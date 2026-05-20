@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   formatDateTime,
   truncate,
@@ -39,26 +45,22 @@ import {
   PLATFORM_TENANT_MODULES,
   PLATFORM_TENANT_ROLLOUT_STAGES,
 } from "@drts/contracts";
+import { Stepper, type StepState, type StepperItem } from "@drts/ui-web";
 import {
-  CalloutBanner,
-  DataCellStack,
-  DataTable,
-  DataViewCard,
-  DetailMetadataGrid,
-  FilterPill,
-  FilterPillRow,
-  KpiCard,
-  KpiRow,
-  PageHeader,
-  StatusChip,
-  Stepper,
-  Td,
-  Tr,
-  WorkflowPanel,
-  WorkflowSplitLayout,
-  type DetailListItem,
-  type StepState,
-  type StepperItem,
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasField,
+  CanvasKPI,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasShell,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasShellNavItem,
+  type CanvasTableColumn,
+  type CanvasTone,
 } from "@drts/ui-web";
 
 const STAGE_INDEX: Record<PlatformTenantRolloutStage, number> = {
@@ -67,11 +69,256 @@ const STAGE_INDEX: Record<PlatformTenantRolloutStage, number> = {
   production: 2,
 };
 
-const anchorSectionStyle = {
+const th = buildCanvasTheme({
+  surface: "platform",
+  dark: true,
+  density: "compact",
+});
+
+const pageRootStyle: CSSProperties = {
+  minHeight: "100%",
+  background: th.bg,
+  color: th.text,
+  fontFamily: th.fontFamily,
+};
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "grid",
+  gap: 16,
+};
+
+const pillRowStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  flexWrap: "wrap",
+};
+
+const pillButtonStyle: CSSProperties = {
+  border: 0,
+  padding: 0,
+  background: "transparent",
+  cursor: "pointer",
+};
+
+const kpiGridStyle: CSSProperties = {
   display: "grid",
   gap: 12,
-  scrollMarginTop: 96,
-} satisfies React.CSSProperties;
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+};
+
+const splitGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(280px, 1fr)",
+};
+
+const twoColumnGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+};
+
+const bannerGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+};
+
+const moduleGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+};
+
+const moduleCardStyle = (enabled: boolean): CSSProperties => ({
+  display: "grid",
+  gap: 8,
+  padding: "14px 16px",
+  borderRadius: 10,
+  border: `1px solid ${enabled ? th.accent : th.border}`,
+  background: enabled ? th.accentBg : th.surfaceLo,
+});
+
+const formGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 14,
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+};
+
+const fullSpanStyle: CSSProperties = {
+  gridColumn: "1 / -1",
+};
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "8px 10px",
+  borderRadius: 7,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  color: th.text,
+  fontSize: 12.5,
+  fontFamily: th.fontFamily,
+};
+
+const monoInputStyle: CSSProperties = {
+  ...inputStyle,
+  fontFamily: th.monoFamily,
+};
+
+const textAreaStyle: CSSProperties = {
+  ...inputStyle,
+  minHeight: 96,
+  resize: "vertical",
+};
+
+const checkboxRowStyle: CSSProperties = {
+  ...fullSpanStyle,
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  color: th.text,
+  fontSize: 12.5,
+};
+
+const sectionStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+  scrollMarginTop: 120,
+};
+
+const loadingStateStyle: CSSProperties = {
+  padding: 24,
+  color: th.textMuted,
+  background: th.bg,
+  borderRadius: 12,
+  fontFamily: th.fontFamily,
+};
+
+function toCanvasTone(tone: ReturnType<typeof tenantStageTone>): CanvasTone {
+  return tone === "warning" ? "warn" : tone;
+}
+
+function formatLocaleNumber(locale: string, value: number) {
+  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
+}
+
+function buildPlatformNav(locale: string): CanvasShellNavItem[] {
+  const labels =
+    locale === "en"
+      ? {
+          workspace: "Workspace",
+          home: "Governance Home",
+          health: "Platform Health",
+          tenantGov: "Tenant Governance",
+          tenants: "Tenants",
+          partners: "Partner entry",
+          users: "Platform staff",
+          fleetGov: "Fleet & Compliance",
+          fleet: "Fleet & compliance",
+          switchboard: "Public info & placards",
+          pricingGov: "Pricing & Settlement",
+          pricing: "Pricing",
+          payments: "Settlement governance",
+          platformLayer: "Platform Layer",
+          notices: "Notices & maintenance",
+          audit: "Audit & evidence",
+          flags: "Feature flags",
+          adapters: "Adapter registry",
+        }
+      : {
+          workspace: "工作面",
+          home: "工作首頁",
+          health: "平台健康",
+          tenantGov: "租戶治理",
+          tenants: "租戶",
+          partners: "合作夥伴 entry",
+          users: "平台人員",
+          fleetGov: "車隊與法遵",
+          fleet: "車隊與合規",
+          switchboard: "法定資訊與牌貼",
+          pricingGov: "計價與結算",
+          pricing: "計價",
+          payments: "結算治理",
+          platformLayer: "平台層",
+          notices: "公告與維護",
+          audit: "稽核與證據",
+          flags: "功能旗標",
+          adapters: "介接登錄",
+        };
+
+  return [
+    { divider: labels.workspace },
+    { key: "home", href: "/", icon: "home", label: labels.home },
+    {
+      key: "health",
+      href: "/health",
+      icon: "health",
+      label: labels.health,
+      badge: "2",
+      badgeTone: "warn",
+    },
+    { divider: labels.tenantGov },
+    {
+      key: "tenants",
+      href: "/tenants",
+      icon: "tenants",
+      label: labels.tenants,
+    },
+    {
+      key: "partners",
+      href: "/partners",
+      icon: "partners",
+      label: labels.partners,
+    },
+    { key: "users", href: "/users", icon: "users", label: labels.users },
+    { divider: labels.fleetGov },
+    { key: "fleet", href: "/fleet", icon: "fleet", label: labels.fleet },
+    {
+      key: "switchboard",
+      href: "/switchboard",
+      icon: "switchboard",
+      label: labels.switchboard,
+    },
+    { divider: labels.pricingGov },
+    {
+      key: "pricing",
+      href: "/pricing",
+      icon: "pricing",
+      label: labels.pricing,
+    },
+    {
+      key: "payments",
+      href: "/payments",
+      icon: "payments",
+      label: labels.payments,
+      badge: "3",
+      badgeTone: "danger",
+    },
+    { divider: labels.platformLayer },
+    {
+      key: "notices",
+      href: "/notices",
+      icon: "notices",
+      label: labels.notices,
+    },
+    { key: "audit", href: "/audit", icon: "audit", label: labels.audit },
+    {
+      key: "flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: labels.flags,
+    },
+    {
+      key: "adapters",
+      href: "/adapter-registry",
+      icon: "adapters",
+      label: labels.adapters,
+    },
+  ];
+}
 
 function rolloutStepState(
   tenant: PlatformAdminTenantRecord,
@@ -83,7 +330,7 @@ function rolloutStepState(
   }
   if (
     gateStatus === "approved" ||
-    STAGE_INDEX[tenant.rollout.stage] > STAGE_INDEX[stage]
+    (STAGE_INDEX[tenant.rollout.stage] ?? -1) > (STAGE_INDEX[stage] ?? -1)
   ) {
     return "complete";
   }
@@ -509,429 +756,717 @@ export default function TenantDetailPage() {
     : [];
   const recentAudit = auditRecords.slice(0, 6);
 
-  const onboardingItems = useMemo<DetailListItem[]>(() => {
+  const onboardingItems = useMemo(() => {
     if (!tenant) {
       return [];
     }
     return [
       {
-        id: "integration",
         label: locale === "en" ? "Integration mode" : "整合模式",
         value: formatPlatformCodeLabel(locale, tenant.integrationPackage.mode),
       },
       {
-        id: "sandbox",
         label: "Sandbox URL",
         value: tenant.integrationPackage.sandboxBaseUrl ?? "—",
+        mono: true,
       },
       {
-        id: "production",
         label: "Production URL",
         value: tenant.integrationPackage.productionBaseUrl ?? "—",
+        mono: true,
       },
       {
-        id: "billing",
         label: locale === "en" ? "Billing baseline" : "帳務基線",
-        value: tenant.bootstrapDefaults.billingBaseline.invoiceTitle,
-        hint: `${tenant.bootstrapDefaults.billingBaseline.contactName} · ${tenant.bootstrapDefaults.billingBaseline.email}`,
+        value: `${tenant.bootstrapDefaults.billingBaseline.invoiceTitle} · ${tenant.bootstrapDefaults.billingBaseline.contactName} · ${tenant.bootstrapDefaults.billingBaseline.email}`,
       },
       {
-        id: "scopes",
         label: "API scopes",
         value:
           tenant.integrationPackage.apiKeyScopes.length > 0
             ? tenant.integrationPackage.apiKeyScopes.join(", ")
             : "—",
-        columnSpan: 2,
+        mono: true,
       },
       {
-        id: "notes",
         label: locale === "en" ? "Rollout note" : "Rollout 備註",
         value: tenant.rollout.notes ?? copy.noRolloutNotes,
-        columnSpan: 2,
+      },
+      {
+        label: locale === "en" ? "Webhook baseline" : "Webhook baseline",
+        value:
+          tenant.bootstrapDefaults.webhookEvents.length > 0
+            ? tenant.bootstrapDefaults.webhookEvents.join(", ")
+            : copy.noWebhookEvents,
+        mono: true,
+      },
+      {
+        label: locale === "en" ? "Quota / month" : "配額 / 月",
+        value: `${formatLocaleNumber(locale, tenant.quotas.monthlyBookings)} bookings`,
+        mono: true,
       },
     ];
-  }, [copy.noRolloutNotes, locale, tenant]);
+  }, [copy.noRolloutNotes, copy.noWebhookEvents, locale, tenant]);
 
-  const overviewItems = useMemo<DetailListItem[]>(() => {
+  const overviewItems = useMemo(() => {
     if (!tenant) {
       return [];
     }
     return [
       {
-        id: "tenant-id",
         label: "Tenant ID",
         value: tenant.id,
+        mono: true,
       },
       {
-        id: "tenant-code",
         label: locale === "en" ? "Tenant code" : "租戶代碼",
         value: tenant.code,
+        mono: true,
       },
       {
-        id: "created-at",
         label: locale === "en" ? "Created at" : "建立時間",
         value: formatDateTime(tenant.createdAt),
+        mono: true,
       },
       {
-        id: "updated-at",
         label: locale === "en" ? "Last updated" : "最近更新",
         value: formatDateTime(tenant.updatedAt),
+        mono: true,
       },
       {
-        id: "integration-mode",
         label: locale === "en" ? "Integration mode" : "整合模式",
         value: formatPlatformCodeLabel(locale, tenant.integrationPackage.mode),
       },
       {
-        id: "current-stage",
         label: locale === "en" ? "Current rollout" : "目前 rollout",
         value: formatPlatformCodeLabel(locale, tenant.rollout.stage),
       },
       {
-        id: "cutover-owner",
         label: locale === "en" ? "Cutover owner" : "Cutover owner",
         value: tenant.rollout.cutoverOwner ?? copy.noCutoverOwner,
       },
       {
-        id: "rollback-owner",
         label: locale === "en" ? "Rollback owner" : "Rollback owner",
         value: tenant.rollout.rollbackOwner ?? copy.noRollbackOwner,
       },
     ];
   }, [copy.noCutoverOwner, copy.noRollbackOwner, locale, tenant]);
 
-  const billingItems = useMemo<DetailListItem[]>(() => {
+  const billingItems = useMemo(() => {
     if (!tenant) {
       return [];
     }
     return [
       {
-        id: "invoice-title",
         label: locale === "en" ? "Invoice title" : "Invoice title",
         value: tenant.bootstrapDefaults.billingBaseline.invoiceTitle,
       },
       {
-        id: "billing-contact",
         label: locale === "en" ? "Billing contact" : "帳務聯絡人",
         value: tenant.bootstrapDefaults.billingBaseline.contactName,
       },
       {
-        id: "billing-email",
         label: locale === "en" ? "Billing email" : "帳務 Email",
         value: tenant.bootstrapDefaults.billingBaseline.email,
       },
       {
-        id: "subscription-count",
         label: locale === "en" ? "Notification subscriptions" : "通知訂閱設定",
-        value: tenant.bootstrapDefaults.notificationSubscriptions.length,
+        value: `${tenant.bootstrapDefaults.notificationSubscriptions.length}`,
+        mono: true,
       },
     ];
   }, [locale, tenant]);
 
-  const webhookItems = useMemo<DetailListItem[]>(() => {
+  const webhookItems = useMemo(() => {
     if (!tenant) {
       return [];
     }
     return [
       {
-        id: "events",
         label: locale === "en" ? "Event scope" : "事件範圍",
         value:
           tenant.bootstrapDefaults.webhookEvents.length > 0
             ? tenant.bootstrapDefaults.webhookEvents.join(", ")
             : copy.noWebhookEvents,
-        columnSpan: 2,
+        mono: true,
       },
       {
-        id: "scopes",
         label: locale === "en" ? "API key scopes" : "API 金鑰 scopes",
         value:
           tenant.integrationPackage.apiKeyScopes.length > 0
             ? tenant.integrationPackage.apiKeyScopes.join(", ")
             : copy.noScopes,
-        columnSpan: 2,
+        mono: true,
       },
     ];
   }, [copy.noScopes, copy.noWebhookEvents, locale, tenant]);
 
   if (loading) {
-    return <div className="admin-empty">{t("tenants.loading")}</div>;
+    return <div style={loadingStateStyle}>{t("tenants.loading")}</div>;
   }
+
+  const shellNav = buildPlatformNav(locale);
+  const tabs = [
+    copy.nav.overview,
+    copy.nav.modules,
+    copy.nav.onboarding,
+    copy.nav.rollout,
+    copy.nav.roles,
+    copy.nav.webhooks,
+    copy.nav.billing,
+    copy.nav.audit,
+  ];
 
   if (!tenant) {
     return (
-      <div style={{ display: "grid", gap: 16 }}>
-        <PageHeader
-          eyebrow={copy.title}
-          title={copy.title}
-          subtitle={copy.subtitle}
-          actions={
-            <Link href="/tenants" className="admin-btn admin-btn--secondary">
-              {copy.back}
-            </Link>
-          }
-        />
-        <CalloutBanner
-          tone="danger"
-          title={locale === "en" ? "Tenant unavailable" : "租戶目前不可用"}
-          description={error ?? copy.notFound}
-        />
-      </div>
+      <CanvasShell
+        theme={th}
+        nav={shellNav}
+        active="tenants"
+        currentPath={tenantId ? `/tenants/${tenantId}` : "/tenants"}
+        breadcrumb={[copy.title]}
+      >
+        <div style={pageRootStyle}>
+          <CanvasPageHeader
+            theme={th}
+            title={copy.title}
+            subtitle={copy.subtitle}
+            actions={
+              <Link href="/tenants">
+                <CanvasBtn theme={th} variant="secondary">
+                  {copy.back}
+                </CanvasBtn>
+              </Link>
+            }
+          />
+          <div style={pageBodyStyle}>
+            <CanvasBanner
+              theme={th}
+              tone="danger"
+              title={locale === "en" ? "Tenant unavailable" : "租戶目前不可用"}
+              body={error ?? copy.notFound}
+            />
+          </div>
+        </div>
+      </CanvasShell>
     );
   }
 
-  return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader
-        eyebrow={copy.title}
-        title={tenant.name}
-        subtitle={`${tenant.code} · ${tenant.id}`}
-        meta={[
-          {
-            label: locale === "en" ? "Status" : "狀態",
-            value: formatPlatformCodeLabel(locale, tenant.status),
-            tone: tenantStatusTone(tenant.status),
-          },
-          {
-            label: locale === "en" ? "Rollout" : "Rollout",
-            value: formatPlatformCodeLabel(locale, tenant.rollout.stage),
-            tone: tenantStageTone(tenant.rollout.stage),
-          },
-          {
-            label: locale === "en" ? "Updated" : "更新",
-            value: formatDateTime(tenant.updatedAt),
-            tone: "neutral",
-          },
-        ]}
-        actions={
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Link href="/tenants" className="admin-btn admin-btn--secondary">
-              {copy.back}
-            </Link>
-            <button
-              type="button"
-              className="admin-btn admin-btn--secondary"
-              onClick={() => void loadTenant()}
-            >
-              {copy.refreshAudit}
-            </button>
-          </div>
-        }
-      />
+  const roleRows = tenant.bootstrapDefaults.roleDefaults.map((role) => ({
+    roleCode: role.roleCode,
+    displayName: role.displayName,
+    required: role.required,
+    invitedAt: role.invitedAt,
+    acknowledgedAt: role.acknowledgedAt,
+  }));
 
-      {error ? (
-        <CalloutBanner
-          tone="danger"
-          title={locale === "en" ? "Unable to update tenant" : "租戶更新失敗"}
-          description={error}
-        />
-      ) : null}
-
-      {tenant.status === "rollback_hold" ? (
-        <CalloutBanner
-          tone="warning"
-          title={
-            locale === "en" ? "Rollback hold is active" : "Rollback hold 已啟用"
-          }
-          description={
-            locale === "en"
-              ? "Review the rollout note, cutover owner, rollback owner, and recent audit trail before restoring promotion flow."
-              : "恢復 promotion flow 前，請先確認 rollout 備註、cutover owner、rollback owner 與最近 audit trail。"
-          }
-        />
-      ) : null}
-
-      <KpiRow minWidth="220px">
-        <KpiCard
-          label={locale === "en" ? "Enabled modules" : "啟用模組"}
-          value={tenant.enabledModules.length}
-          detail={tenant.enabledModules
-            .map((module) => moduleLabels[module])
-            .join(" · ")}
-          tone="info"
-        />
-        <KpiCard
-          label={locale === "en" ? "Monthly quotas" : "每月配額"}
-          value={tenant.quotas.monthlyBookings.toLocaleString()}
-          detail={`${tenant.quotas.activeDrivers.toLocaleString()} drivers · ${tenant.quotas.monthlyApiCalls.toLocaleString()} API`}
-          tone="neutral"
-        />
-        <KpiCard
-          label={locale === "en" ? "Role acknowledgements" : "角色確認"}
-          value={`${acknowledgedRoles ?? 0}/${tenant.bootstrapDefaults.roleDefaults.length}`}
-          detail={
-            locale === "en"
-              ? `${requiredRoles ?? 0} required roles · ${invitedRoles ?? 0} invited`
-              : `${requiredRoles ?? 0} 個必要角色 · ${invitedRoles ?? 0} 個已邀請`
-          }
+  const roleColumns: CanvasTableColumn<(typeof roleRows)[number]>[] = [
+    {
+      h: locale === "en" ? "ROLE" : "角色",
+      w: 140,
+      mono: true,
+      r: (row) => formatPlatformCodeLabel(locale, row.roleCode),
+    },
+    {
+      h: locale === "en" ? "DISPLAY" : "名稱",
+      w: 180,
+      r: (row) => row.displayName,
+    },
+    {
+      h: locale === "en" ? "STATE" : "狀態",
+      w: 120,
+      r: (row) => (
+        <CanvasPill
+          theme={th}
           tone={
-            acknowledgedRoles === tenant.bootstrapDefaults.roleDefaults.length
-              ? "success"
-              : "warning"
+            row.acknowledgedAt ? "success" : row.invitedAt ? "warn" : "neutral"
           }
-        />
-        <KpiCard
-          label={
-            locale === "en" ? "Approved rollout gates" : "已通過的 rollout gate"
-          }
-          value={`${readyGateCount}/${PLATFORM_TENANT_ROLLOUT_STAGES.length}`}
-          detail={
-            tenant.rollout.lastPromotedAt
-              ? formatDateTime(tenant.rollout.lastPromotedAt)
-              : "—"
-          }
-          tone={readyGateCount > 1 ? "success" : "accent"}
-        />
-      </KpiRow>
+          dot
+        >
+          {row.acknowledgedAt
+            ? t("tenants.role.acknowledged")
+            : row.invitedAt
+              ? t("tenants.role.invited")
+              : locale === "en"
+                ? "Pending"
+                : "待處理"}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: locale === "en" ? "REQUIRED" : "必要",
+      w: 100,
+      r: (row) => (
+        <CanvasPill theme={th} tone={row.required ? "warn" : "neutral"}>
+          {row.required
+            ? locale === "en"
+              ? "Required"
+              : "必要"
+            : locale === "en"
+              ? "Optional"
+              : "選填"}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: locale === "en" ? "UPDATED" : "更新",
+      w: 180,
+      mono: true,
+      r: (row) =>
+        row.acknowledgedAt
+          ? formatDateTime(row.acknowledgedAt)
+          : row.invitedAt
+            ? formatDateTime(row.invitedAt)
+            : "—",
+    },
+    {
+      h: locale === "en" ? "ACTION" : "動作",
+      w: 120,
+      r: (row) => {
+        const actionId =
+          row.acknowledgedAt || row.invitedAt
+            ? `ack:${row.roleCode}`
+            : `invite:${row.roleCode}`;
+        if (row.acknowledgedAt) {
+          return "—";
+        }
+        return row.invitedAt ? (
+          <CanvasBtn
+            theme={th}
+            variant="secondary"
+            size="xs"
+            disabled={roleAction === actionId}
+            onClick={() => void acknowledgeRole(row.roleCode)}
+          >
+            {copy.acknowledge}
+          </CanvasBtn>
+        ) : (
+          <CanvasBtn
+            theme={th}
+            variant="secondary"
+            size="xs"
+            disabled={roleAction === actionId}
+            onClick={() => void inviteRole(row.roleCode)}
+          >
+            {copy.invite}
+          </CanvasBtn>
+        );
+      },
+    },
+  ];
 
-      <WorkflowPanel
-        title={copy.navigationTitle}
-        description={copy.navigationSubtitle}
-      >
-        <FilterPillRow>
-          <a href="#overview" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.overview} tone="neutral" active />
-          </a>
-          <a href="#modules" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.modules} tone="info" />
-          </a>
-          <a href="#onboarding" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.onboarding} tone="warning" />
-          </a>
-          <a href="#rollout" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.rollout} tone="success" />
-          </a>
-          <a href="#roles" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.roles} tone="warning" />
-          </a>
-          <a href="#billing" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.billing} tone="neutral" />
-          </a>
-          <a href="#webhooks" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.webhooks} tone="info" />
-          </a>
-          <a href="#audit" style={{ textDecoration: "none" }}>
-            <FilterPill
-              label={copy.nav.audit}
-              tone={recentAudit.length > 0 ? "neutral" : "warning"}
-              count={recentAudit.length}
-            />
-          </a>
-        </FilterPillRow>
-      </WorkflowPanel>
+  const auditRows = recentAudit.map((record) => ({
+    auditId: record.auditId,
+    createdAt: formatDateTime(record.createdAt),
+    module: record.moduleName
+      ? formatPlatformCodeLabel(locale, record.moduleName)
+      : "—",
+    action: record.actionName
+      ? formatPlatformCodeLabel(locale, record.actionName)
+      : "—",
+    resource:
+      record.resourceType && record.resourceId
+        ? `${record.resourceType} · ${record.resourceId}`
+        : record.resourceType || record.resourceId || "—",
+    request: truncate(record.requestId || "—", 14),
+  }));
 
-      <WorkflowSplitLayout
-        main={
-          <>
-            <div id="overview" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.overviewTitle}
-                description={copy.overviewSubtitle}
+  const auditColumns: CanvasTableColumn<(typeof auditRows)[number]>[] = [
+    { h: copy.auditColumns.time, k: "createdAt", w: 180, mono: true },
+    { h: copy.auditColumns.module, k: "module", w: 150 },
+    { h: copy.auditColumns.action, k: "action", w: 180 },
+    { h: copy.auditColumns.resource, k: "resource", w: 240 },
+    { h: copy.auditColumns.request, k: "request", w: 150, mono: true },
+  ];
+
+  return (
+    <CanvasShell
+      theme={th}
+      nav={shellNav}
+      active="tenants"
+      currentPath={`/tenants/${tenant.id}`}
+      breadcrumb={[
+        locale === "en" ? "Tenant Governance" : "租戶治理",
+        copy.title,
+        tenant.name,
+      ]}
+    >
+      <div style={pageRootStyle}>
+        <CanvasPageHeader
+          theme={th}
+          title={tenant.name}
+          subtitle={`${tenant.code} · ${tenant.id}`}
+          tabs={tabs}
+          activeTab={copy.nav.rollout}
+          actions={
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Link href="/tenants">
+                <CanvasBtn theme={th} variant="secondary">
+                  {copy.back}
+                </CanvasBtn>
+              </Link>
+              <CanvasBtn
+                theme={th}
+                variant="secondary"
+                onClick={() => void loadTenant()}
               >
-                <DetailMetadataGrid
-                  items={overviewItems}
-                  minColumnWidth="220px"
-                />
-              </WorkflowPanel>
+                {copy.refreshAudit}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={th}
+                variant="primary"
+                disabled={promotingStage === "production"}
+                onClick={() => void promoteStage("production")}
+              >
+                {promotingStage === "production"
+                  ? t("common.saving")
+                  : `${copy.promote} ${formatPlatformCodeLabel(locale, "production")}`}
+              </CanvasBtn>
             </div>
+          }
+        />
 
-            <div id="modules" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.modulesTitle}
-                description={copy.modulesSubtitle}
+        <div style={pageBodyStyle}>
+          <div style={pillRowStyle}>
+            {[
+              {
+                href: "#overview",
+                label: copy.nav.overview,
+                tone: "neutral" as const,
+              },
+              {
+                href: "#modules",
+                label: copy.nav.modules,
+                tone: "neutral" as const,
+              },
+              {
+                href: "#onboarding",
+                label: copy.nav.onboarding,
+                tone: "warn" as const,
+              },
+              {
+                href: "#rollout",
+                label: copy.nav.rollout,
+                tone: "accent" as const,
+              },
+              { href: "#roles", label: copy.nav.roles, tone: "warn" as const },
+              {
+                href: "#webhooks",
+                label: copy.nav.webhooks,
+                tone: "info" as const,
+              },
+              {
+                href: "#billing",
+                label: copy.nav.billing,
+                tone: "neutral" as const,
+              },
+              {
+                href: "#audit",
+                label: copy.nav.audit,
+                tone:
+                  recentAudit.length > 0
+                    ? ("success" as const)
+                    : ("neutral" as const),
+              },
+            ].map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                style={{ textDecoration: "none" }}
               >
-                <KpiRow minWidth="180px">
-                  <KpiCard
-                    label={locale === "en" ? "Enabled scope" : "已啟用範圍"}
-                    value={tenant.enabledModules.length}
-                    detail={
-                      tenant.enabledModules.length > 0
-                        ? tenant.enabledModules
-                            .map((moduleCode) => moduleLabels[moduleCode])
-                            .join(" · ")
-                        : "—"
+                <button type="button" style={pillButtonStyle}>
+                  <CanvasPill theme={th} tone={item.tone}>
+                    {item.label}
+                  </CanvasPill>
+                </button>
+              </a>
+            ))}
+          </div>
+
+          {error ? (
+            <CanvasBanner
+              theme={th}
+              tone="danger"
+              title={
+                locale === "en" ? "Unable to update tenant" : "租戶更新失敗"
+              }
+              body={error}
+            />
+          ) : null}
+
+          <div style={kpiGridStyle}>
+            <CanvasKPI
+              theme={th}
+              label={locale === "en" ? "Enabled modules" : "啟用模組"}
+              value={tenant.enabledModules.length}
+              sub={tenant.enabledModules
+                .map((module) => moduleLabels[module])
+                .join(" · ")}
+            />
+            <CanvasKPI
+              theme={th}
+              label={locale === "en" ? "Monthly quotas" : "每月配額"}
+              value={formatLocaleNumber(locale, tenant.quotas.monthlyBookings)}
+              sub={`${formatLocaleNumber(locale, tenant.quotas.activeDrivers)} drivers · ${formatLocaleNumber(locale, tenant.quotas.monthlyApiCalls)} API`}
+            />
+            <CanvasKPI
+              theme={th}
+              label={locale === "en" ? "Role acknowledgements" : "角色確認"}
+              value={`${acknowledgedRoles ?? 0}/${tenant.bootstrapDefaults.roleDefaults.length}`}
+              delta={
+                acknowledgedRoles ===
+                tenant.bootstrapDefaults.roleDefaults.length
+                  ? locale === "en"
+                    ? "ready"
+                    : "已齊備"
+                  : undefined
+              }
+              deltaTone={
+                acknowledgedRoles ===
+                tenant.bootstrapDefaults.roleDefaults.length
+                  ? "up"
+                  : "neutral"
+              }
+              sub={
+                locale === "en"
+                  ? `${requiredRoles ?? 0} required · ${invitedRoles ?? 0} invited`
+                  : `${requiredRoles ?? 0} 個必要 · ${invitedRoles ?? 0} 個已邀請`
+              }
+            />
+            <CanvasKPI
+              theme={th}
+              label={
+                locale === "en"
+                  ? "Approved rollout gates"
+                  : "已通過的 rollout gate"
+              }
+              value={`${readyGateCount}/${PLATFORM_TENANT_ROLLOUT_STAGES.length}`}
+              sub={
+                tenant.rollout.lastPromotedAt
+                  ? formatDateTime(tenant.rollout.lastPromotedAt)
+                  : "—"
+              }
+            />
+          </div>
+
+          <section id="rollout" style={sectionStyle}>
+            <CanvasCard
+              theme={th}
+              title={copy.rolloutTitle}
+              subtitle={`${copy.rolloutSubtitle} · ${locale === "en" ? "Cutover owner" : "Cutover owner"}: ${tenant.rollout.cutoverOwner ?? copy.noCutoverOwner} · ${locale === "en" ? "Rollback owner" : "Rollback owner"}: ${tenant.rollout.rollbackOwner ?? copy.noRollbackOwner}`}
+              actions={
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <CanvasPill
+                    theme={th}
+                    tone={toCanvasTone(tenantStageTone(tenant.rollout.stage))}
+                    dot
+                  >
+                    {formatPlatformCodeLabel(locale, tenant.rollout.stage)}
+                  </CanvasPill>
+                  <CanvasPill
+                    theme={th}
+                    tone={toCanvasTone(tenantStatusTone(tenant.status))}
+                    dot
+                  >
+                    {formatPlatformCodeLabel(locale, tenant.status)}
+                  </CanvasPill>
+                </div>
+              }
+            >
+              <div style={{ display: "grid", gap: 16 }}>
+                <div style={{ paddingBottom: 6 }}>
+                  <Stepper items={rolloutSteps} />
+                </div>
+                <div style={bannerGridStyle}>
+                  <CanvasBanner
+                    theme={th}
+                    tone={tenant.rollout.rollbackPrepared ? "success" : "warn"}
+                    title={
+                      locale === "en" ? "rollbackPrepared" : "rollbackPrepared"
                     }
-                    tone="info"
-                  />
-                  <KpiCard
-                    label={locale === "en" ? "Disabled scope" : "未啟用範圍"}
-                    value={disabledModules.length}
-                    detail={
-                      disabledModules.length > 0
-                        ? disabledModules
-                            .map((moduleCode) => moduleLabels[moduleCode])
-                            .join(" · ")
-                        : "—"
+                    body={
+                      tenant.rollout.rollbackPrepared
+                        ? locale === "en"
+                          ? "Tenant meets the rollback readiness checkpoint."
+                          : "租戶已滿足 rollback readiness checkpoint。"
+                        : locale === "en"
+                          ? "Rollback owner or recovery notes still need confirmation."
+                          : "仍需補齊 rollback owner 或 recovery notes。"
                     }
-                    tone="neutral"
                   />
-                  <KpiCard
-                    label={locale === "en" ? "Driver quota" : "司機配額"}
-                    value={tenant.quotas.activeDrivers.toLocaleString()}
-                    detail={`${tenant.quotas.monthlyBookings.toLocaleString()} bookings`}
-                    tone="warning"
+                  <CanvasBanner
+                    theme={th}
+                    tone={
+                      acknowledgedRoles ===
+                      tenant.bootstrapDefaults.roleDefaults.length
+                        ? "success"
+                        : "warn"
+                    }
+                    title={
+                      locale === "en"
+                        ? "role acknowledgements"
+                        : "role acknowledgements"
+                    }
+                    body={
+                      locale === "en"
+                        ? `${acknowledgedRoles ?? 0}/${tenant.bootstrapDefaults.roleDefaults.length} bootstrap roles acknowledged.`
+                        : `${acknowledgedRoles ?? 0}/${tenant.bootstrapDefaults.roleDefaults.length} 個 bootstrap roles 已完成確認。`
+                    }
                   />
-                </KpiRow>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 12,
-                  }}
-                >
+                  <CanvasBanner
+                    theme={th}
+                    tone={tenant.status === "rollback_hold" ? "warn" : "info"}
+                    title={locale === "en" ? "cutover note" : "cutover note"}
+                    body={tenant.rollout.notes ?? copy.noRolloutNotes}
+                  />
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {PLATFORM_TENANT_ROLLOUT_STAGES.map((stage) => (
+                    <CanvasBtn
+                      key={stage}
+                      theme={th}
+                      variant="secondary"
+                      size="xs"
+                      disabled={promotingStage === stage}
+                      onClick={() => void promoteStage(stage)}
+                    >
+                      {promotingStage === stage
+                        ? t("common.saving")
+                        : `${copy.promote} ${formatPlatformCodeLabel(locale, stage)}`}
+                    </CanvasBtn>
+                  ))}
+                </div>
+              </div>
+            </CanvasCard>
+          </section>
+
+          <div style={twoColumnGridStyle}>
+            <section id="onboarding" style={sectionStyle}>
+              <CanvasCard
+                theme={th}
+                title={copy.onboardingTitle}
+                subtitle={copy.onboardingSubtitle}
+              >
+                <CanvasDL theme={th} cols={2} items={onboardingItems} />
+              </CanvasCard>
+            </section>
+
+            <section id="roles" style={sectionStyle}>
+              <CanvasCard
+                theme={th}
+                title={locale === "en" ? "Roles & invites" : "Roles & invites"}
+                subtitle={copy.rolesSubtitle}
+              >
+                <CanvasTable theme={th} columns={roleColumns} rows={roleRows} />
+              </CanvasCard>
+            </section>
+          </div>
+
+          <div style={splitGridStyle}>
+            <section id="overview" style={sectionStyle}>
+              <CanvasCard
+                theme={th}
+                title={copy.overviewTitle}
+                subtitle={copy.overviewSubtitle}
+              >
+                <CanvasDL theme={th} cols={2} items={overviewItems} />
+              </CanvasCard>
+            </section>
+
+            <section id="modules" style={sectionStyle}>
+              <CanvasCard
+                theme={th}
+                title={copy.modulesTitle}
+                subtitle={copy.modulesSubtitle}
+              >
+                <div style={moduleGridStyle}>
                   {PLATFORM_TENANT_MODULES.map((moduleCode) => {
                     const enabled = tenant.enabledModules.includes(moduleCode);
                     return (
-                      <div
-                        key={moduleCode}
-                        style={{
-                          display: "grid",
-                          gap: 8,
-                          padding: "14px 16px",
-                          borderRadius: 14,
-                          border: "1px solid #dbe4ee",
-                          background: enabled ? "#eff6ff" : "#f8fafc",
-                        }}
-                      >
-                        <strong style={{ color: "#0f172a" }}>
+                      <div key={moduleCode} style={moduleCardStyle(enabled)}>
+                        <strong style={{ color: th.text }}>
                           {moduleLabels[moduleCode]}
                         </strong>
-                        <StatusChip
-                          label={statusChipCopy(locale, enabled)}
+                        <CanvasPill
+                          theme={th}
                           tone={enabled ? "success" : "neutral"}
-                        />
-                        <span style={{ color: "#64748b", fontSize: 12.5 }}>
+                          dot
+                        >
+                          {statusChipCopy(locale, enabled)}
+                        </CanvasPill>
+                        <span
+                          style={{
+                            color: th.textMuted,
+                            fontSize: 11.5,
+                            fontFamily: th.monoFamily,
+                          }}
+                        >
                           {formatPlatformCodeLabel(locale, moduleCode)}
                         </span>
                       </div>
                     );
                   })}
                 </div>
-              </WorkflowPanel>
-            </div>
+                <div style={{ marginTop: 16 }}>
+                  <CanvasDL
+                    theme={th}
+                    cols={2}
+                    items={[
+                      {
+                        label:
+                          locale === "en" ? "Disabled scope" : "未啟用範圍",
+                        value:
+                          disabledModules.length > 0
+                            ? disabledModules
+                                .map((moduleCode) => moduleLabels[moduleCode])
+                                .join(" · ")
+                            : "—",
+                      },
+                      {
+                        label: locale === "en" ? "Driver quota" : "司機配額",
+                        value: formatLocaleNumber(
+                          locale,
+                          tenant.quotas.activeDrivers,
+                        ),
+                        mono: true,
+                      },
+                      {
+                        label:
+                          locale === "en" ? "Bookings / month" : "每月預約量",
+                        value: formatLocaleNumber(
+                          locale,
+                          tenant.quotas.monthlyBookings,
+                        ),
+                        mono: true,
+                      },
+                      {
+                        label:
+                          locale === "en"
+                            ? "API calls / month"
+                            : "每月 API 呼叫",
+                        value: formatLocaleNumber(
+                          locale,
+                          tenant.quotas.monthlyApiCalls,
+                        ),
+                        mono: true,
+                      },
+                    ]}
+                  />
+                </div>
+              </CanvasCard>
+            </section>
+          </div>
 
-            <div id="onboarding" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.onboardingTitle}
-                description={copy.onboardingSubtitle}
-              >
-                <DetailMetadataGrid
-                  items={onboardingItems}
-                  minColumnWidth="220px"
-                />
-              </WorkflowPanel>
-            </div>
-
-            <form onSubmit={handleSaveSettings}>
-              <WorkflowPanel
-                title={locale === "en" ? "Tenant settings" : "租戶設定"}
-                description={
-                  locale === "en"
-                    ? "Identity, enabled modules, and quota allocations remain control-plane truth."
-                    : "租戶身分、啟用模組與配額配置仍以 control-plane truth 為準。"
-                }
-              >
+          <div style={twoColumnGridStyle}>
+            <CanvasCard
+              theme={th}
+              title={locale === "en" ? "Tenant settings" : "租戶設定"}
+              subtitle={
+                locale === "en"
+                  ? "Identity, enabled modules, and quota allocations remain control-plane truth."
+                  : "租戶身分、啟用模組與配額配置仍以 control-plane truth 為準。"
+              }
+            >
+              <form onSubmit={handleSaveSettings}>
                 <TenantIdentityFields
                   form={editForm}
                   setForm={(value) => {
@@ -974,38 +1509,27 @@ export default function TenantDetailPage() {
                   moduleLabels={moduleLabels}
                   t={t}
                 />
-                <button
-                  type="submit"
-                  className="admin-btn admin-btn--primary"
+                <CanvasBtn
+                  theme={th}
+                  variant="primary"
                   disabled={savingSettings || !editForm.name.trim()}
                 >
                   {savingSettings ? t("common.saving") : copy.saveSettings}
-                </button>
-              </WorkflowPanel>
-            </form>
+                </CanvasBtn>
+              </form>
+            </CanvasCard>
 
-            <form onSubmit={handleSaveOnboarding}>
-              <WorkflowPanel
-                title={copy.defaultsTitle}
-                description={copy.defaultsSubtitle}
-              >
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                    gap: 12,
-                  }}
-                >
-                  <label>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {t("tenants.form.invoiceTitle")}
-                    </div>
+            <CanvasCard
+              theme={th}
+              title={copy.defaultsTitle}
+              subtitle={copy.defaultsSubtitle}
+            >
+              <form onSubmit={handleSaveOnboarding}>
+                <div style={formGridStyle}>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.invoiceTitle")}
+                  >
                     <input
                       value={onboardingForm.invoiceTitle}
                       onChange={(event) =>
@@ -1015,24 +1539,13 @@ export default function TenantDetailPage() {
                             : current,
                         )
                       }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
+                      style={inputStyle}
                     />
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {t("tenants.form.billingContactName")}
-                    </div>
+                  </CanvasField>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.billingContactName")}
+                  >
                     <input
                       value={onboardingForm.billingContactName}
                       onChange={(event) =>
@@ -1045,24 +1558,13 @@ export default function TenantDetailPage() {
                             : current,
                         )
                       }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
+                      style={inputStyle}
                     />
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {t("tenants.form.billingContactEmail")}
-                    </div>
+                  </CanvasField>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.billingContactEmail")}
+                  >
                     <input
                       value={onboardingForm.billingContactEmail}
                       onChange={(event) =>
@@ -1075,24 +1577,13 @@ export default function TenantDetailPage() {
                             : current,
                         )
                       }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
+                      style={inputStyle}
                     />
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {t("tenants.form.integrationMode")}
-                    </div>
+                  </CanvasField>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.integrationMode")}
+                  >
                     <select
                       value={onboardingForm.integrationMode}
                       onChange={(event) =>
@@ -1106,12 +1597,7 @@ export default function TenantDetailPage() {
                             : current,
                         )
                       }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
+                      style={inputStyle}
                     >
                       {[
                         "none",
@@ -1124,17 +1610,11 @@ export default function TenantDetailPage() {
                         </option>
                       ))}
                     </select>
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {t("tenants.form.sandboxBaseUrl")}
-                    </div>
+                  </CanvasField>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.sandboxBaseUrl")}
+                  >
                     <input
                       value={onboardingForm.sandboxBaseUrl}
                       onChange={(event) =>
@@ -1144,24 +1624,13 @@ export default function TenantDetailPage() {
                             : current,
                         )
                       }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
+                      style={monoInputStyle}
                     />
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {t("tenants.form.productionBaseUrl")}
-                    </div>
+                  </CanvasField>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.productionBaseUrl")}
+                  >
                     <input
                       value={onboardingForm.productionBaseUrl}
                       onChange={(event) =>
@@ -1174,78 +1643,52 @@ export default function TenantDetailPage() {
                             : current,
                         )
                       }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
+                      style={monoInputStyle}
                     />
-                  </label>
-                  <label style={{ gridColumn: "1 / -1" }}>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
+                  </CanvasField>
+                  <div style={fullSpanStyle}>
+                    <CanvasField
+                      theme={th}
+                      label={t("tenants.form.apiKeyScopes")}
                     >
-                      {t("tenants.form.apiKeyScopes")}
-                    </div>
-                    <input
-                      value={onboardingForm.apiKeyScopes}
-                      onChange={(event) =>
-                        setOnboardingForm((current) =>
-                          current
-                            ? { ...current, apiKeyScopes: event.target.value }
-                            : current,
-                        )
-                      }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
-                    />
-                  </label>
-                  <label style={{ gridColumn: "1 / -1" }}>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
+                      <input
+                        value={onboardingForm.apiKeyScopes}
+                        onChange={(event) =>
+                          setOnboardingForm((current) =>
+                            current
+                              ? { ...current, apiKeyScopes: event.target.value }
+                              : current,
+                          )
+                        }
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                  </div>
+                  <div style={fullSpanStyle}>
+                    <CanvasField
+                      theme={th}
+                      label={t("tenants.form.webhookEvents")}
                     >
-                      {t("tenants.form.webhookEvents")}
-                    </div>
-                    <input
-                      value={onboardingForm.webhookEvents}
-                      onChange={(event) =>
-                        setOnboardingForm((current) =>
-                          current
-                            ? { ...current, webhookEvents: event.target.value }
-                            : current,
-                        )
-                      }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
-                    />
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {t("tenants.form.cutoverOwner")}
-                    </div>
+                      <input
+                        value={onboardingForm.webhookEvents}
+                        onChange={(event) =>
+                          setOnboardingForm((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  webhookEvents: event.target.value,
+                                }
+                              : current,
+                          )
+                        }
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                  </div>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.cutoverOwner")}
+                  >
                     <input
                       value={onboardingForm.cutoverOwner}
                       onChange={(event) =>
@@ -1255,24 +1698,13 @@ export default function TenantDetailPage() {
                             : current,
                         )
                       }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
+                      style={inputStyle}
                     />
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {t("tenants.form.rollbackOwner")}
-                    </div>
+                  </CanvasField>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.rollbackOwner")}
+                  >
                     <input
                       value={onboardingForm.rollbackOwner}
                       onChange={(event) =>
@@ -1282,51 +1714,29 @@ export default function TenantDetailPage() {
                             : current,
                         )
                       }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                      }}
+                      style={inputStyle}
                     />
-                  </label>
-                  <label style={{ gridColumn: "1 / -1" }}>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
+                  </CanvasField>
+                  <div style={fullSpanStyle}>
+                    <CanvasField
+                      theme={th}
+                      label={t("tenants.form.rolloutNotes")}
                     >
-                      {t("tenants.form.rolloutNotes")}
-                    </div>
-                    <textarea
-                      value={onboardingForm.notes}
-                      onChange={(event) =>
-                        setOnboardingForm((current) =>
-                          current
-                            ? { ...current, notes: event.target.value }
-                            : current,
-                        )
-                      }
-                      rows={4}
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                        resize: "vertical",
-                      }}
-                    />
-                  </label>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      gridColumn: "1 / -1",
-                    }}
-                  >
+                      <textarea
+                        value={onboardingForm.notes}
+                        onChange={(event) =>
+                          setOnboardingForm((current) =>
+                            current
+                              ? { ...current, notes: event.target.value }
+                              : current,
+                          )
+                        }
+                        rows={4}
+                        style={textAreaStyle}
+                      />
+                    </CanvasField>
+                  </div>
+                  <label style={checkboxRowStyle}>
                     <input
                       type="checkbox"
                       checked={onboardingForm.rollbackPrepared}
@@ -1344,94 +1754,26 @@ export default function TenantDetailPage() {
                     <span>{t("tenants.form.rollbackPrepared")}</span>
                   </label>
                 </div>
-                <button
-                  type="submit"
-                  className="admin-btn admin-btn--primary"
+                <CanvasBtn
+                  theme={th}
+                  variant="primary"
                   disabled={savingOnboarding}
                 >
                   {savingOnboarding ? t("common.saving") : copy.saveOnboarding}
-                </button>
-              </WorkflowPanel>
-            </form>
+                </CanvasBtn>
+              </form>
+            </CanvasCard>
+          </div>
 
-            <div id="billing" style={anchorSectionStyle}>
-              <DataViewCard
-                title={copy.billingTitle}
-                subtitle={copy.billingSubtitle}
-                summary={
-                  locale === "en"
-                    ? "Billing defaults and notification posture remain reviewable here even though downstream invoice workflows live elsewhere."
-                    : "Billing defaults 與通知姿態可在此治理檢視，但下游 invoice workflow 仍位於其他頁面。"
-                }
-              >
-                <DetailMetadataGrid
-                  items={billingItems}
-                  minColumnWidth="220px"
-                />
-                <div style={{ display: "grid", gap: 10 }}>
-                  {tenant.bootstrapDefaults.notificationSubscriptions.length >
-                  0 ? (
-                    tenant.bootstrapDefaults.notificationSubscriptions.map(
-                      (subscription, index) => (
-                        <div
-                          key={`${subscription.eventType}-${subscription.channel}-${index}`}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 12,
-                            padding: "12px 14px",
-                            borderRadius: 14,
-                            border: "1px solid #e2e8f0",
-                            background: "#f8fafc",
-                          }}
-                        >
-                          <DataCellStack
-                            primary={subscription.eventType}
-                            secondary={subscription.channel}
-                          />
-                          <StatusChip
-                            label={statusChipCopy(locale, subscription.enabled)}
-                            tone={subscription.enabled ? "success" : "neutral"}
-                          />
-                        </div>
-                      ),
-                    )
-                  ) : (
-                    <CalloutBanner
-                      tone="warning"
-                      title={
-                        locale === "en"
-                          ? "No notification subscriptions"
-                          : "沒有通知訂閱設定"
-                      }
-                      description={copy.noSubscriptions}
-                    />
-                  )}
-                </div>
-              </DataViewCard>
-            </div>
-
-            <div id="webhooks" style={anchorSectionStyle}>
-              <DataViewCard
+          <div style={twoColumnGridStyle}>
+            <section id="webhooks" style={sectionStyle}>
+              <CanvasCard
+                theme={th}
                 title={copy.webhooksTitle}
                 subtitle={copy.webhooksSubtitle}
-                summary={
-                  locale === "en"
-                    ? "This baseline expresses what the tenant is allowed to emit or receive before any downstream webhook-delivery tooling takes over."
-                    : "這個 baseline 用來表達 tenant 在進入下游 webhook-delivery tooling 前，允許送出或接收哪些事件。"
-                }
               >
-                <DetailMetadataGrid
-                  items={webhookItems}
-                  minColumnWidth="220px"
-                />
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 12,
-                  }}
-                >
+                <CanvasDL theme={th} cols={2} items={webhookItems} />
+                <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
                   {tenant.bootstrapDefaults.notificationSubscriptions.length >
                   0 ? (
                     tenant.bootstrapDefaults.notificationSubscriptions.map(
@@ -1439,387 +1781,206 @@ export default function TenantDetailPage() {
                         <div
                           key={`${subscription.channel}-${subscription.eventType}-${index}`}
                           style={{
-                            display: "grid",
-                            gap: 8,
-                            padding: "14px 16px",
-                            borderRadius: 14,
-                            border: "1px solid #dbe4ee",
-                            background: "#f8fafc",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 12,
+                            padding: "12px 14px",
+                            borderRadius: 10,
+                            border: `1px solid ${th.border}`,
+                            background: th.surfaceLo,
                           }}
                         >
-                          <strong style={{ color: "#0f172a" }}>
-                            {subscription.channel}
-                          </strong>
-                          <span style={{ color: "#64748b", fontSize: 12.5 }}>
-                            {subscription.eventType}
-                          </span>
-                          <StatusChip
-                            label={statusChipCopy(locale, subscription.enabled)}
-                            tone={subscription.enabled ? "info" : "neutral"}
-                          />
+                          <div style={{ display: "grid", gap: 4 }}>
+                            <span style={{ color: th.text, fontWeight: 600 }}>
+                              {subscription.channel}
+                            </span>
+                            <span
+                              style={{
+                                color: th.textMuted,
+                                fontSize: 11.5,
+                                fontFamily: th.monoFamily,
+                              }}
+                            >
+                              {subscription.eventType}
+                            </span>
+                          </div>
+                          <CanvasPill
+                            theme={th}
+                            tone={subscription.enabled ? "success" : "neutral"}
+                            dot
+                          >
+                            {statusChipCopy(locale, subscription.enabled)}
+                          </CanvasPill>
                         </div>
                       ),
                     )
                   ) : (
-                    <CalloutBanner
-                      tone="warning"
+                    <CanvasBanner
+                      theme={th}
+                      tone="warn"
                       title={
                         locale === "en"
                           ? "Webhook baseline is incomplete"
                           : "Webhook baseline 尚未補齊"
                       }
-                      description={copy.noSubscriptions}
+                      body={copy.noSubscriptions}
                     />
                   )}
                 </div>
-              </DataViewCard>
-            </div>
+              </CanvasCard>
+            </section>
 
-            <div id="audit" style={anchorSectionStyle}>
-              <DataViewCard
+            <section id="billing" style={sectionStyle}>
+              <CanvasCard
+                theme={th}
+                title={copy.billingTitle}
+                subtitle={copy.billingSubtitle}
+              >
+                <CanvasDL theme={th} cols={2} items={billingItems} />
+                <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
+                  {tenant.bootstrapDefaults.notificationSubscriptions.length >
+                  0 ? (
+                    tenant.bootstrapDefaults.notificationSubscriptions.map(
+                      (subscription, index) => (
+                        <CanvasBanner
+                          key={`${subscription.eventType}-${subscription.channel}-${index}`}
+                          theme={th}
+                          tone={subscription.enabled ? "info" : "warn"}
+                          title={subscription.eventType}
+                          body={`${subscription.channel} · ${statusChipCopy(locale, subscription.enabled)}`}
+                        />
+                      ),
+                    )
+                  ) : (
+                    <CanvasBanner
+                      theme={th}
+                      tone="warn"
+                      title={
+                        locale === "en"
+                          ? "No notification subscriptions"
+                          : "沒有通知訂閱設定"
+                      }
+                      body={copy.noSubscriptions}
+                    />
+                  )}
+                </div>
+              </CanvasCard>
+            </section>
+          </div>
+
+          <div style={splitGridStyle}>
+            <section id="audit" style={sectionStyle}>
+              <CanvasCard
+                theme={th}
                 title={copy.auditTitle}
                 subtitle={copy.auditSubtitle}
-                summary={
-                  locale === "en"
-                    ? "Showing the latest tenant-scoped audit evidence only. Full append-only history remains on the dedicated audit page."
-                    : "這裡只顯示最新的 tenant-scoped audit 證據；完整 append-only history 仍在獨立 audit 頁。"
-                }
                 actions={
-                  <Link
-                    href="/audit"
-                    className="admin-btn admin-btn--secondary admin-btn--sm"
-                  >
-                    Audit ledger
+                  <Link href="/audit">
+                    <CanvasBtn theme={th} variant="secondary" size="xs">
+                      Audit ledger
+                    </CanvasBtn>
                   </Link>
                 }
               >
-                {recentAudit.length > 0 ? (
-                  <DataTable
-                    columns={[
-                      { label: copy.auditColumns.time, width: "180px" },
-                      { label: copy.auditColumns.module, width: "160px" },
-                      { label: copy.auditColumns.action, width: "180px" },
-                      { label: copy.auditColumns.resource, width: "200px" },
-                      { label: copy.auditColumns.request, width: "160px" },
-                    ]}
-                    empty={copy.noAudit}
-                  >
-                    {recentAudit.map((record) => (
-                      <Tr key={record.auditId}>
-                        <Td>{formatDateTime(record.createdAt)}</Td>
-                        <Td>
-                          {record.moduleName
-                            ? formatPlatformCodeLabel(locale, record.moduleName)
-                            : "—"}
-                        </Td>
-                        <Td>
-                          {record.actionName
-                            ? formatPlatformCodeLabel(locale, record.actionName)
-                            : "—"}
-                        </Td>
-                        <Td>
-                          <DataCellStack
-                            primary={record.resourceType || "—"}
-                            secondary={record.resourceId ?? "—"}
-                          />
-                        </Td>
-                        <Td>{truncate(record.requestId || "—", 14)}</Td>
-                      </Tr>
-                    ))}
-                  </DataTable>
+                {auditRows.length > 0 ? (
+                  <CanvasTable
+                    theme={th}
+                    columns={auditColumns}
+                    rows={auditRows}
+                  />
                 ) : (
-                  <CalloutBanner
-                    tone="neutral"
+                  <CanvasBanner
+                    theme={th}
+                    tone="info"
                     title={
                       locale === "en"
                         ? "No tenant audit yet"
                         : "此 tenant 尚無 audit 紀錄"
                     }
-                    description={copy.noAudit}
+                    body={copy.noAudit}
                   />
                 )}
-              </DataViewCard>
-            </div>
-          </>
-        }
-        side={
-          <>
-            <div id="rollout" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.rolloutTitle}
-                description={copy.rolloutSubtitle}
-                meta={
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <StatusChip
-                      label={`${locale === "en" ? "Stage" : "階段"}: ${formatPlatformCodeLabel(locale, tenant.rollout.stage)}`}
-                      tone={tenantStageTone(tenant.rollout.stage)}
-                    />
-                    <StatusChip
-                      label={`Sandbox: ${tenant.rollout.sandboxStatus}`}
-                      tone={tenantStageTone(tenant.rollout.sandboxStatus)}
-                    />
-                    <StatusChip
-                      label={`Pilot: ${tenant.rollout.pilotStatus}`}
-                      tone={tenantStageTone(tenant.rollout.pilotStatus)}
-                    />
-                    <StatusChip
-                      label={`Production: ${tenant.rollout.productionStatus}`}
-                      tone={tenantStageTone(tenant.rollout.productionStatus)}
-                    />
-                  </div>
-                }
-              >
-                <Stepper items={rolloutSteps} />
-                <DetailMetadataGrid
-                  minColumnWidth="180px"
-                  items={[
-                    {
-                      id: "cutover",
-                      label:
-                        locale === "en" ? "Cutover owner" : "Cutover owner",
-                      value: tenant.rollout.cutoverOwner ?? copy.noCutoverOwner,
-                    },
-                    {
-                      id: "rollback-owner",
-                      label:
-                        locale === "en" ? "Rollback owner" : "Rollback owner",
-                      value:
-                        tenant.rollout.rollbackOwner ?? copy.noRollbackOwner,
-                    },
-                    {
-                      id: "rollback-prepared",
-                      label:
-                        locale === "en"
-                          ? "Rollback prepared"
-                          : "Rollback 已備妥",
-                      value:
-                        locale === "en"
-                          ? tenant.rollout.rollbackPrepared
-                            ? "Yes"
-                            : "No"
-                          : tenant.rollout.rollbackPrepared
-                            ? "是"
-                            : "否",
-                    },
-                    {
-                      id: "last-promoted",
-                      label: locale === "en" ? "Last promoted" : "最近推進時間",
-                      value: tenant.rollout.lastPromotedAt
-                        ? formatDateTime(tenant.rollout.lastPromotedAt)
-                        : "—",
-                    },
-                  ]}
-                />
-                <CalloutBanner
-                  tone={tenant.rollout.rollbackPrepared ? "info" : "warning"}
-                  title={
-                    locale === "en"
-                      ? "Rollout note and rollback readiness"
-                      : "Rollout 備註與 rollback readiness"
-                  }
-                  description={tenant.rollout.notes ?? copy.noRolloutNotes}
-                />
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {PLATFORM_TENANT_ROLLOUT_STAGES.map((stage) => (
-                    <button
-                      key={stage}
-                      type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
-                      disabled={promotingStage === stage}
-                      onClick={() => void promoteStage(stage)}
-                    >
-                      {promotingStage === stage
-                        ? t("common.saving")
-                        : `${copy.promote} ${formatPlatformCodeLabel(locale, stage)}`}
-                    </button>
-                  ))}
-                </div>
-              </WorkflowPanel>
-            </div>
+              </CanvasCard>
+            </section>
 
-            <div id="roles" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.rolesTitle}
-                description={copy.rolesSubtitle}
-              >
-                <KpiRow minWidth="150px">
-                  <KpiCard
-                    label={locale === "en" ? "Required roles" : "必要角色"}
-                    value={requiredRoles ?? 0}
-                    tone="warning"
-                  />
-                  <KpiCard
-                    label={locale === "en" ? "Invited" : "已邀請"}
-                    value={invitedRoles ?? 0}
-                    tone="info"
-                  />
-                  <KpiCard
-                    label={locale === "en" ? "Acknowledged" : "已確認"}
-                    value={acknowledgedRoles ?? 0}
-                    tone="success"
-                  />
-                </KpiRow>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {tenant.bootstrapDefaults.roleDefaults.map((role) => {
-                    const actionId =
-                      role.acknowledgedAt || role.invitedAt
-                        ? `ack:${role.roleCode}`
-                        : `invite:${role.roleCode}`;
-                    return (
-                      <div
-                        key={role.roleCode}
-                        style={{
-                          display: "grid",
-                          gap: 6,
-                          padding: "12px 14px",
-                          borderRadius: 14,
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 8,
-                            alignItems: "center",
-                          }}
-                        >
-                          <strong style={{ color: "#0f172a", fontSize: 13.5 }}>
-                            {role.displayName}
-                          </strong>
-                          <StatusChip
-                            label={
-                              role.acknowledgedAt
-                                ? t("tenants.role.acknowledged")
-                                : role.invitedAt
-                                  ? t("tenants.role.invited")
-                                  : locale === "en"
-                                    ? "Pending"
-                                    : "待處理"
-                            }
-                            tone={
-                              role.acknowledgedAt
-                                ? "success"
-                                : role.invitedAt
-                                  ? "info"
-                                  : role.required
-                                    ? "warning"
-                                    : "neutral"
-                            }
-                          />
-                        </div>
-                        <div style={{ color: "#64748b", fontSize: 12.5 }}>
-                          {formatPlatformCodeLabel(locale, role.roleCode)}
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 8,
-                            flexWrap: "wrap",
-                            alignItems: "center",
-                          }}
-                        >
-                          <StatusChip
-                            label={
-                              role.required
-                                ? locale === "en"
-                                  ? "Required"
-                                  : "必要"
-                                : locale === "en"
-                                  ? "Optional"
-                                  : "選填"
-                            }
-                            tone={role.required ? "warning" : "neutral"}
-                          />
-                          {role.acknowledgedAt ? (
-                            <span style={{ fontSize: 12.5, color: "#64748b" }}>
-                              {formatDateTime(role.acknowledgedAt)}
-                            </span>
-                          ) : role.invitedAt ? (
-                            <button
-                              type="button"
-                              className="admin-btn admin-btn--secondary admin-btn--sm"
-                              disabled={roleAction === actionId}
-                              onClick={() =>
-                                void acknowledgeRole(role.roleCode)
-                              }
-                            >
-                              {copy.acknowledge}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="admin-btn admin-btn--secondary admin-btn--sm"
-                              disabled={roleAction === actionId}
-                              onClick={() => void inviteRole(role.roleCode)}
-                            >
-                              {copy.invite}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </WorkflowPanel>
-            </div>
-
-            <WorkflowPanel
+            <CanvasCard
+              theme={th}
               title={copy.lifecycleTitle}
-              description={copy.lifecycleSubtitle}
+              subtitle={copy.lifecycleSubtitle}
             >
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <StatusChip
-                  label={formatPlatformCodeLabel(locale, tenant.status)}
-                  tone={tenantStatusTone(tenant.status)}
-                />
-                <StatusChip
-                  label={
-                    tenant.rollout.rollbackPrepared
+              <div style={{ display: "grid", gap: 14 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <CanvasPill
+                    theme={th}
+                    tone={toCanvasTone(tenantStatusTone(tenant.status))}
+                    dot
+                  >
+                    {formatPlatformCodeLabel(locale, tenant.status)}
+                  </CanvasPill>
+                  <CanvasPill
+                    theme={th}
+                    tone={tenant.rollout.rollbackPrepared ? "success" : "warn"}
+                    dot
+                  >
+                    {tenant.rollout.rollbackPrepared
                       ? locale === "en"
                         ? "Rollback prepared"
                         : "Rollback 已備妥"
                       : locale === "en"
                         ? "Rollback pending"
-                        : "Rollback 待補"
-                  }
-                  tone={tenant.rollout.rollbackPrepared ? "success" : "warning"}
-                />
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {tenant.status === "active" ? (
-                  <button
-                    type="button"
-                    className="admin-btn admin-btn--secondary"
-                    disabled={lifecycleAction === "suspend"}
-                    onClick={() => void runLifecycle("suspend")}
+                        : "Rollback 待補"}
+                  </CanvasPill>
+                </div>
+                {tenant.status === "rollback_hold" ? (
+                  <CanvasBanner
+                    theme={th}
+                    tone="warn"
+                    title={
+                      locale === "en"
+                        ? "Rollback hold is active"
+                        : "Rollback hold 已啟用"
+                    }
+                    body={
+                      locale === "en"
+                        ? "Review the rollout note, owners, and recent audit evidence before restoring promotion flow."
+                        : "恢復 promotion flow 前，請先確認 rollout 備註、owner 與最近 audit 證據。"
+                    }
+                  />
+                ) : null}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {tenant.status === "active" ? (
+                    <CanvasBtn
+                      theme={th}
+                      variant="secondary"
+                      disabled={lifecycleAction === "suspend"}
+                      onClick={() => void runLifecycle("suspend")}
+                    >
+                      {copy.suspend}
+                    </CanvasBtn>
+                  ) : (
+                    <CanvasBtn
+                      theme={th}
+                      variant="secondary"
+                      disabled={lifecycleAction === "activate"}
+                      onClick={() => void runLifecycle("activate")}
+                    >
+                      {copy.activate}
+                    </CanvasBtn>
+                  )}
+                  <CanvasBtn
+                    theme={th}
+                    variant="secondary"
+                    disabled={lifecycleAction === "rollback_hold"}
+                    onClick={() => void runLifecycle("rollback_hold")}
                   >
-                    {copy.suspend}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="admin-btn admin-btn--secondary"
-                    disabled={lifecycleAction === "activate"}
-                    onClick={() => void runLifecycle("activate")}
-                  >
-                    {copy.activate}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="admin-btn admin-btn--secondary"
-                  disabled={lifecycleAction === "rollback_hold"}
-                  onClick={() => void runLifecycle("rollback_hold")}
-                >
-                  {copy.rollback}
-                </button>
+                    {copy.rollback}
+                  </CanvasBtn>
+                </div>
               </div>
-            </WorkflowPanel>
-          </>
-        }
-      />
-    </div>
+            </CanvasCard>
+          </div>
+        </div>
+      </div>
+    </CanvasShell>
   );
 }
