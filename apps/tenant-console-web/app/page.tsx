@@ -12,8 +12,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
-  CanvasField,
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
@@ -74,23 +72,9 @@ const bannerStackStyle: CSSProperties = {
   gap: 8,
 };
 
-const reminderMetaStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 8,
-  color: th.textMuted,
-  fontSize: 11.5,
-};
-
 const reminderCardStyle: CSSProperties = {
   display: "grid",
-  gap: 10,
-};
-
-const reminderPanelStyle: CSSProperties = {
-  display: "grid",
-  gap: 16,
+  gap: 8,
 };
 
 const emptyStateStyle: CSSProperties = {
@@ -289,27 +273,6 @@ function formatQuotaHeader(summary: TenantQuotaSummary | null) {
   return `本月配額 ${formatQuotaUsage(summary)} / ${formatQuotaLimit(summary)}`;
 }
 
-function formatQuotaMode(
-  mode: TenantQuotaSummary["limit"]["enforcementMode"] | null | undefined,
-) {
-  switch (mode) {
-    case "warn_only":
-      return "warn only";
-    case "require_approval":
-      return "require approval";
-    case "hard_block":
-      return "hard block";
-    default:
-      return "—";
-  }
-}
-
-function formatRemainingPercent(summary: TenantQuotaSummary | null) {
-  const remaining = summary?.usage.remainingPercent;
-  if (remaining === null || remaining === undefined) return "unlimited";
-  return `${remaining}%`;
-}
-
 function formatHeaderDate(value: Date) {
   const weekday = new Intl.DateTimeFormat("zh-Hant", {
     weekday: "short",
@@ -323,24 +286,9 @@ function formatHeaderDate(value: Date) {
   return `${isoDate} (${weekday})`;
 }
 
-function getQuotaTone(summary: TenantQuotaSummary | null): CanvasTone {
-  const remaining = summary?.usage.remainingPercent;
-  if (remaining === null || remaining === undefined) return "neutral";
-  if (remaining < 20) return "warn";
-  if (remaining < 50) return "info";
-  return "success";
-}
-
 function getGreetingName(data: HomeData) {
   if (data.identity?.actorType === "tenant_admin") return "張俐萱";
   return "YAMATO 團隊";
-}
-
-function formatPeriodKey(periodKey: string | null | undefined) {
-  if (!periodKey) return "本期";
-  const [year, month] = periodKey.split("-");
-  if (!year || !month) return periodKey;
-  return `${year}-${month}`;
 }
 
 function compareActiveBookings(left: BookingRecord, right: BookingRecord) {
@@ -391,16 +339,18 @@ function getBookingStateLabel(status: BookingRecord["orderStatus"]) {
 
 function buildReminderBanners(data: HomeData): ReminderBanner[] {
   const banners: ReminderBanner[] = [];
-  const latestNotification = data.notifications[0];
   const enabledFlags =
     data.featureFlags?.flags.filter((flag) => flag.enabled) ?? [];
+  const latestApproval = data.notifications.find(
+    (notification) => notification.channel === "tenant_approval",
+  );
 
-  if (latestNotification && latestNotification.channel === "tenant_approval") {
+  if (latestApproval) {
     banners.push({
       tone: "warn",
-      title: latestNotification.title,
-      body: `${latestNotification.message} · ${formatDateTime(latestNotification.createdAt)}`,
-      actionHref: "/webhooks",
+      title: latestApproval.title,
+      body: `${latestApproval.message} · ${formatDateTime(latestApproval.createdAt)}`,
+      actionHref: "/bookings",
       actionLabel: "查看",
     });
   } else {
@@ -511,20 +461,6 @@ export default async function HomePage() {
   const greetingName = getGreetingName(data);
   const subtitle = `${formatHeaderDate(now)} · ${formatQuotaHeader(data.quotaSummary)}`;
   const reminderBanners = buildReminderBanners(data);
-  const quotaBody = data.quotaSummary
-    ? [
-        `${formatPeriodKey(data.quotaSummary.periodKey)} 月配額已使用 ${formatQuotaUsage(data.quotaSummary)}`,
-        data.quotaSummary.usage.remainingPercent === null
-          ? "目前未設定上限"
-          : `剩餘 ${data.quotaSummary.usage.remainingPercent}%`,
-        `模式 ${formatQuotaMode(data.quotaSummary.limit.enforcementMode)}`,
-      ].join(" · ")
-    : "配額資料尚未載入，請稍後重新整理。";
-  const governanceChecklistCount =
-    data.governance?.onboardingChecklist.length ?? 0;
-  const enabledFlagCount = data.featureFlags?.flags.filter(
-    (flag) => flag.enabled,
-  ).length;
   const rows: BookingTableRow[] = activeBookings.slice(0, 5).map((booking) => ({
     booking: <span style={bookingPrimaryStyle}>{booking.bookingId}</span>,
     passenger: booking.passenger.name,
@@ -544,7 +480,6 @@ export default async function HomePage() {
       </CanvasPill>
     ),
   }));
-  const quotaTone = getQuotaTone(data.quotaSummary);
   const latestInvoiceLabel = latestInvoice
     ? `${latestInvoice.periodStart.slice(0, 7)} · ${latestInvoice.status}`
     : "尚無帳單";
@@ -650,7 +585,6 @@ export default async function HomePage() {
           <CanvasCard
             theme={th}
             title="進行中訂單"
-            subtitle={`${formatCount(activeBookings.length)} 筆 active bookings`}
             padding={0}
             actions={
               <CanvasBtn href="/bookings" theme={th} variant="ghost" size="sm">
@@ -665,99 +599,34 @@ export default async function HomePage() {
             )}
           </CanvasCard>
 
-          <div style={reminderPanelStyle}>
-            <CanvasCard
-              theme={th}
-              title="提醒"
-              subtitle={quotaBody}
-              actions={
-                <CanvasPill theme={th} tone={quotaTone} dot>
-                  {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
-                </CanvasPill>
-              }
-            >
-              <div style={reminderCardStyle}>
-                <div style={bannerStackStyle}>
-                  {reminderBanners.map((banner, index) => (
-                    <CanvasBanner
-                      actions={
-                        banner.actionHref && banner.actionLabel ? (
-                          <CanvasBtn
-                            href={banner.actionHref}
-                            theme={th}
-                            variant="ghost"
-                            size="xs"
-                          >
-                            {banner.actionLabel}
-                          </CanvasBtn>
-                        ) : undefined
-                      }
-                      body={banner.body}
-                      icon={banner.tone === "success" ? "check" : "warn"}
-                      key={`${banner.title}-${index}`}
-                      theme={th}
-                      title={banner.title}
-                      tone={banner.tone}
-                    />
-                  ))}
-                </div>
-                <div style={reminderMetaStyle}>
-                  <span>{enabledFlagCount ?? 0} 個模組啟用中</span>
-                  <span>
-                    {formatPeriodKey(data.quotaSummary?.periodKey)} ·{" "}
-                    {formatRemainingPercent(data.quotaSummary)}
-                  </span>
-                </div>
+          <CanvasCard theme={th} title="提醒">
+            <div style={reminderCardStyle}>
+              <div style={bannerStackStyle}>
+                {reminderBanners.map((banner, index) => (
+                  <CanvasBanner
+                    actions={
+                      banner.actionHref && banner.actionLabel ? (
+                        <CanvasBtn
+                          href={banner.actionHref}
+                          theme={th}
+                          variant="ghost"
+                          size="xs"
+                        >
+                          {banner.actionLabel}
+                        </CanvasBtn>
+                      ) : undefined
+                    }
+                    body={banner.body}
+                    icon={banner.tone === "success" ? "check" : "warn"}
+                    key={`${banner.title}-${index}`}
+                    theme={th}
+                    title={banner.title}
+                    tone={banner.tone}
+                  />
+                ))}
               </div>
-            </CanvasCard>
-
-            <CanvasCard theme={th} title="月配額" subtitle="租戶治理與帳務快照">
-              <CanvasDL
-                theme={th}
-                cols={1}
-                items={[
-                  {
-                    label: "Tenant",
-                    value: data.identity?.tenantId ?? "tenant-demo-001",
-                    mono: true,
-                  },
-                  {
-                    label: "Latest Invoice",
-                    value: latestInvoice?.invoiceId ?? "—",
-                    mono: true,
-                  },
-                ]}
-              />
-              <div style={{ height: 10 }} />
-              <CanvasField theme={th} label="配額模式" hint="quota enforcement">
-                <div style={bookingWindowStyle}>
-                  {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
-                </div>
-              </CanvasField>
-              <CanvasField
-                theme={th}
-                label="整合待辦"
-                hint="governance checklist"
-              >
-                <div style={bookingWindowStyle}>
-                  {governanceChecklistCount > 0
-                    ? `${formatCount(governanceChecklistCount)} 項待完成`
-                    : "沒有待辦"}
-                </div>
-              </CanvasField>
-              <CanvasField
-                theme={th}
-                label="當期帳單"
-                hint="latest invoice snapshot"
-              >
-                <div style={bookingWindowStyle}>
-                  {latestInvoice
-                    ? `${formatMoney(latestInvoice.amount)} · ${latestInvoice.status}`
-                    : "尚無帳單"}
-                </div>
-              </CanvasField>
-            </CanvasCard>
-          </div>
+            </div>
+          </CanvasCard>
         </div>
       </div>
     </>
