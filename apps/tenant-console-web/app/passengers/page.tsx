@@ -7,6 +7,7 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
+  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -31,6 +32,12 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
+const kpiGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: 12,
+};
+
 const contentGridStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
@@ -41,7 +48,6 @@ const contentGridStyle: CSSProperties = {
 const tableCardStyle: CSSProperties = {
   flex: "1.6 1 760px",
   minWidth: 0,
-  overflow: "hidden",
 };
 
 const sideRailStyle: CSSProperties = {
@@ -67,6 +73,16 @@ const pillRowStyle: CSSProperties = {
   flexWrap: "wrap",
   gap: 8,
   padding: "0 0 14px",
+};
+
+const tableWrapStyle: CSSProperties = {
+  marginInline: -16,
+  marginBottom: -16,
+};
+
+const cardSectionStyle: CSSProperties = {
+  display: "grid",
+  gap: 14,
 };
 
 const helperTextStyle: CSSProperties = {
@@ -321,17 +337,17 @@ export default async function PassengersPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="乘客"
-        subtitle="Tabs · CSV 匯入 · Passengers Table"
+        title="乘客通訊錄"
+        subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本"
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={
           <>
-            <CanvasBtn theme={th} icon="upload">
+            <CanvasBtn theme={th} icon="ext" size="sm">
               CSV 匯入
             </CanvasBtn>
-            <CanvasBtn theme={th} variant="primary" icon="plus">
-              新增乘客
+            <CanvasBtn theme={th} variant="primary" icon="plus" size="sm">
+              新增
             </CanvasBtn>
           </>
         }
@@ -347,6 +363,33 @@ export default async function PassengersPage({
             body={errors.join(" · ")}
           />
         ) : null}
+
+        <div style={kpiGridStyle}>
+          <CanvasKPI
+            theme={th}
+            label="Passengers"
+            value={formatCount(passengers.length)}
+            sub={`${selectedTabLabel} roster`}
+          />
+          <CanvasKPI
+            theme={th}
+            label="Employees"
+            value={formatCount(employeeCount)}
+            sub="employee master rows"
+          />
+          <CanvasKPI
+            theme={th}
+            label="Active"
+            value={formatCount(activeCount)}
+            sub="visible for booking"
+          />
+          <CanvasKPI
+            theme={th}
+            label="Disabled"
+            value={formatCount(disabledCount)}
+            sub={`visitors ${formatCount(visitorCount)}`}
+          />
+        </div>
 
         <div style={contentGridStyle}>
           <CanvasCard
@@ -374,17 +417,19 @@ export default async function PassengersPage({
               </CanvasPill>
             </div>
 
-            {filteredRows.length > 0 ? (
-              <CanvasTable<PassengerRow>
-                theme={th}
-                columns={columns}
-                rows={filteredRows}
-              />
-            ) : (
-              <div style={emptyStateStyle}>
-                目前沒有符合篩選條件的乘客資料。
-              </div>
-            )}
+            <div style={tableWrapStyle}>
+              {filteredRows.length > 0 ? (
+                <CanvasTable<PassengerRow>
+                  theme={th}
+                  columns={columns}
+                  rows={filteredRows}
+                />
+              ) : (
+                <div style={emptyStateStyle}>
+                  目前沒有符合篩選條件的乘客資料。
+                </div>
+              )}
+            </div>
           </CanvasCard>
 
           <div style={sideRailStyle}>
@@ -393,31 +438,33 @@ export default async function PassengersPage({
               title="CSV 匯入"
               subtitle="批次建立或更新乘客名錄"
             >
-              <CanvasField
-                theme={th}
-                label="匯入模板"
-                hint="欄位對齊畫板：fullName、employeeNo、departmentName、mobile、email、activeFlag。"
-              >
-                <div style={helperTextStyle}>
-                  建議以 `employeeNo` 或 `email` 當作 match
-                  key，方便員工與訪客分批維護。
+              <div style={cardSectionStyle}>
+                <CanvasField
+                  theme={th}
+                  label="匯入模板"
+                  hint="欄位對齊畫板：fullName、employeeNo、departmentName、mobile、email、activeFlag。"
+                >
+                  <div style={helperTextStyle}>
+                    建議以 `employeeNo` 或 `email` 當作 match
+                    key，方便員工與訪客分批維護。
+                  </div>
+                </CanvasField>
+
+                <CanvasField
+                  theme={th}
+                  label="上傳前檢查"
+                  hint="停用清單與訪客資料建議分批匯入，便於 tab 驗證。"
+                >
+                  <ul style={listStyle}>
+                    <li>員工主檔優先補齊員編與部門。</li>
+                    <li>停用資料請明確帶入 `activeFlag=false`。</li>
+                    <li>缺少手機或 email 的列會在表格中顯示為 `—`。</li>
+                  </ul>
+                </CanvasField>
+
+                <div style={monoMutedStyle}>
+                  action reserved: CSV import wiring remains follow-up work
                 </div>
-              </CanvasField>
-
-              <CanvasField
-                theme={th}
-                label="上傳前檢查"
-                hint="停用清單與訪客資料建議分批匯入，便於 tab 驗證。"
-              >
-                <ul style={listStyle}>
-                  <li>員工主檔優先補齊員編與部門。</li>
-                  <li>停用資料請明確帶入 `activeFlag=false`。</li>
-                  <li>缺少手機或 email 的列會在表格中顯示為 `—`。</li>
-                </ul>
-              </CanvasField>
-
-              <div style={monoMutedStyle}>
-                action reserved: CSV import wiring remains follow-up work
               </div>
             </CanvasCard>
 
