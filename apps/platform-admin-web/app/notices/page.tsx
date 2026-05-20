@@ -1,6 +1,11 @@
 "use client";
 
-import React, { useCallback, useEffect, useState, type CSSProperties } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useState,
+  type CSSProperties,
+} from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -18,7 +23,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -48,22 +52,48 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const kpiGridStyle = {
+const noticeGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gridTemplateColumns: "minmax(0, 2fr) minmax(320px, 1fr)",
+  gap: 16,
+  alignItems: "start",
+} satisfies CSSProperties;
+
+const createCardGridStyle = {
+  display: "grid",
   gap: 12,
 } satisfies CSSProperties;
 
-const formGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "0 14px",
-} satisfies CSSProperties;
-
-const inlineFieldGridStyle = {
+const createFormGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: "0 14px",
+  gap: "0 12px",
+} satisfies CSSProperties;
+
+const maintenanceCardStackStyle = {
+  display: "grid",
+  gap: 12,
+} satisfies CSSProperties;
+
+const maintenanceToggleCardStyle = {
+  padding: 12,
+  border: `1px solid ${theme.border}`,
+  borderRadius: 8,
+  background: theme.surfaceLo,
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const maintenanceToggleRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+} satisfies CSSProperties;
+
+const maintenanceFieldGridStyle = {
+  display: "grid",
+  gap: 10,
 } satisfies CSSProperties;
 
 const tabButtonStyle = (selected: boolean): CSSProperties => ({
@@ -74,6 +104,7 @@ const tabButtonStyle = (selected: boolean): CSSProperties => ({
   cursor: "pointer",
   color: selected ? theme.text : theme.textMuted,
   font: "inherit",
+  fontWeight: selected ? 600 : 500,
 });
 
 const inputBaseStyle = (mono = false): CSSProperties => ({
@@ -93,17 +124,6 @@ const textareaStyle = {
   ...inputBaseStyle(),
   minHeight: 88,
   resize: "vertical",
-} satisfies CSSProperties;
-
-const toggleRowStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 16,
-  padding: 14,
-  borderRadius: 10,
-  border: `1px solid ${theme.border}`,
-  background: theme.surfaceLo,
 } satisfies CSSProperties;
 
 const toggleTrackStyle = (enabled: boolean): CSSProperties => ({
@@ -186,7 +206,12 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       label: labels.health,
     },
     { divider: labels.tenantGov },
-    { key: "tenants", href: "/tenants", icon: "tenants", label: labels.tenants },
+    {
+      key: "tenants",
+      href: "/tenants",
+      icon: "tenants",
+      label: labels.tenants,
+    },
     {
       key: "partners",
       href: "/partners",
@@ -203,7 +228,12 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       label: labels.switchboard,
     },
     { divider: labels.pricingGov },
-    { key: "pricing", href: "/pricing", icon: "pricing", label: labels.pricing },
+    {
+      key: "pricing",
+      href: "/pricing",
+      icon: "pricing",
+      label: labels.pricing,
+    },
     {
       key: "payments",
       href: "/payments",
@@ -257,6 +287,70 @@ function noticeStatusTone(status: PlatformNoticeRecord["status"]): CanvasTone {
   }
 }
 
+function isoToLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return (
+    [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join(
+      "-",
+    ) +
+    "T" +
+    [pad(date.getHours()), pad(date.getMinutes())].join(":")
+  );
+}
+
+function localInputToIso(value: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function buildMaintenanceSummary(
+  locale: string,
+  maintenance: PlatformMaintenanceModeRecord | null,
+  latestNoticeAt: string | null,
+) {
+  return [
+    {
+      label: locale === "en" ? "Current status" : "目前狀態",
+      value: (
+        <CanvasPill
+          theme={theme}
+          tone={maintenance?.enabled ? "danger" : "success"}
+          dot
+        >
+          {maintenance?.enabled
+            ? locale === "en"
+              ? "Enabled"
+              : "已啟用"
+            : locale === "en"
+              ? "Disabled"
+              : "已停用"}
+        </CanvasPill>
+      ),
+    },
+    {
+      label: locale === "en" ? "Latest notice" : "最近公告",
+      value: latestNoticeAt ? formatDateTime(latestNoticeAt) : "-",
+      mono: true,
+    },
+    {
+      label: locale === "en" ? "Last updated" : "最後更新",
+      value: maintenance?.updatedAt
+        ? formatDateTime(maintenance.updatedAt)
+        : "-",
+      mono: true,
+    },
+    {
+      label: locale === "en" ? "Updated by" : "更新者",
+      value: maintenance?.updatedBy || "-",
+      mono: true,
+    },
+  ];
+}
+
 export default function NoticesPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -276,6 +370,8 @@ export default function NoticesPage() {
   const [creating, setCreating] = useState(false);
   const [maintEnabled, setMaintEnabled] = useState(false);
   const [maintReason, setMaintReason] = useState("");
+  const [maintScheduledStart, setMaintScheduledStart] = useState("");
+  const [maintScheduledEnd, setMaintScheduledEnd] = useState("");
   const [updatingMaint, setUpdatingMaint] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -291,6 +387,8 @@ export default function NoticesPage() {
       setMaintenance(nextMaintenance);
       setMaintEnabled(nextMaintenance?.enabled ?? false);
       setMaintReason(nextMaintenance?.reason || "");
+      setMaintScheduledStart(isoToLocalInput(nextMaintenance?.scheduledStart));
+      setMaintScheduledEnd(isoToLocalInput(nextMaintenance?.scheduledEnd));
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -302,7 +400,9 @@ export default function NoticesPage() {
     void loadData();
   }, [loadData]);
 
-  const handleCreateNotice = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleCreateNotice = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
     event.preventDefault();
     setCreating(true);
     try {
@@ -340,6 +440,8 @@ export default function NoticesPage() {
       await client.setMaintenanceMode({
         enabled: maintEnabled,
         reason: maintReason || null,
+        scheduledStart: localInputToIso(maintScheduledStart),
+        scheduledEnd: localInputToIso(maintScheduledEnd),
       });
       await loadData();
     } catch (cause: unknown) {
@@ -349,48 +451,43 @@ export default function NoticesPage() {
     }
   };
 
-  const activeNoticeCount = notices.filter((notice) => notice.status === "active").length;
-  const scheduledNoticeCount = notices.filter((notice) => notice.status === "scheduled").length;
-  const resolvedNoticeCount = notices.filter((notice) => notice.status === "resolved").length;
   const latestNoticeAt = notices[0]?.createdAt ?? null;
   const shellNav = buildPlatformNav(locale);
 
   const tabNodes = [
-    (
-      <button
-        key="notices"
-        type="button"
-        onClick={() => setActiveTab("notices")}
-        style={tabButtonStyle(activeTab === "notices")}
-      >
-        {t("notices.tab.notices")} ({notices.length})
-      </button>
-    ),
-    (
-      <button
-        key="maintenance"
-        type="button"
-        onClick={() => setActiveTab("maintenance")}
-        style={tabButtonStyle(activeTab === "maintenance")}
-      >
-        {t("notices.tab.maintenance")}
-      </button>
-    ),
+    <button
+      key="notices"
+      type="button"
+      onClick={() => setActiveTab("notices")}
+      style={tabButtonStyle(activeTab === "notices")}
+    >
+      {t("notices.tab.notices")}
+    </button>,
+    <button
+      key="maintenance"
+      type="button"
+      onClick={() => setActiveTab("maintenance")}
+      style={tabButtonStyle(activeTab === "maintenance")}
+    >
+      {t("notices.tab.maintenance")}
+    </button>,
   ];
 
   const noticeColumns: CanvasTableColumn<NoticeTableRow>[] = [
     {
       h: getPlatformLabel(locale, "id"),
-      w: 130,
+      w: 96,
       mono: true,
       r: (row) => row.noticeId,
     },
     {
       h: t("notices.col.title"),
-      w: 280,
+      w: 240,
       r: (row) => (
         <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
-          <span style={{ fontWeight: 600, color: theme.text }}>{row.title}</span>
+          <span style={{ fontWeight: 600, color: theme.text }}>
+            {row.title}
+          </span>
           <span
             style={{
               color: theme.textMuted,
@@ -405,8 +502,8 @@ export default function NoticesPage() {
       ),
     },
     {
-      h: t("notices.col.severity"),
-      w: 120,
+      h: locale === "en" ? "SEV" : "嚴重度",
+      w: 92,
       r: (row) => (
         <CanvasPill theme={theme} tone={noticeSeverityTone(row.severity)} dot>
           {formatPlatformCodeLabel(locale, row.severity)}
@@ -414,17 +511,8 @@ export default function NoticesPage() {
       ),
     },
     {
-      h: t("fleet.col.status"),
-      w: 120,
-      r: (row) => (
-        <CanvasPill theme={theme} tone={noticeStatusTone(row.status)} dot>
-          {formatPlatformCodeLabel(locale, row.status)}
-        </CanvasPill>
-      ),
-    },
-    {
       h: t("notices.col.audience"),
-      w: 110,
+      w: 104,
       r: (row) => (
         <CanvasPill theme={theme} tone="neutral">
           {formatPlatformCodeLabel(locale, row.targetAudience)}
@@ -432,14 +520,23 @@ export default function NoticesPage() {
       ),
     },
     {
-      h: t("notices.col.created"),
-      w: 170,
+      h: locale === "en" ? "STATUS" : "狀態",
+      w: 116,
+      r: (row) => (
+        <CanvasPill theme={theme} tone={noticeStatusTone(row.status)} dot>
+          {formatPlatformCodeLabel(locale, row.status)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: locale === "en" ? "Updated" : "更新",
+      w: 164,
       mono: true,
-      r: (row) => formatDateTime(row.createdAt),
+      r: (row) => formatDateTime(row.updatedAt || row.createdAt),
     },
     {
       h: t("common.actions"),
-      w: 110,
+      w: 108,
       r: (row) =>
         row.status === "resolved" ? (
           <span style={{ color: theme.textDim }}>-</span>
@@ -456,13 +553,147 @@ export default function NoticesPage() {
     },
   ];
 
+  const maintenanceCard = (
+    <CanvasCard
+      theme={theme}
+      title="Maintenance mode"
+      subtitle={
+        locale === "en"
+          ? "Global maintenance controls and schedule window."
+          : "全平台維護控制與排程時窗。"
+      }
+    >
+      <div style={maintenanceCardStackStyle}>
+        <div style={maintenanceToggleCardStyle}>
+          <div style={maintenanceToggleRowStyle}>
+            <span style={{ fontWeight: 600, color: theme.text }}>
+              {locale === "en" ? "Global maintenance" : "全平台維護"}
+            </span>
+            <label
+              style={{
+                position: "relative",
+                display: "inline-flex",
+                alignItems: "center",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={maintEnabled}
+                onChange={(event) => setMaintEnabled(event.target.checked)}
+                style={{
+                  position: "absolute",
+                  opacity: 0,
+                  pointerEvents: "none",
+                }}
+              />
+              <span style={toggleTrackStyle(maintEnabled)}>
+                <span style={toggleKnobStyle(maintEnabled)} />
+              </span>
+            </label>
+          </div>
+          <div
+            style={{
+              fontSize: 11.5,
+              color: theme.textMuted,
+              lineHeight: 1.4,
+            }}
+          >
+            {locale === "en"
+              ? "When enabled, dispatch, webhook delivery, and partner ingress should be paused. Publish the notice first."
+              : "啟用後將停止 dispatch、webhook 投遞與 partner 入站。請務必先發佈公告。"}
+          </div>
+        </div>
+
+        {maintenance?.enabled ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            title={t("notices.maintActiveBanner")}
+            body={maintenance.reason || t("notices.maintActive")}
+          />
+        ) : null}
+
+        <CanvasDL
+          theme={theme}
+          cols={2}
+          items={buildMaintenanceSummary(locale, maintenance, latestNoticeAt)}
+        />
+
+        <div style={maintenanceFieldGridStyle}>
+          <CanvasField
+            theme={theme}
+            label={
+              locale === "en" ? "Reason (internal record)" : "原因（內部紀錄）"
+            }
+          >
+            <input
+              id="maint-reason"
+              type="text"
+              value={maintReason}
+              onChange={(event) => setMaintReason(event.target.value)}
+              placeholder={getPlatformLabel(locale, "maintenanceReasonExample")}
+              style={inputBaseStyle()}
+            />
+          </CanvasField>
+
+          <CanvasField
+            theme={theme}
+            label={locale === "en" ? "Scheduled start" : "預定起始"}
+            hint="UTC"
+          >
+            <input
+              id="maint-start"
+              type="datetime-local"
+              value={maintScheduledStart}
+              onChange={(event) => setMaintScheduledStart(event.target.value)}
+              style={inputBaseStyle(true)}
+            />
+          </CanvasField>
+
+          <CanvasField
+            theme={theme}
+            label={locale === "en" ? "Scheduled end" : "預定結束"}
+            hint="UTC"
+          >
+            <input
+              id="maint-end"
+              type="datetime-local"
+              value={maintScheduledEnd}
+              onChange={(event) => setMaintScheduledEnd(event.target.value)}
+              style={inputBaseStyle(true)}
+            />
+          </CanvasField>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-start" }}>
+          <CanvasBtn
+            theme={theme}
+            variant="secondary"
+            onClick={() => void handleSetMaintenance()}
+            disabled={updatingMaint}
+          >
+            {updatingMaint
+              ? t("notices.updating")
+              : locale === "en"
+                ? "Save settings"
+                : "儲存設定"}
+          </CanvasBtn>
+        </div>
+      </div>
+    </CanvasCard>
+  );
+
   return (
     <CanvasShell
       theme={theme}
       nav={shellNav}
       active="notices"
       currentPath="/notices"
-      breadcrumb={[locale === "en" ? "Platform Layer" : "平台層", t("notices.title")]}
+      breadcrumb={[
+        locale === "en" ? "Platform Layer" : "平台層",
+        t("notices.title"),
+      ]}
       searchPlaceholder={
         locale === "en"
           ? "Search notices, incidents, windows..."
@@ -474,7 +705,7 @@ export default function NoticesPage() {
       <CanvasPageHeader
         theme={theme}
         title={t("notices.title")}
-        subtitle={t("notices.subtitle", { count: activeNoticeCount })}
+        subtitle="platform notices · global maintenance mode"
         sticky={false}
         tabs={tabNodes}
         activeTab={activeTab === "notices" ? tabNodes[0] : tabNodes[1]}
@@ -507,173 +738,135 @@ export default function NoticesPage() {
           />
         ) : null}
 
-        {maintenance?.enabled ? (
-          <CanvasBanner
+        {showCreate ? (
+          <CanvasCard
             theme={theme}
-            tone="danger"
-            title={t("notices.maintActiveBanner")}
-            body={maintenance.reason || t("notices.maintActive")}
-          />
+            title={t("notices.newNotice")}
+            subtitle={
+              locale === "en"
+                ? "Compose a platform-wide broadcast for tenants, ops, or drivers."
+                : "建立平台公告，並指定租戶、營運或司機受眾。"
+            }
+          >
+            <form onSubmit={handleCreateNotice} style={createCardGridStyle}>
+              <div style={createFormGridStyle}>
+                <CanvasField
+                  theme={theme}
+                  label={t("notices.form.title")}
+                  required
+                >
+                  <input
+                    id="notice-title"
+                    type="text"
+                    value={formTitle}
+                    onChange={(event) => setFormTitle(event.target.value)}
+                    placeholder={t("notices.form.titlePlaceholder")}
+                    style={inputBaseStyle()}
+                  />
+                </CanvasField>
+
+                <CanvasField theme={theme} label={t("notices.form.severity")}>
+                  <select
+                    value={formSeverity}
+                    onChange={(event) =>
+                      setFormSeverity(
+                        event.target.value as PlatformNoticeSeverity,
+                      )
+                    }
+                    style={inputBaseStyle()}
+                  >
+                    {SEVERITY_OPTIONS.map((severity) => (
+                      <option key={severity} value={severity}>
+                        {formatPlatformCodeLabel(locale, severity)}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+
+                <CanvasField theme={theme} label={t("notices.form.audience")}>
+                  <select
+                    value={formAudience}
+                    onChange={(event) =>
+                      setFormAudience(event.target.value as NoticeAudience)
+                    }
+                    style={inputBaseStyle()}
+                  >
+                    <option value="all">{t("notices.audience.all")}</option>
+                    <option value="tenants">
+                      {t("notices.audience.tenants")}
+                    </option>
+                    <option value="ops">{t("notices.audience.ops")}</option>
+                    <option value="drivers">
+                      {t("notices.audience.drivers")}
+                    </option>
+                  </select>
+                </CanvasField>
+              </div>
+
+              <CanvasField
+                theme={theme}
+                label={t("notices.form.body")}
+                required
+              >
+                <textarea
+                  id="notice-body"
+                  value={formBody}
+                  onChange={(event) => setFormBody(event.target.value)}
+                  placeholder={t("notices.form.bodyPlaceholder")}
+                  style={textareaStyle}
+                />
+              </CanvasField>
+
+              <div
+                style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+              >
+                <CanvasBtn theme={theme} onClick={() => setShowCreate(false)}>
+                  {t("common.cancel")}
+                </CanvasBtn>
+                <button
+                  type="submit"
+                  disabled={creating || !formTitle.trim() || !formBody.trim()}
+                  style={{
+                    ...inputBaseStyle(),
+                    width: "auto",
+                    cursor:
+                      creating || !formTitle.trim() || !formBody.trim()
+                        ? "not-allowed"
+                        : "pointer",
+                    background: theme.accent,
+                    color: "#fff",
+                    borderColor: theme.accent,
+                    fontWeight: 600,
+                    opacity:
+                      creating || !formTitle.trim() || !formBody.trim()
+                        ? 0.55
+                        : 1,
+                  }}
+                >
+                  {creating
+                    ? t("notices.publishing")
+                    : t("notices.publishNotice")}
+                </button>
+              </div>
+            </form>
+          </CanvasCard>
         ) : null}
 
         {activeTab === "notices" ? (
-          <>
-            <div style={kpiGridStyle}>
-              <CanvasKPI
-                theme={theme}
-                label={t("notices.tab.notices")}
-                value={notices.length}
-                sub={locale === "en" ? "Total entries on record" : "目前記錄中的公告總數"}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={t("notices.col.active")}
-                value={activeNoticeCount}
-                delta={maintenance?.enabled ? t("notices.maintEnabled") : undefined}
-                deltaTone={maintenance?.enabled ? "down" : "neutral"}
-                sub={locale === "en" ? "Broadcasts live right now" : "目前正在播送中的公告"}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={locale === "en" ? "Scheduled" : "排程中"}
-                value={scheduledNoticeCount}
-                sub={locale === "en" ? "Queued for later windows" : "等待後續時窗發布"}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={locale === "en" ? "Resolved" : "已解除"}
-                value={resolvedNoticeCount}
-                sub={locale === "en" ? "Retained for audit history" : "保留供稽核歷程追溯"}
-              />
-            </div>
-
-            {showCreate ? (
-              <CanvasCard
-                theme={theme}
-                title={t("notices.newNotice")}
-                subtitle={
-                  locale === "en"
-                    ? "Compose a new platform-wide broadcast."
-                    : "建立新的平台公告並指定對象。"
-                }
-              >
-                <form onSubmit={handleCreateNotice}>
-                  <div style={formGridStyle}>
-                    <CanvasField
-                      theme={theme}
-                      label={t("notices.form.title")}
-                      required
-                    >
-                      <input
-                        id="notice-title"
-                        type="text"
-                        value={formTitle}
-                        onChange={(event) => setFormTitle(event.target.value)}
-                        placeholder={t("notices.form.titlePlaceholder")}
-                        style={inputBaseStyle()}
-                      />
-                    </CanvasField>
-
-                    <CanvasField
-                      theme={theme}
-                      label={t("notices.form.severity")}
-                    >
-                      <select
-                        value={formSeverity}
-                        onChange={(event) =>
-                          setFormSeverity(event.target.value as PlatformNoticeSeverity)
-                        }
-                        style={inputBaseStyle()}
-                      >
-                        {SEVERITY_OPTIONS.map((severity) => (
-                          <option key={severity} value={severity}>
-                            {formatPlatformCodeLabel(locale, severity)}
-                          </option>
-                        ))}
-                      </select>
-                    </CanvasField>
-
-                    <CanvasField
-                      theme={theme}
-                      label={t("notices.form.audience")}
-                    >
-                      <select
-                        value={formAudience}
-                        onChange={(event) =>
-                          setFormAudience(event.target.value as NoticeAudience)
-                        }
-                        style={inputBaseStyle()}
-                      >
-                        <option value="all">{t("notices.audience.all")}</option>
-                        <option value="tenants">{t("notices.audience.tenants")}</option>
-                        <option value="ops">{t("notices.audience.ops")}</option>
-                        <option value="drivers">{t("notices.audience.drivers")}</option>
-                      </select>
-                    </CanvasField>
-                  </div>
-
-                  <CanvasField
-                    theme={theme}
-                    label={t("notices.form.body")}
-                    required
-                  >
-                    <textarea
-                      id="notice-body"
-                      value={formBody}
-                      onChange={(event) => setFormBody(event.target.value)}
-                      placeholder={t("notices.form.bodyPlaceholder")}
-                      style={textareaStyle}
-                    />
-                  </CanvasField>
-
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                    <CanvasBtn
-                      theme={theme}
-                      onClick={() => setShowCreate(false)}
-                    >
-                      {t("common.cancel")}
-                    </CanvasBtn>
-                    <button
-                      type="submit"
-                      disabled={creating || !formTitle.trim() || !formBody.trim()}
-                      style={{
-                        ...inputBaseStyle(),
-                        width: "auto",
-                        cursor:
-                          creating || !formTitle.trim() || !formBody.trim()
-                            ? "not-allowed"
-                            : "pointer",
-                        background: theme.accent,
-                        color: "#fff",
-                        borderColor: theme.accent,
-                        fontWeight: 600,
-                        opacity:
-                          creating || !formTitle.trim() || !formBody.trim()
-                            ? 0.55
-                            : 1,
-                      }}
-                    >
-                      {creating ? t("notices.publishing") : t("notices.publishNotice")}
-                    </button>
-                  </div>
-                </form>
-              </CanvasCard>
-            ) : null}
-
+          <div style={noticeGridStyle}>
             <CanvasCard
               theme={theme}
-              title={t("notices.tab.notices")}
-              subtitle={
-                locale === "en"
-                  ? "Current notices and recent lifecycle state."
-                  : "現行公告與最近狀態變化。"
-              }
+              title={locale === "en" ? "Current notices" : "現行公告"}
               padding={0}
             >
               {loading ? (
-                <div style={{ padding: 16, color: theme.textMuted }}>{t("notices.loading")}</div>
+                <div style={{ padding: 16, color: theme.textMuted }}>
+                  {t("notices.loading")}
+                </div>
               ) : notices.length === 0 ? (
-                <div style={{ padding: 16, color: theme.textMuted }}>{t("notices.empty")}</div>
+                <div style={{ padding: 16, color: theme.textMuted }}>
+                  {t("notices.empty")}
+                </div>
               ) : (
                 <CanvasTable<NoticeTableRow>
                   theme={theme}
@@ -682,117 +875,10 @@ export default function NoticesPage() {
                 />
               )}
             </CanvasCard>
-          </>
+            {maintenanceCard}
+          </div>
         ) : (
-          <CanvasCard
-            theme={theme}
-            title={t("notices.tab.maintenance")}
-            subtitle={
-              locale === "en"
-                ? "Control maintenance mode, reason copy, and current live state."
-                : "管理維護模式、原因文案與目前生效狀態。"
-            }
-          >
-            <div style={{ display: "grid", gap: 16 }}>
-              <div style={toggleRowStyle}>
-                <div style={{ display: "grid", gap: 4 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>
-                    {maintEnabled
-                      ? t("notices.maintenanceModeOn")
-                      : t("notices.maintenanceModeOff")}
-                  </div>
-                  <div style={{ fontSize: 12, color: theme.textMuted }}>
-                    {maintenance?.reason ||
-                      (maintEnabled
-                        ? t("notices.maintActive")
-                        : t("notices.maintDisabled"))}
-                  </div>
-                </div>
-                <label
-                  style={{
-                    position: "relative",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    cursor: "pointer",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={maintEnabled}
-                    onChange={(event) => setMaintEnabled(event.target.checked)}
-                    style={{ position: "absolute", opacity: 0, pointerEvents: "none" }}
-                  />
-                  <span style={toggleTrackStyle(maintEnabled)}>
-                    <span style={toggleKnobStyle(maintEnabled)} />
-                  </span>
-                </label>
-              </div>
-
-              <CanvasDL
-                theme={theme}
-                cols={2}
-                items={[
-                  {
-                    label: t("notices.currentStatus"),
-                    value: (
-                      <CanvasPill
-                        theme={theme}
-                        tone={maintenance?.enabled ? "danger" : "success"}
-                        dot
-                      >
-                        {maintenance?.enabled
-                          ? t("notices.maintEnabled")
-                          : t("notices.maintDisabled")}
-                      </CanvasPill>
-                    ),
-                  },
-                  {
-                    label: t("notices.lastUpdated"),
-                    value: maintenance?.updatedAt
-                      ? formatDateTime(maintenance.updatedAt)
-                      : "-",
-                    mono: true,
-                  },
-                  {
-                    label: t("notices.form.maintenanceReason"),
-                    value: maintenance?.reason || "-",
-                  },
-                  {
-                    label: locale === "en" ? "Latest notice" : "最近公告",
-                    value: latestNoticeAt ? formatDateTime(latestNoticeAt) : "-",
-                    mono: true,
-                  },
-                ]}
-              />
-
-              <div style={inlineFieldGridStyle}>
-                <CanvasField
-                  theme={theme}
-                  label={t("notices.form.maintenanceReason")}
-                >
-                  <input
-                    id="maint-reason"
-                    type="text"
-                    value={maintReason}
-                    onChange={(event) => setMaintReason(event.target.value)}
-                    placeholder={getPlatformLabel(locale, "maintenanceReasonExample")}
-                    style={inputBaseStyle()}
-                  />
-                </CanvasField>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <CanvasBtn
-                  theme={theme}
-                  variant="primary"
-                  onClick={() => void handleSetMaintenance()}
-                  disabled={updatingMaint}
-                >
-                  {updatingMaint ? t("notices.updating") : t("notices.applyMaint")}
-                </CanvasBtn>
-              </div>
-            </div>
-          </CanvasCard>
+          maintenanceCard
         )}
       </div>
     </CanvasShell>
