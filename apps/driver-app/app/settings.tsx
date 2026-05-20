@@ -20,15 +20,11 @@ import {
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
 } from "@drts/contracts";
-import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
 import {
   Banner as CanvasBanner,
   Btn as CanvasBtn,
   Card as CanvasCard,
-  DL as CanvasDL,
-  Field as CanvasField,
-  Input as CanvasInput,
   PageHeader as CanvasPageHeader,
   Pill as CanvasPill,
   Shell as CanvasShell,
@@ -45,7 +41,6 @@ import {
   DEFAULT_SETTINGS_VALUES,
   buildProfileCommand,
   buildSettingsCommand,
-  deriveSaveState,
   hasErrors,
   profileValuesEqual,
   profileValuesFromRecord,
@@ -54,7 +49,6 @@ import {
   validateProfileValues,
   validateSettingsValues,
   type ProfileFormValues,
-  type SaveState,
   type SettingsFormValues,
 } from "@/lib/settings-form";
 import { driverStrings } from "@/lib/strings";
@@ -153,11 +147,11 @@ function formatTokenExpiry(value: string | null | undefined): string | null {
   return `${remainingDays} 天後到期`;
 }
 
-function getBindingTone(record: PlatformPresenceRecord): CanvasTone {
+function getBindingTone(record: PlatformPresenceRecord): "warn" | "success" {
   if (record.reauthRequired) {
     return "warn";
   }
-  return record.status === "online" ? "success" : "neutral";
+  return "success";
 }
 
 function getBindingStatus(record: PlatformPresenceRecord): string {
@@ -182,26 +176,6 @@ function getBindingSubtitle(record: PlatformPresenceRecord): string {
   }
 
   return parts.join(" · ");
-}
-
-interface SaveStatusDescriptor {
-  label: string;
-  tone: CanvasTone;
-}
-
-function describeSaveStatus(state: SaveState): SaveStatusDescriptor {
-  switch (state) {
-    case "saving":
-      return { label: "儲存中…", tone: "info" };
-    case "dirty":
-      return { label: "尚有未儲存變更", tone: "warn" };
-    case "saved":
-      return { label: "已儲存", tone: "success" };
-    case "error":
-      return { label: "儲存失敗", tone: "danger" };
-    default:
-      return { label: "尚未變更", tone: "neutral" };
-  }
 }
 
 function ScreenSection({
@@ -237,20 +211,14 @@ function ScreenSection({
   );
 }
 
-function Divider() {
-  return <View style={[styles.divider, { backgroundColor: THEME.border }]} />;
-}
-
 function ProfileSummaryCard({
   initial,
   name,
   summary,
-  expanded = false,
 }: {
   initial: string;
   name: string;
   summary: string;
-  expanded?: boolean;
 }) {
   return (
     <View style={styles.profileRow}>
@@ -273,11 +241,7 @@ function ProfileSummaryCard({
           {summary}
         </Text>
       </View>
-      <Ionicons
-        name={expanded ? "chevron-down" : "chevron-forward"}
-        size={16}
-        color={THEME.textDim}
-      />
+      <Ionicons name="chevron-forward" size={16} color={THEME.textDim} />
     </View>
   );
 }
@@ -349,6 +313,7 @@ function SettingRow({
   value,
   right,
   onPress,
+  showChevron = Boolean(onPress),
   danger = false,
   last = false,
 }: {
@@ -357,6 +322,7 @@ function SettingRow({
   value?: string | null;
   right?: ReactNode;
   onPress?: () => void;
+  showChevron?: boolean;
   danger?: boolean;
   last?: boolean;
 }) {
@@ -404,7 +370,7 @@ function SettingRow({
           </Text>
         ) : null}
         {right}
-        {onPress ? (
+        {onPress && showChevron ? (
           <Ionicons
             name="chevron-forward"
             size={15}
@@ -519,9 +485,6 @@ export default function SettingsScreen() {
   const [initialProfile, setInitialProfile] = useState<ProfileFormValues>(
     DEFAULT_PROFILE_VALUES,
   );
-  const [profileExpanded, setProfileExpanded] = useState(false);
-  const [preferencesExpanded, setPreferencesExpanded] = useState(false);
-  const [emergencyExpanded, setEmergencyExpanded] = useState(false);
 
   useEffect(() => {
     if (!isProvisioned) {
@@ -608,13 +571,6 @@ export default function SettingsScreen() {
     ? "請先修正標示欄位後再儲存設定。"
     : null;
 
-  const saveState = deriveSaveState({
-    saving,
-    dirty,
-    hasValidation,
-    lastResult,
-  });
-  const saveStatus = describeSaveStatus(saveState);
   const saveDisabled = !dirty || hasValidation || saving;
 
   const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
@@ -638,16 +594,6 @@ export default function SettingsScreen() {
 
   const updateSettings = (patch: Partial<SettingsFormValues>) => {
     setSettingsValues((prev) => ({ ...prev, ...patch }));
-    if (lastResult) {
-      setLastResult(null);
-    }
-    if (saveError) {
-      setSaveError(null);
-    }
-  };
-
-  const updateProfile = (patch: Partial<ProfileFormValues>) => {
-    setProfileValues((prev) => ({ ...prev, ...patch }));
     if (lastResult) {
       setLastResult(null);
     }
@@ -828,11 +774,6 @@ export default function SettingsScreen() {
         theme={THEME}
         title={driverStrings.settings.title}
         style={styles.pageHeader}
-        actions={
-          <CanvasPill theme={THEME} tone={saveStatus.tone}>
-            {saveStatus.label}
-          </CanvasPill>
-        }
       />
 
       {loadError ? (
@@ -875,85 +816,11 @@ export default function SettingsScreen() {
       ) : null}
 
       <CanvasCard theme={THEME} padding={16} style={styles.profileCard}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setProfileExpanded((value) => !value)}
-          style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-        >
-          <ProfileSummaryCard
-            initial={profileInitial}
-            name={profileValues.profileName.trim() || "尚未填寫司機姓名"}
-            summary={identitySummary || "尚未填寫聯絡資訊"}
-            expanded={profileExpanded}
-          />
-        </Pressable>
-        {profileExpanded ? (
-          <>
-            <Divider />
-            <CanvasDL
-              theme={THEME}
-              cols={2}
-              items={[
-                { label: "駕駛編號", value: driverId || "未設定", mono: true },
-                {
-                  label: "電子郵件",
-                  value: profileValues.profileEmail.trim() || "未填寫",
-                  mono: true,
-                },
-              ]}
-            />
-            <Divider />
-            <View style={styles.fieldStack}>
-              <CanvasField theme={THEME} label="姓名" required>
-                <CanvasInput
-                  theme={THEME}
-                  value={profileValues.profileName}
-                  ph="司機姓名"
-                  editable={profileLoaded && !saving}
-                  onChangeText={(value) =>
-                    updateProfile({ profileName: value })
-                  }
-                />
-              </CanvasField>
-              {profileErrors.profileName ? (
-                <Text style={[styles.errorText, { color: THEME.danger }]}>
-                  {profileErrors.profileName}
-                </Text>
-              ) : null}
-
-              <CanvasField theme={THEME} label="電話">
-                <CanvasInput
-                  theme={THEME}
-                  value={profileValues.profilePhone}
-                  ph="+886-900-000-000"
-                  editable={profileLoaded && !saving}
-                  onChangeText={(value) =>
-                    updateProfile({ profilePhone: value })
-                  }
-                />
-              </CanvasField>
-
-              <CanvasField theme={THEME} label="電子郵件">
-                <CanvasInput
-                  theme={THEME}
-                  value={profileValues.profileEmail}
-                  ph="driver@example.com"
-                  editable={profileLoaded && !saving}
-                  onChangeText={(value) =>
-                    updateProfile({ profileEmail: value })
-                  }
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </CanvasField>
-              {profileErrors.profileEmail ? (
-                <Text style={[styles.errorText, { color: THEME.danger }]}>
-                  {profileErrors.profileEmail}
-                </Text>
-              ) : null}
-            </View>
-          </>
-        ) : null}
+        <ProfileSummaryCard
+          initial={profileInitial}
+          name={profileValues.profileName.trim() || "尚未填寫司機姓名"}
+          summary={identitySummary || "尚未填寫聯絡資訊"}
+        />
       </CanvasCard>
 
       <ScreenSection
@@ -983,16 +850,6 @@ export default function SettingsScreen() {
 
       <ScreenSection
         title={driverStrings.settings.sections.preferences}
-        action={
-          <CanvasBtn
-            theme={THEME}
-            variant="ghost"
-            size="xs"
-            onPress={() => setPreferencesExpanded((value) => !value)}
-          >
-            {preferencesExpanded ? "收合" : "編輯"}
-          </CanvasBtn>
-        }
         style={styles.tightSection}
       >
         <CanvasCard theme={THEME} padding={0}>
@@ -1007,122 +864,28 @@ export default function SettingsScreen() {
           <SettingRow
             label="自動接單"
             subtitle="僅自營派單可開啟自動接單"
-            value={settingsValues.autoAcceptEnabled ? "已開啟" : "已關閉"}
+            right={
+              <Switch
+                value={settingsValues.autoAcceptEnabled}
+                onValueChange={(value) =>
+                  updateSettings({ autoAcceptEnabled: value })
+                }
+                disabled={!settingsLoaded || saving}
+                trackColor={{
+                  false: THEME.borderStrong,
+                  true: THEME.accentHi,
+                }}
+                thumbColor={
+                  settingsValues.autoAcceptEnabled ? THEME.accent : "#FFFFFF"
+                }
+              />
+            }
           />
           <SettingRow
             label="通知"
             value={formatNotification(settingsValues.notificationsEnabled)}
-            last={!preferencesExpanded}
+            last
           />
-          {preferencesExpanded ? (
-            <View
-              style={[
-                styles.editorBlock,
-                {
-                  borderTopColor: THEME.border,
-                  backgroundColor: THEME.surfaceLo,
-                },
-              ]}
-            >
-              <View style={styles.fieldStack}>
-                <CanvasField theme={THEME} label="介面語言">
-                  <CanvasInput
-                    theme={THEME}
-                    value={settingsValues.language}
-                    ph="zh-TW"
-                    editable={settingsLoaded && !saving}
-                    onChangeText={(value) =>
-                      updateSettings({ language: value })
-                    }
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </CanvasField>
-                <CanvasField
-                  theme={THEME}
-                  label="最大接單距離"
-                  hint={`目前設定：${formatRadius(settingsValues.maxAcceptRadius)}`}
-                >
-                  <CanvasInput
-                    theme={THEME}
-                    value={settingsValues.maxAcceptRadius}
-                    ph="8"
-                    suffix="km"
-                    editable={settingsLoaded && !saving}
-                    onChangeText={(value) =>
-                      updateSettings({ maxAcceptRadius: value })
-                    }
-                  />
-                </CanvasField>
-                <View style={styles.toggleRow}>
-                  <View style={styles.toggleCopy}>
-                    <Text style={[styles.toggleLabel, { color: THEME.text }]}>
-                      自動接單
-                    </Text>
-                    <Text
-                      style={[styles.toggleHint, { color: THEME.textMuted }]}
-                    >
-                      僅自營派單可開啟自動接單
-                    </Text>
-                  </View>
-                  <Switch
-                    value={settingsValues.autoAcceptEnabled}
-                    onValueChange={(value) =>
-                      updateSettings({ autoAcceptEnabled: value })
-                    }
-                    disabled={!settingsLoaded || saving}
-                    trackColor={{
-                      false: THEME.borderStrong,
-                      true: THEME.accentHi,
-                    }}
-                    thumbColor={
-                      settingsValues.autoAcceptEnabled
-                        ? THEME.accent
-                        : "#FFFFFF"
-                    }
-                  />
-                </View>
-                <View style={styles.toggleRow}>
-                  <View style={styles.toggleCopy}>
-                    <Text style={[styles.toggleLabel, { color: THEME.text }]}>
-                      推播通知
-                    </Text>
-                    <Text
-                      style={[styles.toggleHint, { color: THEME.textMuted }]}
-                    >
-                      關閉後將不再接收行程與帳號提醒
-                    </Text>
-                  </View>
-                  <Switch
-                    value={settingsValues.notificationsEnabled}
-                    onValueChange={(value) =>
-                      updateSettings({ notificationsEnabled: value })
-                    }
-                    disabled={!settingsLoaded || saving}
-                    trackColor={{
-                      false: THEME.borderStrong,
-                      true: THEME.accentHi,
-                    }}
-                    thumbColor={
-                      settingsValues.notificationsEnabled
-                        ? THEME.accent
-                        : "#FFFFFF"
-                    }
-                  />
-                </View>
-                {settingsErrors.language ? (
-                  <Text style={[styles.errorText, { color: THEME.danger }]}>
-                    {settingsErrors.language}
-                  </Text>
-                ) : null}
-                {settingsErrors.maxAcceptRadius ? (
-                  <Text style={[styles.errorText, { color: THEME.danger }]}>
-                    {settingsErrors.maxAcceptRadius}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-          ) : null}
         </CanvasCard>
       </ScreenSection>
 
@@ -1134,7 +897,6 @@ export default function SettingsScreen() {
           <SettingRow
             label={driverStrings.settings.utilityLabels.emergencyContact}
             subtitle={emergencySummary}
-            onPress={() => setEmergencyExpanded((value) => !value)}
           />
           <SettingRow
             label={driverStrings.settings.utilityLabels.aboutDevice}
@@ -1142,76 +904,11 @@ export default function SettingsScreen() {
           />
           <SettingRow
             label={driverStrings.settings.utilityLabels.logout}
-            subtitle="登出後需要重新綁定此裝置"
             onPress={handleLogout}
             danger
-            last={!emergencyExpanded}
+            showChevron={false}
+            last
           />
-          {emergencyExpanded ? (
-            <View
-              style={[
-                styles.editorBlock,
-                {
-                  borderTopColor: THEME.border,
-                  backgroundColor: THEME.surfaceLo,
-                },
-              ]}
-            >
-              <Text style={[styles.editorTitle, { color: THEME.text }]}>
-                緊急聯絡人資料
-              </Text>
-              <Text style={[styles.editorHint, { color: THEME.textMuted }]}>
-                任一欄位填寫後，姓名與電話為必填。
-              </Text>
-              <View style={styles.fieldStack}>
-                <CanvasField theme={THEME} label="聯絡人姓名">
-                  <CanvasInput
-                    theme={THEME}
-                    value={profileValues.emergencyName}
-                    ph="緊急聯絡人姓名"
-                    editable={profileLoaded && !saving}
-                    onChangeText={(value) =>
-                      updateProfile({ emergencyName: value })
-                    }
-                  />
-                </CanvasField>
-                {profileErrors.emergencyName ? (
-                  <Text style={[styles.errorText, { color: THEME.danger }]}>
-                    {profileErrors.emergencyName}
-                  </Text>
-                ) : null}
-
-                <CanvasField theme={THEME} label="聯絡人電話">
-                  <CanvasInput
-                    theme={THEME}
-                    value={profileValues.emergencyPhone}
-                    ph="+886-900-000-000"
-                    editable={profileLoaded && !saving}
-                    onChangeText={(value) =>
-                      updateProfile({ emergencyPhone: value })
-                    }
-                  />
-                </CanvasField>
-                {profileErrors.emergencyPhone ? (
-                  <Text style={[styles.errorText, { color: THEME.danger }]}>
-                    {profileErrors.emergencyPhone}
-                  </Text>
-                ) : null}
-
-                <CanvasField theme={THEME} label="關係">
-                  <CanvasInput
-                    theme={THEME}
-                    value={profileValues.emergencyRelationship}
-                    ph="配偶、家人、朋友"
-                    editable={profileLoaded && !saving}
-                    onChangeText={(value) =>
-                      updateProfile({ emergencyRelationship: value })
-                    }
-                  />
-                </CanvasField>
-              </View>
-            </View>
-          ) : null}
         </CanvasCard>
       </ScreenSection>
     </CanvasShell>
