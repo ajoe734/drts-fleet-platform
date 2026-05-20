@@ -220,7 +220,7 @@ function revenueShareLabel(kind: ContractKind) {
 
 function buildContractRows(
   contracts: VehicleContractRecord[],
-  partnerNameBySlug: Map<string, string>,
+  partnerNameLookup: Map<string, string>,
   locale: Locale,
 ): ContractRow[] {
   const now = Date.now();
@@ -241,7 +241,7 @@ function buildContractRows(
       return {
         contractId: contract.contractId,
         counterparty:
-          partnerNameBySlug.get(contract.partnerId) ?? contract.partnerId,
+          partnerNameLookup.get(contract.partnerId) ?? contract.partnerId,
         kind,
         termLabel: formatTerm(contract.startAt, contract.endAt, locale),
         revenueShare: revenueShareLabel(kind),
@@ -276,10 +276,17 @@ export default async function ContractsPage() {
     error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
 
-  const partnerNameBySlug = new Map(
-    partnerEntries.map((entry) => [entry.entrySlug, entry.displayName]),
-  );
-  const contractRows = buildContractRows(contracts, partnerNameBySlug, locale);
+  const partnerNameLookup = new Map<string, string>();
+  for (const entry of partnerEntries) {
+    if (!partnerNameLookup.has(entry.partnerId)) {
+      partnerNameLookup.set(entry.partnerId, entry.displayName);
+    }
+    if (!partnerNameLookup.has(entry.entrySlug)) {
+      partnerNameLookup.set(entry.entrySlug, entry.displayName);
+    }
+  }
+
+  const contractRows = buildContractRows(contracts, partnerNameLookup, locale);
   const nav = buildShellNav(locale);
 
   const columns: CanvasTableColumn<ContractRow>[] = [
