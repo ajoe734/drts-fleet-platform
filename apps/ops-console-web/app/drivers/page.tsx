@@ -1,21 +1,17 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 import type {
   DriverEligibilityBlockReason,
   DriverLocationSnapshot,
   DriverRegistryRecord,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
-  CanvasDL as DL,
-  CanvasField as Field,
-  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasShell as Shell,
@@ -37,16 +33,16 @@ type DriverTableRow = Record<string, unknown> & {
   driverId: string;
   driverName: string;
   serviceBuckets: string;
+  lifecycleLabel: string;
   shiftLabel: string;
   shiftTone: CanvasTone;
-  dispatchLabel: string;
-  dispatchTone: CanvasTone;
   licenseLabel: string;
   licenseTone: CanvasTone;
+  dispatchLabel: string;
+  dispatchTone: CanvasTone;
   locationLabel: string;
   locationTone: CanvasTone;
   blockedReasons: string;
-  blockedMeta: string;
 };
 
 const STALE_LOCATION_THRESHOLD_MS = 5 * 60 * 1000;
@@ -57,24 +53,12 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const pageStackStyle = {
-  padding: 24,
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: 14,
-};
-
-const kpiGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 10,
-};
-
-const summaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.5fr) minmax(280px, 0.9fr)",
-  gap: 14,
-};
+function pageSubtitle(locale: Locale, count: number) {
+  const countLabel = t("drivers.subtitle", locale, { count });
+  return locale === "en"
+    ? `${countLabel} · roster · shift · license · dispatch eligibility`
+    : `${countLabel} · 總表 · 班別 · 駕照 · 可派狀態`;
+}
 
 async function resolveSearchParams(
   searchParams: DriversPageProps["searchParams"],
@@ -248,7 +232,6 @@ function formatLocationState(
   locationsError: string | null,
   locale: Locale,
 ): {
-  snapshot: DriverLocationSnapshot | undefined;
   state: "live" | "stale" | "missing" | "unknown";
   label: string;
 } {
@@ -270,11 +253,7 @@ function formatLocationState(
           ? t("drivers.list.locationStale", locale)
           : t("drivers.list.locationLive", locale);
 
-  return { snapshot, state, label };
-}
-
-function formatProfileTimestamp(driver: DriverRegistryRecord) {
-  return driver.profileUpdatedAt ?? driver.updatedAt ?? driver.createdAt;
+  return { state, label };
 }
 
 function buildTabLinks(
@@ -322,21 +301,9 @@ function buildTabLinks(
   };
 }
 
-function actionLinkStyle(themeValue: CanvasTheme) {
+function driverLinkStyle(themeValue: CanvasTheme) {
   return {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "6px",
-    height: "28px",
-    padding: "5px 10px",
-    borderRadius: "7px",
-    background: themeValue.accent,
-    color: "#ffffff",
-    border: `1px solid ${themeValue.accent}`,
-    fontSize: "12px",
-    fontWeight: 500,
-    lineHeight: 1,
+    color: themeValue.text,
     textDecoration: "none",
   } as const;
 }
@@ -395,19 +362,6 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     offline: drivers.filter((driver) => driver.workState === "offline").length,
   } satisfies Record<DriverTabKey, number>;
 
-  const dispatchEligibleCount = counts.eligible;
-  const blockedCount = drivers.filter(
-    (driver) => driver.eligibilityBlockedReasons.length > 0,
-  ).length;
-  const liveLocationCount = drivers.filter((driver) => {
-    const snapshot = locationByDriver.get(driver.driverId);
-    return snapshot && !isLocationStale(snapshot);
-  }).length;
-  const staleLocationCount = drivers.filter((driver) => {
-    const snapshot = locationByDriver.get(driver.driverId);
-    return snapshot ? isLocationStale(snapshot) : false;
-  }).length;
-
   const { active: activeTabNode, tabs } = buildTabLinks(
     locale,
     counts,
@@ -431,54 +385,58 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
         locationsError,
         locale,
       );
-      const serviceBuckets = driver.supportedServiceBuckets.length
-        ? driver.supportedServiceBuckets
-            .map(
-              (
-                bucket: DriverRegistryRecord["supportedServiceBuckets"][number],
-              ) => formatOpsCodeLabel(locale, bucket),
-            )
-            .join(" · ")
-        : "—";
 
       return {
         driverId: driver.driverId,
         driverName: driver.name,
-        serviceBuckets,
+        serviceBuckets: driver.supportedServiceBuckets.length
+          ? driver.supportedServiceBuckets
+              .map(
+                (
+                  bucket: DriverRegistryRecord["supportedServiceBuckets"][number],
+                ) => formatOpsCodeLabel(locale, bucket),
+              )
+              .join(" · ")
+          : "—",
+        lifecycleLabel: formatOpsCodeLabel(locale, driver.lifecycleStatus),
         shiftLabel: formatOpsCodeLabel(locale, driver.workState),
         shiftTone: getShiftTone(driver.workState),
-        dispatchLabel: driver.dispatchEligible
-          ? t("common.yes", locale)
-          : t("common.no", locale),
-        dispatchTone: driver.dispatchEligible ? "success" : "danger",
         licenseLabel: driver.licensesValid
           ? t("common.valid", locale)
           : t("common.invalid", locale),
         licenseTone: driver.licensesValid ? "success" : "warn",
+        dispatchLabel: driver.dispatchEligible
+          ? t("common.yes", locale)
+          : t("common.no", locale),
+        dispatchTone: driver.dispatchEligible ? "success" : "warn",
         locationLabel: location.label,
         locationTone: getLocationTone(location.state),
         blockedReasons: summarizeBlockedReasons(
           driver.eligibilityBlockedReasons,
           locale,
         ),
-        blockedMeta: location.snapshot?.recordedAt
-          ? t("driverDetail.summary.locationRecordedAt", locale, {
-              recordedAt: location.snapshot.recordedAt,
-            })
-          : formatProfileTimestamp(driver),
       };
     });
 
   const columns: CanvasTableColumn<DriverTableRow>[] = [
     {
-      h: locale === "en" ? "Driver" : "司機",
-      w: 260,
+      h: "DRIVER",
+      w: 240,
       r: (row) => (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <span style={{ color: theme.text, fontWeight: 700 }}>
-            {row.driverName}
-          </span>
-          <span style={{ color: theme.textDim, fontSize: 11 }}>
+          <Link
+            href={`/drivers/${encodeURIComponent(row.driverId)}`}
+            style={driverLinkStyle(theme)}
+          >
+            <span style={{ fontWeight: 700 }}>{row.driverName}</span>
+          </Link>
+          <span
+            style={{
+              color: theme.textDim,
+              fontSize: 11,
+              fontFamily: theme.fontMono,
+            }}
+          >
             {row.driverId}
           </span>
           <span style={{ color: theme.textMuted, fontSize: 11 }}>
@@ -488,8 +446,8 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
       ),
     },
     {
-      h: t("drivers.col.shift", locale),
-      w: 170,
+      h: locale === "en" ? "STATUS" : "狀態",
+      w: 120,
       r: (row) => (
         <Pill theme={theme} tone={row.shiftTone} dot>
           {row.shiftLabel}
@@ -497,26 +455,14 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
       ),
     },
     {
-      h: t("drivers.col.dispatchEligible", locale),
-      w: 132,
-      r: (row) => (
-        <Pill theme={theme} tone={row.dispatchTone} dot>
-          {row.dispatchLabel}
-        </Pill>
-      ),
+      h: locale === "en" ? "SHIFT" : "班別",
+      w: 140,
+      mono: true,
+      r: (row) => row.lifecycleLabel,
     },
     {
-      h: t("drivers.col.location", locale),
+      h: locale === "en" ? "LICENSE" : "駕照",
       w: 120,
-      r: (row) => (
-        <Pill theme={theme} tone={row.locationTone} dot>
-          {row.locationLabel}
-        </Pill>
-      ),
-    },
-    {
-      h: t("drivers.col.licenseValid", locale),
-      w: 124,
       r: (row) => (
         <Pill
           theme={theme}
@@ -528,265 +474,116 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
       ),
     },
     {
-      h: t("drivers.col.eligibilityBlocked", locale),
-      w: 360,
+      h: locale === "en" ? "ELIGIBLE" : "可派",
+      w: 120,
       r: (row) => (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            whiteSpace: "normal",
-          }}
-        >
-          <span>{row.blockedReasons}</span>
-          <span style={{ color: theme.textDim, fontSize: 11 }}>
-            {row.blockedMeta}
-          </span>
-        </div>
+        <Pill theme={theme} tone={row.dispatchTone} dot>
+          {row.dispatchLabel}
+        </Pill>
       ),
     },
     {
-      h: t("common.actions", locale),
-      w: 118,
+      h: locale === "en" ? "LOCATION" : "定位",
+      w: 120,
       r: (row) => (
-        <Link
-          href={`/drivers/${encodeURIComponent(row.driverId)}`}
-          style={actionLinkStyle(theme)}
-          aria-label={getOpsLabel(locale, "openDriverDetail", {
-            driverId: row.driverId,
-          })}
-        >
-          {t("drivers.list.openDetail", locale)}
-        </Link>
+        <Pill theme={theme} tone={row.locationTone} dot>
+          {row.locationLabel}
+        </Pill>
       ),
     },
-  ];
-
-  const headerActions: ReactNode = (
-    <>
-      <Btn theme={theme} icon="filter">
-        {locale === "en" ? "Filter" : "篩選"}
-      </Btn>
-      <Btn theme={theme} variant="primary" icon="fleet">
-        {locale === "en" ? "Driver detail drill-down" : "司機明細 drill-down"}
-      </Btn>
-    </>
-  );
-
-  const summaryItems = [
     {
-      k: locale === "en" ? "Scope" : "範圍",
-      v:
-        activeTab === "eligible"
-          ? locale === "en"
-            ? "Dispatch eligible"
-            : "可派遣"
-          : activeTab === "on_shift"
-            ? locale === "en"
-              ? "On shift"
-              : "在班"
-            : activeTab === "offline"
-              ? locale === "en"
-                ? "Offline"
-                : "下班"
-              : t("common.all", locale),
-    },
-    {
-      k: locale === "en" ? "Visible rows" : "目前列數",
-      v: String(rows.length),
-      mono: true,
-    },
-    {
-      k: locale === "en" ? "Registry total" : "名冊總數",
-      v: String(drivers.length),
-      mono: true,
-    },
-    {
-      k: locale === "en" ? "Location feed" : "定位資料",
-      v: locationsError
-        ? t("drivers.list.locationUnknown", locale)
-        : `${liveLocationCount} ${t("drivers.list.locationLive", locale)} / ${staleLocationCount} ${t("drivers.list.locationStale", locale)}`,
+      h: locale === "en" ? "BLOCKERS" : "阻塞原因",
+      w: 340,
+      r: (row) => (
+        <span style={{ color: theme.text, whiteSpace: "normal" }}>
+          {row.blockedReasons}
+        </span>
+      ),
     },
   ];
 
   return (
-    <Shell
-      theme={theme}
-      nav={buildShellNav(locale)}
-      active="drivers"
-      currentPath="/drivers"
-      breadcrumb={[
-        locale === "en" ? "Registry" : "主資料",
-        t("nav.drivers", locale),
-      ]}
-      searchPlaceholder={
-        locale === "en"
-          ? "Search order, tenant, or driver..."
-          : "搜尋訂單、租戶或司機..."
-      }
-      brandLabel={t("app.name", locale)}
-      brandSubLabel={t("app.sub", locale)}
-      env={locale === "en" ? "staging" : "測試"}
-      versionLabel="OC"
-      avatarLabel="OC"
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 40,
+        background: theme.bg,
+      }}
     >
-      <PageHeader
+      <Shell
         theme={theme}
-        title={t("drivers.title", locale)}
-        subtitle={t("drivers.subtitle", locale, { count: drivers.length })}
-        tabs={tabs}
-        activeTab={activeTabNode}
-        actions={headerActions}
-      />
-
-      <div style={pageStackStyle}>
-        {registryError ? (
-          <Banner
-            theme={theme}
-            tone="danger"
-            icon="warn"
-            title={t("drivers.list.registryUnavailable", locale)}
-            body={registryError}
-          />
-        ) : null}
-        {locationsError ? (
-          <Banner
-            theme={theme}
-            tone="warn"
-            icon="warn"
-            title={t("drivers.list.locationsUnavailable", locale)}
-            body={locationsError}
-          />
-        ) : null}
-        {rows.length === 0 ? (
-          <Banner
-            theme={theme}
-            tone="info"
-            icon="warn"
-            title={t("drivers.empty", locale)}
-            body={
-              locale === "en"
-                ? "Adjust the tab or wait for registry data to return."
-                : "請切換頁籤，或等待名冊資料回傳。"
-            }
-          />
-        ) : null}
-
-        <div style={kpiGridStyle}>
-          <KPI
-            theme={theme}
-            label={t("drivers.col.driverId", locale)}
-            value={drivers.length}
-            sub={t("drivers.subtitle", locale, { count: drivers.length })}
-          />
-          <KPI
-            theme={theme}
-            label={t("drivers.col.dispatchEligible", locale)}
-            value={dispatchEligibleCount}
-            delta={`${blockedCount} ${locale === "en" ? "blocked" : "受阻"}`}
-            deltaTone={blockedCount > 0 ? "down" : "neutral"}
-          />
-          <KPI
-            theme={theme}
-            label={t("drivers.col.location", locale)}
-            value={liveLocationCount}
-            delta={`${staleLocationCount} ${t("drivers.list.locationStale", locale)}`}
-            deltaTone={staleLocationCount > 0 ? "down" : "neutral"}
-          />
-          <KPI
-            theme={theme}
-            label={locale === "en" ? "Offline" : "下班"}
-            value={counts.offline}
-            sub={
-              locale === "en"
-                ? "Driver roster in rest state"
-                : "目前休班中的司機"
-            }
-          />
-        </div>
-
-        <div style={summaryGridStyle}>
-          <Card
-            theme={theme}
-            title={locale === "en" ? "Registry overview" : "名冊總覽"}
-            subtitle={t("drivers.registrySummary", locale, {
-              eligible: dispatchEligibleCount,
-              blocked: blockedCount,
-              live: liveLocationCount,
-              stale: staleLocationCount,
-            })}
-          >
-            <DL theme={theme} cols={2} items={summaryItems} />
-            <div style={{ height: 14 }} />
-            <Field
-              theme={theme}
-              label={locale === "en" ? "Ops note" : "Ops 備註"}
-              hint={
-                locale === "en" ? "Read-only list view" : "列表頁維持只讀判斷"
-              }
-            >
-              <div
-                style={{
-                  minHeight: 34,
-                  padding: "9px 10px",
-                  borderRadius: 8,
-                  background: theme.surfaceLo,
-                  border: `1px solid ${theme.border}`,
-                  color: theme.text,
-                  fontSize: 12.5,
-                  lineHeight: 1.45,
-                }}
-              >
-                {t("drivers.registryFooter", locale)}
-              </div>
-            </Field>
-          </Card>
-
-          <Card
-            theme={theme}
-            title={locale === "en" ? "Canvas parity" : "Canvas 對齊"}
-            subtitle={
-              locale === "en"
-                ? "Tabs + roster table preserved on server data"
-                : "Tabs + roster table 直接接在現有 server data 上"
-            }
-          >
-            <DL
-              theme={theme}
-              cols={1}
-              items={[
-                {
-                  k: locale === "en" ? "Primary focus" : "主焦點",
-                  v:
-                    locale === "en"
-                      ? "Shift, dispatch readiness, blockers, location freshness"
-                      : "班別、可派遣性、阻塞原因、定位新鮮度",
-                },
-                {
-                  k: locale === "en" ? "Detail path" : "明細路徑",
-                  v: "/drivers/[driverId]",
-                  mono: true,
-                },
-                {
-                  k: locale === "en" ? "Data source" : "資料來源",
-                  v: "listDrivers() + listDriverLocations()",
-                  mono: true,
-                },
-              ]}
-            />
-          </Card>
-        </div>
-
-        <Card
+        nav={buildShellNav(locale)}
+        active="drivers"
+        currentPath="/drivers"
+        breadcrumb={[
+          locale === "en" ? "Registry" : "主資料",
+          t("nav.drivers", locale),
+        ]}
+        searchPlaceholder={
+          locale === "en"
+            ? "Search order, tenant, or driver..."
+            : "搜尋訂單、租戶或司機..."
+        }
+        brandLabel={t("app.name", locale)}
+        brandSubLabel={t("app.sub", locale)}
+        env={locale === "en" ? "staging" : "測試"}
+        versionLabel="OC"
+        avatarLabel="OC"
+      >
+        <PageHeader
           theme={theme}
-          title={locale === "en" ? "Drivers table" : "司機表格"}
-          subtitle={t("drivers.subtitle", locale, { count: rows.length })}
-          padding={0}
-        >
-          <Table theme={theme} columns={columns} rows={rows} />
-        </Card>
-      </div>
-    </Shell>
+          title={t("nav.drivers", locale)}
+          subtitle={pageSubtitle(locale, drivers.length)}
+          tabs={tabs}
+          activeTab={activeTabNode}
+          actions={
+            <Btn theme={theme} icon="filter">
+              {locale === "en" ? "Filter" : "篩選"}
+            </Btn>
+          }
+        />
+
+        <div style={{ padding: 24 }}>
+          <div style={{ display: "grid", gap: 12 }}>
+            {registryError ? (
+              <Banner
+                theme={theme}
+                tone="danger"
+                icon="warn"
+                title={t("drivers.list.registryUnavailable", locale)}
+                body={registryError}
+              />
+            ) : null}
+            {locationsError ? (
+              <Banner
+                theme={theme}
+                tone="warn"
+                icon="warn"
+                title={t("drivers.list.locationsUnavailable", locale)}
+                body={locationsError}
+              />
+            ) : null}
+            {rows.length === 0 ? (
+              <Banner
+                theme={theme}
+                tone="info"
+                icon="warn"
+                title={t("drivers.empty", locale)}
+                body={
+                  locale === "en"
+                    ? "Adjust the current tab or wait for registry data."
+                    : "請調整目前頁籤，或等待名冊資料回傳。"
+                }
+              />
+            ) : null}
+
+            <Card theme={theme} padding={0}>
+              <Table theme={theme} columns={columns} rows={rows} />
+            </Card>
+          </div>
+        </div>
+      </Shell>
+    </div>
   );
 }
