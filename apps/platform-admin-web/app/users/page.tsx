@@ -5,12 +5,11 @@ import {
   useEffect,
   useMemo,
   useState,
-  type FormEvent,
   type CSSProperties,
+  type FormEvent,
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
   PlatformAdminUserRecord,
   PlatformAdminUserRole,
@@ -56,23 +55,51 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const pillsRowStyle = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  flexWrap: "wrap",
+const heroGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "minmax(0, 1.7fr) minmax(260px, 0.9fr)",
+  alignItems: "start",
+} satisfies CSSProperties;
+
+const heroSummaryStyle = {
+  display: "grid",
+  gap: 14,
 } satisfies CSSProperties;
 
 const kpiGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
 } satisfies CSSProperties;
 
-const formGridStyle = {
+const inviteFormStyle = {
   display: "grid",
+  gap: 14,
+} satisfies CSSProperties;
+
+const inviteGridStyle = {
+  display: "grid",
+  gap: 12,
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "0 14px",
+} satisfies CSSProperties;
+
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
+  borderRadius: 7,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  fontFamily: theme.fontFamily,
+  fontSize: 12.5,
+  padding: "8px 10px",
+  outline: "none",
+} satisfies CSSProperties;
+
+const monoInputStyle = {
+  ...inputStyle,
+  fontFamily: theme.monoFamily,
 } satisfies CSSProperties;
 
 const tableEmptyStyle = {
@@ -82,92 +109,50 @@ const tableEmptyStyle = {
   fontSize: 12.5,
 } satisfies CSSProperties;
 
-const pillButtonStyle = {
-  border: "none",
-  background: "transparent",
-  padding: 0,
-  cursor: "pointer",
-} satisfies CSSProperties;
-
-const inputStyle = (mono = false): CSSProperties => ({
-  width: "100%",
-  boxSizing: "border-box",
-  borderRadius: 7,
-  border: `1px solid ${theme.border}`,
-  background: theme.bgRaised,
-  color: theme.text,
-  fontFamily: mono ? theme.monoFamily : theme.fontFamily,
-  fontSize: 12.5,
-  padding: "8px 10px",
-  outline: "none",
-});
-
-const createSubmitStyle = (disabled: boolean): CSSProperties => ({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 6,
-  padding: "8px 14px",
-  minHeight: 34,
-  fontSize: 13,
-  fontWeight: 600,
-  background: theme.accent,
-  color: "#fff",
-  border: `1px solid ${theme.accent}`,
-  borderRadius: 7,
-  cursor: disabled ? "not-allowed" : "pointer",
-  opacity: disabled ? 0.55 : 1,
-  fontFamily: theme.fontFamily,
-});
-
 const nameCellStyle = {
   display: "flex",
   alignItems: "center",
-  gap: 10,
+  gap: 8,
 } satisfies CSSProperties;
 
 const avatarStyle = {
-  width: 32,
-  height: 32,
-  borderRadius: 10,
-  background: theme.accentSoft,
+  width: 22,
+  height: 22,
+  borderRadius: 11,
+  background: theme.accentBg,
   color: theme.accent,
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  fontSize: 11,
+  fontSize: 10,
   fontWeight: 700,
   flexShrink: 0,
 } satisfies CSSProperties;
 
-const primaryTextStyle = {
+const nameTextStyle = {
   color: theme.text,
-  fontWeight: 600,
+  fontWeight: 500,
   lineHeight: 1.3,
-} satisfies CSSProperties;
-
-const secondaryTextStyle = {
-  color: theme.textDim,
-  fontSize: 11.5,
-  lineHeight: 1.4,
-} satisfies CSSProperties;
-
-const monoSubtleStyle = {
-  color: theme.textDim,
-  fontSize: 11,
-  fontFamily: theme.monoFamily,
 } satisfies CSSProperties;
 
 const updatedCellStyle = {
   display: "grid",
-  gap: 8,
+  gap: 6,
 } satisfies CSSProperties;
 
-const actionStackStyle = {
+const actionRowStyle = {
   display: "flex",
   gap: 6,
   flexWrap: "wrap",
 } satisfies CSSProperties;
+
+const responsiveStyle = `
+  @media (max-width: 980px) {
+    .pa-users-hero {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+`;
 
 function buildPlatformNav(locale: string): CanvasShellNavItem[] {
   const labels =
@@ -303,13 +288,6 @@ function getStatusTone(status: PlatformAdminUserStatus): CanvasTone {
   return "danger";
 }
 
-function getRoleTone(roleCode: PlatformAdminUserRole): CanvasTone {
-  if (roleCode === "superadmin") return "platform";
-  if (roleCode === "admin") return "info";
-  if (roleCode === "operator") return "accent";
-  return "neutral";
-}
-
 function getInitials(displayName: string) {
   const compact = displayName.trim().replace(/\s+/g, " ");
   if (!compact) return "PA";
@@ -341,72 +319,63 @@ export default function UsersPage() {
       ? {
           title: "Platform staff",
           subtitle:
-            "Govern internal roles, invite state, and platform-only access from a single desk.",
+            "Internal platform users and roles. RBAC gatekeeping still resolves from backend authority.",
           refresh: "Refresh",
-          add: "Invite staff user",
+          add: "Invite",
           createTitle: "Invite platform staff",
           createSubtitle:
-            "Create a new internal user record and assign the initial role before the user enters any tenant or ops workflow.",
-          filtersLabel: "Filter staff users",
-          filterTitle: "Roster scope",
-          filterSubtitle:
-            "Match the PA_Users board: keep a clean roster, but surface current invite and suspension lanes.",
+            "Create the internal user record and assign the initial platform role before the user enters downstream workflows.",
           errorTitle: "Unable to load platform users",
-          attentionTitle: "Suspended staff need governance review",
-          attentionBody: (count: number) =>
-            `${count} suspended accounts still remain in the authority roster and should be confirmed against current staffing.`,
-          lastUpdated: "Latest roster update",
-          allRoles: "Governed roles",
-          noUsers: "No platform staff found yet. Invite the first internal user.",
+          suspendedTitle:
+            "Suspended staff still appear in the authority roster",
+          suspendedBody: (count: number) =>
+            `${count} suspended account${count === 1 ? "" : "s"} remain visible and should be confirmed against current staffing.`,
+          noUsers:
+            "No platform staff found yet. Invite the first internal user.",
           created: "Created",
           activate: "Activate",
           suspend: "Suspend",
-          inviteLane: "Invite-only",
-          kpis: {
+          filtersLabel: "Roster scope",
+          stats: {
             active: "Active staff",
-            admin: "Admin coverage",
-            operators: "Operators",
+            admins: "Admin coverage",
+            invited: "Open invites",
           },
           detail: {
-            selection: "Selection",
-            visible: "Visible rows",
-            latest: "Latest updated",
-            pending: "Invited",
+            scope: "Visible scope",
+            visible: "Rows",
+            latest: "Latest update",
+            suspended: "Suspended",
           },
         }
       : {
           title: "平台人員",
-          subtitle: "統一治理平台內部角色、邀請狀態與平台專屬權限。",
+          subtitle:
+            "平台內部使用者與角色治理，RBAC 守門仍以前後端 authority 真值為準。",
           refresh: "重新整理",
-          add: "邀請平台人員",
+          add: "邀請",
           createTitle: "邀請平台人員",
           createSubtitle:
-            "先建立內部使用者主檔與初始角色，再讓該使用者進入 tenant 或 ops workflow。",
-          filtersLabel: "篩選平台人員",
-          filterTitle: "名單範圍",
-          filterSubtitle:
-            "對齊 PA_Users 的乾淨 roster 版型，同時補上目前邀請與停權治理所需的篩選脈絡。",
+            "先建立內部使用者主檔與初始平台角色，再讓該使用者進入後續工作流。",
           errorTitle: "無法載入平台人員資料",
-          attentionTitle: "停權中的平台帳號待確認",
-          attentionBody: (count: number) =>
-            `目前有 ${count} 筆停權帳號仍保留在 authority roster，請確認是否仍需保留治理軌跡。`,
-          lastUpdated: "最近名單更新",
-          allRoles: "治理角色",
+          suspendedTitle: "停權帳號仍保留在 authority roster",
+          suspendedBody: (count: number) =>
+            `目前仍有 ${count} 筆停權帳號顯示在平台名單中，請確認是否要保留治理軌跡。`,
           noUsers: "目前沒有任何平台人員，請先邀請第一位內部使用者。",
           created: "建立時間",
           activate: "啟用",
           suspend: "停權",
-          inviteLane: "限邀請加入",
-          kpis: {
+          filtersLabel: "名單範圍",
+          stats: {
             active: "啟用中人員",
-            admin: "管理角色覆蓋",
-            operators: "Operator 角色",
+            admins: "管理角色覆蓋",
+            invited: "待接受邀請",
           },
           detail: {
-            selection: "目前範圍",
-            visible: "可見筆數",
+            scope: "目前範圍",
+            visible: "筆數",
             latest: "最近更新",
-            pending: "待接受邀請",
+            suspended: "停權中",
           },
         };
 
@@ -436,7 +405,6 @@ export default function UsersPage() {
       admins: users.filter(
         (user) => user.roleCode === "superadmin" || user.roleCode === "admin",
       ).length,
-      operators: users.filter((user) => user.roleCode === "operator").length,
     }),
     [users],
   );
@@ -458,41 +426,11 @@ export default function UsersPage() {
     if (filter === "all") {
       return locale === "en" ? "All staff" : "全部人員";
     }
-    return formatPlatformCodeLabel(locale, filter);
+    return filter;
   }, [filter, locale]);
 
   const createDisabled =
     creating || !formEmail.trim() || !formDisplayName.trim();
-
-  const filterPills = useMemo(
-    () => [
-      {
-        value: "all" as const,
-        label: locale === "en" ? "All" : "全部",
-        count: counts.all,
-        tone: "neutral" as CanvasTone,
-      },
-      {
-        value: "active" as const,
-        label: formatPlatformCodeLabel(locale, "active"),
-        count: counts.active,
-        tone: "success" as CanvasTone,
-      },
-      {
-        value: "invited" as const,
-        label: formatPlatformCodeLabel(locale, "invited"),
-        count: counts.invited,
-        tone: "warn" as CanvasTone,
-      },
-      {
-        value: "suspended" as const,
-        label: formatPlatformCodeLabel(locale, "suspended"),
-        count: counts.suspended,
-        tone: "danger" as CanvasTone,
-      },
-    ],
-    [counts, locale],
-  );
 
   const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
@@ -542,59 +480,47 @@ export default function UsersPage() {
     () => [
       {
         h: "NAME",
-        k: "displayName",
-        w: 250,
+        w: 220,
         r: (row) => (
           <div style={nameCellStyle}>
             <span style={avatarStyle}>{getInitials(row.displayName)}</span>
-            <div style={{ display: "grid", gap: 2 }}>
-              <span style={primaryTextStyle}>{row.displayName}</span>
-              <span style={monoSubtleStyle}>{row.userId}</span>
-            </div>
+            <span style={nameTextStyle}>{row.displayName}</span>
           </div>
         ),
       },
       {
         h: "EMAIL",
         k: "email",
+        w: 260,
         mono: true,
       },
       {
         h: "ROLE",
         k: "roleCode",
-        w: 170,
-        r: (row) => (
-          <CanvasPill theme={theme} tone={getRoleTone(row.roleCode)}>
-            {formatPlatformCodeLabel(locale, row.roleCode)}
-          </CanvasPill>
-        ),
+        w: 220,
+        mono: true,
       },
       {
         h: "STATUS",
-        k: "status",
-        w: 150,
+        w: 120,
         r: (row) => (
           <CanvasPill theme={theme} tone={getStatusTone(row.status)} dot>
-            {formatPlatformCodeLabel(locale, row.status)}
+            {row.status}
           </CanvasPill>
         ),
       },
       {
         h: locale === "en" ? "UPDATED" : "更新",
-        k: "updatedAt",
-        w: 250,
+        w: 220,
         r: (row) => (
           <div style={updatedCellStyle}>
-            <div style={{ display: "grid", gap: 2 }}>
-              <span style={secondaryTextStyle}>{formatDateTime(row.updatedAt)}</span>
-              <span style={monoSubtleStyle}>
-                {copy.created}: {formatDateTime(row.createdAt)}
-              </span>
-            </div>
-            <div style={actionStackStyle}>
+            <span style={{ fontFamily: theme.monoFamily }}>
+              {formatDateTime(row.updatedAt)}
+            </span>
+            <div style={actionRowStyle}>
               <CanvasBtn
                 theme={theme}
-                size="sm"
+                size="xs"
                 disabled={
                   updatingUserId === row.userId || row.roleCode === "admin"
                 }
@@ -605,11 +531,11 @@ export default function UsersPage() {
                   })
                 }
               >
-                {formatPlatformCodeLabel(locale, "admin")}
+                admin
               </CanvasBtn>
               <CanvasBtn
                 theme={theme}
-                size="sm"
+                size="xs"
                 disabled={
                   updatingUserId === row.userId || row.roleCode === "viewer"
                 }
@@ -620,11 +546,11 @@ export default function UsersPage() {
                   })
                 }
               >
-                {formatPlatformCodeLabel(locale, "viewer")}
+                viewer
               </CanvasBtn>
               <CanvasBtn
                 theme={theme}
-                size="sm"
+                size="xs"
                 variant="secondary"
                 disabled={updatingUserId === row.userId}
                 onClick={() =>
@@ -641,7 +567,7 @@ export default function UsersPage() {
         ),
       },
     ],
-    [copy.activate, copy.created, copy.suspend, handleUpdate, locale, updatingUserId],
+    [copy.activate, copy.suspend, handleUpdate, locale, updatingUserId],
   );
 
   if (loading) {
@@ -655,7 +581,9 @@ export default function UsersPage() {
           locale === "en" ? "Tenant Governance" : "租戶治理",
           copy.title,
         ]}
-        searchPlaceholder={locale === "en" ? "Search platform admin" : "搜尋平台治理頁面"}
+        searchPlaceholder={
+          locale === "en" ? "Search platform admin" : "搜尋平台治理頁面"
+        }
         avatarLabel="PA"
         style={shellStyle}
       >
@@ -678,10 +606,13 @@ export default function UsersPage() {
         locale === "en" ? "Tenant Governance" : "租戶治理",
         copy.title,
       ]}
-      searchPlaceholder={locale === "en" ? "Search platform admin" : "搜尋平台治理頁面"}
+      searchPlaceholder={
+        locale === "en" ? "Search platform admin" : "搜尋平台治理頁面"
+      }
       avatarLabel="PA"
       style={shellStyle}
     >
+      <style>{responsiveStyle}</style>
       <CanvasPageHeader
         theme={theme}
         title={copy.title}
@@ -695,7 +626,7 @@ export default function UsersPage() {
             <CanvasBtn
               theme={theme}
               variant={showCreate ? "secondary" : "primary"}
-              icon={showCreate ? "x" : "plus"}
+              icon="plus"
               onClick={() => setShowCreate((current) => !current)}
             >
               {showCreate ? t("common.cancel") : copy.add}
@@ -718,155 +649,158 @@ export default function UsersPage() {
           <CanvasBanner
             theme={theme}
             tone="warn"
-            title={copy.attentionTitle}
-            body={copy.attentionBody(counts.suspended)}
+            title={copy.suspendedTitle}
+            body={copy.suspendedBody(counts.suspended)}
           />
         ) : null}
 
-        <CanvasCard
-          theme={theme}
-          title={copy.filterTitle}
-          subtitle={copy.filterSubtitle}
-          actions={
-            <CanvasPill theme={theme} tone="platform">
-              {copy.inviteLane}
-            </CanvasPill>
-          }
-        >
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={pillsRowStyle}>
-              {filterPills.map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  style={pillButtonStyle}
-                  onClick={() => setFilter(item.value)}
-                  aria-label={`${copy.filtersLabel}: ${item.label}`}
-                >
-                  <CanvasPill
-                    theme={theme}
-                    tone={filter === item.value ? "accent" : item.tone}
-                    dot={item.value !== "all"}
-                  >
-                    {item.label} {item.count}
-                  </CanvasPill>
-                </button>
-              ))}
-              <span style={{ flex: 1 }} />
-              <CanvasPill theme={theme} tone="neutral">
-                {copy.lastUpdated}: {latestUpdatedAt}
-              </CanvasPill>
-            </div>
-
-            <div style={kpiGridStyle}>
-              <CanvasKPI
-                theme={theme}
-                label={copy.kpis.active}
-                value={counts.active}
-                sub={`${counts.invited} invited / ${counts.suspended} suspended`}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={copy.kpis.admin}
-                value={counts.admins}
-                sub="superadmin + admin"
-              />
-              <CanvasKPI
-                theme={theme}
-                label={copy.kpis.operators}
-                value={counts.operators}
-                sub={copy.allRoles}
-              />
-            </div>
-
-            <CanvasDL
-              theme={theme}
-              cols={2}
-              items={[
-                {
-                  label: copy.detail.selection,
-                  value: selectedFilterLabel,
-                },
-                {
-                  label: copy.detail.visible,
-                  value: `${visibleUsers.length}`,
-                  mono: true,
-                },
-                {
-                  label: copy.detail.latest,
-                  value: latestUpdatedAt,
-                  mono: true,
-                },
-                {
-                  label: copy.detail.pending,
-                  value: `${counts.invited}`,
-                  mono: true,
-                },
-              ]}
-            />
-          </div>
-        </CanvasCard>
-
-        {showCreate ? (
-          <CanvasCard
-            theme={theme}
-            title={copy.createTitle}
-            subtitle={copy.createSubtitle}
-          >
-            <form onSubmit={handleCreate}>
-              <div style={formGridStyle}>
-                <CanvasField theme={theme} label={t("users.form.email")} required>
-                  <input
-                    type="email"
-                    value={formEmail}
-                    onChange={(event) => setFormEmail(event.target.value)}
-                    required
-                    placeholder="staff@platform.drts"
-                    style={inputStyle(true)}
-                  />
-                </CanvasField>
-                <CanvasField
+        <div className="pa-users-hero" style={heroGridStyle}>
+          <CanvasCard theme={theme}>
+            <div style={heroSummaryStyle}>
+              <div style={kpiGridStyle}>
+                <CanvasKPI
                   theme={theme}
-                  label={t("users.form.displayName")}
-                  required
-                >
-                  <input
-                    type="text"
-                    value={formDisplayName}
-                    onChange={(event) => setFormDisplayName(event.target.value)}
-                    required
-                    style={inputStyle()}
-                  />
-                </CanvasField>
-                <CanvasField theme={theme} label={t("users.form.role")}>
-                  <select
-                    value={formRoleCode}
-                    onChange={(event) =>
-                      setFormRoleCode(event.target.value as PlatformAdminUserRole)
-                    }
-                    style={inputStyle()}
-                  >
-                    {ROLE_CODES.map((roleCode) => (
-                      <option key={roleCode} value={roleCode}>
-                        {formatPlatformCodeLabel(locale, roleCode)}
-                      </option>
-                    ))}
-                  </select>
-                </CanvasField>
+                  label={copy.stats.active}
+                  value={counts.active}
+                  sub={`${counts.all} total`}
+                />
+                <CanvasKPI
+                  theme={theme}
+                  label={copy.stats.admins}
+                  value={counts.admins}
+                  sub="superadmin + admin"
+                />
+                <CanvasKPI
+                  theme={theme}
+                  label={copy.stats.invited}
+                  value={counts.invited}
+                  sub={`${counts.suspended} suspended`}
+                />
               </div>
-
-              <div style={{ marginTop: 14 }}>
-                <button
-                  type="submit"
-                  style={createSubmitStyle(createDisabled)}
-                  disabled={createDisabled}
-                >
-                  {creating ? t("common.adding") : copy.add}
-                </button>
-              </div>
-            </form>
+              <CanvasDL
+                theme={theme}
+                cols={2}
+                items={[
+                  {
+                    label: copy.detail.scope,
+                    value: selectedFilterLabel,
+                  },
+                  {
+                    label: copy.detail.visible,
+                    value: `${visibleUsers.length}`,
+                    mono: true,
+                  },
+                  {
+                    label: copy.detail.latest,
+                    value: latestUpdatedAt,
+                    mono: true,
+                  },
+                  {
+                    label: copy.detail.suspended,
+                    value: `${counts.suspended}`,
+                    mono: true,
+                  },
+                ]}
+              />
+            </div>
           </CanvasCard>
-        ) : null}
+
+          {showCreate ? (
+            <CanvasCard
+              theme={theme}
+              title={copy.createTitle}
+              subtitle={copy.createSubtitle}
+            >
+              <form onSubmit={handleCreate} style={inviteFormStyle}>
+                <div style={inviteGridStyle}>
+                  <CanvasField
+                    theme={theme}
+                    label={t("users.form.email")}
+                    required
+                  >
+                    <input
+                      type="email"
+                      value={formEmail}
+                      onChange={(event) => setFormEmail(event.target.value)}
+                      required
+                      placeholder="staff@platform.drts"
+                      style={monoInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={t("users.form.displayName")}
+                    required
+                  >
+                    <input
+                      type="text"
+                      value={formDisplayName}
+                      onChange={(event) =>
+                        setFormDisplayName(event.target.value)
+                      }
+                      required
+                      style={inputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={theme} label={t("users.form.role")}>
+                    <select
+                      value={formRoleCode}
+                      onChange={(event) =>
+                        setFormRoleCode(
+                          event.target.value as PlatformAdminUserRole,
+                        )
+                      }
+                      style={inputStyle}
+                    >
+                      {ROLE_CODES.map((roleCode) => (
+                        <option key={roleCode} value={roleCode}>
+                          {roleCode}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                </div>
+                <div>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    size="md"
+                    disabled={createDisabled}
+                  >
+                    {creating ? t("common.adding") : copy.add}
+                  </CanvasBtn>
+                </div>
+              </form>
+            </CanvasCard>
+          ) : (
+            <CanvasCard
+              theme={theme}
+              title={copy.filtersLabel}
+              subtitle={
+                locale === "en"
+                  ? "Keep the roster close to the PA_Users artboard while exposing invite and suspension lanes when needed."
+                  : "維持接近 PA_Users 的純表格姿態，必要時再切換到邀請或停權治理視角。"
+              }
+            >
+              <CanvasField theme={theme} label={copy.filtersLabel}>
+                <select
+                  value={filter}
+                  onChange={(event) =>
+                    setFilter(event.target.value as UserFilter)
+                  }
+                  style={inputStyle}
+                >
+                  <option value="all">
+                    {locale === "en" ? "All staff" : "全部人員"}
+                  </option>
+                  <option value="active">active</option>
+                  <option value="invited">invited</option>
+                  <option value="suspended">suspended</option>
+                </select>
+              </CanvasField>
+            </CanvasCard>
+          )}
+        </div>
 
         <CanvasCard theme={theme} padding={0}>
           {visibleUsers.length > 0 ? (
