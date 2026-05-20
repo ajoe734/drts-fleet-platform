@@ -16,8 +16,10 @@ import {
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
+  CanvasShell as Shell,
   CanvasTable as Table,
   buildCanvasTheme,
+  type CanvasShellNavItem,
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -47,9 +49,14 @@ const theme = buildCanvasTheme({
 });
 
 const pageStackStyle = {
-  padding: 24,
+  minHeight: "100%",
   display: "flex",
   flexDirection: "column" as const,
+};
+
+const pageBodyStyle = {
+  padding: "18px 24px 24px",
+  display: "grid",
   gap: 14,
 };
 
@@ -92,6 +99,101 @@ const queueItemStyle = {
   border: `1px solid ${theme.border}`,
   background: theme.surface,
 };
+
+function buildShellNav(locale: Locale): CanvasShellNavItem[] {
+  return [
+    {
+      divider: locale === "en" ? "Workspaces" : "工作面",
+    },
+    {
+      key: "dashboard",
+      href: "/dashboard",
+      icon: "dashboard",
+      label: t("nav.dashboard", locale),
+    },
+    {
+      divider: locale === "en" ? "Live Ops" : "即時派遣",
+    },
+    {
+      key: "dispatch",
+      href: "/dispatch",
+      icon: "dispatch",
+      label: t("nav.dispatch", locale),
+      matchPaths: ["/dispatch"],
+    },
+    {
+      key: "callcenter",
+      href: "/callcenter",
+      icon: "callcenter",
+      label: t("nav.callcenter", locale),
+    },
+    {
+      divider: locale === "en" ? "Casework" : "案件處理",
+    },
+    {
+      key: "complaints",
+      href: "/complaints",
+      icon: "complaints",
+      label: t("nav.complaints", locale),
+    },
+    {
+      key: "incidents",
+      href: "/incidents",
+      icon: "incidents",
+      label: t("nav.incidents", locale),
+      matchPaths: ["/incidents"],
+    },
+    {
+      divider: locale === "en" ? "Monitoring" : "營運監控",
+    },
+    {
+      key: "reports",
+      href: "/reports",
+      icon: "reports",
+      label: t("nav.reports", locale),
+    },
+    {
+      key: "revenue",
+      href: "/revenue",
+      icon: "revenue",
+      label: t("nav.revenue", locale),
+    },
+    {
+      key: "attendance",
+      href: "/attendance",
+      icon: "attendance",
+      label: t("nav.attendance", locale),
+    },
+    {
+      divider: locale === "en" ? "Registry" : "主資料",
+    },
+    {
+      key: "drivers",
+      href: "/drivers",
+      icon: "fleet",
+      label: t("nav.drivers", locale),
+    },
+    {
+      key: "vehicles",
+      href: "/vehicles",
+      icon: "vehicles",
+      label: t("nav.vehicles", locale),
+    },
+    {
+      key: "contracts",
+      href: "/contracts",
+      icon: "contracts",
+      label: t("nav.contracts", locale),
+      matchPaths: ["/contracts"],
+    },
+    {
+      key: "feature-flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: t("nav.featureFlags", locale),
+    },
+  ];
+}
 
 function contractStatusTone(status: VehicleContractRecord["status"]): CanvasTone {
   if (status === "active") return "success";
@@ -304,6 +406,7 @@ export default async function ContractsPage() {
   );
   const leadingContract = contractRows[0] ?? null;
   const leadingReview = reviewQueue[0] ?? null;
+  const nav = buildShellNav(locale);
 
   const columns: CanvasTableColumn<ContractRow>[] = [
     {
@@ -386,278 +489,323 @@ export default async function ContractsPage() {
   ];
 
   return (
-    <div style={pageStackStyle}>
-      <PageHeader
-        theme={theme}
-        title={t("contracts.title", locale)}
-        subtitle={t("contracts.subtitle", locale, { count: contracts.length })}
-        actions={
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn theme={theme} variant="secondary" icon="export" disabled>
-              {locale === "zh" ? "匯出 roster" : "Export roster"}
-            </Btn>
-            <Btn theme={theme} variant="primary" icon="plus" disabled>
-              {locale === "zh" ? "新增合約" : "New contract"}
-            </Btn>
-          </div>
-        }
-      />
-
-      {error ? (
-        <Banner
-          theme={theme}
-          tone="danger"
-          title={t("common.error", locale)}
-          description={error}
-        />
-      ) : null}
-
-      {!error && reviewQueue.length > 0 ? (
-        <Banner
-          theme={theme}
-          tone={manualReviewCount > 0 ? "warn" : "info"}
-          title={t("contracts.reviewTitle", locale)}
-          description={t("contracts.reviewAlert", locale, {
-            count: reviewQueue.length,
-          })}
-        />
-      ) : null}
-
-      <div style={kpiGridStyle}>
-        <KPI
-          theme={theme}
-          label={locale === "zh" ? "Active contracts" : "Active contracts"}
-          value={String(activeContracts)}
-          sub={locale === "zh" ? "可直接支援 dispatch" : "ready for dispatch"}
-          delta={`${contracts.length} total`}
-        />
-        <KPI
-          theme={theme}
-          label={locale === "zh" ? "Draft contracts" : "Draft contracts"}
-          value={String(draftContracts)}
-          sub={locale === "zh" ? "待核准或待生效" : "awaiting approval or start"}
-          deltaTone={draftContracts > 0 ? "down" : "neutral"}
-          delta={draftContracts > 0 ? "attention" : "clear"}
-        />
-        <KPI
-          theme={theme}
-          label={locale === "zh" ? "Eligibility queue" : "Eligibility queue"}
-          value={String(reviewQueue.length)}
-          sub={t("contracts.reviewRegistrySummary", locale, {
-            total: reviewQueue.length,
-            manual: manualReviewCount,
-          })}
-          deltaTone={manualReviewCount > 0 ? "down" : "neutral"}
-          delta={`${manualReviewCount} manual`}
-        />
-        <KPI
-          theme={theme}
-          label={locale === "zh" ? "Kinds covered" : "Kinds covered"}
-          value={String(
-            Object.values(kindCounts).filter((count) => count > 0).length,
-          )}
-          sub="fleet_lease · partner_program · forwarder"
-          delta={`${kindCounts.forwarder} forwarder`}
-        />
-      </div>
-
-      <div style={contentGridStyle}>
-        <Card
+    <Shell
+      theme={theme}
+      nav={nav}
+      active="contracts"
+      title={t("contracts.title", locale)}
+      currentPath="/contracts"
+      searchPlaceholder={
+        locale === "zh"
+          ? "搜尋合約、合作方、審核單…"
+          : "Search contracts, counterparties, reviews…"
+      }
+      breadcrumb={[
+        locale === "zh" ? "主資料" : "Registry",
+        t("nav.contracts", locale),
+      ]}
+      brandSubLabel="Ops Console"
+      avatarLabel="OC"
+    >
+      <div style={pageStackStyle}>
+        <PageHeader
           theme={theme}
           title={t("contracts.title", locale)}
-          subtitle={t("contracts.registrySummary", locale, {
-            active: activeContracts,
-            draft: draftContracts,
-            attention: reviewQueue.length,
-          })}
-        >
-          <div style={filterRowStyle}>
-            <Pill theme={theme} tone="neutral">
-              fleet_lease {kindCounts.fleet_lease}
-            </Pill>
-            <Pill theme={theme} tone="info">
-              partner_program {kindCounts.partner_program}
-            </Pill>
-            <Pill theme={theme} tone="accent">
-              forwarder {kindCounts.forwarder}
-            </Pill>
-            <Pill theme={theme} tone="success">
-              {t("contracts.col.status", locale)} {activeContracts}
-            </Pill>
+          subtitle={t("contracts.subtitle", locale, { count: contracts.length })}
+          actions={
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Btn theme={theme} variant="secondary" icon="export" disabled>
+                {locale === "zh" ? "匯出 roster" : "Export roster"}
+              </Btn>
+              <Btn theme={theme} variant="primary" icon="plus" disabled>
+                {locale === "zh" ? "新增合約" : "New contract"}
+              </Btn>
+            </div>
+          }
+        />
+
+        <div style={pageBodyStyle}>
+          {error ? (
+            <Banner
+              theme={theme}
+              tone="danger"
+              title={t("common.error", locale)}
+              description={error}
+            />
+          ) : null}
+
+          {!error && reviewQueue.length > 0 ? (
+            <Banner
+              theme={theme}
+              tone={manualReviewCount > 0 ? "warn" : "info"}
+              title={t("contracts.reviewTitle", locale)}
+              description={t("contracts.reviewAlert", locale, {
+                count: reviewQueue.length,
+              })}
+            />
+          ) : null}
+
+          <div style={kpiGridStyle}>
+            <KPI
+              theme={theme}
+              label={locale === "zh" ? "Active contracts" : "Active contracts"}
+              value={String(activeContracts)}
+              sub={
+                locale === "zh" ? "可直接支援 dispatch" : "ready for dispatch"
+              }
+              delta={`${contracts.length} total`}
+            />
+            <KPI
+              theme={theme}
+              label={locale === "zh" ? "Draft contracts" : "Draft contracts"}
+              value={String(draftContracts)}
+              sub={
+                locale === "zh" ? "待核准或待生效" : "awaiting approval or start"
+              }
+              deltaTone={draftContracts > 0 ? "down" : "neutral"}
+              delta={draftContracts > 0 ? "attention" : "clear"}
+            />
+            <KPI
+              theme={theme}
+              label={locale === "zh" ? "Eligibility queue" : "Eligibility queue"}
+              value={String(reviewQueue.length)}
+              sub={t("contracts.reviewRegistrySummary", locale, {
+                total: reviewQueue.length,
+                manual: manualReviewCount,
+              })}
+              deltaTone={manualReviewCount > 0 ? "down" : "neutral"}
+              delta={`${manualReviewCount} manual`}
+            />
+            <KPI
+              theme={theme}
+              label={locale === "zh" ? "Kinds covered" : "Kinds covered"}
+              value={String(
+                Object.values(kindCounts).filter((count) => count > 0).length,
+              )}
+              sub="fleet_lease · partner_program · forwarder"
+              delta={`${kindCounts.forwarder} forwarder`}
+            />
           </div>
 
-          <div style={{ height: 12 }} />
-
-          {contractRows.length > 0 ? (
-            <Table theme={theme} columns={columns} rows={contractRows} />
-          ) : (
-            <p style={helperTextStyle}>{t("contracts.empty", locale)}</p>
-          )}
-        </Card>
-
-        <div style={panelStackStyle}>
-          <Card
-            theme={theme}
-            title={locale === "zh" ? "Registry posture" : "Registry posture"}
-            subtitle={
-              locale === "zh"
-                ? "把當前合約結構與審批節奏濃縮成側欄摘要。"
-                : "Compact posture summary for current contract mix and approvals."
-            }
-          >
-            <DL
+          <div style={contentGridStyle}>
+            <Card
               theme={theme}
-              cols={1}
-              items={[
-                {
-                  label: locale === "zh" ? "Partner entries" : "Partner entries",
-                  value: String(partnerEntries.length),
-                },
-                {
-                  label:
-                    locale === "zh" ? "Denied eligibility" : "Denied eligibility",
-                  value: String(deniedCount),
-                },
-                {
-                  label:
-                    locale === "zh" ? "Manual review" : "Manual review",
-                  value: String(manualReviewCount),
-                },
-                {
-                  label:
-                    locale === "zh" ? "Primary focus" : "Primary focus",
-                  value: leadingContract?.counterparty ?? t("common.dash", locale),
-                },
-              ]}
-            />
+              title={t("contracts.title", locale)}
+              subtitle={t("contracts.registrySummary", locale, {
+                active: activeContracts,
+                draft: draftContracts,
+                attention: reviewQueue.length,
+              })}
+            >
+              <Field
+                theme={theme}
+                label={locale === "zh" ? "Registry mix" : "Registry mix"}
+                hint={
+                  locale === "zh"
+                    ? "Contracts table 對齊 handoff canvas，集中呈現 kind、term、revenue share 與 status。"
+                    : "Contracts table aligned to the handoff canvas with kind, term, revenue share, and status."
+                }
+              >
+                <div style={filterRowStyle}>
+                  <Pill theme={theme} tone="neutral">
+                    fleet_lease {kindCounts.fleet_lease}
+                  </Pill>
+                  <Pill theme={theme} tone="info">
+                    partner_program {kindCounts.partner_program}
+                  </Pill>
+                  <Pill theme={theme} tone="accent">
+                    forwarder {kindCounts.forwarder}
+                  </Pill>
+                  <Pill theme={theme} tone="success">
+                    {t("contracts.col.status", locale)} {activeContracts}
+                  </Pill>
+                </div>
+              </Field>
 
-            {leadingContract ? (
-              <>
-                <div style={{ height: 14 }} />
-                <Field
+              <div style={{ height: 12 }} />
+
+              {contractRows.length > 0 ? (
+                <Table theme={theme} columns={columns} rows={contractRows} />
+              ) : (
+                <p style={helperTextStyle}>{t("contracts.empty", locale)}</p>
+              )}
+            </Card>
+
+            <div style={panelStackStyle}>
+              <Card
+                theme={theme}
+                title={locale === "zh" ? "Registry posture" : "Registry posture"}
+                subtitle={
+                  locale === "zh"
+                    ? "把當前合約結構與審批節奏濃縮成側欄摘要。"
+                    : "Compact posture summary for current contract mix and approvals."
+                }
+              >
+                <DL
                   theme={theme}
-                  label={locale === "zh" ? "Contract focus" : "Contract focus"}
-                  hint={
-                    locale === "zh"
-                      ? "read-only 摘要，對齊 canvas handoff 的 side card posture。"
-                      : "Read-only focus card aligned to the canvas side panel."
-                  }
-                >
-                  <DL
-                    theme={theme}
-                    cols={1}
-                    items={[
-                      {
-                        label: locale === "zh" ? "Counterparty" : "Counterparty",
-                        value: leadingContract.counterparty,
-                      },
-                      {
-                        label: locale === "zh" ? "Kind" : "Kind",
-                        value: leadingContract.kindLabel,
-                      },
-                      {
-                        label: locale === "zh" ? "Term" : "Term",
-                        value: leadingContract.termLabel,
-                        mono: true,
-                      },
-                      {
-                        label: locale === "zh" ? "Revenue" : "Revenue",
-                        value: leadingContract.revenueShare,
-                      },
-                    ]}
-                  />
-                </Field>
-              </>
-            ) : null}
-          </Card>
+                  cols={1}
+                  items={[
+                    {
+                      label:
+                        locale === "zh" ? "Partner entries" : "Partner entries",
+                      value: String(partnerEntries.length),
+                    },
+                    {
+                      label:
+                        locale === "zh"
+                          ? "Denied eligibility"
+                          : "Denied eligibility",
+                      value: String(deniedCount),
+                    },
+                    {
+                      label: locale === "zh" ? "Manual review" : "Manual review",
+                      value: String(manualReviewCount),
+                    },
+                    {
+                      label: locale === "zh" ? "Primary focus" : "Primary focus",
+                      value:
+                        leadingContract?.counterparty ?? t("common.dash", locale),
+                    },
+                  ]}
+                />
 
-          <Card
-            theme={theme}
-            title={t("contracts.reviewTitle", locale)}
-            subtitle={t("contracts.reviewSubtitle", locale, {
-              count: reviewQueue.length,
-            })}
-          >
-            {leadingReview ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                {reviewQueue.slice(0, 3).map((item) => (
-                  <div
-                    key={item.eligibilityVerificationId}
-                    style={queueItemStyle}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 8,
-                      }}
-                    >
-                      <strong style={{ color: theme.text }}>
-                        {partnerNameBySlug.get(item.partnerEntrySlug) ??
-                          item.partnerEntrySlug}
-                      </strong>
-                      <Pill
-                        theme={theme}
-                        tone={eligibilityStatusTone(item.verificationStatus)}
-                        dot
-                      >
-                        {t(
-                          `contracts.reviewStatus.${item.verificationStatus}`,
-                          locale,
-                        )}
-                      </Pill>
-                    </div>
-
-                    <DL
-                      theme={theme}
-                      cols={1}
-                      items={[
-                        {
-                          label: t("contracts.reviewCol.reason", locale),
-                          value: formatOpsCodeLabel(
-                            locale,
-                            item.verificationReasonCode,
-                          ),
-                        },
-                        {
-                          label: t("contracts.reviewCol.requestedAt", locale),
-                          value: formatDateTime(
-                            item.manualFallback.requestedAt,
-                            locale,
-                          ),
-                          mono: true,
-                        },
-                        {
-                          label: locale === "zh" ? "Requested by" : "Requested by",
-                          value: formatRequestedBy(item, locale),
-                        },
-                      ]}
-                    />
-
+                {leadingContract ? (
+                  <>
+                    <div style={{ height: 14 }} />
                     <Field
                       theme={theme}
-                      label={t("contracts.reviewCol.requestContext", locale)}
+                      label={
+                        locale === "zh" ? "Contract focus" : "Contract focus"
+                      }
+                      hint={
+                        locale === "zh"
+                          ? "read-only 摘要，對齊 canvas handoff 的 side card posture。"
+                          : "Read-only focus card aligned to the canvas side panel."
+                      }
                     >
-                      <div
-                        style={{
-                          color: theme.textMuted,
-                          fontSize: 12,
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {formatContext(item, locale)}
-                      </div>
+                      <DL
+                        theme={theme}
+                        cols={1}
+                        items={[
+                          {
+                            label:
+                              locale === "zh" ? "Counterparty" : "Counterparty",
+                            value: leadingContract.counterparty,
+                          },
+                          {
+                            label: locale === "zh" ? "Kind" : "Kind",
+                            value: leadingContract.kindLabel,
+                          },
+                          {
+                            label: locale === "zh" ? "Term" : "Term",
+                            value: leadingContract.termLabel,
+                            mono: true,
+                          },
+                          {
+                            label: locale === "zh" ? "Revenue" : "Revenue",
+                            value: leadingContract.revenueShare,
+                          },
+                        ]}
+                      />
                     </Field>
+                  </>
+                ) : null}
+              </Card>
+
+              <Card
+                theme={theme}
+                title={t("contracts.reviewTitle", locale)}
+                subtitle={t("contracts.reviewSubtitle", locale, {
+                  count: reviewQueue.length,
+                })}
+              >
+                {leadingReview ? (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {reviewQueue.slice(0, 3).map((item) => (
+                      <div
+                        key={item.eligibilityVerificationId}
+                        style={queueItemStyle}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 8,
+                          }}
+                        >
+                          <strong style={{ color: theme.text }}>
+                            {partnerNameBySlug.get(item.partnerEntrySlug) ??
+                              item.partnerEntrySlug}
+                          </strong>
+                          <Pill
+                            theme={theme}
+                            tone={eligibilityStatusTone(
+                              item.verificationStatus,
+                            )}
+                            dot
+                          >
+                            {t(
+                              `contracts.reviewStatus.${item.verificationStatus}`,
+                              locale,
+                            )}
+                          </Pill>
+                        </div>
+
+                        <DL
+                          theme={theme}
+                          cols={1}
+                          items={[
+                            {
+                              label: t("contracts.reviewCol.reason", locale),
+                              value: formatOpsCodeLabel(
+                                locale,
+                                item.verificationReasonCode,
+                              ),
+                            },
+                            {
+                              label: t("contracts.reviewCol.requestedAt", locale),
+                              value: formatDateTime(
+                                item.manualFallback.requestedAt,
+                                locale,
+                              ),
+                              mono: true,
+                            },
+                            {
+                              label:
+                                locale === "zh" ? "Requested by" : "Requested by",
+                              value: formatRequestedBy(item, locale),
+                            },
+                          ]}
+                        />
+
+                        <Field
+                          theme={theme}
+                          label={t("contracts.reviewCol.requestContext", locale)}
+                        >
+                          <div
+                            style={{
+                              color: theme.textMuted,
+                              fontSize: 12,
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            {formatContext(item, locale)}
+                          </div>
+                        </Field>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p style={helperTextStyle}>{t("contracts.reviewEmpty", locale)}</p>
-            )}
-          </Card>
+                ) : (
+                  <p style={helperTextStyle}>
+                    {t("contracts.reviewEmpty", locale)}
+                  </p>
+                )}
+              </Card>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    </Shell>
   );
 }
