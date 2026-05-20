@@ -18,10 +18,12 @@ import type {
   PublicInfoVersionRecord,
 } from "@drts/contracts";
 import {
+  CanvasBanner,
   CanvasBtn,
   CanvasCard,
   CanvasDL,
   CanvasField,
+  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -48,7 +50,7 @@ type PlacardFormState = {
 
 type PublicInfoRow = PublicInfoVersionRecord & Record<string, unknown>;
 type PlacardRow = PlacardVersionRecord & Record<string, unknown>;
-type SwitchboardTab = "publicInfo" | "placards";
+type SwitchboardTab = "versions" | "placards" | "publicContact" | "history";
 
 const EMPTY_PUBLIC_INFO_FORM: CreatePublicInfoVersionCommand = {
   title: "",
@@ -82,6 +84,17 @@ const pageBodyStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
+const heroStackStyle = {
+  display: "grid",
+  gap: 16,
+} satisfies CSSProperties;
+
+const kpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+} satisfies CSSProperties;
+
 const splitLayoutStyle = {
   display: "flex",
   flexWrap: "wrap",
@@ -109,6 +122,11 @@ const tabRailStyle = {
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
+const tabPanelStyle = {
+  display: "grid",
+  gap: 16,
+} satisfies CSSProperties;
+
 const placardCardPreviewStyle = {
   display: "grid",
   gap: 12,
@@ -127,12 +145,6 @@ const historyGridStyle = {
 
 const operationalPanelStyle = {
   display: "grid",
-  gap: 16,
-} satisfies CSSProperties;
-
-const operationalSummaryStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
   gap: 16,
 } satisfies CSSProperties;
 
@@ -409,7 +421,7 @@ export default function SwitchboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [showPublicInfoForm, setShowPublicInfoForm] = useState(false);
   const [showPlacardForm, setShowPlacardForm] = useState(false);
-  const [activeTab, setActiveTab] = useState<SwitchboardTab>("publicInfo");
+  const [activeTab, setActiveTab] = useState<SwitchboardTab>("versions");
   const [publicInfoForm, setPublicInfoForm] = useState(EMPTY_PUBLIC_INFO_FORM);
   const [placardForm, setPlacardForm] = useState(EMPTY_PLACARD_FORM);
   const [creatingPublicInfo, setCreatingPublicInfo] = useState(false);
@@ -466,6 +478,10 @@ export default function SwitchboardPage() {
     placards.find((placard) => placard.publishedAt != null) ??
     placards[0] ??
     null;
+  const placardsTiedToPublished = placards.filter(
+    (placard) =>
+      publicInfoById[placard.publicInfoVersionId]?.status === "published",
+  ).length;
 
   useEffect(() => {
     const preferredVersion = getPreferredPlacardSourceVersion(publicInfo);
@@ -501,8 +517,13 @@ export default function SwitchboardPage() {
   );
 
   const tabItems = [
-    { key: "publicInfo" as const, label: t("switchboard.tab.publicInfo") },
+    { key: "versions" as const, label: t("switchboard.tab.publicInfo") },
     { key: "placards" as const, label: t("switchboard.tab.placards") },
+    {
+      key: "publicContact" as const,
+      label: locale === "en" ? "Public contact" : "公開聯絡",
+    },
+    { key: "history" as const, label: locale === "en" ? "History" : "歷史" },
   ];
 
   const copy =
@@ -512,12 +533,9 @@ export default function SwitchboardPage() {
           pageTitle: "Version management",
           title: "Public Info & Placards",
           subtitle: "public info versioning · placard generation · publish",
-          headerTabs: [
-            "Versions",
-            "Placards",
-            "Public contact",
-            "History",
-          ],
+          bannerTitle: "公開揭露版本與牌貼沿革一起維護",
+          bannerBody:
+            "草稿、發布與牌貼生成都在同一頁被檢查，避免 rider disclosure 與實體貼紙脫鉤。",
           versionsTitle: "Public info versions",
           versionsSubtitle:
             "Version · effective window · public contact · status",
@@ -541,7 +559,7 @@ export default function SwitchboardPage() {
             "Published versions keep immutable lineage while drafts remain operational.",
           tabsTitle: "Switchboard lanes",
           tabsSubtitle:
-            "Keep the primary review posture stable while operational forms live in dedicated tabs.",
+            "Keep the review surface stable while creation, placard, and history tasks move through dedicated tabs.",
           placardTableTitle: "Placard lineage",
           placardTableSubtitle:
             "Generated outputs stay tied to public-info source versions and controlled downloads.",
@@ -566,7 +584,9 @@ export default function SwitchboardPage() {
           pageTitle: "版本管理",
           title: "法定資訊與牌貼",
           subtitle: "public info versioning · placard generation · publish",
-          headerTabs: ["版本", "牌貼", "公開聯絡", "歷史"],
+          bannerTitle: "公開揭露版本與牌貼沿革一起維護",
+          bannerBody:
+            "草稿、發布與牌貼生成都在同一頁被檢查，避免 rider disclosure 與實體貼紙脫鉤。",
           versionsTitle: "Public info versions",
           versionsSubtitle: "版本 · effective 區間 · 公開聯絡 · 狀態",
           previewTitle: livePlacardVersion
@@ -586,7 +606,7 @@ export default function SwitchboardPage() {
           paymentPrefix: "支付",
           historySubtitle: "已發布版本維持 immutable lineage，草稿則保留操作空間。",
           tabsTitle: "Switchboard lanes",
-          tabsSubtitle: "主畫面維持審查姿態，操作表單則收在對應分頁。",
+          tabsSubtitle: "主畫面維持審查姿態，新增、牌貼與歷史操作則收在對應分頁。",
           placardTableTitle: "牌貼沿革",
           placardTableSubtitle: "生成成品需持續綁定來源版本與受控下載。",
           publicContactTitle: "公開聯絡 framing",
@@ -1132,7 +1152,7 @@ export default function SwitchboardPage() {
       ) : (
         <CanvasTable<PublicInfoRow>
           theme={theme}
-          rows={publicInfo}
+          rows={publicInfo as PublicInfoRow[]}
           columns={publicInfoColumns}
         />
       )}
@@ -1153,7 +1173,7 @@ export default function SwitchboardPage() {
       ) : (
         <CanvasTable<PlacardRow>
           theme={theme}
-          rows={placards}
+          rows={placards as PlacardRow[]}
           columns={placardColumns}
         />
       )}
@@ -1271,20 +1291,29 @@ export default function SwitchboardPage() {
   const renderActiveTabPanel = () => {
     if (activeTab === "placards") {
       return (
-        <div style={operationalPanelStyle}>
+        <div style={tabPanelStyle}>
           {showPlacardForm ? renderPlacardForm() : null}
           {renderPlacardTable()}
         </div>
       );
     }
 
-    return (
-      <div style={operationalPanelStyle}>
-        {showPublicInfoForm ? renderPublicInfoForm() : null}
-        <div style={operationalSummaryStyle}>
-          {renderPublicContactPanel()}
+    if (activeTab === "publicContact") {
+      return renderPublicContactPanel();
+    }
+
+    if (activeTab === "history") {
+      return (
+        <div style={tabPanelStyle}>
           {renderHistoryPanel()}
+          {renderPlacardTable()}
         </div>
+      );
+    }
+
+    return (
+      <div style={tabPanelStyle}>
+        {showPublicInfoForm ? renderPublicInfoForm() : null}
       </div>
     );
   };
@@ -1312,15 +1341,15 @@ export default function SwitchboardPage() {
             theme={theme}
             title={copy.title}
             subtitle={copy.subtitle}
-            tabs={copy.headerTabs}
-            activeTab={copy.headerTabs[0]}
+            tabs={tabItems.map((tab) => tab.label)}
+            activeTab={tabItems.find((tab) => tab.key === activeTab)?.label}
             actions={
               <>
                 <CanvasBtn
                   theme={theme}
                   icon="plus"
                   onClick={() => {
-                    setActiveTab("publicInfo");
+                    setActiveTab("versions");
                     setShowPublicInfoForm((current) => !current);
                   }}
                 >
@@ -1347,93 +1376,148 @@ export default function SwitchboardPage() {
             }
           />
 
-          {error ? (
-            <CanvasCard theme={theme}>
-              <p style={{ ...helperTextStyle, color: "#b42318" }}>{error}</p>
-            </CanvasCard>
-          ) : null}
+          <div style={heroStackStyle}>
+            <CanvasBanner
+              theme={theme}
+              tone="info"
+              icon="info"
+              title={copy.bannerTitle}
+              body={copy.bannerBody}
+            />
 
-          <div style={splitLayoutStyle}>
-            <div style={mainColumnStyle}>
-              {renderVersionsTable()}
-            </div>
-            <div style={sideColumnStyle}>
-              <CanvasCard
-                theme={theme}
-                title={copy.previewTitle}
-                subtitle={copy.previewSubtitle}
-              >
-                {previewPublicInfoVersion ? (
-                  <div style={placardCardPreviewStyle}>
-                    <div style={placardPreviewStyle}>
-                      <strong style={{ textAlign: "center", fontSize: 13 }}>
-                        {previewPublicInfoVersion.title}
-                      </strong>
-                      <div
-                        style={{
-                          borderTop: "1px solid #1a1a1a",
-                          borderBottom: "1px solid #1a1a1a",
-                          padding: "6px 0",
-                          textAlign: "center",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {getPlatformLabel(locale, "call")}：
-                        {previewPublicInfoVersion.callPhone ?? "—"} {" "}
-                        {getPlatformLabel(locale, "complaint")}：
-                        {previewPublicInfoVersion.complaintPhone ?? "—"}
-                      </div>
-                      <div>{copy.vehicleLine}</div>
-                      <div>
-                        {previewPublicInfoVersion.fareText ??
-                          previewPublicInfoVersion.callRateText ??
-                          t("switchboard.noRateText")}
-                      </div>
-                      <div>
-                        {copy.paymentPrefix}：
-                        {previewPublicInfoVersion.paymentMethodText ?? "—"}
-                      </div>
-                      <div style={{ color: "#666" }}>
-                        {copy.generatedFrom} {previewPublicInfoVersion.versionId} (
-                        {formatEffectiveRange(locale, previewPublicInfoVersion)})
-                      </div>
-                    </div>
-                    <div style={previewActionRowStyle}>
-                      <CanvasBtn
-                        theme={theme}
-                        icon="copy"
-                        disabled={!livePlacardVersion?.artifactDownloadUrl}
-                        onClick={() => {
-                          if (livePlacardVersion?.artifactDownloadUrl) {
-                            window.open(
-                              livePlacardVersion.artifactDownloadUrl,
-                              "_blank",
-                              "noopener,noreferrer",
-                            );
-                          }
-                        }}
-                      >
-                        {t("payments.downloadPdf")}
-                      </CanvasBtn>
-                      <CanvasBtn
-                        theme={theme}
-                        variant="primary"
-                        icon="plus"
-                        onClick={() => {
-                          setActiveTab("placards");
-                          setShowPlacardForm((current) => !current);
-                        }}
-                      >
-                        {showPlacardForm
-                          ? t("switchboard.hidePlacardForm")
-                          : t("switchboard.generatePlacardVersion")}
-                      </CanvasBtn>
-                    </div>
-                  </div>
-                ) : (
-                  <p style={helperTextStyle}>{copy.noLivePlacard}</p>
-                )}
+            {error ? (
+              <CanvasCard theme={theme}>
+                <p style={{ ...helperTextStyle, color: "#b42318" }}>{error}</p>
               </CanvasCard>
+            ) : null}
+
+            <div style={kpiGridStyle}>
+              <CanvasKPI
+                theme={theme}
+                label={locale === "en" ? "Published versions" : "已發布版本"}
+                value={publishedVersions.length}
+                sub={
+                  locale === "en"
+                    ? `${livePublicInfoVersion ? 1 : 0} live`
+                    : `${livePublicInfoVersion ? 1 : 0} 個現行`
+                }
+                hint={livePublicInfoVersion?.versionId ?? "—"}
+              />
+              <CanvasKPI
+                theme={theme}
+                label={locale === "en" ? "Draft versions" : "草稿版本"}
+                value={draftVersions.length}
+                delta={
+                  latestDraftVersion
+                    ? locale === "en"
+                      ? "awaiting publish"
+                      : "待發布"
+                    : undefined
+                }
+                deltaTone="neutral"
+                hint={latestDraftVersion?.versionId ?? "—"}
+              />
+              <CanvasKPI
+                theme={theme}
+                label={locale === "en" ? "Placard versions" : "牌貼版本"}
+                value={placards.length}
+                sub={livePlacardVersion?.templateName ?? "seatback-default"}
+                hint={livePlacardVersion?.versionCode ?? "—"}
+              />
+              <CanvasKPI
+                theme={theme}
+                label={locale === "en" ? "Tied to live" : "綁定已發布來源"}
+                value={placardsTiedToPublished}
+                sub="source status = published"
+                hint={`${placards.length} total`}
+              />
+            </div>
+
+            <div style={splitLayoutStyle}>
+              <div style={mainColumnStyle}>
+                {renderVersionsTable()}
+              </div>
+              <div style={sideColumnStyle}>
+                <div style={cardStackStyle}>
+                  <CanvasCard
+                    theme={theme}
+                    title={copy.previewTitle}
+                    subtitle={copy.previewSubtitle}
+                  >
+                    {previewPublicInfoVersion ? (
+                      <div style={placardCardPreviewStyle}>
+                        <div style={placardPreviewStyle}>
+                          <strong style={{ textAlign: "center", fontSize: 13 }}>
+                            {previewPublicInfoVersion.title}
+                          </strong>
+                          <div
+                            style={{
+                              borderTop: "1px solid #1a1a1a",
+                              borderBottom: "1px solid #1a1a1a",
+                              padding: "6px 0",
+                              textAlign: "center",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {getPlatformLabel(locale, "call")}：
+                            {previewPublicInfoVersion.callPhone ?? "—"}{" "}
+                            {getPlatformLabel(locale, "complaint")}：
+                            {previewPublicInfoVersion.complaintPhone ?? "—"}
+                          </div>
+                          <div>{copy.vehicleLine}</div>
+                          <div>
+                            {previewPublicInfoVersion.fareText ??
+                              previewPublicInfoVersion.callRateText ??
+                              t("switchboard.noRateText")}
+                          </div>
+                          <div>
+                            {copy.paymentPrefix}：
+                            {previewPublicInfoVersion.paymentMethodText ?? "—"}
+                          </div>
+                          <div style={{ color: "#666" }}>
+                            {copy.generatedFrom} {previewPublicInfoVersion.versionId} (
+                            {formatEffectiveRange(locale, previewPublicInfoVersion)})
+                          </div>
+                        </div>
+                        <div style={previewActionRowStyle}>
+                          <CanvasBtn
+                            theme={theme}
+                            icon="copy"
+                            disabled={!livePlacardVersion?.artifactDownloadUrl}
+                            onClick={() => {
+                              if (livePlacardVersion?.artifactDownloadUrl) {
+                                window.open(
+                                  livePlacardVersion.artifactDownloadUrl,
+                                  "_blank",
+                                  "noopener,noreferrer",
+                                );
+                              }
+                            }}
+                          >
+                            {t("payments.downloadPdf")}
+                          </CanvasBtn>
+                          <CanvasBtn
+                            theme={theme}
+                            variant="primary"
+                            icon="plus"
+                            onClick={() => {
+                              setActiveTab("placards");
+                              setShowPlacardForm((current) => !current);
+                            }}
+                          >
+                            {showPlacardForm
+                              ? t("switchboard.hidePlacardForm")
+                              : t("switchboard.generatePlacardVersion")}
+                          </CanvasBtn>
+                        </div>
+                      </div>
+                    ) : (
+                      <p style={helperTextStyle}>{copy.noLivePlacard}</p>
+                    )}
+                  </CanvasCard>
+                  {renderHistoryPanel()}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1455,7 +1539,7 @@ export default function SwitchboardPage() {
                   </CanvasBtn>
                 ))}
               </div>
-              {renderActiveTabPanel()}
+              <div style={operationalPanelStyle}>{renderActiveTabPanel()}</div>
             </div>
           </CanvasCard>
         </div>
