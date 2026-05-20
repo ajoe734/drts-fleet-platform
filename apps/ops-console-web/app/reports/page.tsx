@@ -501,13 +501,17 @@ export default function ReportsPage() {
   const activePresetCategory = jobCategory(jobType);
   const activePreset = JOB_PRESET_METADATA[jobType];
 
-  const tabs = ["Report jobs", "Filing packages", "Schedules"];
+  const headerTabs = [
+    t("reports.reportJobsEyebrow"),
+    t("reports.filingPackagesEyebrow"),
+    translate("maintenance.col.schedule", locale),
+  ];
   const activeHeaderTab =
     activeTab === "report_jobs"
-      ? tabs[0]
+      ? headerTabs[0]
       : activeTab === "filing_packages"
-        ? tabs[1]
-        : tabs[2];
+        ? headerTabs[1]
+        : headerTabs[2];
 
   const jobRows = useMemo<JobTableRow[]>(
     () =>
@@ -639,13 +643,13 @@ export default function ReportsPage() {
       theme={theme}
       nav={buildShellNav(locale)}
       active="reports"
-      breadcrumb={[copyText(locale, "Reports", "報表")]}
+      breadcrumb={[t("reports.title")]}
     >
       <PageHeader
         theme={theme}
-        title={copyText(locale, "Reports", "報表")}
-        subtitle="report jobs · filing packages · signed artifact 短效 URL"
-        tabs={tabs}
+        title={t("reports.title")}
+        subtitle={t("reports.subtitle")}
+        tabs={headerTabs}
         activeTab={activeHeaderTab}
         actions={
           <>
@@ -677,7 +681,7 @@ export default function ReportsPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title={copyText(locale, "Report center error", "報表中心錯誤")}
+            title={`${t("reports.title")} error`}
             body={error}
           />
         ) : null}
@@ -731,15 +735,15 @@ export default function ReportsPage() {
           {[
             {
               key: "report_jobs" as const,
-              label: `Report jobs ${jobs.length}`,
+              label: `${t("reports.reportJobsEyebrow")} ${jobs.length}`,
             },
             {
               key: "filing_packages" as const,
-              label: `Filing packages ${packages.length}`,
+              label: `${t("reports.filingPackagesEyebrow")} ${packages.length}`,
             },
             {
               key: "schedules" as const,
-              label: copyText(locale, "Schedules", "排程"),
+              label: translate("maintenance.col.schedule", locale),
             },
           ].map((tab) => (
             <Btn
@@ -758,7 +762,7 @@ export default function ReportsPage() {
             <Card
               theme={theme}
               padding={0}
-              title={copyText(locale, "Recent jobs", "近期工作")}
+              title={t("reports.recentJobs")}
               subtitle={t("reports.totalJobs", { count: jobs.length })}
             >
               {loading ? (
