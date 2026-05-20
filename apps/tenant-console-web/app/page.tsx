@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type {
   BookingRecord,
   IdentityContext,
@@ -13,6 +13,7 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
+  CanvasDL,
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
@@ -40,7 +41,7 @@ const pageBodyStyle: CSSProperties = {
 
 const kpiGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 12,
 };
 
@@ -75,19 +76,22 @@ const bannerStackStyle: CSSProperties = {
   gap: 8,
 };
 
+const reminderCardStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+};
+
+const quotaSummaryStyle: CSSProperties = {
+  paddingTop: 2,
+};
+
 const emptyStateStyle: CSSProperties = {
   padding: 24,
   color: th.textMuted,
   fontSize: 12.5,
   textAlign: "center",
 };
-
-const dateFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  weekday: "short",
-});
 
 const shortDateTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
   year: "numeric",
@@ -112,7 +116,13 @@ type HomeData = {
   errors: string[];
 };
 
-type BookingRow = BookingRecord & Record<string, unknown>;
+type BookingTableRow = {
+  booking: ReactNode;
+  passenger: string;
+  pickup: ReactNode;
+  window: ReactNode;
+  state: ReactNode;
+};
 
 type ReminderBanner = {
   tone: "warn" | "info" | "success";
@@ -289,6 +299,19 @@ function formatQuotaMode(
   }
 }
 
+function formatHeaderDate(value: Date) {
+  const weekday = new Intl.DateTimeFormat("zh-Hant", {
+    weekday: "short",
+  }).format(value);
+  const isoDate = new Intl.DateTimeFormat("sv-SE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+
+  return `${isoDate} (${weekday})`;
+}
+
 function getQuotaTone(summary: TenantQuotaSummary | null): CanvasTone {
   const remaining = summary?.usage.remainingPercent;
   if (remaining === null || remaining === undefined) return "neutral";
@@ -444,50 +467,58 @@ export default async function HomePage() {
     ].includes(booking.orderStatus),
   ).length;
   const greetingName = getGreetingName(data);
-  const subtitle = `${dateFormatter.format(now)} · ${formatQuotaHeader(data.quotaSummary)}`;
+  const subtitle = `${formatHeaderDate(now)} · ${formatQuotaHeader(data.quotaSummary)}`;
   const reminderBanners = buildReminderBanners(data);
-  const rows: BookingRow[] = activeBookings.slice(0, 5).map((booking) => ({
-    ...booking,
+  const rows: BookingTableRow[] = activeBookings.slice(0, 5).map((booking) => ({
+    booking: <span style={bookingPrimaryStyle}>{booking.bookingId}</span>,
+    passenger: booking.passenger.name,
+    pickup: <div style={bookingLocationStyle}>{booking.pickup.address}</div>,
+    window: (
+      <div style={bookingWindowStyle}>
+        {formatDateTime(booking.reservationWindowStart)}
+      </div>
+    ),
+    state: (
+      <CanvasPill
+        theme={th}
+        tone={getBookingStateTone(booking.orderStatus)}
+        dot
+      >
+        {getBookingStateLabel(booking.orderStatus)}
+      </CanvasPill>
+    ),
   }));
   const quotaTone = getQuotaTone(data.quotaSummary);
   const latestInvoiceLabel = latestInvoice
     ? `${latestInvoice.periodStart.slice(0, 7)} · ${latestInvoice.status}`
     : "尚無帳單";
 
-  const columns: CanvasTableColumn<BookingRow>[] = [
+  const columns: CanvasTableColumn<BookingTableRow>[] = [
     {
       h: "BK",
+      k: "booking",
       w: 120,
       mono: true,
-      r: (row) => <span style={bookingPrimaryStyle}>{row.bookingId}</span>,
     },
     {
       h: "PASS.",
+      k: "passenger",
       w: 120,
-      r: (row) => row.passenger.name,
     },
     {
       h: "PICKUP",
-      r: (row) => <div style={bookingLocationStyle}>{row.pickup.address}</div>,
+      k: "pickup",
     },
     {
       h: "WIN",
+      k: "window",
       w: 150,
       mono: true,
-      r: (row) => (
-        <div style={bookingWindowStyle}>
-          {formatDateTime(row.reservationWindowStart)}
-        </div>
-      ),
     },
     {
       h: "STATE",
+      k: "state",
       w: 140,
-      r: (row) => (
-        <CanvasPill theme={th} tone={getBookingStateTone(row.orderStatus)} dot>
-          {getBookingStateLabel(row.orderStatus)}
-        </CanvasPill>
-      ),
     },
   ];
 
@@ -580,24 +611,59 @@ export default async function HomePage() {
               </CanvasPill>
             }
           >
-            <div style={bannerStackStyle}>
-              {reminderBanners.map((banner, index) => (
-                <CanvasBanner
-                  actions={
-                    index === 0 ? (
-                      <CanvasBtn theme={th} variant="ghost" size="xs">
-                        查看
-                      </CanvasBtn>
-                    ) : undefined
-                  }
-                  body={banner.body}
-                  icon={banner.tone === "success" ? "check" : "warn"}
-                  key={`${banner.title}-${index}`}
+            <div style={reminderCardStyle}>
+              <div style={quotaSummaryStyle}>
+                <CanvasDL
                   theme={th}
-                  title={banner.title}
-                  tone={banner.tone}
+                  cols={2}
+                  items={[
+                    {
+                      k: "本月配額",
+                      v: formatQuotaUsage(data.quotaSummary),
+                      mono: true,
+                    },
+                    {
+                      k: "強制模式",
+                      v: formatQuotaMode(
+                        data.quotaSummary?.limit.enforcementMode,
+                      ),
+                      mono: true,
+                    },
+                    {
+                      k: "剩餘",
+                      v:
+                        data.quotaSummary?.usage.remainingPercent === null
+                          ? "無上限"
+                          : `${data.quotaSummary?.usage.remainingPercent ?? 0}%`,
+                      mono: true,
+                    },
+                    {
+                      k: "最新帳單",
+                      v: latestInvoiceLabel,
+                      mono: true,
+                    },
+                  ]}
                 />
-              ))}
+              </div>
+              <div style={bannerStackStyle}>
+                {reminderBanners.map((banner, index) => (
+                  <CanvasBanner
+                    actions={
+                      index === 0 ? (
+                        <CanvasBtn theme={th} variant="ghost" size="xs">
+                          查看
+                        </CanvasBtn>
+                      ) : undefined
+                    }
+                    body={banner.body}
+                    icon={banner.tone === "success" ? "check" : "warn"}
+                    key={`${banner.title}-${index}`}
+                    theme={th}
+                    title={banner.title}
+                    tone={banner.tone}
+                  />
+                ))}
+              </div>
             </div>
           </CanvasCard>
         </div>
