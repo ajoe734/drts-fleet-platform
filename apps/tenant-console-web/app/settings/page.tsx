@@ -31,28 +31,28 @@ const th = buildCanvasTheme({
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
-};
-
-const settingsGridStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "stretch",
+  display: "grid",
   gap: 16,
 };
 
+const settingsGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
 const generalCardStyle: CSSProperties = {
-  flex: "1.4 1 480px",
   minWidth: 0,
 };
 
 const statusCardStyle: CSSProperties = {
-  flex: "1 1 320px",
   minWidth: 0,
 };
 
 const generalGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: 12,
 };
 
