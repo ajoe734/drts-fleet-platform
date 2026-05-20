@@ -1,13 +1,10 @@
 import type { CSSProperties, ReactNode } from "react";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { PartnerBrandTemplate } from "@drts/ui-tokens";
 import {
-  CanvasBtn,
   CanvasCard,
   CanvasDL,
   CanvasPageHeader,
-  CanvasPill,
   buildCanvasTheme,
   type CanvasTheme,
 } from "@drts/ui-web";
@@ -15,6 +12,7 @@ import {
   PartnerAuthorityError,
   getPartnerRouteContext,
 } from "@/lib/api-client";
+import { EligibilityActions } from "./page-actions";
 
 const baseTheme = buildCanvasTheme({
   surface: "partner",
@@ -22,17 +20,11 @@ const baseTheme = buildCanvasTheme({
 });
 
 const pageBodyStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 16,
+  display: "grid",
+  gap: 12,
   maxWidth: 420,
   margin: "0 auto",
-};
-
-const actionStackStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
+  padding: "0 16px 24px",
 };
 
 const rightsCardStyle: CSSProperties = {
@@ -84,7 +76,7 @@ function buildConsentItems(
       title: `同意《${brand.bankName} × DRTS 禮賓接送服務條款 v3》`,
       detail: (
         <>
-          隱私政策與服務條款將另開視窗。
+          隱私政策連結另開。
           <span style={{ marginLeft: 6, color: brand.primary }}>了解更多</span>
         </>
       ),
@@ -148,6 +140,7 @@ function ConsentChecklist({
                 fontWeight: 700,
                 color: theme.text,
                 lineHeight: 1.35,
+                letterSpacing: -0.1,
               }}
             >
               {item.title}
@@ -155,7 +148,7 @@ function ConsentChecklist({
             <div
               style={{
                 marginTop: 2,
-                fontSize: 11.5,
+                fontSize: 11,
                 lineHeight: 1.45,
                 color: theme.textMuted,
               }}
@@ -179,38 +172,29 @@ export default async function PartnerEligibilityPage({ params }: PageProps) {
     const { brand } = await getPartnerRouteContext(tenantSlug);
     const theme = buildPartnerTheme(brand);
     const consentItems = buildConsentItems(brand);
-    const benefitYear = new Date().getUTCFullYear();
 
     return (
-      <div>
+      <div
+        style={{
+          minHeight: "100%",
+          background: "#F4F6FB",
+          paddingBottom: 24,
+        }}
+      >
         <CanvasPageHeader
           theme={theme}
           title="連結卡片"
           subtitle="第一次使用 · 一次性確認"
           sticky={false}
-          actions={
-            <CanvasPill theme={theme} tone="accent">
-              已驗證卡友身份
-            </CanvasPill>
-          }
           style={{
-            padding: "0 0 18px",
-            background: "transparent",
+            padding: "0 16px 18px",
+            background: "#F4F6FB",
             borderBottom: "none",
           }}
         />
 
         <div style={pageBodyStyle}>
-          <CanvasCard
-            theme={theme}
-            title="您的權益"
-            style={rightsCardStyle}
-            actions={
-              <CanvasPill theme={theme} tone="accent">
-                {benefitYear}
-              </CanvasPill>
-            }
-          >
+          <CanvasCard theme={theme} title="您的權益" style={rightsCardStyle}>
             <CanvasDL
               theme={theme}
               cols={1}
@@ -228,15 +212,7 @@ export default async function PartnerEligibilityPage({ params }: PageProps) {
             />
           </CanvasCard>
 
-          <CanvasCard
-            theme={theme}
-            title="授權同意"
-            actions={
-              <CanvasPill theme={theme} tone="success">
-                3 / 3 已勾選
-              </CanvasPill>
-            }
-          >
+          <CanvasCard theme={theme} title="授權同意">
             <ConsentChecklist
               brand={brand}
               theme={theme}
@@ -244,31 +220,7 @@ export default async function PartnerEligibilityPage({ params }: PageProps) {
             />
           </CanvasCard>
 
-          <div style={actionStackStyle}>
-            <Link
-              href={`/${tenantSlug}/book`}
-              style={{ textDecoration: "none" }}
-            >
-              <CanvasBtn
-                theme={theme}
-                variant="primary"
-                size="md"
-                style={{ width: "100%", justifyContent: "center", height: 44 }}
-              >
-                確認連結並繼續
-              </CanvasBtn>
-            </Link>
-            <Link href={`/${tenantSlug}`} style={{ textDecoration: "none" }}>
-              <CanvasBtn
-                theme={theme}
-                variant="ghost"
-                size="md"
-                style={{ width: "100%", justifyContent: "center", height: 40 }}
-              >
-                稍後
-              </CanvasBtn>
-            </Link>
-          </div>
+          <EligibilityActions theme={theme} tenantSlug={tenantSlug} />
         </div>
       </div>
     );
