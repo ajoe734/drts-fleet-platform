@@ -4,7 +4,6 @@ import type {
   VehicleContractRecord,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
@@ -28,16 +27,11 @@ type ContractKind = "fleet_lease" | "partner_program" | "forwarder";
 
 type ContractRow = Record<string, unknown> & {
   contractId: string;
-  contractLabel: string;
   counterparty: string;
-  counterpartyMeta: string;
   kind: ContractKind;
-  kindLabel: string;
   termLabel: string;
   revenueShare: string;
-  revenueMeta: string;
   status: VehicleContractRecord["status"];
-  statusLabel: string;
 };
 
 const theme = buildCanvasTheme({
@@ -66,9 +60,14 @@ const kpiGridStyle = {
 
 const summaryCardGridStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.5fr) minmax(240px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.5fr) minmax(250px, 0.85fr)",
   gap: 16,
   alignItems: "start",
+};
+
+const summaryFieldGridStyle = {
+  display: "grid",
+  gap: 14,
 };
 
 const filterRowStyle = {
@@ -77,11 +76,20 @@ const filterRowStyle = {
   gap: 8,
 };
 
-const helperTextStyle = {
+const emptyStateStyle = {
   margin: 0,
+  padding: 24,
   color: theme.textMuted,
   fontSize: 12.5,
   lineHeight: 1.55,
+};
+
+const fieldBodyStyle = {
+  minHeight: 44,
+  borderRadius: 8,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  padding: 10,
 };
 
 function buildShellNav(locale: Locale): CanvasShellNavItem[] {
@@ -183,8 +191,8 @@ function contractStatusTone(
   status: VehicleContractRecord["status"],
 ): CanvasTone {
   if (status === "active") return "success";
-  if (status === "terminated") return "danger";
-  return "warn";
+  if (status === "draft") return "warn";
+  return "neutral";
 }
 
 function kindTone(kind: ContractKind): CanvasTone {
@@ -206,7 +214,7 @@ function formatDate(value: string | null, locale: Locale) {
   );
 }
 
-function formatTerm(startAt: string, endAt: string, locale: Locale) {
+function formatTerm(startAt: string, endAt: string | null, locale: Locale) {
   const start = formatDate(startAt, locale);
   const end = endAt ? formatDate(endAt, locale) : "ongoing";
   return `${start} → ${end}`;
@@ -236,38 +244,10 @@ function inferContractKind(contract: VehicleContractRecord): ContractKind {
   return "fleet_lease";
 }
 
-function kindLabel(kind: ContractKind, locale: Locale) {
-  if (locale === "zh") {
-    if (kind === "forwarder") return "forwarder";
-    if (kind === "partner_program") return "partner program";
-    return "fleet lease";
-  }
-  return kind;
-}
-
-function revenueShareLabel(kind: ContractKind, locale: Locale) {
-  if (locale === "zh") {
-    if (kind === "forwarder") return "平台清分";
-    if (kind === "partner_program") return "合作分潤";
-    return "固定租賃";
-  }
-  if (kind === "forwarder") return "platform settled";
-  if (kind === "partner_program") return "partner share";
-  return "fixed lease";
-}
-
-function revenueShareMeta(
-  contract: VehicleContractRecord,
-  locale: Locale,
-  kind: ContractKind,
-) {
-  if (kind === "forwarder") {
-    return formatOpsCodeLabel(locale, contract.partnerType);
-  }
-  if (kind === "partner_program") {
-    return formatOpsCodeLabel(locale, contract.serviceScope);
-  }
-  return contract.approvedBy ?? t("common.dash", locale);
+function revenueShareLabel(kind: ContractKind) {
+  if (kind === "forwarder") return "85/15";
+  if (kind === "partner_program") return "sponsor settle";
+  return "70/30";
 }
 
 function buildContractRows(
@@ -279,17 +259,12 @@ function buildContractRows(
     const kind = inferContractKind(contract);
     return {
       contractId: contract.contractId,
-      contractLabel: contract.contractId,
       counterparty:
         partnerNameBySlug.get(contract.partnerId) ?? contract.partnerId,
-      counterpartyMeta: formatOpsCodeLabel(locale, contract.partnerType),
       kind,
-      kindLabel: kindLabel(kind, locale),
       termLabel: formatTerm(contract.startAt, contract.endAt, locale),
-      revenueShare: revenueShareLabel(kind, locale),
-      revenueMeta: revenueShareMeta(contract, locale, kind),
+      revenueShare: revenueShareLabel(kind),
       status: contract.status,
-      statusLabel: formatOpsCodeLabel(locale, contract.status),
     };
   });
 }
@@ -350,65 +325,45 @@ export default async function ContractsPage() {
 
   const columns: CanvasTableColumn<ContractRow>[] = [
     {
-      h: locale === "zh" ? "合約" : "Contract",
-      w: 128,
-      r: (row) => (
-        <span style={{ color: theme.text, fontFamily: theme.monoFamily }}>
-          {row.contractLabel}
-        </span>
-      ),
+      h: "CONTRACT",
+      k: "contractId",
+      w: 110,
+      mono: true,
     },
     {
-      h: locale === "zh" ? "合作方" : "Counterparty",
+      h: "COUNTERPARTY",
+      k: "counterparty",
       w: 220,
-      r: (row) => (
-        <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
-          <span>{row.counterparty}</span>
-          <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
-            {row.counterpartyMeta}
-          </span>
-        </div>
-      ),
     },
     {
-      h: locale === "zh" ? "類別" : "Kind",
-      w: 138,
+      h: "KIND",
+      k: "kind",
+      w: 130,
       r: (row) => (
         <Pill theme={theme} tone={kindTone(row.kind)}>
-          {row.kindLabel}
+          {row.kind}
         </Pill>
       ),
     },
     {
-      h: locale === "zh" ? "期間" : "Term",
-      w: 228,
-      r: (row) => (
-        <span style={{ fontFamily: theme.monoFamily }}>{row.termLabel}</span>
-      ),
+      h: "TERM",
+      k: "termLabel",
+      w: 200,
+      mono: true,
     },
     {
-      h: locale === "zh" ? "分潤" : "Revenue Share",
+      h: "REVENUE SHARE",
+      k: "revenueShare",
       w: 140,
-      r: (row) => (
-        <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
-          <span style={{ fontFamily: theme.monoFamily }}>
-            {row.revenueShare}
-          </span>
-          <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
-            {row.revenueMeta}
-          </span>
-        </div>
-      ),
+      mono: true,
     },
     {
-      h: t("contracts.col.status", locale),
-      w: 116,
+      h: "STATUS",
+      w: 110,
       r: (row) => (
-        <div style={{ display: "grid", gap: 4, justifyItems: "start" }}>
-          <Pill theme={theme} tone={contractStatusTone(row.status)} dot>
-            {row.statusLabel}
-          </Pill>
-        </div>
+        <Pill theme={theme} tone={contractStatusTone(row.status)} dot>
+          {row.status}
+        </Pill>
       ),
     },
   ];
@@ -442,11 +397,9 @@ export default async function ContractsPage() {
               : "vehicle contracts · partner relation · revenue share"
           }
           actions={
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Btn theme={theme} variant="primary" icon="plus" disabled>
-                {locale === "zh" ? "建立合約" : "Create contract"}
-              </Btn>
-            </div>
+            <Btn theme={theme} variant="primary" icon="plus" disabled>
+              {locale === "zh" ? "建立合約" : "Create contract"}
+            </Btn>
           }
         />
 
@@ -478,6 +431,7 @@ export default async function ContractsPage() {
               value={String(contracts.length)}
               sub={t("contracts.subtitle", locale, { count: contracts.length })}
               delta={`${activeContracts} active`}
+              deltaTone={activeContracts > 0 ? "up" : "neutral"}
             />
             <KPI
               theme={theme}
@@ -487,6 +441,7 @@ export default async function ContractsPage() {
                 locale === "zh" ? "可直接支援 dispatch" : "ready for dispatch"
               }
               delta={`${draftContracts} draft`}
+              deltaTone={draftContracts > 0 ? "neutral" : "up"}
             />
             <KPI
               theme={theme}
@@ -496,8 +451,8 @@ export default async function ContractsPage() {
                 total: reviewQueue.length,
                 manual: manualReviewCount,
               })}
-              deltaTone={manualReviewCount > 0 ? "down" : "neutral"}
               delta={`${manualReviewCount} manual`}
+              deltaTone={manualReviewCount > 0 ? "down" : "neutral"}
             />
             <KPI
               theme={theme}
@@ -507,6 +462,7 @@ export default async function ContractsPage() {
               )}
               sub="fleet_lease · partner_program · forwarder"
               delta={`${kindCounts.forwarder} forwarder`}
+              deltaTone={kindCounts.forwarder > 0 ? "up" : "neutral"}
             />
           </div>
 
@@ -520,65 +476,100 @@ export default async function ContractsPage() {
             })}
           >
             <div style={summaryCardGridStyle}>
-              <Field
-                theme={theme}
-                label={locale === "zh" ? "Registry mix" : "Registry mix"}
-                hint={
-                  locale === "zh"
-                    ? "Contracts table 對齊 canvas handoff，聚焦 kind、term、revenue share 與 status。"
-                    : "Contracts table aligned to the canvas handoff with kind, term, revenue share, and status."
-                }
-              >
-                <div style={filterRowStyle}>
-                  <Pill theme={theme} tone="neutral">
-                    fleet_lease {kindCounts.fleet_lease}
-                  </Pill>
-                  <Pill theme={theme} tone="info">
-                    partner_program {kindCounts.partner_program}
-                  </Pill>
-                  <Pill theme={theme} tone="accent">
-                    forwarder {kindCounts.forwarder}
-                  </Pill>
-                  <Pill theme={theme} tone="success">
-                    active {activeContracts}
-                  </Pill>
-                  {manualReviewCount > 0 ? (
-                    <Pill theme={theme} tone="warn">
-                      manual_review {manualReviewCount}
-                    </Pill>
-                  ) : null}
-                  {deniedCount > 0 ? (
-                    <Pill theme={theme} tone="danger">
-                      denied {deniedCount}
-                    </Pill>
-                  ) : null}
-                </div>
-              </Field>
+              <div style={summaryFieldGridStyle}>
+                <Field
+                  theme={theme}
+                  label={locale === "zh" ? "Registry mix" : "Registry mix"}
+                  hint={
+                    locale === "zh"
+                      ? "OC_Contracts 以 kind、term、revenue share 與 eligibility attention 做主要掃描面。"
+                      : "OC_Contracts emphasizes kind, term, revenue share, and eligibility attention."
+                  }
+                >
+                  <div style={fieldBodyStyle}>
+                    <div style={filterRowStyle}>
+                      <Pill theme={theme} tone="neutral">
+                        fleet_lease {kindCounts.fleet_lease}
+                      </Pill>
+                      <Pill theme={theme} tone="info">
+                        partner_program {kindCounts.partner_program}
+                      </Pill>
+                      <Pill theme={theme} tone="accent">
+                        forwarder {kindCounts.forwarder}
+                      </Pill>
+                      <Pill theme={theme} tone="success">
+                        active {activeContracts}
+                      </Pill>
+                      {draftContracts > 0 ? (
+                        <Pill theme={theme} tone="warn">
+                          draft {draftContracts}
+                        </Pill>
+                      ) : null}
+                    </div>
+                  </div>
+                </Field>
+
+                <Field
+                  theme={theme}
+                  label={locale === "zh" ? "Revenue lanes" : "Revenue lanes"}
+                  hint={
+                    locale === "zh"
+                      ? "以固定租賃、合作分潤、forwarder 清分三種結算節奏對齊 canvas。"
+                      : "Settlements stay split across fixed lease, partner share, and forwarder clearing lanes."
+                  }
+                >
+                  <div style={fieldBodyStyle}>
+                    <div style={filterRowStyle}>
+                      <Pill theme={theme} tone="neutral">
+                        70/30 fleet_lease
+                      </Pill>
+                      <Pill theme={theme} tone="info">
+                        sponsor settle
+                      </Pill>
+                      <Pill theme={theme} tone="accent">
+                        85/15 forwarder
+                      </Pill>
+                      {manualReviewCount > 0 ? (
+                        <Pill theme={theme} tone="warn">
+                          manual_review {manualReviewCount}
+                        </Pill>
+                      ) : null}
+                      {deniedCount > 0 ? (
+                        <Pill theme={theme} tone="danger">
+                          denied {deniedCount}
+                        </Pill>
+                      ) : null}
+                    </div>
+                  </div>
+                </Field>
+              </div>
 
               <DL
                 theme={theme}
                 cols={1}
                 items={[
                   {
-                    label:
-                      locale === "zh" ? "Partner entries" : "Partner entries",
-                    value: String(partnerEntries.length),
+                    k: locale === "zh" ? "Partner entries" : "Partner entries",
+                    v: String(partnerEntries.length),
+                    mono: true,
                   },
                   {
-                    label:
-                      locale === "zh" ? "Draft contracts" : "Draft contracts",
-                    value: String(draftContracts),
+                    k: locale === "zh" ? "Draft contracts" : "Draft contracts",
+                    v: String(draftContracts),
+                    mono: true,
                   },
                   {
-                    label: locale === "zh" ? "Manual review" : "Manual review",
-                    value: String(manualReviewCount),
+                    k: locale === "zh" ? "Manual review" : "Manual review",
+                    v: String(manualReviewCount),
+                    mono: true,
                   },
                   {
-                    label:
+                    k:
                       locale === "zh"
-                        ? "Denied eligibility"
-                        : "Denied eligibility",
-                    value: String(deniedCount),
+                        ? "Eligibility denied"
+                        : "Eligibility denied",
+                    v: String(deniedCount),
+                    mono: true,
                   },
                 ]}
               />
@@ -589,7 +580,7 @@ export default async function ContractsPage() {
             {contractRows.length > 0 ? (
               <Table theme={theme} columns={columns} rows={contractRows} />
             ) : (
-              <p style={helperTextStyle}>{t("contracts.empty", locale)}</p>
+              <p style={emptyStateStyle}>{t("contracts.empty", locale)}</p>
             )}
           </Card>
         </div>
