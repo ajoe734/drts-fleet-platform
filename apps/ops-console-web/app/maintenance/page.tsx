@@ -21,12 +21,14 @@ import {
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasField as Field,
+  CanvasIcon,
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasShell as Shell,
   CanvasTable as Table,
   buildCanvasTheme,
+  type CanvasShellNavItem,
   type CanvasTableColumn,
   type CanvasTheme,
 } from "@drts/ui-web";
@@ -38,8 +40,6 @@ const theme = buildCanvasTheme({
 });
 
 const shellStyle: CSSProperties = {
-  gridTemplateColumns: "0 minmax(0, 1fr)",
-  gridTemplateRows: "0 minmax(0, 1fr)",
   height: "100%",
 };
 
@@ -76,6 +76,11 @@ const editorStackStyle: CSSProperties = {
   display: "grid",
   gap: 16,
   alignContent: "start",
+};
+
+const overviewCardBodyStyle: CSSProperties = {
+  display: "grid",
+  gap: 14,
 };
 
 const STATUSES: MaintenanceStatus[] = [...MAINTENANCE_STATUSES];
@@ -322,6 +327,113 @@ function impactSummary(record: MaintenanceRecord, locale: Locale) {
       "已結案工單可回到一般派車規劃，不再占用維修容量。",
     ),
   };
+}
+
+function buildShellNav(
+  locale: Locale,
+  activeCount: number,
+  overdueCount: number,
+): CanvasShellNavItem[] {
+  return [
+    {
+      divider: locale === "en" ? "Workspaces" : "工作面",
+    },
+    {
+      key: "dashboard",
+      href: "/dashboard",
+      icon: "dashboard",
+      label: t("nav.dashboard", locale),
+    },
+    {
+      divider: locale === "en" ? "Live Ops" : "即時派遣",
+    },
+    {
+      key: "dispatch",
+      href: "/dispatch",
+      icon: "dispatch",
+      label: t("nav.dispatch", locale),
+      matchPaths: ["/dispatch"],
+    },
+    {
+      key: "callcenter",
+      href: "/callcenter",
+      icon: "callcenter",
+      label: t("nav.callcenter", locale),
+    },
+    {
+      divider: locale === "en" ? "Casework" : "案件處理",
+    },
+    {
+      key: "complaints",
+      href: "/complaints",
+      icon: "complaints",
+      label: t("nav.complaints", locale),
+    },
+    {
+      key: "incidents",
+      href: "/incidents",
+      icon: "incidents",
+      label: t("nav.incidents", locale),
+      matchPaths: ["/incidents"],
+    },
+    {
+      divider: locale === "en" ? "Monitoring" : "營運監控",
+    },
+    {
+      key: "reports",
+      href: "/reports",
+      icon: "reports",
+      label: t("nav.reports", locale),
+    },
+    {
+      key: "revenue",
+      href: "/revenue",
+      icon: "revenue",
+      label: t("nav.revenue", locale),
+    },
+    {
+      key: "attendance",
+      href: "/attendance",
+      icon: "attendance",
+      label: t("nav.attendance", locale),
+    },
+    {
+      key: "maintenance",
+      href: "/maintenance",
+      icon: "maintenance",
+      label: t("nav.maintenance", locale),
+      badge: activeCount > 0 ? activeCount : undefined,
+      badgeTone: overdueCount > 0 ? "danger" : "warn",
+      matchPaths: ["/maintenance"],
+    },
+    {
+      divider: locale === "en" ? "Registry" : "主資料",
+    },
+    {
+      key: "drivers",
+      href: "/drivers",
+      icon: "fleet",
+      label: t("nav.drivers", locale),
+    },
+    {
+      key: "vehicles",
+      href: "/vehicles",
+      icon: "vehicles",
+      label: t("nav.vehicles", locale),
+    },
+    {
+      key: "contracts",
+      href: "/contracts",
+      icon: "contracts",
+      label: t("nav.contracts", locale),
+    },
+    {
+      key: "feature-flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: t("nav.featureFlags", locale),
+    },
+  ];
 }
 
 function buttonStyle(
@@ -755,14 +867,75 @@ export default async function MaintenancePage({
           `${filteredRecords.length} / ${records.length} visible`,
           `${filteredRecords.length} / ${records.length} 筆顯示`,
         );
+  const shellNav = buildShellNav(
+    locale,
+    activeCount,
+    effectiveStatusCounts.overdue,
+  );
+  const createHref = buildMaintenanceHref({
+    status: statusFilter,
+    q: query || undefined,
+    editor: "new",
+  });
+  const clearQueryHref = buildMaintenanceHref({ status: statusFilter });
+  const hasEditor = editorParam === "new" || Boolean(selectedRecord);
+  const showInspector = hasEditor || Boolean(query);
+  const scopeLabel =
+    statusFilter === "all"
+      ? copy(locale, "All work orders", "全部工單")
+      : formatOpsCodeLabel(locale, statusFilter);
+  const summaryItems = selectedRecord
+    ? [
+        {
+          label: t("maintenance.col.workOrder", locale),
+          value: selectedRecord.maintenanceId,
+          mono: true,
+        },
+        {
+          label: t("maintenance.col.vehicle", locale),
+          value: selectedRecord.vehicleId,
+          mono: true,
+        },
+        {
+          label: t("maintenance.col.status", locale),
+          value: formatOpsCodeLabel(locale, getEffectiveStatus(selectedRecord)),
+        },
+        {
+          label: t("maintenance.col.schedule", locale),
+          value: formatDateTime(selectedRecord.scheduledAt),
+          mono: true,
+        },
+      ]
+    : [
+        {
+          label: t("maintenance.col.status", locale),
+          value: scopeLabel,
+        },
+        {
+          label: copy(locale, "Visible", "顯示中"),
+          value: summaryCountLabel,
+        },
+        {
+          label: copy(locale, "Due today", "今日到期"),
+          value: String(dueTodayCount),
+          mono: true,
+        },
+        {
+          label: copy(locale, "Impacted vehicles", "受影響車輛"),
+          value: String(impactedVehicleCount),
+          mono: true,
+        },
+      ];
 
   return (
     <Shell
       theme={theme}
-      nav={[]}
+      nav={shellNav}
+      active="maintenance"
       title={t("maintenance.title", locale)}
-      hideEnv
+      breadcrumb={[t("nav.maintenance", locale)]}
       style={shellStyle}
+      currentPath="/maintenance"
     >
       <PageHeader
         theme={theme}
@@ -771,30 +944,10 @@ export default async function MaintenancePage({
         tabs={statusTabs.map((tab) => tab.node)}
         activeTab={activeTab}
         actions={
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              justifyContent: "flex-end",
-            }}
-          >
-            <form method="GET">
-              {statusFilter !== "all" ? (
-                <input type="hidden" name="status" value={statusFilter} />
-              ) : null}
-              {query ? <input type="hidden" name="q" value={query} /> : null}
-              <input type="hidden" name="editor" value="new" />
-              <button type="submit" style={buttonBaseStyle(theme, "primary")}>
-                {t("maintenance.createBtn", locale)}
-              </button>
-            </form>
-            <form method="GET">
-              <button type="submit" style={buttonBaseStyle(theme, "secondary")}>
-                {t("common.refresh", locale)}
-              </button>
-            </form>
-          </div>
+          <Link href={createHref} style={buttonBaseStyle(theme, "primary")}>
+            <CanvasIcon name="plus" size={13} />
+            <span>{t("maintenance.createBtn", locale)}</span>
+          </Link>
         }
       />
 
@@ -808,110 +961,124 @@ export default async function MaintenancePage({
           />
         ) : null}
 
-        <div
-          style={{
-            display: "grid",
-            gap: 16,
-            alignItems: "start",
-            gridTemplateColumns:
-              editorParam === "new" || selectedRecord
-                ? "minmax(0, 1.55fr) minmax(320px, 0.95fr)"
+        <Card theme={theme} padding={0}>
+          {tableRows.length > 0 ? (
+            <Table<MaintenanceTableRow>
+              theme={theme}
+              columns={tableColumns}
+              rows={tableRows}
+            />
+          ) : (
+            <div
+              style={{
+                padding: "18px 16px",
+                color: theme.textMuted,
+                fontSize: 12.5,
+              }}
+            >
+              {t("maintenance.empty", locale)}
+            </div>
+          )}
+        </Card>
+
+        {showInspector ? (
+          <div
+            style={{
+              display: "grid",
+              gap: 16,
+              alignItems: "start",
+              gridTemplateColumns: hasEditor
+                ? "minmax(300px, 0.9fr) minmax(340px, 1fr)"
                 : "minmax(0, 1fr)",
-          }}
-        >
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={toolbarStyle}>
-              <div
-                style={{
-                  display: "grid",
-                  gap: 6,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Btn
-                    theme={theme}
-                    variant="ghost"
-                    size="xs"
-                    icon="filter"
-                    disabled
-                    style={{ opacity: 0.82, cursor: "default" }}
-                  >
-                    {summaryCountLabel}
-                  </Btn>
-                  <span
+            }}
+          >
+            <Card
+              theme={theme}
+              title={
+                selectedRecord?.maintenanceId ??
+                (editorParam === "new"
+                  ? t("maintenance.form.createTitle", locale)
+                  : t("maintenance.backlog", locale))
+              }
+              subtitle={
+                selectedRecord
+                  ? copy(
+                      locale,
+                      "Dispatch impact and current work order context",
+                      "派遣影響與目前工單概況",
+                    )
+                  : t("maintenance.subtitle", locale)
+              }
+            >
+              <div style={overviewCardBodyStyle}>
+                <div style={toolbarStyle}>
+                  <div
                     style={{
-                      fontSize: 11.5,
-                      color: theme.textMuted,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flexWrap: "wrap",
                     }}
                   >
-                    {copy(
-                      locale,
-                      "Tabs keep effective maintenance status in sync with dispatch risk.",
-                      "頁籤依有效狀態同步反映派遣風險。",
-                    )}
-                  </span>
-                </div>
-              </div>
+                    <Btn
+                      theme={theme}
+                      variant="ghost"
+                      size="xs"
+                      icon="filter"
+                      disabled
+                      style={{ opacity: 0.82, cursor: "default" }}
+                    >
+                      {summaryCountLabel}
+                    </Btn>
+                    <span
+                      style={{
+                        fontSize: 11.5,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {copy(
+                        locale,
+                        "Open a work order to edit details without leaving the queue view.",
+                        "開啟工單後可直接在同一個隊列視圖內編輯細節。",
+                      )}
+                    </span>
+                  </div>
 
-              <form method="GET" style={filterRowStyle}>
-                {statusFilter !== "all" ? (
-                  <input type="hidden" name="status" value={statusFilter} />
-                ) : null}
-                <input
-                  type="search"
-                  name="q"
-                  defaultValue={query}
-                  placeholder={t("maintenance.search", locale)}
-                  style={{
-                    ...inputStyle(theme),
-                    width: 280,
-                  }}
-                />
-                <button
-                  type="submit"
-                  style={buttonBaseStyle(theme, "secondary")}
-                >
-                  {t("common.search", locale)}
-                </button>
-                {query ? (
-                  <Link
-                    href={buildMaintenanceHref({ status: statusFilter })}
-                    style={buttonBaseStyle(theme, "ghost")}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
                   >
-                    {copy(locale, "Clear", "清除")}
-                  </Link>
-                ) : null}
-              </form>
-            </div>
-
-            <Card theme={theme} padding={0}>
-              {tableRows.length > 0 ? (
-                <Table<MaintenanceTableRow>
-                  theme={theme}
-                  columns={tableColumns}
-                  rows={tableRows}
-                />
-              ) : (
-                <div
-                  style={{
-                    padding: "18px 16px",
-                    color: theme.textMuted,
-                    fontSize: 12.5,
-                  }}
-                >
-                  {t("maintenance.empty", locale)}
+                    {query ? (
+                      <Link
+                        href={clearQueryHref}
+                        style={buttonBaseStyle(theme, "ghost")}
+                      >
+                        {copy(locale, "Clear", "清除")}
+                      </Link>
+                    ) : null}
+                    <Link
+                      href={returnTo}
+                      style={buttonBaseStyle(theme, "ghost")}
+                    >
+                      {t("common.refresh", locale)}
+                    </Link>
+                  </div>
                 </div>
-              )}
-            </Card>
-          </div>
 
-          {editorParam === "new" || selectedRecord ? (
-            <div style={editorStackStyle}>
-              <Card
-                theme={theme}
-                title={editorTitle}
-                subtitle={t("maintenance.form.editor", locale)}
-              >
+                {selectedImpact ? (
+                  <Banner
+                    theme={theme}
+                    tone={selectedImpact.tone}
+                    title={selectedImpact.title}
+                    body={selectedImpact.body}
+                  />
+                ) : null}
+
+                <DL theme={theme} cols={2} items={summaryItems} />
+
                 <div style={kpiGridStyle}>
                   <KPI
                     theme={theme}
@@ -926,7 +1093,7 @@ export default async function MaintenancePage({
                           )
                         : undefined
                     }
-                    deltaTone={dueTodayCount > 0 ? "neutral" : "neutral"}
+                    deltaTone="neutral"
                     sub={t("maintenance.activeOrdersSub", locale)}
                   />
                   <KPI
@@ -955,234 +1122,238 @@ export default async function MaintenancePage({
                   />
                 </div>
 
-                {selectedRecord && selectedImpact ? (
-                  <>
-                    <Banner
-                      theme={theme}
-                      tone={selectedImpact.tone}
-                      title={selectedImpact.title}
-                      body={selectedImpact.body}
-                    />
-                    <div style={{ height: 12 }} />
-                  </>
-                ) : null}
-
-                <DL
-                  theme={theme}
-                  cols={2}
-                  items={[
-                    {
-                      label: t("maintenance.col.workOrder", locale),
-                      value:
-                        selectedRecord?.maintenanceId ??
-                        copy(locale, "New work order", "新工單"),
-                      mono: Boolean(selectedRecord),
-                    },
-                    {
-                      label: t("maintenance.col.vehicle", locale),
-                      value: selectedRecord?.vehicleId ?? "—",
-                      mono: Boolean(selectedRecord),
-                    },
-                    {
-                      label: t("maintenance.col.status", locale),
-                      value: selectedRecord
-                        ? formatOpsCodeLabel(
-                            locale,
-                            getEffectiveStatus(selectedRecord),
-                          )
-                        : copy(locale, "Scheduled", "排程中"),
-                    },
-                    {
-                      label: t("maintenance.col.schedule", locale),
-                      value: formatDateTime(selectedRecord?.scheduledAt),
-                      mono: true,
-                    },
-                  ]}
-                />
-
-                <form
-                  action={
-                    selectedRecord
-                      ? updateMaintenanceAction
-                      : createMaintenanceAction
-                  }
-                  style={{
-                    marginTop: 16,
-                    display: "grid",
-                    gap: 12,
-                  }}
-                >
-                  <input type="hidden" name="returnTo" value={returnTo} />
-                  {selectedRecord ? (
-                    <input
-                      type="hidden"
-                      name="maintenanceId"
-                      value={selectedRecord.maintenanceId}
-                    />
+                <form method="GET" style={filterRowStyle}>
+                  {statusFilter !== "all" ? (
+                    <input type="hidden" name="status" value={statusFilter} />
                   ) : null}
-
-                  {!selectedRecord ? (
-                    <>
-                      <Field
-                        theme={theme}
-                        label={t("maintenance.form.vehicleId", locale)}
-                        required
-                      >
-                        <input
-                          name="vehicleId"
-                          required
-                          style={inputStyle(theme, true)}
-                        />
-                      </Field>
-
-                      <Field
-                        theme={theme}
-                        label={t("maintenance.form.type", locale)}
-                        required
-                      >
-                        <select
-                          name="type"
-                          defaultValue="scheduled_service"
-                          style={inputStyle(theme)}
-                        >
-                          {TYPES.map((value) => (
-                            <option key={value} value={value}>
-                              {formatOpsCodeLabel(locale, value)}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-
-                      <Field
-                        theme={theme}
-                        label={t("maintenance.form.description", locale)}
-                        required
-                      >
-                        <textarea
-                          name="description"
-                          required
-                          style={textareaStyle(theme)}
-                        />
-                      </Field>
-
-                      <Field
-                        theme={theme}
-                        label={t("maintenance.form.scheduledAt", locale)}
-                      >
-                        <input
-                          type="datetime-local"
-                          name="scheduledAt"
-                          style={inputStyle(theme, true)}
-                        />
-                      </Field>
-                    </>
-                  ) : (
-                    <>
-                      <Field
-                        theme={theme}
-                        label={t("maintenance.col.status", locale)}
-                        required
-                      >
-                        <select
-                          name="status"
-                          defaultValue={selectedRecord.status}
-                          style={inputStyle(theme)}
-                        >
-                          {STATUSES.map((value) => (
-                            <option key={value} value={value}>
-                              {formatOpsCodeLabel(locale, value)}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-
-                      <Field
-                        theme={theme}
-                        label={t("maintenance.form.completedAt", locale)}
-                      >
-                        <input
-                          type="datetime-local"
-                          name="completedAt"
-                          defaultValue={formatDateTimeLocalValue(
-                            selectedRecord.completedAt,
-                          )}
-                          style={inputStyle(theme, true)}
-                        />
-                      </Field>
-                    </>
-                  )}
-
-                  <Field
-                    theme={theme}
-                    label={t("maintenance.form.technician", locale)}
-                  >
-                    <input
-                      name="technician"
-                      defaultValue={selectedRecord?.technician ?? ""}
-                      style={inputStyle(theme)}
-                    />
-                  </Field>
-
-                  <Field
-                    theme={theme}
-                    label={t("maintenance.form.cost", locale)}
-                  >
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      name="cost"
-                      defaultValue={
-                        selectedRecord?.cost !== null &&
-                        selectedRecord?.cost !== undefined
-                          ? String(selectedRecord.cost)
-                          : ""
-                      }
-                      style={inputStyle(theme, true)}
-                    />
-                  </Field>
-
-                  <Field
-                    theme={theme}
-                    label={t("maintenance.form.notes", locale)}
-                  >
-                    <textarea
-                      name="notes"
-                      defaultValue={selectedRecord?.notes ?? ""}
-                      style={textareaStyle(theme)}
-                    />
-                  </Field>
-
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button
-                      type="submit"
-                      style={buttonBaseStyle(theme, "primary")}
-                    >
-                      {selectedRecord
-                        ? t("maintenance.form.saveChanges", locale)
-                        : t("maintenance.form.createRecord", locale)}
-                    </button>
-                    <Link
-                      href={returnTo}
-                      style={buttonBaseStyle(theme, "secondary")}
-                    >
-                      {t("common.cancel", locale)}
-                    </Link>
-                  </div>
-                </form>
-
-                {selectedRecord ? (
-                  <div
+                  <input
+                    type="search"
+                    name="q"
+                    defaultValue={query}
+                    placeholder={t("maintenance.search", locale)}
                     style={{
-                      marginTop: 14,
-                      display: "flex",
-                      gap: 8,
-                      flexWrap: "wrap",
+                      ...inputStyle(theme),
+                      width: 280,
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    style={buttonBaseStyle(theme, "secondary")}
+                  >
+                    {t("common.search", locale)}
+                  </button>
+                </form>
+              </div>
+            </Card>
+
+            {hasEditor ? (
+              <div style={editorStackStyle}>
+                <Card
+                  theme={theme}
+                  title={editorTitle}
+                  subtitle={t("maintenance.form.editor", locale)}
+                >
+                  <form
+                    action={
+                      selectedRecord
+                        ? updateMaintenanceAction
+                        : createMaintenanceAction
+                    }
+                    style={{
+                      display: "grid",
+                      gap: 12,
                     }}
                   >
-                    {selectedRecord.status !== "completed" &&
-                    selectedRecord.status !== "cancelled" ? (
-                      <form action={completeMaintenanceAction}>
+                    <input type="hidden" name="returnTo" value={returnTo} />
+                    {selectedRecord ? (
+                      <input
+                        type="hidden"
+                        name="maintenanceId"
+                        value={selectedRecord.maintenanceId}
+                      />
+                    ) : null}
+
+                    {!selectedRecord ? (
+                      <>
+                        <Field
+                          theme={theme}
+                          label={t("maintenance.form.vehicleId", locale)}
+                          required
+                        >
+                          <input
+                            name="vehicleId"
+                            required
+                            style={inputStyle(theme, true)}
+                          />
+                        </Field>
+
+                        <Field
+                          theme={theme}
+                          label={t("maintenance.form.type", locale)}
+                          required
+                        >
+                          <select
+                            name="type"
+                            defaultValue="scheduled_service"
+                            style={inputStyle(theme)}
+                          >
+                            {TYPES.map((value) => (
+                              <option key={value} value={value}>
+                                {formatOpsCodeLabel(locale, value)}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+
+                        <Field
+                          theme={theme}
+                          label={t("maintenance.form.description", locale)}
+                          required
+                        >
+                          <textarea
+                            name="description"
+                            required
+                            style={textareaStyle(theme)}
+                          />
+                        </Field>
+
+                        <Field
+                          theme={theme}
+                          label={t("maintenance.form.scheduledAt", locale)}
+                        >
+                          <input
+                            type="datetime-local"
+                            name="scheduledAt"
+                            style={inputStyle(theme, true)}
+                          />
+                        </Field>
+                      </>
+                    ) : (
+                      <>
+                        <Field
+                          theme={theme}
+                          label={t("maintenance.col.status", locale)}
+                          required
+                        >
+                          <select
+                            name="status"
+                            defaultValue={selectedRecord.status}
+                            style={inputStyle(theme)}
+                          >
+                            {STATUSES.map((value) => (
+                              <option key={value} value={value}>
+                                {formatOpsCodeLabel(locale, value)}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+
+                        <Field
+                          theme={theme}
+                          label={t("maintenance.form.completedAt", locale)}
+                        >
+                          <input
+                            type="datetime-local"
+                            name="completedAt"
+                            defaultValue={formatDateTimeLocalValue(
+                              selectedRecord.completedAt,
+                            )}
+                            style={inputStyle(theme, true)}
+                          />
+                        </Field>
+                      </>
+                    )}
+
+                    <Field
+                      theme={theme}
+                      label={t("maintenance.form.technician", locale)}
+                    >
+                      <input
+                        name="technician"
+                        defaultValue={selectedRecord?.technician ?? ""}
+                        style={inputStyle(theme)}
+                      />
+                    </Field>
+
+                    <Field
+                      theme={theme}
+                      label={t("maintenance.form.cost", locale)}
+                    >
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        name="cost"
+                        defaultValue={
+                          selectedRecord?.cost !== null &&
+                          selectedRecord?.cost !== undefined
+                            ? String(selectedRecord.cost)
+                            : ""
+                        }
+                        style={inputStyle(theme, true)}
+                      />
+                    </Field>
+
+                    <Field
+                      theme={theme}
+                      label={t("maintenance.form.notes", locale)}
+                    >
+                      <textarea
+                        name="notes"
+                        defaultValue={selectedRecord?.notes ?? ""}
+                        style={textareaStyle(theme)}
+                      />
+                    </Field>
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="submit"
+                        style={buttonBaseStyle(theme, "primary")}
+                      >
+                        {selectedRecord
+                          ? t("maintenance.form.saveChanges", locale)
+                          : t("maintenance.form.createRecord", locale)}
+                      </button>
+                      <Link
+                        href={returnTo}
+                        style={buttonBaseStyle(theme, "secondary")}
+                      >
+                        {t("common.cancel", locale)}
+                      </Link>
+                    </div>
+                  </form>
+
+                  {selectedRecord ? (
+                    <div
+                      style={{
+                        marginTop: 14,
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      {selectedRecord.status !== "completed" &&
+                      selectedRecord.status !== "cancelled" ? (
+                        <form action={completeMaintenanceAction}>
+                          <input
+                            type="hidden"
+                            name="maintenanceId"
+                            value={selectedRecord.maintenanceId}
+                          />
+                          <input
+                            type="hidden"
+                            name="returnTo"
+                            value={returnTo}
+                          />
+                          <button
+                            type="submit"
+                            style={buttonBaseStyle(theme, "secondary")}
+                          >
+                            {t("maintenance.completeBtn", locale)}
+                          </button>
+                        </form>
+                      ) : null}
+                      <form action={deleteMaintenanceAction}>
                         <input
                           type="hidden"
                           name="maintenanceId"
@@ -1191,52 +1362,18 @@ export default async function MaintenancePage({
                         <input type="hidden" name="returnTo" value={returnTo} />
                         <button
                           type="submit"
-                          style={buttonBaseStyle(theme, "secondary")}
+                          style={buttonBaseStyle(theme, "secondary", true)}
                         >
-                          {t("maintenance.completeBtn", locale)}
+                          {t("common.delete", locale)}
                         </button>
                       </form>
-                    ) : null}
-                    <form action={deleteMaintenanceAction}>
-                      <input
-                        type="hidden"
-                        name="maintenanceId"
-                        value={selectedRecord.maintenanceId}
-                      />
-                      <input type="hidden" name="returnTo" value={returnTo} />
-                      <button
-                        type="submit"
-                        style={buttonBaseStyle(theme, "secondary", true)}
-                      >
-                        {t("common.delete", locale)}
-                      </button>
-                    </form>
-                  </div>
-                ) : null}
-              </Card>
-            </div>
-          ) : null}
-        </div>
-
-        <p
-          style={{
-            margin: 0,
-            fontSize: 12.5,
-            color: theme.textMuted,
-          }}
-        >
-          <Link
-            href="/dashboard"
-            style={{
-              color: theme.accent,
-              textDecoration: "none",
-              fontWeight: 600,
-            }}
-          >
-            {t("common.backToDashboard", locale)}
-          </Link>{" "}
-          {t("common.backToDashboardSub", locale)}
-        </p>
+                    </div>
+                  ) : null}
+                </Card>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </Shell>
   );
