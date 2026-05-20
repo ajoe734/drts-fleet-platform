@@ -27,7 +27,6 @@ import {
   buildOperationsOverview,
   buildRevenueInsights,
   formatCompactNumber,
-  formatMinorCurrency,
 } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
@@ -38,10 +37,8 @@ import {
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasShell as Shell,
   CanvasTable as Table,
   buildCanvasTheme,
-  type CanvasShellNavItem,
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -108,6 +105,12 @@ const OWNED_STATE_PRIORITY: Record<string, number> = {
   assigned: 5,
 };
 
+const pageRootStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  minHeight: "100%",
+};
+
 const pageBodyStyle = {
   padding: 24,
   display: "flex",
@@ -171,180 +174,6 @@ const queueLinkStyle = {
   color: theme.accent,
   textDecoration: "none",
   fontWeight: 700,
-};
-
-function buildShellNav(
-  locale: Locale,
-  counts: {
-    dashboard: number;
-    dispatch: number;
-    incidents: number;
-  },
-): CanvasShellNavItem[] {
-  return [
-    { divider: locale === "en" ? "Workspaces" : "工作面" },
-    {
-      key: "dashboard",
-      href: "/dashboard",
-      icon: "dashboard",
-      label: t("nav.dashboard", locale),
-      ...(counts.dashboard > 0
-        ? { badge: String(counts.dashboard), badgeTone: "warn" as const }
-        : {}),
-    },
-    { divider: locale === "en" ? "Live Ops" : "即時派遣" },
-    {
-      key: "dispatch",
-      href: "/dispatch",
-      icon: "dispatch",
-      label: t("nav.dispatch", locale),
-      matchPaths: ["/dispatch"],
-      ...(counts.dispatch > 0
-        ? { badge: String(counts.dispatch), badgeTone: "accent" as const }
-        : {}),
-    },
-    {
-      key: "callcenter",
-      href: "/callcenter",
-      icon: "callcenter",
-      label: t("nav.callcenter", locale),
-    },
-    { divider: locale === "en" ? "Casework" : "案件處理" },
-    {
-      key: "complaints",
-      href: "/complaints",
-      icon: "complaints",
-      label: t("nav.complaints", locale),
-    },
-    {
-      key: "incidents",
-      href: "/incidents",
-      icon: "incidents",
-      label: t("nav.incidents", locale),
-      matchPaths: ["/incidents"],
-      ...(counts.incidents > 0
-        ? { badge: String(counts.incidents), badgeTone: "danger" as const }
-        : {}),
-    },
-    { divider: locale === "en" ? "Monitoring" : "營運監控" },
-    {
-      key: "reports",
-      href: "/reports",
-      icon: "reports",
-      label: t("nav.reports", locale),
-    },
-    {
-      key: "revenue",
-      href: "/revenue",
-      icon: "revenue",
-      label: t("nav.revenue", locale),
-    },
-    {
-      key: "attendance",
-      href: "/attendance",
-      icon: "attendance",
-      label: t("nav.attendance", locale),
-    },
-    { divider: locale === "en" ? "Registry" : "主資料" },
-    {
-      key: "drivers",
-      href: "/drivers",
-      icon: "fleet",
-      label: t("nav.drivers", locale),
-    },
-    {
-      key: "vehicles",
-      href: "/vehicles",
-      icon: "vehicles",
-      label: t("nav.vehicles", locale),
-    },
-    {
-      key: "contracts",
-      href: "/contracts",
-      icon: "contracts",
-      label: t("nav.contracts", locale),
-    },
-    {
-      key: "feature-flags",
-      href: "/feature-flags",
-      icon: "flags",
-      label: t("nav.featureFlags", locale),
-    },
-  ];
-}
-
-const refreshCardStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.6fr) minmax(300px, 1fr)",
-  gap: 16,
-  alignItems: "stretch",
-};
-
-const metaStackStyle = {
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: 12,
-};
-
-const metaRowStyle = {
-  display: "flex",
-  flexWrap: "wrap" as const,
-  gap: 8,
-};
-
-const metaLabelStyle = {
-  fontSize: 11,
-  color: theme.textDim,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.06em",
-};
-
-const summaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 10,
-};
-
-const summaryBoxStyle = {
-  border: `1px solid ${theme.border}`,
-  borderRadius: 10,
-  padding: 12,
-  background: theme.surfaceLo,
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: 6,
-};
-
-const summaryValueStyle = {
-  fontSize: 22,
-  fontWeight: 700,
-  color: theme.text,
-};
-
-const summaryCaptionStyle = {
-  fontSize: 12,
-  color: theme.textDim,
-};
-
-const actionStackStyle = {
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: 6,
-  alignItems: "flex-start",
-};
-
-const emptyStateStyle = {
-  border: `1px dashed ${theme.border}`,
-  borderRadius: 10,
-  background: theme.surfaceLo,
-  padding: 16,
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: 10,
-};
-
-const externalLinkStyle = {
-  textDecoration: "none",
 };
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
@@ -915,12 +744,6 @@ export default async function DashboardPage() {
     observability.adapterDetails[0] ??
     null;
 
-  const shellNav = buildShellNav(locale, {
-    dashboard: Math.max(opsAlerts.length, adapterAttentionCount),
-    dispatch: dispatch.queueDepth,
-    incidents: operations.openIncidents,
-  });
-
   const headerSubtitle = [
     formatTimestamp(health.timestamp, locale),
     locale === "en"
@@ -1186,19 +1009,7 @@ export default async function DashboardPage() {
   ];
 
   return (
-    <Shell
-      theme={theme}
-      nav={shellNav}
-      active="dashboard"
-      brandLabel={t("app.name", locale)}
-      brandSubLabel={t("app.sub", locale)}
-      breadcrumb={[t("nav.dashboard", locale)]}
-      env="production"
-      versionLabel="canvas"
-      searchPlaceholder={t("common.search", locale)}
-      avatarLabel="OC"
-      style={{ height: "100%" }}
-    >
+    <div style={pageRootStyle}>
       <PageHeader
         theme={theme}
         title={t("dashboard.title", locale)}
@@ -1226,8 +1037,7 @@ export default async function DashboardPage() {
                 ? `${formatCompactNumber(dispatch.redispatchOrders)} redispatch`
                 : undefined
             }
-            deltaTone={dispatch.redispatchOrders > 0 ? "down" : "neutral"}
-            sub={t("dashboard.activeOrdersSub", locale)}
+            deltaTone={dispatch.redispatchOrders > 0 ? "up" : "neutral"}
           />
           <KPI
             theme={theme}
@@ -1238,34 +1048,42 @@ export default async function DashboardPage() {
                 ? `${formatCompactNumber(broadcastingCount)} broadcasting`
                 : undefined
             }
+            deltaTone="neutral"
+          />
+          <KPI
+            theme={theme}
+            label={locale === "en" ? "Dispatch-eligible drivers" : "可派司機"}
+            value={formatCompactNumber(
+              observability.driverState.dispatchEligibleDrivers,
+            )}
             sub={
-              dispatch.averageEtaMinutes
-                ? t("dashboard.queueDepthSub", locale, {
-                    eta: dispatch.averageEtaMinutes,
-                  })
-                : t("dashboard.queueDepthSubPending", locale)
+              locale === "en"
+                ? `${formatCompactNumber(operations.onlineDrivers)} online`
+                : `${formatCompactNumber(operations.onlineDrivers)} 在班`
             }
           />
           <KPI
             theme={theme}
-            label={t("dashboard.onlineDrivers", locale)}
-            value={formatCompactNumber(operations.onlineDrivers)}
-            sub={t("dashboard.onlineDriversSub", locale)}
-            hint={`${formatCompactNumber(operations.dispatchableVehicles)} dispatchable`}
+            label={locale === "en" ? "Stale driver location" : "位置失聯"}
+            value={formatCompactNumber(
+              observability.driverState.staleLocationDrivers,
+            )}
+            delta={
+              observability.driverState.oldestLocationLagMinutes
+                ? `>${formatCompactNumber(
+                    observability.driverState.oldestLocationLagMinutes,
+                  )} min`
+                : undefined
+            }
+            deltaTone={
+              observability.driverState.staleLocationDrivers > 0
+                ? "down"
+                : "neutral"
+            }
           />
           <KPI
             theme={theme}
-            label={t("dashboard.dispatchableVehicles", locale)}
-            value={formatCompactNumber(operations.dispatchableVehicles)}
-            delta={`${formatCompactNumber(operations.offlineVehicles)} offline`}
-            deltaTone={operations.offlineVehicles > 0 ? "down" : "neutral"}
-            sub={t("dashboard.dispatchableVehiclesSub", locale, {
-              count: operations.offlineVehicles,
-            })}
-          />
-          <KPI
-            theme={theme}
-            label={t("dashboard.openIncidents", locale)}
+            label={locale === "en" ? "Open incidents" : "事故未結"}
             value={formatCompactNumber(operations.openIncidents)}
             delta={
               operations.overdueMaintenance > 0
@@ -1273,19 +1091,16 @@ export default async function DashboardPage() {
                 : undefined
             }
             deltaTone={operations.overdueMaintenance > 0 ? "down" : "neutral"}
-            sub={t("dashboard.openIncidentsSub", locale, {
-              count: operations.overdueMaintenance,
-            })}
           />
           <KPI
             theme={theme}
-            label={t("dashboard.todayRevenue", locale)}
-            value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
+            label={locale === "en" ? "Critical incidents" : "重大事故"}
+            value={formatCompactNumber(criticalIncidentCount)}
             delta={
-              criticalIncidentCount > 0
+              todayRevenue.completedTrips > 0
                 ? locale === "en"
-                  ? `${formatCompactNumber(criticalIncidentCount)} critical`
-                  : `${formatCompactNumber(criticalIncidentCount)} 重大`
+                  ? `${formatCompactNumber(todayRevenue.completedTrips)} completed`
+                  : `${formatCompactNumber(todayRevenue.completedTrips)} 已完成`
                 : undefined
             }
             deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
@@ -1384,6 +1199,6 @@ export default async function DashboardPage() {
           <Table theme={theme} columns={queueColumns} rows={queueRows} />
         </Card>
       </div>
-    </Shell>
+    </div>
   );
 }
