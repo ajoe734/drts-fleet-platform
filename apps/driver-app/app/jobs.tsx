@@ -4,6 +4,7 @@ import {
   Animated,
   PanResponder,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -17,10 +18,7 @@ import type {
   UnifiedDriverTaskView,
 } from "@drts/contracts";
 
-import {
-  PlatformTaskBadge,
-  getPlatformDisplayLabel,
-} from "@/components/platform-task-badge";
+import { getPlatformDisplayLabel } from "@/components/platform-task-badge";
 import {
   Banner,
   Btn,
@@ -31,6 +29,7 @@ import {
   Shell,
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
+import { AuthorityBanner, PlatformBadge } from "@/components/ui";
 import {
   acceptForwardedDriverOffer,
   getDriverClient,
@@ -67,6 +66,26 @@ type InlineNotice = {
 };
 
 type SwipeActionDirection = "accept" | "reject";
+
+type TaskVisualState =
+  | "needs_action"
+  | "in_progress"
+  | "offered"
+  | "accept_pending"
+  | "confirmed"
+  | "completed"
+  | "lost_race"
+  | "cancelled"
+  | "read_only"
+  | "sync_failed";
+
+type TaskAuthorityDescriptor = {
+  title: string;
+  authorityLabel: string;
+  description: string;
+  tone: "owned" | "platform" | "warning" | "danger";
+  icon: keyof typeof Ionicons.glyphMap;
+};
 
 const THEME = driverCanvasTheme;
 const FILTER_OPTIONS = driverJobFilterOptions;
@@ -611,6 +630,168 @@ function getTaskPlatformCode(task: UnifiedDriverTaskView) {
   }
 }
 
+function getTaskPlatformName(task: UnifiedDriverTaskView) {
+  return isOwnedTask(task)
+    ? "自營派單"
+    : task.platformDisplayName || getPlatformDisplayLabel(task.sourcePlatform);
+}
+
+function getTaskVisualState(task: UnifiedDriverTaskView): TaskVisualState {
+  if (hasSyncIssue(task)) {
+    return "sync_failed";
+  }
+
+  const nativeStatus = normalizeStateCode(task.nativeStatus);
+  if (nativeStatus === "lost_race" || nativeStatus === "taken") {
+    return "lost_race";
+  }
+
+  if (
+    nativeStatus === "cancelled" ||
+    nativeStatus === "cancelled_by_platform"
+  ) {
+    return "cancelled";
+  }
+
+  if (
+    nativeStatus === "confirmed" ||
+    nativeStatus === "confirmed_by_platform"
+  ) {
+    return "confirmed";
+  }
+
+  switch (task.driverActionState) {
+    case "action_required":
+      return isOwnedTask(task) ? "needs_action" : "offered";
+    case "awaiting_platform":
+      return "accept_pending";
+    case "completed":
+      return "completed";
+    case "read_only":
+      return "read_only";
+    case "in_progress":
+    case "blocked":
+    default:
+      return "in_progress";
+  }
+}
+
+function buildTaskAuthorityDescriptor(
+  task: UnifiedDriverTaskView,
+): TaskAuthorityDescriptor {
+  const platformLabel = isOwnedTask(task)
+    ? "DRTS"
+    : getPlatformDisplayLabel(task.sourcePlatform);
+
+  switch (getTaskVisualState(task)) {
+    case "sync_failed":
+      return {
+        title: "平台同步異常",
+        authorityLabel: `平台 ${platformLabel}`,
+        description:
+          "平台同步或授權失敗；派車台接手前，司機端不開放本地生命周期變更。",
+        tone: "danger",
+        icon: "alert-circle-outline",
+      };
+    case "offered":
+      return {
+        title: "來源平台派單",
+        authorityLabel: `平台 ${platformLabel}`,
+        description:
+          "此訂單由來源平台主導。接受後只會送出平台請求，仍可能被其他司機搶先確認。",
+        tone: "platform",
+        icon: "swap-horizontal-outline",
+      };
+    case "accept_pending":
+      return {
+        title: "等待來源平台確認",
+        authorityLabel: `平台 ${platformLabel}`,
+        description:
+          "已送出接單要求。平台回應前，本地只保留安全鏡像與查閱能力。",
+        tone: "warning",
+        icon: "time-outline",
+      };
+    case "confirmed":
+      return {
+        title: "來源平台已確認",
+        authorityLabel: `平台 ${platformLabel}`,
+        description:
+          "平台已確認此單。後續節點仍需遵守來源平台規則，本地僅同步顯示安全資訊。",
+        tone: "platform",
+        icon: "checkmark-circle-outline",
+      };
+    case "completed":
+      return isOwnedTask(task)
+        ? {
+            title: "任務已完成",
+            authorityLabel: "DRTS 任務主控",
+            description:
+              "本地任務已結案，畫面保留完成結果與最後同步資訊供查閱。",
+            tone: "owned",
+            icon: "checkmark-done-outline",
+          }
+        : {
+            title: "來源平台已完成",
+            authorityLabel: `平台 ${platformLabel}`,
+            description:
+              "來源平台已完成此訂單。本地只保留最終同步結果，不再開放操作。",
+            tone: "platform",
+            icon: "checkmark-done-outline",
+          };
+    case "lost_race":
+      return {
+        title: "平台已分配給其他司機",
+        authorityLabel: `平台 ${platformLabel}`,
+        description: "此筆平台訂單已結束，本地僅保留同步結果供查閱與追蹤。",
+        tone: "warning",
+        icon: "close-circle-outline",
+      };
+    case "cancelled":
+      return {
+        title: "來源平台已取消",
+        authorityLabel: `平台 ${platformLabel}`,
+        description: "來源平台已取消此訂單。本地不再提供任何後續任務操作。",
+        tone: "warning",
+        icon: "ban-outline",
+      };
+    case "read_only":
+      return {
+        title: "平台鏡像任務",
+        authorityLabel: `平台 ${platformLabel}`,
+        description: "來源平台仍是此任務的權限來源，本地僅提供同步鏡像供查閱。",
+        tone: "platform",
+        icon: "eye-outline",
+      };
+    case "needs_action":
+      return {
+        title: "待司機處理",
+        authorityLabel: "DRTS 任務主控",
+        description: "完整本地操作權限維持開放，請直接從行程作業台接手下一步。",
+        tone: "owned",
+        icon: "alert-circle-outline",
+      };
+    case "in_progress":
+    default:
+      return isOwnedTask(task)
+        ? {
+            title: "自營派單",
+            authorityLabel: "DRTS 任務主控",
+            description:
+              "完整本地任務操作權限。請依任務節點完成出發、抵達、接送與完單佐證。",
+            tone: "owned",
+            icon: "shield-checkmark",
+          }
+        : {
+            title: "來源平台鏡像進行中",
+            authorityLabel: `平台 ${platformLabel}`,
+            description:
+              "來源平台仍是此任務的權限來源。本地保留安全同步鏡像與查閱資訊。",
+            tone: "platform",
+            icon: "navigate-outline",
+          };
+  }
+}
+
 function describeForwardedActionOutcome(
   outcome: string,
   action: SwipeActionDirection,
@@ -806,17 +987,26 @@ function TaskCard({
   const forwarded = !isOwnedTask(task);
   const platformClosed = isPlatformClosed(task);
   const syncIssue = hasSyncIssue(task);
-  const dimmed = task.driverActionState === "completed" || platformClosed;
+  const visualState = getTaskVisualState(task);
+  const authority = buildTaskAuthorityDescriptor(task);
+  const dimmed = visualState === "completed" || platformClosed;
   const fareLabel = order?.quotedFare ? formatMoney(order.quotedFare) : null;
   const deadlineLabel = formatRelativeDeadline(task.deadlineAt);
   const typeLabel = buildTypeLabel(order);
   const showPrimaryAction = canSwipeForwardedTask(task);
-  const showOpenAction = !showPrimaryAction && !syncIssue && !platformClosed;
+  const showOpenAction =
+    !showPrimaryAction &&
+    !syncIssue &&
+    !platformClosed &&
+    (visualState === "needs_action" ||
+      visualState === "in_progress" ||
+      visualState === "confirmed");
   const actionLabel = showPrimaryAction
     ? "接受平台訂單"
     : showOpenAction
       ? driverStrings.jobs.openCurrentTrip
       : null;
+  const nextStepText = buildAllowedActionSummary(task);
   const showFooter = Boolean(fareLabel || deadlineLabel || actionLabel);
 
   return (
@@ -833,8 +1023,11 @@ function TaskCard({
         <Pressable accessibilityRole="button" onPress={onOpen}>
           <View style={styles.cardTopRow}>
             <View style={styles.cardTopLead}>
-              <PlatformTaskBadge
-                platformCode={isOwnedTask(task) ? "owned" : task.sourcePlatform}
+              <PlatformBadge
+                code={getTaskPlatformCode(task)}
+                name={getTaskPlatformName(task)}
+                forwarded={forwarded}
+                size="sm"
               />
               {isEmphasizedStatus(task) ? (
                 <Pill tone={getTaskPillTone(task)} dot>
@@ -865,18 +1058,24 @@ function TaskCard({
             <Pill tone="neutral">{typeLabel}</Pill>
             {task.routeLocked ? <Pill tone="warn">路線鎖定</Pill> : null}
             {order?.fixedPrice ? <Pill tone="info">固定車資</Pill> : null}
-            <Pill tone={getTaskPillTone(task)} dot>
-              {formatStatusLabel(String(task.localStatus))}
-            </Pill>
           </View>
 
-          {syncIssue ? (
-            <Text style={styles.syncIssueNote}>需派車台處理，請等待指示</Text>
-          ) : (
-            <Text style={styles.cardHint} numberOfLines={2}>
-              {buildAllowedActionSummary(task)}
-            </Text>
-          )}
+          <View style={styles.cardAuthorityWrap}>
+            <AuthorityBanner
+              title={authority.title}
+              authorityLabel={authority.authorityLabel}
+              description={authority.description}
+              tone={authority.tone}
+              icon={authority.icon}
+            />
+          </View>
+
+          <Text
+            style={[styles.cardHint, syncIssue ? styles.cardHintDanger : null]}
+            numberOfLines={2}
+          >
+            下一步 · {nextStepText}
+          </Text>
         </Pressable>
 
         {showFooter ? (
@@ -1350,7 +1549,12 @@ export default function JobsScreen() {
             />
           </View>
 
-          <View style={styles.filterRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterRow}
+            contentContainerStyle={styles.filterRowContent}
+          >
             {FILTER_OPTIONS.map((option) => {
               const selected = option.value === selectedFilter;
 
@@ -1369,7 +1573,7 @@ export default function JobsScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
 
           <View style={styles.taskStack}>
             {filteredTasks.length === 0 ? (
@@ -1512,9 +1716,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   filterRow: {
+    marginHorizontal: -2,
+  },
+  filterRowContent: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 6,
+    paddingBottom: 4,
   },
   filterPillWrap: {
     borderRadius: 999,
@@ -1595,6 +1802,9 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 10,
   },
+  cardAuthorityWrap: {
+    marginTop: 10,
+  },
   cardFooterRow: {
     marginTop: 12,
     paddingTop: 10,
@@ -1640,10 +1850,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: THEME.textMuted,
   },
-  syncIssueNote: {
-    marginTop: 10,
-    fontSize: 12,
-    lineHeight: 17,
+  cardHintDanger: {
     color: THEME.danger,
   },
   variantSummaryRow: {
