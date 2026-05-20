@@ -1,21 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import type {
   ComplaintCaseRecord,
   ComplaintCaseStatus,
   ComplaintCategory,
+  ComplaintExportViewRecord,
+  ComplaintResolutionCode,
+  ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
+  EscalateComplaintToIncidentCommand,
 } from "@drts/contracts";
 import {
   COMPLAINT_CASE_STATUSES,
   COMPLAINT_CATEGORIES,
+  COMPLAINT_CATEGORY_VALID_RESOLUTIONS,
 } from "@drts/contracts";
-import { getOpsClient } from "@/lib/api-client";
-import { useTranslation } from "@/lib/i18n";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
@@ -30,27 +33,24 @@ import {
   buildCanvasTheme,
   type CanvasShellNavItem,
   type CanvasTableColumn,
+  type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
-
-type Locale = "en" | "zh";
-type ComplaintTab = "all" | "mine" | "breach" | "escalated";
-
-type ComplaintTableRow = {
-  caseNo: string;
-  category: ComplaintCategory;
-  severity: ComplaintCaseRecord["severity"];
-  description: string;
-  orderId: string;
-  slaDueAt: string;
-  slaBreach: boolean;
-  assignee: string;
-  status: ComplaintCaseStatus;
-  relatedIncidentId: string | null;
-};
+import { getOpsClient } from "@/lib/api-client";
+import { useTranslation } from "@/lib/i18n";
+import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
+import { t as translate } from "@/lib/translations";
 
 const STATUS_OPTIONS: ComplaintCaseStatus[] = [...COMPLAINT_CASE_STATUSES];
 const CATEGORY_OPTIONS: ComplaintCategory[] = [...COMPLAINT_CATEGORIES];
+const CURRENT_OPERATOR_ID = "AGENT-OPS-002";
+const ESCALATION_SEVERITY_OPTIONS = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+] as const;
 
 const INITIAL_CREATE_FORM: CreateComplaintCaseCommand = {
   caseSource: "ops",
@@ -67,168 +67,120 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const pageStackStyle = {
+const shellFrameStyle: CSSProperties = {
+  minHeight: "calc(100vh - 48px)",
+  borderRadius: 24,
+  overflow: "hidden",
+  border: `1px solid ${theme.border}`,
+  boxShadow: "0 20px 44px rgba(2, 6, 23, 0.42)",
+};
+
+const pageStackStyle: CSSProperties = {
   padding: 24,
   display: "grid",
   gap: 16,
 };
 
-const kpiGridStyle = {
+const kpiGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
 };
 
-const controlGridStyle = {
+const filterGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(240px, 1.4fr) repeat(2, minmax(180px, 0.85fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
 };
 
-const createGridStyle = {
+const workspaceGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, min(100%, 1fr)))",
-  gap: 12,
+  gridTemplateColumns: "minmax(0, 1.2fr) minmax(320px, 0.8fr)",
+  gap: 16,
+  alignItems: "start",
 };
 
-const inputStyle = {
-  width: "100%",
-  minHeight: 34,
-  borderRadius: 8,
-  border: `1px solid ${theme.border}`,
-  background: theme.bgRaised,
-  color: theme.text,
-  padding: "7px 10px",
+const actionGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  gap: 16,
+};
+
+const detailStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
+const pillRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const actionRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const timelineListStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: "14px 16px",
+  borderRadius: 10,
+  border: `1px dashed ${theme.border}`,
+  background: theme.surfaceLo,
+  color: theme.textMuted,
   fontSize: 12.5,
-  fontFamily: theme.fontFamily,
-  boxSizing: "border-box" as const,
+  lineHeight: 1.5,
 };
 
-const textAreaStyle = {
-  ...inputStyle,
-  minHeight: 92,
-  resize: "vertical" as const,
-};
-
-function actionButtonStyle(variant: "primary" | "secondary" = "secondary") {
-  const palette =
-    variant === "primary"
-      ? {
-          background: theme.accent,
-          color: "#fff",
-          border: theme.accent,
-        }
-      : {
-          background: theme.surface,
-          color: theme.text,
-          border: theme.border,
-        };
-
-  return {
-    minHeight: 32,
-    padding: "7px 12px",
-    borderRadius: 8,
-    border: `1px solid ${palette.border}`,
-    background: palette.background,
-    color: palette.color,
-    fontSize: 12.5,
-    fontFamily: theme.fontFamily,
-    fontWeight: 600,
-    cursor: "pointer",
-  };
+function copy(locale: Locale, en: string, zh: string) {
+  return locale === "en" ? en : zh;
 }
 
-function buildShellNav(
-  locale: Locale,
-  t: (key: string, params?: Record<string, string | number>) => string,
-): CanvasShellNavItem[] {
-  return [
-    { divider: locale === "en" ? "Workspaces" : "工作面" },
-    {
-      key: "dashboard",
-      href: "/dashboard",
-      icon: "dashboard",
-      label: t("nav.dashboard"),
-    },
-    { divider: locale === "en" ? "Live Ops" : "即時派遣" },
-    {
-      key: "dispatch",
-      href: "/dispatch",
-      icon: "dispatch",
-      label: t("nav.dispatch"),
-      matchPaths: ["/dispatch"],
-    },
-    {
-      key: "callcenter",
-      href: "/callcenter",
-      icon: "callcenter",
-      label: t("nav.callcenter"),
-    },
-    { divider: locale === "en" ? "Casework" : "案件處理" },
-    {
-      key: "complaints",
-      href: "/complaints",
-      icon: "complaints",
-      label: t("nav.complaints"),
-    },
-    {
-      key: "incidents",
-      href: "/incidents",
-      icon: "incidents",
-      label: t("nav.incidents"),
-      matchPaths: ["/incidents"],
-    },
-    { divider: locale === "en" ? "Monitoring" : "營運監控" },
-    {
-      key: "reports",
-      href: "/reports",
-      icon: "reports",
-      label: t("nav.reports"),
-    },
-    {
-      key: "revenue",
-      href: "/revenue",
-      icon: "revenue",
-      label: t("nav.revenue"),
-    },
-    {
-      key: "attendance",
-      href: "/attendance",
-      icon: "attendance",
-      label: t("nav.attendance"),
-    },
-  ];
-}
-
-function formatDurationHours(locale: Locale, hours: number) {
-  const rounded = Math.max(0, Math.round(hours));
-  return locale === "en" ? `${rounded}h` : `${rounded} 小時`;
-}
-
-function formatPercent(value: number, total: number) {
-  if (total === 0) {
-    return "0%";
+function formatDateTime(locale: Locale, value: string | null | undefined) {
+  if (!value) {
+    return "-";
   }
 
-  return `${Math.round((value / total) * 100)}%`;
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
 }
 
-function formatRelativeSla(
+function formatDateTimeWithSeconds(
   locale: Locale,
-  value: string,
-  breached = false,
+  value: string | null | undefined,
 ) {
-  const deltaMinutes = Math.round(
-    (new Date(value).getTime() - Date.now()) / 60000,
-  );
-
-  if (breached || deltaMinutes < 0) {
-    return locale === "en"
-      ? `breached ${Math.abs(deltaMinutes)}m`
-      : `逾期 ${Math.abs(deltaMinutes)} 分`;
+  if (!value) {
+    return "-";
   }
 
-  return locale === "en" ? `due ${deltaMinutes}m` : `${deltaMinutes} 分後`;
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
 }
 
 function isComplaintActive(status: ComplaintCaseStatus) {
@@ -238,165 +190,427 @@ function isComplaintActive(status: ComplaintCaseStatus) {
 }
 
 function compareComplaintPriority(
-  left: ComplaintCaseRecord,
-  right: ComplaintCaseRecord,
+  a: ComplaintCaseRecord,
+  b: ComplaintCaseRecord,
 ) {
-  if (left.slaBreach !== right.slaBreach) {
-    return left.slaBreach ? -1 : 1;
+  if (a.slaBreach !== b.slaBreach) {
+    return a.slaBreach ? -1 : 1;
   }
 
-  if (Boolean(left.relatedIncidentId) !== Boolean(right.relatedIncidentId)) {
-    return left.relatedIncidentId ? -1 : 1;
+  if (a.relatedIncidentId !== b.relatedIncidentId) {
+    return a.relatedIncidentId ? 1 : -1;
   }
 
-  if (left.severity !== right.severity) {
-    if (left.severity === "high") {
-      return -1;
-    }
-    if (right.severity === "high") {
-      return 1;
-    }
+  if (a.severity !== b.severity) {
+    return a.severity === "high" ? -1 : 1;
   }
 
-  if (isComplaintActive(left.status) !== isComplaintActive(right.status)) {
-    return isComplaintActive(left.status) ? -1 : 1;
+  if (isComplaintActive(a.status) !== isComplaintActive(b.status)) {
+    return isComplaintActive(a.status) ? -1 : 1;
   }
 
   return (
-    new Date(left.slaDueAt).getTime() - new Date(right.slaDueAt).getTime() ||
-    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    new Date(a.slaDueAt).getTime() - new Date(b.slaDueAt).getTime() ||
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 }
 
-function getSeverityTone(severity: ComplaintCaseRecord["severity"]): CanvasTone {
-  return severity === "high" ? "danger" : "neutral";
+function formatRelativeSla(value: string, locale: Locale) {
+  const deltaMinutes = Math.round(
+    (new Date(value).getTime() - Date.now()) / (1000 * 60),
+  );
+
+  if (deltaMinutes >= 0) {
+    return copy(locale, `due in ${deltaMinutes}m`, `還有 ${deltaMinutes} 分鐘`);
+  }
+
+  return copy(
+    locale,
+    `breached by ${Math.abs(deltaMinutes)}m`,
+    `已逾期 ${Math.abs(deltaMinutes)} 分鐘`,
+  );
 }
 
-function getRowStatusTone(row: ComplaintTableRow): CanvasTone {
-  if (row.relatedIncidentId) {
-    return "danger";
+function resolveSelectedComplaintCaseNo(
+  records: ComplaintCaseRecord[],
+  preferredCaseNo: string | null,
+) {
+  if (
+    preferredCaseNo &&
+    records.some((record) => record.caseNo === preferredCaseNo)
+  ) {
+    return preferredCaseNo;
   }
 
-  if (row.slaBreach) {
-    return "danger";
-  }
-
-  switch (row.status) {
-    case "closed":
-      return "success";
-    case "resolved":
-      return "info";
-    case "reopened":
-      return "warn";
-    case "under_investigation":
-    case "assigned":
-      return "accent";
-    case "new":
-    default:
-      return "neutral";
-  }
+  return records[0]?.caseNo ?? null;
 }
 
-function downloadCsv(rows: ComplaintCaseRecord[]) {
-  const header = [
-    "case_no",
-    "category",
-    "severity",
-    "description",
-    "order_id",
-    "sla_due_at",
-    "sla_breach",
-    "assignee_id",
-    "status",
-    "related_incident_id",
+function getSeverityTone(record: ComplaintCaseRecord): CanvasTone {
+  if (record.slaBreach) {
+    return "danger";
+  }
+  if (record.severity === "high") {
+    return "warn";
+  }
+  return "neutral";
+}
+
+function getStatusTone(record: ComplaintCaseRecord): CanvasTone {
+  if (record.relatedIncidentId) {
+    return "danger";
+  }
+  if (record.status === "closed" || record.status === "resolved") {
+    return "success";
+  }
+  if (record.slaBreach) {
+    return "danger";
+  }
+  if (
+    record.status === "assigned" ||
+    record.status === "under_investigation" ||
+    record.status === "reopened"
+  ) {
+    return "info";
+  }
+  return "neutral";
+}
+
+function formatAverageHandleValue(records: ComplaintCaseRecord[]) {
+  const handledRecords = records.filter(
+    (record) => record.status === "resolved" || record.status === "closed",
+  );
+
+  if (handledRecords.length === 0) {
+    return "0h";
+  }
+
+  const averageMinutes = Math.round(
+    handledRecords.reduce((total, record) => {
+      return (
+        total +
+        Math.max(
+          0,
+          (new Date(record.updatedAt).getTime() -
+            new Date(record.createdAt).getTime()) /
+            (1000 * 60),
+        )
+      );
+    }, 0) / handledRecords.length,
+  );
+
+  if (averageMinutes >= 60) {
+    return `${Math.round(averageMinutes / 60)}h`;
+  }
+
+  return `${averageMinutes}m`;
+}
+
+function formatReopenRate(records: ComplaintCaseRecord[]) {
+  if (records.length === 0) {
+    return "0%";
+  }
+
+  const reopened = records.filter((record) => record.reopenCount > 0).length;
+  return `${Math.round((reopened / records.length) * 100)}%`;
+}
+
+function controlStyle(
+  canvasTheme: CanvasTheme,
+  options?: { mono?: boolean; minHeight?: number },
+): CSSProperties {
+  return {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 7,
+    border: `1px solid ${canvasTheme.border}`,
+    background: canvasTheme.bgRaised,
+    color: canvasTheme.text,
+    padding: "8px 10px",
+    fontSize: 12.5,
+    lineHeight: 1.4,
+    fontFamily: options?.mono ? canvasTheme.monoFamily : canvasTheme.fontFamily,
+    minHeight: options?.minHeight,
+  };
+}
+
+function actionLinkStyle(
+  canvasTheme: CanvasTheme,
+  variant: "primary" | "secondary" = "secondary",
+): CSSProperties {
+  if (variant === "primary") {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      height: 28,
+      padding: "5px 10px",
+      borderRadius: 7,
+      background: canvasTheme.accent,
+      color: "#ffffff",
+      border: `1px solid ${canvasTheme.accent}`,
+      fontSize: 12,
+      fontWeight: 500,
+      lineHeight: 1,
+      textDecoration: "none",
+    };
+  }
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: 28,
+    padding: "5px 10px",
+    borderRadius: 7,
+    background: canvasTheme.surface,
+    color: canvasTheme.text,
+    border: `1px solid ${canvasTheme.border}`,
+    fontSize: 12,
+    fontWeight: 500,
+    lineHeight: 1,
+    textDecoration: "none",
+  };
+}
+
+function caseLinkStyle(canvasTheme: CanvasTheme): CSSProperties {
+  return {
+    background: "transparent",
+    border: "none",
+    color: canvasTheme.accent,
+    padding: 0,
+    font: "inherit",
+    fontWeight: 600,
+    cursor: "pointer",
+    textAlign: "left",
+  };
+}
+
+function buildShellNav(locale: Locale): CanvasShellNavItem[] {
+  return [
+    {
+      divider: locale === "en" ? "Workspaces" : "工作面",
+    },
+    {
+      key: "dashboard",
+      href: "/dashboard",
+      icon: "dashboard",
+      label: translate("nav.dashboard", locale),
+    },
+    {
+      divider: locale === "en" ? "Live Ops" : "即時派遣",
+    },
+    {
+      key: "dispatch",
+      href: "/dispatch",
+      icon: "dispatch",
+      label: translate("nav.dispatch", locale),
+      matchPaths: ["/dispatch"],
+    },
+    {
+      key: "callcenter",
+      href: "/callcenter",
+      icon: "callcenter",
+      label: translate("nav.callcenter", locale),
+    },
+    {
+      divider: locale === "en" ? "Casework" : "案件處理",
+    },
+    {
+      key: "complaints",
+      href: "/complaints",
+      icon: "complaints",
+      label: translate("nav.complaints", locale),
+    },
+    {
+      key: "incidents",
+      href: "/incidents",
+      icon: "incidents",
+      label: translate("nav.incidents", locale),
+      matchPaths: ["/incidents"],
+    },
+    {
+      divider: locale === "en" ? "Monitoring" : "營運監控",
+    },
+    {
+      key: "reports",
+      href: "/reports",
+      icon: "reports",
+      label: translate("nav.reports", locale),
+    },
+    {
+      key: "revenue",
+      href: "/revenue",
+      icon: "revenue",
+      label: translate("nav.revenue", locale),
+    },
+    {
+      key: "attendance",
+      href: "/attendance",
+      icon: "attendance",
+      label: translate("nav.attendance", locale),
+    },
+    {
+      divider: locale === "en" ? "Registry" : "主資料",
+    },
+    {
+      key: "drivers",
+      href: "/drivers",
+      icon: "fleet",
+      label: translate("nav.drivers", locale),
+    },
+    {
+      key: "vehicles",
+      href: "/vehicles",
+      icon: "vehicles",
+      label: translate("nav.vehicles", locale),
+    },
+    {
+      key: "contracts",
+      href: "/contracts",
+      icon: "contracts",
+      label: translate("nav.contracts", locale),
+    },
+    {
+      key: "feature-flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: translate("nav.featureFlags", locale),
+    },
   ];
-
-  const body = rows.map((row: ComplaintCaseRecord) => [
-    row.caseNo,
-    row.category,
-    row.severity,
-    row.description,
-    row.relatedOrderId ?? "",
-    row.slaDueAt,
-    row.slaBreach ? "true" : "false",
-    row.assigneeId ?? "",
-    row.status,
-    row.relatedIncidentId ?? "",
-  ]);
-
-  const csv = [header, ...body]
-    .map((line) =>
-      line
-        .map((value) => `"${String(value).replaceAll("\"", "\"\"")}"`)
-        .join(","),
-    )
-    .join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = "complaints-export.csv";
-  anchor.click();
-  URL.revokeObjectURL(url);
 }
 
-function formatTabLabel(
-  label: string,
-  count: number,
-  active: boolean,
-  onClick: () => void,
-) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        border: 0,
-        background: "transparent",
-        color: active ? theme.text : "inherit",
-        padding: 0,
-        font: "inherit",
-        cursor: "pointer",
-      }}
-    >
-      {`${label} ${count}`}
-    </button>
-  );
+function buildIncidentHandoffHref(record: ComplaintCaseRecord) {
+  const params = new URLSearchParams();
+  params.set("create", "1");
+  params.set("complaintCaseNo", record.caseNo);
+  params.set("title", record.caseNo);
+  params.set("description", record.description);
+  params.set("severity", record.slaBreach ? "high" : "medium");
+  if (record.relatedOrderId) {
+    params.set("relatedOrderId", record.relatedOrderId);
+  }
+  return `/incidents?${params.toString()}`;
 }
+
+type ComplaintTableRow = ComplaintCaseRecord &
+  Record<string, unknown> & {
+    _selected?: boolean;
+  };
 
 export default function ComplaintsPage() {
   const { t, locale } = useTranslation();
+  const searchParams = useSearchParams();
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
-
   const [records, setRecords] = useState<ComplaintCaseRecord[]>([]);
+  const [timeline, setTimeline] = useState<ComplaintTimelineEntry[]>([]);
+  const [exportView, setExportView] =
+    useState<ComplaintExportViewRecord | null>(null);
+  const [selectedCaseNo, setSelectedCaseNo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [activeTab, setActiveTab] = useState<ComplaintTab>("all");
+  const [showFilters, setShowFilters] = useState(false);
+  const [showWorkspace, setShowWorkspace] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ComplaintCaseStatus | "all">(
     "all",
   );
-  const [categoryFilter, setCategoryFilter] = useState<ComplaintCategory | "all">(
-    "all",
-  );
+  const [categoryFilter, setCategoryFilter] = useState<
+    ComplaintCategory | "all"
+  >("all");
   const [createForm, setCreateForm] = useState(INITIAL_CREATE_FORM);
+  const [assigneeId, setAssigneeId] = useState(CURRENT_OPERATOR_ID);
+  const [assignmentNote, setAssignmentNote] = useState("");
+  const [noteText, setNoteText] = useState("");
+  const [resolutionCode, setResolutionCode] =
+    useState<ComplaintResolutionCode>("resolved_other");
+  const [closingNote, setClosingNote] = useState("");
+  const [reopenReason, setReopenReason] = useState("");
+  const [escalateTitle, setEscalateTitle] = useState("");
+  const [escalateSeverity, setEscalateSeverity] =
+    useState<EscalateComplaintToIncidentCommand["severity"]>("medium");
+  const [escalateReason, setEscalateReason] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
-
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
+  const caseNoFromQuery = searchParams.get("caseNo");
+
+  const selectedRecord = useMemo(
+    () => records.find((record) => record.caseNo === selectedCaseNo) ?? null,
+    [records, selectedCaseNo],
+  );
+
+  const validResolutionCodes = useMemo(
+    () =>
+      selectedRecord
+        ? (COMPLAINT_CATEGORY_VALID_RESOLUTIONS[selectedRecord.category] ?? [])
+        : [],
+    [selectedRecord],
+  );
 
   useEffect(() => {
-    void loadRecords();
-  }, []);
+    if (!selectedRecord) {
+      return;
+    }
+    setResolutionCode((current) =>
+      validResolutionCodes.includes(current)
+        ? current
+        : (validResolutionCodes[0] ?? "resolved_other"),
+    );
+  }, [selectedRecord, validResolutionCodes]);
 
-  async function loadRecords() {
+  useEffect(() => {
+    if (caseNoFromQuery) {
+      setSelectedCaseNo(caseNoFromQuery);
+      setShowWorkspace(true);
+    }
+
+    void loadRecords(caseNoFromQuery ?? undefined);
+  }, [caseNoFromQuery]);
+
+  useEffect(() => {
+    if (!selectedCaseNo || !showWorkspace) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const client = getOpsClient();
+        const [nextTimeline, nextExportView] = await Promise.all([
+          client.getComplaintTimeline(selectedCaseNo),
+          client.getComplaintExportView(selectedCaseNo),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setTimeline(nextTimeline);
+        setExportView(nextExportView);
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(resolveErrorMessage(nextError));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCaseNo, showWorkspace]);
+
+  async function loadRecords(preferredCaseNo?: string) {
     setLoading(true);
     try {
       const nextRecords = await getOpsClient().listComplaints();
       setRecords(nextRecords);
+      const nextSelected = resolveSelectedComplaintCaseNo(
+        nextRecords,
+        preferredCaseNo ?? caseNoFromQuery ?? selectedCaseNo,
+      );
+      setSelectedCaseNo(nextSelected);
       setError(null);
     } catch (nextError) {
       setError(resolveErrorMessage(nextError));
@@ -417,108 +631,19 @@ export default function ComplaintsPage() {
     }
   }
 
-  const primaryAssigneeId = useMemo(() => {
-    const counts = new Map<string, number>();
-
-    for (const record of records) {
-      if (!record.assigneeId) {
-        continue;
-      }
-
-      counts.set(record.assigneeId, (counts.get(record.assigneeId) ?? 0) + 1);
-    }
-
-    return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
-  }, [records]);
-
-  const activeCases = useMemo(
-    () => records.filter((record) => isComplaintActive(record.status)),
-    [records],
-  );
-  const mineCases = useMemo(
-    () =>
-      primaryAssigneeId
-        ? activeCases.filter((record) => record.assigneeId === primaryAssigneeId)
-        : [],
-    [activeCases, primaryAssigneeId],
-  );
-  const breachedCases = useMemo(
-    () => records.filter((record) => record.slaBreach),
-    [records],
-  );
-  const escalatedCases = useMemo(
-    () => records.filter((record) => Boolean(record.relatedIncidentId)),
-    [records],
-  );
-  const reopenedCases = useMemo(
-    () => records.filter((record) => record.reopenCount > 0),
-    [records],
-  );
-  const resolvedCases = useMemo(
-    () =>
-      records.filter(
-        (record) => record.status === "resolved" || record.status === "closed",
-      ),
-    [records],
-  );
-
-  const averageHandlingHours =
-    resolvedCases.reduce((sum, record) => {
-      const elapsedHours =
-        (new Date(record.updatedAt).getTime() - new Date(record.createdAt).getTime()) /
-        3_600_000;
-      return sum + elapsedHours;
-    }, 0) / (resolvedCases.length || 1);
-
-  const latestEscalation = useMemo(
-    () => escalatedCases.slice().sort(compareComplaintPriority)[0] ?? null,
-    [escalatedCases],
-  );
-
-  const nextDueCase = useMemo(
-    () =>
-      activeCases
-        .slice()
-        .sort(
-          (left, right) =>
-            new Date(left.slaDueAt).getTime() - new Date(right.slaDueAt).getTime(),
-        )[0] ?? null,
-    [activeCases],
-  );
-
   const filteredRecords = useMemo(
     () =>
       records
         .filter((record) => {
-          if (activeTab === "mine") {
-            return primaryAssigneeId
-              ? record.assigneeId === primaryAssigneeId
-              : false;
-          }
-
-          if (activeTab === "breach") {
-            return record.slaBreach;
-          }
-
-          if (activeTab === "escalated") {
-            return Boolean(record.relatedIncidentId);
-          }
-
-          return true;
-        })
-        .filter((record) => {
           if (statusFilter !== "all" && record.status !== statusFilter) {
             return false;
           }
-
           if (categoryFilter !== "all" && record.category !== categoryFilter) {
             return false;
           }
-
           if (!deferredQuery) {
             return true;
           }
-
           const haystack = [
             record.caseNo,
             record.category,
@@ -527,222 +652,312 @@ export default function ComplaintsPage() {
             record.assigneeId ?? "",
             record.relatedOrderId ?? "",
             record.relatedCallId ?? "",
-            record.relatedIncidentId ?? "",
           ]
             .join(" ")
             .toLowerCase();
-
           return haystack.includes(deferredQuery);
         })
         .sort(compareComplaintPriority),
-    [
-      activeTab,
-      categoryFilter,
-      deferredQuery,
-      primaryAssigneeId,
-      records,
-      statusFilter,
-    ],
+    [categoryFilter, deferredQuery, records, statusFilter],
   );
 
+  const activeCases = records.filter((record) =>
+    isComplaintActive(record.status),
+  ).length;
+  const hotlineLinked = records.filter((record) => record.relatedCallId).length;
+  const slaBreached = records.filter((record) => record.slaBreach).length;
+  const readyForAudit = records.filter(
+    (record) => record.status === "closed",
+  ).length;
+  const escalatedCases = records.filter((record) => record.relatedIncidentId);
+  const reopenedCases = records.filter((record) => record.reopenCount > 0);
+  const latestEscalatedCase = [...escalatedCases].sort(
+    compareComplaintPriority,
+  )[0];
+
+  const complaintTabs = [
+    copy(locale, "All", "全部"),
+    copy(locale, "My queue", "我負責"),
+    copy(locale, "SLA breach", "SLA breach"),
+    copy(locale, "Escalated incidents", "已升級事故"),
+  ];
+
+  const unresolvedDelta =
+    slaBreached > 0
+      ? copy(
+          locale,
+          `${slaBreached} SLA breach`,
+          `${slaBreached} 筆 SLA breach`,
+        )
+      : copy(locale, "stable", "穩定");
+  const averageHandleValue = formatAverageHandleValue(records);
+  const averageHandleDelta = copy(
+    locale,
+    `${readyForAudit} closed sample`,
+    `樣本 ${readyForAudit} 筆`,
+  );
+  const escalatedSub = latestEscalatedCase?.relatedIncidentId
+    ? `${latestEscalatedCase.caseNo} -> ${latestEscalatedCase.relatedIncidentId}`
+    : copy(locale, "No linked incident", "尚無 incident 連結");
+  const reopenDelta = reopenedCases.length
+    ? copy(
+        locale,
+        `${reopenedCases.length} reopened`,
+        `${reopenedCases.length} 筆曾重開`,
+      )
+    : copy(locale, "No reopen", "暫無重開");
+
+  async function handleCreateComplaint() {
+    await runAction("create-complaint", async () => {
+      const created = await getOpsClient().createComplaint({
+        ...createForm,
+        relatedOrderId: createForm.relatedOrderId || null,
+        relatedCallId: createForm.relatedCallId || null,
+      });
+      setCreateForm(INITIAL_CREATE_FORM);
+      setShowCreate(false);
+      setSelectedCaseNo(created.caseNo);
+      setShowWorkspace(true);
+      await loadRecords(created.caseNo);
+    });
+  }
+
+  async function handleAssignCase() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("assign-case", async () => {
+      await getOpsClient().assignComplaint(selectedRecord.caseNo, {
+        assigneeId,
+        note: assignmentNote,
+      });
+      setAssignmentNote("");
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleAddNote() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("add-note", async () => {
+      await getOpsClient().addComplaintNote(selectedRecord.caseNo, {
+        note: noteText,
+      });
+      setNoteText("");
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleResolveCase(closeCase: boolean) {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction(closeCase ? "close-case" : "resolve-case", async () => {
+      if (closeCase) {
+        await getOpsClient().closeComplaint(selectedRecord.caseNo, {
+          resolutionCode,
+          closingNote,
+        });
+      } else {
+        await getOpsClient().resolveComplaint(selectedRecord.caseNo, {
+          resolutionCode,
+          closingNote,
+        });
+      }
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleReopenCase() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("reopen-case", async () => {
+      await getOpsClient().reopenComplaint(selectedRecord.caseNo, {
+        reason: reopenReason,
+      });
+      setReopenReason("");
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleEscalateCase() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("escalate-incident", async () => {
+      await getOpsClient().escalateComplaintToIncident(selectedRecord.caseNo, {
+        title: escalateTitle,
+        severity: escalateSeverity,
+        reason: escalateReason,
+      });
+      setEscalateTitle("");
+      setEscalateReason("");
+      setEscalateSeverity("medium");
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleMarkSlaBreach() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("sla-breach", async () => {
+      await getOpsClient().markComplaintSlaBreach(selectedRecord.caseNo);
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
   const tableRows: ComplaintTableRow[] = filteredRecords.map((record) => ({
-    caseNo: record.caseNo,
-    category: record.category,
-    severity: record.severity,
-    description: record.description,
-    orderId: record.relatedOrderId ?? "—",
-    slaDueAt: record.slaDueAt,
-    slaBreach: record.slaBreach,
-    assignee: record.assigneeId ?? t("complaints.unassigned"),
-    status: record.status,
-    relatedIncidentId: record.relatedIncidentId,
+    ...record,
+    _selected: record.caseNo === selectedCaseNo,
   }));
 
   const tableColumns: CanvasTableColumn<ComplaintTableRow>[] = [
     {
       h: "CASE",
-      w: 118,
+      w: 116,
       mono: true,
-      r: (row: ComplaintTableRow) => (
-        <span style={{ color: theme.accent, fontWeight: 700 }}>{row.caseNo}</span>
+      r: (row) => (
+        <button
+          type="button"
+          style={caseLinkStyle(theme)}
+          onClick={() => {
+            setSelectedCaseNo(row.caseNo);
+            setShowWorkspace(true);
+          }}
+        >
+          {row.caseNo}
+        </button>
       ),
     },
     {
       h: "CATEGORY",
-      w: 156,
+      w: 150,
       mono: true,
-      r: (row: ComplaintTableRow) => formatOpsCodeLabel(locale, row.category),
+      r: (row) => formatOpsCodeLabel(locale, row.category),
     },
     {
       h: "SEV",
       w: 92,
-      r: (row: ComplaintTableRow) => (
-        <Pill theme={theme} tone={getSeverityTone(row.severity)} dot>
+      r: (row) => (
+        <Pill theme={theme} tone={getSeverityTone(row)} dot>
           {formatOpsCodeLabel(locale, row.severity)}
         </Pill>
       ),
     },
     {
       h: "DESC",
-      r: (row: ComplaintTableRow) => (
-        <span style={{ whiteSpace: "normal", lineHeight: 1.45 }}>
+      r: (row) => (
+        <div
+          style={{
+            minWidth: 220,
+            maxWidth: 360,
+            whiteSpace: "normal",
+            lineHeight: 1.4,
+          }}
+        >
           {row.description}
-        </span>
+        </div>
       ),
     },
     {
       h: "ORDER",
-      w: 118,
+      w: 128,
       mono: true,
-      r: (row: ComplaintTableRow) => row.orderId,
+      r: (row) => row.relatedOrderId ?? "-",
     },
     {
       h: "SLA",
-      w: 116,
-      r: (row: ComplaintTableRow) => (
+      w: 136,
+      r: (row) => (
         <Pill theme={theme} tone={row.slaBreach ? "danger" : "success"} dot>
-          {formatRelativeSla(locale, row.slaDueAt, row.slaBreach)}
+          {row.slaBreach
+            ? copy(locale, "breached", "違規")
+            : formatRelativeSla(row.slaDueAt, locale)}
         </Pill>
       ),
     },
     {
       h: "OWNER",
-      w: 110,
+      w: 112,
       mono: true,
-      r: (row: ComplaintTableRow) => row.assignee,
+      r: (row) => row.assigneeId ?? t("complaints.unassigned"),
     },
     {
       h: "STATUS",
       w: 170,
-      r: (row: ComplaintTableRow) => (
-        <div style={{ display: "grid", gap: 6 }}>
-          <Pill theme={theme} tone={getRowStatusTone(row)} dot>
-            {formatOpsCodeLabel(locale, row.status)}
-          </Pill>
-          {row.relatedIncidentId ? (
-            <Link
-              href={`/incidents?incidentId=${encodeURIComponent(row.relatedIncidentId)}`}
-              style={{
-                color: theme.accent,
-                textDecoration: "none",
-                fontSize: 11.5,
-                fontFamily: theme.monoFamily,
-              }}
-            >
-              {row.relatedIncidentId}
-            </Link>
-          ) : null}
-        </div>
+      r: (row) => (
+        <Pill theme={theme} tone={getStatusTone(row)} dot>
+          {formatOpsCodeLabel(locale, row.status)}
+        </Pill>
       ),
     },
   ];
 
-  const tabCounts: Record<ComplaintTab, number> = {
-    all: records.length,
-    mine: mineCases.length,
-    breach: breachedCases.length,
-    escalated: escalatedCases.length,
-  };
-
-  const tabLabels: Record<ComplaintTab, string> = {
-    all: t("common.all"),
-    mine: locale === "en" ? "My Queue" : "我負責",
-    breach: locale === "en" ? "SLA breach" : "SLA breach",
-    escalated: locale === "en" ? "Escalated incidents" : "已升級事故",
-  };
-
-  const tabOrder: ComplaintTab[] = ["all", "mine", "breach", "escalated"];
-  const tabNodes: Record<ComplaintTab, ReactNode> = {
-    all: formatTabLabel(tabLabels.all, tabCounts.all, activeTab === "all", () =>
-      setActiveTab("all"),
-    ),
-    mine: formatTabLabel(
-      tabLabels.mine,
-      tabCounts.mine,
-      activeTab === "mine",
-      () => setActiveTab("mine"),
-    ),
-    breach: formatTabLabel(
-      tabLabels.breach,
-      tabCounts.breach,
-      activeTab === "breach",
-      () => setActiveTab("breach"),
-    ),
-    escalated: formatTabLabel(
-      tabLabels.escalated,
-      tabCounts.escalated,
-      activeTab === "escalated",
-      () => setActiveTab("escalated"),
-    ),
-  };
-
-  const controlSummary = [
-    {
-      k: locale === "en" ? "Visible" : "顯示中",
-      v: `${filteredRecords.length}`,
-      mono: true,
-    },
-    {
-      k: locale === "en" ? "Owner focus" : "負責人焦點",
-      v: primaryAssigneeId ?? t("complaints.unassigned"),
-      mono: true,
-    },
-    {
-      k: locale === "en" ? "Next SLA" : "下一個 SLA",
-      v: nextDueCase
-        ? `${nextDueCase.caseNo} · ${formatRelativeSla(locale, nextDueCase.slaDueAt, nextDueCase.slaBreach)}`
-        : "—",
-      mono: true,
-    },
-    {
-      k: locale === "en" ? "Latest escalation" : "最近升級",
-      v: latestEscalation
-        ? `${latestEscalation.caseNo} → ${latestEscalation.relatedIncidentId}`
-        : "—",
-      mono: true,
-    },
-  ];
+  const canCreate =
+    createForm.description.trim().length > 0 && busyKey !== "create-complaint";
+  const canAssign = assigneeId.trim().length > 0 && busyKey !== "assign-case";
+  const canAddNote = noteText.trim().length > 0 && busyKey !== "add-note";
+  const canResolve =
+    validResolutionCodes.length > 0 && busyKey !== "resolve-case";
+  const canClose = validResolutionCodes.length > 0 && busyKey !== "close-case";
+  const canReopen = reopenReason.trim().length > 0 && busyKey !== "reopen-case";
+  const canEscalate =
+    escalateTitle.trim().length > 0 &&
+    escalateReason.trim().length > 0 &&
+    busyKey !== "escalate-incident";
 
   return (
     <Shell
       theme={theme}
-      nav={buildShellNav(locale, t)}
+      nav={buildShellNav(locale)}
       active="complaints"
-      brandLabel={t("app.name")}
-      brandSubLabel={t("app.sub")}
-      breadcrumb={[t("nav.complaints")]}
-      searchPlaceholder={t("common.search")}
+      currentPath="/complaints"
+      breadcrumb={[copy(locale, "Complaints", "客訴")]}
+      searchPlaceholder={t("complaints.search")}
+      style={shellFrameStyle}
     >
       <PageHeader
         theme={theme}
         title={t("complaints.title")}
         subtitle={t("complaints.subtitle")}
-        tabs={tabOrder.map((tab) => tabNodes[tab])}
-        activeTab={tabNodes[activeTab]}
+        tabs={complaintTabs}
+        activeTab={complaintTabs[0]}
         actions={
           <>
             <Btn
               theme={theme}
               icon="filter"
-              onClick={() => setFiltersOpen((current: boolean) => !current)}
+              onClick={() => setShowFilters((current) => !current)}
             >
-              {t("complaints.form.category")}
+              {copy(locale, "Category", "類別")}
             </Btn>
             <Btn
               theme={theme}
               icon="export"
-              disabled={filteredRecords.length === 0}
-              onClick={() => downloadCsv(filteredRecords)}
+              onClick={() => {
+                if (selectedRecord) {
+                  setShowWorkspace(true);
+                }
+              }}
             >
-              {t("complaints.timelineExport")}
+              {copy(locale, "Export", "匯出")}
             </Btn>
             <Btn
               theme={theme}
               variant="primary"
               icon="plus"
-              onClick={() => setShowCreate((current: boolean) => !current)}
+              onClick={() => setShowCreate((current) => !current)}
             >
-              {showCreate ? t("complaints.hideCreate") : t("complaints.createBtn")}
+              {t("complaints.createComplaint")}
             </Btn>
           </>
         }
@@ -753,287 +968,771 @@ export default function ComplaintsPage() {
           <Banner
             theme={theme}
             tone="danger"
-            title={`${getOpsLabel(locale, "error")}: ${error}`}
-            body={t("common.errorMessage")}
-            actions={
-              <Btn theme={theme} onClick={() => void loadRecords()}>
-                {t("common.refresh")}
-              </Btn>
-            }
+            icon="warn"
+            title={getOpsLabel(locale, "error")}
+            body={error}
           />
         ) : null}
 
         <div style={kpiGridStyle}>
           <KPI
             theme={theme}
-            label={locale === "en" ? "Open complaints" : "未結客訴"}
-            value={activeCases.length}
-            delta={
-              locale === "en"
-                ? `${breachedCases.length} SLA breach`
-                : `${breachedCases.length} SLA breach`
-            }
-            deltaTone={breachedCases.length > 0 ? "down" : "neutral"}
+            label={copy(locale, "Open complaints", "未結客訴")}
+            value={activeCases}
+            delta={unresolvedDelta}
+            deltaTone={slaBreached > 0 ? "down" : "neutral"}
           />
           <KPI
             theme={theme}
-            label={locale === "en" ? "Avg handling" : "平均處理"}
-            value={formatDurationHours(locale, averageHandlingHours)}
-            delta={locale === "en" ? "resolved / closed" : "已解決 / 結案"}
-            deltaTone="up"
+            label={copy(locale, "Avg handling", "平均處理")}
+            value={averageHandleValue}
+            delta={averageHandleDelta}
+            deltaTone={readyForAudit > 0 ? "up" : "neutral"}
           />
           <KPI
             theme={theme}
-            label={locale === "en" ? "Escalated incidents" : "升級事故"}
+            label={copy(locale, "Escalated incidents", "升級事故")}
             value={escalatedCases.length}
-            sub={
-              latestEscalation
-                ? `${latestEscalation.caseNo} → ${latestEscalation.relatedIncidentId}`
-                : "—"
-            }
+            sub={escalatedSub}
           />
           <KPI
             theme={theme}
-            label={locale === "en" ? "Reopen rate" : "reopen 率"}
-            value={formatPercent(reopenedCases.length, records.length)}
-            delta={
-              locale === "en"
-                ? `↑ ${reopenedCases.length} reopened`
-                : `↑ ${reopenedCases.length} 件重開`
-            }
+            label={copy(locale, "Reopen rate", "reopen 率")}
+            value={formatReopenRate(records)}
+            delta={reopenDelta}
             deltaTone={reopenedCases.length > 0 ? "down" : "neutral"}
           />
         </div>
 
-        {filtersOpen || showCreate ? (
+        <Card theme={theme} padding={0}>
+          {loading ? (
+            <div style={{ padding: 16, color: theme.textMuted }}>
+              {t("complaints.loading")}
+            </div>
+          ) : filteredRecords.length > 0 ? (
+            <Table theme={theme} columns={tableColumns} rows={tableRows} />
+          ) : (
+            <div style={{ padding: 16 }}>
+              <div style={emptyStateStyle}>{t("complaints.empty")}</div>
+            </div>
+          )}
+        </Card>
+
+        {showFilters ? (
           <Card
             theme={theme}
-            title={showCreate ? t("complaints.createTitle") : t("complaints.registry")}
-            subtitle={
-              showCreate ? t("complaints.createNote") : t("complaints.results", { count: filteredRecords.length })
-            }
+            title={copy(locale, "Registry filters", "案件篩選")}
+            subtitle={copy(
+              locale,
+              "Filter the complaints table without leaving the OC complaints surface.",
+              "在不離開客訴面板的前提下過濾 complaints table。",
+            )}
           >
-            <div style={{ display: "grid", gap: 16 }}>
-              <DL theme={theme} cols={4} items={controlSummary} />
-
-              {filtersOpen ? (
-                <div style={controlGridStyle}>
-                  <Field theme={theme} label={t("complaints.search")}>
-                    <input
-                      type="search"
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={t("complaints.search")}
-                      style={inputStyle}
-                    />
-                  </Field>
-                  <Field theme={theme} label={t("complaints.allStatuses")}>
-                    <select
-                      value={statusFilter}
-                      onChange={(event) =>
-                        setStatusFilter(event.target.value as ComplaintCaseStatus | "all")
-                      }
-                      style={inputStyle}
-                    >
-                      <option value="all">{t("complaints.allStatuses")}</option>
-                      {STATUS_OPTIONS.map((status) => (
-                        <option key={status} value={status}>
-                          {formatOpsCodeLabel(locale, status)}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field theme={theme} label={t("complaints.allCategories")}>
-                    <select
-                      value={categoryFilter}
-                      onChange={(event) =>
-                        setCategoryFilter(event.target.value as ComplaintCategory | "all")
-                      }
-                      style={inputStyle}
-                    >
-                      <option value="all">{t("complaints.allCategories")}</option>
-                      {CATEGORY_OPTIONS.map((category) => (
-                        <option key={category} value={category}>
-                          {formatOpsCodeLabel(locale, category)}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-              ) : null}
-
-              {showCreate ? (
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 12,
-                    paddingTop: 16,
-                    borderTop: `1px solid ${theme.border}`,
-                  }}
+            <div style={filterGridStyle}>
+              <Field theme={theme} label={t("common.search")}>
+                <input
+                  type="search"
+                  style={controlStyle(theme)}
+                  placeholder={t("complaints.search")}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </Field>
+              <Field theme={theme} label={t("complaints.allStatuses")}>
+                <select
+                  style={controlStyle(theme)}
+                  value={statusFilter}
+                  onChange={(event) =>
+                    setStatusFilter(
+                      event.target.value as ComplaintCaseStatus | "all",
+                    )
+                  }
                 >
-                  <div style={createGridStyle}>
-                    <Field theme={theme} label={t("complaints.form.source")}>
-                      <select
-                        value={createForm.caseSource}
-                        onChange={(event) =>
-                          setCreateForm((current: CreateComplaintCaseCommand) => ({
-                            ...current,
-                            caseSource: event.target
-                              .value as CreateComplaintCaseCommand["caseSource"],
-                          }))
-                        }
-                        style={inputStyle}
-                      >
-                        {(["ops", "phone", "web", "app"] as const).map((source) => (
-                          <option key={source} value={source}>
-                            {formatOpsCodeLabel(locale, source)}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field theme={theme} label={t("complaints.form.category")}>
-                      <select
-                        value={createForm.category}
-                        onChange={(event) =>
-                          setCreateForm((current: CreateComplaintCaseCommand) => ({
-                            ...current,
-                            category: event.target.value as ComplaintCategory,
-                          }))
-                        }
-                        style={inputStyle}
-                      >
-                        {CATEGORY_OPTIONS.map((category) => (
-                          <option key={category} value={category}>
-                            {formatOpsCodeLabel(locale, category)}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field theme={theme} label={t("complaints.form.severity")}>
-                      <select
-                        value={createForm.severity}
-                        onChange={(event) =>
-                          setCreateForm((current: CreateComplaintCaseCommand) => ({
-                            ...current,
-                            severity: event.target
-                              .value as CreateComplaintCaseCommand["severity"],
-                          }))
-                        }
-                        style={inputStyle}
-                      >
-                        {(["normal", "high"] as const).map((severity) => (
-                          <option key={severity} value={severity}>
-                            {formatOpsCodeLabel(locale, severity)}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field theme={theme} label={t("complaints.form.relatedOrder")}>
-                      <input
-                        type="text"
-                        value={createForm.relatedOrderId ?? ""}
-                        onChange={(event) =>
-                          setCreateForm((current: CreateComplaintCaseCommand) => ({
-                            ...current,
-                            relatedOrderId: event.target.value,
-                          }))
-                        }
-                        style={inputStyle}
-                      />
-                    </Field>
-                    <Field theme={theme} label={t("complaints.form.relatedCall")}>
-                      <input
-                        type="text"
-                        value={createForm.relatedCallId ?? ""}
-                        onChange={(event) =>
-                          setCreateForm((current: CreateComplaintCaseCommand) => ({
-                            ...current,
-                            relatedCallId: event.target.value,
-                          }))
-                        }
-                        style={inputStyle}
-                      />
-                    </Field>
-                  </div>
-
-                  <Field theme={theme} label={t("complaints.form.description")}>
-                    <textarea
-                      rows={4}
-                      value={createForm.description}
-                      onChange={(event) =>
-                        setCreateForm((current: CreateComplaintCaseCommand) => ({
-                          ...current,
-                          description: event.target.value,
-                        }))
-                      }
-                      style={textAreaStyle}
-                    />
-                  </Field>
-
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      disabled={busyKey === "create-complaint"}
-                      style={actionButtonStyle("primary")}
-                      onClick={() =>
-                        void runAction("create-complaint", async () => {
-                          await getOpsClient().createComplaint({
-                            ...createForm,
-                            relatedOrderId: createForm.relatedOrderId || null,
-                            relatedCallId: createForm.relatedCallId || null,
-                          });
-                          setCreateForm(INITIAL_CREATE_FORM);
-                          setShowCreate(false);
-                          await loadRecords();
-                        })
-                      }
-                    >
-                      {busyKey === "create-complaint"
-                        ? t("complaints.form.saving")
-                        : t("complaints.form.createRecord")}
-                    </button>
-                    <button
-                      type="button"
-                      style={actionButtonStyle()}
-                      onClick={() => setShowCreate(false)}
-                    >
-                      {t("common.cancel")}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
+                  <option value="all">{t("complaints.allStatuses")}</option>
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {formatOpsCodeLabel(locale, status)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field theme={theme} label={t("complaints.allCategories")}>
+                <select
+                  style={controlStyle(theme)}
+                  value={categoryFilter}
+                  onChange={(event) =>
+                    setCategoryFilter(
+                      event.target.value as ComplaintCategory | "all",
+                    )
+                  }
+                >
+                  <option value="all">{t("complaints.allCategories")}</option>
+                  {CATEGORY_OPTIONS.map((category) => (
+                    <option key={category} value={category}>
+                      {formatOpsCodeLabel(locale, category)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field
+                theme={theme}
+                label={copy(locale, "Dataset", "資料集")}
+                hint={copy(locale, "Quick queue summary", "目前 table 摘要")}
+              >
+                <DL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      label: copy(locale, "Visible", "顯示中"),
+                      value: `${filteredRecords.length}`,
+                      mono: true,
+                    },
+                    {
+                      label: copy(locale, "Hotline linked", "已連結熱線"),
+                      value: `${hotlineLinked}`,
+                      mono: true,
+                    },
+                  ]}
+                />
+              </Field>
+            </div>
+            <div style={actionRowStyle}>
+              <Btn
+                theme={theme}
+                onClick={() => void loadRecords(selectedCaseNo ?? undefined)}
+              >
+                {t("common.refresh")}
+              </Btn>
+              <Btn
+                theme={theme}
+                variant="ghost"
+                onClick={() => {
+                  setQuery("");
+                  setStatusFilter("all");
+                  setCategoryFilter("all");
+                }}
+              >
+                {copy(locale, "Reset", "重設")}
+              </Btn>
             </div>
           </Card>
         ) : null}
 
-        <Card
-          theme={theme}
-          title={t("complaints.caseList")}
-          subtitle={t("complaints.results", { count: filteredRecords.length })}
-          padding={0}
-          actions={
-            <Btn theme={theme} onClick={() => void loadRecords()}>
-              {t("common.refresh")}
-            </Btn>
-          }
-        >
-          {loading ? (
-            <div style={{ padding: 16, color: theme.textDim, fontSize: 12.5 }}>
-              {t("complaints.loading")}
-            </div>
-          ) : filteredRecords.length === 0 ? (
-            <div style={{ padding: 16 }}>
-              <Banner
+        {showCreate ? (
+          <Card
+            theme={theme}
+            title={t("complaints.createTitle")}
+            subtitle={t("complaints.createNote")}
+          >
+            <div style={filterGridStyle}>
+              <Field theme={theme} label={t("complaints.form.source")} required>
+                <select
+                  style={controlStyle(theme)}
+                  value={createForm.caseSource}
+                  onChange={(event) =>
+                    setCreateForm((current) => ({
+                      ...current,
+                      caseSource: event.target
+                        .value as CreateComplaintCaseCommand["caseSource"],
+                    }))
+                  }
+                >
+                  <option value="ops">
+                    {formatOpsCodeLabel(locale, "ops")}
+                  </option>
+                  <option value="phone">
+                    {formatOpsCodeLabel(locale, "phone")}
+                  </option>
+                  <option value="web">
+                    {formatOpsCodeLabel(locale, "web")}
+                  </option>
+                  <option value="app">
+                    {formatOpsCodeLabel(locale, "app")}
+                  </option>
+                </select>
+              </Field>
+              <Field
                 theme={theme}
-                tone="info"
-                title={t("complaints.empty")}
-                body={t("complaints.noSelection")}
-              />
+                label={t("complaints.form.category")}
+                required
+              >
+                <select
+                  style={controlStyle(theme)}
+                  value={createForm.category}
+                  onChange={(event) =>
+                    setCreateForm((current) => ({
+                      ...current,
+                      category: event.target.value as ComplaintCategory,
+                    }))
+                  }
+                >
+                  {CATEGORY_OPTIONS.map((category) => (
+                    <option key={category} value={category}>
+                      {formatOpsCodeLabel(locale, category)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field
+                theme={theme}
+                label={t("complaints.form.severity")}
+                required
+              >
+                <select
+                  style={controlStyle(theme)}
+                  value={createForm.severity}
+                  onChange={(event) =>
+                    setCreateForm((current) => ({
+                      ...current,
+                      severity: event.target
+                        .value as CreateComplaintCaseCommand["severity"],
+                    }))
+                  }
+                >
+                  <option value="normal">
+                    {formatOpsCodeLabel(locale, "normal")}
+                  </option>
+                  <option value="high">
+                    {formatOpsCodeLabel(locale, "high")}
+                  </option>
+                </select>
+              </Field>
+              <Field theme={theme} label={t("complaints.form.relatedOrder")}>
+                <input
+                  type="text"
+                  style={controlStyle(theme, { mono: true })}
+                  value={createForm.relatedOrderId ?? ""}
+                  onChange={(event) =>
+                    setCreateForm((current) => ({
+                      ...current,
+                      relatedOrderId: event.target.value,
+                    }))
+                  }
+                />
+              </Field>
+              <Field theme={theme} label={t("complaints.form.relatedCall")}>
+                <input
+                  type="text"
+                  style={controlStyle(theme, { mono: true })}
+                  value={createForm.relatedCallId ?? ""}
+                  onChange={(event) =>
+                    setCreateForm((current) => ({
+                      ...current,
+                      relatedCallId: event.target.value,
+                    }))
+                  }
+                />
+              </Field>
+              <Field
+                theme={theme}
+                label={t("complaints.form.description")}
+                required
+              >
+                <textarea
+                  rows={4}
+                  style={controlStyle(theme, { minHeight: 104 })}
+                  value={createForm.description}
+                  onChange={(event) =>
+                    setCreateForm((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                />
+              </Field>
             </div>
-          ) : (
-            <Table theme={theme} columns={tableColumns} rows={tableRows} />
-          )}
-        </Card>
+            <div style={actionRowStyle}>
+              <Btn
+                theme={theme}
+                variant="primary"
+                icon="check"
+                disabled={!canCreate}
+                onClick={() => void handleCreateComplaint()}
+              >
+                {busyKey === "create-complaint"
+                  ? t("complaints.form.saving")
+                  : t("complaints.form.createRecord")}
+              </Btn>
+              <Btn
+                theme={theme}
+                variant="ghost"
+                onClick={() => setShowCreate(false)}
+              >
+                {t("common.cancel")}
+              </Btn>
+            </div>
+          </Card>
+        ) : null}
+
+        {showWorkspace && selectedRecord ? (
+          <div style={workspaceGridStyle}>
+            <Card
+              theme={theme}
+              title={`${selectedRecord.caseNo} / ${formatOpsCodeLabel(
+                locale,
+                selectedRecord.category,
+              )}`}
+              subtitle={copy(
+                locale,
+                "Selected complaint workspace",
+                "已選客訴 workspace",
+              )}
+              actions={
+                <Btn
+                  theme={theme}
+                  variant="ghost"
+                  onClick={() => setShowWorkspace(false)}
+                >
+                  {copy(locale, "Hide workspace", "隱藏 workspace")}
+                </Btn>
+              }
+            >
+              <div style={detailStackStyle}>
+                <div style={pillRowStyle}>
+                  <Pill theme={theme} tone={getStatusTone(selectedRecord)} dot>
+                    {formatOpsCodeLabel(locale, selectedRecord.status)}
+                  </Pill>
+                  <Pill
+                    theme={theme}
+                    tone={getSeverityTone(selectedRecord)}
+                    dot
+                  >
+                    {selectedRecord.slaBreach
+                      ? copy(locale, "SLA breach", "SLA 違規")
+                      : formatOpsCodeLabel(locale, selectedRecord.severity)}
+                  </Pill>
+                  {selectedRecord.relatedIncidentId ? (
+                    <Pill theme={theme} tone="danger" dot>
+                      {copy(locale, "incident linked", "已連結 incident")}
+                    </Pill>
+                  ) : null}
+                </div>
+
+                <DL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      label: t("common.status"),
+                      value: formatOpsCodeLabel(locale, selectedRecord.status),
+                    },
+                    {
+                      label: t("complaints.detail.assignee"),
+                      value:
+                        selectedRecord.assigneeId ?? t("complaints.unassigned"),
+                      mono: true,
+                    },
+                    {
+                      label: copy(locale, "SLA due", "SLA 截止"),
+                      value: formatDateTime(locale, selectedRecord.slaDueAt),
+                      mono: true,
+                    },
+                    {
+                      label: copy(locale, "SLA breach", "SLA 違規"),
+                      value: selectedRecord.slaBreach
+                        ? t("common.yes")
+                        : t("common.no"),
+                    },
+                    {
+                      label: t("complaints.detail.orderCall"),
+                      value: `${selectedRecord.relatedOrderId ?? "-"} / ${
+                        selectedRecord.relatedCallId ?? "-"
+                      }`,
+                      mono: true,
+                    },
+                    {
+                      label: t("complaints.detail.resolution"),
+                      value: selectedRecord.resolutionCode
+                        ? formatOpsCodeLabel(
+                            locale,
+                            selectedRecord.resolutionCode,
+                          )
+                        : "-",
+                    },
+                    {
+                      label: t("complaints.detail.reopenCount"),
+                      value: `${selectedRecord.reopenCount ?? 0}`,
+                      mono: true,
+                    },
+                    {
+                      label: t("complaints.detail.linkedIncident"),
+                      value: selectedRecord.relatedIncidentId ? (
+                        <Link
+                          href={`/incidents?incidentId=${encodeURIComponent(
+                            selectedRecord.relatedIncidentId,
+                          )}`}
+                          style={actionLinkStyle(theme)}
+                        >
+                          {selectedRecord.relatedIncidentId}
+                        </Link>
+                      ) : (
+                        "-"
+                      ),
+                    },
+                  ]}
+                />
+
+                <div
+                  style={{
+                    color: theme.text,
+                    lineHeight: 1.5,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {selectedRecord.description}
+                </div>
+
+                <div style={actionRowStyle}>
+                  {!selectedRecord.slaBreach ? (
+                    <Btn
+                      theme={theme}
+                      danger
+                      icon="warn"
+                      disabled={busyKey === "sla-breach"}
+                      onClick={() => void handleMarkSlaBreach()}
+                    >
+                      {t("complaints.markSlaBreach")}
+                    </Btn>
+                  ) : null}
+                  {!selectedRecord.relatedIncidentId &&
+                  (selectedRecord.slaBreach ||
+                    selectedRecord.severity === "high") ? (
+                    <Link
+                      href={buildIncidentHandoffHref(selectedRecord)}
+                      style={actionLinkStyle(theme)}
+                    >
+                      {copy(
+                        locale,
+                        "Prepare incident handoff",
+                        "準備 incident handoff",
+                      )}
+                    </Link>
+                  ) : null}
+                </div>
+
+                <div style={actionGridStyle}>
+                  <Card
+                    theme={theme}
+                    title={t("complaints.assignCase")}
+                    subtitle={t("complaints.assignForm.title")}
+                  >
+                    <Field
+                      theme={theme}
+                      label={t("complaints.assignForm.agentId")}
+                    >
+                      <input
+                        type="text"
+                        style={controlStyle(theme, { mono: true })}
+                        value={assigneeId}
+                        onChange={(event) => setAssigneeId(event.target.value)}
+                      />
+                    </Field>
+                    <Field theme={theme} label={t("common.notes")}>
+                      <textarea
+                        rows={3}
+                        style={controlStyle(theme, { minHeight: 92 })}
+                        placeholder={t("complaints.assignmentNotePlaceholder")}
+                        value={assignmentNote}
+                        onChange={(event) =>
+                          setAssignmentNote(event.target.value)
+                        }
+                      />
+                    </Field>
+                    <Btn
+                      theme={theme}
+                      disabled={!canAssign}
+                      onClick={() => void handleAssignCase()}
+                    >
+                      {t("complaints.assign")}
+                    </Btn>
+                  </Card>
+
+                  <Card
+                    theme={theme}
+                    title={t("complaints.addNote")}
+                    subtitle={copy(
+                      locale,
+                      "Append investigation context without replacing history.",
+                      "補充調查內容，不覆蓋既有歷史。",
+                    )}
+                  >
+                    <Field theme={theme} label={t("common.notes")}>
+                      <textarea
+                        rows={4}
+                        style={controlStyle(theme, { minHeight: 112 })}
+                        placeholder={t(
+                          "complaints.investigationNotePlaceholder",
+                        )}
+                        value={noteText}
+                        onChange={(event) => setNoteText(event.target.value)}
+                      />
+                    </Field>
+                    <Btn
+                      theme={theme}
+                      disabled={!canAddNote}
+                      onClick={() => void handleAddNote()}
+                    >
+                      {t("complaints.saveNote")}
+                    </Btn>
+                  </Card>
+
+                  <Card
+                    theme={theme}
+                    title={t("complaints.resolveCase")}
+                    subtitle={t("complaints.resolveForm.title")}
+                  >
+                    <Field
+                      theme={theme}
+                      label={t("complaints.resolveForm.resolution")}
+                    >
+                      <select
+                        style={controlStyle(theme)}
+                        value={resolutionCode}
+                        onChange={(event) =>
+                          setResolutionCode(
+                            event.target.value as ComplaintResolutionCode,
+                          )
+                        }
+                      >
+                        {validResolutionCodes.map((code) => (
+                          <option key={code} value={code}>
+                            {formatOpsCodeLabel(locale, code)}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field theme={theme} label={t("common.notes")}>
+                      <textarea
+                        rows={4}
+                        style={controlStyle(theme, { minHeight: 112 })}
+                        placeholder={t("complaints.closingNotePlaceholder")}
+                        value={closingNote}
+                        onChange={(event) => setClosingNote(event.target.value)}
+                      />
+                    </Field>
+                    <div style={actionRowStyle}>
+                      <Btn
+                        theme={theme}
+                        disabled={!canResolve}
+                        onClick={() => void handleResolveCase(false)}
+                      >
+                        {t("complaints.resolve")}
+                      </Btn>
+                      <Btn
+                        theme={theme}
+                        variant="primary"
+                        disabled={!canClose}
+                        onClick={() => void handleResolveCase(true)}
+                      >
+                        {t("complaints.close")}
+                      </Btn>
+                    </div>
+                  </Card>
+
+                  <Card
+                    theme={theme}
+                    title={t("complaints.reopenCase")}
+                    subtitle={t("complaints.reopenForm.title")}
+                  >
+                    <Field
+                      theme={theme}
+                      label={t("complaints.reopenForm.reason")}
+                    >
+                      <textarea
+                        rows={4}
+                        style={controlStyle(theme, { minHeight: 112 })}
+                        placeholder={t("complaints.reopenReasonPlaceholder")}
+                        value={reopenReason}
+                        onChange={(event) =>
+                          setReopenReason(event.target.value)
+                        }
+                      />
+                    </Field>
+                    <Btn
+                      theme={theme}
+                      disabled={!canReopen}
+                      onClick={() => void handleReopenCase()}
+                    >
+                      {t("complaints.reopen")}
+                    </Btn>
+                  </Card>
+
+                  {!selectedRecord.relatedIncidentId ? (
+                    <Card
+                      theme={theme}
+                      title={t("complaints.escalateToIncident")}
+                      subtitle={t("complaints.escalateForm.title")}
+                    >
+                      <Field
+                        theme={theme}
+                        label={t("complaints.escalateTitlePlaceholder")}
+                        required
+                      >
+                        <input
+                          type="text"
+                          style={controlStyle(theme)}
+                          value={escalateTitle}
+                          onChange={(event) =>
+                            setEscalateTitle(event.target.value)
+                          }
+                        />
+                      </Field>
+                      <Field
+                        theme={theme}
+                        label={t("complaints.form.severity")}
+                      >
+                        <select
+                          style={controlStyle(theme)}
+                          value={escalateSeverity}
+                          onChange={(event) =>
+                            setEscalateSeverity(
+                              event.target
+                                .value as EscalateComplaintToIncidentCommand["severity"],
+                            )
+                          }
+                        >
+                          {ESCALATION_SEVERITY_OPTIONS.map((severity) => (
+                            <option key={severity} value={severity}>
+                              {formatOpsCodeLabel(locale, severity)}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field
+                        theme={theme}
+                        label={t("complaints.escalateForm.reason")}
+                        required
+                      >
+                        <textarea
+                          rows={4}
+                          style={controlStyle(theme, { minHeight: 112 })}
+                          placeholder={t(
+                            "complaints.escalateReasonPlaceholder",
+                          )}
+                          value={escalateReason}
+                          onChange={(event) =>
+                            setEscalateReason(event.target.value)
+                          }
+                        />
+                      </Field>
+                      <Btn
+                        theme={theme}
+                        variant="primary"
+                        icon="warn"
+                        disabled={!canEscalate}
+                        onClick={() => void handleEscalateCase()}
+                      >
+                        {t("complaints.escalateBtn")}
+                      </Btn>
+                    </Card>
+                  ) : null}
+                </div>
+              </div>
+            </Card>
+
+            <Card
+              theme={theme}
+              title={t("complaints.timelineExport")}
+              subtitle={copy(
+                locale,
+                "Audit packet readiness and immutable case timeline.",
+                "稽核封包就緒狀態與不可覆寫的案件時間軸。",
+              )}
+            >
+              <div style={detailStackStyle}>
+                <Banner
+                  theme={theme}
+                  tone={exportView?.readyForAudit ? "info" : "warn"}
+                  icon={exportView?.readyForAudit ? "ok" : "clock"}
+                  title={
+                    exportView?.readyForAudit
+                      ? t("complaints.readyForAudit")
+                      : t("complaints.notExportReady")
+                  }
+                  body={t("complaints.exportGenerated", {
+                    value: formatDateTimeWithSeconds(
+                      locale,
+                      exportView?.exportGeneratedAt,
+                    ),
+                  })}
+                />
+
+                <DL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      label: copy(locale, "Selected case", "目前案件"),
+                      value: selectedRecord.caseNo,
+                      mono: true,
+                    },
+                    {
+                      label: copy(locale, "Timeline entries", "時間軸筆數"),
+                      value: `${timeline.length}`,
+                      mono: true,
+                    },
+                  ]}
+                />
+
+                <div style={timelineListStyle}>
+                  {timeline.length > 0 ? (
+                    timeline.map((entry) => (
+                      <div
+                        key={entry.entryId}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${theme.border}`,
+                          background: theme.surfaceLo,
+                          display: "grid",
+                          gap: 4,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <strong style={{ fontSize: 12.5 }}>
+                            {formatOpsCodeLabel(locale, entry.action)}
+                          </strong>
+                          <span
+                            style={{
+                              color: theme.textMuted,
+                              fontSize: 11.5,
+                              fontFamily: theme.monoFamily,
+                            }}
+                          >
+                            {formatDateTimeWithSeconds(locale, entry.createdAt)}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            color: theme.text,
+                            fontSize: 12.5,
+                            lineHeight: 1.45,
+                            whiteSpace: "pre-wrap",
+                          }}
+                        >
+                          {entry.note}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={emptyStateStyle}>
+                      {t("complaints.timelineEmpty")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          </div>
+        ) : null}
       </div>
     </Shell>
   );
