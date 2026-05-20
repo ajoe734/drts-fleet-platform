@@ -10,9 +10,6 @@ import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
-  CanvasDL as DL,
-  CanvasField as Field,
-  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasShell as Shell,
@@ -41,6 +38,12 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
+const KIND_PRIORITY: Record<ContractKind, number> = {
+  fleet_lease: 0,
+  partner_program: 1,
+  forwarder: 2,
+};
+
 const pageStackStyle = {
   minHeight: "100%",
   display: "flex",
@@ -49,33 +52,6 @@ const pageStackStyle = {
 
 const pageBodyStyle = {
   padding: 24,
-  display: "grid",
-  gap: 16,
-  alignContent: "start",
-};
-
-const supportGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.35fr) minmax(260px, 0.9fr)",
-  gap: 16,
-  alignItems: "start",
-};
-
-const kpiGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-  gap: 12,
-};
-
-const supportStackStyle = {
-  display: "grid",
-  gap: 12,
-};
-
-const pillRowStyle = {
-  display: "flex",
-  flexWrap: "wrap" as const,
-  gap: 8,
 };
 
 const emptyStateStyle = {
@@ -84,14 +60,6 @@ const emptyStateStyle = {
   color: theme.textMuted,
   fontSize: 12.5,
   lineHeight: 1.55,
-};
-
-const fieldBodyStyle = {
-  minHeight: 48,
-  borderRadius: 8,
-  border: `1px solid ${theme.border}`,
-  background: theme.surfaceLo,
-  padding: 10,
 };
 
 function buildShellNav(locale: Locale): CanvasShellNavItem[] {
@@ -214,35 +182,10 @@ function formatDate(value: string | null, locale: Locale) {
   );
 }
 
-function formatDateTime(value: string | null, locale: Locale) {
-  if (!value) return t("common.dash", locale);
-  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "UTC",
-  })
-    .format(new Date(value))
-    .replace(",", "");
-}
-
 function formatTerm(startAt: string, endAt: string | null, locale: Locale) {
   const start = formatDate(startAt, locale);
   const end = endAt ? formatDate(endAt, locale) : "ongoing";
   return `${start} → ${end}`;
-}
-
-function getLatestUpdatedAt(
-  values: Array<string | null | undefined>,
-): string | null {
-  return values.reduce<string | null>((latest, value) => {
-    if (!value) return latest;
-    if (!latest) return value;
-    return value.localeCompare(latest) > 0 ? value : latest;
-  }, null);
 }
 
 function inferContractKind(contract: VehicleContractRecord): ContractKind {
@@ -280,34 +223,36 @@ function buildContractRows(
   partnerNameBySlug: Map<string, string>,
   locale: Locale,
 ): ContractRow[] {
-  return contracts.map((contract) => {
-    const kind = inferContractKind(contract);
-    const now = Date.now();
-    const endAt = Date.parse(contract.endAt);
-    const expiringSoon =
-      contract.status === "active" &&
-      Number.isFinite(endAt) &&
-      endAt >= now &&
-      endAt - now <= 1000 * 60 * 60 * 24 * 45;
+  const now = Date.now();
 
-    return {
-      contractId: contract.contractId,
-      counterparty:
-        partnerNameBySlug.get(contract.partnerId) ?? contract.partnerId,
-      kind,
-      termLabel: formatTerm(contract.startAt, contract.endAt, locale),
-      revenueShare: revenueShareLabel(kind),
-      displayStatus: expiringSoon ? "expiring" : contract.status,
-    };
-  });
-}
+  return contracts
+    .map<ContractRow>((contract) => {
+      const kind = inferContractKind(contract);
+      const endAt = Date.parse(contract.endAt);
+      const expiringSoon =
+        contract.status === "active" &&
+        Number.isFinite(endAt) &&
+        endAt >= now &&
+        endAt - now <= 1000 * 60 * 60 * 24 * 45;
+      const displayStatus = (
+        expiringSoon ? "expiring" : contract.status
+      ) as DisplayContractStatus;
 
-function queueCountByStatus(
-  reviewQueue: PartnerEligibilityReviewQueueItem[],
-  status: PartnerEligibilityReviewQueueItem["verificationStatus"],
-) {
-  return reviewQueue.filter((item) => item.verificationStatus === status)
-    .length;
+      return {
+        contractId: contract.contractId,
+        counterparty:
+          partnerNameBySlug.get(contract.partnerId) ?? contract.partnerId,
+        kind,
+        termLabel: formatTerm(contract.startAt, contract.endAt, locale),
+        revenueShare: revenueShareLabel(kind),
+        displayStatus,
+      };
+    })
+    .sort((left, right) => {
+      const kindOrder = KIND_PRIORITY[left.kind] - KIND_PRIORITY[right.kind];
+      if (kindOrder !== 0) return kindOrder;
+      return left.contractId.localeCompare(right.contractId);
+    });
 }
 
 export default async function ContractsPage() {
@@ -335,33 +280,6 @@ export default async function ContractsPage() {
     partnerEntries.map((entry) => [entry.entrySlug, entry.displayName]),
   );
   const contractRows = buildContractRows(contracts, partnerNameBySlug, locale);
-  const activeContracts = contracts.filter(
-    (contract) => contract.status === "active",
-  ).length;
-  const draftContracts = contracts.filter(
-    (contract) => contract.status === "draft",
-  ).length;
-  const manualReviewCount = queueCountByStatus(reviewQueue, "manual_review");
-  const deniedCount = queueCountByStatus(reviewQueue, "ineligible");
-  const kindCounts = contractRows.reduce<Record<ContractKind, number>>(
-    (acc, row) => {
-      acc[row.kind] += 1;
-      return acc;
-    },
-    {
-      fleet_lease: 0,
-      partner_program: 0,
-      forwarder: 0,
-    },
-  );
-  const coveredKindsCount = Object.values(kindCounts).filter(
-    (count) => count > 0,
-  ).length;
-  const lastUpdatedAt = getLatestUpdatedAt([
-    ...contracts.map((contract) => contract.updatedAt),
-    ...partnerEntries.map((entry) => entry.updatedAt),
-    ...reviewQueue.map((item) => item.updatedAt),
-  ]);
   const nav = buildShellNav(locale);
 
   const columns: CanvasTableColumn<ContractRow>[] = [
@@ -380,6 +298,7 @@ export default async function ContractsPage() {
       h: "KIND",
       k: "kind",
       w: 130,
+      mono: true,
       r: (row) => (
         <Pill theme={theme} tone={kindTone(row.kind)}>
           {row.kind}
@@ -431,14 +350,12 @@ export default async function ContractsPage() {
       <div style={pageStackStyle}>
         <PageHeader
           theme={theme}
-          title={t("nav.contracts", locale)}
-          subtitle={
-            locale === "zh"
-              ? "車隊合約 · partner relation · revenue share"
-              : "vehicle contracts · partner relation · revenue share"
-          }
+          title={t("contracts.title", locale)}
+          subtitle={t("contracts.subtitle", locale, {
+            count: contracts.length,
+          })}
           actions={
-            <Btn theme={theme} variant="primary" icon="plus" disabled>
+            <Btn theme={theme} variant="primary" icon="plus">
               {locale === "zh" ? "建立合約" : "Create contract"}
             </Btn>
           }
@@ -455,14 +372,16 @@ export default async function ContractsPage() {
           ) : null}
 
           {!error && reviewQueue.length > 0 ? (
-            <Banner
-              theme={theme}
-              tone={manualReviewCount > 0 ? "warn" : "info"}
-              title={t("contracts.reviewTitle", locale)}
-              body={t("contracts.reviewAlert", locale, {
-                count: reviewQueue.length,
-              })}
-            />
+            <div style={{ marginBottom: 16 }}>
+              <Banner
+                theme={theme}
+                tone="warn"
+                title={t("contracts.reviewTitle", locale)}
+                body={t("contracts.reviewAlert", locale, {
+                  count: reviewQueue.length,
+                })}
+              />
+            </div>
           ) : null}
 
           <Card theme={theme} padding={contractRows.length > 0 ? 0 : 24}>
@@ -471,126 +390,6 @@ export default async function ContractsPage() {
             ) : (
               <p style={emptyStateStyle}>{t("contracts.empty", locale)}</p>
             )}
-          </Card>
-
-          <Card
-            theme={theme}
-            title={t("contracts.title", locale)}
-            subtitle={t("contracts.registrySummary", locale, {
-              active: activeContracts,
-              draft: draftContracts,
-              attention: reviewQueue.length,
-            })}
-          >
-            <div style={supportGridStyle}>
-              <div style={supportStackStyle}>
-                <div style={kpiGridStyle}>
-                  <KPI
-                    theme={theme}
-                    label={
-                      locale === "zh" ? "Total contracts" : "Total contracts"
-                    }
-                    value={String(contracts.length)}
-                    sub={t("contracts.subtitle", locale, {
-                      count: contracts.length,
-                    })}
-                    delta={`${activeContracts} active`}
-                    deltaTone={activeContracts > 0 ? "up" : "neutral"}
-                  />
-                  <KPI
-                    theme={theme}
-                    label={locale === "zh" ? "Review queue" : "Review queue"}
-                    value={String(reviewQueue.length)}
-                    sub={t("contracts.reviewRegistrySummary", locale, {
-                      total: reviewQueue.length,
-                      manual: manualReviewCount,
-                    })}
-                    delta={`${manualReviewCount} manual`}
-                    deltaTone={manualReviewCount > 0 ? "down" : "neutral"}
-                  />
-                  <KPI
-                    theme={theme}
-                    label={locale === "zh" ? "Kinds covered" : "Kinds covered"}
-                    value={String(coveredKindsCount)}
-                    sub="fleet_lease · partner_program · forwarder"
-                    delta={`${kindCounts.forwarder} forwarder`}
-                    deltaTone={kindCounts.forwarder > 0 ? "up" : "neutral"}
-                  />
-                </div>
-
-                <Field
-                  theme={theme}
-                  label={locale === "zh" ? "Registry mix" : "Registry mix"}
-                  hint={
-                    locale === "zh"
-                      ? "以 kind、term、revenue share 為主軸，維持與 OC_Contracts 相同掃描順序。"
-                      : "The scan order stays aligned to OC_Contracts: kind, term, then revenue share."
-                  }
-                >
-                  <div style={fieldBodyStyle}>
-                    <div style={pillRowStyle}>
-                      <Pill theme={theme} tone="neutral">
-                        fleet_lease {kindCounts.fleet_lease}
-                      </Pill>
-                      <Pill theme={theme} tone="info">
-                        partner_program {kindCounts.partner_program}
-                      </Pill>
-                      <Pill theme={theme} tone="accent">
-                        forwarder {kindCounts.forwarder}
-                      </Pill>
-                      <Pill theme={theme} tone="success">
-                        active {activeContracts}
-                      </Pill>
-                      {draftContracts > 0 ? (
-                        <Pill theme={theme} tone="neutral">
-                          draft {draftContracts}
-                        </Pill>
-                      ) : null}
-                      {manualReviewCount > 0 ? (
-                        <Pill theme={theme} tone="warn">
-                          manual_review {manualReviewCount}
-                        </Pill>
-                      ) : null}
-                    </div>
-                  </div>
-                </Field>
-              </div>
-
-              <DL
-                theme={theme}
-                cols={1}
-                items={[
-                  {
-                    k: locale === "zh" ? "Partner entries" : "Partner entries",
-                    v: String(partnerEntries.length),
-                    mono: true,
-                  },
-                  {
-                    k: locale === "zh" ? "Draft contracts" : "Draft contracts",
-                    v: String(draftContracts),
-                    mono: true,
-                  },
-                  {
-                    k:
-                      locale === "zh"
-                        ? "Eligibility denied"
-                        : "Eligibility denied",
-                    v: String(deniedCount),
-                    mono: true,
-                  },
-                  {
-                    k: locale === "zh" ? "Revenue lanes" : "Revenue lanes",
-                    v: "70/30 · sponsor settle · 85/15",
-                    mono: true,
-                  },
-                  {
-                    k: locale === "zh" ? "Last updated" : "Last updated",
-                    v: formatDateTime(lastUpdatedAt, locale),
-                    mono: true,
-                  },
-                ]}
-              />
-            </div>
           </Card>
         </div>
       </div>
