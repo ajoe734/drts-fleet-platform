@@ -54,18 +54,15 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const shellViewportStyle = {
-  position: "fixed" as const,
-  inset: 0,
-  zIndex: 40,
-  background: theme.bg,
-};
-
 const pageStackStyle = {
   padding: 24,
   display: "flex",
   flexDirection: "column" as const,
-  gap: 12,
+  gap: 16,
+} as const;
+
+const sectionCardStyle = {
+  overflow: "hidden",
 } as const;
 
 async function resolveSearchParams(
@@ -328,6 +325,12 @@ function getDeviceLabel(driver: DriverRegistryRecord, locale: Locale) {
   return activeBinding.deviceLabel ?? activeBinding.deviceId;
 }
 
+function getHeaderSubtitle(locale: Locale) {
+  return locale === "en"
+    ? "master roster · shifts · license · eligibility · location watch"
+    : "總表 · 班別 · license · eligibility · 定位監看";
+}
+
 export default async function DriversPage({ searchParams }: DriversPageProps) {
   const [client, locale, resolvedSearchParams] = await Promise.all([
     getServerOpsClient(),
@@ -383,7 +386,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     (driver) => driver.dispatchEligible,
   ).length;
   const blockedCount = Math.max(drivers.length - eligibleCount, 0);
-  const headerSubtitle = t("drivers.registrySummary", locale, {
+  const registrySummary = t("drivers.registrySummary", locale, {
     eligible: String(eligibleCount),
     blocked: String(blockedCount),
     live: String(locationStats.live),
@@ -507,7 +510,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
       ),
     },
     {
-      h: "EXCL.",
+      h: "ELIG.",
       w: 112,
       r: (row) => (
         <Pill
@@ -535,75 +538,86 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   ];
 
   return (
-    <div style={shellViewportStyle}>
-      <Shell
+    <Shell
+      theme={theme}
+      nav={buildShellNav(locale)}
+      active="drivers"
+      currentPath="/drivers"
+      breadcrumb={[
+        locale === "en" ? "Registry" : "主資料",
+        t("nav.drivers", locale),
+      ]}
+      searchPlaceholder={locale === "en" ? "Search driver..." : "搜尋司機..."}
+      brandLabel={t("app.name", locale)}
+      brandSubLabel={t("app.sub", locale)}
+      env={locale === "en" ? "staging" : "測試"}
+      versionLabel="OC"
+      avatarLabel="OC"
+    >
+      <PageHeader
         theme={theme}
-        nav={buildShellNav(locale)}
-        active="drivers"
-        currentPath="/drivers"
-        breadcrumb={[
-          locale === "en" ? "Registry" : "主資料",
-          t("nav.drivers", locale),
-        ]}
-        searchPlaceholder={locale === "en" ? "Search driver..." : "搜尋司機..."}
-        brandLabel={t("app.name", locale)}
-        brandSubLabel={t("app.sub", locale)}
-        env={locale === "en" ? "staging" : "測試"}
-        versionLabel="OC"
-        avatarLabel="OC"
-      >
-        <PageHeader
-          theme={theme}
-          title={t("nav.drivers", locale)}
-          subtitle={headerSubtitle}
-          tabs={tabs}
-          activeTab={activeTabNode}
-          actions={
-            <Btn theme={theme} icon="filter">
-              {t("reports.detail.filters", locale)}
-            </Btn>
-          }
-        />
+        title={t("nav.drivers", locale)}
+        subtitle={getHeaderSubtitle(locale)}
+        tabs={tabs}
+        activeTab={activeTabNode}
+        actions={
+          <Btn theme={theme} icon="filter">
+            {t("reports.detail.filters", locale)}
+          </Btn>
+        }
+      />
 
-        <div style={pageStackStyle}>
-          {registryError ? (
-            <Banner
-              theme={theme}
-              tone="danger"
-              icon="warn"
-              title={t("drivers.list.registryUnavailable", locale)}
-              body={registryError}
-            />
+      <div style={pageStackStyle}>
+        {registryError ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={t("drivers.list.registryUnavailable", locale)}
+            body={registryError}
+          />
+        ) : null}
+        {locationsError ? (
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title={t("drivers.list.locationsUnavailable", locale)}
+            body={locationsError}
+          />
+        ) : null}
+        {!registryError ? (
+          <Banner
+            theme={theme}
+            tone="info"
+            icon="drivers"
+            title={registrySummary}
+            body={
+              locale === "en"
+                ? "List view stays read-first."
+                : "列表頁維持以讀取與判斷為主。"
+            }
+          />
+        ) : null}
+        {rows.length === 0 ? (
+          <Banner
+            theme={theme}
+            tone="info"
+            icon="warn"
+            title={t("drivers.empty", locale)}
+            body={
+              locale === "en"
+                ? "Adjust the current tab or wait for registry data."
+                : "請調整目前頁籤，或等待名冊資料回傳。"
+            }
+          />
+        ) : null}
+        <Card theme={theme} padding={0} style={sectionCardStyle}>
+          {rows.length > 0 ? (
+            <Table theme={theme} columns={columns} rows={rows} />
           ) : null}
-          {locationsError ? (
-            <Banner
-              theme={theme}
-              tone="warn"
-              icon="warn"
-              title={t("drivers.list.locationsUnavailable", locale)}
-              body={locationsError}
-            />
-          ) : null}
-          {rows.length === 0 ? (
-            <Banner
-              theme={theme}
-              tone="info"
-              icon="warn"
-              title={t("drivers.empty", locale)}
-              body={
-                locale === "en"
-                  ? "Adjust the current tab or wait for registry data."
-                  : "請調整目前頁籤，或等待名冊資料回傳。"
-              }
-            />
-          ) : null}
-          <Card theme={theme} padding={0}>
-            {rows.length > 0 ? (
-              <Table theme={theme} columns={columns} rows={rows} />
-            ) : null}
-          </Card>
-        </div>
-      </Shell>
-    </div>
+        </Card>
+      </div>
+    </Shell>
   );
 }
