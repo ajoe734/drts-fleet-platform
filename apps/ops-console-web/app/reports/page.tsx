@@ -169,7 +169,8 @@ const kpiGridStyle = {
 const tabRowStyle = {
   display: "flex",
   flexWrap: "wrap" as const,
-  gap: 8,
+  gap: 6,
+  padding: "0 4px",
 };
 
 const lowerGridStyle = {
@@ -198,6 +199,10 @@ const sectionStackStyle = {
 
 const tableCardStyle = {
   overflow: "hidden",
+};
+
+const tabCardStyle = {
+  padding: "4px 6px",
 };
 
 const cardBodyStackStyle = {
@@ -584,8 +589,7 @@ export default function ReportsPage() {
       h: "JOB",
       w: 132,
       mono: true,
-      r: (row, index) => {
-        const job = jobs[index];
+      r: (row) => {
         return (
           <button
             type="button"
@@ -593,7 +597,6 @@ export default function ReportsPage() {
             style={linkButtonStyle}
           >
             <span style={{ fontWeight: 700 }}>{row.jobId}</span>
-            <span style={subCopyStyle}>{t(`reports.type.${job.jobType}`)}</span>
           </button>
         );
       },
@@ -630,7 +633,6 @@ export default function ReportsPage() {
           style={linkButtonStyle}
         >
           <span style={{ fontWeight: 700 }}>{row.packageId}</span>
-          <span style={subCopyStyle}>{row.kind}</span>
         </button>
       ),
     },
@@ -743,61 +745,55 @@ export default function ReportsPage() {
           />
         ) : null}
 
-        <div style={kpiGridStyle}>
-          <KPI
-            theme={theme}
-            label={t("reports.queuedJobs")}
-            value={queuedReports}
-            sub={t("reports.queuedJobsSub")}
-          />
-          <KPI
-            theme={theme}
-            label={t("reports.completedReports")}
-            value={completedReports}
-            sub={t("reports.completedReportsSub")}
-          />
-          <KPI
-            theme={theme}
-            label={t("reports.regulatoryJobs")}
-            value={regulatoryJobs}
-            sub={t("reports.regulatoryJobsSub")}
-          />
-          <KPI
-            theme={theme}
-            label={t("reports.artifactsReady")}
-            value={readyArtifacts + completedPackages}
-            sub={t("reports.artifactsReadySub")}
-          />
-        </div>
-
-        <div style={tabRowStyle}>
-          {tabOptions.map((tab) => (
-            <Btn
-              key={tab.key}
-              theme={theme}
-              variant={activeTab === tab.key ? "primary" : "secondary"}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.count !== undefined
-                ? `${tab.label} ${tab.count}`
-                : tab.label}
-            </Btn>
-          ))}
-        </div>
+        <Card theme={theme} style={tabCardStyle}>
+          <div style={tabRowStyle}>
+            {tabOptions.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                style={tabButtonStyle(activeTab === tab.key)}
+              >
+                <span>{tab.label}</span>
+                {tab.count !== undefined ? (
+                  <span style={tabCountStyle(activeTab === tab.key)}>
+                    {tab.count}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </Card>
 
         {activeTab === "report_jobs" ? (
           <div style={sectionStackStyle}>
-            <Card
-              theme={theme}
-              padding={0}
-              title={t("reports.recentJobs")}
-              subtitle={copyText(
-                locale,
-                "report jobs · filing packages · signed artifact short-lived URLs",
-                "report jobs · filing packages · signed artifact 短效 URL",
-              )}
-              style={tableCardStyle}
-            >
+            <div style={kpiGridStyle}>
+              <KPI
+                theme={theme}
+                label={t("reports.queuedJobs")}
+                value={queuedReports}
+                sub={t("reports.queuedJobsSub")}
+              />
+              <KPI
+                theme={theme}
+                label={t("reports.completedReports")}
+                value={completedReports}
+                sub={t("reports.completedReportsSub")}
+              />
+              <KPI
+                theme={theme}
+                label={t("reports.regulatoryJobs")}
+                value={regulatoryJobs}
+                sub={t("reports.regulatoryJobsSub")}
+              />
+              <KPI
+                theme={theme}
+                label={t("reports.artifactsReady")}
+                value={readyArtifacts + completedPackages}
+                sub={t("reports.artifactsReadySub")}
+              />
+            </div>
+            <Card theme={theme} padding={0} style={tableCardStyle}>
               {loading ? (
                 <div style={emptyStateStyle}>{t("reports.loadingJobs")}</div>
               ) : jobs.length > 0 ? (
@@ -1023,15 +1019,43 @@ export default function ReportsPage() {
 
         {activeTab === "filing_packages" ? (
           <div style={sectionStackStyle}>
-            <Card
-              theme={theme}
-              padding={0}
-              title={t("reports.packageHistory")}
-              subtitle={t("reports.packagesGenerated", {
-                count: packages.length,
-              })}
-              style={tableCardStyle}
-            >
+            <div style={kpiGridStyle}>
+              <KPI
+                theme={theme}
+                label={t("reports.artifactsReady")}
+                value={completedPackages}
+                sub={t("reports.packagesGenerated", {
+                  count: completedPackages,
+                })}
+              />
+              <KPI
+                theme={theme}
+                label={t("reports.regulatoryJobs")}
+                value={regulatoryJobs}
+                sub={t("reports.regulatoryJobsSub")}
+              />
+              <KPI
+                theme={theme}
+                label={t("reports.queuedJobs")}
+                value={queuedReports}
+                sub={copyText(
+                  locale,
+                  "Shared background queue",
+                  "共享背景佇列",
+                )}
+              />
+              <KPI
+                theme={theme}
+                label={t("reports.completedReports")}
+                value={completedReports}
+                sub={copyText(
+                  locale,
+                  "Paired exports and filing history",
+                  "配套匯出與申報歷史",
+                )}
+              />
+            </div>
+            <Card theme={theme} padding={0} style={tableCardStyle}>
               {loading ? (
                 <div style={emptyStateStyle}>
                   {t("reports.loadingPackages")}
@@ -1325,73 +1349,104 @@ export default function ReportsPage() {
         ) : null}
 
         {activeTab === "schedules" ? (
-          <div style={lowerGridStyle}>
-            <Card
-              theme={theme}
-              title={copyText(locale, "Schedule posture", "排程狀態")}
-              subtitle={copyText(
-                locale,
-                "Pre-flight controls for recurring report and filing runs.",
-                "定期報表與申報工作前置控制。",
-              )}
-            >
-              <div style={panelGridStyle}>
-                <InfoPanel
-                  label={t("reports.form.type")}
-                  value={t(`reports.type.${jobType}`)}
-                  sub={activePreset?.description ?? t("reports.adhocDesc")}
-                />
-                <InfoPanel
-                  label={t("reports.form.packageType")}
-                  value={formatOpsCodeLabel(locale, packageType)}
-                  sub={copyText(
-                    locale,
-                    "Immutable compliance bundle target",
-                    "不可變合規包目標",
-                  )}
-                />
-                <InfoPanel
-                  label={t("reports.form.filingMonth")}
-                  value={packageMonth}
-                  sub={copyText(locale, "Closed month", "結帳月份")}
-                />
-                <InfoPanel
-                  label={t("reports.queuedJobs")}
-                  value={queuedReports}
-                  sub={copyText(
-                    locale,
-                    "Recurring work should clear before artifact expiry.",
-                    "定期工作應在 artifact 到期前清空。",
-                  )}
-                />
-              </div>
-            </Card>
-            <Card
-              theme={theme}
-              title={copyText(locale, "Operator links", "操作捷徑")}
-              subtitle={copyText(
-                locale,
-                "Adjacent ops surfaces for review and follow-up.",
-                "相鄰營運頁面供檢視與後續處理。",
-              )}
-            >
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+          <div style={sectionStackStyle}>
+            <div style={kpiGridStyle}>
+              <KPI
+                theme={theme}
+                label={t("reports.queuedJobs")}
+                value={queuedReports}
+                sub={copyText(
+                  locale,
+                  "Recurring work should clear before artifact expiry.",
+                  "定期工作應在 artifact 到期前清空。",
+                )}
+              />
+              <KPI
+                theme={theme}
+                label={t("reports.completedReports")}
+                value={completedReports}
+                sub={copyText(locale, "Recent output history", "近期輸出歷史")}
+              />
+              <KPI
+                theme={theme}
+                label={t("reports.form.packageType")}
+                value={formatOpsCodeLabel(locale, packageType)}
+                sub={copyText(
+                  locale,
+                  "Immutable compliance bundle target",
+                  "不可變合規包目標",
+                )}
+              />
+              <KPI
+                theme={theme}
+                label={t("reports.form.filingMonth")}
+                value={packageMonth}
+                sub={copyText(locale, "Closed month", "結帳月份")}
+              />
+            </div>
+
+            <div style={lowerGridStyle}>
+              <Card
+                theme={theme}
+                title={copyText(locale, "Schedule posture", "排程狀態")}
+                subtitle={copyText(
+                  locale,
+                  "Pre-flight controls for recurring report and filing runs.",
+                  "定期報表與申報工作前置控制。",
+                )}
               >
-                <Link href="/revenue" style={routeLinkStyle}>
-                  <strong>{t("reports.revenueView")}</strong>
-                  <span style={subCopyStyle}>
-                    {t("reports.revenueViewSub")}
-                  </span>
-                </Link>
-                <Link href="/dashboard" style={routeLinkStyle}>
-                  <strong>{t("common.backToDashboard")}</strong>
-                  <span style={subCopyStyle}>
-                    {t("reports.backToDashboardSub")}
-                  </span>
-                </Link>
-              </div>
-            </Card>
+                <DL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      label: t("reports.form.type"),
+                      value: t(`reports.type.${jobType}`),
+                    },
+                    {
+                      label: t("reports.form.packageType"),
+                      value: formatOpsCodeLabel(locale, packageType),
+                    },
+                    {
+                      label: t("reports.form.filingMonth"),
+                      value: packageMonth,
+                      mono: true,
+                    },
+                    {
+                      label: t("reports.queuedJobs"),
+                      value: String(queuedReports),
+                      mono: true,
+                    },
+                  ]}
+                />
+              </Card>
+              <Card
+                theme={theme}
+                title={copyText(locale, "Operator links", "操作捷徑")}
+                subtitle={copyText(
+                  locale,
+                  "Adjacent ops surfaces for review and follow-up.",
+                  "相鄰營運頁面供檢視與後續處理。",
+                )}
+              >
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 10 }}
+                >
+                  <Link href="/revenue" style={routeLinkStyle}>
+                    <strong>{t("reports.revenueView")}</strong>
+                    <span style={subCopyStyle}>
+                      {t("reports.revenueViewSub")}
+                    </span>
+                  </Link>
+                  <Link href="/dashboard" style={routeLinkStyle}>
+                    <strong>{t("common.backToDashboard")}</strong>
+                    <span style={subCopyStyle}>
+                      {t("reports.backToDashboardSub")}
+                    </span>
+                  </Link>
+                </div>
+              </Card>
+            </div>
           </div>
         ) : null}
       </div>
@@ -1559,3 +1614,30 @@ const routeLinkStyle: React.CSSProperties = {
   color: theme.text,
   textDecoration: "none",
 };
+
+const tabButtonStyle = (active: boolean): React.CSSProperties => ({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "9px 12px",
+  borderRadius: 8,
+  border: `1px solid ${active ? theme.accentBorder : "transparent"}`,
+  background: active ? theme.accentBg : "transparent",
+  color: active ? theme.text : theme.textMuted,
+  cursor: "pointer",
+  fontSize: 12.5,
+  fontWeight: active ? 600 : 500,
+  fontFamily: theme.fontFamily,
+});
+
+const tabCountStyle = (active: boolean): React.CSSProperties => ({
+  minWidth: 18,
+  padding: "1px 6px",
+  borderRadius: 999,
+  background: active ? theme.accent : theme.surfaceLo,
+  color: active ? "#fff" : theme.textMuted,
+  fontSize: 10.5,
+  fontWeight: 700,
+  lineHeight: 1.4,
+  textAlign: "center",
+});
