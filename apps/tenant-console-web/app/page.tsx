@@ -39,15 +39,20 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
+const quotaBannerStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
 const kpiGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
 };
 
 const contentGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
   gap: 16,
 };
 
@@ -74,6 +79,15 @@ const bannerStackStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 8,
+};
+
+const reminderMetaStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  color: th.textMuted,
+  fontSize: 11.5,
 };
 
 const reminderCardStyle: CSSProperties = {
@@ -350,6 +364,13 @@ function getGreetingName(data: HomeData) {
   return "YAMATO 團隊";
 }
 
+function formatPeriodKey(periodKey: string | null | undefined) {
+  if (!periodKey) return "本期";
+  const [year, month] = periodKey.split("-");
+  if (!year || !month) return periodKey;
+  return `${year}-${month}`;
+}
+
 function compareActiveBookings(left: BookingRecord, right: BookingRecord) {
   const leftTime = parseDate(left.reservationWindowStart)?.getTime() ?? 0;
   const rightTime = parseDate(right.reservationWindowStart)?.getTime() ?? 0;
@@ -396,42 +417,44 @@ function getBookingStateLabel(status: BookingRecord["orderStatus"]) {
   }
 }
 
-function getNotificationTone(
-  notification: NotificationRecord,
-): ReminderBanner["tone"] {
-  switch (notification.channel) {
-    case "tenant_approval":
-    case "tenant_sla":
-      return "warn";
-    case "ops_notice":
-      return "info";
-    default:
-      return "success";
-  }
-}
-
 function buildReminderBanners(data: HomeData): ReminderBanner[] {
   const banners: ReminderBanner[] = [];
   const latestNotification = data.notifications[0];
   const enabledFlags =
     data.featureFlags?.flags.filter((flag) => flag.enabled) ?? [];
 
-  if (latestNotification) {
+  if (latestNotification && latestNotification.channel === "tenant_approval") {
     banners.push({
-      tone: getNotificationTone(latestNotification),
+      tone: "warn",
       title: latestNotification.title,
       body: `${latestNotification.message} · ${formatDateTime(latestNotification.createdAt)}`,
-      ...(latestNotification.channel === "ops_notice" ||
-      latestNotification.channel === "tenant_approval"
-        ? {
-            actionHref: "/webhooks",
-            actionLabel: "查看",
-          }
-        : {}),
+      actionHref: "/webhooks",
+      actionLabel: "查看",
+    });
+  } else {
+    banners.push({
+      tone: "warn",
+      title: "Webhook 狀態需要留意",
+      body:
+        data.governance?.webhookPolicy.autoDisableAfterConsecutiveFailures !==
+        undefined
+          ? `連續失敗 ${formatCount(data.governance.webhookPolicy.autoDisableAfterConsecutiveFailures)} 次會自動停用，請確認 staging 與 production 端點。`
+          : "staging 端點測試中，恢復前不會收到事件。",
+      actionHref: "/webhooks",
+      actionLabel: "查看",
     });
   }
 
-  if ((data.governance?.onboardingChecklist.length ?? 0) > 0) {
+  const maintenanceNotice = data.notifications.find(
+    (notification) => notification.channel === "ops_notice",
+  );
+  if (maintenanceNotice) {
+    banners.push({
+      tone: "info",
+      title: maintenanceNotice.title,
+      body: `${maintenanceNotice.message} · ${formatDateTime(maintenanceNotice.createdAt)}`,
+    });
+  } else if ((data.governance?.onboardingChecklist.length ?? 0) > 0) {
     banners.push({
       tone: "info",
       title: `${formatCount(data.governance?.onboardingChecklist.length ?? 0)} 項整合待辦`,
@@ -439,24 +462,36 @@ function buildReminderBanners(data: HomeData): ReminderBanner[] {
     });
   } else {
     banners.push({
-      tone: "success",
-      title: "Integration baseline ready",
+      tone: "info",
+      title: "平台維護提醒",
       body:
         enabledFlags.length > 0
-          ? `目前已啟用 ${formatCount(enabledFlags.length)} 個租戶模組，webhook 與通知基線已就緒。`
-          : "Webhook 與通知基線目前沒有額外待辦。",
+          ? `目前已啟用 ${formatCount(enabledFlags.length)} 個租戶模組，維護期間請留意即時派遣與 webhook 事件。`
+          : "目前沒有額外整合待辦，若有維護時段將透過此區更新。",
     });
   }
 
-  if (data.quotaSummary?.usage.remainingPercent !== null && data.quotaSummary) {
+  const slaNotice = data.notifications.find(
+    (notification) => notification.channel === "tenant_sla",
+  );
+  if (slaNotice) {
+    banners.push({
+      tone: "success",
+      title: slaNotice.title,
+      body: `${slaNotice.message} · ${formatDateTime(slaNotice.createdAt)}`,
+    });
+  } else if (
+    data.quotaSummary?.usage.remainingPercent !== null &&
+    data.quotaSummary
+  ) {
     const remaining = data.quotaSummary.usage.remainingPercent;
     banners.push({
-      tone: remaining >= 20 ? "success" : "warn",
-      title:
+      tone: "success",
+      title: remaining >= 20 ? `本月 SLA / 配額狀態穩定` : `本月配額接近上限`,
+      body:
         remaining >= 20
-          ? `本月配額仍有 ${remaining}%`
-          : `本月配額僅剩 ${remaining}%`,
-      body: `已使用 ${formatQuotaUsage(data.quotaSummary)}，目前強制模式為 ${data.quotaSummary.limit.enforcementMode ?? "—"}。`,
+          ? `剩餘 ${remaining}% 配額，監控與通知基線正常。`
+          : `已使用 ${formatQuotaUsage(data.quotaSummary)}，目前請留意後續預約審批。`,
     });
   } else if (data.invoices[0]) {
     banners.push({
@@ -504,6 +539,15 @@ export default async function HomePage() {
   const greetingName = getGreetingName(data);
   const subtitle = `${formatHeaderDate(now)} · ${formatQuotaHeader(data.quotaSummary)}`;
   const reminderBanners = buildReminderBanners(data);
+  const quotaBody = data.quotaSummary
+    ? [
+        `${formatPeriodKey(data.quotaSummary.periodKey)} 月配額已使用 ${formatQuotaUsage(data.quotaSummary)}`,
+        data.quotaSummary.usage.remainingPercent === null
+          ? "目前未設定上限"
+          : `剩餘 ${data.quotaSummary.usage.remainingPercent}%`,
+        `模式 ${formatQuotaMode(data.quotaSummary.limit.enforcementMode)}`,
+      ].join(" · ")
+    : "配額資料尚未載入，請稍後重新整理。";
   const rows: BookingTableRow[] = activeBookings.slice(0, 5).map((booking) => ({
     booking: <span style={bookingPrimaryStyle}>{booking.bookingId}</span>,
     passenger: booking.passenger.name,
@@ -524,6 +568,12 @@ export default async function HomePage() {
     ),
   }));
   const quotaTone = getQuotaTone(data.quotaSummary);
+  const quotaBannerTone: ReminderBanner["tone"] =
+    quotaTone === "warn"
+      ? "warn"
+      : quotaTone === "success"
+        ? "success"
+        : "info";
   const latestInvoiceLabel = latestInvoice
     ? `${latestInvoice.periodStart.slice(0, 7)} · ${latestInvoice.status}`
     : "尚無帳單";
@@ -598,6 +648,27 @@ export default async function HomePage() {
             body={data.errors.join(" · ")}
           />
         ) : null}
+
+        <div style={quotaBannerStyle}>
+          <CanvasBanner
+            theme={th}
+            tone={quotaBannerTone}
+            icon={quotaBannerTone === "warn" ? "warn" : "check"}
+            title={formatQuotaHeader(data.quotaSummary)}
+            body={quotaBody}
+            actions={
+              <NavCanvasBtn
+                ariaLabel="前往審批與配額頁面"
+                href="/rules"
+                theme={th}
+                variant="ghost"
+                size="xs"
+              >
+                查看配額
+              </NavCanvasBtn>
+            }
+          />
+        </div>
 
         <div style={kpiGridStyle}>
           <CanvasKPI
@@ -683,10 +754,11 @@ export default async function HomePage() {
                   />
                 ))}
               </div>
-              <div>
+              <div style={reminderMetaStyle}>
                 <CanvasPill theme={th} tone={quotaTone} dot>
                   {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
                 </CanvasPill>
+                <span>{data.notifications.length} 則通知</span>
               </div>
             </div>
           </CanvasCard>
