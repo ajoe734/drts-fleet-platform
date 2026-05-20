@@ -7,7 +7,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -25,11 +24,6 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
-const pageStyle: CSSProperties = {
-  minHeight: "100%",
-  background: th.bg,
-};
-
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "flex",
@@ -37,26 +31,21 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const kpiGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-  gap: 12,
-};
-
 const contentGridStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
-  gap: 16,
   alignItems: "flex-start",
+  gap: 16,
 };
 
-const rosterCardStyle: CSSProperties = {
-  flex: "1.55 1 760px",
+const tableCardStyle: CSSProperties = {
+  flex: "1.6 1 760px",
   minWidth: 0,
+  overflow: "hidden",
 };
 
 const sideRailStyle: CSSProperties = {
-  flex: "1 1 320px",
+  flex: "0.95 1 320px",
   minWidth: 0,
   display: "flex",
   flexDirection: "column",
@@ -73,31 +62,26 @@ const tabLinkStyle: CSSProperties = {
   textDecoration: "none",
 };
 
-const emptyStateStyle: CSSProperties = {
-  padding: 24,
-  color: th.textMuted,
-  fontSize: 12.5,
-  textAlign: "center",
-};
-
-const tableCardStyle: CSSProperties = {
-  overflow: "hidden",
-};
-
-const inlineListStyle: CSSProperties = {
-  margin: 0,
-  paddingLeft: 16,
+const pillRowStyle: CSSProperties = {
   display: "flex",
-  flexDirection: "column",
-  gap: 6,
-  color: th.text,
-  fontSize: 12,
-  lineHeight: 1.45,
+  flexWrap: "wrap",
+  gap: 8,
+  padding: "0 0 14px",
 };
 
 const helperTextStyle: CSSProperties = {
   fontSize: 11.5,
   color: th.textMuted,
+  lineHeight: 1.5,
+};
+
+const listStyle: CSSProperties = {
+  margin: 0,
+  paddingLeft: 16,
+  display: "grid",
+  gap: 6,
+  color: th.text,
+  fontSize: 12,
   lineHeight: 1.45,
 };
 
@@ -105,6 +89,13 @@ const monoMutedStyle: CSSProperties = {
   fontFamily: th.monoFamily,
   color: th.textDim,
   fontSize: 11,
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: 24,
+  color: th.textMuted,
+  fontSize: 12.5,
+  textAlign: "center",
 };
 
 type PassengerTabKey = "all" | "employee" | "visitor" | "disabled";
@@ -245,6 +236,7 @@ function buildTabNodes(selectedTab: PassengerTabKey) {
   const activeIndex = PASSENGER_TABS.findIndex(
     (tab) => tab.key === selectedTab,
   );
+
   return {
     tabs,
     activeTab: tabs[activeIndex] ?? tabs[0],
@@ -267,19 +259,12 @@ export default async function PassengersPage({
   const filteredRows = passengers
     .filter((passenger) => matchesTab(passenger, selectedTab))
     .map(toPassengerRow);
-  const { tabs, activeTab } = buildTabNodes(selectedTab);
   const employeeCount = passengers.filter(isEmployeePassenger).length;
   const visitorCount = passengers.length - employeeCount;
   const activeCount = passengers.filter(
     (passenger) => passenger.activeFlag,
   ).length;
   const disabledCount = passengers.length - activeCount;
-  const consentTrackedCount = passengers.filter(
-    (passenger) => typeof passenger.metadata?.consentVersion === "string",
-  ).length;
-  const dataIssueCount = passengers.filter(
-    (passenger) => (passenger.qualityIssues?.length ?? 0) > 0,
-  ).length;
   const latestUpdated = passengers.reduce<string | null>(
     (latest, passenger) => {
       const candidateTime = parseDate(passenger.updatedAt)?.getTime() ?? 0;
@@ -290,28 +275,29 @@ export default async function PassengersPage({
   );
   const selectedTabLabel =
     PASSENGER_TABS.find((tab) => tab.key === selectedTab)?.label ?? "全部";
+  const { tabs, activeTab } = buildTabNodes(selectedTab);
 
   const columns: CanvasTableColumn<PassengerRow>[] = [
     {
       h: "NAME",
       k: "fullName",
-      w: 160,
+      w: 180,
       r: (row) => <span style={primaryCellStyle}>{row.fullName}</span>,
     },
     {
       h: "EMP ID",
-      w: 100,
+      w: 104,
       mono: true,
       r: (row) => row.employeeNo ?? "—",
     },
     {
       h: "DEPT",
-      w: 140,
+      w: 148,
       r: (row) => row.departmentName ?? "—",
     },
     {
       h: "MOBILE",
-      w: 130,
+      w: 132,
       mono: true,
       r: (row) => row.mobile ?? "—",
     },
@@ -322,7 +308,7 @@ export default async function PassengersPage({
     },
     {
       h: "STATE",
-      w: 100,
+      w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={row.stateTone} dot>
           {row.stateLabel}
@@ -332,20 +318,20 @@ export default async function PassengersPage({
   ];
 
   return (
-    <div style={pageStyle}>
+    <div>
       <CanvasPageHeader
         theme={th}
-        title="乘客通訊錄"
-        subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本"
+        title="乘客"
+        subtitle="Tabs · CSV 匯入 · Passengers Table"
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={
           <>
-            <CanvasBtn theme={th} icon="ext">
+            <CanvasBtn theme={th} icon="upload">
               CSV 匯入
             </CanvasBtn>
             <CanvasBtn theme={th} variant="primary" icon="plus">
-              新增
+              新增乘客
             </CanvasBtn>
           </>
         }
@@ -362,49 +348,32 @@ export default async function PassengersPage({
           />
         ) : null}
 
-        <div style={kpiGridStyle}>
-          <CanvasKPI
-            theme={th}
-            label="Passengers"
-            value={formatCount(passengers.length)}
-            sub={`${selectedTabLabel} ${formatCount(filteredRows.length)} 筆`}
-          />
-          <CanvasKPI
-            theme={th}
-            label="Employees"
-            value={formatCount(employeeCount)}
-            sub={`${formatCount(visitorCount)} visitors`}
-          />
-          <CanvasKPI
-            theme={th}
-            label="Active"
-            value={formatCount(activeCount)}
-            sub={
-              disabledCount > 0
-                ? `${formatCount(disabledCount)} disabled`
-                : "directory online"
-            }
-          />
-          <CanvasKPI
-            theme={th}
-            label="Consent"
-            value={formatCount(consentTrackedCount)}
-            sub={
-              dataIssueCount > 0
-                ? `${formatCount(dataIssueCount)} issues flagged`
-                : "metadata tracked"
-            }
-          />
-        </div>
-
         <div style={contentGridStyle}>
           <CanvasCard
             theme={th}
             title="Passengers Table"
             subtitle={`目前分頁：${selectedTabLabel} · 最後同步 ${formatUpdated(latestUpdated)}`}
-            padding={0}
-            style={{ ...tableCardStyle, ...rosterCardStyle }}
+            style={tableCardStyle}
+            padding={16}
           >
+            <div style={pillRowStyle}>
+              <CanvasPill theme={th} tone="accent">
+                全部 {formatCount(passengers.length)}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="info">
+                員工 {formatCount(employeeCount)}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                訪客 {formatCount(visitorCount)}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="warn">
+                停用 {formatCount(disabledCount)}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="success">
+                啟用 {formatCount(activeCount)}
+              </CanvasPill>
+            </div>
+
             {filteredRows.length > 0 ? (
               <CanvasTable<PassengerRow>
                 theme={th}
@@ -422,39 +391,40 @@ export default async function PassengersPage({
             <CanvasCard
               theme={th}
               title="CSV 匯入"
-              subtitle="批次建立或更新乘客主檔"
+              subtitle="批次建立或更新乘客名錄"
             >
               <CanvasField
                 theme={th}
                 label="匯入模板"
-                hint="建議欄位：fullName、employeeNo、departmentName、mobile、email、roles、activeFlag。"
+                hint="欄位對齊畫板：fullName、employeeNo、departmentName、mobile、email、activeFlag。"
               >
                 <div style={helperTextStyle}>
-                  以員編或 email 當作 match key，未提供值時保留既有欄位。
+                  建議以 `employeeNo` 或 `email` 當作 match
+                  key，方便員工與訪客分批維護。
                 </div>
               </CanvasField>
 
               <CanvasField
                 theme={th}
-                label="前置檢查"
-                hint="匯入前先確認停用名單與 consent metadata 是否一併補齊。"
+                label="上傳前檢查"
+                hint="停用清單與訪客資料建議分批匯入，便於 tab 驗證。"
               >
-                <ul style={inlineListStyle}>
-                  <li>員工與訪客請分批上傳，便於 tab 驗證。</li>
-                  <li>停用乘客請顯式帶入 `activeFlag=false`。</li>
-                  <li>若有同意書版本，寫入 `metadata.consentVersion`。</li>
+                <ul style={listStyle}>
+                  <li>員工主檔優先補齊員編與部門。</li>
+                  <li>停用資料請明確帶入 `activeFlag=false`。</li>
+                  <li>缺少手機或 email 的列會在表格中顯示為 `—`。</li>
                 </ul>
               </CanvasField>
 
               <div style={monoMutedStyle}>
-                action: CSV import button reserved for follow-up wiring
+                action reserved: CSV import wiring remains follow-up work
               </div>
             </CanvasCard>
 
             <CanvasCard
               theme={th}
-              title="資料摘要"
-              subtitle="對齊畫板中的名錄狀態資訊"
+              title="名錄摘要"
+              subtitle="對齊 TN_Passengers 的掃描資訊"
             >
               <CanvasDL
                 theme={th}
@@ -464,14 +434,10 @@ export default async function PassengersPage({
                   { k: "員工", v: formatCount(employeeCount), mono: true },
                   { k: "訪客", v: formatCount(visitorCount), mono: true },
                   { k: "停用", v: formatCount(disabledCount), mono: true },
+                  { k: "啟用", v: formatCount(activeCount), mono: true },
                   {
-                    k: "Consent",
-                    v: `${formatCount(consentTrackedCount)} tracked`,
-                    mono: true,
-                  },
-                  {
-                    k: "Issues",
-                    v: `${formatCount(dataIssueCount)} flagged`,
+                    k: "更新時間",
+                    v: formatUpdated(latestUpdated),
                     mono: true,
                   },
                 ]}
