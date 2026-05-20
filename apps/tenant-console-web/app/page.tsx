@@ -13,7 +13,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
@@ -80,11 +79,7 @@ const bannerStackStyle: CSSProperties = {
 const reminderCardStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 14,
-};
-
-const quotaSummaryStyle: CSSProperties = {
-  paddingTop: 2,
+  gap: 8,
 };
 
 const emptyStateStyle: CSSProperties = {
@@ -140,6 +135,8 @@ type ReminderBanner = {
   tone: "warn" | "info" | "success";
   title: string;
   body: string;
+  actionHref?: string;
+  actionLabel?: string;
 };
 
 type NavCanvasBtnProps = Omit<CanvasBtnProps, "onClick"> & {
@@ -349,7 +346,7 @@ function getQuotaTone(summary: TenantQuotaSummary | null): CanvasTone {
 }
 
 function getGreetingName(data: HomeData) {
-  if (data.identity?.actorType === "tenant_admin") return "YAMATO 團隊";
+  if (data.identity?.actorType === "tenant_admin") return "張俐萱";
   return "YAMATO 團隊";
 }
 
@@ -424,6 +421,13 @@ function buildReminderBanners(data: HomeData): ReminderBanner[] {
       tone: getNotificationTone(latestNotification),
       title: latestNotification.title,
       body: `${latestNotification.message} · ${formatDateTime(latestNotification.createdAt)}`,
+      ...(latestNotification.channel === "ops_notice" ||
+      latestNotification.channel === "tenant_approval"
+        ? {
+            actionHref: "/webhooks",
+            actionLabel: "查看",
+          }
+        : {}),
     });
   }
 
@@ -562,8 +566,8 @@ export default async function HomePage() {
         actions={
           <>
             <NavCanvasBtn
-              ariaLabel="前往 API 金鑰頁面"
-              href="/api-keys"
+              ariaLabel="前往幫助中心"
+              href="/settings"
               theme={th}
               icon="ext"
               size="sm"
@@ -652,62 +656,21 @@ export default async function HomePage() {
             )}
           </CanvasCard>
 
-          <CanvasCard
-            theme={th}
-            title="提醒"
-            actions={
-              <CanvasPill theme={th} tone={quotaTone} dot>
-                {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
-              </CanvasPill>
-            }
-          >
+          <CanvasCard theme={th} title="提醒">
             <div style={reminderCardStyle}>
-              <div style={quotaSummaryStyle}>
-                <CanvasDL
-                  theme={th}
-                  cols={2}
-                  items={[
-                    {
-                      k: "本月配額",
-                      v: formatQuotaUsage(data.quotaSummary),
-                      mono: true,
-                    },
-                    {
-                      k: "強制模式",
-                      v: formatQuotaMode(
-                        data.quotaSummary?.limit.enforcementMode,
-                      ),
-                      mono: true,
-                    },
-                    {
-                      k: "剩餘",
-                      v:
-                        data.quotaSummary?.usage.remainingPercent === null
-                          ? "無上限"
-                          : `${data.quotaSummary?.usage.remainingPercent ?? 0}%`,
-                      mono: true,
-                    },
-                    {
-                      k: "最新帳單",
-                      v: latestInvoiceLabel,
-                      mono: true,
-                    },
-                  ]}
-                />
-              </div>
               <div style={bannerStackStyle}>
                 {reminderBanners.map((banner, index) => (
                   <CanvasBanner
                     actions={
-                      index === 0 ? (
+                      banner.actionHref && banner.actionLabel ? (
                         <NavCanvasBtn
-                          ariaLabel="查看 Webhook 設定"
-                          href="/webhooks"
+                          ariaLabel={banner.actionLabel}
+                          href={banner.actionHref}
                           theme={th}
                           variant="ghost"
                           size="xs"
                         >
-                          查看
+                          {banner.actionLabel}
                         </NavCanvasBtn>
                       ) : undefined
                     }
@@ -719,6 +682,11 @@ export default async function HomePage() {
                     tone={banner.tone}
                   />
                 ))}
+              </div>
+              <div>
+                <CanvasPill theme={th} tone={quotaTone} dot>
+                  {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
+                </CanvasPill>
               </div>
             </div>
           </CanvasCard>
