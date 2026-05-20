@@ -26,6 +26,12 @@ const pageBodyStyle: CSSProperties = {
   paddingTop: 16,
 };
 
+const buttonGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 8,
+};
+
 const gridButtonStyle: CSSProperties = {
   width: "100%",
   justifyContent: "center",
@@ -66,6 +72,7 @@ function buildPartnerTheme(brand: PartnerBrandTemplate): CanvasTheme {
 function buildReceiptDetails(brand: PartnerBrandTemplate) {
   return {
     bookingId: "bk_5512",
+    statusLabel: "已完成",
     timeline: [
       { label: "出發", value: "14:30:11", mono: true },
       { label: "抵達", value: "15:42:27", mono: true },
@@ -171,7 +178,7 @@ export default async function PartnerReceiptPage({ params }: PageProps) {
             >
               <span>{receipt.bookingId}</span>
               <CanvasPill theme={theme} tone="success">
-                已完成
+                {receipt.statusLabel}
               </CanvasPill>
             </span>
           }
@@ -245,13 +252,7 @@ export default async function PartnerReceiptPage({ params }: PageProps) {
             </div>
           </CanvasCard>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: 8,
-            }}
-          >
+          <div style={buttonGridStyle}>
             <CanvasBtn
               theme={theme}
               variant="secondary"
