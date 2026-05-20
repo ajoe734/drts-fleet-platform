@@ -37,8 +37,10 @@ import {
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasShell as Shell,
+  CanvasTable as Table,
   buildCanvasTheme,
   type CanvasShellNavItem,
+  type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
 
@@ -71,14 +73,6 @@ type QueueRow = Record<string, unknown> & {
   state: string;
   driver: string;
   eta: string;
-};
-
-type QueueColumn = {
-  key: keyof QueueRow | "statePill";
-  label: string;
-  width?: string | number;
-  mono?: boolean;
-  align?: "left" | "center" | "right";
 };
 
 const theme = buildCanvasTheme({
@@ -120,7 +114,7 @@ const pageBodyStyle = {
 
 const kpiGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
   gap: 10,
 };
 
@@ -157,39 +151,6 @@ const signalLabelStyle = {
   minWidth: 0,
   fontSize: 12,
   color: theme.text,
-};
-
-const queueTableWrapStyle = {
-  overflowX: "auto" as const,
-};
-
-const queueTableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const,
-  fontSize: 12.5,
-  fontFamily: theme.fontFamily,
-};
-
-const queueHeaderCellStyle = {
-  padding: "7px 12px",
-  fontSize: 10.5,
-  fontWeight: 600,
-  color: theme.textMuted,
-  textTransform: "uppercase" as const,
-  letterSpacing: 0.4,
-  background: theme.surfaceLo,
-  borderBottom: `1px solid ${theme.border}`,
-  whiteSpace: "nowrap" as const,
-  position: "sticky" as const,
-  top: 0,
-};
-
-const queueCellBaseStyle = {
-  padding: "9px 12px",
-  borderBottom: `1px solid ${theme.border}`,
-  color: theme.text,
-  verticalAlign: "middle" as const,
-  whiteSpace: "nowrap" as const,
 };
 
 const queueStackStyle = {
@@ -416,7 +377,17 @@ function formatEtaLabel(minutes: number | null | undefined) {
   return `${minutes}m`;
 }
 
-function getQueueColumnLabel(key: QueueColumn["key"], locale: Locale): string {
+function getQueueColumnLabel(
+  key:
+    | "orderNo"
+    | "tenant"
+    | "pickup"
+    | "window"
+    | "statePill"
+    | "driver"
+    | "eta",
+  locale: Locale,
+): string {
   if (locale === "en") {
     switch (key) {
       case "orderNo":
@@ -1195,41 +1166,59 @@ export default async function DashboardPage() {
         ),
       };
     });
-  const queueColumns: QueueColumn[] = [
+  const queueColumns: CanvasTableColumn<QueueRow>[] = [
     {
-      key: "orderNo",
-      label: getQueueColumnLabel("orderNo", locale),
-      width: 126,
+      h: getQueueColumnLabel("orderNo", locale),
+      w: 126,
+      mono: true,
+      r: (row) => (
+        <div style={queueStackStyle}>
+          <Link
+            href={`/dispatch/${encodeURIComponent(row.orderId)}`}
+            style={queueLinkStyle}
+          >
+            {row.orderNo}
+          </Link>
+          <span style={queueSubLabelStyle}>{row.orderId}</span>
+        </div>
+      ),
+    },
+    {
+      h: getQueueColumnLabel("tenant", locale),
+      k: "tenant",
+      w: 140,
       mono: true,
     },
     {
-      key: "tenant",
-      label: getQueueColumnLabel("tenant", locale),
-      width: 140,
-      mono: true,
-    },
-    { key: "pickup", label: getQueueColumnLabel("pickup", locale), width: 300 },
-    {
-      key: "window",
-      label: getQueueColumnLabel("window", locale),
-      width: 132,
-      mono: true,
+      h: getQueueColumnLabel("pickup", locale),
+      k: "pickup",
+      w: 300,
     },
     {
-      key: "statePill",
-      label: getQueueColumnLabel("statePill", locale),
-      width: 142,
-    },
-    {
-      key: "driver",
-      label: getQueueColumnLabel("driver", locale),
-      width: 112,
+      h: getQueueColumnLabel("window", locale),
+      k: "window",
+      w: 132,
       mono: true,
     },
     {
-      key: "eta",
-      label: getQueueColumnLabel("eta", locale),
-      width: 78,
+      h: getQueueColumnLabel("statePill", locale),
+      w: 142,
+      r: (row) => (
+        <Pill theme={theme} tone={getStateTone(row.state)} dot>
+          {row.state}
+        </Pill>
+      ),
+    },
+    {
+      h: getQueueColumnLabel("driver", locale),
+      k: "driver",
+      w: 112,
+      mono: true,
+    },
+    {
+      h: getQueueColumnLabel("eta", locale),
+      k: "eta",
+      w: 78,
       mono: true,
     },
   ];
@@ -1457,104 +1446,7 @@ export default async function DashboardPage() {
             </Link>
           }
         >
-          <div style={queueTableWrapStyle}>
-            <table style={queueTableStyle}>
-              <thead>
-                <tr>
-                  {queueColumns.map((column) => (
-                    <th
-                      key={column.key}
-                      style={{
-                        ...queueHeaderCellStyle,
-                        width: column.width,
-                        textAlign: column.align ?? "left",
-                      }}
-                    >
-                      {column.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {queueRows.map((row) => (
-                  <tr key={row.orderId}>
-                    {queueColumns.map((column) => {
-                      const cellStyle = {
-                        ...queueCellBaseStyle,
-                        textAlign: column.align ?? "left",
-                        fontFamily: column.mono
-                          ? theme.monoFamily
-                          : theme.fontFamily,
-                        fontSize: column.mono ? 11.5 : 12.5,
-                      };
-
-                      if (column.key === "orderNo") {
-                        return (
-                          <td
-                            key={`${row.orderId}-${column.key}`}
-                            style={cellStyle}
-                          >
-                            <div style={queueStackStyle}>
-                              <Link
-                                href={`/dispatch/${encodeURIComponent(row.orderId)}`}
-                                style={queueLinkStyle}
-                              >
-                                {row.orderNo}
-                              </Link>
-                              <span style={queueSubLabelStyle}>
-                                {row.orderId}
-                              </span>
-                            </div>
-                          </td>
-                        );
-                      }
-
-                      if (column.key === "pickup") {
-                        return (
-                          <td
-                            key={`${row.orderId}-${column.key}`}
-                            style={cellStyle}
-                          >
-                            {row.pickup}
-                          </td>
-                        );
-                      }
-
-                      if (column.key === "statePill") {
-                        return (
-                          <td
-                            key={`${row.orderId}-${column.key}`}
-                            style={cellStyle}
-                          >
-                            <Pill
-                              theme={theme}
-                              tone={getStateTone(row.state)}
-                              dot
-                            >
-                              {row.state}
-                            </Pill>
-                          </td>
-                        );
-                      }
-
-                      return (
-                        <td
-                          key={`${row.orderId}-${column.key}`}
-                          style={cellStyle}
-                        >
-                          {String(
-                            row[
-                              column.key === "statePill" ? "state" : column.key
-                            ] ?? "—",
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table theme={theme} columns={queueColumns} rows={queueRows} />
         </Card>
       </div>
     </Shell>
