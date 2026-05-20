@@ -4,7 +4,11 @@ import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
+  CanvasBtn as Btn,
   CanvasCard as Card,
+  CanvasDL as DL,
+  CanvasField as Field,
+  CanvasKPI as Kpi,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasShell as Shell,
@@ -24,7 +28,7 @@ const pageBodyStyle = {
   padding: 24,
   display: "flex",
   flexDirection: "column" as const,
-  gap: 14,
+  gap: 16,
 };
 
 type FlagRow = Record<string, unknown> & {
@@ -182,17 +186,30 @@ export default async function FeatureFlagsPage() {
     getServerLocale(),
   ]);
   let flags: FeatureFlag[] = [];
+  let notes: string[] = [];
   let error: string | null = null;
 
   try {
     const summary = await client.getFeatureFlags();
     flags = summary.flags;
+    notes = summary.notes;
   } catch (e) {
     error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
 
   const enabled = flags.filter((flag) => flag.enabled).length;
   const disabled = flags.length - enabled;
+  const globalFlags = flags.filter((flag) => !flag.tenantId).length;
+  const overrideFlags = flags.length - globalFlags;
+  const latestUpdatedAt =
+    flags.length > 0
+      ? flags.reduce((latest, flag) =>
+          new Date(flag.updatedAt).getTime() >
+          new Date(latest.updatedAt).getTime()
+            ? flag
+            : latest,
+        ).updatedAt
+      : null;
   const rows: FlagRow[] = flags.map((flag) => ({
     key: flag.key,
     scope: formatFlagScope(flag),
@@ -256,6 +273,31 @@ export default async function FeatureFlagsPage() {
     },
   ];
 
+  const governanceItems = [
+    {
+      k: locale === "en" ? "Mode" : "模式",
+      v: locale === "en" ? "Read-only registry" : "唯讀旗標登錄",
+    },
+    {
+      k: locale === "en" ? "Publishing" : "發佈方式",
+      v: locale === "en" ? "Platform governance" : "由平台治理流程發佈",
+    },
+    {
+      k: locale === "en" ? "Scope coverage" : "範圍覆蓋",
+      v:
+        locale === "en"
+          ? `${globalFlags} global · ${overrideFlags} tenant override`
+          : `${globalFlags} 個全域 · ${overrideFlags} 個租戶覆寫`,
+    },
+    {
+      k: locale === "en" ? "Last sync" : "最後同步",
+      v:
+        (latestUpdatedAt ? formatDateTime(locale, latestUpdatedAt) : null) ??
+        (locale === "en" ? "No published flags" : "尚無已發佈旗標"),
+      mono: true,
+    },
+  ];
+
   return (
     <Shell
       theme={theme}
@@ -277,12 +319,16 @@ export default async function FeatureFlagsPage() {
       <PageHeader
         theme={theme}
         title={t("flags.title", locale)}
-        subtitle={[
+        subtitle={
           locale === "en"
             ? "Read-only · published through platform governance"
-            : "唯讀 · 由平台治理發佈",
-          t("flags.subtitle", locale, { total: flags.length, enabled }),
-        ].join(" · ")}
+            : "唯讀 · 由平台治理發佈"
+        }
+        actions={
+          <Btn theme={theme} variant="secondary" disabled>
+            {locale === "en" ? "Read-only" : "唯讀"}
+          </Btn>
+        }
       />
 
       <div style={pageBodyStyle}>
@@ -296,30 +342,125 @@ export default async function FeatureFlagsPage() {
           />
         ) : null}
 
-        <Card
-          theme={theme}
-          padding={0}
-          title={t("flags.registrySummary", locale, {
-            enabled,
-            disabled,
-          })}
-          subtitle={t("flags.registryFooter", locale)}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 12,
+          }}
         >
-          {rows.length > 0 ? (
-            <Table theme={theme} columns={columns} rows={rows} />
-          ) : (
-            <div
-              style={{
-                padding: 24,
-                color: theme.textMuted,
-                fontSize: 12.5,
-                textAlign: "center",
-              }}
-            >
-              {t("flags.empty", locale)}
+          <Kpi
+            theme={theme}
+            label={locale === "en" ? "Published flags" : "已發佈旗標"}
+            value={flags.length}
+            sub={t("flags.subtitle", locale, { total: flags.length, enabled })}
+            hint={locale === "en" ? "registry.total" : "registry.total"}
+          />
+          <Kpi
+            theme={theme}
+            label={locale === "en" ? "Enabled" : "已啟用"}
+            value={enabled}
+            delta={`${Math.round((enabled / Math.max(flags.length, 1)) * 100)}%`}
+            deltaTone="up"
+            sub={t("flags.registrySummary", locale, { enabled, disabled })}
+            hint={locale === "en" ? "state.enabled" : "state.enabled"}
+          />
+          <Kpi
+            theme={theme}
+            label={locale === "en" ? "Tenant overrides" : "租戶覆寫"}
+            value={overrideFlags}
+            sub={
+              locale === "en"
+                ? `${globalFlags} global definitions remain authoritative`
+                : `${globalFlags} 個全域定義維持權威來源`
+            }
+            hint={locale === "en" ? "scope.tenant" : "scope.tenant"}
+          />
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          <Card
+            theme={theme}
+            title={locale === "en" ? "Registry governance" : "登錄治理"}
+            subtitle={
+              locale === "en"
+                ? "Published notes and authority context"
+                : "已發佈備註與權威來源"
+            }
+          >
+            <div style={{ display: "grid", gap: 16 }}>
+              <DL theme={theme} cols={1} items={governanceItems} />
+              <Field
+                theme={theme}
+                label={locale === "en" ? "Published notes" : "發佈備註"}
+                hint={t("flags.registryFooter", locale)}
+              >
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 8,
+                    padding: 12,
+                    borderRadius: 8,
+                    border: `1px solid ${theme.border}`,
+                    background: theme.surfaceLo,
+                  }}
+                >
+                  {(notes.length > 0 ? notes : [t("flags.empty", locale)]).map(
+                    (note, index) => (
+                      <div
+                        key={`${note}-${index}`}
+                        style={{
+                          fontSize: 12,
+                          color: theme.text,
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {note}
+                      </div>
+                    ),
+                  )}
+                </div>
+              </Field>
             </div>
-          )}
-        </Card>
+          </Card>
+
+          <Card
+            theme={theme}
+            padding={0}
+            title={t("flags.registrySummary", locale, {
+              enabled,
+              disabled,
+            })}
+            subtitle={t("flags.registryFooter", locale)}
+            actions={
+              <Pill theme={theme} tone="info">
+                {locale === "en" ? "Read-only table" : "唯讀表格"}
+              </Pill>
+            }
+          >
+            {rows.length > 0 ? (
+              <Table theme={theme} columns={columns} rows={rows} />
+            ) : (
+              <div
+                style={{
+                  padding: 24,
+                  color: theme.textMuted,
+                  fontSize: 12.5,
+                  textAlign: "center",
+                }}
+              >
+                {t("flags.empty", locale)}
+              </div>
+            )}
+          </Card>
+        </div>
       </div>
     </Shell>
   );
