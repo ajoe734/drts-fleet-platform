@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { PageHeader } from "@drts/ui-web";
+import type { CSSProperties } from "react";
 import type {
   ComplaintCaseRecord,
+  ComplaintCaseStatus,
   ComplaintCategory,
   ComplaintExportViewRecord,
   ComplaintResolutionCode,
   ComplaintTimelineEntry,
-  ComplaintCaseStatus,
   CreateComplaintCaseCommand,
   EscalateComplaintToIncidentCommand,
 } from "@drts/contracts";
@@ -19,12 +19,38 @@ import {
   COMPLAINT_CATEGORIES,
   COMPLAINT_CATEGORY_VALID_RESOLUTIONS,
 } from "@drts/contracts";
+import {
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasDL as DL,
+  CanvasField as Field,
+  CanvasKPI as KPI,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasShell as Shell,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasShellNavItem,
+  type CanvasTableColumn,
+  type CanvasTheme,
+  type CanvasTone,
+} from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
+import { t as translate } from "@/lib/translations";
 
 const STATUS_OPTIONS: ComplaintCaseStatus[] = [...COMPLAINT_CASE_STATUSES];
 const CATEGORY_OPTIONS: ComplaintCategory[] = [...COMPLAINT_CATEGORIES];
+const CURRENT_OPERATOR_ID = "AGENT-OPS-002";
+const ESCALATION_SEVERITY_OPTIONS = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+] as const;
 
 const INITIAL_CREATE_FORM: CreateComplaintCaseCommand = {
   caseSource: "ops",
@@ -35,8 +61,126 @@ const INITIAL_CREATE_FORM: CreateComplaintCaseCommand = {
   relatedCallId: "",
 };
 
-function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "-";
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
+
+const shellFrameStyle: CSSProperties = {
+  minHeight: "calc(100vh - 48px)",
+  borderRadius: 24,
+  overflow: "hidden",
+  border: `1px solid ${theme.border}`,
+  boxShadow: "0 20px 44px rgba(2, 6, 23, 0.42)",
+};
+
+const pageStackStyle: CSSProperties = {
+  padding: 24,
+  display: "grid",
+  gap: 16,
+};
+
+const kpiGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const filterGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const workspaceGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.2fr) minmax(320px, 0.8fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const actionGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  gap: 16,
+};
+
+const detailStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
+const pillRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const actionRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const timelineListStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: "14px 16px",
+  borderRadius: 10,
+  border: `1px dashed ${theme.border}`,
+  background: theme.surfaceLo,
+  color: theme.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.5,
+};
+
+function copy(locale: Locale, en: string, zh: string) {
+  return locale === "en" ? en : zh;
+}
+
+function formatDateTime(locale: Locale, value: string | null | undefined) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
+}
+
+function formatDateTimeWithSeconds(
+  locale: Locale,
+  value: string | null | undefined,
+) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
 }
 
 function isComplaintActive(status: ComplaintCaseStatus) {
@@ -71,30 +215,20 @@ function compareComplaintPriority(
   );
 }
 
-function formatRelativeSla(value: string, locale: "en" | "zh") {
+function formatRelativeSla(value: string, locale: Locale) {
   const deltaMinutes = Math.round(
     (new Date(value).getTime() - Date.now()) / (1000 * 60),
   );
 
   if (deltaMinutes >= 0) {
-    return locale === "en"
-      ? `SLA due in ${deltaMinutes} min`
-      : `SLA 還有 ${deltaMinutes} 分鐘`;
+    return copy(locale, `due in ${deltaMinutes}m`, `還有 ${deltaMinutes} 分鐘`);
   }
 
-  return locale === "en"
-    ? `SLA breached by ${Math.abs(deltaMinutes)} min`
-    : `SLA 已逾期 ${Math.abs(deltaMinutes)} 分鐘`;
-}
-
-function getComplaintQueueTone(record: ComplaintCaseRecord) {
-  if (record.slaBreach) {
-    return "queue-badge badge-danger";
-  }
-  if (record.severity === "high") {
-    return "queue-badge badge-warning";
-  }
-  return "queue-badge";
+  return copy(
+    locale,
+    `breached by ${Math.abs(deltaMinutes)}m`,
+    `已逾期 ${Math.abs(deltaMinutes)} 分鐘`,
+  );
 }
 
 function resolveSelectedComplaintCaseNo(
@@ -111,6 +245,260 @@ function resolveSelectedComplaintCaseNo(
   return records[0]?.caseNo ?? null;
 }
 
+function getSeverityTone(record: ComplaintCaseRecord): CanvasTone {
+  if (record.slaBreach) {
+    return "danger";
+  }
+  if (record.severity === "high") {
+    return "warn";
+  }
+  return "neutral";
+}
+
+function getStatusTone(record: ComplaintCaseRecord): CanvasTone {
+  if (record.relatedIncidentId) {
+    return "danger";
+  }
+  if (record.status === "closed" || record.status === "resolved") {
+    return "success";
+  }
+  if (record.slaBreach) {
+    return "danger";
+  }
+  if (
+    record.status === "assigned" ||
+    record.status === "under_investigation" ||
+    record.status === "reopened"
+  ) {
+    return "info";
+  }
+  return "neutral";
+}
+
+function formatAverageHandleValue(records: ComplaintCaseRecord[]) {
+  const handledRecords = records.filter(
+    (record) => record.status === "resolved" || record.status === "closed",
+  );
+
+  if (handledRecords.length === 0) {
+    return "0h";
+  }
+
+  const averageMinutes = Math.round(
+    handledRecords.reduce((total, record) => {
+      return (
+        total +
+        Math.max(
+          0,
+          (new Date(record.updatedAt).getTime() -
+            new Date(record.createdAt).getTime()) /
+            (1000 * 60),
+        )
+      );
+    }, 0) / handledRecords.length,
+  );
+
+  if (averageMinutes >= 60) {
+    return `${Math.round(averageMinutes / 60)}h`;
+  }
+
+  return `${averageMinutes}m`;
+}
+
+function formatReopenRate(records: ComplaintCaseRecord[]) {
+  if (records.length === 0) {
+    return "0%";
+  }
+
+  const reopened = records.filter((record) => record.reopenCount > 0).length;
+  return `${Math.round((reopened / records.length) * 100)}%`;
+}
+
+function controlStyle(
+  canvasTheme: CanvasTheme,
+  options?: { mono?: boolean; minHeight?: number },
+): CSSProperties {
+  return {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 7,
+    border: `1px solid ${canvasTheme.border}`,
+    background: canvasTheme.bgRaised,
+    color: canvasTheme.text,
+    padding: "8px 10px",
+    fontSize: 12.5,
+    lineHeight: 1.4,
+    fontFamily: options?.mono ? canvasTheme.monoFamily : canvasTheme.fontFamily,
+    minHeight: options?.minHeight,
+  };
+}
+
+function actionLinkStyle(
+  canvasTheme: CanvasTheme,
+  variant: "primary" | "secondary" = "secondary",
+): CSSProperties {
+  if (variant === "primary") {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      height: 28,
+      padding: "5px 10px",
+      borderRadius: 7,
+      background: canvasTheme.accent,
+      color: "#ffffff",
+      border: `1px solid ${canvasTheme.accent}`,
+      fontSize: 12,
+      fontWeight: 500,
+      lineHeight: 1,
+      textDecoration: "none",
+    };
+  }
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: 28,
+    padding: "5px 10px",
+    borderRadius: 7,
+    background: canvasTheme.surface,
+    color: canvasTheme.text,
+    border: `1px solid ${canvasTheme.border}`,
+    fontSize: 12,
+    fontWeight: 500,
+    lineHeight: 1,
+    textDecoration: "none",
+  };
+}
+
+function caseLinkStyle(canvasTheme: CanvasTheme): CSSProperties {
+  return {
+    background: "transparent",
+    border: "none",
+    color: canvasTheme.accent,
+    padding: 0,
+    font: "inherit",
+    fontWeight: 600,
+    cursor: "pointer",
+    textAlign: "left",
+  };
+}
+
+function buildShellNav(locale: Locale): CanvasShellNavItem[] {
+  return [
+    {
+      divider: locale === "en" ? "Workspaces" : "工作面",
+    },
+    {
+      key: "dashboard",
+      href: "/dashboard",
+      icon: "dashboard",
+      label: translate("nav.dashboard", locale),
+    },
+    {
+      divider: locale === "en" ? "Live Ops" : "即時派遣",
+    },
+    {
+      key: "dispatch",
+      href: "/dispatch",
+      icon: "dispatch",
+      label: translate("nav.dispatch", locale),
+      matchPaths: ["/dispatch"],
+    },
+    {
+      key: "callcenter",
+      href: "/callcenter",
+      icon: "callcenter",
+      label: translate("nav.callcenter", locale),
+    },
+    {
+      divider: locale === "en" ? "Casework" : "案件處理",
+    },
+    {
+      key: "complaints",
+      href: "/complaints",
+      icon: "complaints",
+      label: translate("nav.complaints", locale),
+    },
+    {
+      key: "incidents",
+      href: "/incidents",
+      icon: "incidents",
+      label: translate("nav.incidents", locale),
+      matchPaths: ["/incidents"],
+    },
+    {
+      divider: locale === "en" ? "Monitoring" : "營運監控",
+    },
+    {
+      key: "reports",
+      href: "/reports",
+      icon: "reports",
+      label: translate("nav.reports", locale),
+    },
+    {
+      key: "revenue",
+      href: "/revenue",
+      icon: "revenue",
+      label: translate("nav.revenue", locale),
+    },
+    {
+      key: "attendance",
+      href: "/attendance",
+      icon: "attendance",
+      label: translate("nav.attendance", locale),
+    },
+    {
+      divider: locale === "en" ? "Registry" : "主資料",
+    },
+    {
+      key: "drivers",
+      href: "/drivers",
+      icon: "fleet",
+      label: translate("nav.drivers", locale),
+    },
+    {
+      key: "vehicles",
+      href: "/vehicles",
+      icon: "vehicles",
+      label: translate("nav.vehicles", locale),
+    },
+    {
+      key: "contracts",
+      href: "/contracts",
+      icon: "contracts",
+      label: translate("nav.contracts", locale),
+    },
+    {
+      key: "feature-flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: translate("nav.featureFlags", locale),
+    },
+  ];
+}
+
+function buildIncidentHandoffHref(record: ComplaintCaseRecord) {
+  const params = new URLSearchParams();
+  params.set("create", "1");
+  params.set("complaintCaseNo", record.caseNo);
+  params.set("title", record.caseNo);
+  params.set("description", record.description);
+  params.set("severity", record.slaBreach ? "high" : "medium");
+  if (record.relatedOrderId) {
+    params.set("relatedOrderId", record.relatedOrderId);
+  }
+  return `/incidents?${params.toString()}`;
+}
+
+type ComplaintTableRow = ComplaintCaseRecord &
+  Record<string, unknown> & {
+    _selected?: boolean;
+  };
+
 export default function ComplaintsPage() {
   const { t, locale } = useTranslation();
   const searchParams = useSearchParams();
@@ -124,6 +512,8 @@ export default function ComplaintsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showWorkspace, setShowWorkspace] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ComplaintCaseStatus | "all">(
     "all",
@@ -132,7 +522,7 @@ export default function ComplaintsPage() {
     ComplaintCategory | "all"
   >("all");
   const [createForm, setCreateForm] = useState(INITIAL_CREATE_FORM);
-  const [assigneeId, setAssigneeId] = useState("AGENT-OPS-002");
+  const [assigneeId, setAssigneeId] = useState(CURRENT_OPERATOR_ID);
   const [assignmentNote, setAssignmentNote] = useState("");
   const [noteText, setNoteText] = useState("");
   const [resolutionCode, setResolutionCode] =
@@ -174,15 +564,14 @@ export default function ComplaintsPage() {
   useEffect(() => {
     if (caseNoFromQuery) {
       setSelectedCaseNo(caseNoFromQuery);
+      setShowWorkspace(true);
     }
 
     void loadRecords(caseNoFromQuery ?? undefined);
   }, [caseNoFromQuery]);
 
   useEffect(() => {
-    if (!selectedCaseNo) {
-      setTimeline([]);
-      setExportView(null);
+    if (!selectedCaseNo || !showWorkspace) {
       return;
     }
 
@@ -210,7 +599,7 @@ export default function ComplaintsPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedCaseNo]);
+  }, [selectedCaseNo, showWorkspace]);
 
   async function loadRecords(preferredCaseNo?: string) {
     setLoading(true);
@@ -242,31 +631,35 @@ export default function ComplaintsPage() {
     }
   }
 
-  const filteredRecords = records
-    .filter((record) => {
-      if (statusFilter !== "all" && record.status !== statusFilter) {
-        return false;
-      }
-      if (categoryFilter !== "all" && record.category !== categoryFilter) {
-        return false;
-      }
-      if (!deferredQuery) {
-        return true;
-      }
-      const haystack = [
-        record.caseNo,
-        record.category,
-        record.description,
-        record.status,
-        record.assigneeId ?? "",
-        record.relatedOrderId ?? "",
-        record.relatedCallId ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(deferredQuery);
-    })
-    .sort(compareComplaintPriority);
+  const filteredRecords = useMemo(
+    () =>
+      records
+        .filter((record) => {
+          if (statusFilter !== "all" && record.status !== statusFilter) {
+            return false;
+          }
+          if (categoryFilter !== "all" && record.category !== categoryFilter) {
+            return false;
+          }
+          if (!deferredQuery) {
+            return true;
+          }
+          const haystack = [
+            record.caseNo,
+            record.category,
+            record.description,
+            record.status,
+            record.assigneeId ?? "",
+            record.relatedOrderId ?? "",
+            record.relatedCallId ?? "",
+          ]
+            .join(" ")
+            .toLowerCase();
+          return haystack.includes(deferredQuery);
+        })
+        .sort(compareComplaintPriority),
+    [categoryFilter, deferredQuery, records, statusFilter],
+  );
 
   const activeCases = records.filter((record) =>
     isComplaintActive(record.status),
@@ -276,261 +669,491 @@ export default function ComplaintsPage() {
   const readyForAudit = records.filter(
     (record) => record.status === "closed",
   ).length;
-  const escalationReadyCases = records
-    .filter(
-      (record) =>
-        !record.relatedIncidentId &&
-        (record.slaBreach || record.severity === "high"),
-    )
-    .sort(compareComplaintPriority);
-  const unassignedCases = records.filter(
-    (record) => isComplaintActive(record.status) && !record.assigneeId,
-  ).length;
-  const workspaceHeadline = selectedRecord
-    ? locale === "en"
-      ? `${selectedRecord.caseNo} is active in the complaints workspace.`
-      : `${selectedRecord.caseNo} 已進入客訴 workspace。`
-    : locale === "en"
-      ? "Select a complaint to triage SLA, assignee state, and incident escalation."
-      : "選擇客訴案件，處理 SLA、負責人狀態與 incident escalation。";
-  const complaintGuardrails = [
-    locale === "en"
-      ? "Complaint ownership stays in ops until the audit-export packet is ready."
-      : "客訴在 audit-export packet 就緒前，owner 仍維持在 ops。",
-    locale === "en"
-      ? "Escalate to incidents only when safety, operational outage, or service recovery coordination crosses the complaint boundary."
-      : "只有在安全、營運中斷或 service recovery 需跨出客訴邊界時，才升級到 incidents。",
-    locale === "en"
-      ? "SLA breach marking is a control signal and should not replace timeline notes or assignee updates."
-      : "SLA breach 是控制訊號，不可取代 timeline note 與 assignee 更新。",
+  const escalatedCases = records.filter((record) => record.relatedIncidentId);
+  const reopenedCases = records.filter((record) => record.reopenCount > 0);
+  const latestEscalatedCase = [...escalatedCases].sort(
+    compareComplaintPriority,
+  )[0];
+
+  const complaintTabs = [
+    copy(locale, "All", "全部"),
+    copy(locale, "My queue", "我負責"),
+    copy(locale, "SLA breach", "SLA breach"),
+    copy(locale, "Escalated incidents", "已升級事故"),
   ];
 
+  const unresolvedDelta =
+    slaBreached > 0
+      ? copy(
+          locale,
+          `${slaBreached} SLA breach`,
+          `${slaBreached} 筆 SLA breach`,
+        )
+      : copy(locale, "stable", "穩定");
+  const averageHandleValue = formatAverageHandleValue(records);
+  const averageHandleDelta = copy(
+    locale,
+    `${readyForAudit} closed sample`,
+    `樣本 ${readyForAudit} 筆`,
+  );
+  const escalatedSub = latestEscalatedCase?.relatedIncidentId
+    ? `${latestEscalatedCase.caseNo} -> ${latestEscalatedCase.relatedIncidentId}`
+    : copy(locale, "No linked incident", "尚無 incident 連結");
+  const reopenDelta = reopenedCases.length
+    ? copy(
+        locale,
+        `${reopenedCases.length} reopened`,
+        `${reopenedCases.length} 筆曾重開`,
+      )
+    : copy(locale, "No reopen", "暫無重開");
+
+  async function handleCreateComplaint() {
+    await runAction("create-complaint", async () => {
+      const created = await getOpsClient().createComplaint({
+        ...createForm,
+        relatedOrderId: createForm.relatedOrderId || null,
+        relatedCallId: createForm.relatedCallId || null,
+      });
+      setCreateForm(INITIAL_CREATE_FORM);
+      setShowCreate(false);
+      setSelectedCaseNo(created.caseNo);
+      setShowWorkspace(true);
+      await loadRecords(created.caseNo);
+    });
+  }
+
+  async function handleAssignCase() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("assign-case", async () => {
+      await getOpsClient().assignComplaint(selectedRecord.caseNo, {
+        assigneeId,
+        note: assignmentNote,
+      });
+      setAssignmentNote("");
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleAddNote() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("add-note", async () => {
+      await getOpsClient().addComplaintNote(selectedRecord.caseNo, {
+        note: noteText,
+      });
+      setNoteText("");
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleResolveCase(closeCase: boolean) {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction(closeCase ? "close-case" : "resolve-case", async () => {
+      if (closeCase) {
+        await getOpsClient().closeComplaint(selectedRecord.caseNo, {
+          resolutionCode,
+          closingNote,
+        });
+      } else {
+        await getOpsClient().resolveComplaint(selectedRecord.caseNo, {
+          resolutionCode,
+          closingNote,
+        });
+      }
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleReopenCase() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("reopen-case", async () => {
+      await getOpsClient().reopenComplaint(selectedRecord.caseNo, {
+        reason: reopenReason,
+      });
+      setReopenReason("");
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleEscalateCase() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("escalate-incident", async () => {
+      await getOpsClient().escalateComplaintToIncident(selectedRecord.caseNo, {
+        title: escalateTitle,
+        severity: escalateSeverity,
+        reason: escalateReason,
+      });
+      setEscalateTitle("");
+      setEscalateReason("");
+      setEscalateSeverity("medium");
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  async function handleMarkSlaBreach() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    await runAction("sla-breach", async () => {
+      await getOpsClient().markComplaintSlaBreach(selectedRecord.caseNo);
+      await loadRecords(selectedRecord.caseNo);
+    });
+  }
+
+  const tableRows: ComplaintTableRow[] = filteredRecords.map((record) => ({
+    ...record,
+    _selected: record.caseNo === selectedCaseNo,
+  }));
+
+  const tableColumns: CanvasTableColumn<ComplaintTableRow>[] = [
+    {
+      h: "CASE",
+      w: 116,
+      mono: true,
+      r: (row) => (
+        <button
+          type="button"
+          style={caseLinkStyle(theme)}
+          onClick={() => {
+            setSelectedCaseNo(row.caseNo);
+            setShowWorkspace(true);
+          }}
+        >
+          {row.caseNo}
+        </button>
+      ),
+    },
+    {
+      h: "CATEGORY",
+      w: 150,
+      mono: true,
+      r: (row) => formatOpsCodeLabel(locale, row.category),
+    },
+    {
+      h: "SEV",
+      w: 92,
+      r: (row) => (
+        <Pill theme={theme} tone={getSeverityTone(row)} dot>
+          {formatOpsCodeLabel(locale, row.severity)}
+        </Pill>
+      ),
+    },
+    {
+      h: "DESC",
+      r: (row) => (
+        <div
+          style={{
+            minWidth: 220,
+            maxWidth: 360,
+            whiteSpace: "normal",
+            lineHeight: 1.4,
+          }}
+        >
+          {row.description}
+        </div>
+      ),
+    },
+    {
+      h: "ORDER",
+      w: 128,
+      mono: true,
+      r: (row) => row.relatedOrderId ?? "-",
+    },
+    {
+      h: "SLA",
+      w: 136,
+      r: (row) => (
+        <Pill theme={theme} tone={row.slaBreach ? "danger" : "success"} dot>
+          {row.slaBreach
+            ? copy(locale, "breached", "違規")
+            : formatRelativeSla(row.slaDueAt, locale)}
+        </Pill>
+      ),
+    },
+    {
+      h: "OWNER",
+      w: 112,
+      mono: true,
+      r: (row) => row.assigneeId ?? t("complaints.unassigned"),
+    },
+    {
+      h: "STATUS",
+      w: 170,
+      r: (row) => (
+        <Pill theme={theme} tone={getStatusTone(row)} dot>
+          {formatOpsCodeLabel(locale, row.status)}
+        </Pill>
+      ),
+    },
+  ];
+
+  const canCreate =
+    createForm.description.trim().length > 0 && busyKey !== "create-complaint";
+  const canAssign = assigneeId.trim().length > 0 && busyKey !== "assign-case";
+  const canAddNote = noteText.trim().length > 0 && busyKey !== "add-note";
+  const canResolve =
+    validResolutionCodes.length > 0 && busyKey !== "resolve-case";
+  const canClose = validResolutionCodes.length > 0 && busyKey !== "close-case";
+  const canReopen = reopenReason.trim().length > 0 && busyKey !== "reopen-case";
+  const canEscalate =
+    escalateTitle.trim().length > 0 &&
+    escalateReason.trim().length > 0 &&
+    busyKey !== "escalate-incident";
+
   return (
-    <>
+    <Shell
+      theme={theme}
+      nav={buildShellNav(locale)}
+      active="complaints"
+      currentPath="/complaints"
+      breadcrumb={[copy(locale, "Complaints", "客訴")]}
+      searchPlaceholder={t("complaints.search")}
+      style={shellFrameStyle}
+    >
       <PageHeader
+        theme={theme}
         title={t("complaints.title")}
         subtitle={t("complaints.subtitle")}
-      />
-      <div>
-        {error && (
-          <div className="error-banner">
-            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
-          </div>
-        )}
-
-        <section className="workspace-hero">
-          <div>
-            <p className="eyebrow">
-              {locale === "en" ? "Complaint workspace" : "Complaint Workspace"}
-            </p>
-            <h3>
-              {selectedRecord
-                ? `${selectedRecord.caseNo} · ${formatOpsCodeLabel(
-                    locale,
-                    selectedRecord.category,
-                  )}`
-                : t("complaints.caseDetail")}
-            </h3>
-            <p>{workspaceHeadline}</p>
-          </div>
-          <div className="hero-chip-row">
-            <span className="hero-chip hero-chip-critical">
-              {locale === "en"
-                ? `${slaBreached} breached SLA case(s)`
-                : `${slaBreached} 筆 SLA 違規案件`}
-            </span>
-            <span className="hero-chip">
-              {locale === "en"
-                ? `${escalationReadyCases.length} escalation-ready`
-                : `${escalationReadyCases.length} 筆可升級 incident`}
-            </span>
-            <span className="hero-chip">
-              {locale === "en"
-                ? `${unassignedCases} unassigned active case(s)`
-                : `${unassignedCases} 筆活躍案件未指派`}
-            </span>
-          </div>
-        </section>
-
-        <section className="summary-grid">
-          {[
-            {
-              label: t("complaints.activeCases"),
-              value: activeCases,
-              note: t("complaints.activeCasesSub"),
-            },
-            {
-              label: t("complaints.hotlineLinked"),
-              value: hotlineLinked,
-              note: t("complaints.hotlineLinkedSub"),
-            },
-            {
-              label: t("complaints.slaBreached"),
-              value: slaBreached,
-              note: t("complaints.slaBreachedSub"),
-            },
-            {
-              label: t("complaints.closedExport"),
-              value: readyForAudit,
-              note: t("complaints.closedExportSub"),
-            },
-          ].map((card) => (
-            <div key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
-            </div>
-          ))}
-        </section>
-
-        <section className="assumption-panel">
-          <strong>
-            {locale === "en"
-              ? "Authority and escalation guardrails"
-              : "權限與 escalation guardrails"}
-          </strong>
-          <ul className="assumption-list">
-            {complaintGuardrails.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="priority-queue">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">
-                {locale === "en"
-                  ? "SLA + escalation queue"
-                  : "SLA / escalation 佇列"}
-              </p>
-              <h3>
-                {locale === "en"
-                  ? "Immediate complaints requiring ops attention"
-                  : "需立即處理的客訴案件"}
-              </h3>
-            </div>
-            <span className="panel-note">
-              {locale === "en"
-                ? `${Math.min(escalationReadyCases.length, 4)} shown`
-                : `顯示 ${Math.min(escalationReadyCases.length, 4)} 筆`}
-            </span>
-          </div>
-          {escalationReadyCases.length > 0 ? (
-            <div className="queue-grid">
-              {escalationReadyCases.slice(0, 4).map((record) => (
-                <button
-                  key={record.caseNo}
-                  className="queue-card"
-                  type="button"
-                  onClick={() => setSelectedCaseNo(record.caseNo)}
-                >
-                  <div className="queue-card-head">
-                    <strong>{record.caseNo}</strong>
-                    <span className={getComplaintQueueTone(record)}>
-                      {record.slaBreach
-                        ? locale === "en"
-                          ? "SLA breach"
-                          : "SLA 違規"
-                        : formatOpsCodeLabel(locale, record.severity)}
-                    </span>
-                  </div>
-                  <div className="queue-card-subcopy">
-                    {formatOpsCodeLabel(locale, record.category)} ·{" "}
-                    {record.assigneeId ??
-                      (locale === "en" ? "Unassigned" : "未指派")}
-                  </div>
-                  <p>{record.description}</p>
-                  <small>{formatRelativeSla(record.slaDueAt, locale)}</small>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="empty-state">
-              {locale === "en"
-                ? "No complaint currently needs immediate incident escalation."
-                : "目前沒有需要立即升級 incident 的客訴案件。"}
-            </p>
-          )}
-        </section>
-
-        <div className="toolbar">
-          <input
-            className="search-input"
-            type="search"
-            placeholder={t("complaints.search")}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <select
-            value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as ComplaintCaseStatus | "all")
-            }
-          >
-            <option value="all">{t("complaints.allStatuses")}</option>
-            {STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>
-                {formatOpsCodeLabel(locale, status)}
-              </option>
-            ))}
-          </select>
-          <select
-            value={categoryFilter}
-            onChange={(event) =>
-              setCategoryFilter(event.target.value as ComplaintCategory | "all")
-            }
-          >
-            <option value="all">{t("complaints.allCategories")}</option>
-            {CATEGORY_OPTIONS.map((category) => (
-              <option key={category} value={category}>
-                {formatOpsCodeLabel(locale, category)}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={() => setShowCreate((current) => !current)}
-          >
-            {showCreate
-              ? t("complaints.hideCreate")
-              : t("complaints.createComplaint")}
-          </button>
-          <button
-            className="btn"
-            type="button"
-            onClick={() => void loadRecords(selectedCaseNo ?? undefined)}
-          >
-            {t("common.refresh")}
-          </button>
-        </div>
-
-        {showCreate && (
-          <section className="panel">
-            <div className="panel-head">
-              <h3>{t("complaints.createTitle")}</h3>
-              <p>{t("complaints.createNote")}</p>
-            </div>
-            <form
-              className="form-grid"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void runAction("create-complaint", async () => {
-                  const created = await getOpsClient().createComplaint({
-                    ...createForm,
-                    relatedOrderId: createForm.relatedOrderId || null,
-                    relatedCallId: createForm.relatedCallId || null,
-                  });
-                  setCreateForm(INITIAL_CREATE_FORM);
-                  setShowCreate(false);
-                  await loadRecords(created.caseNo);
-                });
+        tabs={complaintTabs}
+        activeTab={complaintTabs[0]}
+        actions={
+          <>
+            <Btn
+              theme={theme}
+              icon="filter"
+              onClick={() => setShowFilters((current) => !current)}
+            >
+              {copy(locale, "Category", "類別")}
+            </Btn>
+            <Btn
+              theme={theme}
+              icon="export"
+              onClick={() => {
+                if (selectedRecord) {
+                  setShowWorkspace(true);
+                }
               }}
             >
-              <label>
-                {t("complaints.form.source")}
+              {copy(locale, "Export", "匯出")}
+            </Btn>
+            <Btn
+              theme={theme}
+              variant="primary"
+              icon="plus"
+              onClick={() => setShowCreate((current) => !current)}
+            >
+              {t("complaints.createComplaint")}
+            </Btn>
+          </>
+        }
+      />
+
+      <div style={pageStackStyle}>
+        {error ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={getOpsLabel(locale, "error")}
+            body={error}
+          />
+        ) : null}
+
+        <div style={kpiGridStyle}>
+          <KPI
+            theme={theme}
+            label={copy(locale, "Open complaints", "未結客訴")}
+            value={activeCases}
+            delta={unresolvedDelta}
+            deltaTone={slaBreached > 0 ? "down" : "neutral"}
+          />
+          <KPI
+            theme={theme}
+            label={copy(locale, "Avg handling", "平均處理")}
+            value={averageHandleValue}
+            delta={averageHandleDelta}
+            deltaTone={readyForAudit > 0 ? "up" : "neutral"}
+          />
+          <KPI
+            theme={theme}
+            label={copy(locale, "Escalated incidents", "升級事故")}
+            value={escalatedCases.length}
+            sub={escalatedSub}
+          />
+          <KPI
+            theme={theme}
+            label={copy(locale, "Reopen rate", "reopen 率")}
+            value={formatReopenRate(records)}
+            delta={reopenDelta}
+            deltaTone={reopenedCases.length > 0 ? "down" : "neutral"}
+          />
+        </div>
+
+        {showFilters ? (
+          <Card
+            theme={theme}
+            title={copy(locale, "Registry filters", "案件篩選")}
+            subtitle={copy(
+              locale,
+              "Filter the complaints table without leaving the OC complaints surface.",
+              "在不離開客訴面板的前提下過濾 complaints table。",
+            )}
+          >
+            <div style={filterGridStyle}>
+              <Field theme={theme} label={t("common.search")}>
+                <input
+                  type="search"
+                  style={controlStyle(theme)}
+                  placeholder={t("complaints.search")}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </Field>
+              <Field theme={theme} label={t("complaints.allStatuses")}>
                 <select
+                  style={controlStyle(theme)}
+                  value={statusFilter}
+                  onChange={(event) =>
+                    setStatusFilter(
+                      event.target.value as ComplaintCaseStatus | "all",
+                    )
+                  }
+                >
+                  <option value="all">{t("complaints.allStatuses")}</option>
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {formatOpsCodeLabel(locale, status)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field theme={theme} label={t("complaints.allCategories")}>
+                <select
+                  style={controlStyle(theme)}
+                  value={categoryFilter}
+                  onChange={(event) =>
+                    setCategoryFilter(
+                      event.target.value as ComplaintCategory | "all",
+                    )
+                  }
+                >
+                  <option value="all">{t("complaints.allCategories")}</option>
+                  {CATEGORY_OPTIONS.map((category) => (
+                    <option key={category} value={category}>
+                      {formatOpsCodeLabel(locale, category)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field
+                theme={theme}
+                label={copy(locale, "Dataset", "資料集")}
+                hint={copy(locale, "Quick queue summary", "目前 table 摘要")}
+              >
+                <DL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      label: copy(locale, "Visible", "顯示中"),
+                      value: `${filteredRecords.length}`,
+                      mono: true,
+                    },
+                    {
+                      label: copy(locale, "Hotline linked", "已連結熱線"),
+                      value: `${hotlineLinked}`,
+                      mono: true,
+                    },
+                  ]}
+                />
+              </Field>
+            </div>
+            <div style={actionRowStyle}>
+              <Btn
+                theme={theme}
+                onClick={() => void loadRecords(selectedCaseNo ?? undefined)}
+              >
+                {t("common.refresh")}
+              </Btn>
+              <Btn
+                theme={theme}
+                variant="ghost"
+                onClick={() => {
+                  setQuery("");
+                  setStatusFilter("all");
+                  setCategoryFilter("all");
+                }}
+              >
+                {copy(locale, "Reset", "重設")}
+              </Btn>
+            </div>
+          </Card>
+        ) : null}
+
+        <Card
+          theme={theme}
+          padding={0}
+          title={copy(locale, "Complaints table", "客訴清單")}
+          subtitle={t("complaints.visible", { count: filteredRecords.length })}
+          actions={
+            <div style={actionRowStyle}>
+              <Btn
+                theme={theme}
+                onClick={() => void loadRecords(selectedCaseNo ?? undefined)}
+              >
+                {t("common.refresh")}
+              </Btn>
+              <Btn
+                theme={theme}
+                variant="ghost"
+                disabled={!selectedRecord}
+                onClick={() => setShowWorkspace((current) => !current)}
+              >
+                {showWorkspace
+                  ? copy(locale, "Hide workspace", "隱藏 workspace")
+                  : copy(locale, "Open workspace", "開啟 workspace")}
+              </Btn>
+            </div>
+          }
+        >
+          {loading ? (
+            <div style={{ padding: 16, color: theme.textMuted }}>
+              {t("complaints.loading")}
+            </div>
+          ) : filteredRecords.length > 0 ? (
+            <Table theme={theme} columns={tableColumns} rows={tableRows} />
+          ) : (
+            <div style={{ padding: 16 }}>
+              <div style={emptyStateStyle}>{t("complaints.empty")}</div>
+            </div>
+          )}
+        </Card>
+
+        {showCreate ? (
+          <Card
+            theme={theme}
+            title={t("complaints.createTitle")}
+            subtitle={t("complaints.createNote")}
+          >
+            <div style={filterGridStyle}>
+              <Field theme={theme} label={t("complaints.form.source")} required>
+                <select
+                  style={controlStyle(theme)}
                   value={createForm.caseSource}
                   onChange={(event) =>
                     setCreateForm((current) => ({
@@ -553,10 +1176,14 @@ export default function ComplaintsPage() {
                     {formatOpsCodeLabel(locale, "app")}
                   </option>
                 </select>
-              </label>
-              <label>
-                {t("complaints.form.category")}
+              </Field>
+              <Field
+                theme={theme}
+                label={t("complaints.form.category")}
+                required
+              >
                 <select
+                  style={controlStyle(theme)}
                   value={createForm.category}
                   onChange={(event) =>
                     setCreateForm((current) => ({
@@ -571,10 +1198,14 @@ export default function ComplaintsPage() {
                     </option>
                   ))}
                 </select>
-              </label>
-              <label>
-                {t("complaints.form.severity")}
+              </Field>
+              <Field
+                theme={theme}
+                label={t("complaints.form.severity")}
+                required
+              >
                 <select
+                  style={controlStyle(theme)}
                   value={createForm.severity}
                   onChange={(event) =>
                     setCreateForm((current) => ({
@@ -591,11 +1222,11 @@ export default function ComplaintsPage() {
                     {formatOpsCodeLabel(locale, "high")}
                   </option>
                 </select>
-              </label>
-              <label>
-                {t("complaints.form.relatedOrder")}
+              </Field>
+              <Field theme={theme} label={t("complaints.form.relatedOrder")}>
                 <input
                   type="text"
+                  style={controlStyle(theme, { mono: true })}
                   value={createForm.relatedOrderId ?? ""}
                   onChange={(event) =>
                     setCreateForm((current) => ({
@@ -604,11 +1235,11 @@ export default function ComplaintsPage() {
                     }))
                   }
                 />
-              </label>
-              <label>
-                {t("complaints.form.relatedCall")}
+              </Field>
+              <Field theme={theme} label={t("complaints.form.relatedCall")}>
                 <input
                   type="text"
+                  style={controlStyle(theme, { mono: true })}
                   value={createForm.relatedCallId ?? ""}
                   onChange={(event) =>
                     setCreateForm((current) => ({
@@ -617,11 +1248,15 @@ export default function ComplaintsPage() {
                     }))
                   }
                 />
-              </label>
-              <label className="full-span">
-                {t("complaints.form.description")}
+              </Field>
+              <Field
+                theme={theme}
+                label={t("complaints.form.description")}
+                required
+              >
                 <textarea
-                  rows={3}
+                  rows={4}
+                  style={controlStyle(theme, { minHeight: 104 })}
                   value={createForm.description}
                   onChange={(event) =>
                     setCreateForm((current) => ({
@@ -630,439 +1265,341 @@ export default function ComplaintsPage() {
                     }))
                   }
                 />
-              </label>
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={busyKey === "create-complaint"}
+              </Field>
+            </div>
+            <div style={actionRowStyle}>
+              <Btn
+                theme={theme}
+                variant="primary"
+                icon="check"
+                disabled={!canCreate}
+                onClick={() => void handleCreateComplaint()}
               >
                 {busyKey === "create-complaint"
                   ? t("complaints.form.saving")
                   : t("complaints.form.createRecord")}
-              </button>
-            </form>
-          </section>
-        )}
+              </Btn>
+              <Btn
+                theme={theme}
+                variant="ghost"
+                onClick={() => setShowCreate(false)}
+              >
+                {t("common.cancel")}
+              </Btn>
+            </div>
+          </Card>
+        ) : null}
 
-        {loading ? (
-          <p>{t("complaints.loading")}</p>
-        ) : (
-          <div className="content-grid">
-            <section className="panel">
-              <div className="panel-head">
-                <h3>{t("complaints.caseList")}</h3>
-                <p>
-                  {t("complaints.results", { count: filteredRecords.length })}
-                </p>
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>{t("complaints.col.case")}</th>
-                      <th>{t("complaints.col.category")}</th>
-                      <th>{t("complaints.col.status")}</th>
-                      <th>{t("complaints.col.assignee")}</th>
-                      <th>{t("complaints.col.order")}</th>
-                      <th>{t("complaints.col.hotline")}</th>
-                      <th>SLA</th>
-                      <th>{t("complaints.col.created")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRecords.map((record) => (
-                      <tr
-                        key={record.caseNo}
-                        className={
-                          record.caseNo === selectedCaseNo ? "selected-row" : ""
-                        }
-                        onClick={() => setSelectedCaseNo(record.caseNo)}
-                      >
-                        <td>{record.caseNo}</td>
-                        <td>{formatOpsCodeLabel(locale, record.category)}</td>
-                        <td>
-                          <div>{formatOpsCodeLabel(locale, record.status)}</div>
-                          <div className="table-subcopy">
-                            {formatOpsCodeLabel(locale, record.severity)}
-                          </div>
-                        </td>
-                        <td>{record.assigneeId ?? "-"}</td>
-                        <td>{record.relatedOrderId ?? "-"}</td>
-                        <td>{record.relatedCallId ?? "-"}</td>
-                        <td>
-                          {record.slaBreach ? (
-                            <span className="sla-badge">
-                              {locale === "en" ? "BREACH" : "違規"}
-                            </span>
-                          ) : (
-                            <span className="table-subcopy">
-                              {formatRelativeSla(record.slaDueAt, locale)}
-                            </span>
-                          )}
-                        </td>
-                        <td>{formatDateTime(record.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+        {showWorkspace && selectedRecord ? (
+          <div style={workspaceGridStyle}>
+            <Card
+              theme={theme}
+              title={`${selectedRecord.caseNo} / ${formatOpsCodeLabel(
+                locale,
+                selectedRecord.category,
+              )}`}
+              subtitle={copy(
+                locale,
+                "Selected complaint workspace",
+                "已選客訴 workspace",
+              )}
+            >
+              <div style={detailStackStyle}>
+                <div style={pillRowStyle}>
+                  <Pill theme={theme} tone={getStatusTone(selectedRecord)} dot>
+                    {formatOpsCodeLabel(locale, selectedRecord.status)}
+                  </Pill>
+                  <Pill
+                    theme={theme}
+                    tone={getSeverityTone(selectedRecord)}
+                    dot
+                  >
+                    {selectedRecord.slaBreach
+                      ? copy(locale, "SLA breach", "SLA 違規")
+                      : formatOpsCodeLabel(locale, selectedRecord.severity)}
+                  </Pill>
+                  {selectedRecord.relatedIncidentId ? (
+                    <Pill theme={theme} tone="danger" dot>
+                      {copy(locale, "incident linked", "已連結 incident")}
+                    </Pill>
+                  ) : null}
+                </div>
 
-            <section className="panel">
-              <div className="panel-head">
-                <h3>{t("complaints.caseDetail")}</h3>
-                <p>
-                  {selectedRecord
-                    ? selectedRecord.caseNo
-                    : t("complaints.selectCase")}
-                </p>
-              </div>
-
-              {selectedRecord ? (
-                <div className="details-stack">
-                  <section className="detail-card">
-                    <div className="detail-status-row">
-                      <span className={getComplaintQueueTone(selectedRecord)}>
-                        {selectedRecord.slaBreach
-                          ? locale === "en"
-                            ? "SLA breach"
-                            : "SLA 違規"
-                          : formatOpsCodeLabel(locale, selectedRecord.severity)}
-                      </span>
-                      {!selectedRecord.relatedIncidentId &&
-                        (selectedRecord.slaBreach ||
-                          selectedRecord.severity === "high") && (
-                          <Link
-                            className="inline-link quick-link"
-                            href={`/incidents?create=1&complaintCaseNo=${encodeURIComponent(selectedRecord.caseNo)}&title=${encodeURIComponent(selectedRecord.caseNo)}&description=${encodeURIComponent(selectedRecord.description)}&severity=${encodeURIComponent(selectedRecord.slaBreach ? "high" : "medium")}${selectedRecord.relatedOrderId ? `&relatedOrderId=${encodeURIComponent(selectedRecord.relatedOrderId)}` : ""}`}
-                          >
-                            {locale === "en"
-                              ? "Prepare incident handoff"
-                              : "準備 incident handoff"}
-                          </Link>
-                        )}
-                    </div>
-                    <div className="detail-grid">
-                      <div>
-                        <span className="label">{t("common.status")}</span>
-                        <strong>
-                          {formatOpsCodeLabel(locale, selectedRecord.status)}
-                        </strong>
-                        <small>
-                          {t("complaints.detail.slaDue", {
-                            value: formatDateTime(selectedRecord.slaDueAt),
-                          })}
-                        </small>
-                      </div>
-                      <div>
-                        <span className="label">
-                          {t("complaints.detail.assignee")}
-                        </span>
-                        <strong>
-                          {selectedRecord.assigneeId ??
-                            t("complaints.unassigned")}
-                        </strong>
-                        <small>
-                          {t("complaints.detail.slaBreach", {
-                            value: selectedRecord.slaBreach
-                              ? t("common.yes")
-                              : t("common.no"),
-                          })}
-                        </small>
-                        {selectedRecord.slaBreach && (
-                          <span className="sla-badge">SLA BREACH</span>
-                        )}
-                      </div>
-                      <div>
-                        <span className="label">
-                          {t("complaints.detail.reopenCount")}
-                        </span>
-                        <strong>{selectedRecord.reopenCount ?? 0}</strong>
-                      </div>
-                      <div>
-                        <span className="label">
-                          {t("complaints.detail.orderCall")}
-                        </span>
-                        <strong>{selectedRecord.relatedOrderId ?? "-"}</strong>
-                        <small>{selectedRecord.relatedCallId ?? "-"}</small>
-                      </div>
-                      <div>
-                        <span className="label">
-                          {t("complaints.detail.resolution")}
-                        </span>
-                        <strong>
-                          {selectedRecord.resolutionCode
-                            ? formatOpsCodeLabel(
-                                locale,
-                                selectedRecord.resolutionCode,
-                              )
-                            : "-"}
-                        </strong>
-                        <small>{selectedRecord.closingNote ?? "-"}</small>
-                      </div>
-                      <div>
-                        <span className="label">
-                          {t("complaints.detail.linkedIncident")}
-                        </span>
-                        {selectedRecord.relatedIncidentId ? (
-                          <Link
-                            className="inline-link"
-                            href={`/incidents?incidentId=${encodeURIComponent(
-                              selectedRecord.relatedIncidentId,
-                            )}`}
-                          >
-                            <strong>{selectedRecord.relatedIncidentId}</strong>
-                          </Link>
-                        ) : (
-                          <strong>-</strong>
-                        )}
-                      </div>
-                    </div>
-                    <p className="description">{selectedRecord.description}</p>
-                    <div className="action-row">
-                      {!selectedRecord.slaBreach && (
-                        <button
-                          className="btn"
-                          type="button"
-                          disabled={busyKey === "sla-breach"}
-                          onClick={() =>
-                            void runAction("sla-breach", async () => {
-                              await getOpsClient().markComplaintSlaBreach(
-                                selectedRecord.caseNo,
-                              );
-                              await loadRecords(selectedRecord.caseNo);
-                            })
-                          }
+                <DL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      label: t("common.status"),
+                      value: formatOpsCodeLabel(locale, selectedRecord.status),
+                    },
+                    {
+                      label: t("complaints.detail.assignee"),
+                      value:
+                        selectedRecord.assigneeId ?? t("complaints.unassigned"),
+                      mono: true,
+                    },
+                    {
+                      label: copy(locale, "SLA due", "SLA 截止"),
+                      value: formatDateTime(locale, selectedRecord.slaDueAt),
+                      mono: true,
+                    },
+                    {
+                      label: copy(locale, "SLA breach", "SLA 違規"),
+                      value: selectedRecord.slaBreach
+                        ? t("common.yes")
+                        : t("common.no"),
+                    },
+                    {
+                      label: t("complaints.detail.orderCall"),
+                      value: `${selectedRecord.relatedOrderId ?? "-"} / ${
+                        selectedRecord.relatedCallId ?? "-"
+                      }`,
+                      mono: true,
+                    },
+                    {
+                      label: t("complaints.detail.resolution"),
+                      value: selectedRecord.resolutionCode
+                        ? formatOpsCodeLabel(
+                            locale,
+                            selectedRecord.resolutionCode,
+                          )
+                        : "-",
+                    },
+                    {
+                      label: t("complaints.detail.reopenCount"),
+                      value: `${selectedRecord.reopenCount ?? 0}`,
+                      mono: true,
+                    },
+                    {
+                      label: t("complaints.detail.linkedIncident"),
+                      value: selectedRecord.relatedIncidentId ? (
+                        <Link
+                          href={`/incidents?incidentId=${encodeURIComponent(
+                            selectedRecord.relatedIncidentId,
+                          )}`}
+                          style={actionLinkStyle(theme)}
                         >
-                          {t("complaints.markSlaBreach")}
-                        </button>
+                          {selectedRecord.relatedIncidentId}
+                        </Link>
+                      ) : (
+                        "-"
+                      ),
+                    },
+                  ]}
+                />
+
+                <div
+                  style={{
+                    color: theme.text,
+                    lineHeight: 1.5,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {selectedRecord.description}
+                </div>
+
+                <div style={actionRowStyle}>
+                  {!selectedRecord.slaBreach ? (
+                    <Btn
+                      theme={theme}
+                      danger
+                      icon="warn"
+                      disabled={busyKey === "sla-breach"}
+                      onClick={() => void handleMarkSlaBreach()}
+                    >
+                      {t("complaints.markSlaBreach")}
+                    </Btn>
+                  ) : null}
+                  {!selectedRecord.relatedIncidentId &&
+                  (selectedRecord.slaBreach ||
+                    selectedRecord.severity === "high") ? (
+                    <Link
+                      href={buildIncidentHandoffHref(selectedRecord)}
+                      style={actionLinkStyle(theme)}
+                    >
+                      {copy(
+                        locale,
+                        "Prepare incident handoff",
+                        "準備 incident handoff",
                       )}
-                    </div>
-                  </section>
+                    </Link>
+                  ) : null}
+                </div>
 
-                  <section className="detail-card">
-                    <div className="detail-subgrid">
-                      <form
-                        className="stack-form"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void runAction("assign-case", async () => {
-                            await getOpsClient().assignComplaint(
-                              selectedRecord.caseNo,
-                              {
-                                assigneeId,
-                                note: assignmentNote,
-                              },
-                            );
-                            setAssignmentNote("");
-                            await loadRecords(selectedRecord.caseNo);
-                          });
-                        }}
+                <div style={actionGridStyle}>
+                  <Card
+                    theme={theme}
+                    title={t("complaints.assignCase")}
+                    subtitle={t("complaints.assignForm.title")}
+                  >
+                    <Field
+                      theme={theme}
+                      label={t("complaints.assignForm.agentId")}
+                    >
+                      <input
+                        type="text"
+                        style={controlStyle(theme, { mono: true })}
+                        value={assigneeId}
+                        onChange={(event) => setAssigneeId(event.target.value)}
+                      />
+                    </Field>
+                    <Field theme={theme} label={t("common.notes")}>
+                      <textarea
+                        rows={3}
+                        style={controlStyle(theme, { minHeight: 92 })}
+                        placeholder={t("complaints.assignmentNotePlaceholder")}
+                        value={assignmentNote}
+                        onChange={(event) =>
+                          setAssignmentNote(event.target.value)
+                        }
+                      />
+                    </Field>
+                    <Btn
+                      theme={theme}
+                      disabled={!canAssign}
+                      onClick={() => void handleAssignCase()}
+                    >
+                      {t("complaints.assign")}
+                    </Btn>
+                  </Card>
+
+                  <Card
+                    theme={theme}
+                    title={t("complaints.addNote")}
+                    subtitle={copy(
+                      locale,
+                      "Append investigation context without replacing history.",
+                      "補充調查內容，不覆蓋既有歷史。",
+                    )}
+                  >
+                    <Field theme={theme} label={t("common.notes")}>
+                      <textarea
+                        rows={4}
+                        style={controlStyle(theme, { minHeight: 112 })}
+                        placeholder={t(
+                          "complaints.investigationNotePlaceholder",
+                        )}
+                        value={noteText}
+                        onChange={(event) => setNoteText(event.target.value)}
+                      />
+                    </Field>
+                    <Btn
+                      theme={theme}
+                      disabled={!canAddNote}
+                      onClick={() => void handleAddNote()}
+                    >
+                      {t("complaints.saveNote")}
+                    </Btn>
+                  </Card>
+
+                  <Card
+                    theme={theme}
+                    title={t("complaints.resolveCase")}
+                    subtitle={t("complaints.resolveForm.title")}
+                  >
+                    <Field
+                      theme={theme}
+                      label={t("complaints.resolveForm.resolution")}
+                    >
+                      <select
+                        style={controlStyle(theme)}
+                        value={resolutionCode}
+                        onChange={(event) =>
+                          setResolutionCode(
+                            event.target.value as ComplaintResolutionCode,
+                          )
+                        }
                       >
-                        <h4>{t("complaints.assignCase")}</h4>
+                        {validResolutionCodes.map((code) => (
+                          <option key={code} value={code}>
+                            {formatOpsCodeLabel(locale, code)}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field theme={theme} label={t("common.notes")}>
+                      <textarea
+                        rows={4}
+                        style={controlStyle(theme, { minHeight: 112 })}
+                        placeholder={t("complaints.closingNotePlaceholder")}
+                        value={closingNote}
+                        onChange={(event) => setClosingNote(event.target.value)}
+                      />
+                    </Field>
+                    <div style={actionRowStyle}>
+                      <Btn
+                        theme={theme}
+                        disabled={!canResolve}
+                        onClick={() => void handleResolveCase(false)}
+                      >
+                        {t("complaints.resolve")}
+                      </Btn>
+                      <Btn
+                        theme={theme}
+                        variant="primary"
+                        disabled={!canClose}
+                        onClick={() => void handleResolveCase(true)}
+                      >
+                        {t("complaints.close")}
+                      </Btn>
+                    </div>
+                  </Card>
+
+                  <Card
+                    theme={theme}
+                    title={t("complaints.reopenCase")}
+                    subtitle={t("complaints.reopenForm.title")}
+                  >
+                    <Field
+                      theme={theme}
+                      label={t("complaints.reopenForm.reason")}
+                    >
+                      <textarea
+                        rows={4}
+                        style={controlStyle(theme, { minHeight: 112 })}
+                        placeholder={t("complaints.reopenReasonPlaceholder")}
+                        value={reopenReason}
+                        onChange={(event) =>
+                          setReopenReason(event.target.value)
+                        }
+                      />
+                    </Field>
+                    <Btn
+                      theme={theme}
+                      disabled={!canReopen}
+                      onClick={() => void handleReopenCase()}
+                    >
+                      {t("complaints.reopen")}
+                    </Btn>
+                  </Card>
+
+                  {!selectedRecord.relatedIncidentId ? (
+                    <Card
+                      theme={theme}
+                      title={t("complaints.escalateToIncident")}
+                      subtitle={t("complaints.escalateForm.title")}
+                    >
+                      <Field
+                        theme={theme}
+                        label={t("complaints.escalateTitlePlaceholder")}
+                        required
+                      >
                         <input
                           type="text"
-                          placeholder={t("complaints.assigneeIdPlaceholder")}
-                          value={assigneeId}
-                          onChange={(event) =>
-                            setAssigneeId(event.target.value)
-                          }
-                        />
-                        <textarea
-                          rows={2}
-                          placeholder={t(
-                            "complaints.assignmentNotePlaceholder",
-                          )}
-                          value={assignmentNote}
-                          onChange={(event) =>
-                            setAssignmentNote(event.target.value)
-                          }
-                        />
-                        <button
-                          className="btn"
-                          type="submit"
-                          disabled={busyKey === "assign-case"}
-                        >
-                          {t("complaints.assign")}
-                        </button>
-                      </form>
-
-                      <form
-                        className="stack-form"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void runAction("add-note", async () => {
-                            await getOpsClient().addComplaintNote(
-                              selectedRecord.caseNo,
-                              {
-                                note: noteText,
-                              },
-                            );
-                            setNoteText("");
-                            await loadRecords(selectedRecord.caseNo);
-                          });
-                        }}
-                      >
-                        <h4>{t("complaints.addNote")}</h4>
-                        <textarea
-                          rows={3}
-                          placeholder={t(
-                            "complaints.investigationNotePlaceholder",
-                          )}
-                          value={noteText}
-                          onChange={(event) => setNoteText(event.target.value)}
-                        />
-                        <button
-                          className="btn"
-                          type="submit"
-                          disabled={busyKey === "add-note"}
-                        >
-                          {t("complaints.saveNote")}
-                        </button>
-                      </form>
-                    </div>
-                  </section>
-
-                  <section className="detail-card">
-                    <div className="detail-subgrid">
-                      <form
-                        className="stack-form"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void runAction("resolve-case", async () => {
-                            await getOpsClient().resolveComplaint(
-                              selectedRecord.caseNo,
-                              {
-                                resolutionCode,
-                                closingNote,
-                              },
-                            );
-                            await loadRecords(selectedRecord.caseNo);
-                          });
-                        }}
-                      >
-                        <h4>{t("complaints.resolveCase")}</h4>
-                        <select
-                          value={resolutionCode}
-                          onChange={(event) =>
-                            setResolutionCode(
-                              event.target.value as ComplaintResolutionCode,
-                            )
-                          }
-                        >
-                          {validResolutionCodes.map((code) => (
-                            <option key={code} value={code}>
-                              {formatOpsCodeLabel(locale, code)}
-                            </option>
-                          ))}
-                        </select>
-                        <textarea
-                          rows={3}
-                          placeholder={t("complaints.closingNotePlaceholder")}
-                          value={closingNote}
-                          onChange={(event) =>
-                            setClosingNote(event.target.value)
-                          }
-                        />
-                        <div className="action-row">
-                          <button
-                            className="btn"
-                            type="submit"
-                            disabled={busyKey === "resolve-case"}
-                          >
-                            {t("complaints.resolve")}
-                          </button>
-                          <button
-                            className="btn"
-                            type="button"
-                            disabled={busyKey === "close-case"}
-                            onClick={() =>
-                              void runAction("close-case", async () => {
-                                await getOpsClient().closeComplaint(
-                                  selectedRecord.caseNo,
-                                  {
-                                    resolutionCode,
-                                    closingNote,
-                                  },
-                                );
-                                await loadRecords(selectedRecord.caseNo);
-                              })
-                            }
-                          >
-                            {t("complaints.close")}
-                          </button>
-                        </div>
-                      </form>
-
-                      <form
-                        className="stack-form"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void runAction("reopen-case", async () => {
-                            await getOpsClient().reopenComplaint(
-                              selectedRecord.caseNo,
-                              {
-                                reason: reopenReason,
-                              },
-                            );
-                            setReopenReason("");
-                            await loadRecords(selectedRecord.caseNo);
-                          });
-                        }}
-                      >
-                        <h4>{t("complaints.reopenCase")}</h4>
-                        <textarea
-                          rows={3}
-                          placeholder={t("complaints.reopenReasonPlaceholder")}
-                          value={reopenReason}
-                          onChange={(event) =>
-                            setReopenReason(event.target.value)
-                          }
-                        />
-                        <button
-                          className="btn"
-                          type="submit"
-                          disabled={busyKey === "reopen-case"}
-                        >
-                          {t("complaints.reopen")}
-                        </button>
-                      </form>
-                    </div>
-                  </section>
-
-                  {!selectedRecord.relatedIncidentId && (
-                    <section className="detail-card">
-                      <form
-                        className="stack-form"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void runAction("escalate-incident", async () => {
-                            await getOpsClient().escalateComplaintToIncident(
-                              selectedRecord.caseNo,
-                              {
-                                title: escalateTitle,
-                                severity: escalateSeverity,
-                                reason: escalateReason,
-                              },
-                            );
-                            setEscalateTitle("");
-                            setEscalateReason("");
-                            setEscalateSeverity("medium");
-                            await loadRecords(selectedRecord.caseNo);
-                          });
-                        }}
-                      >
-                        <h4>{t("complaints.escalateToIncident")}</h4>
-                        <input
-                          type="text"
-                          placeholder={t("complaints.escalateTitlePlaceholder")}
+                          style={controlStyle(theme)}
                           value={escalateTitle}
                           onChange={(event) =>
                             setEscalateTitle(event.target.value)
                           }
-                          required
                         />
+                      </Field>
+                      <Field
+                        theme={theme}
+                        label={t("complaints.form.severity")}
+                      >
                         <select
+                          style={controlStyle(theme)}
                           value={escalateSeverity}
                           onChange={(event) =>
                             setEscalateSeverity(
@@ -1071,16 +1608,21 @@ export default function ComplaintsPage() {
                             )
                           }
                         >
-                          {(["low", "medium", "high", "critical"] as const).map(
-                            (sev) => (
-                              <option key={sev} value={sev}>
-                                {formatOpsCodeLabel(locale, sev)}
-                              </option>
-                            ),
-                          )}
+                          {ESCALATION_SEVERITY_OPTIONS.map((severity) => (
+                            <option key={severity} value={severity}>
+                              {formatOpsCodeLabel(locale, severity)}
+                            </option>
+                          ))}
                         </select>
+                      </Field>
+                      <Field
+                        theme={theme}
+                        label={t("complaints.escalateForm.reason")}
+                        required
+                      >
                         <textarea
-                          rows={3}
+                          rows={4}
+                          style={controlStyle(theme, { minHeight: 112 })}
                           placeholder={t(
                             "complaints.escalateReasonPlaceholder",
                           )}
@@ -1088,328 +1630,126 @@ export default function ComplaintsPage() {
                           onChange={(event) =>
                             setEscalateReason(event.target.value)
                           }
-                          required
                         />
-                        <button
-                          className="btn btn-warning"
-                          type="submit"
-                          disabled={busyKey === "escalate-incident"}
-                        >
-                          {t("complaints.escalateBtn")}
-                        </button>
-                      </form>
-                    </section>
-                  )}
-
-                  <section className="detail-card">
-                    <h4>{t("complaints.timelineExport")}</h4>
-                    <div className="export-banner">
-                      <strong>
-                        {exportView?.readyForAudit
-                          ? t("complaints.readyForAudit")
-                          : t("complaints.notExportReady")}
-                      </strong>
-                      <small>
-                        {t("complaints.exportGenerated", {
-                          value: formatDateTime(exportView?.exportGeneratedAt),
-                        })}
-                      </small>
-                    </div>
-                    <div className="timeline-list">
-                      {timeline.length > 0 ? (
-                        timeline.map((entry) => (
-                          <div key={entry.entryId} className="timeline-item">
-                            <strong>
-                              {formatOpsCodeLabel(locale, entry.action)}
-                            </strong>
-                            <span>{entry.note}</span>
-                            <small>{formatDateTime(entry.createdAt)}</small>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="empty-state">
-                          {t("complaints.timelineEmpty")}
-                        </p>
-                      )}
-                    </div>
-                  </section>
+                      </Field>
+                      <Btn
+                        theme={theme}
+                        variant="primary"
+                        icon="warn"
+                        disabled={!canEscalate}
+                        onClick={() => void handleEscalateCase()}
+                      >
+                        {t("complaints.escalateBtn")}
+                      </Btn>
+                    </Card>
+                  ) : null}
                 </div>
-              ) : (
-                <p className="empty-state">{t("complaints.noSelection")}</p>
+              </div>
+            </Card>
+
+            <Card
+              theme={theme}
+              title={t("complaints.timelineExport")}
+              subtitle={copy(
+                locale,
+                "Audit packet readiness and immutable case timeline.",
+                "稽核封包就緒狀態與不可覆寫的案件時間軸。",
               )}
-            </section>
+            >
+              <div style={detailStackStyle}>
+                <Banner
+                  theme={theme}
+                  tone={exportView?.readyForAudit ? "info" : "warn"}
+                  icon={exportView?.readyForAudit ? "ok" : "clock"}
+                  title={
+                    exportView?.readyForAudit
+                      ? t("complaints.readyForAudit")
+                      : t("complaints.notExportReady")
+                  }
+                  body={t("complaints.exportGenerated", {
+                    value: formatDateTimeWithSeconds(
+                      locale,
+                      exportView?.exportGeneratedAt,
+                    ),
+                  })}
+                />
+
+                <DL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      label: copy(locale, "Selected case", "目前案件"),
+                      value: selectedRecord.caseNo,
+                      mono: true,
+                    },
+                    {
+                      label: copy(locale, "Timeline entries", "時間軸筆數"),
+                      value: `${timeline.length}`,
+                      mono: true,
+                    },
+                  ]}
+                />
+
+                <div style={timelineListStyle}>
+                  {timeline.length > 0 ? (
+                    timeline.map((entry) => (
+                      <div
+                        key={entry.entryId}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${theme.border}`,
+                          background: theme.surfaceLo,
+                          display: "grid",
+                          gap: 4,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <strong style={{ fontSize: 12.5 }}>
+                            {formatOpsCodeLabel(locale, entry.action)}
+                          </strong>
+                          <span
+                            style={{
+                              color: theme.textMuted,
+                              fontSize: 11.5,
+                              fontFamily: theme.monoFamily,
+                            }}
+                          >
+                            {formatDateTimeWithSeconds(locale, entry.createdAt)}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            color: theme.text,
+                            fontSize: 12.5,
+                            lineHeight: 1.45,
+                            whiteSpace: "pre-wrap",
+                          }}
+                        >
+                          {entry.note}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={emptyStateStyle}>
+                      {t("complaints.timelineEmpty")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
           </div>
-        )}
-
-        <Link className="route-link" href="/">
-          <strong>{t("complaints.backToHome")}</strong>{" "}
-          {t("complaints.backToHomeSub")}
-        </Link>
-
-        <style jsx>{`
-          .summary-grid,
-          .content-grid,
-          .form-grid,
-          .detail-grid,
-          .detail-subgrid,
-          .queue-grid {
-            display: grid;
-            gap: 0.9rem;
-          }
-          .workspace-hero,
-          .priority-queue,
-          .assumption-panel,
-          .panel,
-          .detail-card {
-            border: 1px solid #dbe4f0;
-            border-radius: 1rem;
-            background: #fff;
-          }
-          .workspace-hero,
-          .priority-queue,
-          .assumption-panel {
-            padding: 1rem;
-            margin-bottom: 1rem;
-          }
-          .workspace-hero {
-            display: grid;
-            gap: 1rem;
-            grid-template-columns: minmax(0, 1fr) auto;
-            align-items: start;
-            background: linear-gradient(135deg, #fff7ed, #fff1f2 65%, #ffffff);
-          }
-          .hero-chip-row,
-          .detail-status-row {
-            display: flex;
-            gap: 0.65rem;
-            flex-wrap: wrap;
-            align-items: center;
-          }
-          .hero-chip,
-          .queue-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.22rem 0.6rem;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            font-weight: 700;
-          }
-          .hero-chip {
-            background: rgba(255, 255, 255, 0.86);
-            border: 1px solid #fdba74;
-            color: #9a3412;
-          }
-          .hero-chip-critical,
-          .badge-danger {
-            background: #fee2e2;
-            border: 1px solid #fca5a5;
-            color: #b91c1c;
-          }
-          .queue-badge,
-          .badge-warning {
-            background: #fef3c7;
-            border: 1px solid #fcd34d;
-            color: #a16207;
-          }
-          .assumption-panel strong {
-            display: block;
-            margin-bottom: 0.55rem;
-          }
-          .assumption-list {
-            margin: 0;
-            padding-left: 1.1rem;
-            color: #475569;
-          }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .summary-card {
-            padding: 0.95rem 1rem;
-            border: 1px solid #dbe4f0;
-            border-radius: 1rem;
-            background: #fff;
-          }
-          .summary-card strong {
-            display: block;
-            font-size: 1.35rem;
-            margin: 0.2rem 0;
-          }
-          .toolbar,
-          .action-row {
-            display: flex;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-            align-items: center;
-          }
-          .toolbar {
-            margin-bottom: 1rem;
-          }
-          .queue-grid {
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          }
-          .queue-card {
-            display: grid;
-            gap: 0.5rem;
-            padding: 0.9rem 1rem;
-            border-radius: 0.95rem;
-            border: 1px solid #fed7aa;
-            background: #fffbeb;
-            text-align: left;
-            cursor: pointer;
-          }
-          .queue-card-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 0.75rem;
-            align-items: center;
-            flex-wrap: wrap;
-          }
-          .queue-card p {
-            margin: 0;
-            color: #334155;
-          }
-          .queue-card-subcopy,
-          .table-subcopy {
-            color: #64748b;
-            font-size: 0.82rem;
-          }
-          .search-input,
-          input,
-          select,
-          textarea {
-            width: 100%;
-            border: 1px solid #cbd5e1;
-            border-radius: 0.85rem;
-            padding: 0.7rem 0.8rem;
-            font: inherit;
-            background: #fff;
-          }
-          .btn {
-            border: 1px solid #cbd5e1;
-            border-radius: 999px;
-            padding: 0.65rem 1rem;
-            background: #fff;
-            cursor: pointer;
-          }
-          .btn-primary {
-            border-color: #9a3412;
-            background: #9a3412;
-            color: #fff;
-          }
-          .btn-warning {
-            background: #fef3c7;
-            border-color: #f59e0b;
-            color: #92400e;
-          }
-          .inline-link {
-            color: #0f172a;
-            text-decoration: none;
-          }
-          .content-grid {
-            grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-            margin-top: 1rem;
-            margin-bottom: 1rem;
-          }
-          .panel,
-          .detail-card {
-            padding: 1rem;
-          }
-          .panel-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 0.75rem;
-            align-items: baseline;
-            margin-bottom: 0.8rem;
-          }
-          .table-wrap {
-            overflow-x: auto;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-          }
-          th,
-          td {
-            text-align: left;
-            padding: 0.75rem 0.65rem;
-            border-bottom: 1px solid #e2e8f0;
-            vertical-align: top;
-          }
-          tbody tr {
-            cursor: pointer;
-          }
-          .selected-row {
-            background: #fff7ed;
-          }
-          .details-stack,
-          .stack-form,
-          .timeline-list {
-            display: grid;
-            gap: 0.8rem;
-          }
-          .quick-link {
-            font-size: 0.88rem;
-            font-weight: 600;
-          }
-          .detail-grid {
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-          }
-          .detail-subgrid {
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          }
-          .label {
-            display: block;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: #64748b;
-            margin-bottom: 0.25rem;
-          }
-          .description {
-            margin-top: 0.8rem;
-            margin-bottom: 0;
-            color: #334155;
-          }
-          .timeline-item {
-            border-left: 3px solid #c2410c;
-            padding-left: 0.75rem;
-          }
-          .export-banner {
-            padding: 0.85rem 1rem;
-            border-radius: 0.9rem;
-            background: #fff7ed;
-            color: #9a3412;
-            display: grid;
-            gap: 0.25rem;
-            margin-bottom: 0.8rem;
-          }
-          .full-span {
-            grid-column: 1 / -1;
-          }
-          .sla-badge {
-            display: inline-flex;
-            margin-top: 0.3rem;
-            padding: 0.2rem 0.6rem;
-            border-radius: 999px;
-            background: #fef2f2;
-            color: #dc2626;
-            font-size: 0.7rem;
-            font-weight: 700;
-            letter-spacing: 0.05em;
-            border: 1px solid #fca5a5;
-          }
-          .empty-state {
-            color: #64748b;
-          }
-          @media (max-width: 960px) {
-            .workspace-hero,
-            .content-grid {
-              grid-template-columns: 1fr;
-            }
-          }
-        `}</style>
+        ) : null}
       </div>
-    </>
+    </Shell>
   );
 }
