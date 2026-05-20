@@ -1,29 +1,33 @@
 # ADM-UI-RD-005 Unblock History Repair
 
-Last updated: 2026-05-18
-Owner: Codex2
-Reviewer: Codex
+Last updated: 2026-05-20
+Owner: Codex
+Reviewer: Codex2
 Task: `ADM-UI-RD-005-UNBLOCK-HISTORY-REPAIR`
 
 ## Summary
 
-`ADM-UI-RD-005` is blocked by history contamination and a split recovery state, not by missing implementation work.
+`ADM-UI-RD-005` was originally blocked by mixed history on shared branch
+`feat/claude2-ui-redesign-foundation`, specifically commit
+`f481c294d627390bf574a46b3c6fdaaf5951f5eb`
+`feat(ADM-UI-RD-006): finalize users fleet switchboard redesign`.
 
-The original contamination is the mixed-task commit:
+As revalidated on 2026-05-20, the non-destructive repair path has already been
+executed successfully:
 
-- `f481c294d627390bf574a46b3c6fdaaf5951f5eb` `feat(ADM-UI-RD-006): finalize users fleet switchboard redesign`
+- clean recovery branch: `origin/codex2/adm-ui-rd-005`
+- task-scoped recovery commit: `59f485b78417bd1bbd23f34fad870ae7e40fc914`
+- merge to trunk: `67369562e8bd9328e0e694e2534ef26dd1433539`
+- merged via PR: `#146`
 
-That commit bundled `ADM-UI-RD-005` partner files into an `ADM-UI-RD-006` subject. The later recovery on `codex/adm-ui-rd-005-unblock-history-repair` only partially normalized the state:
-
-- the switchboard row-action fix was replayed into local commit `93fffe24c3c8d926ca7db4115b574915fea701ed`
-- the partners/detail/storybook payload still lives only in the index
-- the worktree also carried a stale `git cherry-pick --no-commit` sequencer until it was cleared with `git cherry-pick --quit`
-
-The parent is therefore unblocked by rebuilding `ADM-UI-RD-005` from clean source commits on current `origin/dev`, without force-pushing any shared history.
+The remaining blocker is no longer branch contamination in canonical delivery
+history. The remaining blocker is stale machine truth: `ADM-UI-RD-005` still
+claims it is waiting for Codex2 to disentangle a shared branch state even
+though the clean recovery commit was pushed and merged normally.
 
 ## Exact contamination
 
-### 1. `f481c294` is exact cross-task contamination
+### 1. `f481c294` is the exact cross-task commit contamination
 
 `git show --name-status f481c294d627390bf574a46b3c6fdaaf5951f5eb` resolves to:
 
@@ -34,171 +38,149 @@ The parent is therefore unblocked by rebuilding `ADM-UI-RD-005` from clean sourc
 - `A packages/ui-web/src/platform-operations.stories.tsx`
 - `A packages/ui-web/src/platform-partners.stories.tsx`
 
-That splits cleanly into two scopes:
+That file set splits cleanly into two scopes:
 
-- `ADM-UI-RD-006`: `fleet/page.tsx`, `platform-operations.stories.tsx`
-- `ADM-UI-RD-005`: `partners/page.tsx`, `partners/[entrySlug]/page.tsx`, `next-env.d.ts`, `platform-partners.stories.tsx`
+- `ADM-UI-RD-006`: `fleet/page.tsx`,
+  `packages/ui-web/src/platform-operations.stories.tsx`
+- `ADM-UI-RD-005`: `partners/page.tsx`,
+  `partners/[entrySlug]/page.tsx`, `next-env.d.ts`,
+  `packages/ui-web/src/platform-partners.stories.tsx`
 
-It also omitted `apps/platform-admin-web/app/switchboard/page.tsx`, so it is both mixed-scope and incomplete as `ADM-UI-RD-005` closeout evidence.
+This is the branch/commit contamination that originally blocked the parent:
+`ADM-UI-RD-005` could not safely close out from a shared branch whose local
+`HEAD` carried a mixed-task commit under an `ADM-UI-RD-006` subject.
 
-### 2. At review intake, the assigned unblock worktree was split across `HEAD` and the index
+### 2. The parent blocker snapshot was accurate at intake, but it is now stale
 
-Current branch:
+The original parent blocker in machine truth captured a real mixed recovery
+state:
 
-- `codex/adm-ui-rd-005-unblock-history-repair`
+- `ADM-UI-RD-005` had already reached reviewer approval on 2026-05-11
+- closeout then failed because shared branch `HEAD` moved to `f481c294`
+- the partners payload and switchboard-related acceptance unblocker were no
+  longer represented by a clean task-scoped commit/push pair owned by the
+  parent task
 
-Current branch relation to trunk:
+That blocker message is still recorded in `ai-status.json`, but it no longer
+describes canonical delivery reality after the clean repair work below landed.
 
-- ahead `1`, behind `2` relative to current `origin/dev`
+### 3. The non-destructive repair path was executed on a clean branch
 
-`HEAD` is only:
+The parent repair was rebuilt on branch `origin/codex2/adm-ui-rd-005` as commit
+`59f485b78417bd1bbd23f34fad870ae7e40fc914`
+`ADM-UI-RD-005: rebuild partners redesign closeout on current dev`.
 
-- `93fffe24c3c8d926ca7db4115b574915fea701ed`
-- subject: `fix(ADM-UI-RD-005-UNBLOCK-HISTORY-REPAIR): replay switchboard button hardening`
-
-That commit changes only:
-
-- `apps/platform-admin-web/app/switchboard/page.tsx`
-
-The remaining recovered payload was still staged, not committed on this branch:
+`git show --name-status 59f485b78417bd1bbd23f34fad870ae7e40fc914` confirms the
+recovered task-scoped file set:
 
 - `M apps/platform-admin-web/app/partners/[entrySlug]/page.tsx`
 - `M apps/platform-admin-web/app/partners/page.tsx`
+- `M apps/platform-admin-web/app/switchboard/page.tsx`
 - `A apps/platform-admin-web/components/platform-ui.tsx`
 - `M apps/platform-admin-web/next-env.d.ts`
 - `A packages/ui-web/src/platform-partners.stories.tsx`
 
-So this branch is still not safe closeout evidence for the parent task:
+That commit preserved the non-force-push repair rule:
 
-- the partners/detail/storybook payload is not in a task-scoped commit on this branch
-- the branch is behind current trunk
-- the only local commit is the switchboard replay under the unblock task subject
+- it did not rewrite `f481c294`
+- it did not force-push the shared contaminated branch
+- it rebuilt the `ADM-UI-RD-005` payload on a task-scoped branch from current
+  trunk at that time
+- it carried verification evidence in the commit message trailers
 
-### 3. The unblock worktree also carried stale no-commit cherry-pick state
+### 4. Canonical trunk now proves the parent is repaired
 
-Before cleanup, `git status` reported an in-progress cherry-pick. The sequencer state showed:
+`origin/dev` contains merge commit
+`67369562e8bd9328e0e694e2534ef26dd1433539`
+`ADM-UI-RD-005: rebuild partners redesign on current dev (#146)`.
 
-- `pick a7b47f5 fix(ADM-UI-RD-005): harden switchboard row actions`
-- `pick 911fba9 ADM-UI-RD-005: finalize partners redesign closeout`
-- option `no-commit = true`
+That merge commit touches only:
 
-But the actual worktree state had already diverged from that sequencer:
+- `M apps/platform-admin-web/app/partners/[entrySlug]/page.tsx`
+- `M apps/platform-admin-web/app/partners/page.tsx`
+- `A packages/ui-web/src/platform-partners.stories.tsx`
 
-- the `a7b47f5` switchboard fix had already been replayed and committed manually as `93fffe2`
-- the index matched the later `911fba9` partners payload instead
-- `CHERRY_PICK_HEAD` was absent even though the sequencer directory still existed
+The merge is narrower than `59f485b` because the shared helper and supporting
+surfaces were already absorbed by the sibling `ADM-UI-RD-006` recovery:
 
-That residue was itself part of the contamination. It has now been cleared non-destructively with:
+- `0db61c064f575531c4df03721cad30f47332da4a`
+  `ADM-UI-RD-006: rebuild users fleet switchboard redesign on current dev (#145)`
+  already carried `apps/platform-admin-web/components/platform-ui.tsx`,
+  `apps/platform-admin-web/next-env.d.ts`, and the switchboard page delta into
+  `origin/dev`
 
-```bash
-git cherry-pick --quit
-```
+So the clean parent recovery is now represented by both:
 
-After `--quit`, the sequencer directory is gone and the staged payload remains intact.
+- the task-scoped pushed commit on `origin/codex2/adm-ui-rd-005`
+- the merged canonical trunk evidence on `origin/dev`
 
-### 4. The staged partners payload already matched a task-scoped recovery commit
+### 5. The current unblock branches are evidence branches, not delivery branches
 
-`git diff --cached --exit-code 911fba96df8914fe0d58d902166b469388c8992b -- <ADM-UI-RD-005 files>` exits cleanly.
+Two unblock-task branches still exist:
 
-At review intake, the current index was byte-for-byte aligned with:
+- `origin/codex/adm-ui-rd-005-unblock-history-repair`
+- `origin/codex2/adm-ui-rd-005-unblock-history-repair`
 
-- `911fba96df8914fe0d58d902166b469388c8992b`
-- subject: `ADM-UI-RD-005: finalize partners redesign closeout`
+These branches are useful as audit/evidence surfaces, but they are not the
+canonical parent delivery branch. The parent was repaired through
+`origin/codex2/adm-ui-rd-005` and then merged through PR `#146`.
 
-Recovered file set:
+## Non-destructive repair path
 
-- `apps/platform-admin-web/app/partners/page.tsx`
-- `apps/platform-admin-web/app/partners/[entrySlug]/page.tsx`
-- `apps/platform-admin-web/components/platform-ui.tsx`
-- `apps/platform-admin-web/next-env.d.ts`
-- `packages/ui-web/src/platform-partners.stories.tsx`
+The correct repair path was:
 
-This is the key unblock fact: the parent task does not need forensic reconstruction from scratch. Its recovered partners payload already existed in a task-scoped commit and in the current index; it was simply never finalized on a clean current-trunk branch together with the switchboard replay.
+1. Preserve `f481c294` as evidence of contamination; do not rewrite shared
+   history.
+2. Rebuild `ADM-UI-RD-005` on a fresh task-scoped branch from current trunk.
+3. Push the clean recovery branch normally.
+4. Merge the clean branch through a normal PR.
+5. Leave the unblock branch as supporting evidence only.
 
-### 5. Review stabilization performed in this repair branch
+That path has already been completed for the parent:
 
-This review session performed only non-destructive stabilization on the assigned repair branch:
-
-- cleared the stale sequencer with `git cherry-pick --quit`
-- preserved the recovered multi-file `ADM-UI-RD-005` payload in a task-scoped anchor commit on `codex/adm-ui-rd-005-unblock-history-repair`
-
-That stabilization does not make this branch the canonical parent closeout branch. The parent still needs a fresh rebuild from current `origin/dev`, because the repair branch remains history-specific evidence and still carries the standalone unblock-task replay commit.
-
-## Non-destructive recovery path
-
-Do not push `f481c294`.
-
-Do not force-push `codex/adm-ui-rd-005-unblock-history-repair`.
-
-Do not close out the parent directly from this behind-trunk repair branch.
-
-Instead:
-
-1. `git fetch origin`
-2. create a fresh recovery branch from current `origin/dev`
-3. restore the partner payload from `911fba96df8914fe0d58d902166b469388c8992b`
-4. reapply the switchboard hardening from `93fffe24c3c8d926ca7db4115b574915fea701ed`
-5. rerun acceptance on current trunk
-6. commit and push a clean task-scoped `ADM-UI-RD-005` closeout commit
-
-Suggested sequence:
-
-```bash
-git fetch origin
-git switch -c codex/adm-ui-rd-005-recovery origin/dev
-
-git checkout 911fba96df8914fe0d58d902166b469388c8992b -- \
-  apps/platform-admin-web/app/partners/page.tsx \
-  apps/platform-admin-web/app/partners/[entrySlug]/page.tsx \
-  apps/platform-admin-web/components/platform-ui.tsx \
-  apps/platform-admin-web/next-env.d.ts \
-  packages/ui-web/src/platform-partners.stories.tsx
-
-git checkout 93fffe24c3c8d926ca7db4115b574915fea701ed -- \
-  apps/platform-admin-web/app/switchboard/page.tsx
-
-pnpm --filter @drts/platform-admin-web typecheck
-pnpm --filter @drts/platform-admin-web build
-pnpm --filter @drts/platform-admin-web test
-pnpm --filter @drts/ui-web typecheck
-pnpm --filter @drts/ui-web build-storybook
-git diff --check -- \
-  apps/platform-admin-web/app/partners/page.tsx \
-  apps/platform-admin-web/app/partners/[entrySlug]/page.tsx \
-  apps/platform-admin-web/app/switchboard/page.tsx \
-  apps/platform-admin-web/components/platform-ui.tsx \
-  apps/platform-admin-web/next-env.d.ts \
-  packages/ui-web/src/platform-partners.stories.tsx
-
-git add \
-  apps/platform-admin-web/app/partners/page.tsx \
-  apps/platform-admin-web/app/partners/[entrySlug]/page.tsx \
-  apps/platform-admin-web/app/switchboard/page.tsx \
-  apps/platform-admin-web/components/platform-ui.tsx \
-  apps/platform-admin-web/next-env.d.ts \
-  packages/ui-web/src/platform-partners.stories.tsx
-
-git commit -m "ADM-UI-RD-005: rebuild partners redesign closeout on current dev" \
-  -m "LLM-Agent: Codex" \
-  -m "Task-ID: ADM-UI-RD-005" \
-  -m "Reviewer: Codex2"
-
-git push -u origin codex/adm-ui-rd-005-recovery
-```
-
-## Canonical evidence already available
-
-The recovery path does not depend on guessing lost work. It can reuse these concrete artifacts:
-
-- `911fba96df8914fe0d58d902166b469388c8992b` `ADM-UI-RD-005: finalize partners redesign closeout`
-- `a7b47f566da105d95392fb47659c4a833cbd667b` `fix(ADM-UI-RD-005): harden switchboard row actions`
-- `93fffe24c3c8d926ca7db4115b574915fea701ed` local replay of the switchboard hardening onto the current repair branch
+- branch: `origin/codex2/adm-ui-rd-005`
+- clean task-scoped commit:
+  `59f485b78417bd1bbd23f34fad870ae7e40fc914`
+- PR: `#146`
+- merged trunk commit:
+  `67369562e8bd9328e0e694e2534ef26dd1433539`
 
 ## Parent next step
 
-Update `ADM-UI-RD-005` machine truth from "wait for Codex2 to disentangle the shared branch" to this concrete owner action:
+`ADM-UI-RD-005` should no longer remain blocked on
+"wait for Codex2 to disentangle the shared branch state".
 
-- rebuild the parent closeout on a fresh branch from current `origin/dev` using `911fba9` plus `93fffe2`
-- rerun platform-admin and Storybook acceptance
-- push the clean recovery branch normally
-- hand off the repaired parent task to `Codex2` for final review
+The concrete next step for the parent task is control-plane closeout using the
+already existing clean recovery evidence:
+
+- `COMMIT_HASH=59f485b78417bd1bbd23f34fad870ae7e40fc914`
+- `COMMIT_SUBJECT=ADM-UI-RD-005: rebuild partners redesign closeout on current dev`
+- `PUSH_REMOTE=origin`
+- `PUSH_BRANCH=codex2/adm-ui-rd-005`
+- merged proof:
+  `67369562e8bd9328e0e694e2534ef26dd1433539` on `origin/dev`
+- PR proof: `#146`
+
+In other words:
+
+- the history repair is complete
+- the parent is unblocked from a git-history perspective
+- the remaining work is to align machine truth with the already-pushed and
+  already-merged parent closeout evidence
+
+## Task-scoped evidence for this unblock task
+
+This unblock task updates canonical support evidence under:
+
+- `support/unblock/ADM-UI-RD-005/ADM-UI-RD-005-UNBLOCK-HISTORY-REPAIR.md`
+
+Revalidation basis for this update:
+
+- `git show --name-status f481c294d627390bf574a46b3c6fdaaf5951f5eb`
+- `git show --name-status 59f485b78417bd1bbd23f34fad870ae7e40fc914`
+- `git show --name-status 67369562e8bd9328e0e694e2534ef26dd1433539`
+- `git show --stat 0db61c064f575531c4df03721cad30f47332da4a`
+- `git branch -r` for
+  `origin/codex2/adm-ui-rd-005`,
+  `origin/codex/adm-ui-rd-005-unblock-history-repair`,
+  and `origin/codex2/adm-ui-rd-005-unblock-history-repair`
