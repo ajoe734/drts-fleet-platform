@@ -32,7 +32,8 @@ type DriverTabKey = "all" | "eligible" | "on_shift" | "offline";
 type DriverTableRow = Record<string, unknown> & {
   driverId: string;
   driverName: string;
-  rosterMeta: string;
+  driverMeta: string;
+  blockerSummary: string;
   vehicleLabel: string;
   statusLabel: string;
   statusTone: CanvasTone;
@@ -62,7 +63,8 @@ const shellViewportStyle = {
 
 const pageStackStyle = {
   padding: 24,
-  display: "grid",
+  display: "flex",
+  flexDirection: "column" as const,
   gap: 12,
 } as const;
 
@@ -326,23 +328,6 @@ function getDeviceLabel(driver: DriverRegistryRecord, locale: Locale) {
   return activeBinding.deviceLabel ?? activeBinding.deviceId;
 }
 
-function getRosterMeta(
-  driver: DriverRegistryRecord,
-  locationLabel: string,
-  locale: Locale,
-) {
-  const blockedSummary = summarizeBlockedReasons(
-    driver.eligibilityBlockedReasons,
-    locale,
-  );
-
-  if (blockedSummary === t("drivers.list.eligibilityClear", locale)) {
-    return `${locationLabel} · ${blockedSummary}`;
-  }
-
-  return `${locationLabel} · ${blockedSummary}`;
-}
-
 export default async function DriversPage({ searchParams }: DriversPageProps) {
   const [client, locale, resolvedSearchParams] = await Promise.all([
     getServerOpsClient(),
@@ -378,6 +363,33 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
 
   const { active: activeTabNode, tabs } = buildTabLinks(locale, activeTab);
 
+  const locationStats = drivers.reduce(
+    (accumulator, driver) => {
+      const snapshot = locationByDriver.get(driver.driverId);
+      if (!snapshot || locationsError) {
+        return accumulator;
+      }
+      if (isLocationStale(snapshot)) {
+        accumulator.stale += 1;
+      } else {
+        accumulator.live += 1;
+      }
+      return accumulator;
+    },
+    { live: 0, stale: 0 },
+  );
+
+  const eligibleCount = drivers.filter(
+    (driver) => driver.dispatchEligible,
+  ).length;
+  const blockedCount = Math.max(drivers.length - eligibleCount, 0);
+  const headerSubtitle = t("drivers.registrySummary", locale, {
+    eligible: String(eligibleCount),
+    blocked: String(blockedCount),
+    live: String(locationStats.live),
+    stale: String(locationStats.stale),
+  });
+
   const rows: DriverTableRow[] = drivers
     .filter((driver) => matchesTab(driver, activeTab))
     .sort((left, right) => {
@@ -395,11 +407,16 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
         locationsError,
         locale,
       );
+      const blockerSummary = summarizeBlockedReasons(
+        driver.eligibilityBlockedReasons,
+        locale,
+      );
 
       return {
         driverId: driver.driverId,
         driverName: driver.name,
-        rosterMeta: getRosterMeta(driver, locationLabel, locale),
+        driverMeta: `${driver.driverId} · ${locationLabel}`,
+        blockerSummary,
         vehicleLabel: getDeviceLabel(driver, locale),
         statusLabel: formatOpsCodeLabel(locale, driver.workState),
         statusTone: getStatusTone(driver.workState),
@@ -425,14 +442,14 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   const columns: CanvasTableColumn<DriverTableRow>[] = [
     {
       h: "DRIVER",
-      w: 260,
+      w: 244,
       r: (row) => (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <Link
             href={`/drivers/${encodeURIComponent(row.driverId)}`}
             style={driverLinkStyle(theme)}
           >
-            <span style={{ fontWeight: 700 }}>{row.driverName}</span>
+            <span style={{ fontWeight: 600 }}>{row.driverName}</span>
           </Link>
           <span
             style={{
@@ -441,7 +458,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
               fontFamily: theme.monoFamily,
             }}
           >
-            {row.driverId}
+            {row.driverMeta}
           </span>
           <span
             style={{
@@ -450,7 +467,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
               whiteSpace: "normal",
             }}
           >
-            {row.rosterMeta}
+            {row.blockerSummary}
           </span>
         </div>
       ),
@@ -538,7 +555,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
         <PageHeader
           theme={theme}
           title={t("nav.drivers", locale)}
-          subtitle={t("drivers.registryFooter", locale)}
+          subtitle={headerSubtitle}
           tabs={tabs}
           activeTab={activeTabNode}
           actions={
