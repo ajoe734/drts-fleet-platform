@@ -214,10 +214,35 @@ function formatDate(value: string | null, locale: Locale) {
   );
 }
 
+function formatDateTime(value: string | null, locale: Locale) {
+  if (!value) return t("common.dash", locale);
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
+}
+
 function formatTerm(startAt: string, endAt: string | null, locale: Locale) {
   const start = formatDate(startAt, locale);
   const end = endAt ? formatDate(endAt, locale) : "ongoing";
   return `${start} → ${end}`;
+}
+
+function getLatestUpdatedAt(
+  values: Array<string | null | undefined>,
+): string | null {
+  return values.reduce<string | null>((latest, value) => {
+    if (!value) return latest;
+    if (!latest) return value;
+    return value.localeCompare(latest) > 0 ? value : latest;
+  }, null);
 }
 
 function inferContractKind(contract: VehicleContractRecord): ContractKind {
@@ -321,6 +346,11 @@ export default async function ContractsPage() {
       forwarder: 0,
     },
   );
+  const lastUpdatedAt = getLatestUpdatedAt([
+    ...contracts.map((contract) => contract.updatedAt),
+    ...partnerEntries.map((entry) => entry.updatedAt),
+    ...reviewQueue.map((item) => item.updatedAt),
+  ]);
   const nav = buildShellNav(locale);
 
   const columns: CanvasTableColumn<ContractRow>[] = [
@@ -569,6 +599,11 @@ export default async function ContractsPage() {
                         ? "Eligibility denied"
                         : "Eligibility denied",
                     v: String(deniedCount),
+                    mono: true,
+                  },
+                  {
+                    k: locale === "zh" ? "Last updated" : "Last updated",
+                    v: formatDateTime(lastUpdatedAt, locale),
                     mono: true,
                   },
                 ]}
