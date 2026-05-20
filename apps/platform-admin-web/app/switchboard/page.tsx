@@ -18,7 +18,6 @@ import type {
   PublicInfoVersionRecord,
 } from "@drts/contracts";
 import {
-  CanvasBanner,
   CanvasBtn,
   CanvasCard,
   CanvasDL,
@@ -27,8 +26,6 @@ import {
   CanvasPill,
   CanvasShell,
   CanvasTable,
-  KpiCard,
-  KpiRow,
   buildCanvasTheme,
   type CanvasShellNavItem,
   type CanvasTableColumn,
@@ -81,31 +78,24 @@ const viewportStyle = {
 
 const pageBodyStyle = {
   display: "grid",
-  gap: 20,
+  gap: 16,
   padding: 24,
-  maxWidth: 1160,
-  margin: "0 auto",
 } satisfies CSSProperties;
 
 const splitLayoutStyle = {
   display: "flex",
   flexWrap: "wrap",
-  gap: 20,
-  alignItems: "start",
+  gap: 16,
 } satisfies CSSProperties;
 
 const mainColumnStyle = {
   flex: "1.6 1 680px",
-  display: "grid",
-  gap: 16,
   minWidth: 0,
 } satisfies CSSProperties;
 
 const sideColumnStyle = {
-  flex: "1 1 340px",
-  display: "grid",
-  gap: 16,
-  minWidth: 320,
+  flex: "1 1 320px",
+  minWidth: 0,
 } satisfies CSSProperties;
 
 const cardStackStyle = {
@@ -133,6 +123,17 @@ const previewActionRowStyle = {
 const historyGridStyle = {
   display: "grid",
   gap: 12,
+} satisfies CSSProperties;
+
+const operationalPanelStyle = {
+  display: "grid",
+  gap: 16,
+} satisfies CSSProperties;
+
+const operationalSummaryStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: 16,
 } satisfies CSSProperties;
 
 const historyItemStyle = {
@@ -240,11 +241,6 @@ const richTextStyle = {
   color: theme.text,
   lineHeight: 1.6,
   whiteSpace: "pre-wrap",
-} satisfies CSSProperties;
-
-const mutedValueStyle = {
-  color: theme.textMuted,
-  fontSize: 11.5,
 } satisfies CSSProperties;
 
 const submitRowStyle = {
@@ -490,15 +486,6 @@ export default function SwitchboardPage() {
       ? (publicInfoById[livePlacardVersion.publicInfoVersionId] ?? null)
       : null) ??
     livePublicInfoVersion;
-  const placardsTiedToLiveCount = useMemo(
-    () =>
-      placards.filter((placard) => {
-        const sourceVersion = publicInfoById[placard.publicInfoVersionId];
-        return sourceVersion?.status === "published";
-      }).length,
-    [placards, publicInfoById],
-  );
-
   const versionCodePrecheckMessage = useMemo(
     () =>
       getPlacardVersionCodePrecheckMessage(
@@ -518,20 +505,19 @@ export default function SwitchboardPage() {
     { key: "placards" as const, label: t("switchboard.tab.placards") },
   ];
 
-  const activeTabLabel =
-    tabItems.find((tab) => tab.key === activeTab)?.label ?? tabItems[0].label;
-
   const copy =
     locale === "en"
       ? {
-          breadcrumbParent: "Fleet & Compliance",
-          pageTitle: "Switchboard",
+          breadcrumbParent: "Legal info",
+          pageTitle: "Version management",
           title: "Public Info & Placards",
           subtitle: "public info versioning · placard generation · publish",
-          bannerTitle:
-            "Public disclosure versions and placard lineage stay governed together",
-          bannerBody:
-            "Draft, publish, and placard generation share one surface so rider disclosure does not drift away from the physical placard artifact.",
+          headerTabs: [
+            "Versions",
+            "Placards",
+            "Public contact",
+            "History",
+          ],
           versionsTitle: "Public info versions",
           versionsSubtitle:
             "Version · effective window · public contact · status",
@@ -551,15 +537,6 @@ export default function SwitchboardPage() {
           generatedFrom: "Generated from",
           vehicleLine: "Vehicle ARJ-2891 / Driver Lin Zhi-Wei",
           paymentPrefix: "Payment",
-          kpiPublished: "Published versions",
-          kpiPublishedDetail: "live disclosure lineage",
-          kpiDrafts: "Draft versions",
-          kpiDraftsDetail: "awaiting publish",
-          kpiPlacards: "Placard versions",
-          kpiPlacardsDetail: "artifact lineage tracked",
-          kpiTied: "Tied to live",
-          kpiTiedDetail: "source status = published",
-          historyTitle: "History framing",
           historySubtitle:
             "Published versions keep immutable lineage while drafts remain operational.",
           tabsTitle: "Switchboard lanes",
@@ -585,13 +562,11 @@ export default function SwitchboardPage() {
           notAvailable: "not available",
         }
       : {
-          breadcrumbParent: "車隊與合規",
-          pageTitle: "Switchboard",
+          breadcrumbParent: "法定資訊",
+          pageTitle: "版本管理",
           title: "法定資訊與牌貼",
           subtitle: "public info versioning · placard generation · publish",
-          bannerTitle: "公開揭露版本與牌貼沿革一起維護",
-          bannerBody:
-            "草稿、發布與牌貼生成共用同一治理畫面，避免 rider disclosure 與實體牌貼脫鉤。",
+          headerTabs: ["版本", "牌貼", "公開聯絡", "歷史"],
           versionsTitle: "Public info versions",
           versionsSubtitle: "版本 · effective 區間 · 公開聯絡 · 狀態",
           previewTitle: livePlacardVersion
@@ -609,15 +584,6 @@ export default function SwitchboardPage() {
           generatedFrom: "本牌貼依",
           vehicleLine: "車輛編號 ARJ-2891 / 駕駛 林志偉",
           paymentPrefix: "支付",
-          kpiPublished: "已發布版本",
-          kpiPublishedDetail: "現行揭露沿革",
-          kpiDrafts: "草稿版本",
-          kpiDraftsDetail: "待發布",
-          kpiPlacards: "牌貼版本",
-          kpiPlacardsDetail: "成品沿革受管",
-          kpiTied: "綁定現行",
-          kpiTiedDetail: "來源狀態 = published",
-          historyTitle: "History framing",
           historySubtitle: "已發布版本維持 immutable lineage，草稿則保留操作空間。",
           tabsTitle: "Switchboard lanes",
           tabsSubtitle: "主畫面維持審查姿態，操作表單則收在對應分頁。",
@@ -1305,7 +1271,7 @@ export default function SwitchboardPage() {
   const renderActiveTabPanel = () => {
     if (activeTab === "placards") {
       return (
-        <div style={cardStackStyle}>
+        <div style={operationalPanelStyle}>
           {showPlacardForm ? renderPlacardForm() : null}
           {renderPlacardTable()}
         </div>
@@ -1313,10 +1279,12 @@ export default function SwitchboardPage() {
     }
 
     return (
-      <div style={cardStackStyle}>
+      <div style={operationalPanelStyle}>
         {showPublicInfoForm ? renderPublicInfoForm() : null}
-        {renderPublicContactPanel()}
-        {renderHistoryPanel()}
+        <div style={operationalSummaryStyle}>
+          {renderPublicContactPanel()}
+          {renderHistoryPanel()}
+        </div>
       </div>
     );
   };
@@ -1344,8 +1312,8 @@ export default function SwitchboardPage() {
             theme={theme}
             title={copy.title}
             subtitle={copy.subtitle}
-            tabs={tabItems.map((tab) => tab.label)}
-            activeTab={activeTabLabel}
+            tabs={copy.headerTabs}
+            activeTab={copy.headerTabs[0]}
             actions={
               <>
                 <CanvasBtn
@@ -1380,55 +1348,15 @@ export default function SwitchboardPage() {
           />
 
           {error ? (
-            <CanvasBanner
-              theme={theme}
-              tone="danger"
-              icon="warn"
-              title={getPlatformLabel(locale, "error")}
-              body={error}
-            />
+            <CanvasCard theme={theme}>
+              <p style={{ ...helperTextStyle, color: "#b42318" }}>{error}</p>
+            </CanvasCard>
           ) : null}
-
-          <CanvasBanner
-            theme={theme}
-            tone="info"
-            icon="info"
-            title={copy.bannerTitle}
-            body={copy.bannerBody}
-          />
-
-          <KpiRow minWidth="180px">
-            <KpiCard
-              label={copy.kpiPublished}
-              value={publishedVersions.length}
-              detail={copy.kpiPublishedDetail}
-              tone="success"
-            />
-            <KpiCard
-              label={copy.kpiDrafts}
-              value={draftVersions.length}
-              detail={copy.kpiDraftsDetail}
-              tone="warning"
-            />
-            <KpiCard
-              label={copy.kpiPlacards}
-              value={placards.length}
-              detail={copy.kpiPlacardsDetail}
-              tone="info"
-            />
-            <KpiCard
-              label={copy.kpiTied}
-              value={placardsTiedToLiveCount}
-              detail={copy.kpiTiedDetail}
-              tone="platform"
-            />
-          </KpiRow>
 
           <div style={splitLayoutStyle}>
             <div style={mainColumnStyle}>
               {renderVersionsTable()}
             </div>
-
             <div style={sideColumnStyle}>
               <CanvasCard
                 theme={theme}
@@ -1505,54 +1433,6 @@ export default function SwitchboardPage() {
                 ) : (
                   <p style={helperTextStyle}>{copy.noLivePlacard}</p>
                 )}
-              </CanvasCard>
-              <CanvasCard
-                theme={theme}
-                title={copy.historyTitle}
-                subtitle={copy.historySubtitle}
-              >
-                <CanvasDL
-                  theme={theme}
-                  cols={1}
-                  items={[
-                    {
-                      k: copy.historyLiveDisclosure,
-                      v: livePublicInfoVersion ? (
-                        `${livePublicInfoVersion.versionId} · ${formatEffectiveRange(locale, livePublicInfoVersion)}`
-                      ) : (
-                        <span style={mutedValueStyle}>{copy.noLiveVersion}</span>
-                      ),
-                      mono: Boolean(livePublicInfoVersion),
-                    },
-                    {
-                      k: copy.historyCurrentPlacard,
-                      v: livePlacardVersion ? (
-                        `${livePlacardVersion.versionCode} · ${livePlacardVersion.templateName}`
-                      ) : (
-                        <span style={mutedValueStyle}>{copy.noLivePlacard}</span>
-                      ),
-                      mono: Boolean(livePlacardVersion),
-                    },
-                    {
-                      k: copy.historyDraftPosture,
-                      v: latestDraftVersion ? (
-                        latestDraftVersion.versionId
-                      ) : (
-                        <span style={mutedValueStyle}>—</span>
-                      ),
-                      mono: true,
-                    },
-                    {
-                      k: copy.historySelectedSource,
-                      v: selectedPublicInfoVersion ? (
-                        selectedPublicInfoVersion.versionId
-                      ) : (
-                        <span style={mutedValueStyle}>—</span>
-                      ),
-                      mono: true,
-                    },
-                  ]}
-                />
               </CanvasCard>
             </div>
           </div>
