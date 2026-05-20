@@ -1,40 +1,47 @@
 "use client";
 
 import Link from "next/link";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { usePlatformAdminClient } from "@/lib/admin-client";
-import { useTranslation } from "@/lib/i18n";
-import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   EMPTY_TENANT_FORM,
-  IntegrationFields,
-  ModuleFields,
-  QuotaFields,
-  TenantIdentityFields,
   createTenantModuleLabels,
   parseQuota,
   tenantStageTone,
-  tenantStatusTone,
   toggleTenantModule,
   type TenantFormState,
 } from "@/components/tenant-governance-shared";
+import {
+  formatDateTime,
+  truncate,
+  usePlatformAdminClient,
+} from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
   CreatePlatformTenantCommand,
   PlatformAdminTenantRecord,
 } from "@drts/contracts";
 import {
-  CalloutBanner,
-  DataCellStack,
-  DataFilterBar,
-  DataTable,
-  DataViewCard,
-  KpiCard,
-  KpiRow,
-  PageHeader,
-  StatusChip,
-  Td,
-  Tr,
-  WorkflowPanel,
+  PLATFORM_TENANT_INTEGRATION_MODES,
+  PLATFORM_TENANT_MODULES,
+} from "@drts/contracts";
+import {
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasField,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTone,
 } from "@drts/ui-web";
 
 type TenantFilter =
@@ -44,6 +51,207 @@ type TenantFilter =
   | "production"
   | "rollback_hold";
 
+type TenantRow = PlatformAdminTenantRecord & Record<string, unknown>;
+
+const th = buildCanvasTheme({
+  surface: "platform",
+  dark: true,
+  density: "compact",
+});
+
+const pageRootStyle: CSSProperties = {
+  minHeight: "100%",
+  background: th.bg,
+  color: th.text,
+  borderRadius: 12,
+  overflow: "hidden",
+  fontFamily: th.fontFamily,
+};
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const filterRowStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  flexWrap: "wrap",
+};
+
+const filterButtonStyle: CSSProperties = {
+  border: 0,
+  padding: 0,
+  background: "transparent",
+  cursor: "pointer",
+};
+
+const loadingStateStyle: CSSProperties = {
+  padding: 24,
+  color: th.textMuted,
+  fontFamily: th.fontFamily,
+  background: th.bg,
+  borderRadius: 12,
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: 28,
+  color: th.textMuted,
+  fontSize: 12.5,
+  textAlign: "center",
+};
+
+const createGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
+const fieldGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+  gap: 14,
+};
+
+const quotaGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 14,
+};
+
+const moduleGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 10,
+};
+
+const sectionTitleStyle: CSSProperties = {
+  margin: 0,
+  color: th.text,
+  fontSize: 12.5,
+  fontWeight: 600,
+};
+
+const sectionHintStyle: CSSProperties = {
+  margin: "4px 0 0",
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.45,
+};
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "8px 10px",
+  borderRadius: 7,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  color: th.text,
+  fontSize: 12.5,
+  fontFamily: th.fontFamily,
+};
+
+const monoInputStyle: CSSProperties = {
+  ...inputStyle,
+  fontFamily: th.monoFamily,
+};
+
+const createActionsStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 10,
+  marginTop: 4,
+};
+
+const submitButtonStyle = (disabled: boolean): CSSProperties => ({
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 120,
+  height: 28,
+  padding: "5px 10px",
+  borderRadius: 7,
+  border: `1px solid ${th.accent}`,
+  background: th.accent,
+  color: "#ffffff",
+  fontSize: 12,
+  fontWeight: 500,
+  lineHeight: 1,
+  cursor: disabled ? "not-allowed" : "pointer",
+  opacity: disabled ? 0.55 : 1,
+});
+
+const tenantLinkStyle: CSSProperties = {
+  display: "inline-flex",
+  flexDirection: "column",
+  gap: 3,
+  color: th.text,
+  textDecoration: "none",
+};
+
+const tenantNameStyle: CSSProperties = {
+  fontWeight: 600,
+  color: th.text,
+};
+
+const tenantMetaStyle: CSSProperties = {
+  fontSize: 11,
+  color: th.textDim,
+  fontFamily: th.monoFamily,
+};
+
+const tenantSecondaryStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: th.textMuted,
+};
+
+const stackedCellStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+};
+
+const secondaryMonoStyle: CSSProperties = {
+  fontSize: 11,
+  color: th.textMuted,
+  fontFamily: th.monoFamily,
+};
+
+function toCanvasTone(tone: ReturnType<typeof tenantStageTone>): CanvasTone {
+  return tone === "warning" ? "warn" : tone;
+}
+
+function formatLocaleNumber(locale: string, value: number) {
+  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
+}
+
+function getFilterTone(value: TenantFilter, active: boolean): CanvasTone {
+  if (value === "rollback_hold") {
+    return "danger";
+  }
+  if (active) {
+    return "accent";
+  }
+  return "neutral";
+}
+
+function getIntegrationEndpoint(tenant: PlatformAdminTenantRecord) {
+  return (
+    tenant.integrationPackage.productionBaseUrl ??
+    tenant.integrationPackage.sandboxBaseUrl ??
+    "—"
+  );
+}
+
+function toCsvCell(value: string | number) {
+  const text = String(value);
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
 export default function TenantsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -52,7 +260,6 @@ export default function TenantsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [tenantActionId, setTenantActionId] = useState<string | null>(null);
   const [filter, setFilter] = useState<TenantFilter>("all");
   const [createForm, setCreateForm] =
     useState<TenantFormState>(EMPTY_TENANT_FORM);
@@ -64,46 +271,68 @@ export default function TenantsPage() {
           subtitle:
             "Manage the full tenant lifecycle from bootstrap through sandbox, pilot, and production rollout.",
           refresh: "Refresh",
-          filtersLabel: "Filter tenants by rollout lane",
-          view: "Open detail",
+          export: "Export",
           createTitle: "Create tenant",
           createSubtitle:
-            "Bootstrap the tenant identity, quota, enabled modules, and onboarding defaults from the platform side.",
+            "Bootstrap tenant identity, quota, enabled modules, and onboarding defaults before the first rollout promotion.",
+          rollbackTitle: "Rollback hold requires review",
           rollbackBanner: (count: number) =>
-            `${count} tenant(s) are in rollback hold and should be reviewed before any new rollout promotion.`,
+            `${count} tenant(s) are currently in rollback hold and should be reviewed before any new promotion.`,
+          errorTitle: "Unable to load tenant governance",
+          filterPill: "live roster",
           columns: {
-            tenant: "Tenant",
-            stage: "Stage",
-            modules: "Modules",
-            quotas: "Quota / month",
-            integration: "Integration",
-            updated: "Updated",
-            actions: "Actions",
+            tenant: "TENANT",
+            stage: "STAGE",
+            modules: "MODULES",
+            quotas: "配額 / 月",
+            integration: "介接",
+            updated: "更新",
           },
-          summary: "Governance list",
+          filters: {
+            all: "All",
+            sandbox: "sandbox",
+            pilot: "pilot",
+            production: "production",
+            rollback_hold: "rollback_hold",
+          },
+          moduleState: {
+            enabled: "enabled",
+            disabled: "optional",
+          },
         }
       : {
           title: "租戶",
           subtitle:
             "管理 tenant 從建立到 sandbox、pilot、production rollout 的完整生命週期。",
           refresh: "重新整理",
-          filtersLabel: "依 rollout lane 篩選租戶",
-          view: "查看詳情",
+          export: "匯出",
           createTitle: "建立租戶",
           createSubtitle:
-            "從平台端建立租戶主檔、配額、模組與 onboarding defaults。",
+            "在第一次 promotion 前，先補齊租戶主檔、配額、模組與 onboarding defaults。",
+          rollbackTitle: "Rollback hold 需優先審視",
           rollbackBanner: (count: number) =>
             `${count} 個租戶目前處於 rollback hold，推進新 rollout 前應先完成治理判讀。`,
+          errorTitle: "無法載入租戶治理資料",
+          filterPill: "平台治理名單",
           columns: {
-            tenant: "租戶",
-            stage: "階段",
-            modules: "模組",
+            tenant: "TENANT",
+            stage: "STAGE",
+            modules: "MODULES",
             quotas: "配額 / 月",
             integration: "介接",
             updated: "更新",
-            actions: "操作",
           },
-          summary: "治理清單",
+          filters: {
+            all: "全部",
+            sandbox: "sandbox",
+            pilot: "pilot",
+            production: "production",
+            rollback_hold: "rollback_hold",
+          },
+          moduleState: {
+            enabled: "已啟用",
+            disabled: "可選",
+          },
         };
 
   const moduleLabels = useMemo(() => createTenantModuleLabels(t), [t]);
@@ -138,25 +367,60 @@ export default function TenantsPage() {
       rollback_hold: tenants.filter(
         (tenant) => tenant.status === "rollback_hold",
       ).length,
-      active: tenants.filter((tenant) => tenant.status === "active").length,
-      paused: tenants.filter((tenant) => tenant.status === "paused").length,
     }),
     [tenants],
   );
 
   const visibleTenants = useMemo(() => {
-    switch (filter) {
-      case "rollback_hold":
-        return tenants.filter((tenant) => tenant.status === "rollback_hold");
-      case "sandbox":
-      case "pilot":
-      case "production":
-        return tenants.filter((tenant) => tenant.rollout.stage === filter);
-      case "all":
-      default:
-        return tenants;
-    }
+    const filtered =
+      filter === "rollback_hold"
+        ? tenants.filter((tenant) => tenant.status === "rollback_hold")
+        : filter === "all"
+          ? tenants
+          : tenants.filter((tenant) => tenant.rollout.stage === filter);
+
+    return [...filtered].sort(
+      (left, right) =>
+        new Date(right.updatedAt).getTime() -
+        new Date(left.updatedAt).getTime(),
+    );
   }, [filter, tenants]);
+
+  const exportVisibleTenants = useCallback(() => {
+    if (visibleTenants.length === 0) {
+      return;
+    }
+
+    const header = [
+      copy.columns.tenant,
+      copy.columns.stage,
+      copy.columns.modules,
+      copy.columns.quotas,
+      copy.columns.integration,
+      copy.columns.updated,
+    ];
+
+    const rows = visibleTenants.map((tenant) => [
+      `${tenant.name} (${tenant.code})`,
+      tenant.rollout.stage,
+      tenant.enabledModules.join(" | "),
+      `${tenant.quotas.monthlyBookings}/${tenant.quotas.activeDrivers}/${tenant.quotas.monthlyApiCalls}`,
+      tenant.integrationPackage.mode,
+      formatDateTime(tenant.updatedAt),
+    ]);
+
+    const csv = [header, ...rows]
+      .map((row) => row.map(toCsvCell).join(","))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `platform-tenants-${filter}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, [copy.columns, filter, visibleTenants]);
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -192,319 +456,494 @@ export default function TenantsPage() {
     }
   };
 
-  const runTenantAction = useCallback(
-    async (
-      tenantId: string,
-      action: "activate" | "suspend" | "rollback_hold",
-    ) => {
-      setTenantActionId(`${tenantId}:${action}`);
-      setError(null);
-      try {
-        if (action === "activate") {
-          await client.activateTenant(tenantId);
-        } else if (action === "rollback_hold") {
-          await client.rollbackHoldTenant(tenantId);
-        } else {
-          await client.suspendTenant(tenantId);
-        }
-        await loadTenants();
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setTenantActionId(null);
-      }
-    },
-    [client, loadTenants],
+  const columns = useMemo<CanvasTableColumn<TenantRow>[]>(
+    () => [
+      {
+        h: copy.columns.tenant,
+        w: 260,
+        r: (tenant) => (
+          <Link href={`/tenants/${tenant.id}`} style={tenantLinkStyle}>
+            <span style={tenantNameStyle}>{tenant.name}</span>
+            <span style={tenantMetaStyle}>
+              {tenant.code} · {tenant.id}
+            </span>
+            {tenant.status === "rollback_hold" ? (
+              <span style={tenantSecondaryStyle}>
+                {locale === "en"
+                  ? "rollout held pending governance review"
+                  : "rollout 已停在治理審視中"}
+              </span>
+            ) : null}
+          </Link>
+        ),
+      },
+      {
+        h: copy.columns.stage,
+        w: 140,
+        r: (tenant) => (
+          <div style={stackedCellStyle}>
+            <CanvasPill
+              theme={th}
+              tone={toCanvasTone(tenantStageTone(tenant.rollout.stage))}
+              dot
+            >
+              {formatPlatformCodeLabel(locale, tenant.rollout.stage)}
+            </CanvasPill>
+            <span style={tenantSecondaryStyle}>
+              {formatPlatformCodeLabel(locale, tenant.status)}
+            </span>
+          </div>
+        ),
+      },
+      {
+        h: copy.columns.modules,
+        w: 130,
+        mono: true,
+        r: (tenant) => (
+          <div style={stackedCellStyle}>
+            <span>{tenant.enabledModules.length}/4</span>
+            <span style={secondaryMonoStyle}>
+              {tenant.enabledModules
+                .map((moduleCode) => moduleLabels[moduleCode])
+                .join(" · ")}
+            </span>
+          </div>
+        ),
+      },
+      {
+        h: copy.columns.quotas,
+        w: 180,
+        mono: true,
+        r: (tenant) => (
+          <div style={stackedCellStyle}>
+            <span>
+              {formatLocaleNumber(locale, tenant.quotas.monthlyBookings)}{" "}
+              {locale === "en" ? "bookings" : "bookings"}
+            </span>
+            <span style={secondaryMonoStyle}>
+              {formatLocaleNumber(locale, tenant.quotas.activeDrivers)}{" "}
+              {locale === "en" ? "drivers" : "drivers"} ·{" "}
+              {formatLocaleNumber(locale, tenant.quotas.monthlyApiCalls)} API
+            </span>
+          </div>
+        ),
+      },
+      {
+        h: copy.columns.integration,
+        w: 180,
+        r: (tenant) => (
+          <div style={stackedCellStyle}>
+            <span>
+              {formatPlatformCodeLabel(locale, tenant.integrationPackage.mode)}
+            </span>
+            <span style={secondaryMonoStyle}>
+              {truncate(getIntegrationEndpoint(tenant), 28)}
+            </span>
+          </div>
+        ),
+      },
+      {
+        h: copy.columns.updated,
+        w: 160,
+        mono: true,
+        r: (tenant) => formatDateTime(tenant.updatedAt),
+      },
+    ],
+    [copy.columns, locale, moduleLabels],
   );
 
+  const filterOptions = [
+    { value: "all" as const, label: copy.filters.all, count: counts.all },
+    {
+      value: "sandbox" as const,
+      label: copy.filters.sandbox,
+      count: counts.sandbox,
+    },
+    { value: "pilot" as const, label: copy.filters.pilot, count: counts.pilot },
+    {
+      value: "production" as const,
+      label: copy.filters.production,
+      count: counts.production,
+    },
+    {
+      value: "rollback_hold" as const,
+      label: copy.filters.rollback_hold,
+      count: counts.rollback_hold,
+    },
+  ];
+
   if (loading) {
-    return <div className="admin-empty">{t("tenants.loading")}</div>;
+    return <div style={loadingStateStyle}>{t("tenants.loading")}</div>;
   }
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader
-        eyebrow={locale === "en" ? "Tenant Governance" : "租戶治理"}
+    <div style={pageRootStyle}>
+      <CanvasPageHeader
+        theme={th}
         title={copy.title}
         subtitle={copy.subtitle}
         actions={
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className="admin-btn admin-btn--secondary"
+          <>
+            <CanvasBtn
+              theme={th}
+              variant="secondary"
               onClick={() => void loadTenants()}
             >
               {copy.refresh}
-            </button>
-            <button
-              type="button"
-              className="admin-btn admin-btn--primary"
+            </CanvasBtn>
+            <CanvasBtn
+              theme={th}
+              variant="secondary"
+              icon="reports"
+              onClick={exportVisibleTenants}
+              disabled={visibleTenants.length === 0}
+            >
+              {copy.export}
+            </CanvasBtn>
+            <CanvasBtn
+              theme={th}
+              variant="primary"
+              icon={showCreate ? "x" : "plus"}
               onClick={() => setShowCreate((current) => !current)}
             >
               {showCreate ? t("common.cancel") : t("tenants.newTenant")}
-            </button>
-          </div>
+            </CanvasBtn>
+          </>
         }
       />
 
-      {error ? (
-        <CalloutBanner
-          tone="danger"
-          title={
-            locale === "en"
-              ? "Unable to load tenant governance"
-              : "無法載入租戶治理資料"
-          }
-          description={error}
-        />
-      ) : null}
-
-      <KpiRow minWidth="220px">
-        <KpiCard
-          label={locale === "en" ? "Registered tenants" : "已登錄租戶"}
-          value={counts.all}
-          detail={
-            locale === "en"
-              ? `${counts.active} active · ${counts.paused} paused`
-              : `${counts.active} 啟用 · ${counts.paused} 暫停`
-          }
-          tone="neutral"
-        />
-        <KpiCard
-          label={locale === "en" ? "Production rollout" : "Production rollout"}
-          value={counts.production}
-          detail={
-            locale === "en"
-              ? `${counts.pilot} pilot · ${counts.sandbox} sandbox`
-              : `${counts.pilot} pilot · ${counts.sandbox} sandbox`
-          }
-          tone="success"
-        />
-        <KpiCard
-          label={locale === "en" ? "Rollback hold" : "Rollback hold"}
-          value={counts.rollback_hold}
-          detail={
-            locale === "en"
-              ? "Tenants requiring governance review"
-              : "需要平台治理判讀的租戶"
-          }
-          tone={counts.rollback_hold > 0 ? "danger" : "neutral"}
-        />
-      </KpiRow>
-
-      {counts.rollback_hold > 0 ? (
-        <CalloutBanner
-          tone="warning"
-          title={
-            locale === "en"
-              ? "Rollback hold requires review"
-              : "Rollback hold 需優先審視"
-          }
-          description={copy.rollbackBanner(counts.rollback_hold)}
-        />
-      ) : null}
-
-      {showCreate ? (
-        <WorkflowPanel
-          title={copy.createTitle}
-          description={copy.createSubtitle}
-          tone="info"
-        >
-          <form onSubmit={handleCreate}>
-            <TenantIdentityFields
-              form={createForm}
-              setForm={setCreateForm}
-              t={t}
-            />
-            <QuotaFields form={createForm} setForm={setCreateForm} t={t} />
-            <ModuleFields
-              form={createForm}
-              onToggle={(moduleCode) =>
-                setCreateForm((current) =>
-                  toggleTenantModule(current, moduleCode),
-                )
-              }
-              moduleLabels={moduleLabels}
-              t={t}
-            />
-            <IntegrationFields
-              form={createForm}
-              setForm={setCreateForm}
-              t={t}
-            />
+      <div style={pageBodyStyle}>
+        <div style={filterRowStyle}>
+          {filterOptions.map((option) => (
             <button
-              type="submit"
-              className="admin-btn admin-btn--primary"
-              disabled={
-                creating || !createForm.name.trim() || !createForm.code.trim()
-              }
+              key={option.value}
+              type="button"
+              style={filterButtonStyle}
+              onClick={() => setFilter(option.value)}
+              aria-pressed={filter === option.value}
             >
-              {creating ? t("common.creating") : t("tenants.createTenant")}
+              <CanvasPill
+                theme={th}
+                tone={getFilterTone(option.value, filter === option.value)}
+                dot={option.value !== "all"}
+              >
+                {option.label} {formatLocaleNumber(locale, option.count)}
+              </CanvasPill>
             </button>
-          </form>
-        </WorkflowPanel>
-      ) : null}
-
-      <DataViewCard
-        title={copy.summary}
-        subtitle={copy.subtitle}
-        filters={
-          <DataFilterBar
-            value={filter}
-            onChange={setFilter}
-            ariaLabel={copy.filtersLabel}
-            filters={[
-              {
-                value: "all",
-                label: locale === "en" ? "All" : "全部",
-                count: counts.all,
-                tone: "neutral",
-              },
-              {
-                value: "sandbox",
-                label: "sandbox",
-                count: counts.sandbox,
-                tone: "warning",
-              },
-              {
-                value: "pilot",
-                label: "pilot",
-                count: counts.pilot,
-                tone: "info",
-              },
-              {
-                value: "production",
-                label: "production",
-                count: counts.production,
-                tone: "success",
-              },
-              {
-                value: "rollback_hold",
-                label: "rollback hold",
-                count: counts.rollback_hold,
-                tone: "danger",
-              },
-            ]}
-          />
-        }
-      >
-        <DataTable
-          columns={[
-            { label: copy.columns.tenant, width: "260px" },
-            { label: copy.columns.stage, width: "160px" },
-            { label: copy.columns.modules, width: "150px" },
-            { label: copy.columns.quotas, width: "180px" },
-            { label: copy.columns.integration, width: "180px" },
-            { label: copy.columns.updated, width: "180px" },
-            { label: copy.columns.actions, width: "260px" },
-          ]}
-          empty={t("tenants.empty")}
-        >
-          {visibleTenants.map((tenant) => (
-            <Tr key={tenant.id}>
-              <Td>
-                <DataCellStack
-                  primary={<strong>{tenant.name}</strong>}
-                  secondary={`${tenant.code} · ${tenant.id}`}
-                  tertiary={
-                    tenant.status === "rollback_hold"
-                      ? locale === "en"
-                        ? "rollout held pending governance review"
-                        : "rollout 已停在治理審視中"
-                      : undefined
-                  }
-                />
-              </Td>
-              <Td>
-                <div style={{ display: "grid", gap: 8 }}>
-                  <StatusChip
-                    label={formatPlatformCodeLabel(
-                      locale,
-                      tenant.rollout.stage,
-                    )}
-                    tone={tenantStageTone(tenant.rollout.stage)}
-                  />
-                  <StatusChip
-                    label={formatPlatformCodeLabel(locale, tenant.status)}
-                    tone={tenantStatusTone(tenant.status)}
-                  />
-                </div>
-              </Td>
-              <Td>
-                <DataCellStack
-                  primary={`${tenant.enabledModules.length}/4`}
-                  secondary={tenant.enabledModules
-                    .map((module) => moduleLabels[module])
-                    .join(" · ")}
-                />
-              </Td>
-              <Td>
-                <DataCellStack
-                  primary={`${tenant.quotas.monthlyBookings.toLocaleString()} bookings`}
-                  secondary={`${tenant.quotas.activeDrivers.toLocaleString()} drivers`}
-                  tertiary={`${tenant.quotas.monthlyApiCalls.toLocaleString()} API calls`}
-                />
-              </Td>
-              <Td>
-                <DataCellStack
-                  primary={formatPlatformCodeLabel(
-                    locale,
-                    tenant.integrationPackage.mode,
-                  )}
-                  secondary={tenant.integrationPackage.sandboxBaseUrl ?? "—"}
-                  tertiary={
-                    tenant.integrationPackage.productionBaseUrl ?? undefined
-                  }
-                />
-              </Td>
-              <Td>{new Date(tenant.updatedAt).toLocaleString()}</Td>
-              <Td>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <Link
-                    href={`/tenants/${tenant.id}`}
-                    className="admin-btn admin-btn--secondary admin-btn--sm"
-                  >
-                    {copy.view}
-                  </Link>
-                  {tenant.status === "active" ? (
-                    <button
-                      type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
-                      disabled={tenantActionId === `${tenant.id}:suspend`}
-                      onClick={() => void runTenantAction(tenant.id, "suspend")}
-                    >
-                      {t("tenants.suspend")}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
-                      disabled={tenantActionId === `${tenant.id}:activate`}
-                      onClick={() =>
-                        void runTenantAction(tenant.id, "activate")
-                      }
-                    >
-                      {t("tenants.activate")}
-                    </button>
-                  )}
-                  {tenant.status !== "rollback_hold" ? (
-                    <button
-                      type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
-                      disabled={tenantActionId === `${tenant.id}:rollback_hold`}
-                      onClick={() =>
-                        void runTenantAction(tenant.id, "rollback_hold")
-                      }
-                    >
-                      {t("tenants.rollbackHold")}
-                    </button>
-                  ) : null}
-                </div>
-              </Td>
-            </Tr>
           ))}
-        </DataTable>
-      </DataViewCard>
+          <span style={{ flex: 1 }} />
+          <CanvasPill theme={th} tone="neutral">
+            {copy.filterPill}
+          </CanvasPill>
+        </div>
+
+        {error ? (
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title={copy.errorTitle}
+            body={error}
+          />
+        ) : null}
+
+        {counts.rollback_hold > 0 ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="warn"
+            title={copy.rollbackTitle}
+            body={copy.rollbackBanner(counts.rollback_hold)}
+          />
+        ) : null}
+
+        {showCreate ? (
+          <CanvasCard
+            theme={th}
+            title={copy.createTitle}
+            subtitle={copy.createSubtitle}
+          >
+            <form onSubmit={handleCreate}>
+              <div style={createGridStyle}>
+                <div>
+                  <h3 style={sectionTitleStyle}>{copy.createTitle}</h3>
+                  <p style={sectionHintStyle}>{copy.createSubtitle}</p>
+                </div>
+
+                <div style={fieldGridStyle}>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.name")}
+                    required
+                  >
+                    <input
+                      value={createForm.name}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                      required
+                      placeholder="Acme Mobility"
+                      style={inputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={th}
+                    label={t("tenants.form.code")}
+                    required
+                  >
+                    <input
+                      value={createForm.code}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          code: event.target.value,
+                        }))
+                      }
+                      required
+                      placeholder="acme_dispatch"
+                      style={monoInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={th} label={t("tenants.form.status")}>
+                    <select
+                      value={createForm.status}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          status: event.target.value as "active" | "inactive",
+                        }))
+                      }
+                      style={inputStyle}
+                    >
+                      <option value="active">{t("common.active")}</option>
+                      <option value="inactive">{t("common.inactive")}</option>
+                    </select>
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <h3 style={sectionTitleStyle}>
+                    {t("tenants.quotaAllocation")}
+                  </h3>
+                  <p style={sectionHintStyle}>
+                    {locale === "en"
+                      ? "Set the initial monthly quota envelope before enabling traffic."
+                      : "在正式啟用前先設定初始月配額範圍。"}
+                  </p>
+                  <div style={quotaGridStyle}>
+                    <CanvasField
+                      theme={th}
+                      label={t("tenants.form.activeDrivers")}
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        value={createForm.activeDrivers}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            activeDrivers: event.target.value,
+                          }))
+                        }
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      label={t("tenants.form.monthlyBookings")}
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        value={createForm.monthlyBookings}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            monthlyBookings: event.target.value,
+                          }))
+                        }
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      label={t("tenants.form.monthlyApiCalls")}
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        value={createForm.monthlyApiCalls}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            monthlyApiCalls: event.target.value,
+                          }))
+                        }
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 style={sectionTitleStyle}>{t("tenants.form.modules")}</h3>
+                  <p style={sectionHintStyle}>
+                    {locale === "en"
+                      ? "Keep the initial module footprint explicit."
+                      : "把首批啟用模組明確列出。"}
+                  </p>
+                  <div style={moduleGridStyle}>
+                    {PLATFORM_TENANT_MODULES.map((moduleCode) => {
+                      const active =
+                        createForm.enabledModules.includes(moduleCode);
+
+                      return (
+                        <button
+                          key={moduleCode}
+                          type="button"
+                          onClick={() =>
+                            setCreateForm((current) =>
+                              toggleTenantModule(current, moduleCode),
+                            )
+                          }
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 10,
+                            padding: "10px 12px",
+                            borderRadius: 8,
+                            border: `1px solid ${
+                              active ? th.accentBorder : th.border
+                            }`,
+                            background: active ? th.accentBg : th.surfaceLo,
+                            color: th.text,
+                            cursor: "pointer",
+                          }}
+                        >
+                          <CanvasPill
+                            theme={th}
+                            tone={active ? "accent" : "neutral"}
+                          >
+                            {moduleLabels[moduleCode]}
+                          </CanvasPill>
+                          <span style={tenantSecondaryStyle}>
+                            {active
+                              ? copy.moduleState.enabled
+                              : copy.moduleState.disabled}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 style={sectionTitleStyle}>
+                    {t("tenants.section.onboarding")}
+                  </h3>
+                  <p style={sectionHintStyle}>
+                    {locale === "en"
+                      ? "Seed integration posture and bootstrap ownership from the platform side."
+                      : "由平台端預先補齊 integration posture 與 bootstrap owner。"}
+                  </p>
+                  <div style={fieldGridStyle}>
+                    <CanvasField
+                      theme={th}
+                      label={t("tenants.form.integrationMode")}
+                    >
+                      <select
+                        value={createForm.integrationMode}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            integrationMode: event.target
+                              .value as (typeof PLATFORM_TENANT_INTEGRATION_MODES)[number],
+                          }))
+                        }
+                        style={inputStyle}
+                      >
+                        {PLATFORM_TENANT_INTEGRATION_MODES.map((mode) => (
+                          <option key={mode} value={mode}>
+                            {formatPlatformCodeLabel(locale, mode)}
+                          </option>
+                        ))}
+                      </select>
+                    </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      label={t("tenants.form.bootstrapAdminEmail")}
+                    >
+                      <input
+                        value={createForm.bootstrapAdminEmail}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            bootstrapAdminEmail: event.target.value,
+                          }))
+                        }
+                        placeholder="admin@acme.example"
+                        style={inputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      label={t("tenants.form.sandboxBaseUrl")}
+                    >
+                      <input
+                        value={createForm.sandboxBaseUrl}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            sandboxBaseUrl: event.target.value,
+                          }))
+                        }
+                        placeholder="https://sandbox.acme.example"
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                  </div>
+                </div>
+
+                <div style={createActionsStyle}>
+                  <button
+                    type="submit"
+                    disabled={
+                      creating ||
+                      !createForm.name.trim() ||
+                      !createForm.code.trim()
+                    }
+                    style={submitButtonStyle(
+                      creating ||
+                        !createForm.name.trim() ||
+                        !createForm.code.trim(),
+                    )}
+                  >
+                    {creating
+                      ? t("common.creating")
+                      : t("tenants.createTenant")}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </CanvasCard>
+        ) : null}
+
+        <CanvasCard theme={th} padding={0}>
+          {visibleTenants.length > 0 ? (
+            <CanvasTable<TenantRow>
+              theme={th}
+              columns={columns}
+              rows={visibleTenants as TenantRow[]}
+            />
+          ) : (
+            <div style={emptyStateStyle}>{t("tenants.empty")}</div>
+          )}
+        </CanvasCard>
+      </div>
     </div>
   );
 }
