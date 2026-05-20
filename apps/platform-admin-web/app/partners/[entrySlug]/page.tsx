@@ -3,42 +3,103 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
-import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
-import { useTranslation } from "@/lib/i18n";
-import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import {
   EMPTY_ENTRY_FORM,
-  EntryForm,
   buildPartnerReadinessItems,
   partnerStatusTone,
   toPartnerFormState,
   toPartnerUpdateCommand,
+  type EntryFormState,
 } from "@/components/partner-governance-shared";
-import type {
-  PartnerChannelEntryRecord,
-  PartnerIngressCredentialIssued,
-  PartnerIngressCredentialRecord,
+import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import {
+  BUSINESS_DISPATCH_SUBTYPES,
+  PARTNER_ENTRY_AUTH_MODES,
+  PARTNER_ELIGIBILITY_MODES,
+  type BusinessDispatchSubtype,
+  type PartnerChannelEntryRecord,
+  type PartnerEntryAuthMode,
+  type PartnerEligibilityMode,
+  type PartnerIngressCredentialIssued,
+  type PartnerIngressCredentialRecord,
 } from "@drts/contracts";
 import {
-  CalloutBanner,
-  DataViewCard,
-  DetailMetadataGrid,
-  FilterPill,
-  FilterPillRow,
-  KpiCard,
-  KpiRow,
-  PageHeader,
-  StatusChip,
-  WorkflowPanel,
-  WorkflowSplitLayout,
-  type DetailListItem,
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasDL as DL,
+  CanvasField as Field,
+  CanvasIcon,
+  CanvasKPI as KPI,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasTableColumn,
 } from "@drts/ui-web";
 
-const anchorSectionStyle = {
+const theme = buildCanvasTheme({
+  surface: "platform",
+  density: "compact",
+});
+
+const pageShellStyle = {
+  minHeight: "100%",
+  background: theme.bg,
+  color: theme.text,
+} satisfies React.CSSProperties;
+
+const pageBodyStyle = {
   display: "grid",
+  gap: 16,
+  padding: 24,
+} satisfies React.CSSProperties;
+
+const emptyStateStyle = {
+  display: "grid",
+  placeItems: "center",
+  minHeight: 220,
+  padding: "40px 24px",
+  borderRadius: 12,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  color: theme.textMuted,
+  textAlign: "center",
+} satisfies React.CSSProperties;
+
+const kpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
-  scrollMarginTop: 96,
+} satisfies React.CSSProperties;
+
+const sideStackStyle = {
+  display: "grid",
+  gap: 16,
+} satisfies React.CSSProperties;
+
+const saveBarStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+  padding: "12px 14px",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+} satisfies React.CSSProperties;
+
+const mutedTextStyle = {
+  fontSize: 11.5,
+  color: theme.textMuted,
+  lineHeight: 1.45,
+} satisfies React.CSSProperties;
+
+const sectionAnchorStyle = {
+  scrollMarginTop: 92,
 } satisfies React.CSSProperties;
 
 function heroGridStyle(isCompact: boolean) {
@@ -46,17 +107,208 @@ function heroGridStyle(isCompact: boolean) {
     display: "grid",
     gridTemplateColumns: isCompact
       ? "minmax(0, 1fr)"
-      : "minmax(0, 1.35fr) minmax(280px, 1fr)",
+      : "minmax(0, 1.4fr) minmax(320px, 1fr)",
     gap: 16,
     alignItems: "start",
   } satisfies React.CSSProperties;
 }
 
-const statusSummaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-} satisfies React.CSSProperties;
+function detailGridStyle(isCompact: boolean) {
+  return {
+    display: "grid",
+    gridTemplateColumns: isCompact
+      ? "minmax(0, 1fr)"
+      : "repeat(2, minmax(0, 1fr))",
+    gap: 16,
+  } satisfies React.CSSProperties;
+}
+
+function fieldGridStyle(isCompact: boolean) {
+  return {
+    display: "grid",
+    gridTemplateColumns: isCompact
+      ? "minmax(0, 1fr)"
+      : "repeat(2, minmax(0, 1fr))",
+    gap: 12,
+  } satisfies React.CSSProperties;
+}
+
+function readinessItemStyle(ready: boolean) {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "10px 0",
+    borderBottom: `1px solid ${theme.border}`,
+    color: ready ? theme.text : theme.textMuted,
+  } satisfies React.CSSProperties;
+}
+
+function linkButtonStyle(
+  variant: "primary" | "secondary" | "ghost" = "secondary",
+) {
+  if (variant === "primary") {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      height: 28,
+      padding: "5px 10px",
+      borderRadius: 7,
+      background: theme.accent,
+      color: "#ffffff",
+      border: `1px solid ${theme.accent}`,
+      textDecoration: "none",
+      fontSize: 12,
+      fontWeight: 500,
+      lineHeight: 1,
+    } satisfies React.CSSProperties;
+  }
+
+  if (variant === "ghost") {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      height: 28,
+      padding: "5px 10px",
+      borderRadius: 7,
+      background: "transparent",
+      color: theme.textMuted,
+      border: "1px solid transparent",
+      textDecoration: "none",
+      fontSize: 12,
+      fontWeight: 500,
+      lineHeight: 1,
+    } satisfies React.CSSProperties;
+  }
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: 28,
+    padding: "5px 10px",
+    borderRadius: 7,
+    background: theme.surface,
+    color: theme.text,
+    border: `1px solid ${theme.border}`,
+    textDecoration: "none",
+    fontSize: 12,
+    fontWeight: 500,
+    lineHeight: 1,
+  } satisfies React.CSSProperties;
+}
+
+function controlStyle({
+  mono = false,
+  disabled = false,
+}: {
+  mono?: boolean;
+  disabled?: boolean;
+} = {}) {
+  return {
+    width: "100%",
+    minHeight: 32,
+    boxSizing: "border-box",
+    padding: "7px 10px",
+    borderRadius: 7,
+    border: `1px solid ${theme.border}`,
+    background: disabled ? theme.surfaceLo : theme.bgRaised,
+    color: disabled ? theme.textDim : theme.text,
+    fontSize: 12.5,
+    lineHeight: 1.4,
+    fontFamily: mono ? theme.monoFamily : theme.fontFamily,
+    outline: "none",
+    opacity: disabled ? 0.72 : 1,
+  } satisfies React.CSSProperties;
+}
+
+function toCanvasTone(
+  tone: ReturnType<typeof partnerStatusTone>,
+): "neutral" | "success" | "warn" | "danger" {
+  if (tone === "warning") {
+    return "warn";
+  }
+  return tone;
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+  hint,
+  placeholder,
+  mono = false,
+  required = false,
+  disabled = false,
+}: {
+  label: React.ReactNode;
+  value: string;
+  onChange: (value: string) => void;
+  hint?: React.ReactNode;
+  placeholder?: string;
+  mono?: boolean;
+  required?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <Field theme={theme} label={label} hint={hint} required={required}>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        style={controlStyle({ mono, disabled })}
+      />
+    </Field>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+  formatOption,
+  hint,
+}: {
+  label: React.ReactNode;
+  value: string;
+  options: readonly string[];
+  onChange: (value: string) => void;
+  formatOption: (value: string) => string;
+  hint?: React.ReactNode;
+}) {
+  return (
+    <Field theme={theme} label={label} hint={hint}>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        style={controlStyle()}
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {formatOption(option)}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+type CredentialRow = Record<string, unknown> & {
+  keyId: string;
+  masked: string;
+  source: string;
+  createdAt: string;
+  lastUsedAt: string;
+  revokedAt: string | null;
+};
 
 export default function PartnerDetailPage() {
   const params = useParams<{ entrySlug: string }>();
@@ -66,7 +318,7 @@ export default function PartnerDetailPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [entry, setEntry] = useState<PartnerChannelEntryRecord | null>(null);
-  const [editForm, setEditForm] = useState(EMPTY_ENTRY_FORM);
+  const [editForm, setEditForm] = useState<EntryFormState>(EMPTY_ENTRY_FORM);
   const [credentials, setCredentials] = useState<
     PartnerIngressCredentialRecord[]
   >([]);
@@ -87,7 +339,7 @@ export default function PartnerDetailPage() {
       return undefined;
     }
 
-    const mediaQuery = window.matchMedia("(max-width: 960px)");
+    const mediaQuery = window.matchMedia("(max-width: 1080px)");
     const syncViewport = () => setIsCompactViewport(mediaQuery.matches);
     syncViewport();
     mediaQuery.addEventListener("change", syncViewport);
@@ -98,109 +350,117 @@ export default function PartnerDetailPage() {
     locale === "en"
       ? {
           back: "Back to partner entries",
+          refresh: "Refresh",
+          preview: "Preview entry",
+          save: "Save changes",
+          saveHint:
+            "Applies branding, routing, auth, and eligibility edits for this partner-facing entry.",
           title: "Partner entry detail",
-          subtitle:
-            "Review readiness, lifecycle, credentials, routing, and audit metadata from the platform side.",
-          routingTitle: "Routing and branding",
-          routingSubtitle:
-            "Entry routing, partner identity, auth mode, and branding remain platform-governed surfaces.",
-          overviewTitle: "Entry overview",
+          unavailableTitle: "Partner entry unavailable",
+          notFound: "Partner entry not found.",
+          errorTitle: "Unable to update partner entry",
+          tabs: [
+            "Overview",
+            "Branding",
+            "Auth",
+            "Eligibility",
+            "Credentials",
+            "Audit",
+          ],
+          overviewTitle: "Entry basics",
           overviewSubtitle:
-            "Core identity, audit, and eligibility linkage for the selected entry.",
-          authTitle: "Auth authority",
-          authSubtitle:
-            "Keep partner entry auth decisions explicit so rollout authority does not drift into tenant-owned settings.",
-          eligibilityTitle: "Eligibility contract",
-          eligibilitySubtitle:
-            "Partner-side eligibility is governed by contract snapshots, fallback policy, and adapter posture.",
+            "Platform-owned routing, identity, and launch posture for the selected partner entry.",
           readinessTitle: "Readiness checks",
           readinessSubtitle:
-            "Do not enable the entry until every required routing, branding, and support dependency is present.",
-          readinessBlocked:
-            "This entry still has unresolved readiness gaps. Keep rollout authority on the platform side until every gate is green.",
-          readinessReady:
-            "Checklist is clear. The entry can be promoted without hiding platform authority boundaries.",
-          lifecycleTitle: "Lifecycle controls",
-          lifecycleSubtitle:
-            "Lifecycle actions affect whether external traffic can reach this partner-facing entry.",
+            "Keep activation blocked until branding, routing, contract, and credential gates are green.",
           credentialsTitle: "Active credentials",
           credentialsSubtitle:
-            "Rotate ingress credentials here. Plaintext material is only shown once after issuance.",
-          auditTitle: "Audit lineage",
+            "Ingress material is shown once at issue time and stays platform-governed afterward.",
+          brandingTitle: "Branding",
+          brandingSubtitle:
+            "Partner-facing display, route, accent, and support metadata.",
+          authTitle: "Auth",
+          authSubtitle:
+            "Auth authority, partner identity, and lifecycle control remain on the platform side.",
+          eligibilityTitle: "Eligibility",
+          eligibilitySubtitle:
+            "Contract snapshot, adapter posture, and fallback policy for this entry.",
+          auditTitle: "Audit",
           auditSubtitle:
-            "Creation, update, revoke, and credential activity must remain visible for platform review.",
-          navigationTitle: "Entry sections",
-          navigationSubtitle:
-            "Use anchored sections to keep overview, auth, eligibility, routing, readiness, credentials, and audit posture in the same review lane.",
-          snapshotTitle: "Promotion posture",
-          snapshotSubtitle:
-            "Keep readiness, entry routing, and credential coverage visible before enabling partner-facing traffic.",
-          nav: {
-            overview: "Overview",
-            auth: "Auth",
-            eligibility: "Eligibility",
-            routing: "Routing",
-            readiness: "Readiness",
-            lifecycle: "Lifecycle",
-            credentials: "Credentials",
-            audit: "Audit",
-          },
-          notFound: "Partner entry not found.",
-          save: "Save entry",
-          preview: "Preview route",
+            "Creation, update, revocation, and request lineage for platform review.",
+          lifecycleLabel: "Lifecycle",
+          readinessLabel: "Readiness",
+          activeCredentialsLabel: "Active credentials",
+          auditSourceLabel: "Audit source",
+          updatedLabel: "Last updated",
+          readyTitle: "Ready to promote",
+          blockedTitle: "Readiness gaps remain",
+          readyBody:
+            "Checklist is clear. This entry can be promoted without hiding platform governance boundaries.",
+          blockedBody:
+            "Do not activate external traffic until the remaining readiness gaps are resolved.",
+          contractEmpty:
+            "No eligibility contract snapshot is linked to this entry yet.",
+          routeHint: "Public route preview",
+          accentHint: "Brand accent delivered to the entry skin",
+          authBannerTitle: "Credential posture",
+          eligibilityBannerTitle: "Contract posture",
         }
       : {
           back: "返回 partner entries",
+          refresh: "重新整理",
+          preview: "預覽 entry",
+          save: "儲存變更",
+          saveHint:
+            "儲存會同步更新此 partner-facing entry 的 branding、routing、auth 與 eligibility 設定。",
           title: "Partner entry 詳情",
-          subtitle:
-            "從平台側檢視 readiness、lifecycle、credentials、routing 與 audit metadata。",
-          routingTitle: "Routing 與 branding",
-          routingSubtitle:
-            "Entry routing、partner identity、auth mode 與 branding 皆屬平台治理面。",
-          overviewTitle: "Entry 概況",
+          unavailableTitle: "Partner entry 目前不可用",
+          notFound: "找不到此 partner entry。",
+          errorTitle: "Partner entry 更新失敗",
+          tabs: [
+            "Overview",
+            "Branding",
+            "Auth",
+            "Eligibility",
+            "Credentials",
+            "Audit",
+          ],
+          overviewTitle: "Entry 基本資料",
           overviewSubtitle:
-            "此 entry 的核心識別、audit 與 eligibility linkage。",
-          authTitle: "Auth 治理權限",
-          authSubtitle:
-            "明確保留 partner entry 的 auth 決策在平台側，避免與 tenant 自主管理設定混淆。",
-          eligibilityTitle: "Eligibility 契約",
-          eligibilitySubtitle:
-            "partner eligibility 由契約快照、fallback policy 與 adapter 狀態共同治理。",
+            "集中檢視平台治理下的 partner routing、識別與上線姿態。",
           readinessTitle: "Readiness 檢查",
           readinessSubtitle:
-            "在 routing、branding、support 依賴補齊前，不應直接啟用此 entry。",
-          readinessBlocked:
-            "此 entry 仍有未解 readiness 缺口；在所有 gate 轉綠前，應維持平台側 rollout authority。",
-          readinessReady:
-            "Checklist 已補齊；可在不模糊平台治理邊界的前提下推進上線。",
-          lifecycleTitle: "Lifecycle controls",
-          lifecycleSubtitle:
-            "生命週期動作會直接影響外部流量是否能進入這個 partner-facing entry。",
-          credentialsTitle: "有效憑證",
+            "在 branding、routing、contract 與 credential gate 全部轉綠前，不應直接啟用流量。",
+          credentialsTitle: "Active credentials",
           credentialsSubtitle:
-            "在此輪替 ingress credential；明文只會在發出後顯示一次。",
-          auditTitle: "Audit 脈絡",
+            "入口憑證只會在核發當下顯示一次，之後持續由平台治理。",
+          brandingTitle: "Branding",
+          brandingSubtitle:
+            "partner-facing entry 的顯示名稱、入口路由、色彩與支援資訊。",
+          authTitle: "Auth",
+          authSubtitle:
+            "驗證權限、合作方識別與 lifecycle control 都應保留在平台側。",
+          eligibilityTitle: "Eligibility",
+          eligibilitySubtitle:
+            "檢視此 entry 的資格驗證模式、契約快照、adapter posture 與 fallback policy。",
+          auditTitle: "Audit",
           auditSubtitle:
-            "建立、更新、撤銷與 credential 活動都必須保留給平台稽核檢視。",
-          navigationTitle: "Entry 區段",
-          navigationSubtitle:
-            "用 anchored sections 把 overview、auth、eligibility、routing、readiness、credentials 與 audit posture 放在同一條治理路徑裡檢視。",
-          snapshotTitle: "Promotion posture",
-          snapshotSubtitle:
-            "在啟用 partner-facing 流量前，先把 readiness、entry routing 與 credential coverage 放在同一屏檢視。",
-          nav: {
-            overview: "Overview",
-            auth: "Auth",
-            eligibility: "Eligibility",
-            routing: "Routing",
-            readiness: "Readiness",
-            lifecycle: "Lifecycle",
-            credentials: "Credentials",
-            audit: "Audit",
-          },
-          notFound: "找不到此 partner entry。",
-          save: "儲存 entry",
-          preview: "預覽路由",
+            "建立、更新、撤銷與 request lineage 都需保留給平台稽核。",
+          lifecycleLabel: "Lifecycle",
+          readinessLabel: "Readiness",
+          activeCredentialsLabel: "有效憑證",
+          auditSourceLabel: "Audit 來源",
+          updatedLabel: "最近更新",
+          readyTitle: "可推進上線",
+          blockedTitle: "仍有 readiness 缺口",
+          readyBody:
+            "Checklist 已補齊，可在不模糊平台治理邊界的前提下推進流量啟用。",
+          blockedBody: "在剩餘 gate 補齊前，不應讓外部流量直接進入此 entry。",
+          contractEmpty: "此 entry 尚未綁定 eligibility contract snapshot。",
+          routeHint: "公開入口預覽",
+          accentHint: "交付到 entry skin 的品牌 accent",
+          authBannerTitle: "憑證姿態",
+          eligibilityBannerTitle: "契約姿態",
         };
 
   const loadEntry = useCallback(
@@ -210,18 +470,23 @@ export default function PartnerDetailPage() {
         setLoading(false);
         return;
       }
+
       setLoading(true);
       setError(null);
+
       try {
         const entries = await client.listPlatformPartnerEntries();
         const selected =
           entries.find((candidate) => candidate.entrySlug === entrySlug) ??
           null;
+
         setEntry(selected);
         setEditForm(selected ? toPartnerFormState(selected) : EMPTY_ENTRY_FORM);
+
         if (!options?.preserveIssuedCredential) {
           setIssuedCredential(null);
         }
+
         if (selected) {
           const nextCredentials =
             await client.listPlatformPartnerIngressCredentials(
@@ -247,11 +512,14 @@ export default function PartnerDetailPage() {
     void loadEntry();
   }, [loadEntry]);
 
-  const handleSave = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!entry) return;
+  const saveEntry = useCallback(async () => {
+    if (!entry) {
+      return;
+    }
+
     setSaving(true);
     setError(null);
+
     try {
       await client.updatePlatformPartnerEntry(
         entry.entrySlug,
@@ -263,13 +531,22 @@ export default function PartnerDetailPage() {
     } finally {
       setSaving(false);
     }
+  }, [client, editForm, entry, loadEntry]);
+
+  const handleSave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    await saveEntry();
   };
 
   const setEntryStatus = useCallback(
     async (nextStatus: "active" | "inactive" | "revoked") => {
-      if (!entry) return;
+      if (!entry) {
+        return;
+      }
+
       setChangingStatus(nextStatus);
       setError(null);
+
       try {
         if (nextStatus === "active") {
           await client.activatePlatformPartnerEntry(entry.entrySlug);
@@ -278,6 +555,7 @@ export default function PartnerDetailPage() {
         } else {
           await client.revokePlatformPartnerEntry(entry.entrySlug);
         }
+
         await loadEntry();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
@@ -289,9 +567,13 @@ export default function PartnerDetailPage() {
   );
 
   const issueCredential = useCallback(async () => {
-    if (!entry) return;
+    if (!entry) {
+      return;
+    }
+
     setIssuingCredential(true);
     setError(null);
+
     try {
       const issued = await client.issuePlatformPartnerIngressCredential(
         entry.entrySlug,
@@ -308,9 +590,13 @@ export default function PartnerDetailPage() {
 
   const revokeCredential = useCallback(
     async (keyId: string) => {
-      if (!entry) return;
+      if (!entry) {
+        return;
+      }
+
       setRevokingCredentialId(keyId);
       setError(null);
+
       try {
         await client.revokePlatformPartnerIngressCredential(
           entry.entrySlug,
@@ -327,6 +613,16 @@ export default function PartnerDetailPage() {
     [client, entry, loadEntry],
   );
 
+  const updateFormField = <Key extends keyof EntryFormState>(
+    key: Key,
+    value: EntryFormState[Key],
+  ) => {
+    setEditForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  };
+
   const activeCredentialCount = useMemo(
     () => credentials.filter((credential) => !credential.revokedAt).length,
     [credentials],
@@ -342,106 +638,114 @@ export default function PartnerDetailPage() {
     [activeCredentialCount, entry, t],
   );
 
-  const detailItems = useMemo<DetailListItem[]>(() => {
-    if (!entry) {
-      return [];
-    }
-    return [
-      {
-        id: "tenant",
-        label: "Tenant",
-        value: entry.tenantId,
-      },
-      {
-        id: "partner",
-        label: locale === "en" ? "Partner / program" : "合作方 / 方案",
-        value: `${entry.partnerCode} · ${entry.programId}`,
-        hint: entry.programCode ?? undefined,
-      },
-      {
-        id: "subtype",
-        label: locale === "en" ? "Dispatch subtype" : "派單子類型",
-        value: formatPlatformCodeLabel(locale, entry.businessDispatchSubtype),
-      },
-      {
-        id: "entry-host",
-        label: "Entry host",
-        value: entry.entryHost ?? "—",
-      },
-      {
-        id: "entry-path",
-        label: "Entry path",
-        value: entry.entryPath ?? "—",
-      },
-      {
-        id: "audit-source",
-        label: locale === "en" ? "Audit source" : "Audit 來源",
-        value: entry.auditMetadata.source ?? "—",
-      },
-      {
-        id: "eligibility-contract",
-        label:
-          locale === "en" ? "Eligibility contract" : "Eligibility contract",
-        value: entry.eligibilityContract?.contractId ?? "—",
-        hint: entry.eligibilityContract
-          ? `${entry.eligibilityContract.adapterCode} · ${entry.eligibilityContract.adapterVersion}`
-          : undefined,
-        columnSpan: 2,
-      },
-    ];
-  }, [entry, locale]);
+  const readinessReadyCount = readinessItems.filter(
+    (item) => item.ready,
+  ).length;
+  const readinessMissingCount = readinessItems.length - readinessReadyCount;
+  const readinessComplete =
+    readinessItems.length > 0 && readinessItems.every((item) => item.ready);
 
-  const authItems = useMemo<DetailListItem[]>(() => {
+  const previewUrl =
+    entry?.entryHost && entry?.entryPath
+      ? `https://${entry.entryHost}${entry.entryPath}`
+      : null;
+
+  const supportValue = useMemo(() => {
+    if (!entry) {
+      return "—";
+    }
+
+    return (
+      [
+        entry.brandingMetadata?.supportEmail,
+        entry.brandingMetadata?.supportPhone,
+      ]
+        .filter(Boolean)
+        .join(" · ") || "—"
+    );
+  }, [entry]);
+
+  const overviewItems = useMemo(() => {
     if (!entry) {
       return [];
     }
 
     return [
       {
-        id: "auth-mode",
-        label: locale === "en" ? "Auth mode" : "驗證模式",
-        value: formatPlatformCodeLabel(locale, entry.authMode),
-        hint:
-          entry.authMode === "partner_api_key"
-            ? locale === "en"
-              ? "Platform-managed ingress secrets gate partner traffic."
-              : "由平台管理 ingress secret，作為 partner 流量入口 gate。"
-            : locale === "en"
-              ? "Tenant portal bearer identity governs session entry."
-              : "由 tenant portal bearer identity 管理進入流程。",
+        k: "TENANT",
+        v: `${entry.partnerType} · ${entry.tenantId}`,
+        mono: true,
       },
       {
-        id: "dispatch-subtype",
-        label: locale === "en" ? "Dispatch subtype" : "派單子類型",
-        value: formatPlatformCodeLabel(locale, entry.businessDispatchSubtype),
+        k: "BANK CODE",
+        v: entry.bankCode ?? "—",
+        mono: true,
       },
       {
-        id: "active-flag",
-        label: locale === "en" ? "Rollout flag" : "Rollout 旗標",
-        value: entry.activeFlag ? "active" : "inactive",
-        hint:
-          locale === "en"
-            ? "Keep lifecycle status and rollout flag aligned."
-            : "生命週期狀態與 rollout flag 應保持一致。",
+        k: "PROGRAM",
+        v: `${entry.partnerCode} · ${entry.programId}`,
       },
       {
-        id: "credential-coverage",
-        label: locale === "en" ? "Credential coverage" : "憑證覆蓋",
-        value:
-          entry.authMode === "partner_api_key"
-            ? `${activeCredentialCount} active`
-            : locale === "en"
-              ? "Not required"
-              : "不需要",
-        tone:
-          entry.authMode === "partner_api_key" && activeCredentialCount === 0
-            ? "warning"
-            : "success",
+        k: "BUSINESS SUBTYPE",
+        v: formatPlatformCodeLabel(locale, entry.businessDispatchSubtype),
+        mono: true,
+      },
+      {
+        k: "AUTH MODE",
+        v: formatPlatformCodeLabel(locale, entry.authMode),
+        mono: true,
+      },
+      {
+        k: "ELIGIBILITY",
+        v: formatPlatformCodeLabel(locale, entry.eligibilityMode),
+        mono: true,
+      },
+      {
+        k: "ENTRY HOST",
+        v: entry.entryHost ?? "—",
+        mono: true,
+      },
+      {
+        k: "ENTRY PATH",
+        v: entry.entryPath ?? "—",
+        mono: true,
+      },
+      {
+        k: "THEME ACCENT",
+        v: entry.themeAccent ? (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                background: entry.themeAccent,
+                border: `1px solid ${theme.border}`,
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+              {entry.themeAccent}
+            </span>
+          </span>
+        ) : (
+          "—"
+        ),
+      },
+      {
+        k: "SUPPORT CONTACT",
+        v: supportValue,
       },
     ];
-  }, [activeCredentialCount, entry, locale]);
+  }, [entry, locale, supportValue]);
 
-  const eligibilityItems = useMemo<DetailListItem[]>(() => {
+  const eligibilitySnapshotItems = useMemo(() => {
     if (!entry) {
       return [];
     }
@@ -450,151 +754,168 @@ export default function PartnerDetailPage() {
 
     return [
       {
-        id: "eligibility-mode",
-        label: locale === "en" ? "Eligibility mode" : "資格驗證模式",
-        value: formatPlatformCodeLabel(locale, entry.eligibilityMode),
-        hint:
-          entry.eligibilityMode === "none"
-            ? locale === "en"
-              ? "No partner-side verification required before fulfillment."
-              : "此流程在 fulfill 前不要求 partner-side verification。"
-            : locale === "en"
-              ? "Eligibility remains a platform-governed pre-dispatch gate."
-              : "Eligibility 仍屬平台治理的 pre-dispatch gate。",
+        k: locale === "en" ? "Contract ID" : "契約 ID",
+        v: contract?.contractId ?? "—",
+        mono: true,
       },
       {
-        id: "contract-id",
-        label: locale === "en" ? "Contract ID" : "契約 ID",
-        value: contract?.contractId ?? "—",
-        hint: contract
+        k: locale === "en" ? "Adapter" : "Adapter",
+        v: contract
           ? `${contract.adapterCode} · ${contract.adapterVersion}`
-          : undefined,
+          : "—",
+        mono: true,
       },
       {
-        id: "adapter-kind",
-        label: locale === "en" ? "Adapter posture" : "Adapter 狀態",
-        value: contract?.adapterKind ?? "—",
-        hint: contract?.notes?.[0] ?? undefined,
+        k: locale === "en" ? "Adapter posture" : "Adapter posture",
+        v: contract?.adapterKind ?? "—",
       },
       {
-        id: "fallback",
-        label: locale === "en" ? "Manual fallback" : "人工 fallback",
-        value: contract?.manualFallbackPolicy?.requiredOnTimeout
+        k: locale === "en" ? "Fallback" : "Fallback",
+        v: contract?.manualFallbackPolicy?.requiredOnTimeout
           ? locale === "en"
             ? "Ops queue required"
             : "需進 ops queue"
           : locale === "en"
             ? "No timeout fallback"
             : "無 timeout fallback",
-        hint: contract?.manualFallbackPolicy
-          ? `${contract.manualFallbackPolicy.queue} · ${contract.manualFallbackPolicy.requiredAuditFields.join(", ")}`
-          : undefined,
       },
     ];
   }, [entry, locale]);
 
-  const auditItems = useMemo<DetailListItem[]>(() => {
+  const auditItems = useMemo(() => {
     if (!entry) {
       return [];
     }
 
     return [
       {
-        id: "audit-source",
-        label: locale === "en" ? "Audit source" : "Audit 來源",
-        value: entry.auditMetadata.source ?? "—",
+        k: locale === "en" ? "Audit source" : "Audit 來源",
+        v: entry.auditMetadata.source ?? "—",
       },
       {
-        id: "request-id",
-        label: locale === "en" ? "Request ID" : "Request ID",
-        value: entry.auditMetadata.requestId ?? "—",
+        k: locale === "en" ? "Request ID" : "Request ID",
+        v: entry.auditMetadata.requestId ?? "—",
+        mono: true,
       },
       {
-        id: "created-by",
-        label: locale === "en" ? "Created by" : "建立者",
-        value: entry.auditMetadata.createdBy ?? "—",
-        hint: formatDateTime(entry.createdAt),
+        k: locale === "en" ? "Created by" : "建立者",
+        v: entry.auditMetadata.createdBy ?? "—",
       },
       {
-        id: "updated-by",
-        label: locale === "en" ? "Updated by" : "更新者",
-        value: entry.auditMetadata.updatedBy ?? "—",
-        hint: formatDateTime(entry.updatedAt),
+        k: locale === "en" ? "Created at" : "建立時間",
+        v: formatDateTime(entry.createdAt),
+        mono: true,
       },
       {
-        id: "revoked-at",
-        label: locale === "en" ? "Revoked at" : "撤銷時間",
-        value: entry.revokedAt ? formatDateTime(entry.revokedAt) : "—",
-        hint: entry.revokedBy ?? undefined,
+        k: locale === "en" ? "Updated by" : "更新者",
+        v: entry.auditMetadata.updatedBy ?? "—",
       },
       {
-        id: "revoke-reason",
-        label: locale === "en" ? "Revoke reason" : "撤銷原因",
-        value: entry.revokeReason ?? "—",
+        k: locale === "en" ? "Updated at" : "更新時間",
+        v: formatDateTime(entry.updatedAt),
+        mono: true,
+      },
+      {
+        k: locale === "en" ? "Revoked at" : "撤銷時間",
+        v: entry.revokedAt ? formatDateTime(entry.revokedAt) : "—",
+        mono: true,
+      },
+      {
+        k: locale === "en" ? "Revoke reason" : "撤銷原因",
+        v: entry.revokeReason ?? "—",
       },
     ];
   }, [entry, locale]);
 
-  const credentialPreviewUrl =
-    entry?.entryHost && entry?.entryPath
-      ? `https://${entry.entryHost}${entry.entryPath}`
-      : (entry?.entryPath ?? entry?.entryHost ?? null);
+  const credentialRows = useMemo<CredentialRow[]>(
+    () =>
+      [...credentials]
+        .sort((left, right) => {
+          if (Boolean(left.revokedAt) !== Boolean(right.revokedAt)) {
+            return left.revokedAt ? 1 : -1;
+          }
+          return (
+            new Date(right.createdAt).getTime() -
+            new Date(left.createdAt).getTime()
+          );
+        })
+        .map((credential) => ({
+          keyId: credential.keyId,
+          masked: `${credential.keyPrefix}${credential.maskedSuffix}`,
+          source: credential.source,
+          createdAt: formatDateTime(credential.createdAt),
+          lastUsedAt: credential.lastUsedAt
+            ? formatDateTime(credential.lastUsedAt)
+            : "—",
+          revokedAt: credential.revokedAt,
+        })),
+    [credentials],
+  );
 
-  const snapshotItems = useMemo<DetailListItem[]>(() => {
-    if (!entry) {
-      return [];
-    }
-
-    return [
+  const credentialColumns = useMemo<CanvasTableColumn<CredentialRow>[]>(
+    () => [
       {
-        id: "updated-at",
-        label: locale === "en" ? "Last updated" : "最近更新",
-        value: formatDateTime(entry.updatedAt),
+        h: locale === "en" ? "masked" : "憑證",
+        k: "masked",
+        mono: true,
+        w: 180,
       },
       {
-        id: "credential-coverage",
-        label: locale === "en" ? "Credential coverage" : "憑證覆蓋",
-        value:
-          entry.authMode === "partner_api_key"
-            ? `${activeCredentialCount} active`
-            : locale === "en"
-              ? "Not required"
-              : "不需要",
-        hint:
-          credentials.length > activeCredentialCount
-            ? locale === "en"
-              ? `${credentials.length} issued total`
-              : `共核發 ${credentials.length} 筆`
-            : undefined,
+        h: locale === "en" ? "source" : "來源",
+        k: "source",
+        mono: true,
+        w: 160,
       },
       {
-        id: "support-contact",
-        label: locale === "en" ? "Support contact" : "支援窗口",
-        value: entry.brandingMetadata?.supportEmail ?? "—",
-        hint: entry.brandingMetadata?.supportPhone ?? undefined,
+        h: locale === "en" ? "created" : "建立",
+        k: "createdAt",
+        mono: true,
+        w: 160,
       },
       {
-        id: "entry-route",
-        label: locale === "en" ? "Entry route" : "入口路由",
-        value: credentialPreviewUrl ?? "—",
+        h: locale === "en" ? "last used" : "最後使用",
+        k: "lastUsedAt",
+        mono: true,
+        w: 160,
       },
-    ];
-  }, [
-    activeCredentialCount,
-    credentialPreviewUrl,
-    credentials.length,
-    entry,
-    locale,
-  ]);
-
-  const readinessReadyCount = readinessItems.filter(
-    (item) => item.ready,
-  ).length;
-  const readinessMissingCount = readinessItems.length - readinessReadyCount;
-  const readinessComplete =
-    readinessItems.length > 0 && readinessItems.every((item) => item.ready);
-  const readinessFilterCountProps =
-    readinessMissingCount > 0 ? { count: readinessMissingCount } : {};
+      {
+        h: locale === "en" ? "status" : "狀態",
+        w: 110,
+        r: (row) => (
+          <Pill
+            theme={theme}
+            tone={row.revokedAt ? "danger" : "success"}
+            dot={!row.revokedAt}
+          >
+            {row.revokedAt
+              ? t("partners.credentialStatus.revoked")
+              : t("partners.credentialStatus.active")}
+          </Pill>
+        ),
+      },
+      {
+        h: "",
+        w: 116,
+        r: (row) =>
+          row.revokedAt ? (
+            <span style={mutedTextStyle}>—</span>
+          ) : (
+            <Btn
+              theme={theme}
+              variant="secondary"
+              size="xs"
+              disabled={revokingCredentialId === row.keyId}
+              onClick={() => void revokeCredential(row.keyId)}
+            >
+              {revokingCredentialId === row.keyId
+                ? t("partners.revokingCredential")
+                : t("partners.revokeCredential")}
+            </Btn>
+          ),
+      },
+    ],
+    [locale, revokeCredential, revokingCredentialId, t],
+  );
 
   if (loading) {
     return <div style={emptyStateStyle}>{t("partners.loading")}</div>;
@@ -602,534 +923,625 @@ export default function PartnerDetailPage() {
 
   if (!entry) {
     return (
-      <div style={{ display: "grid", gap: 16 }}>
+      <div style={pageShellStyle}>
         <PageHeader
-          eyebrow={copy.title}
+          theme={theme}
           title={copy.title}
-          subtitle={copy.subtitle}
+          subtitle={copy.notFound}
           actions={
-            <Link
-              href="/partners"
-              style={actionButtonStyle({ tone: "secondary" })}
-            >
+            <Link href="/partners" style={linkButtonStyle()}>
               {copy.back}
             </Link>
           }
         />
-        <CalloutBanner
-          tone="danger"
-          title={
-            locale === "en"
-              ? "Partner entry unavailable"
-              : "Partner entry 目前不可用"
-          }
-          description={error ?? copy.notFound}
-        />
+        <div style={pageBodyStyle}>
+          <Banner
+            theme={theme}
+            tone="danger"
+            title={copy.unavailableTitle}
+            body={error ?? copy.notFound}
+          />
+        </div>
       </div>
     );
   }
 
+  const statusTone = toCanvasTone(partnerStatusTone(entry.status));
+  const lifecycleAction =
+    entry.status === "active" ? (
+      <Btn
+        theme={theme}
+        variant="secondary"
+        disabled={changingStatus === "inactive"}
+        onClick={() => void setEntryStatus("inactive")}
+      >
+        {t("partners.deactivate")}
+      </Btn>
+    ) : entry.status === "inactive" ? (
+      <Btn
+        theme={theme}
+        variant="primary"
+        disabled={changingStatus === "active"}
+        onClick={() => void setEntryStatus("active")}
+      >
+        {t("partners.activate")}
+      </Btn>
+    ) : null;
+
+  const credentialBannerTone =
+    entry.authMode !== "partner_api_key"
+      ? "info"
+      : activeCredentialCount > 0
+        ? "success"
+        : "warn";
+
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div style={pageShellStyle}>
       <PageHeader
-        eyebrow={copy.title}
-        title={entry.displayName}
+        theme={theme}
+        title={`${entry.displayName}`}
         subtitle={`/${entry.entrySlug} · ${entry.partnerCode} · ${entry.programId}`}
-        meta={[
-          {
-            label: locale === "en" ? "Status" : "狀態",
-            value: formatPlatformCodeLabel(locale, entry.status),
-            tone: partnerStatusTone(entry.status),
-          },
-          {
-            label: "Auth",
-            value: formatPlatformCodeLabel(locale, entry.authMode),
-            tone: "info",
-          },
-          {
-            label: locale === "en" ? "Eligibility" : "資格",
-            value: formatPlatformCodeLabel(locale, entry.eligibilityMode),
-            tone: "info",
-          },
-        ]}
+        tabs={copy.tabs}
+        activeTab={copy.tabs[0]}
         actions={
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Link
-              href="/partners"
-              style={actionButtonStyle({ tone: "secondary" })}
-            >
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
+            }}
+          >
+            <Link href="/partners" style={linkButtonStyle()}>
               {copy.back}
             </Link>
-            <button
-              type="button"
-              style={actionButtonStyle({ tone: "secondary" })}
+            <Btn
+              theme={theme}
+              variant="secondary"
               onClick={() => void loadEntry()}
             >
-              {t("common.refresh")}
-            </button>
+              {copy.refresh}
+            </Btn>
+            {previewUrl ? (
+              <a
+                href={previewUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={linkButtonStyle("secondary")}
+              >
+                {copy.preview}
+              </a>
+            ) : null}
+            {lifecycleAction}
           </div>
         }
       />
 
-      {error ? (
-        <CalloutBanner
-          tone="danger"
-          title={
-            locale === "en"
-              ? "Unable to update partner entry"
-              : "Partner entry 更新失敗"
-          }
-          description={error}
-        />
-      ) : null}
+      <div style={pageBodyStyle}>
+        {error ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            title={copy.errorTitle}
+            body={error}
+          />
+        ) : null}
 
-      <KpiRow minWidth="220px">
-        <KpiCard
-          label={locale === "en" ? "Lifecycle" : "生命週期"}
-          value={formatPlatformCodeLabel(locale, entry.status)}
-          detail={entry.activeFlag ? "active flag on" : "active flag off"}
-          tone={partnerStatusTone(entry.status)}
-        />
-        <KpiCard
-          label={locale === "en" ? "Readiness checks" : "Readiness 檢查"}
-          value={`${readinessReadyCount}/${readinessItems.length}`}
-          detail={
-            readinessComplete
-              ? locale === "en"
-                ? "All checks passed"
-                : "全部檢查通過"
-              : locale === "en"
-                ? "Some dependencies are still missing"
-                : "仍有依賴尚未補齊"
-          }
-          tone={readinessComplete ? "success" : "warning"}
-        />
-        <KpiCard
-          label={locale === "en" ? "Active credentials" : "有效憑證"}
-          value={activeCredentialCount}
-          detail={
-            credentials[0]?.lastUsedAt
-              ? `${locale === "en" ? "Last used" : "最後使用"} ${formatDateTime(
-                  credentials[0].lastUsedAt,
-                )}`
-              : locale === "en"
-                ? "No last-used telemetry yet"
-                : "目前尚無 last-used telemetry"
-          }
-          tone="accent"
-        />
-      </KpiRow>
-
-      <WorkflowPanel
-        title={copy.navigationTitle}
-        description={copy.navigationSubtitle}
-      >
-        <FilterPillRow>
-          <a href="#overview" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.overview} tone="neutral" active />
-          </a>
-          <a href="#auth" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.auth} tone="info" />
-          </a>
-          <a href="#eligibility" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.eligibility} tone="neutral" />
-          </a>
-          <a href="#routing" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.routing} tone="platform" />
-          </a>
-          <a href="#readiness" style={{ textDecoration: "none" }}>
-            <FilterPill
-              label={copy.nav.readiness}
-              tone={readinessComplete ? "success" : "warning"}
-              {...readinessFilterCountProps}
-            />
-          </a>
-          <a href="#lifecycle" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.lifecycle} tone="warning" />
-          </a>
-          <a href="#credentials" style={{ textDecoration: "none" }}>
-            <FilterPill
-              label={copy.nav.credentials}
-              tone="info"
-              count={activeCredentialCount}
-            />
-          </a>
-          <a href="#audit" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.audit} tone="neutral" />
-          </a>
-        </FilterPillRow>
-      </WorkflowPanel>
-
-      <div id="overview" style={anchorSectionStyle}>
-        <div style={heroGridStyle(isCompactViewport)}>
-          <DataViewCard
-            title={copy.overviewTitle}
-            subtitle={copy.overviewSubtitle}
-            tone="platform"
-          >
-            <DetailMetadataGrid items={detailItems} minColumnWidth="220px" />
-          </DataViewCard>
-          <DataViewCard
-            title={copy.snapshotTitle}
-            subtitle={copy.snapshotSubtitle}
-            tone={readinessComplete ? "platform" : "warning"}
-            actions={
-              credentialPreviewUrl ? (
-                <a
-                  href={credentialPreviewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{
-                    ...actionButtonStyle({ tone: "secondary", size: "sm" }),
-                    width: "fit-content",
-                  }}
-                >
-                  {copy.preview}
-                </a>
-              ) : undefined
+        <div style={kpiGridStyle}>
+          <KPI
+            theme={theme}
+            label={copy.lifecycleLabel}
+            value={formatPlatformCodeLabel(locale, entry.status)}
+            sub={entry.activeFlag ? "active flag on" : "active flag off"}
+            hint={formatDateTime(entry.updatedAt)}
+          />
+          <KPI
+            theme={theme}
+            label={copy.readinessLabel}
+            value={`${readinessReadyCount}/${readinessItems.length}`}
+            sub={
+              readinessComplete
+                ? copy.readyTitle
+                : `${readinessMissingCount} ${locale === "en" ? "gap(s)" : "項缺口"}`
             }
-          >
-            <div style={{ display: "grid", gap: 12 }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <StatusChip
-                  label={formatPlatformCodeLabel(locale, entry.status)}
-                  tone={partnerStatusTone(entry.status)}
-                />
-                <StatusChip
-                  label={formatPlatformCodeLabel(locale, entry.authMode)}
-                  tone="info"
-                />
-                <StatusChip
-                  label={formatPlatformCodeLabel(locale, entry.eligibilityMode)}
-                  tone="neutral"
-                />
-              </div>
-              <div style={statusSummaryGridStyle}>
-                <CalloutBanner
-                  tone={
-                    readinessComplete
-                      ? "success"
-                      : entry.status === "active"
-                        ? "danger"
-                        : "warning"
-                  }
-                  title={
-                    readinessComplete
-                      ? locale === "en"
-                        ? "Promotion clear"
-                        : "可推進上線"
-                      : locale === "en"
-                        ? "Readiness gaps remain"
-                        : "仍有 readiness 缺口"
-                  }
-                  description={
-                    readinessComplete
-                      ? copy.readinessReady
-                      : copy.readinessBlocked
-                  }
-                />
-                <CalloutBanner
-                  tone={
-                    entry.authMode !== "partner_api_key" ||
-                    activeCredentialCount > 0
-                      ? "info"
-                      : "warning"
-                  }
-                  title={locale === "en" ? "Credential posture" : "憑證姿態"}
-                  description={
-                    entry.authMode === "partner_api_key"
-                      ? activeCredentialCount > 0
-                        ? locale === "en"
-                          ? `${activeCredentialCount} active credential(s) can gate ingress traffic.`
-                          : `${activeCredentialCount} 筆有效憑證可作為 ingress traffic gate。`
-                        : locale === "en"
-                          ? "Partner API key mode is active, but no usable ingress credential is available."
-                          : "partner API key 模式已啟用，但目前沒有可用的 ingress credential。"
-                      : locale === "en"
-                        ? "This entry does not require partner-managed ingress credentials."
-                        : "此 entry 不需要 partner-managed ingress credential。"
-                  }
-                />
-              </div>
-              <DetailMetadataGrid
-                columns={1}
-                minColumnWidth="100%"
-                items={snapshotItems}
-              />
-            </div>
-          </DataViewCard>
+            hint={copy.updatedLabel}
+          />
+          <KPI
+            theme={theme}
+            label={copy.activeCredentialsLabel}
+            value={activeCredentialCount}
+            sub={
+              credentials[0]?.lastUsedAt
+                ? `${locale === "en" ? "Last used" : "最後使用"} ${formatDateTime(
+                    credentials[0].lastUsedAt,
+                  )}`
+                : locale === "en"
+                  ? "No last-used telemetry yet"
+                  : "目前尚無 last-used telemetry"
+            }
+            hint={`${credentials.length} ${locale === "en" ? "issued total" : "筆已核發"}`}
+          />
+          <KPI
+            theme={theme}
+            label={copy.auditSourceLabel}
+            value={entry.auditMetadata.source ?? "—"}
+            sub={entry.auditMetadata.requestId ?? "—"}
+            hint={formatDateTime(entry.updatedAt)}
+          />
         </div>
-      </div>
 
-      <WorkflowSplitLayout
-        main={
-          <>
-            <div id="auth" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.authTitle}
-                description={copy.authSubtitle}
-              >
-                <DetailMetadataGrid items={authItems} minColumnWidth="220px" />
-              </WorkflowPanel>
-            </div>
+        <div id="overview" style={sectionAnchorStyle}>
+          <div style={heroGridStyle(isCompactViewport)}>
+            <Card
+              theme={theme}
+              title={copy.overviewTitle}
+              subtitle={copy.overviewSubtitle}
+              actions={
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <Pill theme={theme} tone={statusTone} dot>
+                    {formatPlatformCodeLabel(locale, entry.status)}
+                  </Pill>
+                  <Pill theme={theme} tone="info">
+                    {formatPlatformCodeLabel(locale, entry.authMode)}
+                  </Pill>
+                  <Pill theme={theme} tone="accent">
+                    {formatPlatformCodeLabel(locale, entry.eligibilityMode)}
+                  </Pill>
+                </div>
+              }
+            >
+              <DL
+                theme={theme}
+                items={overviewItems}
+                cols={isCompactViewport ? 1 : 2}
+              />
+            </Card>
 
-            <div id="eligibility" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.eligibilityTitle}
-                description={copy.eligibilitySubtitle}
-              >
-                <DetailMetadataGrid
-                  items={eligibilityItems}
-                  minColumnWidth="220px"
-                />
-              </WorkflowPanel>
-            </div>
-
-            <div id="routing" style={anchorSectionStyle}>
-              <form onSubmit={handleSave}>
-                <WorkflowPanel
-                  title={copy.routingTitle}
-                  description={copy.routingSubtitle}
-                >
-                  <EntryForm
-                    form={editForm}
-                    setForm={(value) => {
-                      setEditForm((current) => {
-                        if (!current) {
-                          return current;
-                        }
-                        return typeof value === "function"
-                          ? value(current)
-                          : value;
-                      });
-                    }}
-                    t={t}
-                    lockSlug
-                  />
-                  <button
-                    type="submit"
-                    style={actionButtonStyle({ tone: "primary" })}
-                    disabled={saving || !editForm.displayName.trim()}
-                  >
-                    {saving ? t("common.saving") : copy.save}
-                  </button>
-                </WorkflowPanel>
-              </form>
-            </div>
-          </>
-        }
-        side={
-          <>
-            <div id="readiness" style={anchorSectionStyle}>
-              <WorkflowPanel
+            <div style={sideStackStyle}>
+              <Card
+                theme={theme}
                 title={copy.readinessTitle}
-                description={copy.readinessSubtitle}
+                subtitle={copy.readinessSubtitle}
               >
-                <div style={{ display: "grid", gap: 8 }}>
-                  {readinessItems.map((item) => (
-                    <div
-                      key={item.label}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        alignItems: "center",
-                        padding: "10px 12px",
-                        borderRadius: 12,
-                        border: "1px solid #e2e8f0",
-                        background: "#f8fafc",
-                      }}
-                    >
-                      <div style={{ display: "grid", gap: 4 }}>
-                        <strong style={{ fontSize: 13, color: "#0f172a" }}>
-                          {item.label}
-                        </strong>
-                        <span style={{ fontSize: 12, color: "#64748b" }}>
-                          {item.value}
-                        </span>
-                      </div>
-                      <StatusChip
-                        label={
-                          item.ready
-                            ? t("partners.ready")
-                            : t("partners.missing")
-                        }
-                        tone={item.ready ? "success" : "warning"}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </WorkflowPanel>
-            </div>
-
-            <div id="lifecycle" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.lifecycleTitle}
-                description={copy.lifecycleSubtitle}
-              >
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <StatusChip
-                    label={formatPlatformCodeLabel(locale, entry.status)}
-                    tone={partnerStatusTone(entry.status)}
+                <div style={{ display: "grid", gap: 10 }}>
+                  <Banner
+                    theme={theme}
+                    tone={
+                      readinessComplete
+                        ? "success"
+                        : entry.status === "active"
+                          ? "danger"
+                          : "warn"
+                    }
+                    title={
+                      readinessComplete ? copy.readyTitle : copy.blockedTitle
+                    }
+                    body={readinessComplete ? copy.readyBody : copy.blockedBody}
                   />
-                  <StatusChip
-                    label={formatPlatformCodeLabel(locale, entry.authMode)}
-                    tone="info"
-                  />
-                  <StatusChip
-                    label={formatPlatformCodeLabel(
-                      locale,
-                      entry.eligibilityMode,
-                    )}
-                    tone="info"
-                  />
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {entry.status === "active" ? (
-                    <button
-                      type="button"
-                      style={actionButtonStyle({ tone: "secondary" })}
-                      disabled={changingStatus === "inactive"}
-                      onClick={() => void setEntryStatus("inactive")}
-                    >
-                      {t("partners.deactivate")}
-                    </button>
-                  ) : entry.status === "inactive" ? (
-                    <button
-                      type="button"
-                      style={actionButtonStyle({ tone: "secondary" })}
-                      disabled={changingStatus === "active"}
-                      onClick={() => void setEntryStatus("active")}
-                    >
-                      {t("partners.activate")}
-                    </button>
-                  ) : null}
-                  {entry.status !== "revoked" ? (
-                    <button
-                      type="button"
-                      style={actionButtonStyle({ tone: "secondary" })}
-                      disabled={changingStatus === "revoked"}
-                      onClick={() => void setEntryStatus("revoked")}
-                    >
-                      {t("partners.revoke")}
-                    </button>
-                  ) : null}
-                </div>
-              </WorkflowPanel>
-            </div>
 
-            <div id="credentials" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.credentialsTitle}
-                description={copy.credentialsSubtitle}
-              >
-                <button
-                  type="button"
-                  style={actionButtonStyle({ tone: "secondary", size: "sm" })}
-                  disabled={issuingCredential || entry.status === "revoked"}
-                  onClick={() => void issueCredential()}
-                >
-                  {issuingCredential
-                    ? t("partners.rotatingCredential")
-                    : t("partners.rotateCredential")}
-                </button>
-
-                {issuedCredential ? (
-                  <CalloutBanner
-                    tone="info"
-                    title={t("partners.plaintextCredential")}
-                    description={issuedCredential.plaintextKey}
-                  />
-                ) : null}
-
-                {credentials.length > 0 ? (
-                  <div style={{ display: "grid", gap: 10 }}>
-                    {credentials.map((credential) => (
+                  <div style={{ display: "grid" }}>
+                    {readinessItems.map((item, index) => (
                       <div
-                        key={credential.keyId}
+                        key={`${item.label}-${index}`}
                         style={{
-                          display: "grid",
-                          gap: 6,
-                          padding: "12px 14px",
-                          borderRadius: 14,
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
+                          ...readinessItemStyle(item.ready),
+                          borderBottom:
+                            index === readinessItems.length - 1
+                              ? "none"
+                              : readinessItemStyle(item.ready).borderBottom,
                         }}
                       >
                         <div
                           style={{
                             display: "flex",
-                            justifyContent: "space-between",
-                            gap: 8,
-                            alignItems: "center",
+                            alignItems: "flex-start",
+                            gap: 10,
+                            minWidth: 0,
                           }}
                         >
-                          <strong style={{ fontSize: 13.5, color: "#0f172a" }}>
-                            {credential.keyPrefix}
-                            {credential.maskedSuffix}
-                          </strong>
-                          <StatusChip
-                            label={
-                              credential.revokedAt
-                                ? t("partners.credentialStatus.revoked")
-                                : t("partners.credentialStatus.active")
-                            }
-                            tone={credential.revokedAt ? "danger" : "success"}
-                          />
-                        </div>
-                        <div style={{ fontSize: 12.5, color: "#64748b" }}>
-                          {t("partners.credentialMeta.createdAt")}:{" "}
-                          {formatDateTime(credential.createdAt)}
-                        </div>
-                        <div style={{ fontSize: 12.5, color: "#64748b" }}>
-                          {t("partners.credentialMeta.lastUsedAt")}:{" "}
-                          {credential.lastUsedAt
-                            ? formatDateTime(credential.lastUsedAt)
-                            : "—"}
-                        </div>
-                        <div style={{ fontSize: 12.5, color: "#64748b" }}>
-                          {t("partners.credentialMeta.source")}:{" "}
-                          {credential.source}
-                        </div>
-                        {!credential.revokedAt ? (
-                          <button
-                            type="button"
-                            style={actionButtonStyle({
-                              tone: "secondary",
-                              size: "sm",
-                            })}
-                            disabled={revokingCredentialId === credential.keyId}
-                            onClick={() =>
-                              void revokeCredential(credential.keyId)
-                            }
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: 20,
+                              height: 20,
+                              borderRadius: "50%",
+                              background: item.ready
+                                ? theme.successBg
+                                : theme.warnBg,
+                              color: item.ready ? theme.success : theme.warn,
+                              flexShrink: 0,
+                            }}
                           >
-                            {revokingCredentialId === credential.keyId
-                              ? t("partners.revokingCredential")
-                              : t("partners.revokeCredential")}
-                          </button>
-                        ) : null}
+                            <CanvasIcon
+                              name={item.ready ? "check" : "warn"}
+                              size={12}
+                              stroke={2}
+                            />
+                          </span>
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontSize: 12.5,
+                                fontWeight: 600,
+                                color: theme.text,
+                              }}
+                            >
+                              {item.label}
+                            </div>
+                            <div
+                              style={{
+                                ...mutedTextStyle,
+                                overflowWrap: "anywhere",
+                              }}
+                            >
+                              {item.value}
+                            </div>
+                          </div>
+                        </div>
+
+                        <Pill
+                          theme={theme}
+                          tone={item.ready ? "success" : "warn"}
+                        >
+                          {item.ready
+                            ? t("partners.ready")
+                            : t("partners.missing")}
+                        </Pill>
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <div style={{ color: "#64748b", fontSize: 13 }}>
-                    {t("partners.emptyCredentials")}
+                </div>
+              </Card>
+
+              <div id="credentials" style={sectionAnchorStyle}>
+                <Card
+                  theme={theme}
+                  title={copy.credentialsTitle}
+                  subtitle={copy.credentialsSubtitle}
+                  actions={
+                    <Btn
+                      theme={theme}
+                      variant="secondary"
+                      disabled={issuingCredential || entry.status === "revoked"}
+                      onClick={() => void issueCredential()}
+                    >
+                      {issuingCredential
+                        ? t("partners.rotatingCredential")
+                        : t("partners.rotateCredential")}
+                    </Btn>
+                  }
+                >
+                  <div style={{ display: "grid", gap: 12 }}>
+                    {issuedCredential ? (
+                      <Banner
+                        theme={theme}
+                        tone="info"
+                        title={t("partners.plaintextCredential")}
+                        body={issuedCredential.plaintextKey}
+                      />
+                    ) : null}
+
+                    {credentialRows.length > 0 ? (
+                      <Table<CredentialRow>
+                        theme={theme}
+                        dense
+                        columns={credentialColumns}
+                        rows={credentialRows}
+                      />
+                    ) : (
+                      <Banner
+                        theme={theme}
+                        tone="info"
+                        title={copy.credentialsTitle}
+                        body={t("partners.emptyCredentials")}
+                      />
+                    )}
                   </div>
-                )}
-              </WorkflowPanel>
+                </Card>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSave} style={{ display: "grid", gap: 16 }}>
+          <div id="branding" style={sectionAnchorStyle}>
+            <Card
+              theme={theme}
+              title={copy.brandingTitle}
+              subtitle={copy.brandingSubtitle}
+            >
+              <div style={{ display: "grid", gap: 12 }}>
+                <div style={fieldGridStyle(isCompactViewport)}>
+                  <TextField
+                    label={t("partners.form.displayName")}
+                    value={editForm.displayName}
+                    onChange={(value) => updateFormField("displayName", value)}
+                    required
+                  />
+                  <TextField
+                    label={t("partners.form.entryHost")}
+                    value={editForm.entryHost}
+                    onChange={(value) => updateFormField("entryHost", value)}
+                    placeholder="partner.example"
+                    mono
+                  />
+                  <TextField
+                    label={t("partners.form.entryPath")}
+                    value={editForm.entryPath}
+                    onChange={(value) => updateFormField("entryPath", value)}
+                    placeholder="/partner/bank-demo-alpha-airport"
+                    mono
+                    hint={
+                      previewUrl
+                        ? `${copy.routeHint}: ${previewUrl}`
+                        : undefined
+                    }
+                  />
+                  <TextField
+                    label={t("partners.form.themeAccent")}
+                    value={editForm.themeAccent}
+                    onChange={(value) => updateFormField("themeAccent", value)}
+                    placeholder="#0b7285"
+                    mono
+                    hint={copy.accentHint}
+                  />
+                  <TextField
+                    label={t("partners.form.supportEmail")}
+                    value={editForm.supportEmail}
+                    onChange={(value) => updateFormField("supportEmail", value)}
+                  />
+                  <TextField
+                    label={t("partners.form.supportPhone")}
+                    value={editForm.supportPhone}
+                    onChange={(value) => updateFormField("supportPhone", value)}
+                  />
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          <div style={detailGridStyle(isCompactViewport)}>
+            <div id="auth" style={sectionAnchorStyle}>
+              <Card
+                theme={theme}
+                title={copy.authTitle}
+                subtitle={copy.authSubtitle}
+                actions={
+                  entry.status !== "revoked" ? (
+                    <Btn
+                      theme={theme}
+                      variant="secondary"
+                      danger
+                      disabled={changingStatus === "revoked"}
+                      onClick={() => void setEntryStatus("revoked")}
+                    >
+                      {t("partners.revoke")}
+                    </Btn>
+                  ) : (
+                    <Pill theme={theme} tone="danger">
+                      {t("partners.status.revoked")}
+                    </Pill>
+                  )
+                }
+              >
+                <div style={{ display: "grid", gap: 12 }}>
+                  <Banner
+                    theme={theme}
+                    tone={credentialBannerTone}
+                    title={copy.authBannerTitle}
+                    body={
+                      entry.authMode === "partner_api_key"
+                        ? activeCredentialCount > 0
+                          ? locale === "en"
+                            ? `${activeCredentialCount} active credential(s) can gate ingress traffic.`
+                            : `${activeCredentialCount} 筆有效憑證可作為 ingress traffic gate。`
+                          : locale === "en"
+                            ? "Partner API key mode is active, but no usable ingress credential is available."
+                            : "partner API key 模式已啟用，但目前沒有可用的 ingress credential。"
+                        : locale === "en"
+                          ? "This entry does not require partner-managed ingress credentials."
+                          : "此 entry 不需要 partner-managed ingress credential。"
+                    }
+                  />
+
+                  <div style={fieldGridStyle(isCompactViewport)}>
+                    <TextField
+                      label={t("partners.form.tenantId")}
+                      value={editForm.tenantId}
+                      onChange={(value) => updateFormField("tenantId", value)}
+                      mono
+                    />
+                    <TextField
+                      label={t("partners.form.partnerType")}
+                      value={editForm.partnerType}
+                      onChange={(value) =>
+                        updateFormField("partnerType", value)
+                      }
+                      mono
+                    />
+                    <TextField
+                      label={t("partners.form.partnerCode")}
+                      value={editForm.partnerCode}
+                      onChange={(value) =>
+                        updateFormField("partnerCode", value)
+                      }
+                      mono
+                    />
+                    <TextField
+                      label={t("partners.form.programId")}
+                      value={editForm.programId}
+                      onChange={(value) => updateFormField("programId", value)}
+                      mono
+                    />
+                    <TextField
+                      label={t("partners.form.programCode")}
+                      value={editForm.programCode}
+                      onChange={(value) =>
+                        updateFormField("programCode", value)
+                      }
+                      mono
+                    />
+                    <TextField
+                      label={t("partners.form.bankCode")}
+                      value={editForm.bankCode}
+                      onChange={(value) => updateFormField("bankCode", value)}
+                      mono
+                    />
+                    <TextField
+                      label={t("partners.form.entrySlug")}
+                      value={editForm.entrySlug}
+                      onChange={(value) => updateFormField("entrySlug", value)}
+                      mono
+                      disabled
+                    />
+                    <SelectField
+                      label={t("partners.form.dispatchSubtype")}
+                      value={editForm.businessDispatchSubtype}
+                      options={BUSINESS_DISPATCH_SUBTYPES}
+                      onChange={(value) =>
+                        updateFormField(
+                          "businessDispatchSubtype",
+                          value as BusinessDispatchSubtype,
+                        )
+                      }
+                      formatOption={(value) =>
+                        formatPlatformCodeLabel(locale, value)
+                      }
+                    />
+                    <SelectField
+                      label={t("partners.form.authMode")}
+                      value={editForm.authMode}
+                      options={PARTNER_ENTRY_AUTH_MODES}
+                      onChange={(value) =>
+                        updateFormField(
+                          "authMode",
+                          value as PartnerEntryAuthMode,
+                        )
+                      }
+                      formatOption={(value) =>
+                        formatPlatformCodeLabel(locale, value)
+                      }
+                    />
+                  </div>
+                </div>
+              </Card>
             </div>
 
-            <div id="audit" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.auditTitle}
-                description={copy.auditSubtitle}
+            <div id="eligibility" style={sectionAnchorStyle}>
+              <Card
+                theme={theme}
+                title={copy.eligibilityTitle}
+                subtitle={copy.eligibilitySubtitle}
               >
-                <DetailMetadataGrid items={auditItems} minColumnWidth="220px" />
-              </WorkflowPanel>
+                <div style={{ display: "grid", gap: 12 }}>
+                  <Banner
+                    theme={theme}
+                    tone={
+                      entry.eligibilityMode === "none"
+                        ? "info"
+                        : entry.eligibilityContract?.contractId
+                          ? "accent"
+                          : "warn"
+                    }
+                    title={copy.eligibilityBannerTitle}
+                    body={
+                      entry.eligibilityMode === "none"
+                        ? locale === "en"
+                          ? "No partner-side eligibility verification is required before fulfillment."
+                          : "此流程在 fulfill 前不要求 partner-side eligibility verification。"
+                        : entry.eligibilityContract?.contractId
+                          ? locale === "en"
+                            ? "Eligibility remains platform-governed and is backed by the linked contract snapshot."
+                            : "Eligibility 仍由平台治理，且已有對應 contract snapshot。"
+                          : copy.contractEmpty
+                    }
+                  />
+
+                  <SelectField
+                    label={t("partners.form.eligibilityMode")}
+                    value={editForm.eligibilityMode}
+                    options={PARTNER_ELIGIBILITY_MODES}
+                    onChange={(value) =>
+                      updateFormField(
+                        "eligibilityMode",
+                        value as PartnerEligibilityMode,
+                      )
+                    }
+                    formatOption={(value) =>
+                      formatPlatformCodeLabel(locale, value)
+                    }
+                  />
+
+                  <DL
+                    theme={theme}
+                    items={eligibilitySnapshotItems}
+                    cols={isCompactViewport ? 1 : 2}
+                  />
+
+                  {entry.eligibilityContract?.notes?.[0] ? (
+                    <div style={mutedTextStyle}>
+                      {entry.eligibilityContract.notes[0]}
+                    </div>
+                  ) : null}
+                </div>
+              </Card>
             </div>
-          </>
-        }
-      />
+          </div>
+
+          <div style={saveBarStyle}>
+            <div style={mutedTextStyle}>
+              {copy.saveHint}
+              <br />
+              {copy.updatedLabel}: {formatDateTime(entry.updatedAt)}
+            </div>
+            <Btn
+              theme={theme}
+              variant="primary"
+              disabled={saving || !editForm.displayName.trim()}
+              onClick={() => void saveEntry()}
+            >
+              {saving ? t("common.saving") : copy.save}
+            </Btn>
+            <button type="submit" style={{ display: "none" }} />
+          </div>
+        </form>
+
+        <div id="audit" style={sectionAnchorStyle}>
+          <Card
+            theme={theme}
+            title={copy.auditTitle}
+            subtitle={copy.auditSubtitle}
+            actions={
+              <Pill theme={theme} tone={statusTone}>
+                {formatPlatformCodeLabel(locale, entry.status)}
+              </Pill>
+            }
+          >
+            <div style={{ display: "grid", gap: 12 }}>
+              {entry.revokedAt ? (
+                <Banner
+                  theme={theme}
+                  tone="danger"
+                  title={locale === "en" ? "Entry revoked" : "Entry 已撤銷"}
+                  body={
+                    entry.revokeReason ??
+                    (locale === "en"
+                      ? "Traffic should remain blocked for this entry."
+                      : "此 entry 應持續維持流量封鎖。")
+                  }
+                />
+              ) : null}
+              <DL
+                theme={theme}
+                items={auditItems}
+                cols={isCompactViewport ? 1 : 2}
+              />
+            </div>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
