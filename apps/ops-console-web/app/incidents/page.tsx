@@ -95,6 +95,14 @@ function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
+function formatTableDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  return new Date(value).toISOString().slice(0, 16).replace("T", " ");
+}
+
 function formatIncidentAge(
   value: string | null | undefined,
   locale: "en" | "zh",
@@ -143,21 +151,6 @@ function inlineLinkStyle(themeToken: CanvasTheme): CSSProperties {
     color: themeToken.accent,
     textDecoration: "none",
     fontWeight: 600,
-  };
-}
-
-function backLinkStyle(themeToken: CanvasTheme): CSSProperties {
-  return {
-    display: "inline-flex",
-    flexDirection: "column",
-    gap: 4,
-    padding: "10px 12px",
-    borderRadius: 8,
-    border: `1px solid ${themeToken.border}`,
-    background: themeToken.surface,
-    color: themeToken.text,
-    textDecoration: "none",
-    alignSelf: "flex-start",
   };
 }
 
@@ -312,6 +305,16 @@ function matchesIncidentTab(status: IncidentStatus, tab: IncidentTab) {
   return status === "closed";
 }
 
+function tabForStatus(status: IncidentStatus): IncidentTab {
+  if (status === "resolved") {
+    return "resolved";
+  }
+  if (status === "closed") {
+    return "closed";
+  }
+  return "active";
+}
+
 function incidentSeverityTone(severity: IncidentSeverity) {
   if (severity === "critical" || severity === "high") {
     return "danger" as const;
@@ -426,7 +429,7 @@ export default function IncidentsPage() {
   const [categoryFilter, setCategoryFilter] = useState<
     IncidentCategory | "all"
   >("all");
-  const [showFilters, setShowFilters] = useState(true);
+  const [showFilters, setShowFilters] = useState(false);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const createFromQuery = searchParams.get("create") === "1";
   const incidentIdFromQuery = searchParams.get("incidentId");
@@ -446,7 +449,10 @@ export default function IncidentsPage() {
       ? (searchParams.get("severity") as IncidentSeverity)
       : "medium",
     complaintCaseNo: complaintCaseNoFromQuery,
-    relatedOrderId: searchParams.get("relatedOrderId") ?? "",
+    relatedOrderId:
+      searchParams.get("relatedOrderId") ??
+      searchParams.get("sourceOrderId") ??
+      "",
     relatedVehicleId: searchParams.get("relatedVehicleId") ?? "",
     relatedDriverId: searchParams.get("relatedDriverId") ?? "",
     reportedBy: searchParams.get("reportedBy") ?? "ops-user-001",
@@ -483,6 +489,14 @@ export default function IncidentsPage() {
     void loadTimeline(incidentIdFromQuery);
   }, [incidentIdFromQuery]);
 
+  useEffect(() => {
+    if (!selectedIncident) {
+      return;
+    }
+
+    setActiveTab(tabForStatus(selectedIncident.status));
+  }, [selectedIncident]);
+
   async function loadRecords() {
     setLoading(true);
     try {
@@ -515,6 +529,11 @@ export default function IncidentsPage() {
   }
 
   async function inspectIncident(incidentId: string) {
+    const record = records.find((item) => item.incidentId === incidentId);
+    if (record) {
+      setActiveTab(tabForStatus(record.status));
+    }
+
     setSelectedIncidentId(incidentId);
     await loadTimeline(incidentId);
     document
@@ -666,7 +685,7 @@ export default function IncidentsPage() {
       h: "OCCURRED",
       w: 168,
       mono: true,
-      r: (row) => formatDateTime(row.occurredAt ?? row.createdAt),
+      r: (row) => formatTableDateTime(row.occurredAt ?? row.createdAt),
     },
     {
       h: "RECOVERY",
@@ -719,8 +738,12 @@ export default function IncidentsPage() {
     >
       <PageHeader
         theme={theme}
-        title={t("incidents.title")}
-        subtitle={t("incidents.subtitle")}
+        title={locale === "en" ? "Incident Center" : "事故中心"}
+        subtitle={
+          locale === "en"
+            ? "safety · collision · property · service recovery"
+            : "安全 · 碰撞 · 財損 · 服務補償"
+        }
         tabs={tabNodes}
         activeTab={activeTabNode}
         actions={
@@ -859,105 +882,69 @@ export default function IncidentsPage() {
           </Card>
         ) : null}
 
-        <Card theme={theme} padding={0}>
-          <div
-            style={{
-              padding: "12px 14px",
-              borderBottom: `1px solid ${theme.border}`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
+        {showFilters ? (
+          <Card
+            theme={theme}
+            title={locale === "en" ? "Filter incidents" : "篩選事故"}
+            subtitle={t("incidents.visible", { count: filteredRecords.length })}
           >
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                flexWrap: "wrap",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 12,
               }}
             >
-              <Pill theme={theme} tone="accent" dot>
-                {tabConfig.find((tab) => tab.key === activeTab)?.label}
-              </Pill>
-              <span style={{ fontSize: 11.5, color: theme.textMuted }}>
-                {t("incidents.visible", { count: filteredRecords.length })}
-              </span>
+              <Field theme={theme} label={t("common.search")}>
+                <input
+                  type="search"
+                  style={controlStyle(theme)}
+                  placeholder={t("incidents.search")}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </Field>
+              <Field theme={theme} label={t("incidents.allCategories")}>
+                <select
+                  style={controlStyle(theme)}
+                  value={categoryFilter}
+                  onChange={(event) =>
+                    setCategoryFilter(
+                      event.target.value as IncidentCategory | "all",
+                    )
+                  }
+                >
+                  <option value="all">{t("incidents.allCategories")}</option>
+                  {CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {formatOpsCodeLabel(locale, category)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field theme={theme} label={t("incidents.allSeverities")}>
+                <select
+                  style={controlStyle(theme)}
+                  value={severityFilter}
+                  onChange={(event) =>
+                    setSeverityFilter(
+                      event.target.value as IncidentSeverity | "all",
+                    )
+                  }
+                >
+                  <option value="all">{t("incidents.allSeverities")}</option>
+                  {SEVERITIES.map((severity) => (
+                    <option key={severity} value={severity}>
+                      {formatOpsCodeLabel(locale, severity)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             </div>
-            <Btn
-              theme={theme}
-              icon="refresh"
-              onClick={() => void loadRecords()}
-            >
-              {t("common.refresh")}
-            </Btn>
-          </div>
+          </Card>
+        ) : null}
 
-          {showFilters ? (
-            <div
-              style={{
-                padding: "14px 14px 0",
-                borderBottom: `1px solid ${theme.border}`,
-              }}
-            >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                  gap: 12,
-                }}
-              >
-                <Field theme={theme} label={t("common.search")}>
-                  <input
-                    type="search"
-                    style={controlStyle(theme)}
-                    placeholder={t("incidents.search")}
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                  />
-                </Field>
-                <Field theme={theme} label={t("incidents.allCategories")}>
-                  <select
-                    style={controlStyle(theme)}
-                    value={categoryFilter}
-                    onChange={(event) =>
-                      setCategoryFilter(
-                        event.target.value as IncidentCategory | "all",
-                      )
-                    }
-                  >
-                    <option value="all">{t("incidents.allCategories")}</option>
-                    {CATEGORIES.map((category) => (
-                      <option key={category} value={category}>
-                        {formatOpsCodeLabel(locale, category)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field theme={theme} label={t("incidents.allSeverities")}>
-                  <select
-                    style={controlStyle(theme)}
-                    value={severityFilter}
-                    onChange={(event) =>
-                      setSeverityFilter(
-                        event.target.value as IncidentSeverity | "all",
-                      )
-                    }
-                  >
-                    <option value="all">{t("incidents.allSeverities")}</option>
-                    {SEVERITIES.map((severity) => (
-                      <option key={severity} value={severity}>
-                        {formatOpsCodeLabel(locale, severity)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
-            </div>
-          ) : null}
-
+        <Card theme={theme} padding={0}>
           {loading ? (
             <div style={emptyStateStyle(theme)}>
               {getOpsLabel(locale, "incidentsLoading")}
@@ -969,32 +956,30 @@ export default function IncidentsPage() {
           )}
         </Card>
 
-        <div
-          id="incident-detail-section"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-            gap: 16,
-          }}
-        >
-          <Card
-            theme={theme}
-            title={
-              selectedIncident
-                ? `${selectedIncident.incidentId} · ${selectedIncident.title}`
-                : t("incidents.timeline")
-            }
-            subtitle={
-              selectedIncident
-                ? formatIncidentAge(
-                    selectedIncident.occurredAt ?? selectedIncident.createdAt,
-                    locale,
-                  )
-                : getOpsLabel(locale, "incidentsSelectHint")
-            }
-            actions={
-              selectedIncident ? (
+        {selectedIncident ? (
+          <div
+            id="incident-detail-section"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+              gap: 16,
+            }}
+          >
+            <Card
+              theme={theme}
+              title={`${selectedIncident.incidentId} · ${selectedIncident.title}`}
+              subtitle={formatIncidentAge(
+                selectedIncident.occurredAt ?? selectedIncident.createdAt,
+                locale,
+              )}
+              actions={
                 <>
+                  <Link
+                    href={`/incidents/${encodeURIComponent(selectedIncident.incidentId)}`}
+                    style={inlineLinkStyle(theme)}
+                  >
+                    {locale === "en" ? "Open detail" : "詳細頁"}
+                  </Link>
                   <Btn
                     theme={theme}
                     onClick={() => setEditingId(selectedIncident.incidentId)}
@@ -1013,11 +998,22 @@ export default function IncidentsPage() {
                       {t("incidents.resolve")}
                     </Btn>
                   ) : null}
+                  <Btn
+                    theme={theme}
+                    variant="ghost"
+                    icon="x"
+                    onClick={() => {
+                      setSelectedIncidentId(null);
+                      setTimeline([]);
+                      setRecoveryActions([]);
+                      setShowRecoveryForm(false);
+                    }}
+                  >
+                    {locale === "en" ? "Hide" : "收起"}
+                  </Btn>
                 </>
-              ) : undefined
-            }
-          >
-            {selectedIncident ? (
+              }
+            >
               <>
                 <div
                   style={{
@@ -1200,23 +1196,13 @@ export default function IncidentsPage() {
                   )}
                 </div>
               </>
-            ) : (
-              <div style={emptyStateStyle(theme)}>
-                {getOpsLabel(locale, "incidentsSelectHint")}
-              </div>
-            )}
-          </Card>
+            </Card>
 
-          <Card
-            theme={theme}
-            title={t("incidents.serviceRecovery.title")}
-            subtitle={
-              selectedIncident
-                ? selectedIncident.incidentId
-                : t("incidents.selectIncident")
-            }
-            actions={
-              selectedIncident ? (
+            <Card
+              theme={theme}
+              title={t("incidents.serviceRecovery.title")}
+              subtitle={selectedIncident.incidentId}
+              actions={
                 <Btn
                   theme={theme}
                   variant={showRecoveryForm ? "secondary" : "primary"}
@@ -1227,10 +1213,8 @@ export default function IncidentsPage() {
                     ? t("common.cancel")
                     : t("incidents.serviceRecovery.add")}
                 </Btn>
-              ) : undefined
-            }
-          >
-            {selectedIncident ? (
+              }
+            >
               <>
                 <DL
                   theme={theme}
@@ -1367,20 +1351,9 @@ export default function IncidentsPage() {
                   )}
                 </div>
               </>
-            ) : (
-              <div style={emptyStateStyle(theme)}>
-                {t("incidents.selectIncident")}
-              </div>
-            )}
-          </Card>
-        </div>
-
-        <Link href="/dashboard" style={backLinkStyle(theme)}>
-          <span style={{ fontWeight: 600 }}>{t("common.backToDashboard")}</span>
-          <span style={{ fontSize: 11.5, color: theme.textMuted }}>
-            {t("common.backToDashboardSub")}
-          </span>
-        </Link>
+            </Card>
+          </div>
+        ) : null}
       </div>
     </Shell>
   );
