@@ -3,7 +3,7 @@
 Task: `TEN-UI-RD-013-UNBLOCK-PLANNING-DECISION`
 Parent: `TEN-UI-RD-013`
 Owner: `Codex`
-Reviewer: `Codex2`
+Reviewer: `Claude`
 Date: `2026-05-20`
 
 ## Status
