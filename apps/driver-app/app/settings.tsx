@@ -20,11 +20,16 @@ import {
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
 } from "@drts/contracts";
+import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
 import {
   Banner as CanvasBanner,
   Btn as CanvasBtn,
   Card as CanvasCard,
+  DL as CanvasDL,
+  Field as CanvasField,
+  Input as CanvasInput,
+  KPI as CanvasKpi,
   PageHeader as CanvasPageHeader,
   Pill as CanvasPill,
   Shell as CanvasShell,
@@ -39,9 +44,18 @@ import {
 import {
   DEFAULT_PROFILE_VALUES,
   DEFAULT_SETTINGS_VALUES,
+  buildProfileCommand,
+  buildSettingsCommand,
+  deriveSaveState,
+  hasErrors,
+  profileValuesEqual,
   profileValuesFromRecord,
+  settingsValuesEqual,
   settingsValuesFromRecord,
+  validateProfileValues,
+  validateSettingsValues,
   type ProfileFormValues,
+  type SaveState,
   type SettingsFormValues,
 } from "@/lib/settings-form";
 import { driverStrings } from "@/lib/strings";
@@ -140,9 +154,9 @@ function formatTokenExpiry(value: string | null | undefined): string | null {
   return `${remainingDays} 天後到期`;
 }
 
-function getBindingTone(record: PlatformPresenceRecord) {
+function getBindingTone(record: PlatformPresenceRecord): CanvasTone {
   if (record.reauthRequired) {
-    return "warn" as const;
+    return "warn";
   }
   return record.status === "online" ? "success" : "neutral";
 }
@@ -169,6 +183,26 @@ function getBindingSubtitle(record: PlatformPresenceRecord): string {
   }
 
   return parts.join(" · ");
+}
+
+interface SaveStatusDescriptor {
+  label: string;
+  tone: CanvasTone;
+}
+
+function describeSaveStatus(state: SaveState): SaveStatusDescriptor {
+  switch (state) {
+    case "saving":
+      return { label: "儲存中…", tone: "info" };
+    case "dirty":
+      return { label: "尚有未儲存變更", tone: "warn" };
+    case "saved":
+      return { label: "已儲存", tone: "success" };
+    case "error":
+      return { label: "儲存失敗", tone: "danger" };
+    default:
+      return { label: "尚未變更", tone: "neutral" };
+  }
 }
 
 function ScreenSection({
@@ -199,6 +233,10 @@ function ScreenSection({
   );
 }
 
+function Divider() {
+  return <View style={[styles.divider, { backgroundColor: THEME.border }]} />;
+}
+
 function ProfileSummaryCard({
   initial,
   name,
@@ -209,32 +247,28 @@ function ProfileSummaryCard({
   summary: string;
 }) {
   return (
-    <CanvasCard theme={THEME} padding={16} style={styles.profileCard}>
-      <View style={styles.profileRow}>
-        <View
-          style={[
-            styles.avatar,
-            {
-              backgroundColor: THEME.accentBg,
-              borderColor: THEME.accentBorder,
-            },
-          ]}
-        >
-          <Text style={[styles.avatarText, { color: THEME.accentHi }]}>
-            {initial}
-          </Text>
-        </View>
-        <View style={styles.profileCopy}>
-          <Text style={[styles.profileName, { color: THEME.text }]}>
-            {name}
-          </Text>
-          <Text style={[styles.profileMeta, { color: THEME.textMuted }]}>
-            {summary}
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={16} color={THEME.textDim} />
+    <View style={styles.profileRow}>
+      <View
+        style={[
+          styles.avatar,
+          {
+            backgroundColor: THEME.accentBg,
+            borderColor: THEME.accentBorder,
+          },
+        ]}
+      >
+        <Text style={[styles.avatarText, { color: THEME.accentHi }]}>
+          {initial}
+        </Text>
       </View>
-    </CanvasCard>
+      <View style={styles.profileCopy}>
+        <Text style={[styles.profileName, { color: THEME.text }]}>{name}</Text>
+        <Text style={[styles.profileMeta, { color: THEME.textMuted }]}>
+          {summary}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={THEME.textDim} />
+    </View>
   );
 }
 
@@ -452,13 +486,27 @@ export default function SettingsScreen() {
   const driverId = isProvisioned ? getDriverId() : "";
 
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<"success" | "error" | null>(
+    null,
+  );
+
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [presenceSummary, setPresenceSummary] =
     useState<PlatformPresenceSummary | null>(null);
   const [settingsValues, setSettingsValues] = useState<SettingsFormValues>(
     DEFAULT_SETTINGS_VALUES,
   );
   const [profileValues, setProfileValues] = useState<ProfileFormValues>(
+    DEFAULT_PROFILE_VALUES,
+  );
+  const [initialSettings, setInitialSettings] = useState<SettingsFormValues>(
+    DEFAULT_SETTINGS_VALUES,
+  );
+  const [initialProfile, setInitialProfile] = useState<ProfileFormValues>(
     DEFAULT_PROFILE_VALUES,
   );
 
@@ -486,17 +534,23 @@ export default function SettingsScreen() {
       const failures: string[] = [];
 
       if (settingsResult.status === "fulfilled") {
-        setSettingsValues(
-          settingsValuesFromRecord(settingsResult.value as DriverSettings),
+        const next = settingsValuesFromRecord(
+          settingsResult.value as DriverSettings,
         );
+        setSettingsValues(next);
+        setInitialSettings(next);
+        setSettingsLoaded(true);
       } else {
         failures.push(`偏好設定（${toErrorMessage(settingsResult.reason)}）`);
       }
 
       if (profileResult.status === "fulfilled") {
-        setProfileValues(
-          profileValuesFromRecord(profileResult.value as DriverProfileRecord),
+        const next = profileValuesFromRecord(
+          profileResult.value as DriverProfileRecord,
         );
+        setProfileValues(next);
+        setInitialProfile(next);
+        setProfileLoaded(true);
       } else {
         failures.push(`個人資料（${toErrorMessage(profileResult.reason)}）`);
       }
@@ -524,6 +578,32 @@ export default function SettingsScreen() {
     };
   }, [driverId, isProvisioned]);
 
+  const settingsErrors = validateSettingsValues(settingsValues);
+  const profileErrors = profileLoaded
+    ? validateProfileValues(profileValues)
+    : {};
+
+  const settingsDirty =
+    settingsLoaded && !settingsValuesEqual(initialSettings, settingsValues);
+  const profileDirty =
+    profileLoaded && !profileValuesEqual(initialProfile, profileValues);
+  const dirty = settingsDirty || profileDirty;
+  const hasValidation =
+    (settingsLoaded && hasErrors(settingsErrors)) ||
+    (profileLoaded && hasErrors(profileErrors));
+  const validationMessage = hasValidation
+    ? "請先修正標示欄位後再儲存設定。"
+    : null;
+
+  const saveState = deriveSaveState({
+    saving,
+    dirty,
+    hasValidation,
+    lastResult,
+  });
+  const saveStatus = describeSaveStatus(saveState);
+  const saveDisabled = !dirty || hasValidation || saving;
+
   const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
   const identitySummary = [
     driverId ? `D-${driverId.replace(/^D-?/i, "")}` : null,
@@ -542,6 +622,103 @@ export default function SettingsScreen() {
   const presences = [...(presenceSummary?.presences ?? [])].sort((a, b) =>
     getPlatformDisplayName(a).localeCompare(getPlatformDisplayName(b), "zh-TW"),
   );
+  const boundCount = presences.filter(
+    (entry) => entry.status === "online",
+  ).length;
+  const reauthCount = presences.filter((entry) => entry.reauthRequired).length;
+
+  const updateSettings = (patch: Partial<SettingsFormValues>) => {
+    setSettingsValues((prev) => ({ ...prev, ...patch }));
+    if (lastResult) {
+      setLastResult(null);
+    }
+    if (saveError) {
+      setSaveError(null);
+    }
+  };
+
+  const updateProfile = (patch: Partial<ProfileFormValues>) => {
+    setProfileValues((prev) => ({ ...prev, ...patch }));
+    if (lastResult) {
+      setLastResult(null);
+    }
+    if (saveError) {
+      setSaveError(null);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!dirty || hasValidation) {
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+    const client = getDriverClient();
+
+    const tasks: Array<Promise<{ section: string }>> = [];
+    if (settingsDirty) {
+      tasks.push(
+        client
+          .updateDriverSettings(driverId, buildSettingsCommand(settingsValues))
+          .then(() => ({ section: "偏好設定" })),
+      );
+    }
+    if (profileDirty) {
+      tasks.push(
+        client
+          .updateDriverProfile(buildProfileCommand(profileValues))
+          .then(() => ({ section: "個人資料" })),
+      );
+    }
+
+    try {
+      const results = await Promise.allSettled(tasks);
+      const saved: string[] = [];
+      const failed: string[] = [];
+
+      results.forEach((entry, index) => {
+        const isSettingsTask = settingsDirty && index === 0;
+        const sectionLabel = isSettingsTask ? "偏好設定" : "個人資料";
+        if (entry.status === "fulfilled") {
+          saved.push(entry.value.section);
+        } else {
+          failed.push(`${sectionLabel}（${toErrorMessage(entry.reason)}）`);
+        }
+      });
+
+      if (saved.includes("偏好設定")) {
+        setInitialSettings(settingsValues);
+      }
+      if (saved.includes("個人資料")) {
+        setInitialProfile(profileValues);
+      }
+
+      if (failed.length === 0) {
+        setLastResult("success");
+        Alert.alert("儲存成功", "設定已成功儲存。");
+        return;
+      }
+
+      if (saved.length === 0) {
+        setLastResult("error");
+        setSaveError(`無法儲存 ${formatSectionList(failed)}。`);
+        Alert.alert("儲存失敗", `無法儲存 ${formatSectionList(failed)}。`);
+        return;
+      }
+
+      setLastResult("error");
+      setSaveError(
+        `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`,
+      );
+      Alert.alert(
+        "部分儲存成功",
+        `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`,
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert("登出裝置", "登出後需要重新完成裝置配置，確定要繼續嗎？", [
@@ -621,7 +798,33 @@ export default function SettingsScreen() {
         theme={THEME}
         title={driverStrings.settings.title}
         style={styles.pageHeader}
+        actions={
+          <CanvasPill theme={THEME} tone={saveStatus.tone}>
+            {saveStatus.label}
+          </CanvasPill>
+        }
       />
+
+      <View style={styles.kpiRow}>
+        <CanvasKpi
+          theme={THEME}
+          label="已綁定平台"
+          value={String(boundCount)}
+          sub={`${presences.length} 個平台`}
+        />
+        <CanvasKpi
+          theme={THEME}
+          label="待處理"
+          value={String(reauthCount)}
+          sub="需重新授權"
+        />
+        <CanvasKpi
+          theme={THEME}
+          label="儲存狀態"
+          value={dirty ? "待同步" : "最新"}
+          sub={saveStatus.label}
+        />
+      </View>
 
       {loadError ? (
         <CanvasBanner
@@ -637,12 +840,101 @@ export default function SettingsScreen() {
           }
         />
       ) : null}
+      {validationMessage ? (
+        <CanvasBanner
+          theme={THEME}
+          tone="danger"
+          body={validationMessage}
+          icon={
+            <Ionicons name="warning-outline" size={16} color={THEME.danger} />
+          }
+        />
+      ) : null}
+      {saveError ? (
+        <CanvasBanner
+          theme={THEME}
+          tone="danger"
+          body={saveError}
+          icon={
+            <Ionicons
+              name="close-circle-outline"
+              size={16}
+              color={THEME.danger}
+            />
+          }
+        />
+      ) : null}
 
-      <ProfileSummaryCard
-        initial={profileInitial}
-        name={profileValues.profileName.trim() || "尚未填寫司機姓名"}
-        summary={identitySummary || "尚未填寫聯絡資訊"}
-      />
+      <CanvasCard theme={THEME} padding={16} style={styles.profileCard}>
+        <ProfileSummaryCard
+          initial={profileInitial}
+          name={profileValues.profileName.trim() || "尚未填寫司機姓名"}
+          summary={identitySummary || "尚未填寫聯絡資訊"}
+        />
+        <Divider />
+        <CanvasDL
+          theme={THEME}
+          cols={2}
+          items={[
+            { label: "駕駛編號", value: driverId || "未設定", mono: true },
+            {
+              label: "聯絡電話",
+              value: profileValues.profilePhone.trim() || "未填寫",
+              mono: true,
+            },
+            {
+              label: "電子郵件",
+              value: profileValues.profileEmail.trim() || "未填寫",
+              mono: true,
+            },
+            { label: "緊急聯絡人", value: emergencySummary },
+          ]}
+        />
+        <Divider />
+        <View style={styles.fieldStack}>
+          <CanvasField theme={THEME} label="姓名" required>
+            <CanvasInput
+              theme={THEME}
+              value={profileValues.profileName}
+              ph="司機姓名"
+              editable={profileLoaded && !saving}
+              onChangeText={(value) => updateProfile({ profileName: value })}
+            />
+          </CanvasField>
+          {profileErrors.profileName ? (
+            <Text style={[styles.errorText, { color: THEME.danger }]}>
+              {profileErrors.profileName}
+            </Text>
+          ) : null}
+
+          <CanvasField theme={THEME} label="電話">
+            <CanvasInput
+              theme={THEME}
+              value={profileValues.profilePhone}
+              ph="+886-900-000-000"
+              editable={profileLoaded && !saving}
+              onChangeText={(value) => updateProfile({ profilePhone: value })}
+            />
+          </CanvasField>
+
+          <CanvasField theme={THEME} label="電子郵件">
+            <CanvasInput
+              theme={THEME}
+              value={profileValues.profileEmail}
+              ph="driver@example.com"
+              editable={profileLoaded && !saving}
+              onChangeText={(value) => updateProfile({ profileEmail: value })}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </CanvasField>
+          {profileErrors.profileEmail ? (
+            <Text style={[styles.errorText, { color: THEME.danger }]}>
+              {profileErrors.profileEmail}
+            </Text>
+          ) : null}
+        </View>
+      </CanvasCard>
 
       <ScreenSection
         title={driverStrings.settings.sections.bindings}
@@ -688,7 +980,10 @@ export default function SettingsScreen() {
             right={
               <Switch
                 value={settingsValues.autoAcceptEnabled}
-                disabled
+                onValueChange={(value) =>
+                  updateSettings({ autoAcceptEnabled: value })
+                }
+                disabled={!settingsLoaded || saving}
                 trackColor={{ false: THEME.borderStrong, true: THEME.accentHi }}
                 thumbColor={
                   settingsValues.autoAcceptEnabled ? THEME.accent : "#FFFFFF"
@@ -701,6 +996,55 @@ export default function SettingsScreen() {
             value={formatNotification(settingsValues.notificationsEnabled)}
             last
           />
+          <View
+            style={[
+              styles.editorBlock,
+              {
+                borderTopColor: THEME.border,
+                backgroundColor: THEME.surfaceLo,
+              },
+            ]}
+          >
+            <View style={styles.fieldStack}>
+              <CanvasField theme={THEME} label="介面語言">
+                <CanvasInput
+                  theme={THEME}
+                  value={settingsValues.language}
+                  ph="zh-TW"
+                  editable={settingsLoaded && !saving}
+                  onChangeText={(value) => updateSettings({ language: value })}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </CanvasField>
+              <CanvasField
+                theme={THEME}
+                label="最大接單距離"
+                hint={`目前設定：${formatRadius(settingsValues.maxAcceptRadius)}`}
+              >
+                <CanvasInput
+                  theme={THEME}
+                  value={settingsValues.maxAcceptRadius}
+                  ph="8"
+                  suffix="km"
+                  editable={settingsLoaded && !saving}
+                  onChangeText={(value) =>
+                    updateSettings({ maxAcceptRadius: value })
+                  }
+                />
+              </CanvasField>
+              {settingsErrors.language ? (
+                <Text style={[styles.errorText, { color: THEME.danger }]}>
+                  {settingsErrors.language}
+                </Text>
+              ) : null}
+              {settingsErrors.maxAcceptRadius ? (
+                <Text style={[styles.errorText, { color: THEME.danger }]}>
+                  {settingsErrors.maxAcceptRadius}
+                </Text>
+              ) : null}
+            </View>
+          </View>
         </CanvasCard>
       </ScreenSection>
 
@@ -724,8 +1068,88 @@ export default function SettingsScreen() {
             danger
             last
           />
+          <View
+            style={[
+              styles.editorBlock,
+              {
+                borderTopColor: THEME.border,
+                backgroundColor: THEME.surfaceLo,
+              },
+            ]}
+          >
+            <Text style={[styles.editorTitle, { color: THEME.text }]}>
+              緊急聯絡人資料
+            </Text>
+            <Text style={[styles.editorHint, { color: THEME.textMuted }]}>
+              任一欄位填寫後，姓名與電話為必填。
+            </Text>
+            <View style={styles.fieldStack}>
+              <CanvasField theme={THEME} label="聯絡人姓名">
+                <CanvasInput
+                  theme={THEME}
+                  value={profileValues.emergencyName}
+                  ph="緊急聯絡人姓名"
+                  editable={profileLoaded && !saving}
+                  onChangeText={(value) =>
+                    updateProfile({ emergencyName: value })
+                  }
+                />
+              </CanvasField>
+              {profileErrors.emergencyName ? (
+                <Text style={[styles.errorText, { color: THEME.danger }]}>
+                  {profileErrors.emergencyName}
+                </Text>
+              ) : null}
+
+              <CanvasField theme={THEME} label="聯絡人電話">
+                <CanvasInput
+                  theme={THEME}
+                  value={profileValues.emergencyPhone}
+                  ph="+886-900-000-000"
+                  editable={profileLoaded && !saving}
+                  onChangeText={(value) =>
+                    updateProfile({ emergencyPhone: value })
+                  }
+                />
+              </CanvasField>
+              {profileErrors.emergencyPhone ? (
+                <Text style={[styles.errorText, { color: THEME.danger }]}>
+                  {profileErrors.emergencyPhone}
+                </Text>
+              ) : null}
+
+              <CanvasField theme={THEME} label="關係">
+                <CanvasInput
+                  theme={THEME}
+                  value={profileValues.emergencyRelationship}
+                  ph="配偶、家人、朋友"
+                  editable={profileLoaded && !saving}
+                  onChangeText={(value) =>
+                    updateProfile({ emergencyRelationship: value })
+                  }
+                />
+              </CanvasField>
+            </View>
+          </View>
         </CanvasCard>
       </ScreenSection>
+
+      <CanvasBtn
+        theme={THEME}
+        variant="primary"
+        size="md"
+        onPress={() => void handleSave()}
+        disabled={saveDisabled}
+        icon={
+          saving ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Ionicons name="save-outline" size={15} color="#FFFFFF" />
+          )
+        }
+      >
+        {saving ? "儲存中…" : dirty ? "儲存變更" : "已同步"}
+      </CanvasBtn>
     </CanvasShell>
   );
 }
@@ -753,8 +1177,14 @@ const styles = StyleSheet.create({
   pageHeader: {
     paddingBottom: 8,
   },
+  kpiRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 14,
+  },
   profileCard: {
-    marginTop: 4,
+    marginTop: 14,
+    gap: 14,
   },
   profileRow: {
     flexDirection: "row",
@@ -786,6 +1216,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontFamily: THEME.monoFamily,
+  },
+  divider: {
+    height: 1,
+  },
+  fieldStack: {
+    gap: 10,
   },
   sectionBlock: {
     gap: 8,
@@ -867,6 +1303,27 @@ const styles = StyleSheet.create({
   settingValue: {
     fontSize: 13,
     lineHeight: 17,
+  },
+  editorBlock: {
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    gap: 10,
+  },
+  editorTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  editorHint: {
+    fontSize: 11.5,
+    lineHeight: 16,
+  },
+  errorText: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: -4,
   },
   platformBadge: {
     width: 36,
