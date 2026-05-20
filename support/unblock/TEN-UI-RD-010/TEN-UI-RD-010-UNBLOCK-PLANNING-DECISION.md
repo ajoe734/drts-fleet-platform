@@ -13,9 +13,10 @@ anymore. The tenant-governance contract wave already resolved the planning
 question, and the current `origin/dev` planning artifacts record the screen as
 shipped.
 
-The remaining gap is control-plane drift: the supervisor machine-truth root at
-`/home/edna/workspace/drts-fleet-platform/ai-status.json` still shows the
-parent task frozen at the 2026-05-10 pre-contract blocker.
+The remaining gap was control-plane drift. This unblock task routes the stale
+parent row away from the 2026-05-10 pre-contract blocker and back to normal
+closeout sync, because the canonical planning and delivery evidence already
+resolved the product question.
 
 ## Canonical Decision
 
@@ -35,17 +36,29 @@ Canonical planning sources:
 
 ## Evidence
 
-### 1. The original planning blocker is stale
+### 1. The original planning blocker was stale and has now been rerouted
 
-The canonical machine-truth root currently records parent `TEN-UI-RD-010` as:
+Before this reconciliation, the canonical machine-truth root recorded parent
+`TEN-UI-RD-010` as:
 
 - status `blocked`
 - last update `2026-05-10T18:26:24Z`
 - blocker summary: no tenant cost-center directory or approval-rule read model
 
-That matched the pre-contract state on 2026-05-10, but it no longer matches
+That matched the pre-contract state on 2026-05-10, but it no longer matched
 the accepted planning docs or the shipped Wave 3 closeout evidence on
 `origin/dev`.
+
+The canonical root now records parent `TEN-UI-RD-010` as:
+
+- status `in_progress`
+- last update `2026-05-20T05:45:45Z`
+- next step: sync the stale parent row to the shipped `origin/dev` evidence
+  already recorded in the parity decision log, redesign closeout doc, and dev
+  merge `7673f8a`
+
+This confirms the unblock outcome is routing and control-plane repair, not a
+new planning decision.
 
 ### 2. Canonical planning artifacts already resolved the product decision
 
@@ -73,7 +86,7 @@ product semantics.
   machine-truth row for `TEN-UI-RD-010`
 
 Interpretation: the blocker is not product uncertainty. The stale root task row
-simply has not caught up with the already-shipped planning and delivery record.
+needed to be rerouted to the already-shipped planning and delivery record.
 
 ## Decision
 
@@ -87,7 +100,8 @@ Resolve the planning blocker as follows:
 
 ## Parent Next Step
 
-Update parent `TEN-UI-RD-010` with this next step:
+Canonical machine truth now records parent `TEN-UI-RD-010` with this next
+step:
 
 Planning blocker resolved. Reopen the parent from stale `blocked` state and
 sync its task row to the shipped `origin/dev` evidence already recorded in
