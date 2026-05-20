@@ -8,7 +8,7 @@ import {
   type PartnerBookingScreenId,
 } from "./partner-booking-funnel";
 
-const canvasBaseSrc = "/drts-design-canvas/Partner%20Booking.html";
+const canvasBaseSrc = "/drts-design-canvas/Partner%20Booking%20Artboard.html";
 const ctbcBrand = BRAND_TEMPLATES.CTBC;
 
 function ComparisonFrame({
@@ -103,7 +103,7 @@ function PartnerBookingStoryChrome({
           </ComparisonFrame>
           <ComparisonFrame
             title="Canvas"
-            subtitle={`\`docs/05-ui/drts-design-canvas/Partner Booking.html#${anchor}\``}
+            subtitle={`\`docs/05-ui/drts-design-canvas/Partner Booking Artboard.html#${anchor}\``}
           >
             <iframe
               src={`${canvasBaseSrc}#${anchor}`}
@@ -131,7 +131,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "PBK-UI-003 parity stories. Each story compares the built white-label CTBC funnel screen against `Partner Booking.html` artboard anchors.",
+          "PBK-UI-003 parity stories. Each story compares the built white-label CTBC funnel screen against the matching `Partner Booking Artboard.html#<screen>` reference artboard (per-screen host that lands directly on the requested PB_* component).",
       },
     },
   },
