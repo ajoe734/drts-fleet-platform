@@ -326,6 +326,7 @@ function SettingRow({
   value,
   right,
   onPress,
+  disabled = false,
   showChevron = Boolean(onPress),
   danger = false,
   last = false,
@@ -335,6 +336,7 @@ function SettingRow({
   value?: string | null;
   right?: ReactNode;
   onPress?: () => void;
+  disabled?: boolean;
   showChevron?: boolean;
   danger?: boolean;
   last?: boolean;
@@ -350,7 +352,13 @@ function SettingRow({
         <Text
           style={[
             styles.settingLabel,
-            { color: danger ? THEME.danger : THEME.text },
+            {
+              color: disabled
+                ? THEME.textDim
+                : danger
+                  ? THEME.danger
+                  : THEME.text,
+            },
           ]}
         >
           {label}
@@ -360,8 +368,9 @@ function SettingRow({
             style={[
               styles.settingSubtitle,
               {
-                color:
-                  danger || subtitle.includes("需重新授權")
+                color: disabled
+                  ? THEME.textDim
+                  : danger || subtitle.includes("需重新授權")
                     ? THEME.warn
                     : THEME.textMuted,
               },
@@ -376,14 +385,20 @@ function SettingRow({
           <Text
             style={[
               styles.settingValue,
-              { color: danger ? THEME.danger : THEME.textMuted },
+              {
+                color: disabled
+                  ? THEME.textDim
+                  : danger
+                    ? THEME.danger
+                    : THEME.textMuted,
+              },
             ]}
           >
             {value}
           </Text>
         ) : null}
         {right}
-        {onPress && showChevron ? (
+        {onPress && showChevron && !disabled ? (
           <Ionicons
             name="chevron-forward"
             size={15}
@@ -400,8 +415,9 @@ function SettingRow({
 
   return (
     <Pressable
+      disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [{ opacity: pressed ? 0.88 : 1 }]}
+      style={({ pressed }) => [{ opacity: pressed && !disabled ? 0.88 : 1 }]}
     >
       {content}
     </Pressable>
@@ -574,6 +590,8 @@ export default function SettingsScreen() {
   const profileErrors = profileLoaded
     ? validateProfileValues(profileValues)
     : {};
+  const profileSectionAvailable = profileLoaded;
+  const settingsSectionAvailable = settingsLoaded;
 
   const settingsDirty =
     settingsLoaded && !settingsValuesEqual(initialSettings, settingsValues);
@@ -589,26 +607,36 @@ export default function SettingsScreen() {
 
   const saveDisabled = !dirty || hasValidation || saving;
 
-  const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
-  const identitySummary = [
-    driverId ? `D-${driverId.replace(/^D-?/i, "")}` : null,
-    profileValues.profilePhone.trim() || null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const emergencySummary = [
-    profileValues.emergencyName.trim() || "尚未設定",
-    profileValues.emergencyRelationship.trim() || null,
-    profileValues.emergencyPhone.trim() || null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const profileInitial =
+    profileSectionAvailable && profileValues.profileName.trim()
+      ? profileValues.profileName.trim().charAt(0)
+      : "司";
+  const identitySummary = profileSectionAvailable
+    ? [
+        driverId ? `D-${driverId.replace(/^D-?/i, "")}` : null,
+        profileValues.profilePhone.trim() || null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "個人資料未載入";
+  const emergencySummary = profileSectionAvailable
+    ? [
+        profileValues.emergencyName.trim() || "尚未設定",
+        profileValues.emergencyRelationship.trim() || null,
+        profileValues.emergencyPhone.trim() || null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "緊急聯絡人資料未載入";
 
   const presences = [...(presenceSummary?.presences ?? [])].sort((a, b) =>
     getPlatformDisplayName(a).localeCompare(getPlatformDisplayName(b), "zh-TW"),
   );
 
   const updateSettings = (patch: Partial<SettingsFormValues>) => {
+    if (!settingsSectionAvailable) {
+      return;
+    }
     setSettingsValues((prev) => ({ ...prev, ...patch }));
     if (lastResult) {
       setLastResult(null);
@@ -619,6 +647,9 @@ export default function SettingsScreen() {
   };
 
   const updateProfile = (patch: Partial<ProfileFormValues>) => {
+    if (!profileSectionAvailable) {
+      return;
+    }
     setProfileValues((prev) => ({ ...prev, ...patch }));
     if (lastResult) {
       setLastResult(null);
@@ -629,8 +660,25 @@ export default function SettingsScreen() {
   };
 
   const toggleEditor = (editor: "profile" | "preferences" | "emergency") => {
+    if (
+      (editor === "preferences" && !settingsSectionAvailable) ||
+      ((editor === "profile" || editor === "emergency") &&
+        !profileSectionAvailable)
+    ) {
+      return;
+    }
     setActiveEditor((prev) => (prev === editor ? null : editor));
   };
+
+  useEffect(() => {
+    if (
+      (activeEditor === "preferences" && !settingsSectionAvailable) ||
+      ((activeEditor === "profile" || activeEditor === "emergency") &&
+        !profileSectionAvailable)
+    ) {
+      setActiveEditor(null);
+    }
+  }, [activeEditor, profileSectionAvailable, settingsSectionAvailable]);
 
   const handleSave = async () => {
     if (!dirty || hasValidation) {
@@ -847,14 +895,25 @@ export default function SettingsScreen() {
 
       <Pressable
         accessibilityRole="button"
+        disabled={!profileSectionAvailable}
         onPress={() => toggleEditor("profile")}
-        style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
+        style={({ pressed }) => [
+          { opacity: pressed && profileSectionAvailable ? 0.92 : 1 },
+        ]}
       >
         <CanvasCard theme={THEME} padding={16} style={styles.profileCard}>
           <ProfileSummaryCard
             initial={profileInitial}
-            name={profileValues.profileName.trim() || "尚未填寫司機姓名"}
-            summary={identitySummary || "尚未填寫聯絡資訊"}
+            name={
+              profileSectionAvailable
+                ? profileValues.profileName.trim() || "尚未填寫司機姓名"
+                : "個人資料未載入"
+            }
+            summary={
+              profileSectionAvailable
+                ? identitySummary || "尚未填寫聯絡資訊"
+                : identitySummary
+            }
           />
         </CanvasCard>
       </Pressable>
@@ -968,17 +1027,32 @@ export default function SettingsScreen() {
         <CanvasCard theme={THEME} padding={0}>
           <SettingRow
             label="語言"
-            value={formatLanguage(settingsValues.language)}
+            value={
+              settingsSectionAvailable
+                ? formatLanguage(settingsValues.language)
+                : "未載入"
+            }
             onPress={() => toggleEditor("preferences")}
+            disabled={!settingsSectionAvailable}
           />
           <SettingRow
             label="最大接單距離"
-            value={formatRadius(settingsValues.maxAcceptRadius)}
+            value={
+              settingsSectionAvailable
+                ? formatRadius(settingsValues.maxAcceptRadius)
+                : "未載入"
+            }
             onPress={() => toggleEditor("preferences")}
+            disabled={!settingsSectionAvailable}
           />
           <SettingRow
             label="自動接單"
-            subtitle="僅自營派單可開啟自動接單"
+            subtitle={
+              settingsSectionAvailable
+                ? "僅自營派單可開啟自動接單"
+                : "偏好設定未載入"
+            }
+            disabled={!settingsSectionAvailable}
             right={
               <Switch
                 value={settingsValues.autoAcceptEnabled}
@@ -998,8 +1072,13 @@ export default function SettingsScreen() {
           />
           <SettingRow
             label="通知"
-            value={formatNotification(settingsValues.notificationsEnabled)}
+            value={
+              settingsSectionAvailable
+                ? formatNotification(settingsValues.notificationsEnabled)
+                : "未載入"
+            }
             onPress={() => toggleEditor("preferences")}
+            disabled={!settingsSectionAvailable}
             last
           />
         </CanvasCard>
@@ -1121,6 +1200,7 @@ export default function SettingsScreen() {
             label={driverStrings.settings.utilityLabels.emergencyContact}
             subtitle={emergencySummary}
             onPress={() => toggleEditor("emergency")}
+            disabled={!profileSectionAvailable}
           />
           <SettingRow
             label={driverStrings.settings.utilityLabels.aboutDevice}
