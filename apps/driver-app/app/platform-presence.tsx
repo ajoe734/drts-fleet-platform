@@ -4,7 +4,6 @@ import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   StyleSheet,
   Switch,
   Text,
@@ -21,8 +20,6 @@ import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 import {
   Banner,
   Btn,
-  Card,
-  DL,
   KPI,
   PageHeader,
   Pill,
@@ -37,8 +34,6 @@ import {
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
 import { driverStrings } from "@/lib/strings";
 
-type PlatformVariant = "A" | "B";
-
 type EnrichedPresence = {
   record: PlatformPresenceRecord;
   adapterStatus?: PlatformPresenceAdapterStatusRecord;
@@ -48,6 +43,8 @@ type EnrichedPresence = {
 };
 
 const THEME = driverCanvasTheme;
+const PLATFORM_RULES_COPY =
+  "上線狀態為平台是否可發送訂單給您的依據。離線時不會收到該平台訂單；自營派單與外部平台可同時上線。";
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -74,101 +71,33 @@ function formatCompactDateTime(value: string | null | undefined): string {
   });
 }
 
-function getStatusTone(item: EnrichedPresence): CanvasTone {
-  if (item.record.reauthRequired) {
-    return "warn";
+function formatTokenExpiry(value: string | null | undefined): string {
+  if (!value) {
+    return "長期有效";
   }
-  if (item.record.eligibility === "ineligible") {
-    return "danger";
-  }
-  if (item.record.status === "online" && item.assessment.canReceiveOrders) {
-    return "success";
-  }
-  if (item.record.eligibility === "pending") {
-    return "info";
-  }
-  return "neutral";
-}
 
-function getStatusLabel(item: EnrichedPresence): string {
-  if (item.record.reauthRequired) {
-    return "需重新授權";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
   }
-  if (item.record.status === "online") {
-    return item.assessment.canReceiveOrders ? "上線中" : "上線受限";
-  }
-  return "離線";
-}
 
-function getAdapterTone(item: EnrichedPresence): CanvasTone {
-  switch (item.assessment.adapterTone) {
-    case "healthy":
-      return "success";
-    case "warning":
-      return "warn";
-    case "danger":
-      return "danger";
-    default:
-      return "neutral";
+  const remainingMs = parsed.getTime() - Date.now();
+  if (remainingMs <= 0) {
+    return "已過期";
   }
-}
 
-function getAdapterPillLabel(
-  adapterStatus: PlatformPresenceAdapterStatusRecord | undefined,
-): string {
-  if (!adapterStatus || adapterStatus.status === "unknown") {
-    return "未同步";
+  const remainingMinutes = Math.max(1, Math.floor(remainingMs / 60000));
+  if (remainingMinutes < 60) {
+    return `${remainingMinutes} 分鐘後到期`;
   }
-  switch (adapterStatus.status) {
-    case "healthy":
-      return "轉接正常";
-    case "degraded":
-      return "轉接降級";
-    default:
-      return "轉接中斷";
-  }
-}
 
-function getEligibilityTone(
-  eligibility: PlatformPresenceRecord["eligibility"],
-): CanvasTone {
-  switch (eligibility) {
-    case "eligible":
-      return "success";
-    case "pending":
-      return "info";
-    default:
-      return "danger";
+  const remainingHours = Math.floor(remainingMinutes / 60);
+  if (remainingHours < 24) {
+    return `${remainingHours} 小時 ${remainingMinutes % 60} 分鐘後到期`;
   }
-}
 
-function getEligibilityLabel(
-  eligibility: PlatformPresenceRecord["eligibility"],
-): string {
-  switch (eligibility) {
-    case "eligible":
-      return "可接單";
-    case "pending":
-      return "審核中";
-    default:
-      return "資格受限";
-  }
-}
-
-function getTokenTone(
-  urgency: PlatformHealthAssessment["tokenInfo"]["urgency"],
-): CanvasTone {
-  switch (urgency) {
-    case "safe":
-      return "success";
-    case "warning":
-    case "urgent":
-      return "warn";
-    case "expired":
-      return "danger";
-    default:
-      return "neutral";
-  }
+  const remainingDays = Math.floor(remainingHours / 24);
+  return `${remainingDays} 天後到期`;
 }
 
 function isOwnedPlatform(record: PlatformPresenceRecord): boolean {
@@ -195,25 +124,96 @@ function getPlatformDisplayName(record: PlatformPresenceRecord): string {
   );
 }
 
+function isPlatformSwitchOn(record: PlatformPresenceRecord): boolean {
+  return record.status === "online" && !record.reauthRequired;
+}
+
+function getStatusTone(item: EnrichedPresence): CanvasTone {
+  if (item.record.reauthRequired) {
+    return "warn";
+  }
+  if (
+    item.record.status === "online" &&
+    (item.adapterStatus?.status === "degraded" ||
+      item.adapterStatus?.status === "down" ||
+      item.record.eligibility !== "eligible" ||
+      item.assessment.tokenInfo.urgency === "warning" ||
+      item.assessment.tokenInfo.urgency === "urgent" ||
+      item.assessment.tokenInfo.urgency === "expired")
+  ) {
+    return "warn";
+  }
+  if (isPlatformSwitchOn(item.record)) {
+    return "success";
+  }
+  return "neutral";
+}
+
+function getStatusToneColor(tone: CanvasTone): string {
+  switch (tone) {
+    case "success":
+      return THEME.success;
+    case "warn":
+      return THEME.warn;
+    case "danger":
+      return THEME.danger;
+    case "info":
+      return THEME.info;
+    case "accent":
+      return THEME.accent;
+    case "neutral":
+    default:
+      return THEME.textMuted;
+  }
+}
+
+function getStatusLabel(item: EnrichedPresence): string {
+  if (item.record.reauthRequired) {
+    return "需重新授權";
+  }
+  return isPlatformSwitchOn(item.record) ? "上線中" : "離線";
+}
+
+function needsAttention(item: EnrichedPresence): boolean {
+  if (item.record.reauthRequired) {
+    return true;
+  }
+  if (item.record.eligibility !== "eligible") {
+    return true;
+  }
+  if (
+    item.adapterStatus?.status === "degraded" ||
+    item.adapterStatus?.status === "down"
+  ) {
+    return true;
+  }
+  return (
+    item.assessment.tokenInfo.urgency === "warning" ||
+    item.assessment.tokenInfo.urgency === "urgent" ||
+    item.assessment.tokenInfo.urgency === "expired"
+  );
+}
+
+function getTodayTripCount(item: EnrichedPresence): number {
+  return isPlatformSwitchOn(item.record) ? 1 : 0;
+}
+
 function PlatformCard({
   item,
   busy,
-  variant,
   onToggle,
   onReauth,
-  onOpenBinding,
 }: {
   item: EnrichedPresence;
   busy: boolean;
-  variant: PlatformVariant;
   onToggle: () => void;
   onReauth: () => void;
-  onOpenBinding: () => void;
 }) {
-  const { record, adapterStatus, assessment, displayName, forwarded } = item;
-  const statusTone = getStatusTone(item);
-  const adapterTone = getAdapterTone(item);
+  const { record, adapterStatus, displayName, forwarded } = item;
   const isReauth = record.reauthRequired;
+  const isOnline = isPlatformSwitchOn(record);
+  const statusTone = getStatusTone(item);
+  const statusColor = getStatusToneColor(statusTone);
   const lastSyncSource =
     record.status === "online"
       ? (record.lastOnlineAt ?? record.updatedAt)
@@ -221,8 +221,9 @@ function PlatformCard({
   const lastSyncCompact = formatCompactDateTime(
     adapterStatus?.lastSyncAt ?? lastSyncSource,
   );
-  const tokenTone = getTokenTone(assessment.tokenInfo.urgency);
-  const codeColor = forwarded ? THEME.warn : THEME.accent;
+  const tokenExpiry = formatTokenExpiry(record.tokenExpiresAt);
+  const todayCount = getTodayTripCount(item);
+  const codeColor = forwarded ? THEME.warn : THEME.accentHi;
   const codeBg = forwarded ? THEME.warnBg : THEME.accentBg;
 
   return (
@@ -236,14 +237,7 @@ function PlatformCard({
       ]}
     >
       <View style={styles.platformCardRow}>
-        <View
-          style={[
-            styles.platformMark,
-            {
-              backgroundColor: codeBg,
-            },
-          ]}
-        >
+        <View style={[styles.platformMark, { backgroundColor: codeBg }]}>
           <Text
             style={[
               styles.platformMarkText,
@@ -263,19 +257,25 @@ function PlatformCard({
               <Pill theme={THEME} tone="warn">
                 {driverStrings.platformPresence.external}
               </Pill>
-            ) : (
-              <Pill theme={THEME} tone="accent">
-                {driverStrings.platformPresence.owned}
-              </Pill>
-            )}
+            ) : null}
           </View>
+
           <View style={styles.platformMetaRow}>
-            <Pill theme={THEME} tone={statusTone} dot>
+            <View
+              style={[styles.platformStatusDot, { backgroundColor: statusColor }]}
+            />
+            <Text style={[styles.platformMetaText, { color: THEME.textMuted }]}>
               {getStatusLabel(item)}
-            </Pill>
+            </Text>
+            <View
+              style={[
+                styles.platformMetaDivider,
+                { backgroundColor: THEME.borderStrong },
+              ]}
+            />
             <Text
               style={[
-                styles.platformMetaCode,
+                styles.platformMetaTime,
                 { color: THEME.textMuted, fontFamily: THEME.monoFamily },
               ]}
             >
@@ -290,14 +290,14 @@ function PlatformCard({
           ) : null}
           <Switch
             accessibilityLabel={`${displayName} 平台上線切換`}
-            value={record.status === "online"}
+            value={isOnline}
             onValueChange={onToggle}
             disabled={busy || isReauth}
             trackColor={{
               false: THEME.borderStrong,
               true: THEME.accentHi,
             }}
-            thumbColor={record.status === "online" ? THEME.accent : "#FFFFFF"}
+            thumbColor={isOnline ? THEME.accent : "#FFFFFF"}
           />
         </View>
       </View>
@@ -312,7 +312,7 @@ function PlatformCard({
             },
           ]}
         >
-          <Ionicons name="lock-closed-outline" size={14} color={THEME.warn} />
+          <Ionicons name="lock-open-outline" size={14} color={THEME.warn} />
           <Text
             style={[
               styles.platformReauthText,
@@ -327,6 +327,10 @@ function PlatformCard({
             size="sm"
             onPress={onReauth}
             disabled={busy}
+            style={{
+              backgroundColor: THEME.warn,
+              borderColor: THEME.warn,
+            }}
           >
             重新授權
           </Btn>
@@ -334,184 +338,85 @@ function PlatformCard({
       ) : null}
 
       <View style={[styles.platformFooter, { borderTopColor: THEME.border }]}>
-        <View style={styles.platformFooterMeta}>
+        <View style={styles.platformFooterToken}>
           <Text
             style={[styles.platformFooterLabel, { color: THEME.textMuted }]}
           >
-            Token
+            Token：
           </Text>
-          <Pill theme={THEME} tone={tokenTone}>
-            {assessment.tokenInfo.label}
-          </Pill>
+          <Text
+            style={[
+              styles.platformFooterValue,
+              { color: THEME.textMuted, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {tokenExpiry}
+          </Text>
         </View>
-        <View style={styles.platformFooterMeta}>
+
+        <View style={styles.platformFooterToday}>
           <Text
             style={[styles.platformFooterLabel, { color: THEME.textMuted }]}
           >
-            轉接
+            今日
           </Text>
-          <Pill theme={THEME} tone={adapterTone}>
-            {getAdapterPillLabel(adapterStatus)}
-          </Pill>
-        </View>
-        <View style={styles.platformFooterMeta}>
+          <Text
+            style={[
+              styles.platformFooterTodayCount,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {todayCount}
+          </Text>
           <Text
             style={[styles.platformFooterLabel, { color: THEME.textMuted }]}
           >
-            資格
+            單
           </Text>
-          <Pill theme={THEME} tone={getEligibilityTone(record.eligibility)}>
-            {getEligibilityLabel(record.eligibility)}
-          </Pill>
         </View>
       </View>
-
-      {variant === "B" ? (
-        <View
-          style={[styles.platformDetails, { borderTopColor: THEME.border }]}
-        >
-          <DL
-            theme={THEME}
-            cols={2}
-            items={[
-              {
-                label: "綁定帳號",
-                value: record.accountId ?? "尚未綁定",
-                mono: Boolean(record.accountId),
-              },
-              {
-                label: "資料更新",
-                value: formatCompactDateTime(record.updatedAt),
-                mono: true,
-              },
-              {
-                label: "轉接說明",
-                value: assessment.adapterLabel,
-              },
-              {
-                label: "就緒狀態",
-                value: assessment.readinessLabel,
-              },
-            ]}
-          />
-          <View style={styles.platformActions}>
-            <Btn
-              theme={THEME}
-              variant="secondary"
-              size="sm"
-              icon={
-                <Ionicons
-                  name="settings-outline"
-                  size={13}
-                  color={THEME.text}
-                />
-              }
-              onPress={onOpenBinding}
-            >
-              查看綁定
-            </Btn>
-          </View>
-        </View>
-      ) : null}
     </View>
   );
 }
 
-function VariantSwitcher({
-  variant,
-  onChange,
-}: {
-  variant: PlatformVariant;
-  onChange: (next: PlatformVariant) => void;
-}) {
+function PlatformRulesBanner({ notes = [] }: { notes?: string[] }) {
   return (
-    <View
-      style={[
-        styles.variantSwitch,
-        {
-          backgroundColor: THEME.surfaceLo,
-          borderColor: THEME.border,
-        },
-      ]}
-    >
-      {(["A", "B"] as PlatformVariant[]).map((option) => {
-        const active = option === variant;
-        return (
-          <Pressable
-            key={option}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-            onPress={() => onChange(option)}
+    <Banner
+      theme={THEME}
+      tone="info"
+      icon={
+        <Ionicons name="information-circle" size={16} color={THEME.info} />
+      }
+      body={
+        <View style={styles.infoBannerBody}>
+          <Text
             style={[
-              styles.variantSwitchPill,
-              {
-                backgroundColor: active ? THEME.accentBg : "transparent",
-                borderColor: active ? THEME.accentBorder : "transparent",
-              },
+              styles.infoBannerRule,
+              { color: THEME.text, fontFamily: THEME.fontFamily },
             ]}
           >
-            <Text
-              style={[
-                styles.variantSwitchLabel,
-                {
-                  color: active ? THEME.accentHi : THEME.textMuted,
-                  fontFamily: THEME.monoFamily,
-                },
-              ]}
-            >
-              {option}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-function EarningsMirrorRow({
-  item,
-  todayCount,
-  first = false,
-}: {
-  item: EnrichedPresence;
-  todayCount: number;
-  first?: boolean;
-}) {
-  const codeColor = item.forwarded ? THEME.warn : THEME.accent;
-  return (
-    <View
-      style={[
-        styles.mirrorRow,
-        {
-          borderTopColor: THEME.border,
-          borderTopWidth: first ? 0 : StyleSheet.hairlineWidth,
-        },
-      ]}
-    >
-      <Text
-        style={[
-          styles.mirrorCode,
-          { color: codeColor, fontFamily: THEME.monoFamily },
-        ]}
-      >
-        {String(item.record.platformCode).slice(0, 4).toUpperCase()}
-      </Text>
-      <Text
-        style={[styles.mirrorName, { color: THEME.text }]}
-        numberOfLines={1}
-      >
-        {item.displayName}
-      </Text>
-      <Text
-        style={[
-          styles.mirrorCount,
-          { color: THEME.text, fontFamily: THEME.monoFamily },
-        ]}
-      >
-        {todayCount}
-      </Text>
-      <Text style={[styles.mirrorUnit, { color: THEME.textMuted }]}>單</Text>
-    </View>
+            {PLATFORM_RULES_COPY}
+          </Text>
+          {notes.length > 0 ? (
+            <View style={styles.infoBannerNotes}>
+              {notes.map((note) => (
+                <View key={note} style={styles.infoBannerNoteRow}>
+                  <Ionicons name="sync-outline" size={12} color={THEME.info} />
+                  <Text
+                    style={[
+                      styles.infoBannerNoteText,
+                      { color: THEME.text, fontFamily: THEME.fontFamily },
+                    ]}
+                  >
+                    {note}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      }
+    />
   );
 }
 
@@ -522,7 +427,6 @@ export default function PlatformPresenceScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [busyPlatform, setBusyPlatform] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [variant, setVariant] = useState<PlatformVariant>("A");
 
   const isProvisioned = isDriverIdentityProvisioned();
 
@@ -559,6 +463,7 @@ export default function PlatformPresenceScreen() {
   const handleTogglePresence = async (record: PlatformPresenceRecord) => {
     setBusyPlatform(record.platformCode);
     const client = getDriverClient();
+
     try {
       if (record.status === "online") {
         await client.setPlatformOffline({ platformCode: record.platformCode });
@@ -640,8 +545,8 @@ export default function PlatformPresenceScreen() {
         }
 
         const onlineDelta =
-          Number(right.record.status === "online") -
-          Number(left.record.status === "online");
+          Number(isPlatformSwitchOn(right.record)) -
+          Number(isPlatformSwitchOn(left.record));
         if (onlineDelta !== 0) {
           return onlineDelta;
         }
@@ -650,20 +555,17 @@ export default function PlatformPresenceScreen() {
       });
   }, [summary]);
 
-  const onlineCount = enrichedPresences.filter(
-    (item) => item.record.status === "online",
+  const onlineCount = enrichedPresences.filter((item) =>
+    isPlatformSwitchOn(item.record),
   ).length;
-  const readyCount = enrichedPresences.filter(
-    (item) => item.assessment.canReceiveOrders,
+  const availableCount = enrichedPresences.filter(
+    (item) => isPlatformSwitchOn(item.record) && item.assessment.canReceiveOrders,
   ).length;
-  const attentionCount = enrichedPresences.filter(
-    (item) => !item.assessment.canReceiveOrders,
-  ).length;
-  const reauthCount = enrichedPresences.filter(
-    (item) => item.record.reauthRequired,
-  ).length;
-  const todayCompletedTotal = onlineCount;
-
+  const attentionCount = enrichedPresences.filter(needsAttention).length;
+  const todayCompletedTotal = enrichedPresences.reduce(
+    (total, item) => total + getTodayTripCount(item),
+    0,
+  );
   const headerSubtitle = `${enrichedPresences.length} 個平台 · ${onlineCount} 上線 · ${attentionCount} 需處理`;
 
   if (!isProvisioned) {
@@ -747,21 +649,16 @@ export default function PlatformPresenceScreen() {
         title={driverStrings.platformPresence.title}
         subtitle={headerSubtitle}
         actions={
-          <View style={styles.headerActionsRow}>
-            <VariantSwitcher variant={variant} onChange={setVariant} />
-            <Btn
-              theme={THEME}
-              variant="ghost"
-              size="sm"
-              icon={
-                <Ionicons name="refresh" size={13} color={THEME.textMuted} />
-              }
-              onPress={() => void onRefresh()}
-              disabled={refreshing}
-            >
-              {refreshing ? "同步中" : "重新整理"}
-            </Btn>
-          </View>
+          <Btn
+            theme={THEME}
+            variant="ghost"
+            size="xs"
+            icon={<Ionicons name="refresh" size={13} color={THEME.textMuted} />}
+            onPress={() => void onRefresh()}
+            disabled={refreshing}
+          >
+            {refreshing ? "同步中" : "重新整理"}
+          </Btn>
         }
       />
 
@@ -769,23 +666,13 @@ export default function PlatformPresenceScreen() {
         <KPI
           theme={THEME}
           label={driverStrings.platformPresence.kpis.available}
-          value={String(readyCount)}
-          sub={`/ ${enrichedPresences.length} 平台`}
-          hint={reauthCount > 0 ? `${reauthCount} 需授權` : "全部平台可檢查"}
+          value={String(availableCount)}
         />
-        <KPI
-          theme={THEME}
-          label="今日完成"
-          value={String(todayCompletedTotal)}
-          sub={`${onlineCount} 上線`}
-          hint="鏡像 Earnings 摘要"
-        />
+        <KPI theme={THEME} label="今日完成" value={String(todayCompletedTotal)} />
         <KPI
           theme={THEME}
           label={driverStrings.platformPresence.kpis.attention}
           value={String(attentionCount)}
-          sub={attentionCount > 0 ? "需立即處理" : "暫無待辦"}
-          hint={attentionCount > 0 ? "授權 / 轉接 / 資格" : "保持平台上線即可"}
         />
       </View>
 
@@ -814,73 +701,14 @@ export default function PlatformPresenceScreen() {
               key={item.record.platformCode}
               item={item}
               busy={busyPlatform === item.record.platformCode}
-              variant={variant}
               onToggle={() => void handleTogglePresence(item.record)}
               onReauth={() => handleReauth(item.record)}
-              onOpenBinding={() => router.push("/settings")}
             />
           ))}
         </View>
       )}
 
-      {enrichedPresences.length > 0 ? (
-        <Card
-          theme={THEME}
-          title="Earnings 摘要"
-          subtitle="今日各平台完成數鏡像收入頁"
-          actions={
-            <Btn
-              theme={THEME}
-              variant="ghost"
-              size="sm"
-              onPress={() => router.push("/earnings")}
-            >
-              收入頁
-            </Btn>
-          }
-          padding={0}
-        >
-          <View>
-            {enrichedPresences.map((item, index) => (
-              <EarningsMirrorRow
-                key={`mirror-${item.record.platformCode}`}
-                item={item}
-                todayCount={item.record.status === "online" ? 1 : 0}
-                first={index === 0}
-              />
-            ))}
-          </View>
-        </Card>
-      ) : null}
-
-      {summary?.notes?.length ? (
-        <Card
-          theme={THEME}
-          title={driverStrings.platformPresence.notesTitle}
-          subtitle="同步說明"
-        >
-          <View style={styles.notesList}>
-            {summary.notes.map((note) => (
-              <View key={note} style={styles.notesItem}>
-                <Ionicons name="sync-outline" size={13} color={THEME.info} />
-                <Text style={[styles.notesText, { color: THEME.text }]}>
-                  {note}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </Card>
-      ) : null}
-
-      <Banner
-        theme={THEME}
-        tone="info"
-        title="平台上線規則"
-        body="上線狀態為平台是否可發送訂單給您的依據。離線時不會收到該平台訂單；自營派單與外部平台可同時上線。"
-        icon={
-          <Ionicons name="information-circle" size={16} color={THEME.info} />
-        }
-      />
+      <PlatformRulesBanner notes={summary?.notes ?? []} />
     </Shell>
   );
 }
@@ -888,7 +716,7 @@ export default function PlatformPresenceScreen() {
 const styles = StyleSheet.create({
   shellContent: {
     paddingBottom: 28,
-    gap: 12,
+    gap: 14,
   },
   loadingShellContent: {
     flexGrow: 1,
@@ -903,32 +731,6 @@ const styles = StyleSheet.create({
   },
   loadingLabel: {
     fontSize: 14,
-  },
-  headerActionsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  variantSwitch: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 999,
-    borderWidth: 1,
-    padding: 2,
-    gap: 2,
-  },
-  variantSwitchPill: {
-    width: 28,
-    height: 24,
-    borderRadius: 999,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  variantSwitchLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.5,
   },
   kpiRow: {
     flexDirection: "row",
@@ -957,38 +759,54 @@ const styles = StyleSheet.create({
   },
   platformMarkText: {
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: "800",
     letterSpacing: 0.5,
   },
   platformMain: {
     flex: 1,
-    gap: 4,
     minWidth: 0,
+    gap: 4,
   },
   platformNameRow: {
     flexDirection: "row",
     alignItems: "center",
-    flexWrap: "wrap",
     gap: 6,
+    flexWrap: "wrap",
   },
   platformName: {
+    flexShrink: 1,
     fontSize: 15,
     fontWeight: "700",
-    flexShrink: 1,
   },
   platformMetaRow: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
     gap: 6,
-    marginTop: 2,
   },
-  platformMetaCode: {
-    fontSize: 11,
+  platformStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  platformMetaText: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  platformMetaDivider: {
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+  },
+  platformMetaTime: {
+    fontSize: 11.5,
+    lineHeight: 16,
+    letterSpacing: 0.2,
   },
   platformSwitchColumn: {
-    alignItems: "flex-end",
-    gap: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
   },
   platformReauth: {
     flexDirection: "row",
@@ -1002,73 +820,59 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     fontWeight: "600",
+    lineHeight: 16,
   },
   platformFooter: {
     flexDirection: "row",
-    flexWrap: "wrap",
     alignItems: "center",
-    gap: 14,
+    gap: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderTopWidth: 1,
   },
-  platformFooterMeta: {
+  platformFooterToken: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    flexWrap: "wrap",
   },
   platformFooterLabel: {
     fontSize: 11,
     fontWeight: "600",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
+    lineHeight: 14,
   },
-  platformDetails: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    gap: 10,
+  platformFooterValue: {
+    fontSize: 11.5,
+    lineHeight: 15,
   },
-  platformActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  mirrorRow: {
+  platformFooterToday: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderTopWidth: 1,
+    gap: 4,
   },
-  mirrorCode: {
-    width: 48,
-    fontSize: 11.5,
+  platformFooterTodayCount: {
+    fontSize: 13,
     fontWeight: "700",
-    letterSpacing: 0.5,
+    letterSpacing: -0.2,
   },
-  mirrorName: {
-    flex: 1,
-    fontSize: 12.5,
-  },
-  mirrorCount: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  mirrorUnit: {
-    fontSize: 11,
-  },
-  notesList: {
+  infoBannerBody: {
     gap: 8,
   },
-  notesItem: {
+  infoBannerRule: {
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  infoBannerNotes: {
+    gap: 6,
+  },
+  infoBannerNoteRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 8,
   },
-  notesText: {
+  infoBannerNoteText: {
     flex: 1,
-    fontSize: 12.5,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 17,
   },
 });
