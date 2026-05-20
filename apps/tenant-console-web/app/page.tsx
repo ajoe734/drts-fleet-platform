@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type {
   BookingRecord,
@@ -21,7 +20,6 @@ import {
   CanvasTable,
   type CanvasTableColumn,
   type CanvasTone,
-  type CanvasBtnProps,
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
@@ -37,102 +35,19 @@ const th = buildCanvasTheme({
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "grid",
-  gap: 18,
-};
-
-const heroGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.45fr) minmax(320px, 0.95fr)",
   gap: 16,
 };
 
 const kpiGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 12,
 };
 
 const contentGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.55fr) minmax(320px, 0.95fr)",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(340px, 1fr)",
   gap: 16,
-};
-
-const heroStackStyle: CSSProperties = {
-  display: "grid",
-  gap: 12,
-};
-
-const heroHeaderStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 12,
-  flexWrap: "wrap",
-};
-
-const heroTitleStyle: CSSProperties = {
-  margin: 0,
-  color: th.text,
-  fontSize: 28,
-  lineHeight: 1.05,
-  letterSpacing: -0.5,
-};
-
-const heroLeadStyle: CSSProperties = {
-  margin: "6px 0 0",
-  color: th.textMuted,
-  fontSize: 13,
-  lineHeight: 1.5,
-};
-
-const heroPillRowStyle: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const heroActionsStyle: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const quotaMetricsStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 12,
-};
-
-const quotaMetricStyle: CSSProperties = {
-  padding: "12px 14px",
-  borderRadius: 10,
-  border: `1px solid ${th.border}`,
-  background: th.surfaceLo,
-};
-
-const quotaMetricLabelStyle: CSSProperties = {
-  color: th.textMuted,
-  fontSize: 10.5,
-  fontWeight: 700,
-  letterSpacing: 0.5,
-  textTransform: "uppercase",
-};
-
-const quotaMetricValueStyle: CSSProperties = {
-  marginTop: 6,
-  color: th.text,
-  fontSize: 19,
-  fontWeight: 700,
-  lineHeight: 1.1,
-  fontFamily: th.monoFamily,
-};
-
-const quotaMetricSubStyle: CSSProperties = {
-  marginTop: 4,
-  color: th.textMuted,
-  fontSize: 11.5,
-  lineHeight: 1.4,
 };
 
 const bookingPrimaryStyle: CSSProperties = {
@@ -170,17 +85,12 @@ const reminderMetaStyle: CSSProperties = {
 
 const reminderCardStyle: CSSProperties = {
   display: "grid",
-  gap: 8,
+  gap: 10,
 };
 
 const reminderPanelStyle: CSSProperties = {
   display: "grid",
-  gap: 14,
-};
-
-const fieldGridStyle: CSSProperties = {
-  display: "grid",
-  gap: 2,
+  gap: 16,
 };
 
 const emptyStateStyle: CSSProperties = {
@@ -188,18 +98,6 @@ const emptyStateStyle: CSSProperties = {
   color: th.textMuted,
   fontSize: 12.5,
   textAlign: "center",
-};
-
-const navButtonWrapStyle: CSSProperties = {
-  position: "relative",
-  display: "inline-flex",
-};
-
-const navButtonLinkStyle: CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  borderRadius: 7,
-  zIndex: 1,
 };
 
 const shortDateTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
@@ -239,25 +137,6 @@ type ReminderBanner = {
   actionHref?: string;
   actionLabel?: string;
 };
-
-type NavCanvasBtnProps = Omit<CanvasBtnProps, "onClick"> & {
-  href: string;
-  ariaLabel: string;
-};
-
-function NavCanvasBtn({
-  href,
-  ariaLabel,
-  children,
-  ...buttonProps
-}: NavCanvasBtnProps) {
-  return (
-    <span style={navButtonWrapStyle}>
-      <CanvasBtn {...buttonProps}>{children}</CanvasBtn>
-      <Link aria-label={ariaLabel} href={href} style={navButtonLinkStyle} />
-    </span>
-  );
-}
 
 async function loadHomeData(): Promise<HomeData> {
   const client = getTenantClient();
@@ -666,12 +545,6 @@ export default async function HomePage() {
     ),
   }));
   const quotaTone = getQuotaTone(data.quotaSummary);
-  const quotaBannerTone: ReminderBanner["tone"] =
-    quotaTone === "warn"
-      ? "warn"
-      : quotaTone === "success"
-        ? "success"
-        : "info";
   const latestInvoiceLabel = latestInvoice
     ? `${latestInvoice.periodStart.slice(0, 7)} · ${latestInvoice.status}`
     : "尚無帳單";
@@ -713,17 +586,10 @@ export default async function HomePage() {
         subtitle={subtitle}
         actions={
           <>
-            <NavCanvasBtn
-              ariaLabel="前往幫助中心"
-              href="/settings"
-              theme={th}
-              icon="ext"
-              size="sm"
-            >
+            <CanvasBtn href="/settings" theme={th} icon="ext" size="sm">
               幫助中心
-            </NavCanvasBtn>
-            <NavCanvasBtn
-              ariaLabel="前往建立叫車頁面"
+            </CanvasBtn>
+            <CanvasBtn
               href="/bookings/new"
               theme={th}
               variant="primary"
@@ -731,7 +597,7 @@ export default async function HomePage() {
               size="sm"
             >
               建立叫車
-            </NavCanvasBtn>
+            </CanvasBtn>
           </>
         }
       />
@@ -746,156 +612,6 @@ export default async function HomePage() {
             body={data.errors.join(" · ")}
           />
         ) : null}
-
-        <div style={heroGridStyle}>
-          <CanvasCard theme={th}>
-            <div style={heroStackStyle}>
-              <div style={heroHeaderStyle}>
-                <div>
-                  <div style={heroPillRowStyle}>
-                    <CanvasPill theme={th} tone="accent">
-                      TENANT HOME
-                    </CanvasPill>
-                    <CanvasPill theme={th} tone="neutral" dot>
-                      {formatHeaderDate(now)}
-                    </CanvasPill>
-                  </div>
-                  <h2 style={heroTitleStyle}>{`早安，${greetingName}`}</h2>
-                  <p style={heroLeadStyle}>
-                    今天的租戶工作區聚焦月配額、進行中派遣與提醒事項；首頁資料維持
-                    availability-first 快照。
-                  </p>
-                </div>
-                <div style={heroActionsStyle}>
-                  <NavCanvasBtn
-                    ariaLabel="前往建立叫車頁面"
-                    href="/bookings/new"
-                    theme={th}
-                    variant="primary"
-                    icon="plus"
-                    size="sm"
-                  >
-                    建立叫車
-                  </NavCanvasBtn>
-                  <NavCanvasBtn
-                    ariaLabel="前往叫車列表"
-                    href="/bookings"
-                    theme={th}
-                    variant="secondary"
-                    size="sm"
-                  >
-                    查看訂單
-                  </NavCanvasBtn>
-                </div>
-              </div>
-
-              <CanvasDL
-                theme={th}
-                cols={3}
-                items={[
-                  {
-                    label: "Tenant",
-                    value: data.identity?.tenantId ?? "tenant-demo-001",
-                    mono: true,
-                  },
-                  {
-                    label: "Quota Cycle",
-                    value: formatPeriodKey(data.quotaSummary?.periodKey),
-                    mono: true,
-                  },
-                  {
-                    label: "Latest Invoice",
-                    value: latestInvoice?.invoiceId ?? "—",
-                    mono: true,
-                  },
-                ]}
-              />
-
-              <CanvasBanner
-                theme={th}
-                tone={quotaBannerTone}
-                icon={quotaBannerTone === "warn" ? "warn" : "check"}
-                title={formatQuotaHeader(data.quotaSummary)}
-                body={quotaBody}
-                actions={
-                  <NavCanvasBtn
-                    ariaLabel="前往審批與配額頁面"
-                    href="/rules"
-                    theme={th}
-                    variant="ghost"
-                    size="xs"
-                  >
-                    查看配額
-                  </NavCanvasBtn>
-                }
-              />
-            </div>
-          </CanvasCard>
-
-          <CanvasCard
-            theme={th}
-            title="月配額"
-            subtitle={formatPeriodKey(data.quotaSummary?.periodKey)}
-            actions={
-              <CanvasPill theme={th} tone={quotaTone} dot>
-                {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
-              </CanvasPill>
-            }
-          >
-            <div style={heroStackStyle}>
-              <div style={quotaMetricsStyle}>
-                <div style={quotaMetricStyle}>
-                  <div style={quotaMetricLabelStyle}>Used</div>
-                  <div style={quotaMetricValueStyle}>
-                    {formatQuotaUsage(data.quotaSummary)}
-                  </div>
-                  <div style={quotaMetricSubStyle}>已確認 + 待審批保留</div>
-                </div>
-                <div style={quotaMetricStyle}>
-                  <div style={quotaMetricLabelStyle}>Remaining</div>
-                  <div style={quotaMetricValueStyle}>
-                    {formatRemainingPercent(data.quotaSummary)}
-                  </div>
-                  <div style={quotaMetricSubStyle}>
-                    上限 {formatQuotaLimit(data.quotaSummary)}
-                  </div>
-                </div>
-              </div>
-
-              <CanvasDL
-                theme={th}
-                cols={2}
-                items={[
-                  {
-                    label: "Enforcement",
-                    value: formatQuotaMode(
-                      data.quotaSummary?.limit.enforcementMode,
-                    ),
-                  },
-                  {
-                    label: "Currency",
-                    value: data.quotaSummary?.limit.currency ?? "—",
-                    mono: true,
-                  },
-                  {
-                    label: "Pending Reserve",
-                    value: formatCount(
-                      data.quotaSummary?.usage.pendingReservedBookingCount ?? 0,
-                    ),
-                    mono: true,
-                  },
-                  {
-                    label: "Confirmed",
-                    value: formatCount(
-                      data.quotaSummary?.usage.confirmedBookingCount ?? 0,
-                    ),
-                    mono: true,
-                  },
-                ]}
-              />
-            </div>
-          </CanvasCard>
-        </div>
 
         <div style={kpiGridStyle}>
           <CanvasKPI
@@ -937,15 +653,9 @@ export default async function HomePage() {
             subtitle={`${formatCount(activeBookings.length)} 筆 active bookings`}
             padding={0}
             actions={
-              <NavCanvasBtn
-                ariaLabel="前往叫車列表"
-                href="/bookings"
-                theme={th}
-                variant="ghost"
-                size="sm"
-              >
+              <CanvasBtn href="/bookings" theme={th} variant="ghost" size="sm">
                 前往叫車
-              </NavCanvasBtn>
+              </CanvasBtn>
             }
           >
             {rows.length > 0 ? (
@@ -959,7 +669,12 @@ export default async function HomePage() {
             <CanvasCard
               theme={th}
               title="提醒"
-              subtitle={`${data.notifications.length} 則通知`}
+              subtitle={quotaBody}
+              actions={
+                <CanvasPill theme={th} tone={quotaTone} dot>
+                  {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
+                </CanvasPill>
+              }
             >
               <div style={reminderCardStyle}>
                 <div style={bannerStackStyle}>
@@ -967,15 +682,14 @@ export default async function HomePage() {
                     <CanvasBanner
                       actions={
                         banner.actionHref && banner.actionLabel ? (
-                          <NavCanvasBtn
-                            ariaLabel={banner.actionLabel}
+                          <CanvasBtn
                             href={banner.actionHref}
                             theme={th}
                             variant="ghost"
                             size="xs"
                           >
                             {banner.actionLabel}
-                          </NavCanvasBtn>
+                          </CanvasBtn>
                         ) : undefined
                       }
                       body={banner.body}
@@ -988,54 +702,60 @@ export default async function HomePage() {
                   ))}
                 </div>
                 <div style={reminderMetaStyle}>
-                  <CanvasPill theme={th} tone={quotaTone} dot>
-                    {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
-                  </CanvasPill>
                   <span>{enabledFlagCount ?? 0} 個模組啟用中</span>
+                  <span>
+                    {formatPeriodKey(data.quotaSummary?.periodKey)} ·{" "}
+                    {formatRemainingPercent(data.quotaSummary)}
+                  </span>
                 </div>
               </div>
             </CanvasCard>
 
-            <CanvasCard
-              theme={th}
-              title="治理摘要"
-              subtitle="租戶整合與帳務快照"
-            >
-              <div style={fieldGridStyle}>
-                <CanvasField
-                  theme={th}
-                  label="當期帳單"
-                  hint="最新 invoice snapshot"
-                >
-                  <div style={bookingWindowStyle}>
-                    {latestInvoice
-                      ? `${formatMoney(latestInvoice.amount)} · ${latestInvoice.status}`
-                      : "尚無帳單"}
-                  </div>
-                </CanvasField>
-                <CanvasField
-                  theme={th}
-                  label="整合待辦"
-                  hint="governance checklist"
-                >
-                  <div style={bookingWindowStyle}>
-                    {governanceChecklistCount > 0
-                      ? `${formatCount(governanceChecklistCount)} 項待完成`
-                      : "沒有待辦"}
-                  </div>
-                </CanvasField>
-                <CanvasField
-                  theme={th}
-                  label="通知基線"
-                  hint="latest activity snapshot"
-                >
-                  <div style={bookingWindowStyle}>
-                    {data.notifications[0]
-                      ? `${data.notifications[0].title} · ${formatDateTime(data.notifications[0].createdAt)}`
-                      : "目前沒有新通知"}
-                  </div>
-                </CanvasField>
-              </div>
+            <CanvasCard theme={th} title="月配額" subtitle="租戶治理與帳務快照">
+              <CanvasDL
+                theme={th}
+                cols={1}
+                items={[
+                  {
+                    label: "Tenant",
+                    value: data.identity?.tenantId ?? "tenant-demo-001",
+                    mono: true,
+                  },
+                  {
+                    label: "Latest Invoice",
+                    value: latestInvoice?.invoiceId ?? "—",
+                    mono: true,
+                  },
+                ]}
+              />
+              <div style={{ height: 10 }} />
+              <CanvasField theme={th} label="配額模式" hint="quota enforcement">
+                <div style={bookingWindowStyle}>
+                  {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
+                </div>
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label="整合待辦"
+                hint="governance checklist"
+              >
+                <div style={bookingWindowStyle}>
+                  {governanceChecklistCount > 0
+                    ? `${formatCount(governanceChecklistCount)} 項待完成`
+                    : "沒有待辦"}
+                </div>
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label="當期帳單"
+                hint="latest invoice snapshot"
+              >
+                <div style={bookingWindowStyle}>
+                  {latestInvoice
+                    ? `${formatMoney(latestInvoice.amount)} · ${latestInvoice.status}`
+                    : "尚無帳單"}
+                </div>
+              </CanvasField>
             </CanvasCard>
           </div>
         </div>

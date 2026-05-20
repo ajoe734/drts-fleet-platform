@@ -677,6 +677,7 @@ export interface BtnProps {
   children: ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  href?: string;
   onClick?: () => void;
   style?: CSSProperties;
 }
@@ -689,6 +690,7 @@ export function Btn({
   children,
   danger = false,
   disabled = false,
+  href,
   onClick,
   style,
 }: BtnProps) {
@@ -722,33 +724,49 @@ export function Btn({
             shadow: "none",
           };
 
+  const buttonStyle: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: sizing.padding,
+    fontSize: sizing.fontSize,
+    height: sizing.height,
+    fontWeight: 500,
+    background: styles.bg,
+    color: styles.fg,
+    border: `1px solid ${styles.bd}`,
+    borderRadius: 7,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+    boxShadow: styles.shadow,
+    lineHeight: 1,
+    fontFamily: theme.fontFamily,
+    textDecoration: "none",
+    ...style,
+  };
+  const content = (
+    <>
+      {renderIcon(icon, sizing.icon)}
+      {children}
+    </>
+  );
+
+  if (href && !disabled) {
+    return (
+      <Link href={href} style={buttonStyle}>
+        {content}
+      </Link>
+    );
+  }
+
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: sizing.padding,
-        fontSize: sizing.fontSize,
-        height: sizing.height,
-        fontWeight: 500,
-        background: styles.bg,
-        color: styles.fg,
-        border: `1px solid ${styles.bd}`,
-        borderRadius: 7,
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-        boxShadow: styles.shadow,
-        lineHeight: 1,
-        fontFamily: theme.fontFamily,
-        ...style,
-      }}
+      style={buttonStyle}
     >
-      {renderIcon(icon, sizing.icon)}
-      {children}
+      {content}
     </button>
   );
 }
