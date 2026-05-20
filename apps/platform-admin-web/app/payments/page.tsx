@@ -6,7 +6,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
   formatPlatformCodeLabel,
@@ -23,9 +23,33 @@ import type {
   SettlementMatrixRecord,
   TenantInvoiceRecord,
 } from "@drts/contracts";
+import {
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasField,
+  CanvasKPI,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasShell,
+  CanvasTable,
+  buildCanvasTheme,
+} from "@drts/ui-web";
+import type {
+  CanvasShellNavItem,
+  CanvasTableColumn,
+  CanvasTheme,
+  CanvasTone,
+} from "@drts/ui-web";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_FINANCE_ACTOR_ID = "finance.console";
+const REOPEN_WARN_THRESHOLD = 5;
+const PLATFORM_THEME = buildCanvasTheme({
+  surface: "platform",
+  density: "compact",
+});
 const MATRIX_CHANNEL_ORDER = [
   "tenant_enterprise",
   "partner_airport",
@@ -50,6 +74,18 @@ const RECONCILIATION_RESOLUTION_OPTIONS: (typeof RECONCILIATION_ISSUE_RESOLUTION
     "no_action_required",
     "resolved_other",
   ];
+const ISSUE_STATUS_PRIORITY: Record<ReconciliationIssueRecord["status"], number> =
+  {
+    reopened: 0,
+    open: 1,
+    assigned: 2,
+    resolved: 3,
+  };
+type IssueTableRow = ReconciliationIssueRecord & Record<string, unknown>;
+type MatrixTableRow = SettlementMatrixRecord & Record<string, unknown>;
+type InvoiceTableRow = TenantInvoiceRecord & Record<string, unknown>;
+type StatementTableRow = DriverStatementRecord & Record<string, unknown>;
+type ReimbursementTableRow = ReimbursementBatchRecord & Record<string, unknown>;
 
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -87,6 +123,10 @@ function formatMoney(
   return `${amount.amountMinor.toLocaleString()} ${amount.currency}`;
 }
 
+function formatMinorMoney(amountMinor: number, currency: string) {
+  return `${amountMinor.toLocaleString()} ${currency}`;
+}
+
 function reimbursementWorkflow(
   batch: ReimbursementBatchRecord,
   awaitingApproval: string,
@@ -107,6 +147,17 @@ function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
       (priority.get(left.channelKey) ?? Number.MAX_SAFE_INTEGER) -
       (priority.get(right.channelKey) ?? Number.MAX_SAFE_INTEGER),
   );
+}
+
+function sortReconciliationIssues(rows: ReconciliationIssueRecord[]) {
+  return [...rows].sort((left, right) => {
+    const statusDelta =
+      ISSUE_STATUS_PRIORITY[left.status] - ISSUE_STATUS_PRIORITY[right.status];
+    if (statusDelta !== 0) {
+      return statusDelta;
+    }
+    return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+  });
 }
 
 function settlementMatrixKey(
@@ -157,10 +208,203 @@ function parseArtifactIds(value: string) {
     .filter(Boolean);
 }
 
+function issueStatusTone(
+  status: ReconciliationIssueRecord["status"],
+): CanvasTone {
+  switch (status) {
+    case "resolved":
+      return "success";
+    case "reopened":
+      return "danger";
+    case "assigned":
+      return "info";
+    case "open":
+    default:
+      return "warn";
+  }
+}
+
+function invoiceStatusTone(status: TenantInvoiceRecord["status"]): CanvasTone {
+  switch (status) {
+    case "paid":
+      return "success";
+    case "draft":
+      return "neutral";
+    case "issued":
+    default:
+      return "warn";
+  }
+}
+
+function reimbursementStatusTone(
+  status: ReimbursementBatchRecord["status"],
+): CanvasTone {
+  switch (status) {
+    case "paid":
+      return "success";
+    case "pending":
+      return "info";
+    default:
+      return "warn";
+  }
+}
+
+function payoutStatusTone(
+  status: DriverStatementRecord["payoutStatus"],
+): CanvasTone {
+  return status === "paid" ? "success" : "warn";
+}
+
+function ledgerModeTone(
+  mode: SettlementMatrixRecord["localLedgerMode"],
+): CanvasTone {
+  return mode === "shadow_only" ? "info" : "success";
+}
+
+function hoursBetween(startAt?: string | null, endAt?: string | null) {
+  const start = startAt ? Date.parse(startAt) : Number.NaN;
+  const end = endAt ? Date.parse(endAt) : Number.NaN;
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) {
+    return null;
+  }
+  return (end - start) / 3_600_000;
+}
+
+function average(values: Array<number | null>) {
+  const list = values.filter(
+    (value): value is number => typeof value === "number" && Number.isFinite(value),
+  );
+  if (list.length === 0) {
+    return null;
+  }
+  return list.reduce((sum, value) => sum + value, 0) / list.length;
+}
+
+function formatHours(value: number | null) {
+  if (value === null) {
+    return "—";
+  }
+  if (value >= 72) {
+    return `${(value / 24).toFixed(1)}d`;
+  }
+  return `${Math.max(1, Math.round(value))}h`;
+}
+
+function withinDays(value: string, days: number) {
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) {
+    return false;
+  }
+  return Date.now() - time <= days * 24 * 3_600_000;
+}
+
+function viewportStyle(theme: CanvasTheme): React.CSSProperties {
+  return {
+    position: "fixed",
+    inset: 0,
+    zIndex: 10,
+    background: theme.bg,
+  };
+}
+
+function pageBodyStyle(theme: CanvasTheme): React.CSSProperties {
+  return {
+    padding: "16px 24px 24px",
+    display: "grid",
+    gap: theme.sectGap,
+  };
+}
+
+function nativeControlStyle(
+  theme: CanvasTheme,
+  options?: { mono?: boolean },
+): React.CSSProperties {
+  return {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "8px 10px",
+    borderRadius: 7,
+    border: `1px solid ${theme.border}`,
+    background: theme.bgRaised,
+    color: theme.text,
+    fontSize: 12.5,
+    fontFamily: options?.mono ? theme.monoFamily : theme.fontFamily,
+    lineHeight: 1.35,
+  };
+}
+
+function nativeTextAreaStyle(theme: CanvasTheme): React.CSSProperties {
+  return {
+    ...nativeControlStyle(theme),
+    minHeight: 92,
+    resize: "vertical",
+  };
+}
+
+function nativeSubmitStyle(
+  theme: CanvasTheme,
+  options?: {
+    primary?: boolean;
+    disabled?: boolean;
+  },
+): React.CSSProperties {
+  const primary = options?.primary ?? false;
+  const disabled = options?.disabled ?? false;
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    padding: "7px 12px",
+    minHeight: 30,
+    borderRadius: 7,
+    border: `1px solid ${primary ? theme.accent : theme.border}`,
+    background: primary ? theme.accent : theme.surface,
+    color: primary ? "#fff" : theme.text,
+    fontSize: 12.5,
+    fontWeight: 600,
+    fontFamily: theme.fontFamily,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+  };
+}
+
+function sectionGridStyle(columns: string): React.CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: columns,
+    gap: 16,
+    alignItems: "start",
+  };
+}
+
+function emptyStateStyle(theme: CanvasTheme): React.CSSProperties {
+  return {
+    padding: 18,
+    color: theme.textMuted,
+    fontSize: 12.5,
+  };
+}
+
+function cellStackStyle(options?: {
+  mono?: boolean;
+  align?: "left" | "right";
+}): React.CSSProperties {
+  return {
+    display: "grid",
+    gap: 4,
+    minWidth: 0,
+    whiteSpace: "normal",
+    textAlign: options?.align ?? "left",
+    fontFamily: options?.mono ? PLATFORM_THEME.monoFamily : undefined,
+  };
+}
+
 export default function PaymentsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const defaults = getPreviousMonthDefaults();
+  const theme = PLATFORM_THEME;
   const [financeActorId, setFinanceActorId] = useState(
     DEFAULT_FINANCE_ACTOR_ID,
   );
@@ -575,9 +819,79 @@ export default function PaymentsPage() {
   const paidReimbursementMinor = reimbursements
     .filter((batch) => batch.status === "paid")
     .reduce((sum, batch) => sum + batch.totalAmount.amountMinor, 0);
-  const openReconciliationCount = reconciliationIssues.filter(
+  const openIssues = reconciliationIssues.filter(
     (issue) => issue.status !== "resolved",
+  );
+  const openReconciliationCount = openIssues.length;
+  const sortedIssues = sortReconciliationIssues(reconciliationIssues);
+  const sortedMatrix = sortSettlementMatrix(settlementMatrix);
+  const pendingReimbursements = reimbursements.filter(
+    (batch) => batch.status !== "paid",
+  );
+  const recentIssues = reconciliationIssues.filter((issue) =>
+    withinDays(issue.updatedAt || issue.createdAt, 30),
+  );
+  const issueWindow = recentIssues.length > 0 ? recentIssues : reconciliationIssues;
+  const reopenedWindowCount = issueWindow.filter(
+    (issue) => issue.reopenCount > 0 || issue.status === "reopened",
   ).length;
+  const reopenRate =
+    issueWindow.length > 0 ? (reopenedWindowCount / issueWindow.length) * 100 : 0;
+  const reopenRateWarning = reopenRate >= REOPEN_WARN_THRESHOLD;
+  const resolvedWindow = issueWindow.filter((issue) => issue.resolvedAt);
+  const handlingWindow = resolvedWindow.length > 0 ? resolvedWindow : openIssues;
+  const averageHandlingHours = average(
+    handlingWindow.map((issue) =>
+      hoursBetween(issue.createdAt, issue.resolvedAt ?? issue.updatedAt),
+    ),
+  );
+  const openIssueMix = summarizeChannelMix(
+    openIssues.map((issue) => issue.channelKey),
+    describeMatrixChannel,
+  );
+  const shadowIssueCount = reconciliationIssues.filter(
+    (issue) =>
+      issue.channelKey === "forwarded_shadow" ||
+      issue.forwardedFinanceContext != null,
+  ).length;
+  const partnerIssueCount = openIssues.filter(
+    (issue) => issue.channelKey === "partner_airport",
+  ).length;
+  const forwardedIssueCount = openIssues.filter(
+    (issue) => issue.channelKey === "forwarded_shadow",
+  ).length;
+  const tenantIssueCount = openIssues.filter(
+    (issue) => issue.channelKey === "tenant_enterprise",
+  ).length;
+  const phoneIssueCount = openIssues.filter(
+    (issue) => issue.channelKey === "phone_dispatch",
+  ).length;
+
+  const invoicesById = new Map(invoices.map((invoice) => [invoice.invoiceId, invoice]));
+  const reimbursementsById = new Map(
+    reimbursements.map((batch) => [batch.batchId, batch]),
+  );
+  let exposureMinor = 0;
+  let exposureCurrency = "TWD";
+  let linkedExposureCount = 0;
+  for (const issue of openIssues) {
+    const linkedInvoice = issue.linkedInvoiceId
+      ? invoicesById.get(issue.linkedInvoiceId)
+      : undefined;
+    const linkedBatch = issue.linkedReimbursementBatchId
+      ? reimbursementsById.get(issue.linkedReimbursementBatchId)
+      : undefined;
+    if (linkedInvoice) {
+      exposureMinor += linkedInvoice.amount?.amountMinor ?? 0;
+      exposureCurrency = linkedInvoice.amount?.currency ?? exposureCurrency;
+      linkedExposureCount += 1;
+    }
+    if (linkedBatch) {
+      exposureMinor += linkedBatch.totalAmount.amountMinor;
+      exposureCurrency = linkedBatch.totalAmount.currency ?? exposureCurrency;
+      linkedExposureCount += 1;
+    }
+  }
 
   const describeLedgerMode = (
     mode: SettlementMatrixRecord["localLedgerMode"],
@@ -598,1093 +912,1590 @@ export default function PaymentsPage() {
       describeMatrixChannel,
     );
 
-  if (loading) {
-    return <div className="admin-empty">{t("payments.loading")}</div>;
-  }
+  const navLabels =
+    locale === "en"
+      ? {
+          home: "Home",
+          health: "Health & Alerts",
+          tenantGroup: "Tenant Governance",
+          tenants: "Tenants",
+          partners: "Partners",
+          users: "Users",
+          fleetGroup: "Fleet & Compliance",
+          fleet: "Fleet & Devices",
+          switchboard: "Switchboard",
+          pricingGroup: "Pricing & Settlement",
+          pricing: "Pricing",
+          payments: "Payments",
+          platformGroup: "Platform Layer",
+          notices: "Notices",
+          audit: "Audit Trail",
+          flags: "Feature Flags",
+          adapters: "Adapter Registry",
+        }
+      : {
+          home: "工作首頁",
+          health: "平台健康",
+          tenantGroup: "租戶治理",
+          tenants: "租戶",
+          partners: "合作夥伴",
+          users: "平台人員",
+          fleetGroup: "車隊與合規",
+          fleet: "車隊與設備",
+          switchboard: "法定資訊與牌貼",
+          pricingGroup: "計價與結算",
+          pricing: "計價",
+          payments: "結算治理",
+          platformGroup: "平台層",
+          notices: "公告與維護",
+          audit: "稽核軌跡",
+          flags: "功能旗標",
+          adapters: "介接登錄",
+        };
+
+  const copy =
+    locale === "en"
+      ? {
+          breadcrumbParent: "Pricing & Settlement",
+          pageTitle: "Settlement governance",
+          pageSubtitle:
+            "invoices · driver statements · reimbursement batches · settlement matrix · reconciliation issues",
+          export: "Export",
+          openIssue: "Open issue",
+          searchPlaceholder: "Search orders, tenants, drivers...",
+          queueSubtitle:
+            "Track finance exceptions before drilling into detailed evidence handling.",
+          queueProfileTitle: "Queue profile",
+          queueProfileSubtitle: "Current operator slice",
+          releaseControlsTitle: "Release controls",
+          releaseControlsSubtitle:
+            "Generate invoices and statements without leaving the payments route.",
+          issueActionsTitle: "Reconciliation workflow actions",
+          issueActionsSubtitle:
+            "Assignment, evidence, resolve, and reopen stay on the same control plane.",
+          createIssueTitle: "Open reconciliation issue",
+          createIssueSubtitle:
+            "Seed actor, context, and the first evidence note in one pass.",
+          outstandingLabel: "Current outstanding",
+          exposureLabel: "Cumulative exposure",
+          handlingLabel: "Average handling time",
+          reopenRateLabel: "Reopen rate",
+          reopenDeltaWarn: `warn threshold ${REOPEN_WARN_THRESHOLD}%`,
+          reopenDeltaOk: `ok < ${REOPEN_WARN_THRESHOLD}%`,
+          reopenBannerTitle: "Reopen rate exceeded threshold",
+          reopenBannerBody: (rate: string, count: number) =>
+            `${rate} of the current 30-day issue window has already been reopened. ${count} row(s) need closer queue hygiene before they recycle again.`,
+          queueWindow: "Recent issue window",
+          linkedExposure: "Linked exposure",
+          shadowIssues: "Shadow issues",
+          openMix: "Open mix",
+          actorLabel: "Finance actor ID",
+          loading: t("payments.loading"),
+        }
+      : {
+          breadcrumbParent: "計價與結算",
+          pageTitle: "結算治理",
+          pageSubtitle:
+            "invoices · driver statements · reimbursement batches · settlement matrix · reconciliation issues",
+          export: "匯出",
+          openIssue: "開立 issue",
+          searchPlaceholder: "搜尋訂單、租戶、司機...",
+          queueSubtitle: "先在總表追蹤財務例外，再往下做證據與狀態處理。",
+          queueProfileTitle: "Queue 總覽",
+          queueProfileSubtitle: "目前治理切面",
+          releaseControlsTitle: "產出控制",
+          releaseControlsSubtitle: "不離開 payments route 直接產 invoice 與 statements。",
+          issueActionsTitle: "Reconciliation workflow actions",
+          issueActionsSubtitle: "指派、補 evidence、結案與重開都維持在同一個 control plane。",
+          createIssueTitle: "開立 reconciliation issue",
+          createIssueSubtitle: "一次補齊 actor、context 與第一筆 evidence note。",
+          outstandingLabel: "當期 outstanding",
+          exposureLabel: "差額累計",
+          handlingLabel: "平均處理時間",
+          reopenRateLabel: "reopen 率",
+          reopenDeltaWarn: `warn 閾值 ${REOPEN_WARN_THRESHOLD}%`,
+          reopenDeltaOk: `ok < ${REOPEN_WARN_THRESHOLD}%`,
+          reopenBannerTitle: "Reopen 率超過警戒值",
+          reopenBannerBody: (rate: string, count: number) =>
+            `最近 30 天 issue 視窗中已有 ${rate} 項目曾被重開。至少 ${count} 筆需要提高 queue hygiene，避免再次循環。`,
+          queueWindow: "近 30 天 issue 視窗",
+          linkedExposure: "關聯金額",
+          shadowIssues: "Shadow issues",
+          openMix: "Open mix",
+          actorLabel: "財務操作人 ID",
+          loading: t("payments.loading"),
+        };
+
+  const tabs = [
+    t("payments.matrix.title"),
+    t("payments.invoicesTitle"),
+    t("payments.statementsTitle"),
+    t("payments.tab.reimbursements"),
+    t("payments.reconciliation.title"),
+  ];
+
+  const shellNav: CanvasShellNavItem[] = [
+    { key: "home", href: "/", label: navLabels.home, icon: "dashboard" },
+    {
+      key: "health",
+      href: "/health",
+      label: navLabels.health,
+      icon: "health",
+    },
+    { divider: navLabels.tenantGroup },
+    { key: "tenants", href: "/tenants", label: navLabels.tenants, icon: "tenants" },
+    {
+      key: "partners",
+      href: "/partners",
+      label: navLabels.partners,
+      icon: "partners",
+    },
+    { key: "users", href: "/users", label: navLabels.users, icon: "users" },
+    { divider: navLabels.fleetGroup },
+    { key: "fleet", href: "/fleet", label: navLabels.fleet, icon: "fleet" },
+    {
+      key: "switchboard",
+      href: "/switchboard",
+      label: navLabels.switchboard,
+      icon: "switchboard",
+    },
+    { divider: navLabels.pricingGroup },
+    {
+      key: "pricing",
+      href: "/pricing",
+      label: navLabels.pricing,
+      icon: "pricing",
+    },
+    {
+      key: "payments",
+      href: "/payments",
+      label: navLabels.payments,
+      icon: "payments",
+      badge: openReconciliationCount > 0 ? String(openReconciliationCount) : undefined,
+      badgeTone: openReconciliationCount > 0 ? "danger" : "neutral",
+      matchPaths: ["/payments"],
+    },
+    { divider: navLabels.platformGroup },
+    {
+      key: "notices",
+      href: "/notices",
+      label: navLabels.notices,
+      icon: "notices",
+    },
+    { key: "audit", href: "/audit", label: navLabels.audit, icon: "audit" },
+    {
+      key: "flags",
+      href: "/feature-flags",
+      label: navLabels.flags,
+      icon: "flags",
+    },
+    {
+      key: "adapters",
+      href: "/adapter-registry",
+      label: navLabels.adapters,
+      icon: "adapters",
+    },
+  ];
+
+  const issueColumns: CanvasTableColumn<IssueTableRow>[] = [
+    {
+      h: "Issue",
+      w: 116,
+      mono: true,
+      r: (issue) => (
+        <div style={cellStackStyle({ mono: true })}>
+          <span style={{ color: theme.accent, fontWeight: 700 }}>
+            {issue.issueId}
+          </span>
+          {issue.reopenCount > 0 ? (
+            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+              {t("payments.reconciliation.reopenCount", {
+                count: String(issue.reopenCount),
+              })}
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      h: "Source",
+      w: 132,
+      r: (issue) => (
+        <CanvasPill
+          theme={theme}
+          tone={issue.source === "forwarder_auto" ? "accent" : "neutral"}
+        >
+          {formatPlatformCodeLabel(locale, issue.source)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: "Type",
+      w: 200,
+      mono: true,
+      r: (issue) => (
+        <div style={cellStackStyle({ mono: true })}>
+          <span>{issue.issueType}</span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {describeMatrixChannel(issue.channelKey)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: "Tenant",
+      w: 128,
+      mono: true,
+      r: (issue) => issue.tenantId ?? "—",
+    },
+    {
+      h: "External order",
+      w: 164,
+      mono: true,
+      r: (issue) =>
+        issue.externalOrderId ?? issue.mirrorOrderId ?? issue.orderId ?? "—",
+    },
+    {
+      h: "Owner",
+      w: 120,
+      r: (issue) => issue.ownerId ?? "—",
+    },
+    {
+      h: "Status",
+      w: 126,
+      r: (issue) => (
+        <div style={cellStackStyle()}>
+          <CanvasPill theme={theme} tone={issueStatusTone(issue.status)} dot>
+            {formatPlatformCodeLabel(locale, issue.status)}
+          </CanvasPill>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {t("payments.reconciliation.evidenceCount", {
+              count: String(issue.evidenceArtifactIds.length),
+            })}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: "Updated",
+      w: 156,
+      mono: true,
+      r: (issue) => formatDateTime(issue.updatedAt),
+    },
+  ];
+
+  const actionColumns: CanvasTableColumn<IssueTableRow>[] = [
+    {
+      h: "Issue",
+      w: 150,
+      r: (issue) => (
+        <div style={cellStackStyle()}>
+          <CanvasPill theme={theme} tone={issueStatusTone(issue.status)} dot>
+            {issue.issueId}
+          </CanvasPill>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {issue.summary}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: "Assignment",
+      w: 220,
+      r: (issue) =>
+        issue.status === "resolved" ? (
+          <div style={cellStackStyle()}>
+            <span>{issue.ownerId ?? "—"}</span>
+            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+              {formatDateTime(issue.updatedAt)}
+            </span>
+          </div>
+        ) : (
+          <input
+            value={issueAssignments[issue.issueId] ?? issue.ownerId ?? ""}
+            onChange={(event) =>
+              setIssueAssignments((current) => ({
+                ...current,
+                [issue.issueId]: event.target.value,
+              }))
+            }
+            placeholder={t("payments.reconciliation.assignee")}
+            style={nativeControlStyle(theme)}
+          />
+        ),
+    },
+    {
+      h: "Evidence note",
+      w: 320,
+      r: (issue) =>
+        issue.status === "resolved" ? (
+          <div style={cellStackStyle()}>
+            <span>
+              {issue.resolutionSummary ??
+                issue.comments.at(-1)?.message ??
+                "—"}
+            </span>
+            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+              {t("payments.reconciliation.commentCount", {
+                count: String(issue.comments.length),
+              })}
+            </span>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
+            <input
+              value={issueComments[issue.issueId] ?? ""}
+              onChange={(event) =>
+                setIssueComments((current) => ({
+                  ...current,
+                  [issue.issueId]: event.target.value,
+                }))
+              }
+              placeholder={t("payments.reconciliation.comment")}
+              style={nativeControlStyle(theme)}
+            />
+            <input
+              value={issueCommentArtifactIds[issue.issueId] ?? ""}
+              onChange={(event) =>
+                setIssueCommentArtifactIds((current) => ({
+                  ...current,
+                  [issue.issueId]: event.target.value,
+                }))
+              }
+              placeholder={t("payments.reconciliation.artifactIds")}
+              style={nativeControlStyle(theme)}
+            />
+          </div>
+        ),
+    },
+    {
+      h: "Resolution / reopen",
+      w: 360,
+      r: (issue) =>
+        issue.status === "resolved" ? (
+          <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
+            <input
+              value={issueReopenReasons[issue.issueId] ?? ""}
+              onChange={(event) =>
+                setIssueReopenReasons((current) => ({
+                  ...current,
+                  [issue.issueId]: event.target.value,
+                }))
+              }
+              placeholder={t("payments.reconciliation.reopenReason")}
+              style={nativeControlStyle(theme)}
+            />
+            <input
+              value={issueReopenArtifactIds[issue.issueId] ?? ""}
+              onChange={(event) =>
+                setIssueReopenArtifactIds((current) => ({
+                  ...current,
+                  [issue.issueId]: event.target.value,
+                }))
+              }
+              placeholder={t("payments.reconciliation.artifactIds")}
+              style={nativeControlStyle(theme)}
+            />
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
+            <select
+              value={issueResolutionCodes[issue.issueId] ?? ""}
+              onChange={(event) =>
+                setIssueResolutionCodes((current) => ({
+                  ...current,
+                  [issue.issueId]: event.target
+                    .value as ReconciliationIssueRecord["resolutionCode"],
+                }))
+              }
+              style={nativeControlStyle(theme)}
+            >
+              <option value="">{t("payments.reconciliation.resolveCode")}</option>
+              {RECONCILIATION_RESOLUTION_OPTIONS.map((code) => (
+                <option key={code} value={code}>
+                  {formatPlatformCodeLabel(locale, code)}
+                </option>
+              ))}
+            </select>
+            <input
+              value={issueResolutionSummaries[issue.issueId] ?? ""}
+              onChange={(event) =>
+                setIssueResolutionSummaries((current) => ({
+                  ...current,
+                  [issue.issueId]: event.target.value,
+                }))
+              }
+              placeholder={t("payments.reconciliation.resolveSummary")}
+              style={nativeControlStyle(theme)}
+            />
+            <input
+              value={issueResolutionArtifactIds[issue.issueId] ?? ""}
+              onChange={(event) =>
+                setIssueResolutionArtifactIds((current) => ({
+                  ...current,
+                  [issue.issueId]: event.target.value,
+                }))
+              }
+              placeholder={t("payments.reconciliation.artifactIds")}
+              style={nativeControlStyle(theme)}
+            />
+          </div>
+        ),
+    },
+    {
+      h: "Actions",
+      w: 206,
+      r: (issue) => (
+        <div style={{ display: "grid", gap: 8, minWidth: 180 }}>
+          {issue.status !== "resolved" ? (
+            <>
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                icon="copy"
+                disabled={issueActionId === issue.issueId}
+                onClick={() => void handleAssignIssue(issue)}
+              >
+                {t("payments.reconciliation.assign")}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                icon="plus"
+                disabled={issueActionId === issue.issueId}
+                onClick={() => void handleCommentIssue(issue)}
+              >
+                {t("payments.reconciliation.addComment")}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                icon="check"
+                disabled={issueActionId === issue.issueId}
+                onClick={() => void handleResolveIssue(issue)}
+              >
+                {t("payments.reconciliation.resolve")}
+              </CanvasBtn>
+            </>
+          ) : (
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              icon="arrow"
+              disabled={issueActionId === issue.issueId}
+              onClick={() => void handleReopenIssue(issue)}
+            >
+              {t("payments.reconciliation.reopen")}
+            </CanvasBtn>
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  const settlementColumns: CanvasTableColumn<MatrixTableRow>[] = [
+    {
+      h: t("payments.matrix.col.channel"),
+      w: 172,
+      r: (row) => (
+        <div style={cellStackStyle()}>
+          <span>{describeMatrixChannel(row.channelKey)}</span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {row.orderDomain} · {row.orderSources.join(" / ")}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("payments.matrix.col.payer"),
+      w: 168,
+      r: (row) => describeMatrixField("payer", row, row.payerType),
+    },
+    {
+      h: t("payments.matrix.col.sponsor"),
+      w: 168,
+      r: (row) => describeMatrixField("sponsor", row, row.sponsorType),
+    },
+    {
+      h: t("payments.matrix.col.invoice"),
+      w: 216,
+      r: (row) => (
+        <div style={cellStackStyle()}>
+          <span>{describeMatrixField("invoiceOwner", row, row.invoiceOwner)}</span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {describeMatrixField("invoice", row, row.invoicePath)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("payments.matrix.col.receipt"),
+      w: 168,
+      r: (row) => describeMatrixField("receipt", row, row.receiptOwner),
+    },
+    {
+      h: t("payments.matrix.col.payout"),
+      w: 172,
+      r: (row) =>
+        describeMatrixField("payout", row, row.driverPayoutAuthority),
+    },
+    {
+      h: t("payments.matrix.col.discount"),
+      w: 220,
+      r: (row) => (
+        <div style={cellStackStyle()}>
+          <span>
+            {describeMatrixField("discount", row, row.discountFundingSource)}
+          </span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {describeMatrixField("reimbursement", row, row.reimbursementRule)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("payments.matrix.col.reconciliation"),
+      w: 176,
+      r: (row) =>
+        describeMatrixField("reconciliation", row, row.reconciliationPath),
+    },
+    {
+      h: t("payments.matrix.col.ledger"),
+      w: 112,
+      r: (row) => (
+        <CanvasPill theme={theme} tone={ledgerModeTone(row.localLedgerMode)} dot>
+          {describeLedgerMode(row.localLedgerMode)}
+        </CanvasPill>
+      ),
+    },
+  ];
+
+  const invoiceColumns: CanvasTableColumn<InvoiceTableRow>[] = [
+    {
+      h: t("payments.col.invoice"),
+      w: 148,
+      mono: true,
+      r: (invoice) => (
+        <div style={cellStackStyle({ mono: true })}>
+          <span>{invoice.invoiceId}</span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {formatDateTime(invoice.createdAt)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("payments.col.tenant"),
+      w: 128,
+      mono: true,
+      r: (invoice) => invoice.tenantId,
+    },
+    {
+      h: t("payments.col.channelMix"),
+      w: 220,
+      r: (invoice) => (
+        <div style={{ ...cellStackStyle(), maxWidth: 220 }}>
+          {describeInvoiceChannelMix(invoice)}
+        </div>
+      ),
+    },
+    {
+      h: t("payments.col.amount"),
+      w: 130,
+      mono: true,
+      r: (invoice) => formatMoney(invoice.amount),
+    },
+    {
+      h: t("payments.col.status"),
+      w: 108,
+      r: (invoice) => (
+        <CanvasPill theme={theme} tone={invoiceStatusTone(invoice.status)} dot>
+          {formatPlatformCodeLabel(locale, invoice.status)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: getPlatformLabel(locale, "pricingSnapshot"),
+      w: 148,
+      mono: true,
+      r: (invoice) => invoice.pricingVersionSnapshot,
+    },
+    {
+      h: t("payments.col.period"),
+      w: 200,
+      r: (invoice) => (
+        <div style={{ ...cellStackStyle(), maxWidth: 200 }}>
+          {formatDateTime(invoice.periodStart)} - {formatDateTime(invoice.periodEnd)}
+        </div>
+      ),
+    },
+    {
+      h: getPlatformLabel(locale, "artifact"),
+      w: 130,
+      r: (invoice) =>
+        invoice.artifactUrl ? (
+          <a
+            href={invoice.artifactUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: theme.accent, textDecoration: "none", fontWeight: 600 }}
+          >
+            {t("payments.downloadPdf")}
+          </a>
+        ) : (
+          "—"
+        ),
+    },
+  ];
+
+  const statementColumns: CanvasTableColumn<StatementTableRow>[] = [
+    {
+      h: t("payments.col.statement"),
+      w: 148,
+      mono: true,
+      r: (statement) => (
+        <div style={cellStackStyle({ mono: true })}>
+          <span>{statement.receiptNo}</span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {statement.statementId}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("payments.col.driver"),
+      w: 128,
+      mono: true,
+      r: (statement) => statement.driverId,
+    },
+    {
+      h: t("payments.col.channelMix"),
+      w: 220,
+      r: (statement) => (
+        <div style={{ ...cellStackStyle(), maxWidth: 220 }}>
+          {describeStatementChannelMix(statement)}
+        </div>
+      ),
+    },
+    {
+      h: t("payments.col.period"),
+      w: 112,
+      mono: true,
+      r: (statement) => statement.periodMonth,
+    },
+    {
+      h: getPlatformLabel(locale, "feePlan"),
+      w: 140,
+      mono: true,
+      r: (statement) => statement.feePlanVersion,
+    },
+    {
+      h: getPlatformLabel(locale, "gross"),
+      w: 128,
+      mono: true,
+      r: (statement) => formatMoney(statement.grossEarning),
+    },
+    {
+      h: getPlatformLabel(locale, "serviceFee"),
+      w: 128,
+      mono: true,
+      r: (statement) => formatMoney(statement.serviceFee),
+    },
+    {
+      h: getPlatformLabel(locale, "subsidy"),
+      w: 128,
+      mono: true,
+      r: (statement) => formatMoney(statement.subsidy),
+    },
+    {
+      h: t("payments.col.net"),
+      w: 128,
+      mono: true,
+      r: (statement) => formatMoney(statement.netAmount),
+    },
+    {
+      h: getPlatformLabel(locale, "payout"),
+      w: 108,
+      r: (statement) => (
+        <CanvasPill
+          theme={theme}
+          tone={payoutStatusTone(statement.payoutStatus)}
+          dot
+        >
+          {formatPlatformCodeLabel(locale, statement.payoutStatus)}
+        </CanvasPill>
+      ),
+    },
+  ];
+
+  const reimbursementColumns: CanvasTableColumn<ReimbursementTableRow>[] = [
+    {
+      h: t("payments.col.batch"),
+      w: 152,
+      mono: true,
+      r: (batch) => (
+        <div style={cellStackStyle({ mono: true })}>
+          <span>{batch.batchId}</span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {batch.periodMonth}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("payments.col.driver"),
+      w: 128,
+      mono: true,
+      r: (batch) => batch.driverId,
+    },
+    {
+      h: getPlatformLabel(locale, "statement"),
+      w: 160,
+      mono: true,
+      r: (batch) => batch.statementId,
+    },
+    {
+      h: getPlatformLabel(locale, "total"),
+      w: 128,
+      mono: true,
+      r: (batch) => formatMoney(batch.totalAmount),
+    },
+    {
+      h: getPlatformLabel(locale, "workflow"),
+      w: 168,
+      r: (batch) => (
+        <div style={cellStackStyle()}>
+          <CanvasPill
+            theme={theme}
+            tone={reimbursementStatusTone(batch.status)}
+            dot
+          >
+            {reimbursementWorkflow(
+              batch,
+              t("payments.awaitingApproval"),
+              formatPlatformCodeLabel(locale, "paid"),
+              t("payments.col.approved"),
+            )}
+          </CanvasPill>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {batch.approvedAt
+              ? formatDateTime(batch.approvedAt)
+              : t("payments.awaitingApproval")}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: getPlatformLabel(locale, "remittance"),
+      w: 220,
+      r: (batch) => (
+        <input
+          value={remittanceProofs[batch.batchId] ?? batch.remittanceProofId ?? ""}
+          onChange={(event) =>
+            setRemittanceProofs((current) => ({
+              ...current,
+              [batch.batchId]: event.target.value,
+            }))
+          }
+          placeholder={getPlatformLabel(locale, "remittanceProofExample")}
+          style={nativeControlStyle(theme)}
+          disabled={batch.status === "paid"}
+        />
+      ),
+    },
+    {
+      h: getPlatformLabel(locale, "items"),
+      w: 220,
+      r: (batch) => (
+        <div style={{ ...cellStackStyle(), maxWidth: 220 }}>
+          {batch.items.map((item) => item.orderId).join(", ")}
+        </div>
+      ),
+    },
+    {
+      h: t("common.actions"),
+      w: 160,
+      r: (batch) => (
+        <div style={{ display: "grid", gap: 8, minWidth: 140 }}>
+          {!batch.approvedAt ? (
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              icon="check"
+              disabled={batchActionId === batch.batchId}
+              onClick={() => void handleApproveBatch(batch)}
+            >
+              {t("payments.approve")}
+            </CanvasBtn>
+          ) : null}
+          {batch.status !== "paid" ? (
+            <CanvasBtn
+              theme={theme}
+              variant="primary"
+              icon="billing"
+              disabled={batchActionId === batch.batchId}
+              onClick={() => void handleMarkPaid(batch)}
+            >
+              {batchActionId === batch.batchId
+                ? t("payments.saving")
+                : t("payments.markPaid")}
+            </CanvasBtn>
+          ) : null}
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div>
-      <div className="admin-page-header">
-        <h1>{t("payments.title")}</h1>
-        <p>{t("payments.subtitle")}</p>
-      </div>
-
-      {error && (
-        <div
-          className="admin-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
-        >
-          <p style={{ color: "#dc2626", margin: 0 }}>
-            {getPlatformLabel(locale, "error")}: {error}
-          </p>
-        </div>
-      )}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 16,
-          marginBottom: 16,
-        }}
+    <div style={viewportStyle(theme)}>
+      <CanvasShell
+        theme={theme}
+        nav={shellNav}
+        active="payments"
+        brandLabel={t("app.name")}
+        brandSubLabel={t("app.sub")}
+        breadcrumb={[copy.breadcrumbParent, copy.pageTitle]}
+        env="production"
+        versionLabel="canvas"
+        searchPlaceholder={copy.searchPlaceholder}
+        avatarLabel={locale === "en" ? "FA" : "財務"}
+        style={{ height: "100%" }}
       >
-        {[
-          {
-            label: t("payments.invoiceTotal"),
-            value: `${totalInvoiceAmountMinor.toLocaleString()} minor`,
-            note: `${filteredInvoices.length}`,
-          },
-          {
-            label: t("payments.statementNet"),
-            value: `${totalStatementNetMinor.toLocaleString()} minor`,
-            note: `${statements.length}`,
-          },
-          {
-            label: t("payments.pendingReimbursements"),
-            value: `${pendingReimbursementMinor.toLocaleString()} minor`,
-            note: t("payments.pendingReimbNote"),
-          },
-          {
-            label: t("payments.paidReimbursements"),
-            value: `${paidReimbursementMinor.toLocaleString()} minor`,
-            note: t("payments.invoiceTotalNote"),
-          },
-          {
-            label: t("payments.reconciliation.openCount"),
-            value: String(openReconciliationCount),
-            note: `${reconciliationIssues.length} ${t("payments.reconciliation.totalIssues")}`,
-          },
-        ].map((card) => (
-          <div key={card.label} className="admin-card">
-            <p
-              style={{
-                margin: "0 0 8px",
-                fontSize: 13,
-                color: "#6b7280",
-              }}
-            >
-              {card.label}
-            </p>
-            <strong style={{ display: "block", fontSize: 22 }}>
-              {card.value}
-            </strong>
-            <small style={{ color: "#6b7280" }}>{card.note}</small>
-          </div>
-        ))}
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div className="admin-card">
-          <h3 style={{ marginTop: 0 }}>{t("payments.generateInvoiceTitle")}</h3>
-          <form onSubmit={handleGenerateInvoice}>
-            <div style={formGridStyle}>
-              <label style={labelStyle}>
-                {t("payments.form.tenantId")}
-                <input
-                  value={invoiceTenantId}
-                  onChange={(event) => setInvoiceTenantId(event.target.value)}
-                  style={inputStyle}
-                />
-              </label>
-              <label style={labelStyle}>
-                {t("payments.form.periodStart")}
-                <input
-                  type="date"
-                  value={invoicePeriodStart}
-                  onChange={(event) =>
-                    setInvoicePeriodStart(event.target.value)
-                  }
-                  style={inputStyle}
-                />
-              </label>
-              <label style={labelStyle}>
-                {t("payments.form.periodEnd")}
-                <input
-                  type="date"
-                  value={invoicePeriodEnd}
-                  onChange={(event) => setInvoicePeriodEnd(event.target.value)}
-                  style={inputStyle}
-                />
-              </label>
-            </div>
-            <button
-              type="submit"
-              className="admin-btn admin-btn--primary"
-              disabled={invoicePending}
-            >
-              {invoicePending
-                ? t("payments.generating")
-                : t("payments.generateInvoice")}
-            </button>
-          </form>
-        </div>
-
-        <div className="admin-card">
-          <h3 style={{ marginTop: 0 }}>
-            {t("payments.generateStatementsTitle")}
-          </h3>
-          <form onSubmit={handleGenerateStatements}>
-            <div style={formGridStyle}>
-              <label style={labelStyle}>
-                {t("payments.form.periodMonth")}
-                <input
-                  value={statementPeriodMonth}
-                  onChange={(event) =>
-                    setStatementPeriodMonth(event.target.value)
-                  }
-                  placeholder="2026-03"
-                  style={inputStyle}
-                />
-              </label>
-            </div>
-            <button
-              type="submit"
-              className="admin-btn admin-btn--primary"
-              disabled={statementPending}
-            >
-              {statementPending
-                ? t("payments.generating")
-                : t("payments.generateStatements")}
-            </button>
-          </form>
-        </div>
-      </div>
-
-      <div
-        className="admin-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
-        <div style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: "0 0 4px" }}>
-            {t("payments.reconciliation.title")}
-          </h3>
-          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-            {t("payments.reconciliation.subtitle")}
-          </p>
-        </div>
-
-        <div style={{ ...formGridStyle, marginBottom: 12 }}>
-          <label style={labelStyle}>
-            {t("payments.reconciliation.actorId")}
-            <input
-              value={financeActorId}
-              onChange={(event) => setFinanceActorId(event.target.value)}
-              style={inputStyle}
-            />
-          </label>
-        </div>
-
-        <form onSubmit={handleCreateReconciliationIssue}>
-          <div style={formGridStyle}>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.issueType")}
-              <select
-                value={newIssue.issueType}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    issueType: event.target
-                      .value as ReconciliationIssueRecord["issueType"],
-                    channelKey:
-                      event.target.value === "forwarder_status_mismatch"
-                        ? "forwarded_shadow"
-                        : "partner_airport",
-                  }))
+        <CanvasPageHeader
+          theme={theme}
+          title={copy.pageTitle}
+          subtitle={copy.pageSubtitle}
+          tabs={tabs}
+          activeTab={tabs[4]}
+          actions={
+            <>
+              <CanvasBtn theme={theme} icon="reports" disabled>
+                {copy.export}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                icon="plus"
+                onClick={() =>
+                  document
+                    .getElementById("payments-create-issue")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
                 }
-                style={inputStyle}
               >
-                {RECONCILIATION_ISSUE_TYPE_OPTIONS.map((issueType) => (
-                  <option key={issueType} value={issueType}>
-                    {formatPlatformCodeLabel(locale, issueType)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.channel")}
-              <select
-                value={newIssue.channelKey}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    channelKey: event.target.value,
-                  }))
-                }
-                style={inputStyle}
+                {copy.openIssue}
+              </CanvasBtn>
+            </>
+          }
+        />
+
+        <div style={pageBodyStyle(theme)}>
+          {loading ? (
+            <CanvasCard theme={theme} title={copy.pageTitle} subtitle={copy.loading}>
+              <div style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                {copy.loading}
+              </div>
+            </CanvasCard>
+          ) : (
+            <>
+              {error ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="danger"
+                  title={`${getPlatformLabel(locale, "error")}: ${error}`}
+                  body={copy.queueSubtitle}
+                />
+              ) : null}
+
+              {reopenRateWarning ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="warn"
+                  title={copy.reopenBannerTitle}
+                  body={copy.reopenBannerBody(
+                    `${reopenRate.toFixed(1)}%`,
+                    reopenedWindowCount,
+                  )}
+                />
+              ) : null}
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: 12,
+                }}
               >
-                {RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => (
-                  <option key={channelKey} value={channelKey}>
-                    {describeMatrixChannel(channelKey)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.assignee")}
-              <input
-                value={newIssue.assigneeId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    assigneeId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.orderId")}
-              <input
-                value={newIssue.orderId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    orderId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.partnerId")}
-              <input
-                value={newIssue.partnerId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    partnerId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.partnerProgramId")}
-              <input
-                value={newIssue.partnerProgramId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    partnerProgramId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.sponsorReference")}
-              <input
-                value={newIssue.sponsorReference}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    sponsorReference: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.mirrorOrderId")}
-              <input
-                value={newIssue.mirrorOrderId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    mirrorOrderId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.externalOrderId")}
-              <input
-                value={newIssue.externalOrderId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    externalOrderId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.linkedJobId")}
-              <input
-                value={newIssue.linkedReconciliationJobId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    linkedReconciliationJobId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
-              {t("payments.reconciliation.summary")}
-              <textarea
-                value={newIssue.summary}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    summary: event.target.value,
-                  }))
-                }
-                style={textAreaStyle}
-              />
-            </label>
-            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
-              {t("payments.reconciliation.comment")}
-              <textarea
-                value={newIssue.comment}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    comment: event.target.value,
-                  }))
-                }
-                style={textAreaStyle}
-              />
-            </label>
-            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
-              {t("payments.reconciliation.artifactIds")}
-              <input
-                value={newIssue.artifactIds}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    artifactIds: event.target.value,
-                  }))
-                }
-                placeholder={t("payments.reconciliation.artifactPlaceholder")}
-                style={inputStyle}
-              />
-            </label>
-          </div>
-          <button
-            type="submit"
-            className="admin-btn admin-btn--primary"
-            disabled={issueDraftPending}
-          >
-            {issueDraftPending
-              ? t("payments.reconciliation.opening")
-              : t("payments.reconciliation.open")}
-          </button>
-        </form>
+                <CanvasKPI
+                  theme={theme}
+                  label={copy.outstandingLabel}
+                  value={String(openReconciliationCount)}
+                  sub={
+                    openIssueMix !== "—"
+                      ? openIssueMix
+                      : `${partnerIssueCount} partner · ${forwardedIssueCount} forwarded`
+                  }
+                />
+                <CanvasKPI
+                  theme={theme}
+                  label={copy.exposureLabel}
+                  value={formatMinorMoney(exposureMinor, exposureCurrency)}
+                  delta={
+                    linkedExposureCount > 0
+                      ? `${linkedExposureCount} linked`
+                      : locale === "en"
+                        ? "no linked docs"
+                        : "無關聯單據"
+                  }
+                  sub={copy.linkedExposure}
+                />
+                <CanvasKPI
+                  theme={theme}
+                  label={copy.handlingLabel}
+                  value={formatHours(averageHandlingHours)}
+                  delta={
+                    resolvedWindow.length > 0
+                      ? `${resolvedWindow.length} resolved`
+                      : `${openIssues.length} active`
+                  }
+                  sub={
+                    resolvedWindow.length > 0
+                      ? locale === "en"
+                        ? "resolved issue window"
+                        : "resolved issue 視窗"
+                      : locale === "en"
+                        ? "active queue age fallback"
+                        : "以 active queue age 補位"
+                  }
+                />
+                <CanvasKPI
+                  theme={theme}
+                  label={copy.reopenRateLabel}
+                  value={`${reopenRate.toFixed(1)}%`}
+                  delta={reopenRateWarning ? copy.reopenDeltaWarn : copy.reopenDeltaOk}
+                  deltaTone={reopenRateWarning ? "down" : "up"}
+                  sub={`${copy.queueWindow} · ${issueWindow.length}`}
+                />
+              </div>
 
-        <div style={{ marginTop: 16 }}>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>{t("payments.reconciliation.col.issue")}</th>
-                <th>{t("payments.reconciliation.col.summary")}</th>
-                <th>{t("payments.reconciliation.col.owner")}</th>
-                <th>{t("payments.reconciliation.col.context")}</th>
-                <th>{t("payments.reconciliation.col.notes")}</th>
-                <th>{t("payments.reconciliation.col.actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reconciliationIssues.length > 0 ? (
-                reconciliationIssues.map((issue) => (
-                  <tr key={issue.issueId}>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      <div>{issue.issueId}</div>
-                      <div style={{ color: "#6b7280" }}>
-                        {formatPlatformCodeLabel(locale, issue.issueType)}
-                      </div>
-                      <div style={{ color: "#6b7280" }}>
-                        {formatPlatformCodeLabel(locale, issue.source)}
-                      </div>
-                      <div style={{ marginTop: 6 }}>
-                        <span
-                          className={`admin-badge ${
-                            issue.status === "resolved"
-                              ? "admin-badge--success"
-                              : issue.status === "assigned"
-                                ? "admin-badge--warning"
-                                : "admin-badge--neutral"
-                          }`}
-                        >
-                          {formatPlatformCodeLabel(locale, issue.status)}
-                        </span>
-                      </div>
-                    </td>
-                    <td style={{ minWidth: 260 }}>
-                      <div>{issue.summary}</div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>
-                        {describeMatrixChannel(issue.channelKey)}
-                      </div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>
-                        {formatDateTime(issue.updatedAt)}
-                      </div>
-                    </td>
-                    <td style={{ minWidth: 180 }}>
-                      <div>{issue.ownerId ?? "—"}</div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>
-                        {t("payments.reconciliation.reopenCount", {
-                          count: String(issue.reopenCount),
-                        })}
-                      </div>
-                    </td>
-                    <td style={{ fontSize: 12, minWidth: 220 }}>
-                      <div>{issue.orderId ?? issue.mirrorOrderId ?? "—"}</div>
-                      <div style={{ color: "#6b7280" }}>
-                        {issue.externalOrderId ?? issue.partnerId ?? "—"}
-                      </div>
-                      <div style={{ color: "#6b7280" }}>
-                        {issue.linkedReconciliationJobId ??
-                          issue.sponsorReference ??
-                          "—"}
-                      </div>
-                    </td>
-                    <td style={{ fontSize: 12, minWidth: 220 }}>
-                      <div>
-                        {t("payments.reconciliation.commentCount", {
-                          count: String(issue.comments.length),
-                        })}
-                      </div>
-                      <div style={{ color: "#6b7280" }}>
-                        {t("payments.reconciliation.evidenceCount", {
-                          count: String(issue.evidenceArtifactIds.length),
-                        })}
-                      </div>
-                      <div style={{ color: "#6b7280", marginTop: 6 }}>
-                        {issue.comments.at(-1)?.message ?? "—"}
-                      </div>
-                    </td>
-                    <td style={{ minWidth: 320 }}>
-                      <div style={issueActionGridStyle}>
-                        {issue.status !== "resolved" && (
-                          <>
-                            <input
-                              value={
-                                issueAssignments[issue.issueId] ??
-                                issue.ownerId ??
-                                ""
-                              }
-                              onChange={(event) =>
-                                setIssueAssignments((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={t(
-                                "payments.reconciliation.assignee",
-                              )}
-                              style={inputStyle}
-                            />
-                            <button
-                              className="admin-btn admin-btn--secondary"
-                              onClick={() => void handleAssignIssue(issue)}
-                              disabled={issueActionId === issue.issueId}
-                            >
-                              {t("payments.reconciliation.assign")}
-                            </button>
-                            <input
-                              value={issueComments[issue.issueId] ?? ""}
-                              onChange={(event) =>
-                                setIssueComments((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={t("payments.reconciliation.comment")}
-                              style={inputStyle}
-                            />
-                            <input
-                              value={
-                                issueCommentArtifactIds[issue.issueId] ?? ""
-                              }
-                              onChange={(event) =>
-                                setIssueCommentArtifactIds((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={`${t("payments.reconciliation.artifactIds")} · ${t("payments.reconciliation.comment")}`}
-                              aria-label={`${t("payments.reconciliation.artifactIds")} (${t("payments.reconciliation.comment")})`}
-                              style={inputStyle}
-                            />
-                            <button
-                              className="admin-btn admin-btn--secondary"
-                              onClick={() => void handleCommentIssue(issue)}
-                              disabled={issueActionId === issue.issueId}
-                            >
-                              {t("payments.reconciliation.addComment")}
-                            </button>
-                            <select
-                              value={issueResolutionCodes[issue.issueId] ?? ""}
-                              onChange={(event) =>
-                                setIssueResolutionCodes((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target
-                                    .value as ReconciliationIssueRecord["resolutionCode"],
-                                }))
-                              }
-                              style={inputStyle}
-                            >
-                              <option value="">
-                                {t("payments.reconciliation.resolveCode")}
-                              </option>
-                              {RECONCILIATION_RESOLUTION_OPTIONS.map((code) => (
-                                <option key={code} value={code}>
-                                  {formatPlatformCodeLabel(locale, code)}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              value={
-                                issueResolutionSummaries[issue.issueId] ?? ""
-                              }
-                              onChange={(event) =>
-                                setIssueResolutionSummaries((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={t(
-                                "payments.reconciliation.resolveSummary",
-                              )}
-                              style={inputStyle}
-                            />
-                            <input
-                              value={
-                                issueResolutionArtifactIds[issue.issueId] ?? ""
-                              }
-                              onChange={(event) =>
-                                setIssueResolutionArtifactIds((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={`${t("payments.reconciliation.artifactIds")} · ${t("payments.reconciliation.resolve")}`}
-                              aria-label={`${t("payments.reconciliation.artifactIds")} (${t("payments.reconciliation.resolve")})`}
-                              style={inputStyle}
-                            />
-                            <button
-                              className="admin-btn admin-btn--primary"
-                              onClick={() => void handleResolveIssue(issue)}
-                              disabled={issueActionId === issue.issueId}
-                            >
-                              {t("payments.reconciliation.resolve")}
-                            </button>
-                          </>
-                        )}
-                        {issue.status === "resolved" && (
-                          <>
-                            <input
-                              value={issueReopenReasons[issue.issueId] ?? ""}
-                              onChange={(event) =>
-                                setIssueReopenReasons((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={t(
-                                "payments.reconciliation.reopenReason",
-                              )}
-                              style={inputStyle}
-                            />
-                            <input
-                              value={
-                                issueReopenArtifactIds[issue.issueId] ?? ""
-                              }
-                              onChange={(event) =>
-                                setIssueReopenArtifactIds((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={`${t("payments.reconciliation.artifactIds")} · ${t("payments.reconciliation.reopen")}`}
-                              aria-label={`${t("payments.reconciliation.artifactIds")} (${t("payments.reconciliation.reopen")})`}
-                              style={inputStyle}
-                            />
-                            <button
-                              className="admin-btn admin-btn--secondary"
-                              onClick={() => void handleReopenIssue(issue)}
-                              disabled={issueActionId === issue.issueId}
-                            >
-                              {t("payments.reconciliation.reopen")}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={6}>{t("payments.reconciliation.empty")}</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div
-        className="admin-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
-        <div style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: "0 0 4px" }}>{t("payments.matrix.title")}</h3>
-          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-            {t("payments.matrix.subtitle")}
-          </p>
-        </div>
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>{t("payments.matrix.col.channel")}</th>
-              <th>{t("payments.matrix.col.payer")}</th>
-              <th>{t("payments.matrix.col.sponsor")}</th>
-              <th>{t("payments.matrix.col.invoice")}</th>
-              <th>{t("payments.matrix.col.receipt")}</th>
-              <th>{t("payments.matrix.col.payout")}</th>
-              <th>{t("payments.matrix.col.discount")}</th>
-              <th>{t("payments.matrix.col.reconciliation")}</th>
-              <th>{t("payments.matrix.col.ledger")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {settlementMatrix.length > 0 ? (
-              sortSettlementMatrix(settlementMatrix).map((row) => (
-                <tr key={row.channelKey}>
-                  <td>
-                    <div>{describeMatrixChannel(row.channelKey)}</div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {row.orderDomain} · {row.orderSources.join(" / ")}
-                    </div>
-                  </td>
-                  <td>{describeMatrixField("payer", row, row.payerType)}</td>
-                  <td>
-                    {describeMatrixField("sponsor", row, row.sponsorType)}
-                  </td>
-                  <td>
-                    <div>
-                      {describeMatrixField(
-                        "invoiceOwner",
-                        row,
-                        row.invoiceOwner,
-                      )}
-                    </div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {describeMatrixField("invoice", row, row.invoicePath)}
-                    </div>
-                  </td>
-                  <td>
-                    {describeMatrixField("receipt", row, row.receiptOwner)}
-                  </td>
-                  <td>
-                    {describeMatrixField(
-                      "payout",
-                      row,
-                      row.driverPayoutAuthority,
-                    )}
-                  </td>
-                  <td>
-                    <div>
-                      {describeMatrixField(
-                        "discount",
-                        row,
-                        row.discountFundingSource,
-                      )}
-                    </div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {describeMatrixField(
-                        "reimbursement",
-                        row,
-                        row.reimbursementRule,
-                      )}
-                    </div>
-                  </td>
-                  <td>
-                    {describeMatrixField(
-                      "reconciliation",
-                      row,
-                      row.reconciliationPath,
-                    )}
-                  </td>
-                  <td>
-                    <span
-                      className={`admin-badge ${
-                        row.localLedgerMode === "shadow_only"
-                          ? "admin-badge--neutral"
-                          : "admin-badge--success"
-                      }`}
+              <div
+                style={sectionGridStyle("minmax(0, 2.1fr) minmax(280px, 1fr)")}
+              >
+                <CanvasCard
+                  theme={theme}
+                  title={t("payments.reconciliation.title")}
+                  subtitle={copy.queueSubtitle}
+                  padding={0}
+                  actions={
+                    <CanvasBtn
+                      theme={theme}
+                      variant="secondary"
+                      icon="arrow"
+                      onClick={() => void loadFinance()}
                     >
-                      {describeLedgerMode(row.localLedgerMode)}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={9}>{t("payments.matrix.empty")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="admin-toolbar">
-        <div className="admin-toggle-group">
-          {(["all", "paid", "issued", "draft"] as const).map((value) => (
-            <button
-              key={value}
-              className={`admin-toggle-btn ${
-                invoiceFilter === value ? "active" : ""
-              }`}
-              onClick={() => setInvoiceFilter(value)}
-            >
-              {formatPlatformCodeLabel(locale, value)}
-            </button>
-          ))}
-        </div>
-        <button
-          className="admin-btn admin-btn--secondary"
-          onClick={() => void loadFinance()}
-        >
-          {t("common.refresh")}
-        </button>
-      </div>
-
-      <div
-        className="admin-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>{t("payments.invoicesTitle")}</h3>
-          <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {filteredInvoices.length}
-          </span>
-        </div>
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>{t("payments.col.invoice")}</th>
-              <th>{t("payments.col.tenant")}</th>
-              <th>{t("payments.col.channelMix")}</th>
-              <th>{t("payments.col.amount")}</th>
-              <th>{t("payments.col.status")}</th>
-              <th>{getPlatformLabel(locale, "pricingSnapshot")}</th>
-              <th>{t("payments.col.period")}</th>
-              <th>{getPlatformLabel(locale, "artifact")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredInvoices.length > 0 ? (
-              filteredInvoices.map((invoice) => (
-                <tr key={invoice.invoiceId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    <div>{invoice.invoiceId}</div>
-                    <div style={{ color: "#6b7280" }}>
-                      {formatDateTime(invoice.createdAt)}
-                    </div>
-                  </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    {invoice.tenantId}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {describeInvoiceChannelMix(invoice)}
-                  </td>
-                  <td>{formatMoney(invoice.amount)}</td>
-                  <td>
-                    <span
-                      className={`admin-badge ${
-                        invoice.status === "paid"
-                          ? "admin-badge--success"
-                          : invoice.status === "draft"
-                            ? "admin-badge--neutral"
-                            : "admin-badge--warning"
-                      }`}
-                    >
-                      {formatPlatformCodeLabel(locale, invoice.status)}
-                    </span>
-                  </td>
-                  <td>
-                    <code>{invoice.pricingVersionSnapshot}</code>
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {formatDateTime(invoice.periodStart)} —{" "}
-                    {formatDateTime(invoice.periodEnd)}
-                  </td>
-                  <td>
-                    {invoice.artifactUrl ? (
-                      <a
-                        href={invoice.artifactUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {t("payments.downloadPdf")}
-                      </a>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={8}>{t("payments.noInvoices")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div
-        className="admin-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>{t("payments.statementsTitle")}</h3>
-          <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {statements.length}
-          </span>
-        </div>
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>{t("payments.col.statement")}</th>
-              <th>{t("payments.col.driver")}</th>
-              <th>{t("payments.col.channelMix")}</th>
-              <th>{t("payments.col.period")}</th>
-              <th>{getPlatformLabel(locale, "feePlan")}</th>
-              <th>{getPlatformLabel(locale, "gross")}</th>
-              <th>{getPlatformLabel(locale, "serviceFee")}</th>
-              <th>{getPlatformLabel(locale, "subsidy")}</th>
-              <th>{t("payments.col.net")}</th>
-              <th>{getPlatformLabel(locale, "payout")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {statements.length > 0 ? (
-              statements.map((statement) => (
-                <tr key={statement.statementId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    <div>{statement.receiptNo}</div>
-                    <div style={{ color: "#6b7280" }}>
-                      {statement.statementId}
-                    </div>
-                  </td>
-                  <td>{statement.driverId}</td>
-                  <td style={{ fontSize: 12 }}>
-                    {describeStatementChannelMix(statement)}
-                  </td>
-                  <td>{statement.periodMonth}</td>
-                  <td>
-                    <code>{statement.feePlanVersion}</code>
-                  </td>
-                  <td>{formatMoney(statement.grossEarning)}</td>
-                  <td>{formatMoney(statement.serviceFee)}</td>
-                  <td>{formatMoney(statement.subsidy)}</td>
-                  <td>{formatMoney(statement.netAmount)}</td>
-                  <td>
-                    <span
-                      className={`admin-badge ${
-                        statement.payoutStatus === "paid"
-                          ? "admin-badge--success"
-                          : "admin-badge--warning"
-                      }`}
-                    >
-                      {formatPlatformCodeLabel(locale, statement.payoutStatus)}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={10}>{t("payments.noStatements")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="admin-card" style={{ overflowX: "auto" }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>{t("payments.reimbursementsTitle")}</h3>
-          <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {reimbursements.length}
-          </span>
-        </div>
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>{t("payments.col.batch")}</th>
-              <th>{t("payments.col.driver")}</th>
-              <th>{getPlatformLabel(locale, "statement")}</th>
-              <th>{getPlatformLabel(locale, "total")}</th>
-              <th>{getPlatformLabel(locale, "workflow")}</th>
-              <th>{getPlatformLabel(locale, "remittance")}</th>
-              <th>{getPlatformLabel(locale, "items")}</th>
-              <th>{t("common.actions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {reimbursements.length > 0 ? (
-              reimbursements.map((batch) => (
-                <tr key={batch.batchId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    <div>{batch.batchId}</div>
-                    <div style={{ color: "#6b7280" }}>{batch.periodMonth}</div>
-                  </td>
-                  <td>{batch.driverId}</td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    {batch.statementId}
-                  </td>
-                  <td>{formatMoney(batch.totalAmount)}</td>
-                  <td>
-                    <div>
-                      {reimbursementWorkflow(
-                        batch,
-                        t("payments.awaitingApproval"),
-                        formatPlatformCodeLabel(locale, "paid"),
-                        t("payments.col.approved"),
-                      )}
-                    </div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {batch.approvedAt
-                        ? formatDateTime(batch.approvedAt)
-                        : t("payments.awaitingApproval")}
-                    </div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {batch.paidAt
-                        ? formatDateTime(batch.paidAt)
-                        : t("payments.awaitingRemittance")}
-                    </div>
-                  </td>
-                  <td>
-                    <input
-                      value={
-                        remittanceProofs[batch.batchId] ??
-                        batch.remittanceProofId ??
-                        ""
-                      }
-                      onChange={(event) =>
-                        setRemittanceProofs((current) => ({
-                          ...current,
-                          [batch.batchId]: event.target.value,
-                        }))
-                      }
-                      placeholder={getPlatformLabel(
-                        locale,
-                        "remittanceProofExample",
-                      )}
-                      style={{ ...inputStyle, minWidth: 180 }}
-                      disabled={batch.status === "paid"}
+                      {t("common.refresh")}
+                    </CanvasBtn>
+                  }
+                >
+                  {sortedIssues.length > 0 ? (
+                    <CanvasTable
+                      theme={theme}
+                      columns={issueColumns}
+                      rows={sortedIssues as IssueTableRow[]}
                     />
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {batch.items.map((item) => item.orderId).join(", ")}
-                  </td>
-                  <td>
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: 8,
-                        minWidth: 120,
-                      }}
-                    >
-                      {!batch.approvedAt && (
-                        <button
-                          className="admin-btn admin-btn--secondary"
-                          onClick={() => void handleApproveBatch(batch)}
-                          disabled={batchActionId === batch.batchId}
-                        >
-                          {t("payments.approve")}
-                        </button>
-                      )}
-                      {batch.status !== "paid" && (
-                        <button
-                          className="admin-btn admin-btn--primary"
-                          onClick={() => void handleMarkPaid(batch)}
-                          disabled={batchActionId === batch.batchId}
-                        >
-                          {batchActionId === batch.batchId
-                            ? t("payments.saving")
-                            : t("payments.markPaid")}
-                        </button>
-                      )}
+                  ) : (
+                    <div style={emptyStateStyle(theme)}>
+                      {t("payments.reconciliation.empty")}
                     </div>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={8}>{t("payments.noReimbursements")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                  )}
+                </CanvasCard>
+
+                <CanvasCard
+                  theme={theme}
+                  title={copy.queueProfileTitle}
+                  subtitle={copy.queueProfileSubtitle}
+                >
+                  <CanvasDL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      {
+                        k: t("payments.reconciliation.openCount"),
+                        v: String(openReconciliationCount),
+                        mono: true,
+                      },
+                      {
+                        k: copy.shadowIssues,
+                        v: String(shadowIssueCount),
+                        mono: true,
+                      },
+                      {
+                        k: copy.queueWindow,
+                        v: `${issueWindow.length} / ${reopenedWindowCount}`,
+                        mono: true,
+                      },
+                      {
+                        k: copy.linkedExposure,
+                        v: formatMinorMoney(exposureMinor, exposureCurrency),
+                        mono: true,
+                      },
+                      {
+                        k: copy.openMix,
+                        v:
+                          openIssueMix !== "—"
+                            ? openIssueMix
+                            : `${partnerIssueCount} partner · ${tenantIssueCount} tenant · ${phoneIssueCount} phone · ${forwardedIssueCount} forwarded`,
+                      },
+                      {
+                        k: t("payments.pendingReimbursements"),
+                        v: `${pendingReimbursements.length} / ${formatMinorMoney(
+                          pendingReimbursementMinor,
+                          exposureCurrency,
+                        )}`,
+                        mono: true,
+                      },
+                    ]}
+                  />
+
+                  <div style={{ marginTop: 14 }}>
+                    <CanvasField theme={theme} label={copy.actorLabel}>
+                      <input
+                        value={financeActorId}
+                        onChange={(event) => setFinanceActorId(event.target.value)}
+                        style={nativeControlStyle(theme, { mono: true })}
+                      />
+                    </CanvasField>
+                  </div>
+                </CanvasCard>
+              </div>
+
+              <div
+                style={sectionGridStyle("minmax(0, 1.7fr) minmax(320px, 1fr)")}
+              >
+                <div id="payments-create-issue">
+                  <CanvasCard
+                    theme={theme}
+                    title={copy.createIssueTitle}
+                    subtitle={copy.createIssueSubtitle}
+                  >
+                    <form onSubmit={handleCreateReconciliationIssue}>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit, minmax(180px, 1fr))",
+                          gap: 12,
+                        }}
+                      >
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.issueType")}
+                          required
+                        >
+                          <select
+                            value={newIssue.issueType}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                issueType: event.target
+                                  .value as ReconciliationIssueRecord["issueType"],
+                                channelKey:
+                                  event.target.value ===
+                                  "forwarder_status_mismatch"
+                                    ? "forwarded_shadow"
+                                    : "partner_airport",
+                              }))
+                            }
+                            style={nativeControlStyle(theme)}
+                          >
+                            {RECONCILIATION_ISSUE_TYPE_OPTIONS.map((issueType) => (
+                              <option key={issueType} value={issueType}>
+                                {formatPlatformCodeLabel(locale, issueType)}
+                              </option>
+                            ))}
+                          </select>
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.channel")}
+                          required
+                        >
+                          <select
+                            value={newIssue.channelKey}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                channelKey: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme)}
+                          >
+                            {RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => (
+                              <option key={channelKey} value={channelKey}>
+                                {describeMatrixChannel(channelKey)}
+                              </option>
+                            ))}
+                          </select>
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.assignee")}
+                        >
+                          <input
+                            value={newIssue.assigneeId}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                assigneeId: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme)}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.orderId")}
+                        >
+                          <input
+                            value={newIssue.orderId}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                orderId: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme, { mono: true })}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.partnerId")}
+                        >
+                          <input
+                            value={newIssue.partnerId}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                partnerId: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme, { mono: true })}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.partnerProgramId")}
+                        >
+                          <input
+                            value={newIssue.partnerProgramId}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                partnerProgramId: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme, { mono: true })}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.sponsorReference")}
+                        >
+                          <input
+                            value={newIssue.sponsorReference}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                sponsorReference: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme, { mono: true })}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.mirrorOrderId")}
+                        >
+                          <input
+                            value={newIssue.mirrorOrderId}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                mirrorOrderId: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme, { mono: true })}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.externalOrderId")}
+                        >
+                          <input
+                            value={newIssue.externalOrderId}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                externalOrderId: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme, { mono: true })}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.reconciliation.linkedJobId")}
+                        >
+                          <input
+                            value={newIssue.linkedReconciliationJobId}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                linkedReconciliationJobId: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme, { mono: true })}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={theme}
+                          label={t("payments.form.tenantId")}
+                        >
+                          <input
+                            value={newIssue.tenantId}
+                            onChange={(event) =>
+                              setNewIssue((current) => ({
+                                ...current,
+                                tenantId: event.target.value,
+                              }))
+                            }
+                            style={nativeControlStyle(theme, { mono: true })}
+                          />
+                        </CanvasField>
+                        <div style={{ gridColumn: "1 / -1" }}>
+                          <CanvasField
+                            theme={theme}
+                            label={t("payments.reconciliation.summary")}
+                            required
+                          >
+                            <textarea
+                              value={newIssue.summary}
+                              onChange={(event) =>
+                                setNewIssue((current) => ({
+                                  ...current,
+                                  summary: event.target.value,
+                                }))
+                              }
+                              style={nativeTextAreaStyle(theme)}
+                            />
+                          </CanvasField>
+                        </div>
+                        <div style={{ gridColumn: "1 / -1" }}>
+                          <CanvasField
+                            theme={theme}
+                            label={t("payments.reconciliation.comment")}
+                          >
+                            <textarea
+                              value={newIssue.comment}
+                              onChange={(event) =>
+                                setNewIssue((current) => ({
+                                  ...current,
+                                  comment: event.target.value,
+                                }))
+                              }
+                              style={nativeTextAreaStyle(theme)}
+                            />
+                          </CanvasField>
+                        </div>
+                        <div style={{ gridColumn: "1 / -1" }}>
+                          <CanvasField
+                            theme={theme}
+                            label={t("payments.reconciliation.artifactIds")}
+                            hint={t("payments.reconciliation.artifactPlaceholder")}
+                          >
+                            <input
+                              value={newIssue.artifactIds}
+                              onChange={(event) =>
+                                setNewIssue((current) => ({
+                                  ...current,
+                                  artifactIds: event.target.value,
+                                }))
+                              }
+                              style={nativeControlStyle(theme, { mono: true })}
+                            />
+                          </CanvasField>
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={issueDraftPending || !newIssue.summary.trim()}
+                        style={nativeSubmitStyle(theme, {
+                          primary: true,
+                          disabled: issueDraftPending || !newIssue.summary.trim(),
+                        })}
+                      >
+                        {issueDraftPending
+                          ? t("payments.reconciliation.opening")
+                          : t("payments.reconciliation.open")}
+                      </button>
+                    </form>
+                  </CanvasCard>
+                </div>
+
+                <CanvasCard
+                  theme={theme}
+                  title={copy.releaseControlsTitle}
+                  subtitle={copy.releaseControlsSubtitle}
+                >
+                  <form onSubmit={handleGenerateInvoice}>
+                    <CanvasField
+                      theme={theme}
+                      label={t("payments.form.tenantId")}
+                    >
+                      <input
+                        value={invoiceTenantId}
+                        onChange={(event) => setInvoiceTenantId(event.target.value)}
+                        style={nativeControlStyle(theme, { mono: true })}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("payments.form.periodStart")}
+                    >
+                      <input
+                        type="date"
+                        value={invoicePeriodStart}
+                        onChange={(event) =>
+                          setInvoicePeriodStart(event.target.value)
+                        }
+                        style={nativeControlStyle(theme)}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("payments.form.periodEnd")}
+                    >
+                      <input
+                        type="date"
+                        value={invoicePeriodEnd}
+                        onChange={(event) => setInvoicePeriodEnd(event.target.value)}
+                        style={nativeControlStyle(theme)}
+                      />
+                    </CanvasField>
+                    <button
+                      type="submit"
+                      disabled={invoicePending}
+                      style={nativeSubmitStyle(theme, {
+                        primary: true,
+                        disabled: invoicePending,
+                      })}
+                    >
+                      {invoicePending
+                        ? t("payments.generating")
+                        : t("payments.generateInvoice")}
+                    </button>
+                  </form>
+
+                  <div
+                    style={{
+                      height: 1,
+                      background: theme.border,
+                      margin: "16px 0",
+                    }}
+                  />
+
+                  <form onSubmit={handleGenerateStatements}>
+                    <CanvasField
+                      theme={theme}
+                      label={t("payments.form.periodMonth")}
+                    >
+                      <input
+                        value={statementPeriodMonth}
+                        onChange={(event) =>
+                          setStatementPeriodMonth(event.target.value)
+                        }
+                        placeholder="2026-03"
+                        style={nativeControlStyle(theme, { mono: true })}
+                      />
+                    </CanvasField>
+                    <button
+                      type="submit"
+                      disabled={statementPending}
+                      style={nativeSubmitStyle(theme, {
+                        primary: true,
+                        disabled: statementPending,
+                      })}
+                    >
+                      {statementPending
+                        ? t("payments.generating")
+                        : t("payments.generateStatements")}
+                    </button>
+                  </form>
+                </CanvasCard>
+              </div>
+
+              <CanvasCard
+                theme={theme}
+                title={copy.issueActionsTitle}
+                subtitle={copy.issueActionsSubtitle}
+                padding={0}
+              >
+                {sortedIssues.length > 0 ? (
+                  <CanvasTable
+                    theme={theme}
+                    columns={actionColumns}
+                    rows={sortedIssues as IssueTableRow[]}
+                  />
+                ) : (
+                  <div style={emptyStateStyle(theme)}>
+                    {t("payments.reconciliation.empty")}
+                  </div>
+                )}
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={t("payments.matrix.title")}
+                subtitle={t("payments.matrix.subtitle")}
+                padding={0}
+              >
+                {sortedMatrix.length > 0 ? (
+                  <CanvasTable
+                    theme={theme}
+                    columns={settlementColumns}
+                    rows={sortedMatrix as MatrixTableRow[]}
+                  />
+                ) : (
+                  <div style={emptyStateStyle(theme)}>
+                    {t("payments.matrix.empty")}
+                  </div>
+                )}
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={t("payments.invoicesTitle")}
+                subtitle={`${filteredInvoices.length} / ${invoices.length}`}
+                padding={0}
+                actions={
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {(["all", "paid", "issued", "draft"] as const).map((value) => (
+                      <CanvasBtn
+                        key={value}
+                        theme={theme}
+                        size="xs"
+                        variant={invoiceFilter === value ? "primary" : "secondary"}
+                        onClick={() => setInvoiceFilter(value)}
+                      >
+                        {formatPlatformCodeLabel(locale, value)}
+                      </CanvasBtn>
+                    ))}
+                  </div>
+                }
+              >
+                {filteredInvoices.length > 0 ? (
+                  <CanvasTable
+                    theme={theme}
+                    columns={invoiceColumns}
+                    rows={filteredInvoices as InvoiceTableRow[]}
+                  />
+                ) : (
+                  <div style={emptyStateStyle(theme)}>{t("payments.noInvoices")}</div>
+                )}
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={t("payments.statementsTitle")}
+                subtitle={`${statements.length}`}
+                padding={0}
+              >
+                {statements.length > 0 ? (
+                  <CanvasTable
+                    theme={theme}
+                    columns={statementColumns}
+                    rows={statements as StatementTableRow[]}
+                  />
+                ) : (
+                  <div style={emptyStateStyle(theme)}>
+                    {t("payments.noStatements")}
+                  </div>
+                )}
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={t("payments.reimbursementsTitle")}
+                subtitle={`${pendingReimbursements.length} pending · ${paidReimbursementMinor.toLocaleString()} settled`}
+                padding={0}
+              >
+                {reimbursements.length > 0 ? (
+                  <CanvasTable
+                    theme={theme}
+                    columns={reimbursementColumns}
+                    rows={reimbursements as ReimbursementTableRow[]}
+                  />
+                ) : (
+                  <div style={emptyStateStyle(theme)}>
+                    {t("payments.noReimbursements")}
+                  </div>
+                )}
+              </CanvasCard>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: 12,
+                }}
+              >
+                <CanvasCard theme={theme} title={t("payments.invoiceTotal")}>
+                  <CanvasDL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      {
+                        k: t("payments.invoiceTotal"),
+                        v: formatMinorMoney(totalInvoiceAmountMinor, exposureCurrency),
+                        mono: true,
+                      },
+                      {
+                        k: t("payments.statementNet"),
+                        v: formatMinorMoney(totalStatementNetMinor, exposureCurrency),
+                        mono: true,
+                      },
+                    ]}
+                  />
+                </CanvasCard>
+                <CanvasCard theme={theme} title={t("payments.pendingReimbursements")}>
+                  <CanvasDL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      {
+                        k: t("payments.pendingReimbursements"),
+                        v: formatMinorMoney(
+                          pendingReimbursementMinor,
+                          exposureCurrency,
+                        ),
+                        mono: true,
+                      },
+                      {
+                        k: t("payments.paidReimbursements"),
+                        v: formatMinorMoney(
+                          paidReimbursementMinor,
+                          exposureCurrency,
+                        ),
+                        mono: true,
+                      },
+                    ]}
+                  />
+                </CanvasCard>
+              </div>
+            </>
+          )}
+        </div>
+      </CanvasShell>
     </div>
   );
 }
-
-const formGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-  marginBottom: 16,
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 4,
-  fontSize: 13,
-  fontWeight: 500,
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.75rem 0.85rem",
-  borderRadius: 12,
-  border: "1px solid #d1d5db",
-  background: "#fff",
-  fontSize: 14,
-};
-
-const textAreaStyle: React.CSSProperties = {
-  ...inputStyle,
-  minHeight: 88,
-  resize: "vertical",
-};
-
-const issueActionGridStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 8,
-};
