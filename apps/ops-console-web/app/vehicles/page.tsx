@@ -7,8 +7,6 @@ import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
-  CanvasDL as DL,
-  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasShell as Shell,
@@ -29,19 +27,7 @@ const pageStackStyle = {
   padding: 24,
   display: "flex",
   flexDirection: "column" as const,
-  gap: 16,
-};
-
-const kpiGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 10,
-};
-
-const summaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-  gap: 16,
+  gap: 12,
 };
 
 type VehicleTableRow = Record<string, unknown> & {
@@ -302,9 +288,6 @@ export default async function VehiclesPage() {
     (vehicle) =>
       vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending",
   ).length;
-  const exclusivityApprovedCount = vehicles.filter(
-    (vehicle) => vehicle.exclusivityApproved,
-  ).length;
 
   const rows = buildVehicleRows(vehicles, locale);
 
@@ -474,115 +457,30 @@ export default async function VehiclesPage() {
             />
           ) : null}
 
-          <div style={kpiGridStyle}>
-            <KPI
-              theme={theme}
-              label={t("vehicles.title", locale)}
-              value={vehicles.length}
-              sub={t("vehicles.subtitle", locale, { count: vehicles.length })}
-            />
-            <KPI
-              theme={theme}
-              label={t("vehicles.col.dispatchable", locale)}
-              value={dispatchableCount}
-              delta={
-                warningVehicles.length > 0
-                  ? `${warningVehicles.length} ${t("vehicles.col.blockedBy", locale)}`
-                  : undefined
-              }
-              deltaTone={warningVehicles.length > 0 ? "down" : "neutral"}
-            />
-            <KPI
-              theme={theme}
-              label={t("vehicles.col.exclusivity", locale)}
-              value={exclusivityApprovedCount}
-              sub={
-                locale === "en"
-                  ? `${vehicles.length - exclusivityApprovedCount} pending review`
-                  : `${vehicles.length - exclusivityApprovedCount} 輛待審`
-              }
-            />
-            <KPI
-              theme={theme}
-              label={t("vehicles.col.offboarding", locale)}
-              value={offboardingCount}
-              delta={
-                debrandingPendingCount > 0
-                  ? `${debrandingPendingCount} ${t("vehicles.debrandingPending", locale)}`
-                  : undefined
-              }
-              deltaTone={debrandingPendingCount > 0 ? "down" : "neutral"}
-            />
-          </div>
-
-          <div style={summaryGridStyle}>
-            <Card
-              theme={theme}
-              title={t("vehicles.title", locale)}
-              subtitle={t("vehicles.subtitle", locale, { count: vehicles.length })}
-              padding={0}
-            >
-              {rows.length > 0 ? (
-                <Table theme={theme} columns={columns} rows={rows} />
-              ) : (
-                <div
-                  style={{
-                    padding: 16,
-                    color: theme.textMuted,
-                    fontSize: 12.5,
-                  }}
-                >
-                  {t("vehicles.empty", locale)}
-                </div>
-              )}
-            </Card>
-
-            <Card
-              theme={theme}
-              title={t("vehicles.lifecycle", locale)}
-              subtitle={t("vehicles.registrySummary", locale, {
-                dispatchable: dispatchableCount,
-                blocked: warningVehicles.length,
-                offboarding: offboardingCount,
-                debranding: debrandingPendingCount,
-              })}
-            >
-              <DL
-                theme={theme}
-                cols={1}
-                items={[
-                  {
-                    k: t("vehicles.col.dispatchable", locale),
-                    v: `${dispatchableCount}/${vehicles.length}`,
-                    mono: true,
-                  },
-                  {
-                    k: t("vehicles.col.blockedBy", locale),
-                    v:
-                      warningVehicles.length > 0
-                        ? warningVehicles
-                            .map((vehicle) => vehicle.plateNo)
-                            .join(", ")
-                        : t("vehicles.noneBlocked", locale),
-                    mono: warningVehicles.length > 0,
-                  },
-                  {
-                    k: t("vehicles.col.exclusivity", locale),
-                    v:
-                      locale === "en"
-                        ? `${exclusivityApprovedCount} approved`
-                        : `${exclusivityApprovedCount} 輛已核准`,
-                  },
-                  {
-                    k: t("vehicles.col.lastChange", locale),
-                    v:
-                      rows[0]?.lastChange ??
-                      t("vehicles.lastChangeNone", locale),
-                  },
-                ]}
-              />
-            </Card>
-          </div>
+          <Card
+            theme={theme}
+            title={t("vehicles.title", locale)}
+            subtitle={
+              locale === "en"
+                ? "dispatchable · contract · insurance · debrand"
+                : "dispatchable · 合約 · 保險 · debrand"
+            }
+            padding={0}
+          >
+            {rows.length > 0 ? (
+              <Table theme={theme} columns={columns} rows={rows} />
+            ) : (
+              <div
+                style={{
+                  padding: 16,
+                  color: theme.textMuted,
+                  fontSize: 12.5,
+                }}
+              >
+                {t("vehicles.empty", locale)}
+              </div>
+            )}
+          </Card>
         </div>
       </Shell>
     </div>
