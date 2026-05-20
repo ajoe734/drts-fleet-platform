@@ -22,7 +22,7 @@ on:
           - "true"
   push:
     branches:
-      - 'publish/v*'
+      - "publish/v*"
 
 permissions:
   contents: read
@@ -71,8 +71,6 @@ jobs:
       region: ${{ steps.resolve.outputs.region }}
       cloudsql: ${{ steps.resolve.outputs.cloudsql }}
       runtime_service_account: ${{ steps.resolve.outputs.runtime_service_account }}
-      deployer_service_account: ${{ steps.resolve.outputs.deployer_service_account }}
-      wif_provider: ${{ steps.resolve.outputs.wif_provider }}
       registry: ${{ steps.resolve.outputs.registry }}
       secret_prefix: ${{ steps.resolve.outputs.secret_prefix }}
       api_service: ${{ steps.resolve.outputs.api_service }}
@@ -182,8 +180,6 @@ jobs:
           emit region "$region"
           emit cloudsql "$cloudsql"
           emit runtime_service_account "$runtime_sa"
-          emit deployer_service_account "$deployer_sa"
-          emit wif_provider "$wif_provider"
           emit registry "$registry"
           emit secret_prefix "$secret_prefix"
           emit api_service "$api_service"
@@ -218,8 +214,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.wif_provider }}
-          service_account: ${{ needs.prepare.outputs.deployer_service_account }}
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -293,8 +289,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.wif_provider }}
-          service_account: ${{ needs.prepare.outputs.deployer_service_account }}
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -305,7 +301,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${{ needs.prepare.outputs.runtime_service_account }}" == "${{ needs.prepare.outputs.deployer_service_account }}" ]]; then
+          deployer_sa="${DEV_WIF_SERVICE_ACCOUNT:-${WIF_SERVICE_ACCOUNT:-}}"
+          if [[ "${{ needs.prepare.outputs.runtime_service_account }}" == "$deployer_sa" ]]; then
             echo "::error::Cloud Run runtime identity resolves to the GitHub deployer identity. Configure a separate runtime service account."
             exit 1
           fi
@@ -350,8 +347,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.wif_provider }}
-          service_account: ${{ needs.prepare.outputs.deployer_service_account }}
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -470,8 +467,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.wif_provider }}
-          service_account: ${{ needs.prepare.outputs.deployer_service_account }}
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
