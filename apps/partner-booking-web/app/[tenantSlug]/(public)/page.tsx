@@ -5,7 +5,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
@@ -24,13 +23,26 @@ const baseTheme = buildCanvasTheme({
 
 const pageBodyStyle: CSSProperties = {
   display: "grid",
-  gap: 14,
+  gap: 12,
   paddingTop: 16,
 };
 
 const actionStackStyle: CSSProperties = {
   display: "grid",
-  gap: 10,
+  gap: 8,
+};
+
+const memberCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+  padding: 16,
+};
+
+const serviceRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  padding: "10px 0",
 };
 
 const serviceList: ReadonlyArray<{
@@ -42,7 +54,7 @@ const serviceList: ReadonlyArray<{
   { title: "優先派車", detail: "都會區 · 8 分鐘內到車", tag: "PRIORITY" },
   {
     title: "商務時段",
-    detail: "平日 07:00-22:00 · 含車型升級",
+    detail: "平日 07:00–22:00 · 含車型升級",
     tag: "BUSINESS",
   },
 ];
@@ -187,150 +199,33 @@ export default async function PartnerLandingPage({ params }: PageProps) {
         />
 
         <div style={pageBodyStyle}>
-          <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
-            <div
-              style={{
-                padding: 16,
-                background: `linear-gradient(135deg, ${brand.cardArt.gradientFrom} 0%, ${brand.cardArt.gradientTo} 72%)`,
-                color: "#FFFFFF",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
-                  gap: 12,
-                }}
-              >
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 6,
-                    minWidth: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      letterSpacing: "0.12em",
-                      opacity: 0.78,
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {brand.cardArt.issuerLabel}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 19,
-                      fontWeight: 800,
-                      lineHeight: 1.2,
-                    }}
-                  >
-                    {brand.cardArt.programLabel}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      lineHeight: 1.45,
-                      opacity: 0.9,
-                    }}
-                  >
-                    {brand.programName} 卡友尊享禮遇
-                  </div>
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 8,
-                    justifyItems: "end",
-                  }}
-                >
-                  <CanvasPill
-                    theme={theme}
-                    tone="accent"
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      fontSize: 10,
-                      fontWeight: 800,
-                      letterSpacing: "0.12em",
-                      color: brand.primaryDark,
-                      background:
-                        "linear-gradient(180deg, #F6E7B6 0%, #E5C66B 100%)",
-                      border: "1px solid #D2AF57",
-                    }}
-                  >
-                    EXCLUSIVE
-                  </CanvasPill>
-
-                  <div
-                    style={{
-                      width: 62,
-                      height: 40,
-                      borderRadius: 10,
-                      border: "1px solid rgba(255,255,255,0.18)",
-                      background:
-                        "linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.08) 100%)",
-                      position: "relative",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: "auto auto 8px 8px",
-                        width: 18,
-                        height: 12,
-                        borderRadius: 4,
-                        background: "rgba(255,255,255,0.92)",
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        right: 9,
-                        bottom: 8,
-                        width: 12,
-                        height: 12,
-                        borderRadius: 4,
-                        background: brand.accent,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ padding: 16 }}>
+          <CanvasCard theme={theme} padding={0}>
+            <div style={memberCardStyle}>
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: 12,
-                  marginBottom: 14,
                 }}
               >
                 <div
                   style={{
-                    width: 48,
-                    height: 32,
-                    borderRadius: 8,
+                    width: 44,
+                    height: 28,
+                    borderRadius: 4,
                     background: `linear-gradient(135deg, ${brand.primaryDark}, ${brand.primary})`,
                     position: "relative",
                     flexShrink: 0,
-                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.24)",
                   }}
                 >
                   <div
                     style={{
                       position: "absolute",
-                      right: 5,
-                      bottom: 5,
-                      width: 10,
-                      height: 10,
-                      borderRadius: 3,
+                      right: 4,
+                      bottom: 4,
+                      width: 8,
+                      height: 8,
+                      borderRadius: 1,
                       background: brand.accent,
                     }}
                   />
@@ -342,7 +237,6 @@ export default async function PartnerLandingPage({ params }: PageProps) {
                       fontSize: 13,
                       fontWeight: 700,
                       color: theme.text,
-                      lineHeight: 1.3,
                     }}
                   >
                     •••• •••• •••• {brand.cardArt.lastFour}
@@ -351,7 +245,6 @@ export default async function PartnerLandingPage({ params }: PageProps) {
                     style={{
                       fontSize: 11,
                       color: theme.textMuted,
-                      lineHeight: 1.45,
                     }}
                   >
                     {riderName} · {brand.programName}
@@ -363,53 +256,41 @@ export default async function PartnerLandingPage({ params }: PageProps) {
                 </CanvasPill>
               </div>
 
-              <CanvasDL
-                theme={theme}
-                cols={2}
-                items={[
-                  { label: "發卡單位", value: brand.cardArt.issuerLabel },
-                  { label: "卡別", value: brand.cardArt.programLabel },
-                  { label: "卡號末四碼", value: brand.cardArt.lastFour },
-                  { label: "適用網路", value: brand.cardArt.networkLabel },
-                ]}
-              />
-            </div>
-
-            <div
-              style={{
-                margin: "0 16px 16px",
-                borderRadius: 12,
-                background: "#F1F3F8",
-                padding: 12,
-              }}
-            >
-              <CanvasKPI
-                theme={theme}
-                label="本年度剩餘趟次"
-                value={
-                  <>
-                    <b style={{ fontSize: 18 }}>{remainingBenefits}</b> /{" "}
-                    {totalBenefits}
-                  </>
-                }
-                sub={`${brand.programName} benefit balance`}
-              />
               <div
                 style={{
-                  height: 5,
-                  marginTop: 8,
-                  borderRadius: 999,
-                  background: "#DDE3EC",
-                  overflow: "hidden",
+                  borderRadius: 8,
+                  background: "#F1F3F8",
+                  padding: 10,
                 }}
               >
+                <CanvasKPI
+                  theme={theme}
+                  label="本年度剩餘趟次"
+                  value={
+                    <>
+                      <b style={{ fontSize: 18 }}>{remainingBenefits}</b> /{" "}
+                      {totalBenefits}
+                    </>
+                  }
+                  sub={`${brand.programName} benefit balance`}
+                />
                 <div
                   style={{
-                    width: benefitUsageWidth,
-                    height: "100%",
-                    background: brand.accent,
+                    height: 4,
+                    marginTop: 6,
+                    borderRadius: 999,
+                    background: "#DDE3EC",
+                    overflow: "hidden",
                   }}
-                />
+                >
+                  <div
+                    style={{
+                      width: benefitUsageWidth,
+                      height: "100%",
+                      background: brand.accent,
+                    }}
+                  />
+                </div>
               </div>
             </div>
           </CanvasCard>
@@ -420,10 +301,7 @@ export default async function PartnerLandingPage({ params }: PageProps) {
                 <div
                   key={item.title}
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "10px 0",
+                    ...serviceRowStyle,
                     borderBottom:
                       index < serviceList.length - 1
                         ? "1px dashed #F1F3F8"
@@ -456,9 +334,8 @@ export default async function PartnerLandingPage({ params }: PageProps) {
                     <div
                       style={{
                         fontSize: 13,
-                        fontWeight: 700,
+                        fontWeight: 600,
                         color: theme.text,
-                        lineHeight: 1.35,
                       }}
                     >
                       {item.title}
@@ -467,7 +344,6 @@ export default async function PartnerLandingPage({ params }: PageProps) {
                       style={{
                         fontSize: 11,
                         color: theme.textMuted,
-                        lineHeight: 1.45,
                       }}
                     >
                       {item.detail}
@@ -482,22 +358,31 @@ export default async function PartnerLandingPage({ params }: PageProps) {
             </div>
           </CanvasCard>
 
-          <CanvasBanner
+          <CanvasCard
             theme={theme}
-            tone="accent"
-            title="禮遇條款"
-            body={termsBody}
-            icon={
-              <div
-                style={{
-                  width: 4,
-                  alignSelf: "stretch",
-                  borderRadius: 999,
-                  background: brand.accent,
-                }}
-              />
-            }
-          />
+            padding={0}
+            style={{
+              background: "linear-gradient(135deg, #FAF3DF 0%, #FFFDF5 100%)",
+              borderColor: "#E5D58A",
+            }}
+          >
+            <CanvasBanner
+              theme={theme}
+              tone="accent"
+              title="禮遇條款"
+              body={termsBody}
+              icon={
+                <div
+                  style={{
+                    width: 4,
+                    alignSelf: "stretch",
+                    borderRadius: 2,
+                    background: brand.accent,
+                  }}
+                />
+              }
+            />
+          </CanvasCard>
 
           <div style={actionStackStyle}>
             <PartnerPrimaryLink action={`/${tenantSlug}/eligibility`}>
