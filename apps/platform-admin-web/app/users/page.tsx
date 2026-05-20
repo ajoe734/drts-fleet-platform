@@ -55,51 +55,18 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const heroGridStyle = {
-  display: "grid",
-  gap: 16,
-  gridTemplateColumns: "minmax(0, 1.7fr) minmax(260px, 0.9fr)",
-  alignItems: "start",
+const pillsRowStyle = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  flexWrap: "wrap",
 } satisfies CSSProperties;
 
-const heroSummaryStyle = {
-  display: "grid",
-  gap: 14,
-} satisfies CSSProperties;
-
-const kpiGridStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-} satisfies CSSProperties;
-
-const inviteFormStyle = {
-  display: "grid",
-  gap: 14,
-} satisfies CSSProperties;
-
-const inviteGridStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-} satisfies CSSProperties;
-
-const inputStyle = {
-  width: "100%",
-  boxSizing: "border-box",
-  borderRadius: 7,
-  border: `1px solid ${theme.border}`,
-  background: theme.bgRaised,
-  color: theme.text,
-  fontFamily: theme.fontFamily,
-  fontSize: 12.5,
-  padding: "8px 10px",
-  outline: "none",
-} satisfies CSSProperties;
-
-const monoInputStyle = {
-  ...inputStyle,
-  fontFamily: theme.monoFamily,
+const pillButtonStyle = {
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  cursor: "pointer",
 } satisfies CSSProperties;
 
 const tableEmptyStyle = {
@@ -109,10 +76,17 @@ const tableEmptyStyle = {
   fontSize: 12.5,
 } satisfies CSSProperties;
 
-const nameCellStyle = {
+const nameButtonStyle = {
   display: "flex",
   alignItems: "center",
   gap: 8,
+  width: "100%",
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+  textAlign: "left",
 } satisfies CSSProperties;
 
 const avatarStyle = {
@@ -135,24 +109,63 @@ const nameTextStyle = {
   lineHeight: 1.3,
 } satisfies CSSProperties;
 
-const updatedCellStyle = {
+const overlayScrimStyle = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.52)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 24,
+  zIndex: 80,
+} satisfies CSSProperties;
+
+const overlayPanelStyle = {
+  width: "min(880px, 100%)",
+  maxHeight: "calc(100vh - 48px)",
+  overflow: "auto",
+} satisfies CSSProperties;
+
+const overlayContentStyle = {
   display: "grid",
-  gap: 6,
+  gap: 16,
+} satisfies CSSProperties;
+
+const kpiGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+} satisfies CSSProperties;
+
+const formGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
 } satisfies CSSProperties;
 
 const actionRowStyle = {
   display: "flex",
-  gap: 6,
+  gap: 8,
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
-const responsiveStyle = `
-  @media (max-width: 980px) {
-    .pa-users-hero {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-`;
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
+  borderRadius: 7,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  fontFamily: theme.fontFamily,
+  fontSize: 12.5,
+  padding: "8px 10px",
+  outline: "none",
+} satisfies CSSProperties;
+
+const monoInputStyle = {
+  ...inputStyle,
+  fontFamily: theme.monoFamily,
+} satisfies CSSProperties;
 
 function buildPlatformNav(locale: string): CanvasShellNavItem[] {
   const labels =
@@ -306,6 +319,7 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [filter, setFilter] = useState<UserFilter>("all");
   const [formEmail, setFormEmail] = useState("");
   const [formDisplayName, setFormDisplayName] = useState("");
@@ -321,30 +335,37 @@ export default function UsersPage() {
           subtitle:
             "Internal platform users and roles. RBAC gatekeeping still resolves from backend authority.",
           refresh: "Refresh",
-          add: "Invite",
-          createTitle: "Invite platform staff",
-          createSubtitle:
-            "Create the internal user record and assign the initial platform role before the user enters downstream workflows.",
+          invite: "Invite",
+          last30Days: "last 30 days",
+          all: "All staff",
           errorTitle: "Unable to load platform users",
           suspendedTitle:
             "Suspended staff still appear in the authority roster",
           suspendedBody: (count: number) =>
             `${count} suspended account${count === 1 ? "" : "s"} remain visible and should be confirmed against current staffing.`,
-          noUsers:
-            "No platform staff found yet. Invite the first internal user.",
+          detailTitle: "Staff detail",
+          detailSubtitle:
+            "Role and status changes stay off the main roster surface until explicitly opened.",
+          inviteTitle: "Invite platform staff",
+          inviteSubtitle:
+            "Create the internal user record and assign the initial platform role before the user enters downstream workflows.",
+          visibleNow: "Visible rows",
+          activeStaff: "Active staff",
+          openInvites: "Open invites",
+          role: "Role",
+          status: "Status",
           created: "Created",
+          updated: "Updated",
           activate: "Activate",
           suspend: "Suspend",
-          filtersLabel: "Roster scope",
-          stats: {
-            active: "Active staff",
-            admins: "Admin coverage",
-            invited: "Open invites",
-          },
-          detail: {
-            scope: "Visible scope",
-            visible: "Rows",
-            latest: "Latest update",
+          promoteAdmin: "Promote admin",
+          assignViewer: "Assign viewer",
+          noUsers:
+            "No platform staff found yet. Invite the first internal user.",
+          filterLabels: {
+            all: "All",
+            active: "Active",
+            invited: "Invited",
             suspended: "Suspended",
           },
         }
@@ -353,29 +374,35 @@ export default function UsersPage() {
           subtitle:
             "平台內部使用者與角色治理，RBAC 守門仍以前後端 authority 真值為準。",
           refresh: "重新整理",
-          add: "邀請",
-          createTitle: "邀請平台人員",
-          createSubtitle:
-            "先建立內部使用者主檔與初始平台角色，再讓該使用者進入後續工作流。",
+          invite: "邀請",
+          last30Days: "last 30 days",
+          all: "全部人員",
           errorTitle: "無法載入平台人員資料",
           suspendedTitle: "停權帳號仍保留在 authority roster",
           suspendedBody: (count: number) =>
             `目前仍有 ${count} 筆停權帳號顯示在平台名單中，請確認是否要保留治理軌跡。`,
-          noUsers: "目前沒有任何平台人員，請先邀請第一位內部使用者。",
+          detailTitle: "人員詳情",
+          detailSubtitle: "角色與狀態調整移出主名單，僅在需要時打開治理視窗。",
+          inviteTitle: "邀請平台人員",
+          inviteSubtitle:
+            "先建立內部使用者主檔與初始平台角色，再讓該使用者進入後續工作流。",
+          visibleNow: "目前筆數",
+          activeStaff: "啟用中人員",
+          openInvites: "待接受邀請",
+          role: "角色",
+          status: "狀態",
           created: "建立時間",
+          updated: "更新",
           activate: "啟用",
           suspend: "停權",
-          filtersLabel: "名單範圍",
-          stats: {
-            active: "啟用中人員",
-            admins: "管理角色覆蓋",
-            invited: "待接受邀請",
-          },
-          detail: {
-            scope: "目前範圍",
-            visible: "筆數",
-            latest: "最近更新",
-            suspended: "停權中",
+          promoteAdmin: "設為 admin",
+          assignViewer: "設為 viewer",
+          noUsers: "目前沒有任何平台人員，請先邀請第一位內部使用者。",
+          filterLabels: {
+            all: "全部",
+            active: "啟用",
+            invited: "邀請中",
+            suspended: "停權",
           },
         };
 
@@ -402,9 +429,6 @@ export default function UsersPage() {
       active: users.filter((user) => user.status === "active").length,
       invited: users.filter((user) => user.status === "invited").length,
       suspended: users.filter((user) => user.status === "suspended").length,
-      admins: users.filter(
-        (user) => user.roleCode === "superadmin" || user.roleCode === "admin",
-      ).length,
     }),
     [users],
   );
@@ -414,20 +438,10 @@ export default function UsersPage() {
     return users.filter((user) => user.status === filter);
   }, [filter, users]);
 
-  const latestUpdatedAt = useMemo(() => {
-    const latest = users.reduce<string | null>((acc, user) => {
-      if (!acc) return user.updatedAt;
-      return new Date(user.updatedAt) > new Date(acc) ? user.updatedAt : acc;
-    }, null);
-    return latest ? formatDateTime(latest) : "—";
-  }, [users]);
-
-  const selectedFilterLabel = useMemo(() => {
-    if (filter === "all") {
-      return locale === "en" ? "All staff" : "全部人員";
-    }
-    return filter;
-  }, [filter, locale]);
+  const selectedUser = useMemo(
+    () => users.find((user) => user.userId === selectedUserId) ?? null,
+    [selectedUserId, users],
+  );
 
   const createDisabled =
     creating || !formEmail.trim() || !formDisplayName.trim();
@@ -482,10 +496,14 @@ export default function UsersPage() {
         h: "NAME",
         w: 220,
         r: (row) => (
-          <div style={nameCellStyle}>
+          <button
+            type="button"
+            style={nameButtonStyle}
+            onClick={() => setSelectedUserId(row.userId)}
+          >
             <span style={avatarStyle}>{getInitials(row.displayName)}</span>
             <span style={nameTextStyle}>{row.displayName}</span>
-          </div>
+          </button>
         ),
       },
       {
@@ -511,64 +529,44 @@ export default function UsersPage() {
       },
       {
         h: locale === "en" ? "UPDATED" : "更新",
-        w: 220,
-        r: (row) => (
-          <div style={updatedCellStyle}>
-            <span style={{ fontFamily: theme.monoFamily }}>
-              {formatDateTime(row.updatedAt)}
-            </span>
-            <div style={actionRowStyle}>
-              <CanvasBtn
-                theme={theme}
-                size="xs"
-                disabled={
-                  updatingUserId === row.userId || row.roleCode === "admin"
-                }
-                onClick={() =>
-                  void handleUpdate(row.userId, {
-                    roleCode: "admin",
-                    status: row.status,
-                  })
-                }
-              >
-                admin
-              </CanvasBtn>
-              <CanvasBtn
-                theme={theme}
-                size="xs"
-                disabled={
-                  updatingUserId === row.userId || row.roleCode === "viewer"
-                }
-                onClick={() =>
-                  void handleUpdate(row.userId, {
-                    roleCode: "viewer",
-                    status: row.status,
-                  })
-                }
-              >
-                viewer
-              </CanvasBtn>
-              <CanvasBtn
-                theme={theme}
-                size="xs"
-                variant="secondary"
-                disabled={updatingUserId === row.userId}
-                onClick={() =>
-                  void handleUpdate(row.userId, {
-                    roleCode: row.roleCode,
-                    status: row.status === "suspended" ? "active" : "suspended",
-                  })
-                }
-              >
-                {row.status === "suspended" ? copy.activate : copy.suspend}
-              </CanvasBtn>
-            </div>
-          </div>
-        ),
+        w: 180,
+        mono: true,
+        r: (row) => formatDateTime(row.updatedAt),
       },
     ],
-    [copy.activate, copy.suspend, handleUpdate, locale, updatingUserId],
+    [locale],
   );
+
+  const filterPills = [
+    {
+      value: "all" as const,
+      label: copy.filterLabels.all,
+      count: counts.all,
+      tone: "neutral" as CanvasTone,
+    },
+    {
+      value: "active" as const,
+      label: copy.filterLabels.active,
+      count: counts.active,
+      tone: "success" as CanvasTone,
+    },
+    {
+      value: "invited" as const,
+      label: copy.filterLabels.invited,
+      count: counts.invited,
+      tone: "warn" as CanvasTone,
+    },
+    {
+      value: "suspended" as const,
+      label: copy.filterLabels.suspended,
+      count: counts.suspended,
+      tone: "danger" as CanvasTone,
+    },
+  ];
+
+  const selectedFilterLabel = filterPills.find(
+    (item) => item.value === filter,
+  )?.label;
 
   if (loading) {
     return (
@@ -612,7 +610,6 @@ export default function UsersPage() {
       avatarLabel="PA"
       style={shellStyle}
     >
-      <style>{responsiveStyle}</style>
       <CanvasPageHeader
         theme={theme}
         title={copy.title}
@@ -625,11 +622,11 @@ export default function UsersPage() {
             </CanvasBtn>
             <CanvasBtn
               theme={theme}
-              variant={showCreate ? "secondary" : "primary"}
+              variant="primary"
               icon="plus"
-              onClick={() => setShowCreate((current) => !current)}
+              onClick={() => setShowCreate(true)}
             >
-              {showCreate ? t("common.cancel") : copy.add}
+              {copy.invite}
             </CanvasBtn>
           </>
         }
@@ -654,152 +651,27 @@ export default function UsersPage() {
           />
         ) : null}
 
-        <div className="pa-users-hero" style={heroGridStyle}>
-          <CanvasCard theme={theme}>
-            <div style={heroSummaryStyle}>
-              <div style={kpiGridStyle}>
-                <CanvasKPI
-                  theme={theme}
-                  label={copy.stats.active}
-                  value={counts.active}
-                  sub={`${counts.all} total`}
-                />
-                <CanvasKPI
-                  theme={theme}
-                  label={copy.stats.admins}
-                  value={counts.admins}
-                  sub="superadmin + admin"
-                />
-                <CanvasKPI
-                  theme={theme}
-                  label={copy.stats.invited}
-                  value={counts.invited}
-                  sub={`${counts.suspended} suspended`}
-                />
-              </div>
-              <CanvasDL
+        <div style={pillsRowStyle}>
+          {filterPills.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              style={pillButtonStyle}
+              onClick={() => setFilter(item.value)}
+            >
+              <CanvasPill
                 theme={theme}
-                cols={2}
-                items={[
-                  {
-                    label: copy.detail.scope,
-                    value: selectedFilterLabel,
-                  },
-                  {
-                    label: copy.detail.visible,
-                    value: `${visibleUsers.length}`,
-                    mono: true,
-                  },
-                  {
-                    label: copy.detail.latest,
-                    value: latestUpdatedAt,
-                    mono: true,
-                  },
-                  {
-                    label: copy.detail.suspended,
-                    value: `${counts.suspended}`,
-                    mono: true,
-                  },
-                ]}
-              />
-            </div>
-          </CanvasCard>
-
-          {showCreate ? (
-            <CanvasCard
-              theme={theme}
-              title={copy.createTitle}
-              subtitle={copy.createSubtitle}
-            >
-              <form onSubmit={handleCreate} style={inviteFormStyle}>
-                <div style={inviteGridStyle}>
-                  <CanvasField
-                    theme={theme}
-                    label={t("users.form.email")}
-                    required
-                  >
-                    <input
-                      type="email"
-                      value={formEmail}
-                      onChange={(event) => setFormEmail(event.target.value)}
-                      required
-                      placeholder="staff@platform.drts"
-                      style={monoInputStyle}
-                    />
-                  </CanvasField>
-                  <CanvasField
-                    theme={theme}
-                    label={t("users.form.displayName")}
-                    required
-                  >
-                    <input
-                      type="text"
-                      value={formDisplayName}
-                      onChange={(event) =>
-                        setFormDisplayName(event.target.value)
-                      }
-                      required
-                      style={inputStyle}
-                    />
-                  </CanvasField>
-                  <CanvasField theme={theme} label={t("users.form.role")}>
-                    <select
-                      value={formRoleCode}
-                      onChange={(event) =>
-                        setFormRoleCode(
-                          event.target.value as PlatformAdminUserRole,
-                        )
-                      }
-                      style={inputStyle}
-                    >
-                      {ROLE_CODES.map((roleCode) => (
-                        <option key={roleCode} value={roleCode}>
-                          {roleCode}
-                        </option>
-                      ))}
-                    </select>
-                  </CanvasField>
-                </div>
-                <div>
-                  <CanvasBtn
-                    theme={theme}
-                    variant="primary"
-                    size="md"
-                    disabled={createDisabled}
-                  >
-                    {creating ? t("common.adding") : copy.add}
-                  </CanvasBtn>
-                </div>
-              </form>
-            </CanvasCard>
-          ) : (
-            <CanvasCard
-              theme={theme}
-              title={copy.filtersLabel}
-              subtitle={
-                locale === "en"
-                  ? "Keep the roster close to the PA_Users artboard while exposing invite and suspension lanes when needed."
-                  : "維持接近 PA_Users 的純表格姿態，必要時再切換到邀請或停權治理視角。"
-              }
-            >
-              <CanvasField theme={theme} label={copy.filtersLabel}>
-                <select
-                  value={filter}
-                  onChange={(event) =>
-                    setFilter(event.target.value as UserFilter)
-                  }
-                  style={inputStyle}
-                >
-                  <option value="all">
-                    {locale === "en" ? "All staff" : "全部人員"}
-                  </option>
-                  <option value="active">active</option>
-                  <option value="invited">invited</option>
-                  <option value="suspended">suspended</option>
-                </select>
-              </CanvasField>
-            </CanvasCard>
-          )}
+                tone={filter === item.value ? "accent" : item.tone}
+                dot={item.value !== "all"}
+              >
+                {item.label} {item.count}
+              </CanvasPill>
+            </button>
+          ))}
+          <span style={{ flex: 1 }} />
+          <CanvasPill theme={theme} tone="neutral">
+            {copy.last30Days}
+          </CanvasPill>
         </div>
 
         <CanvasCard theme={theme} padding={0}>
@@ -814,6 +686,279 @@ export default function UsersPage() {
           )}
         </CanvasCard>
       </div>
+
+      {showCreate ? (
+        <div
+          style={overlayScrimStyle}
+          onClick={() => setShowCreate(false)}
+          role="presentation"
+        >
+          <div
+            style={overlayPanelStyle}
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pa-users-invite-title"
+          >
+            <CanvasCard
+              theme={theme}
+              title={copy.inviteTitle}
+              subtitle={copy.inviteSubtitle}
+              actions={
+                <CanvasBtn
+                  theme={theme}
+                  variant="secondary"
+                  onClick={() => setShowCreate(false)}
+                >
+                  {t("common.close")}
+                </CanvasBtn>
+              }
+            >
+              <div style={overlayContentStyle}>
+                <div id="pa-users-invite-title" style={{ display: "none" }}>
+                  {copy.inviteTitle}
+                </div>
+                <div style={kpiGridStyle}>
+                  <CanvasKPI
+                    theme={theme}
+                    label={copy.activeStaff}
+                    value={counts.active}
+                    sub={`${counts.all} total`}
+                  />
+                  <CanvasKPI
+                    theme={theme}
+                    label={copy.openInvites}
+                    value={counts.invited}
+                    sub={`${counts.suspended} suspended`}
+                  />
+                </div>
+
+                <form onSubmit={handleCreate} style={overlayContentStyle}>
+                  <div style={formGridStyle}>
+                    <CanvasField
+                      theme={theme}
+                      label={t("users.form.email")}
+                      required
+                    >
+                      <input
+                        type="email"
+                        value={formEmail}
+                        onChange={(event) => setFormEmail(event.target.value)}
+                        required
+                        placeholder="staff@platform.drts"
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+
+                    <CanvasField
+                      theme={theme}
+                      label={t("users.form.displayName")}
+                      required
+                    >
+                      <input
+                        type="text"
+                        value={formDisplayName}
+                        onChange={(event) =>
+                          setFormDisplayName(event.target.value)
+                        }
+                        required
+                        style={inputStyle}
+                      />
+                    </CanvasField>
+
+                    <CanvasField theme={theme} label={t("users.form.role")}>
+                      <select
+                        value={formRoleCode}
+                        onChange={(event) =>
+                          setFormRoleCode(
+                            event.target.value as PlatformAdminUserRole,
+                          )
+                        }
+                        style={inputStyle}
+                      >
+                        {ROLE_CODES.map((roleCode) => (
+                          <option key={roleCode} value={roleCode}>
+                            {roleCode}
+                          </option>
+                        ))}
+                      </select>
+                    </CanvasField>
+                  </div>
+
+                  <div style={actionRowStyle}>
+                    <CanvasBtn
+                      theme={theme}
+                      variant="primary"
+                      size="md"
+                      disabled={createDisabled}
+                    >
+                      {creating ? t("common.adding") : copy.invite}
+                    </CanvasBtn>
+                    <CanvasBtn
+                      theme={theme}
+                      variant="secondary"
+                      onClick={() => setShowCreate(false)}
+                    >
+                      {t("common.cancel")}
+                    </CanvasBtn>
+                  </div>
+                </form>
+              </div>
+            </CanvasCard>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedUser ? (
+        <div
+          style={overlayScrimStyle}
+          onClick={() => setSelectedUserId(null)}
+          role="presentation"
+        >
+          <div
+            style={overlayPanelStyle}
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pa-users-detail-title"
+          >
+            <CanvasCard
+              theme={theme}
+              title={copy.detailTitle}
+              subtitle={copy.detailSubtitle}
+              actions={
+                <CanvasBtn
+                  theme={theme}
+                  variant="secondary"
+                  onClick={() => setSelectedUserId(null)}
+                >
+                  {t("common.close")}
+                </CanvasBtn>
+              }
+            >
+              <div style={overlayContentStyle}>
+                <div id="pa-users-detail-title" style={{ display: "none" }}>
+                  {copy.detailTitle}
+                </div>
+
+                <div style={kpiGridStyle}>
+                  <CanvasKPI
+                    theme={theme}
+                    label={copy.activeStaff}
+                    value={selectedUser.status}
+                    sub={selectedUser.roleCode}
+                  />
+                  <CanvasKPI
+                    theme={theme}
+                    label={copy.visibleNow}
+                    value={visibleUsers.length}
+                    sub={selectedFilterLabel ?? copy.all}
+                  />
+                </div>
+
+                {selectedUser.status === "suspended" ? (
+                  <CanvasBanner
+                    theme={theme}
+                    tone="warn"
+                    title={copy.suspendedTitle}
+                    body={copy.suspendedBody(1)}
+                  />
+                ) : null}
+
+                <CanvasDL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      label: "NAME",
+                      value: selectedUser.displayName,
+                    },
+                    {
+                      label: "EMAIL",
+                      value: selectedUser.email,
+                      mono: true,
+                    },
+                    {
+                      label: copy.role,
+                      value: selectedUser.roleCode,
+                      mono: true,
+                    },
+                    {
+                      label: copy.status,
+                      value: selectedUser.status,
+                      mono: true,
+                    },
+                    {
+                      label: copy.created,
+                      value: formatDateTime(selectedUser.createdAt),
+                      mono: true,
+                    },
+                    {
+                      label: copy.updated,
+                      value: formatDateTime(selectedUser.updatedAt),
+                      mono: true,
+                    },
+                  ]}
+                />
+
+                <div style={actionRowStyle}>
+                  <CanvasBtn
+                    theme={theme}
+                    size="sm"
+                    disabled={
+                      updatingUserId === selectedUser.userId ||
+                      selectedUser.roleCode === "admin"
+                    }
+                    onClick={() =>
+                      void handleUpdate(selectedUser.userId, {
+                        roleCode: "admin",
+                        status: selectedUser.status,
+                      })
+                    }
+                  >
+                    {copy.promoteAdmin}
+                  </CanvasBtn>
+                  <CanvasBtn
+                    theme={theme}
+                    size="sm"
+                    disabled={
+                      updatingUserId === selectedUser.userId ||
+                      selectedUser.roleCode === "viewer"
+                    }
+                    onClick={() =>
+                      void handleUpdate(selectedUser.userId, {
+                        roleCode: "viewer",
+                        status: selectedUser.status,
+                      })
+                    }
+                  >
+                    {copy.assignViewer}
+                  </CanvasBtn>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="secondary"
+                    size="sm"
+                    disabled={updatingUserId === selectedUser.userId}
+                    onClick={() =>
+                      void handleUpdate(selectedUser.userId, {
+                        roleCode: selectedUser.roleCode,
+                        status:
+                          selectedUser.status === "suspended"
+                            ? "active"
+                            : "suspended",
+                      })
+                    }
+                  >
+                    {selectedUser.status === "suspended"
+                      ? copy.activate
+                      : copy.suspend}
+                  </CanvasBtn>
+                </div>
+              </div>
+            </CanvasCard>
+          </div>
+        </div>
+      ) : null}
     </CanvasShell>
   );
 }
