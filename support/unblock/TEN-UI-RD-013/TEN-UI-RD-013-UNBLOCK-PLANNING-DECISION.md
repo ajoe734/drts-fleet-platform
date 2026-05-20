@@ -2,9 +2,15 @@
 
 Task: `TEN-UI-RD-013-UNBLOCK-PLANNING-DECISION`
 Parent: `TEN-UI-RD-013`
-Owner: `Codex2`
-Reviewer: `Codex`
-Date: `2026-05-18`
+Owner: `Codex`
+Reviewer: `Codex2`
+Date: `2026-05-20`
+
+## Status
+
+Backfill helper closeout. The parent task is already unblocked and `done` in
+current machine truth; this packet records the planning-decision evidence chain
+and removes stale "reopen before deciding" guidance from the parity document.
 
 ## Decision
 
@@ -31,6 +37,9 @@ artifacts:
    `TEN-UI-RD-013` to shipped commit `921c456`, push branch
    `codex/be-cc-001-fu-seed`, and reviewer approval by `Claude2` at
    `2026-05-14T03:16:30Z`.
+5. Current `origin/dev` machine truth records `TEN-UI-RD-013` as `done` on
+   commit `7673f8a4568e6ceddeadc05ce744d389a7d05b0b`, with the deferred
+   management editor explicitly kept out of scope.
 
 ## Scope cut
 
@@ -52,31 +61,33 @@ already-shipped read-only route.
 
 ## Parent task routing
 
-`TEN-UI-RD-013` should no longer stay blocked on "missing canonical tenant
-cost-center contract". The concrete next step is:
+`TEN-UI-RD-013` no longer needs any unblock work in the parent row. The
+concrete parent outcome is already recorded:
 
-1. remove the stale planning blocker in machine truth;
-2. recover the parent closeout trail from the existing shipped evidence
-   (`a7c1b9f` for `BE-CC-001`, `921c456` for the route, and the 2026-05-14
-   closeout packet);
-3. only open a separate follow-up if product wants the deferred management
-   editor surface.
+1. `TEN-UI-RD-013` stays `done` in machine truth and on `origin/dev`;
+2. the read-only route remains the accepted shipped scope;
+3. if product still wants the deferred management editor, it must be a new
+   follow-up task against backend mutation scope rather than a reopen of the
+   shipped route.
 
-## Verification used for this unblock packet
+## Verification used for this helper refresh
 
-- `rg` over the accepted design-response, execution-packet, parity-decision,
-  and closeout documents
-- `git log --grep` confirmation for commits `a7c1b9f`, `921c456`, and `9becf4e`
+- `git show origin/dev:ai-status.json` for the current parent `done` row and
+  the resolved blocker entry
+- `git show origin/dev:docs/05-ui/tenant-console-parity-decisions-20260510.md`
+  and `git show origin/dev:docs/05-ui/tenant-console-redesign-closeout-20260514.md`
+  for the shipped-scope record
+- `git diff origin/dev..HEAD -- docs/05-ui/tenant-console-parity-decisions-20260510.md support/unblock/TEN-UI-RD-013/TEN-UI-RD-013-UNBLOCK-PLANNING-DECISION.md`
+  to isolate this helper's canonical delta
 - source-file existence checks for:
   - `apps/tenant-console-web/app/cost-centers/page.tsx`
-  - `packages/api-client/src/index.ts`
-  - `packages/contracts/src/index.ts`
+  - `packages/ui-web/src/tenant-cost-centers.stories.tsx`
 
-## Closeout evidence
+## Closeout note
 
-- Support packet creation and metadata alignment: `54d2f1b`, then `4599c5d`,
-  on `origin/codex2/ten-ui-rd-013-unblock-planning-decision`
-- Parent machine-truth recovery commit: `ee374ca` on
-  `origin/codex2/ten-ui-rd-013-unblock-planning-decision`
-- Final reviewer approval and owner closeout are recorded in machine truth,
-  not duplicated in this support packet
+Earlier branch-local recovery work existed on
+`origin/codex2/ten-ui-rd-013-unblock-planning-decision`, but the effective
+parent resolution is now the `origin/dev` closeout tuple. This helper task
+therefore stays narrow: add the missing support artifact, align the parity
+document's stale follow-up wording, and preserve the scope cut for any future
+management-editor request.
