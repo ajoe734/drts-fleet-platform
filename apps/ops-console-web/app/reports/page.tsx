@@ -166,15 +166,15 @@ const kpiGridStyle = {
   gap: 12,
 };
 
-const controlRowStyle = {
+const tabRowStyle = {
   display: "flex",
   flexWrap: "wrap" as const,
   gap: 8,
 };
 
-const splitGridStyle = {
+const lowerGridStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.45fr) minmax(320px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(320px, 420px)",
   gap: 16,
 };
 
@@ -188,6 +188,29 @@ const formGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
+};
+
+const sectionStackStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 16,
+};
+
+const tableCardStyle = {
+  overflow: "hidden",
+};
+
+const cardBodyStackStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 14,
+};
+
+const buttonRowStyle = {
+  display: "flex",
+  gap: 8,
+  marginTop: 2,
+  flexWrap: "wrap" as const,
 };
 
 function defaultClosedMonth() {
@@ -637,6 +660,22 @@ export default function ReportsPage() {
   const currentPackage = selectedPackageId
     ? (packages.find((pkg) => pkg.packageId === selectedPackageId) ?? null)
     : null;
+  const tabOptions: { key: TabKey; label: string; count?: number }[] = [
+    {
+      key: "report_jobs",
+      label: t("reports.reportJobsEyebrow"),
+      count: jobs.length,
+    },
+    {
+      key: "filing_packages",
+      label: t("reports.filingPackagesEyebrow"),
+      count: packages.length,
+    },
+    {
+      key: "schedules",
+      label: translate("maintenance.col.schedule", locale),
+    },
+  ];
 
   return (
     <Shell
@@ -731,39 +770,33 @@ export default function ReportsPage() {
           />
         </div>
 
-        <div style={controlRowStyle}>
-          {[
-            {
-              key: "report_jobs" as const,
-              label: `${t("reports.reportJobsEyebrow")} ${jobs.length}`,
-            },
-            {
-              key: "filing_packages" as const,
-              label: `${t("reports.filingPackagesEyebrow")} ${packages.length}`,
-            },
-            {
-              key: "schedules" as const,
-              label: translate("maintenance.col.schedule", locale),
-            },
-          ].map((tab) => (
+        <div style={tabRowStyle}>
+          {tabOptions.map((tab) => (
             <Btn
               key={tab.key}
               theme={theme}
               variant={activeTab === tab.key ? "primary" : "secondary"}
               onClick={() => setActiveTab(tab.key)}
             >
-              {tab.label}
+              {tab.count !== undefined
+                ? `${tab.label} ${tab.count}`
+                : tab.label}
             </Btn>
           ))}
         </div>
 
         {activeTab === "report_jobs" ? (
-          <div style={splitGridStyle}>
+          <div style={sectionStackStyle}>
             <Card
               theme={theme}
               padding={0}
               title={t("reports.recentJobs")}
-              subtitle={t("reports.totalJobs", { count: jobs.length })}
+              subtitle={copyText(
+                locale,
+                "report jobs · filing packages · signed artifact short-lived URLs",
+                "report jobs · filing packages · signed artifact 短效 URL",
+              )}
+              style={tableCardStyle}
             >
               {loading ? (
                 <div style={emptyStateStyle}>{t("reports.loadingJobs")}</div>
@@ -774,7 +807,7 @@ export default function ReportsPage() {
               )}
             </Card>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={lowerGridStyle}>
               <Card
                 theme={theme}
                 title={t("reports.createReportEyebrow")}
@@ -852,7 +885,7 @@ export default function ReportsPage() {
                       />
                     </Field>
                   </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
+                  <div style={buttonRowStyle}>
                     <button
                       type="submit"
                       style={primaryButtonStyle}
@@ -862,6 +895,9 @@ export default function ReportsPage() {
                         ? t("reports.form.submitting")
                         : t("reports.form.createJob")}
                     </button>
+                    <Pill theme={theme} tone="neutral">
+                      {activePreset?.description ?? t("reports.adhocDesc")}
+                    </Pill>
                   </div>
                 </form>
               </Card>
@@ -881,13 +917,7 @@ export default function ReportsPage() {
                     {t("reports.loadingReportDetail")}
                   </div>
                 ) : jobDetail ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 14,
-                    }}
-                  >
+                  <div style={cardBodyStackStyle}>
                     <DL
                       theme={theme}
                       cols={2}
@@ -992,7 +1022,7 @@ export default function ReportsPage() {
         ) : null}
 
         {activeTab === "filing_packages" ? (
-          <div style={splitGridStyle}>
+          <div style={sectionStackStyle}>
             <Card
               theme={theme}
               padding={0}
@@ -1000,6 +1030,7 @@ export default function ReportsPage() {
               subtitle={t("reports.packagesGenerated", {
                 count: packages.length,
               })}
+              style={tableCardStyle}
             >
               {loading ? (
                 <div style={emptyStateStyle}>
@@ -1016,7 +1047,7 @@ export default function ReportsPage() {
               )}
             </Card>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={lowerGridStyle}>
               <Card
                 theme={theme}
                 title={t("reports.generateFiling")}
@@ -1075,7 +1106,7 @@ export default function ReportsPage() {
                       />
                     </Field>
                   </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
+                  <div style={buttonRowStyle}>
                     <button
                       type="submit"
                       style={primaryButtonStyle}
@@ -1109,13 +1140,7 @@ export default function ReportsPage() {
                     {t("reports.loadingPackageDetail")}
                   </div>
                 ) : packageDetail ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 14,
-                    }}
-                  >
+                  <div style={cardBodyStackStyle}>
                     <DL
                       theme={theme}
                       cols={2}
@@ -1300,7 +1325,7 @@ export default function ReportsPage() {
         ) : null}
 
         {activeTab === "schedules" ? (
-          <div style={splitGridStyle}>
+          <div style={lowerGridStyle}>
             <Card
               theme={theme}
               title={copyText(locale, "Schedule posture", "排程狀態")}
@@ -1329,6 +1354,15 @@ export default function ReportsPage() {
                   label={t("reports.form.filingMonth")}
                   value={packageMonth}
                   sub={copyText(locale, "Closed month", "結帳月份")}
+                />
+                <InfoPanel
+                  label={t("reports.queuedJobs")}
+                  value={queuedReports}
+                  sub={copyText(
+                    locale,
+                    "Recurring work should clear before artifact expiry.",
+                    "定期工作應在 artifact 到期前清空。",
+                  )}
                 />
               </div>
             </Card>
