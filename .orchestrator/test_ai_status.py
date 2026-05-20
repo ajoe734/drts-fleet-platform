@@ -168,6 +168,51 @@ class UnblockParentResolutionTest(unittest.TestCase):
         self.assertEqual(len(state["blockers"]), 1)
         self.assertEqual(state["blockers"][0]["status"], "open")
 
+    def test_unblock_done_does_not_reopen_done_parent_by_default(self) -> None:
+        state = {
+            "tasks": [
+                {
+                    "id": "TEN-UI-RD-014",
+                    "owner": "Codex",
+                    "reviewer": "Codex2",
+                    "status": "done",
+                    "next": "Merged to dev via PR #153 at origin/dev commit 7673f8a.",
+                },
+                {
+                    "id": "TEN-UI-RD-014-UNBLOCK-PLANNING-DECISION",
+                    "owner": "Codex",
+                    "reviewer": "Claude",
+                    "status": "review_approved",
+                    "task_class": "unblock",
+                    "helper_parent": "TEN-UI-RD-014",
+                    "helper_kind": "planning_decision",
+                    "mutates_canonical": False,
+                },
+            ],
+            "blockers": [],
+            "handoffs": [],
+        }
+
+        with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_done(
+                state,
+                [
+                    "TEN-UI-RD-014-UNBLOCK-PLANNING-DECISION",
+                    "Unblock rationale recorded without regressing the already-done parent.",
+                ],
+            )
+
+        parent = next(task for task in state["tasks"] if task["id"] == "TEN-UI-RD-014")
+        child = next(
+            task for task in state["tasks"] if task["id"] == "TEN-UI-RD-014-UNBLOCK-PLANNING-DECISION"
+        )
+        self.assertEqual(parent["status"], "done")
+        self.assertEqual(parent["next"], "Merged to dev via PR #153 at origin/dev commit 7673f8a.")
+        self.assertEqual(child["resolved_parent_status"], "done")
+        self.assertEqual(child["resolved_parent_next"], parent["next"])
+        self.assertEqual(len(state["handoffs"]), 0)
+        self.assertEqual(len(state["blockers"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

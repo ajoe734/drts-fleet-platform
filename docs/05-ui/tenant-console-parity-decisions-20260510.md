@@ -73,7 +73,7 @@ its reviewer / approval-time / commit / canvas anchor / parity story is
 Status: shipped
 Owner: `Codex`
 Reviewer: `Codex2`
-Last checked: `2026-05-18`
+Last checked: `2026-05-20`
 
 ### Decision
 
@@ -419,8 +419,11 @@ Supervisor routing implication:
 1. Treat the planning blocker as resolved.
 2. Reconcile `TEN-UI-RD-014` against the shipped branch
    `origin/codex2/ten-ui-rd-014-closeout` at commit `f0e8265`.
-3. Update machine truth so the parent task points at shipped closeout
-   evidence instead of the old "missing contract" redirect.
+3. Update canonical machine truth so the parent task points at the shipped
+   closeout evidence already present on current `origin/dev` (merge commit
+   `7673f8a`) instead of the old "missing contract" redirect, while
+   preserving the original route shipping evidence from
+   `origin/codex2/ten-ui-rd-014-closeout` at `f0e8265`.
 
 ### Why this was blocked
 

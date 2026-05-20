@@ -797,8 +797,19 @@ def apply_unblock_parent_resolution(
     parent = get_task(state, parent_id)
     if parent is None:
         return
+    parent_status = str(parent.get("status") or "").strip().lower()
+    explicit_parent_status = os.environ.get("PARENT_STATUS", "").strip().lower()
 
-    resume_status = os.environ.get("PARENT_STATUS", "").strip().lower() or "todo"
+    # A completed parent should stay completed unless the closeout explicitly
+    # requests another status. This avoids helper-task closeout regressing an
+    # already-finalized parent row back to todo.
+    if parent_status == "done" and not explicit_parent_status:
+        task["resolved_parent_status"] = "done"
+        task["resolved_parent_next"] = str(parent.get("next") or "")
+        task.pop("resolved_parent_waiting_for", None)
+        return
+
+    resume_status = explicit_parent_status or "todo"
     if resume_status not in {"backlog", "todo", "in_progress", "blocked"}:
         raise SystemExit("PARENT_STATUS must be backlog, todo, in_progress, or blocked")
     parent_message = (
