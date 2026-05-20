@@ -67,7 +67,7 @@ Working tree is **not** a staging area for design intent. Stash is **not** an al
   git fetch origin
   git rebase origin/dev
   ```
-- **Anchor commits are not closeouts.** They have `wip:` prefix and do not require a `Verification:` trailer. The closeout commit (per `task-closeout-finalization.md`) is the one that satisfies the `<TASK-ID>: <summary>` subject regex required by CI.
+- **Anchor commits are not closeouts.** They have `wip:` prefix and do not require a `Verification:` trailer. Both subject forms — anchor `wip(<TASK-ID>): <summary>` and closeout `<TASK-ID>: <summary>` — satisfy the CI subject regex (see `scripts/git/check_commit_trailers.py`); the formal closeout commit is the one made per `task-closeout-finalization.md` and additionally carries a `Verification:` trailer.
 - **doc / skill / config changes** (per `branch-strategy.md` §11.5) always go branch → commit → push → PR. They must not accumulate in-session across supervisor cycles.
 
 ## Trigger checklist (ask before each significant save)
