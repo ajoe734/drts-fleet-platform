@@ -5,25 +5,18 @@ import type {
   ShiftRecord,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
-  CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
-  CanvasDL as DL,
-  CanvasField as Field,
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
-  CanvasPill as Pill,
   CanvasShell as Shell,
-  CanvasTable as Table,
   buildCanvasTheme,
   type CanvasShellNavItem,
-  type CanvasTableColumn,
-  type CanvasTone,
   type CanvasTheme,
+  type CanvasTone,
 } from "@drts/ui-web";
 
 type AttendancePageProps = {
@@ -41,18 +34,6 @@ type GanttRow = {
   segmentWidth: number;
   startLabel: string;
   endLabel: string;
-  totalHoursLabel: string;
-  hintLabel: string;
-};
-
-type ExceptionRow = Record<string, unknown> & {
-  key: string;
-  driver: string;
-  shiftOrAttendance: string;
-  status: string;
-  statusTone: CanvasTone;
-  window: string;
-  impact: string;
 };
 
 const theme = buildCanvasTheme({
@@ -63,7 +44,8 @@ const theme = buildCanvasTheme({
 
 const pageBodyStyle = {
   padding: 24,
-  display: "grid",
+  display: "flex",
+  flexDirection: "column" as const,
   gap: 16,
 };
 
@@ -73,47 +55,37 @@ const kpiGridStyle = {
   gap: 12,
 };
 
-const summaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-  gap: 16,
-  alignItems: "start",
-};
-
 const ganttGridStyle = {
   display: "grid",
-  gridTemplateColumns: "140px minmax(720px, 1fr)",
-  gap: "0 8px",
+  gridTemplateColumns: "120px minmax(720px, 1fr)",
   fontSize: 11,
+  gap: "0 8px",
 };
 
 const ganttHeaderStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(24, minmax(26px, 1fr))",
+  gridTemplateColumns: "repeat(24, minmax(28px, 1fr))",
   color: theme.textDim,
-  paddingBottom: 6,
+  paddingBottom: 4,
   borderBottom: `1px solid ${theme.border}`,
   fontFamily: theme.monoFamily,
 };
 
-const ganttTrackGridStyle = {
+const ganttTrackStyle = {
   position: "absolute" as const,
   inset: 0,
   display: "grid",
-  gridTemplateColumns: "repeat(24, minmax(26px, 1fr))",
+  gridTemplateColumns: "repeat(24, minmax(28px, 1fr))",
 };
 
-const ganttSegmentStyle = {
+const ganttSegmentBaseStyle = {
   position: "absolute" as const,
   top: 6,
-  height: 18,
+  height: 16,
   borderRadius: 4,
-  border: `1px solid ${theme.accent}`,
-  background: theme.accentBg,
-  color: theme.accent,
-  fontSize: 10.5,
+  fontSize: 10,
   paddingLeft: 6,
-  lineHeight: "16px",
+  lineHeight: "14px",
   fontFamily: theme.monoFamily,
   overflow: "hidden" as const,
   whiteSpace: "nowrap" as const,
@@ -204,31 +176,6 @@ function formatDateLabel(locale: Locale, value: Date) {
   }).format(value);
 }
 
-function formatDateTime(locale: Locale, value: string | null | undefined) {
-  if (!value) {
-    return "—";
-  }
-
-  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "UTC",
-  })
-    .format(new Date(value))
-    .replace(",", "");
-}
-
-function formatHourSpan(hours: number | null | undefined, locale: Locale) {
-  if (hours === null || hours === undefined) {
-    return "—";
-  }
-
-  return t("attendance.hours", locale, { h: hours.toFixed(1) });
-}
-
 function formatHourTick(hour: number) {
   return hour.toString().padStart(2, "0");
 }
@@ -255,15 +202,9 @@ function formatAttendanceRate(
 }
 
 function shiftTone(status: ShiftRecord["status"]): CanvasTone {
-  if (status === "active") return "info";
   if (status === "completed") return "success";
-  return "danger";
-}
-
-function attendanceTone(status: AttendanceRecord["status"]): CanvasTone {
-  if (status === "present") return "success";
-  if (status === "partial") return "warn";
-  return "danger";
+  if (status === "abandoned") return "danger";
+  return "info";
 }
 
 function buildShellNav(locale: Locale): CanvasShellNavItem[] {
@@ -402,7 +343,6 @@ function buildGanttRows(
   rangeStart: number,
   rangeEnd: number,
   now: number,
-  locale: Locale,
 ): GanttRow[] {
   return shifts
     .filter((shift) =>
@@ -438,62 +378,8 @@ function buildGanttRows(
         segmentWidth: (Math.min(widthHours, 24) / 24) * 100,
         startLabel: formatSegmentHour(leftHours),
         endLabel: formatSegmentHour(Math.min(leftHours + widthHours, 24)),
-        totalHoursLabel: formatHourSpan(shift.totalHours, locale),
-        hintLabel:
-          locale === "en"
-            ? `${formatOpsCodeLabel(locale, shift.status)} · ${shift.vehicleId ?? "No vehicle"}`
-            : `${formatOpsCodeLabel(locale, shift.status)} · ${shift.vehicleId ?? "未綁定車輛"}`,
       };
     });
-}
-
-function buildExceptionRows(
-  shifts: ShiftRecord[],
-  attendanceRecords: AttendanceRecord[],
-  driversById: Map<string, DriverRegistryRecord>,
-  locale: Locale,
-): ExceptionRow[] {
-  const shiftRows = shifts
-    .filter((shift) => shift.status === "abandoned")
-    .map((shift) => {
-      const driver = driversById.get(shift.driverId);
-      return {
-        key: `shift-${shift.shiftId}`,
-        driver: driver?.name ?? shift.driverId,
-        shiftOrAttendance: shift.shiftId,
-        status: formatOpsCodeLabel(locale, shift.status),
-        statusTone: shiftTone(shift.status),
-        window: `${formatDateTime(locale, shift.clockedInAt)} → ${formatDateTime(locale, shift.clockedOutAt)}`,
-        impact:
-          locale === "en"
-            ? "Shift closed without clean clock-out."
-            : "班次未正常收班即結束。",
-      };
-    });
-
-  const attendanceRows = attendanceRecords
-    .filter((record) => record.status !== "present")
-    .map((record) => {
-      const driver = driversById.get(record.driverId);
-      return {
-        key: `attendance-${record.attendanceId}`,
-        driver: driver?.name ?? record.driverId,
-        shiftOrAttendance: record.attendanceId,
-        status: formatOpsCodeLabel(locale, record.status),
-        statusTone: attendanceTone(record.status),
-        window: `${record.date} · ${formatDateTime(locale, record.clockedInAt)} → ${formatDateTime(locale, record.clockedOutAt)}`,
-        impact:
-          record.status === "partial"
-            ? locale === "en"
-              ? "Partial attendance needs supervisor confirmation."
-              : "部分出勤需要主管確認。"
-            : locale === "en"
-              ? "Driver marked absent for this shift."
-              : "該班次司機記錄為缺勤。",
-      };
-    });
-
-  return [...attendanceRows, ...shiftRows].slice(0, 8);
 }
 
 export default async function AttendancePage({
@@ -535,31 +421,26 @@ export default async function AttendancePage({
 
   const scopeShifts = view === "week" ? weekShifts : todayShifts;
   const scopeAttendance = view === "week" ? weekAttendance : todayAttendance;
+  const scheduledDrivers = new Set(scopeShifts.map((shift) => shift.driverId)).size;
   const activeShifts = scopeShifts.filter((shift) => shift.status === "active");
   const completedShifts = scopeShifts.filter(
     (shift) => shift.status === "completed",
   );
-  const exceptionRows = buildExceptionRows(
-    scopeShifts,
-    view === "week" ? weekAttendance : todayAttendance,
-    driversById,
-    locale,
-  );
-  const exceptionCount = exceptionRows.length;
-  const presentCount = scopeAttendance.filter(
-    (record) => record.status === "present",
+  const absentCount = scopeAttendance.filter(
+    (record) => record.status === "absent",
   ).length;
-  const partialOrAbsentCount = scopeAttendance.filter(
-    (record) => record.status !== "present",
+  const partialCount = scopeAttendance.filter(
+    (record) => record.status === "partial",
   ).length;
+  const exceptionCount = absentCount + partialCount;
   const ganttRows = buildGanttRows(
     todayShifts,
     driversById,
     todayStart,
     todayEnd,
     now,
-    locale,
   );
+
   const scopeLabel =
     view === "week"
       ? locale === "en"
@@ -567,17 +448,13 @@ export default async function AttendancePage({
         : "本週"
       : view === "exceptions"
         ? locale === "en"
-          ? "Exception focus"
-          : "異常焦點"
+          ? "Exceptions"
+          : "異常"
         : locale === "en"
           ? "Today"
           : "今日";
 
-  const subtitle =
-    locale === "en"
-      ? `${formatDateLabel(locale, nowDate)} · ${scopeLabel}`
-      : `${formatDateLabel(locale, nowDate)} · ${scopeLabel}`;
-
+  const subtitle = `${formatDateLabel(locale, nowDate)} · ${scopeLabel}`;
   const tabConfigs = [
     {
       key: "today" as const,
@@ -595,49 +472,13 @@ export default async function AttendancePage({
       key: "exceptions" as const,
       href: "/attendance?view=exceptions",
       label: locale === "en" ? "Exceptions" : "異常",
-      count: buildExceptionRows(todayShifts, todayAttendance, driversById, locale)
-        .length,
+      count: todayAttendance.filter((record) => record.status !== "present").length,
     },
   ];
   const tabs = tabConfigs.map((tab) =>
     renderTabLink(tab.href, tab.label, tab.count, tab.key === view, theme),
   );
   const activeTab = tabs[tabConfigs.findIndex((tab) => tab.key === view)];
-
-  const exceptionColumns: CanvasTableColumn<ExceptionRow>[] = [
-    {
-      h: t("attendance.col.driver", locale),
-      k: "driver",
-      w: 160,
-      r: (row) => (
-        <div style={{ display: "grid", gap: 2 }}>
-          <span style={{ fontWeight: 600 }}>{row.driver}</span>
-          <span style={{ color: theme.textMuted, fontFamily: theme.monoFamily }}>
-            {row.shiftOrAttendance}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: t("attendance.col.status", locale),
-      w: 120,
-      r: (row) => (
-        <Pill theme={theme} tone={row.statusTone} dot>
-          {row.status}
-        </Pill>
-      ),
-    },
-    {
-      h: locale === "en" ? "Window" : "時段",
-      k: "window",
-      mono: true,
-      w: 220,
-    },
-    {
-      h: locale === "en" ? "Impact" : "影響",
-      k: "impact",
-    },
-  ];
 
   return (
     <div
@@ -672,85 +513,50 @@ export default async function AttendancePage({
           tabs={tabs}
           activeTab={activeTab}
           actions={
-            <>
-              <Btn theme={theme} icon="clock">
-                {scopeLabel}
-              </Btn>
-              <Btn theme={theme} variant="primary" icon="ext">
-                {locale === "en" ? "Export" : "匯出"}
-              </Btn>
-            </>
+            <Btn theme={theme} variant="primary" icon="ext">
+              {locale === "en" ? "Export" : "匯出"}
+            </Btn>
           }
         />
 
         <div style={pageBodyStyle}>
           <div style={kpiGridStyle}>
-            <KPI
-              theme={theme}
-              label={locale === "en" ? "Scheduled drivers" : "排班司機"}
-              value={new Set(scopeShifts.map((shift) => shift.driverId)).size}
-              sub={
-                locale === "en"
-                  ? `${drivers.length} drivers in registry`
-                  : `司機主檔 ${drivers.length} 人`
-              }
-            />
+            <KPI theme={theme} label={locale === "en" ? "Scheduled drivers" : "排班司機"} value={scheduledDrivers} />
             <KPI
               theme={theme}
               label={t("attendance.activeShifts", locale)}
               value={activeShifts.length}
-              sub={
-                locale === "en"
-                  ? `${formatAttendanceRate(activeShifts.length, Math.max(scopeShifts.length, 1), locale)} of visible shifts`
-                  : `可視班次佔比 ${formatAttendanceRate(activeShifts.length, Math.max(scopeShifts.length, 1), locale)}`
-              }
+              sub={formatAttendanceRate(activeShifts.length, scopeShifts.length, locale)}
             />
             <KPI
               theme={theme}
               label={t("attendance.completedShifts", locale)}
               value={completedShifts.length}
-              sub={
-                locale === "en"
-                  ? `${scopeAttendance.length} attendance records`
-                  : `出勤記錄 ${scopeAttendance.length} 筆`
-              }
             />
             <KPI
               theme={theme}
               label={locale === "en" ? "Exception / late" : "異常 / 遲到"}
-              value={partialOrAbsentCount}
+              value={exceptionCount}
               delta={
-                partialOrAbsentCount > 0
+                absentCount > 0
                   ? locale === "en"
-                    ? `${exceptionCount} need follow-up`
-                    : `${exceptionCount} 筆待追蹤`
+                    ? `${absentCount} absent`
+                    : `${absentCount} 未到`
                   : undefined
               }
-              deltaTone={partialOrAbsentCount > 0 ? "down" : "neutral"}
+              deltaTone={exceptionCount > 0 ? "down" : "neutral"}
               sub={
-                locale === "en"
-                  ? `${presentCount} marked present`
-                  : `${presentCount} 筆正常出勤`
+                partialCount > 0
+                  ? locale === "en"
+                    ? `${partialCount} partial`
+                    : `${partialCount} 部分出勤`
+                  : undefined
               }
             />
           </div>
 
-          <div style={summaryGridStyle}>
-            <Card
-              theme={theme}
-              title={locale === "en" ? "On-duty gantt" : "當班甘特"}
-              subtitle={
-                locale === "en"
-                  ? "24-hour roster by driver"
-                  : "24 小時欄位 × 司機列"
-              }
-              actions={
-                <Pill theme={theme} tone="info">
-                  {locale === "en" ? `${ganttRows.length} rows` : `${ganttRows.length} 列`}
-                </Pill>
-              }
-              padding={16}
-            >
+          <Card theme={theme} title={locale === "en" ? "On-duty gantt" : "當班甘特"} padding={16}>
+            {ganttRows.length > 0 ? (
               <div style={{ overflowX: "auto" }}>
                 <div style={ganttGridStyle}>
                   <div />
@@ -762,250 +568,86 @@ export default async function AttendancePage({
                     ))}
                   </div>
 
-                  {ganttRows.map((row) => (
-                    <div key={row.shiftId} style={{ display: "contents" }}>
-                      <div
-                        style={{
-                          padding: "8px 0",
-                          borderBottom: `1px dashed ${theme.border}`,
-                          display: "grid",
-                          gap: 2,
-                        }}
-                      >
-                        <span style={{ fontSize: 12.5, fontWeight: 600 }}>
-                          {row.driverLabel}
-                        </span>
-                        <span
+                  {ganttRows.map((row) => {
+                    const tone = shiftTone(row.status);
+                    const borderColor =
+                      tone === "success"
+                        ? theme.success
+                        : tone === "danger"
+                          ? theme.danger
+                          : theme.accent;
+                    const backgroundColor =
+                      tone === "success"
+                        ? "rgba(52, 211, 153, 0.14)"
+                        : tone === "danger"
+                          ? "rgba(248, 113, 113, 0.14)"
+                          : theme.accentBg;
+
+                    return (
+                      <div key={row.shiftId} style={{ display: "contents" }}>
+                        <div
                           style={{
-                            color: theme.textMuted,
-                            fontSize: 10.5,
-                            fontFamily: theme.monoFamily,
+                            padding: "6px 0",
+                            borderBottom: `1px dashed ${theme.border}`,
+                            display: "grid",
+                            gap: 2,
                           }}
                         >
-                          {row.vehicleLabel}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          position: "relative",
-                          height: 34,
-                          borderBottom: `1px dashed ${theme.border}`,
-                        }}
-                      >
-                        <div style={ganttTrackGridStyle}>
-                          {Array.from({ length: 24 }, (_, index) => (
-                            <span
-                              key={index}
-                              style={{
-                                borderLeft:
-                                  index === 0
-                                    ? "none"
-                                    : `1px solid ${theme.border}`,
-                                opacity: 0.45,
-                              }}
-                            />
-                          ))}
+                          <span style={{ fontSize: 12, fontWeight: 600 }}>
+                            {row.driverLabel}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: theme.textDim,
+                              fontFamily: theme.monoFamily,
+                            }}
+                          >
+                            {row.vehicleLabel}
+                          </span>
                         </div>
                         <div
                           style={{
-                            ...ganttSegmentStyle,
-                            left: `${row.segmentLeft}%`,
-                            width: `${row.segmentWidth}%`,
-                            borderColor:
-                              row.status === "completed"
-                                ? theme.success
-                                : row.status === "abandoned"
-                                  ? theme.danger
-                                  : theme.accent,
-                            background:
-                              row.status === "completed"
-                                ? "rgba(52, 211, 153, 0.14)"
-                                : row.status === "abandoned"
-                                  ? "rgba(248, 113, 113, 0.14)"
-                                  : theme.accentBg,
-                            color:
-                              row.status === "completed"
-                                ? theme.success
-                                : row.status === "abandoned"
-                                  ? theme.danger
-                                  : theme.accent,
+                            position: "relative",
+                            height: 28,
+                            borderBottom: `1px dashed ${theme.border}`,
                           }}
                         >
-                          {row.startLabel}–{row.endLabel}
+                          <div style={ganttTrackStyle}>
+                            {Array.from({ length: 24 }, (_, index) => (
+                              <span
+                                key={index}
+                                style={{
+                                  borderLeft:
+                                    index === 0
+                                      ? "none"
+                                      : `1px solid ${theme.border}`,
+                                  opacity: 0.45,
+                                }}
+                              />
+                            ))}
+                          </div>
+                          <div
+                            style={{
+                              ...ganttSegmentBaseStyle,
+                              left: `${row.segmentLeft}%`,
+                              width: `${row.segmentWidth}%`,
+                              border: `1px solid ${borderColor}`,
+                              background: backgroundColor,
+                              color: borderColor,
+                            }}
+                          >
+                            {row.startLabel}–{row.endLabel}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
-            </Card>
-
-            <div style={{ display: "grid", gap: 16 }}>
-              <Banner
-                theme={theme}
-                tone={exceptionCount > 0 ? "warn" : "info"}
-                icon={exceptionCount > 0 ? "warn" : "check"}
-                title={
-                  exceptionCount > 0
-                    ? locale === "en"
-                      ? "Attendance exceptions need review"
-                      : "出勤異常待複核"
-                    : locale === "en"
-                      ? "Attendance flow is stable"
-                      : "出勤流穩定"
-                }
-                body={
-                  exceptionCount > 0
-                    ? locale === "en"
-                      ? `${exceptionCount} records are partial, absent, or abandoned in the selected scope.`
-                      : `所選範圍內共有 ${exceptionCount} 筆部分出勤、缺勤或異常收班。`
-                    : locale === "en"
-                      ? "No partial, absent, or abandoned records are visible right now."
-                      : "目前沒有可見的部分出勤、缺勤或異常收班記錄。"
-                }
-              />
-
-              <Card
-                theme={theme}
-                title={locale === "en" ? "Shift summary" : "班次摘要"}
-                subtitle={scopeLabel}
-                padding={16}
-              >
-                <DL
-                  theme={theme}
-                  cols={2}
-                  items={[
-                    {
-                      label: t("attendance.attendanceRecords", locale),
-                      value: scopeAttendance.length,
-                      mono: true,
-                    },
-                    {
-                      label: locale === "en" ? "Present rate" : "正常出勤率",
-                      value: formatAttendanceRate(
-                        presentCount,
-                        Math.max(scopeAttendance.length, 1),
-                        locale,
-                      ),
-                      mono: true,
-                    },
-                    {
-                      label: locale === "en" ? "Abandoned shifts" : "異常收班",
-                      value: scopeShifts.filter((shift) => shift.status === "abandoned")
-                        .length,
-                      mono: true,
-                    },
-                    {
-                      label: locale === "en" ? "Avg hours" : "平均工時",
-                      value: formatHourSpan(
-                        scopeAttendance.length > 0
-                          ? Number(
-                              (
-                                scopeAttendance.reduce(
-                                  (sum, record) => sum + (record.totalHours ?? 0),
-                                  0,
-                                ) / scopeAttendance.length
-                              ).toFixed(1),
-                            )
-                          : null,
-                        locale,
-                      ),
-                      mono: true,
-                    },
-                  ]}
-                />
-              </Card>
-
-              <Card
-                theme={theme}
-                title={locale === "en" ? "Supervisor cues" : "主管提示"}
-                subtitle={locale === "en" ? "Realtime roster watchpoints" : "即時排班觀察點"}
-                padding={16}
-              >
-                <Field
-                  theme={theme}
-                  label={locale === "en" ? "Current focus" : "目前焦點"}
-                  hint={
-                    locale === "en"
-                      ? "Selected tab changes the KPI scope, while the gantt remains pinned to the current day."
-                      : "頁籤切換 KPI 範圍，甘特則固定顯示當日當班。"
-                  }
-                >
-                  <Pill
-                    theme={theme}
-                    tone={view === "exceptions" ? "warn" : "info"}
-                    dot
-                  >
-                    {scopeLabel}
-                  </Pill>
-                </Field>
-                <Field
-                  theme={theme}
-                  label={locale === "en" ? "Coverage" : "覆蓋狀態"}
-                  hint={
-                    locale === "en"
-                      ? "Unique drivers with a visible shift in the selected scope."
-                      : "所選範圍內有可見班次的唯一司機數。"
-                  }
-                >
-                  <div
-                    style={{
-                      color: theme.text,
-                      fontFamily: theme.monoFamily,
-                      fontSize: 12.5,
-                    }}
-                  >
-                    {new Set(scopeShifts.map((shift) => shift.driverId)).size}
-                  </div>
-                </Field>
-                <Field
-                  theme={theme}
-                  label={locale === "en" ? "Exception queue" : "異常佇列"}
-                  hint={
-                    locale === "en"
-                      ? "Partial attendance, absence, and abandoned shifts."
-                      : "包含部分出勤、缺勤與異常收班。"
-                  }
-                >
-                  <div
-                    style={{
-                      color: exceptionCount > 0 ? theme.danger : theme.text,
-                      fontFamily: theme.monoFamily,
-                      fontSize: 12.5,
-                    }}
-                  >
-                    {exceptionCount}
-                  </div>
-                </Field>
-              </Card>
-            </div>
-          </div>
-
-          <Card
-            theme={theme}
-            title={locale === "en" ? "Attention queue" : "關注佇列"}
-            subtitle={
-              locale === "en"
-                ? "Partial attendance, absences, and abandoned shifts"
-                : "部分出勤、缺勤與異常收班"
-            }
-            padding={0}
-          >
-            {exceptionRows.length > 0 ? (
-              <Table
-                theme={theme}
-                columns={exceptionColumns}
-                rows={exceptionRows}
-              />
             ) : (
-              <div
-                style={{
-                  padding: 16,
-                  color: theme.textMuted,
-                  fontSize: 12.5,
-                }}
-              >
-                {t("attendance.emptyAttendance", locale)}
+              <div style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                {t("attendance.emptyShifts", locale)}
               </div>
             )}
           </Card>
