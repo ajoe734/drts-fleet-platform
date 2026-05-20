@@ -418,7 +418,9 @@ function yesNoTone(active: boolean, activeTone: CanvasTone): CanvasTone {
   return active ? activeTone : "warn";
 }
 
-function contractStatusTone(status: VehicleContractRecord["status"]): CanvasTone {
+function contractStatusTone(
+  status: VehicleContractRecord["status"],
+): CanvasTone {
   switch (status) {
     case "active":
       return "success";
@@ -532,7 +534,6 @@ export default function FleetPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<FleetTab>("drivers");
   const [showGovernancePanel, setShowGovernancePanel] = useState(false);
-  const [showCreateDriver, setShowCreateDriver] = useState(false);
   const [creatingDriver, setCreatingDriver] = useState(false);
   const [reportActionId, setReportActionId] =
     useState<FleetReportJobType | null>(null);
@@ -728,7 +729,6 @@ export default function FleetPage() {
           email: driverForm.email?.trim() || null,
         });
         setDriverForm(createInitialDriverForm());
-        setShowCreateDriver(false);
         await loadData();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
@@ -779,8 +779,7 @@ export default function FleetPage() {
   const exclusivityRows: ExclusivityRow[] = vehicles.map((vehicle) => ({
     vehicleId: vehicle.vehicleId,
     plateNo: vehicle.plateNo,
-    declarationStatus:
-      vehicle.supplyLifecycle.exclusivity.declarationStatus,
+    declarationStatus: vehicle.supplyLifecycle.exclusivity.declarationStatus,
     reviewStatus: vehicle.supplyLifecycle.exclusivity.reviewStatus,
     providerName: vehicle.supplyLifecycle.exclusivity.providerName,
     effectiveStart: vehicle.supplyLifecycle.exclusivity.effectiveStart,
@@ -905,7 +904,9 @@ export default function FleetPage() {
       align: "right",
       r: (driver) => (
         <span
-          style={driver.profileUpdatedAt ? primaryCellTextStyle : mutedCellTextStyle}
+          style={
+            driver.profileUpdatedAt ? primaryCellTextStyle : mutedCellTextStyle
+          }
         >
           {driver.profileUpdatedAt ? copy.profileLinked : copy.profilePending}
         </span>
@@ -1037,7 +1038,11 @@ export default function FleetPage() {
       h: "STATUS",
       w: 118,
       r: (contract) => (
-        <CanvasPill theme={theme} tone={contractStatusTone(contract.status)} dot>
+        <CanvasPill
+          theme={theme}
+          tone={contractStatusTone(contract.status)}
+          dot
+        >
           {formatPlatformCodeLabel(locale, contract.status)}
         </CanvasPill>
       ),
@@ -1242,7 +1247,8 @@ export default function FleetPage() {
   }));
 
   const activeHeaderTab =
-    headerTabs.find((tab) => tab.key === activeTab)?.node ?? headerTabs[0]?.node;
+    headerTabs.find((tab) => tab.key === activeTab)?.node ??
+    headerTabs[0]?.node;
 
   const governanceItems = [
     {
@@ -1370,7 +1376,7 @@ export default function FleetPage() {
               theme={theme}
               variant="primary"
               icon="plus"
-              onClick={() => setShowCreateDriver((current) => !current)}
+              onClick={() => setActiveTab("drivers")}
             >
               {copy.createAction}
             </CanvasBtn>
@@ -1501,7 +1507,11 @@ export default function FleetPage() {
           </CanvasCard>
         ) : null}
 
-        {showCreateDriver ? (
+        <CanvasCard theme={theme} padding={0}>
+          {renderTable()}
+        </CanvasCard>
+
+        {activeTab === "drivers" ? (
           <CanvasCard
             theme={theme}
             title={copy.createTitle}
@@ -1545,7 +1555,10 @@ export default function FleetPage() {
                     style={inputStyle}
                   />
                 </CanvasField>
-                <CanvasField theme={theme} label={t("fleet.form.licensesValid")}>
+                <CanvasField
+                  theme={theme}
+                  label={t("fleet.form.licensesValid")}
+                >
                   <label style={checkboxRowStyle}>
                     <input
                       type="checkbox"
@@ -1563,13 +1576,6 @@ export default function FleetPage() {
               </div>
 
               <div style={formActionsStyle}>
-                <CanvasBtn
-                  theme={theme}
-                  variant="secondary"
-                  onClick={() => setShowCreateDriver(false)}
-                >
-                  {locale === "en" ? "Close" : "關閉"}
-                </CanvasBtn>
                 <button
                   type="submit"
                   disabled={creatingDriver || !driverForm.name.trim()}
@@ -1585,10 +1591,6 @@ export default function FleetPage() {
             </form>
           </CanvasCard>
         ) : null}
-
-        <CanvasCard theme={theme} padding={0}>
-          {renderTable()}
-        </CanvasCard>
       </div>
     </CanvasShell>
   );
