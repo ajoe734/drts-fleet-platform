@@ -14,10 +14,8 @@ import {
   CanvasCard as Card,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasShell as Shell,
   CanvasTable as Table,
   buildCanvasTheme,
-  type CanvasShellNavItem,
   type CanvasTableColumn,
   type CanvasTheme,
   type CanvasTone,
@@ -27,14 +25,14 @@ type DriversPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type DriverTabKey = "all" | "eligible" | "on_shift" | "offline";
+type DriverFilterKey = "all" | "eligible" | "on_shift" | "offline";
 
 type DriverTableRow = Record<string, unknown> & {
   driverId: string;
   driverName: string;
   driverMeta: string;
   blockerSummary: string;
-  vehicleLabel: string;
+  deviceLabel: string;
   statusLabel: string;
   statusTone: CanvasTone;
   shiftLabel: string;
@@ -78,7 +76,7 @@ function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function resolveTab(value: string | undefined): DriverTabKey {
+function resolveFilter(value: string | undefined): DriverFilterKey {
   switch (value) {
     case "eligible":
     case "on_shift":
@@ -89,106 +87,59 @@ function resolveTab(value: string | undefined): DriverTabKey {
   }
 }
 
-function buildDriversHref(tab: DriverTabKey) {
-  if (tab === "all") {
+function buildDriversHref(filter: DriverFilterKey) {
+  if (filter === "all") {
     return "/drivers";
   }
-  return `/drivers?tab=${encodeURIComponent(tab)}`;
+  return `/drivers?filter=${encodeURIComponent(filter)}`;
 }
 
-function buildShellNav(locale: Locale): CanvasShellNavItem[] {
-  return [
+function buildFilterTabs(locale: Locale, activeFilter: DriverFilterKey) {
+  const items: Array<{ key: DriverFilterKey; label: string; href: string }> = [
     {
-      divider: locale === "en" ? "Workspaces" : "工作面",
+      key: "all",
+      label: t("common.all", locale),
+      href: buildDriversHref("all"),
     },
     {
-      key: "dashboard",
-      href: "/dashboard",
-      icon: "dashboard",
-      label: t("nav.dashboard", locale),
+      key: "eligible",
+      label: t("drivers.col.dispatchEligible", locale),
+      href: buildDriversHref("eligible"),
     },
     {
-      divider: locale === "en" ? "Live Ops" : "即時派遣",
+      key: "on_shift",
+      label: t("attendance.activeShifts", locale),
+      href: buildDriversHref("on_shift"),
     },
     {
-      key: "dispatch",
-      href: "/dispatch",
-      icon: "dispatch",
-      label: t("nav.dispatch", locale),
-      matchPaths: ["/dispatch"],
-    },
-    {
-      key: "callcenter",
-      href: "/callcenter",
-      icon: "callcenter",
-      label: t("nav.callcenter", locale),
-    },
-    {
-      divider: locale === "en" ? "Casework" : "案件處理",
-    },
-    {
-      key: "complaints",
-      href: "/complaints",
-      icon: "complaints",
-      label: t("nav.complaints", locale),
-    },
-    {
-      key: "incidents",
-      href: "/incidents",
-      icon: "incidents",
-      label: t("nav.incidents", locale),
-      matchPaths: ["/incidents"],
-    },
-    {
-      divider: locale === "en" ? "Monitoring" : "營運監控",
-    },
-    {
-      key: "reports",
-      href: "/reports",
-      icon: "reports",
-      label: t("nav.reports", locale),
-    },
-    {
-      key: "revenue",
-      href: "/revenue",
-      icon: "revenue",
-      label: t("nav.revenue", locale),
-    },
-    {
-      key: "attendance",
-      href: "/attendance",
-      icon: "attendance",
-      label: t("nav.attendance", locale),
-    },
-    {
-      divider: locale === "en" ? "Registry" : "主資料",
-    },
-    {
-      key: "drivers",
-      href: "/drivers",
-      icon: "fleet",
-      label: t("nav.drivers", locale),
-      matchPaths: ["/drivers"],
-    },
-    {
-      key: "vehicles",
-      href: "/vehicles",
-      icon: "vehicles",
-      label: t("nav.vehicles", locale),
-    },
-    {
-      key: "contracts",
-      href: "/contracts",
-      icon: "contracts",
-      label: t("nav.contracts", locale),
-    },
-    {
-      key: "feature-flags",
-      href: "/feature-flags",
-      icon: "flags",
-      label: t("nav.featureFlags", locale),
+      key: "offline",
+      label: formatOpsCodeLabel(locale, "offline"),
+      href: buildDriversHref("offline"),
     },
   ];
+
+  const tabs = items.map((item) => (
+    <Link
+      key={item.key}
+      href={item.href}
+      style={{ color: "inherit", textDecoration: "none" }}
+    >
+      {item.label}
+    </Link>
+  ));
+
+  const activeIndex = items.findIndex((item) => item.key === activeFilter);
+  return {
+    active: tabs[activeIndex] ?? tabs[0],
+    tabs,
+  };
+}
+
+function driverLinkStyle(themeValue: CanvasTheme) {
+  return {
+    color: themeValue.text,
+    textDecoration: "none",
+  } as const;
 }
 
 function summarizeBlockedReasons(
@@ -247,56 +198,18 @@ function formatLocationState(
   return t("drivers.list.locationLive", locale);
 }
 
-function buildTabLinks(locale: Locale, activeTab: DriverTabKey) {
-  const items: Array<{ key: DriverTabKey; label: string; href: string }> = [
-    {
-      key: "all",
-      label: t("common.all", locale),
-      href: buildDriversHref("all"),
-    },
-    {
-      key: "eligible",
-      label: t("drivers.col.dispatchEligible", locale),
-      href: buildDriversHref("eligible"),
-    },
-    {
-      key: "on_shift",
-      label: t("attendance.activeShifts", locale),
-      href: buildDriversHref("on_shift"),
-    },
-    {
-      key: "offline",
-      label: formatOpsCodeLabel(locale, "offline"),
-      href: buildDriversHref("offline"),
-    },
-  ];
-
-  const tabs = items.map((item) => (
-    <Link
-      key={item.key}
-      href={item.href}
-      style={{ color: "inherit", textDecoration: "none" }}
-    >
-      {item.label}
-    </Link>
-  ));
-
-  const activeIndex = items.findIndex((item) => item.key === activeTab);
-  return {
-    active: tabs[activeIndex] ?? tabs[0],
-    tabs,
-  };
+function locationTone(label: string, locale: Locale): CanvasTone {
+  if (label === t("drivers.list.locationLive", locale)) {
+    return "success";
+  }
+  if (label === t("drivers.list.locationStale", locale)) {
+    return "warn";
+  }
+  return "neutral";
 }
 
-function driverLinkStyle(themeValue: CanvasTheme) {
-  return {
-    color: themeValue.text,
-    textDecoration: "none",
-  } as const;
-}
-
-function matchesTab(driver: DriverRegistryRecord, tab: DriverTabKey) {
-  switch (tab) {
+function matchesFilter(driver: DriverRegistryRecord, filter: DriverFilterKey) {
+  switch (filter) {
     case "eligible":
       return driver.dispatchEligible;
     case "on_shift":
@@ -338,7 +251,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     resolveSearchParams(searchParams),
   ]);
 
-  const activeTab = resolveTab(firstParam(resolvedSearchParams.tab));
+  const activeFilter = resolveFilter(firstParam(resolvedSearchParams.filter));
 
   let drivers: DriverRegistryRecord[] = [];
   let locations: DriverLocationSnapshot[] = [];
@@ -364,7 +277,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     locationByDriver.set(snapshot.driverId, snapshot);
   }
 
-  const { active: activeTabNode, tabs } = buildTabLinks(locale, activeTab);
+  const { active: activeTabNode, tabs } = buildFilterTabs(locale, activeFilter);
 
   const locationStats = drivers.reduce(
     (accumulator, driver) => {
@@ -386,15 +299,9 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     (driver) => driver.dispatchEligible,
   ).length;
   const blockedCount = Math.max(drivers.length - eligibleCount, 0);
-  const registrySummary = t("drivers.registrySummary", locale, {
-    eligible: String(eligibleCount),
-    blocked: String(blockedCount),
-    live: String(locationStats.live),
-    stale: String(locationStats.stale),
-  });
 
   const rows: DriverTableRow[] = drivers
-    .filter((driver) => matchesTab(driver, activeTab))
+    .filter((driver) => matchesFilter(driver, activeFilter))
     .sort((left, right) => {
       const leftPriority = left.dispatchEligible ? 0 : 1;
       const rightPriority = right.dispatchEligible ? 0 : 1;
@@ -410,17 +317,16 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
         locationsError,
         locale,
       );
-      const blockerSummary = summarizeBlockedReasons(
-        driver.eligibilityBlockedReasons,
-        locale,
-      );
 
       return {
         driverId: driver.driverId,
         driverName: driver.name,
         driverMeta: `${driver.driverId} · ${locationLabel}`,
-        blockerSummary,
-        vehicleLabel: getDeviceLabel(driver, locale),
+        blockerSummary: summarizeBlockedReasons(
+          driver.eligibilityBlockedReasons,
+          locale,
+        ),
+        deviceLabel: getDeviceLabel(driver, locale),
         statusLabel: formatOpsCodeLabel(locale, driver.workState),
         statusTone: getStatusTone(driver.workState),
         shiftLabel: formatOpsCodeLabel(locale, driver.lifecycleStatus),
@@ -433,19 +339,14 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
           : t("common.no", locale),
         gateTone: driver.dispatchEligible ? "success" : "warn",
         locationLabel,
-        locationTone:
-          locationLabel === t("drivers.list.locationLive", locale)
-            ? "success"
-            : locationLabel === t("drivers.list.locationStale", locale)
-              ? "warn"
-              : "neutral",
+        locationTone: locationTone(locationLabel, locale),
       };
     });
 
   const columns: CanvasTableColumn<DriverTableRow>[] = [
     {
       h: "DRIVER",
-      w: 244,
+      w: 240,
       r: (row) => (
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <Link
@@ -476,14 +377,14 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
       ),
     },
     {
-      h: locale === "en" ? "VEHICLE" : "車輛",
-      k: "vehicleLabel",
+      h: locale === "en" ? "DEVICE" : "設備",
+      k: "deviceLabel",
       w: 140,
       mono: true,
     },
     {
       h: "STATUS",
-      w: 128,
+      w: 120,
       r: (row) => (
         <Pill theme={theme} tone={row.statusTone} dot>
           {row.statusLabel}
@@ -498,7 +399,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     },
     {
       h: "LICENSE",
-      w: 128,
+      w: 120,
       r: (row) => (
         <Pill
           theme={theme}
@@ -511,7 +412,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     },
     {
       h: "ELIG.",
-      w: 112,
+      w: 108,
       r: (row) => (
         <Pill
           theme={theme}
@@ -538,22 +439,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   ];
 
   return (
-    <Shell
-      theme={theme}
-      nav={buildShellNav(locale)}
-      active="drivers"
-      currentPath="/drivers"
-      breadcrumb={[
-        locale === "en" ? "Registry" : "主資料",
-        t("nav.drivers", locale),
-      ]}
-      searchPlaceholder={locale === "en" ? "Search driver..." : "搜尋司機..."}
-      brandLabel={t("app.name", locale)}
-      brandSubLabel={t("app.sub", locale)}
-      env={locale === "en" ? "staging" : "測試"}
-      versionLabel="OC"
-      avatarLabel="OC"
-    >
+    <>
       <PageHeader
         theme={theme}
         title={t("nav.drivers", locale)}
@@ -591,12 +477,13 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
             theme={theme}
             tone="info"
             icon="drivers"
-            title={registrySummary}
-            body={
-              locale === "en"
-                ? "List view stays read-first."
-                : "列表頁維持以讀取與判斷為主。"
-            }
+            title={t("drivers.registrySummary", locale, {
+              eligible: String(eligibleCount),
+              blocked: String(blockedCount),
+              live: String(locationStats.live),
+              stale: String(locationStats.stale),
+            })}
+            body={t("drivers.registryFooter", locale)}
           />
         ) : null}
         {rows.length === 0 ? (
@@ -607,8 +494,8 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
             title={t("drivers.empty", locale)}
             body={
               locale === "en"
-                ? "Adjust the current tab or wait for registry data."
-                : "請調整目前頁籤，或等待名冊資料回傳。"
+                ? "Adjust the current filter or wait for registry data."
+                : "請調整目前篩選條件，或等待名冊資料回傳。"
             }
           />
         ) : null}
@@ -618,6 +505,6 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
           ) : null}
         </Card>
       </div>
-    </Shell>
+    </>
   );
 }
