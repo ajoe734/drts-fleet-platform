@@ -229,7 +229,7 @@ reference shell 的 demo 型態。
 | `/health`           | Platform Health                  | alerts、observability、adapter health                         |
 | `/notices`          | Notices & Maintenance            | platform notices、maintenance mode                            |
 | `/audit`            | Audit & Evidence Governance      | audit log、retention policy、legal hold、deletion exception   |
-| `/feature-flags`    | Feature Flags                    | global / tenant override switch governance                    |
+| `/feature-flags`    | Feature Flags                    | global switch governance；tenant override 為 platform-admin follow-up scope |
 | `/adapter-registry` | Adapter Governance               | 平台 adapter registry                                         |
 
 ### 7.4 Module specifications
@@ -546,15 +546,23 @@ reference shell 的 demo 型態。
 目標：
 
 - 管理平台能力開關與 adapter inventory。
+- Phase 1 的 `PA_Flags` 頁面以 global flag governance 為主；tenant override
+  contract 仍由 platform-admin authority 持有，但 dedicated tenant-targeting /
+  override 編輯 UX 不納入這次 canvas parity slice。
 
 必備資料：
 
-- flag key / enabled / tenant override / updatedAt
+- flag key / enabled / updatedAt
+- tenant override summary（若 API 已提供，僅作 read-only context，不是這次 parity
+  必達互動）
 - adapter list / status / config metadata
 
 必備動作：
 
 - toggle feature flag
+- 檢視既有 tenant override context（如存在）
+- dedicated tenant override create/edit remains follow-up until the targeting UX
+  and rollout posture are taskized
 - 檢視 adapter
 - 編輯 adapter
 
