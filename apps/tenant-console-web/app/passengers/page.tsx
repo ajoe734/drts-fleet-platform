@@ -22,6 +22,11 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
+const pageStyle: CSSProperties = {
+  minHeight: "100%",
+  background: th.bg,
+};
+
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "flex",
@@ -44,6 +49,10 @@ const emptyStateStyle: CSSProperties = {
   color: th.textMuted,
   fontSize: 12.5,
   textAlign: "center",
+};
+
+const tableCardStyle: CSSProperties = {
+  overflow: "hidden",
 };
 
 type PassengerTabKey = "all" | "employee" | "visitor" | "disabled";
@@ -96,7 +105,10 @@ function getStateLabel(activeFlag: boolean) {
   return activeFlag ? "active" : "disabled";
 }
 
-function comparePassengers(left: TenantPassengerRecord, right: TenantPassengerRecord) {
+function comparePassengers(
+  left: TenantPassengerRecord,
+  right: TenantPassengerRecord,
+) {
   if (left.activeFlag !== right.activeFlag) {
     return left.activeFlag ? -1 : 1;
   }
@@ -163,7 +175,9 @@ function buildTabNodes(selectedTab: PassengerTabKey) {
     </Link>
   ));
 
-  const activeIndex = PASSENGER_TABS.findIndex((tab) => tab.key === selectedTab);
+  const activeIndex = PASSENGER_TABS.findIndex(
+    (tab) => tab.key === selectedTab,
+  );
   return {
     tabs,
     activeTab: tabs[activeIndex] ?? tabs[0],
@@ -192,23 +206,23 @@ export default async function PassengersPage({
     {
       h: "NAME",
       k: "fullName",
-      w: 200,
+      w: 160,
       r: (row) => <span style={primaryCellStyle}>{row.fullName}</span>,
     },
     {
       h: "EMP ID",
-      w: 108,
+      w: 100,
       mono: true,
       r: (row) => row.employeeNo ?? "—",
     },
     {
       h: "DEPT",
-      w: 144,
+      w: 140,
       r: (row) => row.departmentName ?? "—",
     },
     {
       h: "MOBILE",
-      w: 140,
+      w: 130,
       mono: true,
       r: (row) => row.mobile ?? "—",
     },
@@ -219,7 +233,7 @@ export default async function PassengersPage({
     },
     {
       h: "STATE",
-      w: 110,
+      w: 100,
       r: (row) => (
         <CanvasPill theme={th} tone={row.stateTone} dot>
           {row.stateLabel}
@@ -229,7 +243,7 @@ export default async function PassengersPage({
   ];
 
   return (
-    <div>
+    <div style={pageStyle}>
       <CanvasPageHeader
         theme={th}
         title="乘客通訊錄"
@@ -238,10 +252,10 @@ export default async function PassengersPage({
         activeTab={activeTab}
         actions={
           <>
-            <CanvasBtn theme={th} icon="ext" size="sm">
+            <CanvasBtn theme={th} icon="ext">
               CSV 匯入
             </CanvasBtn>
-            <CanvasBtn theme={th} variant="primary" icon="plus" size="sm">
+            <CanvasBtn theme={th} variant="primary" icon="plus">
               新增
             </CanvasBtn>
           </>
@@ -259,7 +273,7 @@ export default async function PassengersPage({
           />
         ) : null}
 
-        <CanvasCard theme={th} padding={0}>
+        <CanvasCard theme={th} padding={0} style={tableCardStyle}>
           {filteredRows.length > 0 ? (
             <CanvasTable<PassengerRow>
               theme={th}
