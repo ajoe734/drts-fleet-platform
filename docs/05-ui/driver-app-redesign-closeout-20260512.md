@@ -1,24 +1,9 @@
-# Driver App Redesign — Wave 4 Closeout (2026-05-12)
+# Driver App Redesign — Wave 4 Closeout (2026-05-12; branch/canvas paths refreshed 2026-05-17)
 
-Owner: Codex · Reviewer of record (this closeout): Gemini2
+Owner: Claude2 (refresh) · prior owner: Claude · Reviewer of record (this closeout): Codex
 Task: `DRV-UI-RD-009`
 Planning ref: [`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`](./drts-ui-redesign-workbreakdown-20260510.md)
-Machine-truth note: reviewer verification must read the canonical status files
-via `AI_STATUS_ROOT` / `ORCH_STATUS_ROOT`. The worktree-local `ai-status.json`
-and `ai-activity-log.jsonl` files committed on this isolated branch are not the
-authoritative history for the already-shipped `DRV-UI-RD-001`..`DRV-UI-RD-008`
-tasks.
-Verification baseline: immutable per-surface commit hashes in this repo, plus
-the checked-in design assets under `docs/05-ui/driver-app-design-20260507/`.
-Historical note: local branch `feat/claude2-ui-redesign-foundation` still
-contains the eight shipped commits in this checkout, but
-`origin/feat/claude2-ui-redesign-foundation` no longer exists as of
-2026-05-18.
-Closeout review note: the final `review_approved` event for `DRV-UI-RD-009`
-was posted by Gemini2 at 2026-05-18T19:07:51Z after reviewer verification
-work recorded under commit `4745461`; this owner branch preserves the repaired
-checked-in asset paths and canonical-root verification guidance in the final
-closeout copy.
+Branch of record: `origin/dev` (Wave 4 driver-app reskin landed via PR #56 squash-merge `965c98f`). The per-task `commit_hash` values in the surface matrix below were the originals approved by each reviewer; they continue to resolve on `origin/claude/pbk-ui-003` (the original delivery branch that PR #56 squashed into `origin/dev`). The earlier branch `origin/feat/claude2-ui-redesign-foundation` no longer exists on `origin`.
 
 ## Purpose
 
@@ -26,48 +11,43 @@ Wave 4 closeout for the driver-app reskin. The eight implementation tasks
 `DRV-UI-RD-001`..`DRV-UI-RD-008` have all reached `done` in `ai-status.json`.
 This document binds each shipped surface to:
 
-- the **after** state (the shipped reskin commit, identified here by immutable
-  `commit_hash` rather than a now-retired remote branch name),
+- the **after** state — the shipped reskin commit. The matrix records each
+  per-task `commit_hash` as approved by its reviewer; those hashes resolve on
+  `origin/claude/pbk-ui-003` (the original delivery branch). The same surface
+  set is on `origin/dev` via PR #56 squash-merge `965c98f`.
 - the **before** state (the most recent surface-bearing commit prior to the
   DRV-UI-RD-\* reskin so reviewers can `git diff <before>..<after>` to see the
   reskin delta in isolation),
-- the **canvas** anchor in
-  `docs/05-ui/driver-app-design-20260507/DRTS Driver App.html`
+- the **canvas** anchor in `docs/05-ui/driver-app-design-20260507/DRTS Driver App.html`
   (the design source of truth) and the matching `Screen*` JSX block in
   `docs/05-ui/driver-app-design-20260507/driver-screens-{1,2,3}.jsx`,
 - the **reviewer of record** and the UTC timestamp at which they posted the
-  final `review_approved` evidence in the canonical machine-truth root
-  (`AI_STATUS_ROOT` / `ORCH_STATUS_ROOT`) for the task entry that was
-  finalized into `done`.
+  final `review_approved` event in `ai-activity-log.jsonl` for the task entry
+  that was finalized into `done`.
 
 driver-app is Expo / React Native, so per the Wave 4 guardrail it **cannot**
 import `@drts/ui-web`. The "parity story" column is therefore not a Storybook
-file but the RN canvas JSX in
-`docs/05-ui/driver-app-design-20260507/driver-screens-*.jsx` plus the
-on-device primitives that landed in
+file but the RN canvas JSX in `docs/05-ui/driver-app-design-20260507/driver-screens-*.jsx`
+plus the on-device primitives that landed in
 `apps/driver-app/components/ui-rn/` under `DRV-UI-RD-001`.
 
 ## Verification scope
 
 This closeout does **not** rerun the per-task acceptance commands. Each
 surface row cites the reviewer rerun summary recorded in the corresponding
-`DRV-UI-RD-00x` task entry in the canonical `ai-status.json`
-(`review_notes_zh` and `next` fields) under `AI_STATUS_ROOT`. The reviewer for
-`DRV-UI-RD-009` is asked to confirm against the canonical machine-truth root
-(`AI_STATUS_ROOT` / `ORCH_STATUS_ROOT`), not the worktree-local snapshots
-committed on this isolated branch, that:
+`DRV-UI-RD-00x` task entry in `ai-status.json` (`review_notes_zh` and `next`
+fields). The reviewer for `DRV-UI-RD-009` is asked to confirm that:
 
-1. each row's `commit_hash` resolves to a commit object in this checkout, and
-   remains reachable from the local historical branch
-   `feat/claude2-ui-redesign-foundation`,
-2. the cited reviewer + approval timestamp matches the final
-   `review_approved` evidence in the canonical machine-truth root for that
-   task,
-3. each cited canvas anchor exists in
-   `docs/05-ui/driver-app-design-20260507/DRTS Driver App.html`,
+1. each row's `commit_hash` resolves on `origin/claude/pbk-ui-003` (the original
+   delivery branch — the same hashes also appear in each task entry's
+   `commit_hash` / `push_branch` fields in `ai-status.json`; the squash-merged
+   equivalent of the full surface set is `965c98f` on `origin/dev` via PR #56),
+2. the cited reviewer + approval timestamp matches the final `review_approved`
+   event in `ai-activity-log.jsonl` for that task,
+3. each cited canvas anchor exists in `docs/05-ui/driver-app-design-20260507/DRTS Driver App.html`,
 4. each cited `Screen*` JSX block exists in
    `docs/05-ui/driver-app-design-20260507/driver-screens-{1,2,3}.jsx`,
-5. each cited checked-in sidecar packet under `support/sidecars/DRV-UI-RD-00x/`
+5. each cited sidecar acceptance / review packet under `support/sidecars/DRV-UI-RD-00x/`
    exists where listed.
 
 The Wave 4 acceptance set per task is fixed by the planning ref:
@@ -88,17 +68,18 @@ each row's approval timestamp below.
 | #             | Surface                                                                            | Owner   | Reviewer | Approved (UTC)       | Shipped commit | Before commit                                                       | Canvas anchor                                                                                           | Parity reference                                                                                                             |
 | ------------- | ---------------------------------------------------------------------------------- | ------- | -------- | -------------------- | -------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | DRV-UI-RD-001 | Wire `@drts/ui-tokens` into driver-app + RN primitives layer (`components/ui-rn/`) | Codex   | Codex2   | 2026-05-10T13:47:42Z | `5db92c8`      | `a6028b7` (`TOK-UI-001` cross-stack tokens)                         | _(token + primitives wire-up — no single canvas anchor; underpins every Wave 4 row)_                    | `apps/driver-app/components/ui-rn/{AppText,AuthorityBadge,Badge,Button,ForwardedStatusBadge,Screen,Stack,Surface,theme}.tsx` |
-| DRV-UI-RD-002 | Reskin Workspace cockpit (`app/index.tsx` / `app/onboarding.tsx`)                  | Claude2 | Codex2   | 2026-05-12T14:31:53Z | `de6a07b`      | `acf1404` (`DRV-MP-002` multi-platform cockpit)                     | `DRTS Driver App.html#n-workspace` (`ScreenWorkspace`), `#hero-flow` (`ScreenProvisioning`)             | `docs/05-ui/driver-app-design-20260507/driver-screens-1.jsx` (`ScreenWorkspace`, `ScreenProvisioning`)                        |
-| DRV-UI-RD-003 | Reskin Inbox (`app/jobs.tsx`)                                                      | Claude2 | Codex    | 2026-05-11T02:43:01Z | `bfd77ed`      | `3724f61` (`DRV-MP-003` unified driver jobs inbox)                  | `DRTS Driver App.html#n-inbox` (`ScreenInbox`)                                                          | `docs/05-ui/driver-app-design-20260507/driver-screens-2.jsx` (`ScreenInbox`)                                                  |
-| DRV-UI-RD-004 | Reskin Trip — 7 states (`app/trip.tsx`, `components/route-display.tsx`)            | Codex2  | Claude   | 2026-05-12T17:46:58Z | `411a2ab`      | `1705dd2` (`DRV-MP-005` trip authority boundaries)                  | `DRTS Driver App.html#driver-states`, `#trip-owned`, `#sync-fail`, `#lost` (`ScreenTrip` 7-state board) | `docs/05-ui/driver-app-design-20260507/driver-screens-2.jsx` (`ScreenTrip`)                                                   |
-| DRV-UI-RD-005 | Reskin Platform Presence (`app/platform-presence.tsx`)                             | Codex   | Codex2   | 2026-05-12T18:17:35Z | `0887ccf`      | `4b496e2` (`DRV-MP-006` platform presence health center)            | `DRTS Driver App.html#n-platform` (`ScreenPlatform`)                                                    | `docs/05-ui/driver-app-design-20260507/driver-screens-3.jsx` (`ScreenPlatform`)                                               |
-| DRV-UI-RD-006 | Reskin Earnings + Shift (`app/earnings.tsx`, `app/shift.tsx`)                      | Codex2  | Codex    | 2026-05-12T19:02:07Z | `6229325`      | `605d0c3` (`DRV-MP-007` earnings) / `28c17ed` (`DRV-MAT-006` shift) | `DRTS Driver App.html#earnings` (`ScreenEarnings`), `#shift` (`ScreenShift`)                            | `docs/05-ui/driver-app-design-20260507/driver-screens-3.jsx` (`ScreenEarnings`, `ScreenShift`)                                |
-| DRV-UI-RD-007 | Reskin SOS (`app/incident.tsx`)                                                    | Codex   | Codex2   | 2026-05-12T19:17:09Z | `c95a401`      | `e64fb1a` (`DRV-MP-010` SOS source platform context)                | `DRTS Driver App.html#sos` (`ScreenSOS`)                                                                | `docs/05-ui/driver-app-design-20260507/driver-screens-3.jsx` (`ScreenSOS`)                                                    |
-| DRV-UI-RD-008 | Reskin Settings (`app/settings.tsx`)                                               | Codex2  | Codex    | 2026-05-12T19:35:37Z | `c6c7373`      | `3e2ce45` (`DRV-MP-009` settings platform binding status)           | `DRTS Driver App.html#settings` (`ScreenSettings`)                                                      | `docs/05-ui/driver-app-design-20260507/driver-screens-3.jsx` (`ScreenSettings`)                                               |
+| DRV-UI-RD-002 | Reskin Workspace cockpit (`app/index.tsx` / `app/onboarding.tsx`)                  | Claude2 | Codex2   | 2026-05-12T14:31:53Z | `de6a07b`      | `acf1404` (`DRV-MP-002` multi-platform cockpit)                     | `DRTS Driver App.html#n-workspace` (`ScreenWorkspace`), `#hero-flow` (`ScreenProvisioning`)             | `docs/05-ui/driver-app-design-20260507/driver-screens-1.jsx` (`ScreenWorkspace`, `ScreenProvisioning`)                       |
+| DRV-UI-RD-003 | Reskin Inbox (`app/jobs.tsx`)                                                      | Claude2 | Codex    | 2026-05-11T02:43:01Z | `bfd77ed`      | `3724f61` (`DRV-MP-003` unified driver jobs inbox)                  | `DRTS Driver App.html#n-inbox` (`ScreenInbox`)                                                          | `docs/05-ui/driver-app-design-20260507/driver-screens-2.jsx` (`ScreenInbox`)                                                 |
+| DRV-UI-RD-004 | Reskin Trip — 7 states (`app/trip.tsx`, `components/route-display.tsx`)            | Codex2  | Claude   | 2026-05-12T17:46:58Z | `411a2ab`      | `1705dd2` (`DRV-MP-005` trip authority boundaries)                  | `DRTS Driver App.html#driver-states`, `#trip-owned`, `#sync-fail`, `#lost` (`ScreenTrip` 7-state board) | `docs/05-ui/driver-app-design-20260507/driver-screens-2.jsx` (`ScreenTrip`)                                                  |
+| DRV-UI-RD-005 | Reskin Platform Presence (`app/platform-presence.tsx`)                             | Codex   | Codex2   | 2026-05-12T18:17:35Z | `0887ccf`      | `4b496e2` (`DRV-MP-006` platform presence health center)            | `DRTS Driver App.html#n-platform` (`ScreenPlatform`)                                                    | `docs/05-ui/driver-app-design-20260507/driver-screens-3.jsx` (`ScreenPlatform`)                                              |
+| DRV-UI-RD-006 | Reskin Earnings + Shift (`app/earnings.tsx`, `app/shift.tsx`)                      | Codex2  | Codex    | 2026-05-12T19:02:07Z | `6229325`      | `605d0c3` (`DRV-MP-007` earnings) / `28c17ed` (`DRV-MAT-006` shift) | `DRTS Driver App.html#earnings` (`ScreenEarnings`), `#shift` (`ScreenShift`)                            | `docs/05-ui/driver-app-design-20260507/driver-screens-3.jsx` (`ScreenEarnings`, `ScreenShift`)                               |
+| DRV-UI-RD-007 | Reskin SOS (`app/incident.tsx`)                                                    | Codex   | Codex2   | 2026-05-12T19:17:09Z | `c95a401`      | `e64fb1a` (`DRV-MP-010` SOS source platform context)                | `DRTS Driver App.html#sos` (`ScreenSOS`)                                                                | `docs/05-ui/driver-app-design-20260507/driver-screens-3.jsx` (`ScreenSOS`)                                                   |
+| DRV-UI-RD-008 | Reskin Settings (`app/settings.tsx`)                                               | Codex2  | Codex    | 2026-05-12T19:35:37Z | `c6c7373`      | `3e2ce45` (`DRV-MP-009` settings platform binding status)           | `DRTS Driver App.html#settings` (`ScreenSettings`)                                                      | `docs/05-ui/driver-app-design-20260507/driver-screens-3.jsx` (`ScreenSettings`)                                              |
 
-All eight rows are verified by immutable `commit_hash`. In this checkout they
-also remain reachable from local branch `feat/claude2-ui-redesign-foundation`.
-The "before" column lists the most recent commit that materially shaped the
+All eight per-task `commit_hash` values in the matrix resolve on
+`origin/claude/pbk-ui-003` (the original delivery branch). The same surface
+set is on `origin/dev` as the squash-merged commit `965c98f` (PR #56). The
+"before" column lists the most recent commit that materially shaped the
 listed `app/*.tsx` artifact prior to the DRV-UI-RD reskin commit so reviewers
 can `git diff <before>..<after> -- apps/driver-app/<artifact>` and see the
 reskin delta in isolation.
@@ -216,10 +197,8 @@ reskin delta in isolation.
   all PASS. The Android emulator screenshot-vs-canvas leg is explicitly
   environment-blocked here (no `adb` / emulator) and is recorded as a
   deferred human follow-up.
-- Sidecar packets:
-  [`support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-ACCEPTANCE.md`](../../support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-ACCEPTANCE.md),
-  no checked-in review companion packet is cited here because
-  `DRV-UI-RD-008-SIDECAR-REVIEW.md` is not present in the current tree.
+- Sidecar acceptance packet:
+  [`support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-ACCEPTANCE.md`](../../support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-ACCEPTANCE.md).
 
 ## Wave 4 guardrails — final standing
 
@@ -252,19 +231,17 @@ None blocking Wave 4 sign-off. Items intentionally deferred:
 - The Wave 4 "Expo dev build on Android emulator + manual screenshot vs
   canvas" leg is environment-blocked in this workspace (no `adb` / Android
   SDK). Every owner closeout records this explicitly as a deferred human
-  follow-up; the design canvas
-  (`docs/05-ui/driver-app-design-20260507/DRTS Driver App.html`) and the
-  `driver-screens-{1,2,3}.jsx` Screen\* blocks remain the reproducible
-  comparison surface for that follow-up.
+  follow-up; the design canvas (`docs/05-ui/driver-app-design-20260507/DRTS Driver App.html`)
+  and the `driver-screens-{1,2,3}.jsx` Screen\* blocks under the same folder
+  remain the reproducible comparison surface for that follow-up.
 
 ## Reviewer signoff for DRV-UI-RD-009
 
-The reviewer (Gemini2) is asked to confirm only that the matrix above is
-internally consistent with the canonical `ai-status.json` and
-`ai-activity-log.jsonl` resolved via `AI_STATUS_ROOT` / `ORCH_STATUS_ROOT` —
-i.e. each `(owner, reviewer, approved-at, commit_hash)` quadruple in the
-matrix matches the canonical machine truth for this repo, the eight
-`commit_hash` values resolve in the current repo and remain reachable from
-local branch `feat/claude2-ui-redesign-foundation`, and each cited canvas
-anchor,
-`Screen*` JSX block, and checked-in sidecar packet path exists.
+The reviewer (Codex) is asked to confirm only that the matrix above is
+internally consistent with `ai-status.json` and `ai-activity-log.jsonl` — i.e.
+each `(owner, reviewer, approved-at, commit_hash)` quadruple in the matrix
+matches the machine truth on this branch, the eight `commit_hash` values
+resolve on `origin/claude/pbk-ui-003` (and the squash-merged equivalent
+`965c98f` is on `origin/dev` via PR #56), and each cited canvas anchor,
+`Screen*` JSX block, and sidecar packet path exists under
+`docs/05-ui/driver-app-design-20260507/` / `support/sidecars/DRV-UI-RD-00x/`.
