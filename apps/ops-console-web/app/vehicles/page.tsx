@@ -32,14 +32,12 @@ const pageStackStyle = {
 type VehicleTableRow = Record<string, unknown> & {
   plate: string;
   model: string;
-  modelMeta: string;
   year: string;
   dispatchable: boolean;
   dispatchableLabel: string;
   contract: string;
   insurance: string;
   debrandDue: string;
-  debrandTone: "neutral" | "warn" | "success";
 };
 
 function formatShortDate(locale: Locale, value: string | null | undefined) {
@@ -52,8 +50,7 @@ function formatShortDate(locale: Locale, value: string | null | undefined) {
     month: "2-digit",
     day: "2-digit",
     timeZone: "UTC",
-  })
-    .format(new Date(value));
+  }).format(new Date(value));
 }
 
 function buildShellNav(locale: Locale): CanvasShellNavItem[] {
@@ -159,7 +156,6 @@ function buildVehicleRows(
     .map((vehicle) => ({
       plate: vehicle.plateNo,
       model: vehicle.vehicleId,
-      modelMeta: vehicle.operatingArea,
       year: "—",
       dispatchable: vehicle.dispatchableFlag,
       dispatchableLabel: vehicle.dispatchableFlag
@@ -179,34 +175,7 @@ function buildVehicleRows(
             vehicle.supplyLifecycle.offboarding.debrandingDueAt,
           )
         : "—",
-      debrandTone:
-        vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"
-          ? "warn"
-          : vehicle.supplyLifecycle.offboarding.debrandingStatus ===
-              "completed"
-            ? "success"
-            : "neutral",
     }));
-}
-
-function buildDebrandLabel(row: VehicleTableRow, locale: Locale) {
-  if (row.debrandDue === "—") {
-    return locale === "en" ? "not due" : "無";
-  }
-
-  if (row.debrandTone === "warn") {
-    return locale === "en"
-      ? `due ${row.debrandDue}`
-      : `到期 ${row.debrandDue}`;
-  }
-
-  if (row.debrandTone === "neutral") {
-    return row.debrandDue;
-  }
-
-  return locale === "en"
-    ? `cleared ${row.debrandDue}`
-    : `已完成 ${row.debrandDue}`;
 }
 
 export default async function VehiclesPage() {
@@ -238,23 +207,8 @@ export default async function VehiclesPage() {
     },
     {
       h: locale === "en" ? "MODEL" : "車型 / 車輛",
-      w: 210,
-      r: (row) => (
-        <div style={{ display: "grid", gap: 2 }}>
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 600,
-              color: theme.text,
-            }}
-          >
-            {row.model}
-          </span>
-          <span style={{ fontSize: 11.5, color: theme.textMuted }}>
-            {row.modelMeta}
-          </span>
-        </div>
-      ),
+      k: "model",
+      w: 200,
     },
     {
       h: locale === "en" ? "YEAR" : "年份",
@@ -267,11 +221,7 @@ export default async function VehiclesPage() {
       h: t("vehicles.col.dispatchable", locale),
       w: 140,
       r: (row) => (
-        <Pill
-          theme={theme}
-          tone={row.dispatchable ? "success" : "danger"}
-          dot
-        >
+        <Pill theme={theme} tone={row.dispatchable ? "success" : "danger"} dot>
           {row.dispatchableLabel}
         </Pill>
       ),
@@ -290,17 +240,9 @@ export default async function VehiclesPage() {
     },
     {
       h: locale === "en" ? "DEBRAND DUE" : "除標識期限",
-      w: 160,
+      k: "debrandDue",
+      w: 140,
       mono: true,
-      r: (row) => (
-        <Pill
-          theme={theme}
-          tone={row.debrandTone}
-          dot={row.debrandTone !== "neutral"}
-        >
-          {buildDebrandLabel(row, locale)}
-        </Pill>
-      ),
     },
   ];
 
@@ -335,7 +277,7 @@ export default async function VehiclesPage() {
       >
         <PageHeader
           theme={theme}
-          title={t("vehicles.title", locale)}
+          title={t("nav.vehicles", locale)}
           subtitle={
             locale === "en"
               ? "dispatchable · contract · insurance · debrand"
@@ -359,10 +301,7 @@ export default async function VehiclesPage() {
             />
           ) : null}
 
-          <Card
-            theme={theme}
-            padding={0}
-          >
+          <Card theme={theme} padding={0}>
             {rows.length > 0 ? (
               <Table theme={theme} columns={columns} rows={rows} />
             ) : (
