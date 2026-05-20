@@ -18,15 +18,11 @@ import {
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
 } from "@drts/contracts";
-import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
 import {
   Banner,
   Btn,
   Card,
-  Field,
-  Input,
-  KPI,
   PageHeader,
   Pill,
   Shell,
@@ -41,18 +37,9 @@ import {
 import {
   DEFAULT_PROFILE_VALUES,
   DEFAULT_SETTINGS_VALUES,
-  buildProfileCommand,
-  buildSettingsCommand,
-  deriveSaveState,
-  hasErrors,
-  profileValuesEqual,
   profileValuesFromRecord,
-  settingsValuesEqual,
   settingsValuesFromRecord,
-  validateProfileValues,
-  validateSettingsValues,
   type ProfileFormValues,
-  type SaveState,
   type SettingsFormValues,
 } from "@/lib/settings-form";
 import { driverStrings } from "@/lib/strings";
@@ -151,9 +138,9 @@ function formatTokenExpiry(value: string | null | undefined): string | null {
   return `${remainingDays} 天後到期`;
 }
 
-function getBindingTone(record: PlatformPresenceRecord): CanvasTone {
+function getBindingTone(record: PlatformPresenceRecord) {
   if (record.reauthRequired) {
-    return "warn";
+    return "warn" as const;
   }
   return record.status === "online" ? "success" : "neutral";
 }
@@ -165,33 +152,21 @@ function getBindingStatus(record: PlatformPresenceRecord): string {
   return record.status === "online" ? "已綁定" : "未啟用";
 }
 
-function getBindingSubtitle(record: PlatformPresenceRecord): string | null {
-  const token = formatTokenExpiry(record.tokenExpiresAt);
-  if (record.reauthRequired) {
-    return token ? `憑證 ${token}` : "請重新完成平台驗證";
+function getBindingSubtitle(record: PlatformPresenceRecord): string {
+  const parts = [];
+
+  if (record.accountId?.trim()) {
+    parts.push(record.accountId.trim());
   }
 
-  return token;
-}
+  parts.push(getBindingStatus(record));
 
-interface SaveStatusDescriptor {
-  label: string;
-  tone: CanvasTone;
-}
-
-function describeSaveStatus(state: SaveState): SaveStatusDescriptor {
-  switch (state) {
-    case "saving":
-      return { label: "儲存中…", tone: "info" };
-    case "dirty":
-      return { label: "尚有未儲存變更", tone: "warn" };
-    case "saved":
-      return { label: "已儲存", tone: "success" };
-    case "error":
-      return { label: "儲存失敗", tone: "danger" };
-    default:
-      return { label: "尚未變更", tone: "neutral" };
+  const expiry = formatTokenExpiry(record.tokenExpiresAt);
+  if (expiry) {
+    parts.push(expiry);
   }
+
+  return parts.join(" · ");
 }
 
 function SectionTitle({
@@ -218,11 +193,11 @@ function SectionTitle({
   );
 }
 
-function Row({
+function ListRow({
   icon,
   label,
-  value,
   subtitle,
+  value,
   right,
   onPress,
   danger = false,
@@ -230,8 +205,8 @@ function Row({
 }: {
   icon?: ReactNode;
   label: string;
-  value?: string | null;
   subtitle?: string | null;
+  value?: string | null;
   right?: ReactNode;
   onPress?: () => void;
   danger?: boolean;
@@ -241,9 +216,7 @@ function Row({
     <View
       style={[
         styles.row,
-        {
-          borderBottomColor: last ? "transparent" : THEME.border,
-        },
+        { borderBottomColor: last ? "transparent" : THEME.border },
       ]}
     >
       <View style={styles.rowMain}>
@@ -258,7 +231,17 @@ function Row({
             {label}
           </Text>
           {subtitle ? (
-            <Text style={[styles.rowSubtitle, { color: THEME.textMuted }]}>
+            <Text
+              style={[
+                styles.rowSubtitle,
+                {
+                  color:
+                    danger || subtitle.includes("需重新授權")
+                      ? THEME.warn
+                      : THEME.textMuted,
+                },
+              ]}
+            >
               {subtitle}
             </Text>
           ) : null}
@@ -269,9 +252,7 @@ function Row({
           <Text
             style={[
               styles.rowValue,
-              {
-                color: danger ? THEME.danger : THEME.textMuted,
-              },
+              { color: danger ? THEME.danger : THEME.textMuted },
             ]}
           >
             {value}
@@ -294,9 +275,70 @@ function Row({
   }
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}>
+    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.88 : 1 }]}>
       {content}
     </Pressable>
+  );
+}
+
+function DriverBottomTabs({
+  active,
+  onNavigate,
+}: {
+  active: "jobs" | "home" | "trip" | "platform" | "settings";
+  onNavigate: (route: string) => void;
+}) {
+  const items = [
+    { id: "home", label: "工作台", icon: "home-outline", route: "/" },
+    { id: "jobs", label: "任務", icon: "list-outline", route: "/jobs" },
+    { id: "trip", label: "行程", icon: "car-outline", route: "/trip" },
+    {
+      id: "platform",
+      label: "平台",
+      icon: "layers-outline",
+      route: "/platform-presence",
+      dot: true,
+    },
+    {
+      id: "settings",
+      label: "設定",
+      icon: "person-outline",
+      route: "/settings",
+    },
+  ] as const;
+
+  return (
+    <View style={styles.bottomTabs}>
+      {items.map((item) => {
+        const selected = item.id === active;
+        const hasDot = "dot" in item && Boolean(item.dot);
+        return (
+          <Pressable
+            key={item.id}
+            accessibilityRole="button"
+            onPress={() => onNavigate(item.route)}
+            style={styles.bottomTabItem}
+          >
+            <View style={styles.bottomTabIconWrap}>
+              <Ionicons
+                name={item.icon}
+                size={22}
+                color={selected ? THEME.accent : THEME.textDim}
+              />
+              {hasDot ? <View style={styles.bottomTabDot} /> : null}
+            </View>
+            <Text
+              style={[
+                styles.bottomTabLabel,
+                { color: selected ? THEME.accent : THEME.textDim },
+              ]}
+            >
+              {item.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -306,27 +348,13 @@ export default function SettingsScreen() {
   const driverId = isProvisioned ? getDriverId() : "";
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [lastResult, setLastResult] = useState<"success" | "error" | null>(
-    null,
-  );
-
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [profileLoaded, setProfileLoaded] = useState(false);
   const [presenceSummary, setPresenceSummary] =
     useState<PlatformPresenceSummary | null>(null);
   const [settingsValues, setSettingsValues] = useState<SettingsFormValues>(
     DEFAULT_SETTINGS_VALUES,
   );
   const [profileValues, setProfileValues] = useState<ProfileFormValues>(
-    DEFAULT_PROFILE_VALUES,
-  );
-  const [initialSettings, setInitialSettings] = useState<SettingsFormValues>(
-    DEFAULT_SETTINGS_VALUES,
-  );
-  const [initialProfile, setInitialProfile] = useState<ProfileFormValues>(
     DEFAULT_PROFILE_VALUES,
   );
 
@@ -354,23 +382,17 @@ export default function SettingsScreen() {
       const failures: string[] = [];
 
       if (settingsResult.status === "fulfilled") {
-        const next = settingsValuesFromRecord(
-          settingsResult.value as DriverSettings,
+        setSettingsValues(
+          settingsValuesFromRecord(settingsResult.value as DriverSettings),
         );
-        setSettingsValues(next);
-        setInitialSettings(next);
-        setSettingsLoaded(true);
       } else {
         failures.push(`偏好設定（${toErrorMessage(settingsResult.reason)}）`);
       }
 
       if (profileResult.status === "fulfilled") {
-        const next = profileValuesFromRecord(
-          profileResult.value as DriverProfileRecord,
+        setProfileValues(
+          profileValuesFromRecord(profileResult.value as DriverProfileRecord),
         );
-        setProfileValues(next);
-        setInitialProfile(next);
-        setProfileLoaded(true);
       } else {
         failures.push(`個人資料（${toErrorMessage(profileResult.reason)}）`);
       }
@@ -383,14 +405,11 @@ export default function SettingsScreen() {
         );
       }
 
-      if (failures.length > 0) {
-        setLoadError(
-          `已使用可用資料。無法載入 ${formatSectionList(failures)}。`,
-        );
-      } else {
-        setLoadError(null);
-      }
-
+      setLoadError(
+        failures.length > 0
+          ? `已使用可用資料。無法載入 ${formatSectionList(failures)}。`
+          : null,
+      );
       setLoading(false);
     };
 
@@ -401,35 +420,9 @@ export default function SettingsScreen() {
     };
   }, [driverId, isProvisioned]);
 
-  const settingsErrors = validateSettingsValues(settingsValues);
-  const profileErrors = profileLoaded
-    ? validateProfileValues(profileValues)
-    : {};
-
-  const settingsDirty =
-    settingsLoaded && !settingsValuesEqual(initialSettings, settingsValues);
-  const profileDirty =
-    profileLoaded && !profileValuesEqual(initialProfile, profileValues);
-  const dirty = settingsDirty || profileDirty;
-  const hasValidation =
-    (settingsLoaded && hasErrors(settingsErrors)) ||
-    (profileLoaded && hasErrors(profileErrors));
-  const validationMessage = hasValidation
-    ? "請先修正標示欄位後再儲存設定。"
-    : null;
-
-  const saveState = deriveSaveState({
-    saving,
-    dirty,
-    hasValidation,
-    lastResult,
-  });
-  const saveStatus = describeSaveStatus(saveState);
-  const saveDisabled = !dirty || hasValidation || saving;
-
   const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
   const identitySummary = [
-    driverId ? `ID ${driverId}` : null,
+    driverId ? `D-${driverId.replace(/^D-?/i, "")}` : null,
     profileValues.profilePhone.trim() || null,
   ]
     .filter(Boolean)
@@ -445,101 +438,6 @@ export default function SettingsScreen() {
   const presences = [...(presenceSummary?.presences ?? [])].sort((a, b) =>
     getPlatformDisplayName(a).localeCompare(getPlatformDisplayName(b), "zh-TW"),
   );
-  const boundCount = presences.filter((entry) => entry.status === "online").length;
-  const reauthCount = presences.filter((entry) => entry.reauthRequired).length;
-
-  const updateSettings = (patch: Partial<SettingsFormValues>) => {
-    setSettingsValues((prev) => ({ ...prev, ...patch }));
-    if (lastResult) {
-      setLastResult(null);
-    }
-    if (saveError) {
-      setSaveError(null);
-    }
-  };
-
-  const updateProfile = (patch: Partial<ProfileFormValues>) => {
-    setProfileValues((prev) => ({ ...prev, ...patch }));
-    if (lastResult) {
-      setLastResult(null);
-    }
-    if (saveError) {
-      setSaveError(null);
-    }
-  };
-
-  const handleSave = async () => {
-    if (!dirty || hasValidation) {
-      return;
-    }
-
-    setSaving(true);
-    setSaveError(null);
-    const client = getDriverClient();
-
-    const tasks: Array<Promise<{ section: string }>> = [];
-    if (settingsDirty) {
-      tasks.push(
-        client
-          .updateDriverSettings(driverId, buildSettingsCommand(settingsValues))
-          .then(() => ({ section: "偏好設定" })),
-      );
-    }
-    if (profileDirty) {
-      tasks.push(
-        client
-          .updateDriverProfile(buildProfileCommand(profileValues))
-          .then(() => ({ section: "個人資料" })),
-      );
-    }
-
-    try {
-      const results = await Promise.allSettled(tasks);
-      const saved: string[] = [];
-      const failed: string[] = [];
-
-      results.forEach((entry, index) => {
-        const isSettingsTask = settingsDirty && index === 0;
-        const sectionLabel = isSettingsTask ? "偏好設定" : "個人資料";
-        if (entry.status === "fulfilled") {
-          saved.push(entry.value.section);
-        } else {
-          failed.push(`${sectionLabel}（${toErrorMessage(entry.reason)}）`);
-        }
-      });
-
-      if (saved.includes("偏好設定")) {
-        setInitialSettings(settingsValues);
-      }
-      if (saved.includes("個人資料")) {
-        setInitialProfile(profileValues);
-      }
-
-      if (failed.length === 0) {
-        setLastResult("success");
-        Alert.alert("儲存成功", "設定已成功儲存。");
-        return;
-      }
-
-      if (saved.length === 0) {
-        setLastResult("error");
-        setSaveError(`無法儲存 ${formatSectionList(failed)}。`);
-        Alert.alert("儲存失敗", `無法儲存 ${formatSectionList(failed)}。`);
-        return;
-      }
-
-      setLastResult("error");
-      setSaveError(
-        `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`,
-      );
-      Alert.alert(
-        "部分儲存成功",
-        `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`,
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleLogout = () => {
     Alert.alert("登出裝置", "登出後需要重新完成裝置配置，確定要繼續嗎？", [
@@ -613,54 +511,17 @@ export default function SettingsScreen() {
       theme={THEME}
       contentContainerStyle={styles.shellContent}
       footer={
-        <View style={styles.footerBar}>
-          <Btn
-            theme={THEME}
-            variant="primary"
-            size="md"
-            onPress={() => void handleSave()}
-            disabled={saveDisabled}
-            icon={
-              saving ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Ionicons name="save-outline" size={15} color="#FFFFFF" />
-              )
-            }
-            style={styles.footerButton}
-          >
-            {saving ? "儲存中…" : dirty ? "儲存變更" : "已同步"}
-          </Btn>
-        </View>
+        <DriverBottomTabs
+          active="settings"
+          onNavigate={(route) => router.push(route as never)}
+        />
       }
     >
       <PageHeader
         theme={THEME}
         title={driverStrings.settings.title}
-        subtitle="個人資料、平台綁定與接單偏好"
-        actions={<Pill theme={THEME} tone={saveStatus.tone}>{saveStatus.label}</Pill>}
+        subtitle="帳號與綁定"
       />
-
-      <View style={styles.kpiRow}>
-        <KPI
-          theme={THEME}
-          label="已綁定平台"
-          value={String(boundCount)}
-          sub={`${presences.length} 個平台`}
-        />
-        <KPI
-          theme={THEME}
-          label="待處理"
-          value={String(reauthCount)}
-          sub="需重新授權"
-        />
-        <KPI
-          theme={THEME}
-          label="儲存狀態"
-          value={dirty ? "待同步" : "最新"}
-          sub={saveStatus.label}
-        />
-      </View>
 
       {loadError ? (
         <Banner
@@ -670,110 +531,42 @@ export default function SettingsScreen() {
           icon={<Ionicons name="alert-circle-outline" size={16} color={THEME.warn} />}
         />
       ) : null}
-      {validationMessage ? (
-        <Banner
-          theme={THEME}
-          tone="danger"
-          body={validationMessage}
-          icon={<Ionicons name="warning-outline" size={16} color={THEME.danger} />}
-        />
-      ) : null}
-      {saveError ? (
-        <Banner
-          theme={THEME}
-          tone="danger"
-          body={saveError}
-          icon={<Ionicons name="close-circle-outline" size={16} color={THEME.danger} />}
-        />
-      ) : null}
 
-      <View style={styles.sectionStack}>
-        <SectionTitle
-          title={driverStrings.settings.sections.identity}
-          subtitle="維持最新的聯絡方式以便派遣與行政聯繫。"
-        />
-        <Card theme={THEME} padding={16}>
-          <View style={styles.profileHero}>
-            <View
-              style={[
-                styles.avatar,
-                { backgroundColor: THEME.accentBg, borderColor: THEME.accentBorder },
-              ]}
-            >
-              <Text style={[styles.avatarText, { color: THEME.accentHi }]}>
-                {profileInitial}
-              </Text>
-            </View>
-            <View style={styles.profileCopy}>
-              <Text style={[styles.profileName, { color: THEME.text }]}>
-                {profileValues.profileName.trim() || "尚未填寫司機姓名"}
-              </Text>
-              <Text style={[styles.profileMeta, { color: THEME.textMuted }]}>
-                {identitySummary || "尚未填寫聯絡資訊"}
-              </Text>
-            </View>
+      <Card theme={THEME} padding={16} style={styles.profileCard}>
+        <View style={styles.profileRow}>
+          <View
+            style={[
+              styles.avatar,
+              {
+                backgroundColor: THEME.accentBg,
+                borderColor: THEME.accentBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.avatarText, { color: THEME.accentHi }]}>
+              {profileInitial}
+            </Text>
           </View>
-
-          <View style={styles.fieldStack}>
-            <Field theme={THEME} label="姓名" required>
-              <Input
-                theme={THEME}
-                value={profileValues.profileName}
-                ph="司機姓名"
-                editable={profileLoaded && !saving}
-                onChangeText={(value) => updateProfile({ profileName: value })}
-              />
-            </Field>
-            {profileErrors.profileName ? (
-              <Text style={[styles.errorText, { color: THEME.danger }]}>
-                {profileErrors.profileName}
-              </Text>
-            ) : null}
-
-            <Field theme={THEME} label="電話">
-              <Input
-                theme={THEME}
-                value={profileValues.profilePhone}
-                ph="+886-900-000-000"
-                editable={profileLoaded && !saving}
-                onChangeText={(value) => updateProfile({ profilePhone: value })}
-              />
-            </Field>
-
-            <Field theme={THEME} label="電子郵件">
-              <Input
-                theme={THEME}
-                value={profileValues.profileEmail}
-                ph="driver@example.com"
-                editable={profileLoaded && !saving}
-                onChangeText={(value) => updateProfile({ profileEmail: value })}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </Field>
-            {profileErrors.profileEmail ? (
-              <Text style={[styles.errorText, { color: THEME.danger }]}>
-                {profileErrors.profileEmail}
-              </Text>
-            ) : null}
+          <View style={styles.profileCopy}>
+            <Text style={[styles.profileName, { color: THEME.text }]}>
+              {profileValues.profileName.trim() || "尚未填寫司機姓名"}
+            </Text>
+            <Text style={[styles.profileMeta, { color: THEME.textMuted }]}>
+              {identitySummary || "尚未填寫聯絡資訊"}
+            </Text>
           </View>
-        </Card>
-      </View>
+          <Ionicons
+            name="chevron-forward"
+            size={16}
+            color={THEME.textDim}
+          />
+        </View>
+      </Card>
 
       <View style={styles.sectionStack}>
         <SectionTitle
           title={driverStrings.settings.sections.bindings}
           subtitle="連線後可接收該平台訂單。"
-          action={
-            <Btn
-              theme={THEME}
-              variant="ghost"
-              size="xs"
-              onPress={() => router.push("/platform-presence")}
-            >
-              管理
-            </Btn>
-          }
         />
         <Card theme={THEME} padding={0}>
           {presences.length === 0 ? (
@@ -784,7 +577,7 @@ export default function SettingsScreen() {
             </View>
           ) : (
             presences.map((record, index) => (
-              <Row
+              <ListRow
                 key={record.platformCode}
                 icon={
                   <View
@@ -814,10 +607,13 @@ export default function SettingsScreen() {
                 label={getPlatformDisplayName(record)}
                 subtitle={getBindingSubtitle(record)}
                 right={
-                  <Pill theme={THEME} tone={getBindingTone(record)}>
-                    {getBindingStatus(record)}
-                  </Pill>
+                  record.reauthRequired ? (
+                    <Pill theme={THEME} tone={getBindingTone(record)}>
+                      處理
+                    </Pill>
+                  ) : undefined
                 }
+                onPress={() => router.push("/platform-presence")}
                 last={index === presences.length - 1}
               />
             ))
@@ -826,82 +622,47 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.sectionStack}>
-        <SectionTitle title="偏好" />
+        <SectionTitle title={driverStrings.settings.sections.preferences} />
         <Card theme={THEME} padding={0}>
-          <Row
-            label="語言"
-            value={formatLanguage(settingsValues.language)}
-            subtitle={settingsErrors.language}
+          <ListRow label="語言" value={formatLanguage(settingsValues.language)} />
+          <ListRow
+            label="最大接單距離"
+            value={formatRadius(settingsValues.maxAcceptRadius)}
           />
-          <View style={styles.rowForm}>
-            <Field theme={THEME} label="最大接單距離">
-              <Input
-                theme={THEME}
-                value={settingsValues.maxAcceptRadius}
-                ph="8"
-                suffix="km"
-                editable={settingsLoaded && !saving}
-                onChangeText={(value) => updateSettings({ maxAcceptRadius: value })}
+          <ListRow
+            label="自動接單"
+            subtitle="僅自營派單可開啟自動接單"
+            right={
+              <Switch
+                value={settingsValues.autoAcceptEnabled}
+                disabled
+                trackColor={{ false: THEME.borderStrong, true: THEME.accentHi }}
+                thumbColor={
+                  settingsValues.autoAcceptEnabled ? THEME.accent : "#FFFFFF"
+                }
               />
-            </Field>
-            {settingsErrors.maxAcceptRadius ? (
-              <Text style={[styles.errorText, { color: THEME.danger }]}>
-                {settingsErrors.maxAcceptRadius}
-              </Text>
-            ) : (
-              <Text style={[styles.helperText, { color: THEME.textMuted }]}>
-                目前設定：{formatRadius(settingsValues.maxAcceptRadius)}
-              </Text>
-            )}
-          </View>
-          <View style={[styles.toggleRow, { borderTopColor: THEME.border }]}>
-            <View style={styles.toggleCopy}>
-              <Text style={[styles.rowLabel, { color: THEME.text }]}>自動接單</Text>
-              <Text style={[styles.rowSubtitle, { color: THEME.textMuted }]}>
-                僅自營派單可開啟自動接單
-              </Text>
-            </View>
-            <Switch
-              value={settingsValues.autoAcceptEnabled}
-              onValueChange={(value) => updateSettings({ autoAcceptEnabled: value })}
-              disabled={!settingsLoaded || saving}
-              trackColor={{ false: THEME.borderStrong, true: THEME.accentHi }}
-              thumbColor={
-                settingsValues.autoAcceptEnabled ? THEME.accent : "#FFFFFF"
-              }
-            />
-          </View>
-          <View style={[styles.toggleRow, { borderTopColor: THEME.border }]}>
-            <View style={styles.toggleCopy}>
-              <Text style={[styles.rowLabel, { color: THEME.text }]}>通知</Text>
-              <Text style={[styles.rowSubtitle, { color: THEME.textMuted }]}>
-                {formatNotification(settingsValues.notificationsEnabled)}
-              </Text>
-            </View>
-            <Switch
-              value={settingsValues.notificationsEnabled}
-              onValueChange={(value) =>
-                updateSettings({ notificationsEnabled: value })
-              }
-              disabled={!settingsLoaded || saving}
-              trackColor={{ false: THEME.borderStrong, true: THEME.accentHi }}
-              thumbColor={
-                settingsValues.notificationsEnabled ? THEME.accent : "#FFFFFF"
-              }
-            />
-          </View>
+            }
+          />
+          <ListRow
+            label="通知"
+            value={formatNotification(settingsValues.notificationsEnabled)}
+            last
+          />
         </Card>
       </View>
 
       <View style={styles.sectionStack}>
         <SectionTitle title={driverStrings.settings.sections.misc} />
         <Card theme={THEME} padding={0}>
-          <Row
+          <ListRow
             label={driverStrings.settings.utilityLabels.emergencyContact}
             subtitle={emergencySummary}
           />
-          <Row label={driverStrings.settings.utilityLabels.aboutDevice} subtitle={driverId} />
-          <Row
+          <ListRow
+            label={driverStrings.settings.utilityLabels.aboutDevice}
+            subtitle={driverId || "未設定"}
+          />
+          <ListRow
             label={driverStrings.settings.utilityLabels.logout}
             subtitle="登出後需要重新綁定此裝置"
             onPress={handleLogout}
@@ -910,65 +671,13 @@ export default function SettingsScreen() {
           />
         </Card>
       </View>
-
-      <View style={styles.sectionStack}>
-        <SectionTitle
-          title={driverStrings.settings.sections.emergency}
-          subtitle="任一欄位填寫後，姓名與電話為必填。"
-        />
-        <Card theme={THEME} padding={16}>
-          <View style={styles.fieldStack}>
-            <Field theme={THEME} label="聯絡人姓名">
-              <Input
-                theme={THEME}
-                value={profileValues.emergencyName}
-                ph="緊急聯絡人姓名"
-                editable={profileLoaded && !saving}
-                onChangeText={(value) => updateProfile({ emergencyName: value })}
-              />
-            </Field>
-            {profileErrors.emergencyName ? (
-              <Text style={[styles.errorText, { color: THEME.danger }]}>
-                {profileErrors.emergencyName}
-              </Text>
-            ) : null}
-
-            <Field theme={THEME} label="聯絡人電話">
-              <Input
-                theme={THEME}
-                value={profileValues.emergencyPhone}
-                ph="+886-900-000-000"
-                editable={profileLoaded && !saving}
-                onChangeText={(value) => updateProfile({ emergencyPhone: value })}
-              />
-            </Field>
-            {profileErrors.emergencyPhone ? (
-              <Text style={[styles.errorText, { color: THEME.danger }]}>
-                {profileErrors.emergencyPhone}
-              </Text>
-            ) : null}
-
-            <Field theme={THEME} label="關係">
-              <Input
-                theme={THEME}
-                value={profileValues.emergencyRelationship}
-                ph="配偶、家人、朋友"
-                editable={profileLoaded && !saving}
-                onChangeText={(value) =>
-                  updateProfile({ emergencyRelationship: value })
-                }
-              />
-            </Field>
-          </View>
-        </Card>
-      </View>
     </Shell>
   );
 }
 
 const styles = StyleSheet.create({
   shellContent: {
-    paddingBottom: 28,
+    paddingBottom: 24,
     gap: 14,
   },
   loadingContent: {
@@ -983,47 +692,24 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   loadingLabel: {
-    fontSize: 14,
-  },
-  kpiRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  sectionStack: {
-    gap: 8,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    gap: 12,
-    paddingHorizontal: 2,
-  },
-  sectionCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  sectionSubtitle: {
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 18,
   },
-  profileHero: {
+  profileCard: {
+    marginTop: -2,
+  },
+  profileRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    marginBottom: 16,
   },
   avatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
   },
   avatarText: {
     fontSize: 18,
@@ -1031,113 +717,138 @@ const styles = StyleSheet.create({
   },
   profileCopy: {
     flex: 1,
-    gap: 2,
+    minWidth: 0,
+    gap: 4,
   },
   profileName: {
     fontSize: 16,
-    fontWeight: "700",
+    fontWeight: "600",
   },
   profileMeta: {
     fontSize: 12,
+    lineHeight: 16,
+    fontFamily: THEME.monoFamily,
   },
-  fieldStack: {
-    gap: 10,
+  sectionStack: {
+    gap: 8,
   },
-  errorText: {
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: -4,
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
   },
-  helperText: {
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 2,
+  sectionCopy: {
+    flex: 1,
+    gap: 2,
   },
-  emptyCard: {
-    padding: 16,
-  },
-  emptyText: {
-    fontSize: 13,
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: "700",
     lineHeight: 20,
   },
+  sectionSubtitle: {
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
   row: {
+    minHeight: 58,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
   },
   rowMain: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
     flex: 1,
+    minWidth: 0,
+    gap: 12,
   },
   rowIcon: {
-    width: 40,
-    alignItems: "center",
-    justifyContent: "center",
+    flexShrink: 0,
   },
   rowCopy: {
     flex: 1,
+    minWidth: 0,
     gap: 2,
   },
   rowLabel: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "600",
+    lineHeight: 18,
   },
   rowSubtitle: {
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 11.5,
+    lineHeight: 16,
   },
   rowRight: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    flexShrink: 1,
+    flexShrink: 0,
   },
   rowValue: {
-    fontSize: 12,
+    fontSize: 13,
+    lineHeight: 17,
   },
   platformBadge: {
-    minWidth: 40,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
   },
   platformBadgeText: {
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: "800",
+    letterSpacing: 0.3,
+    fontFamily: THEME.monoFamily,
   },
-  rowForm: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+  emptyCard: {
+    paddingHorizontal: 14,
+    paddingVertical: 18,
+  },
+  emptyText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  bottomTabs: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 12,
+    backgroundColor: THEME.surface,
     borderTopWidth: 1,
     borderTopColor: THEME.border,
-    gap: 6,
   },
-  toggleRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderTopWidth: 1,
-  },
-  toggleCopy: {
+  bottomTabItem: {
     flex: 1,
-    gap: 2,
+    alignItems: "center",
+    gap: 5,
   },
-  footerBar: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  footerButton: {
-    width: "100%",
+  bottomTabIconWrap: {
+    minHeight: 24,
+    alignItems: "center",
     justifyContent: "center",
+  },
+  bottomTabLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    lineHeight: 14,
+  },
+  bottomTabDot: {
+    position: "absolute",
+    top: 1,
+    right: -3,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: THEME.warn,
   },
 });
