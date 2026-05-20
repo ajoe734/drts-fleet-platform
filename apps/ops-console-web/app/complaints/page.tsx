@@ -1004,6 +1004,20 @@ export default function ComplaintsPage() {
           />
         </div>
 
+        <Card theme={theme} padding={0}>
+          {loading ? (
+            <div style={{ padding: 16, color: theme.textMuted }}>
+              {t("complaints.loading")}
+            </div>
+          ) : filteredRecords.length > 0 ? (
+            <Table theme={theme} columns={tableColumns} rows={tableRows} />
+          ) : (
+            <div style={{ padding: 16 }}>
+              <div style={emptyStateStyle}>{t("complaints.empty")}</div>
+            </div>
+          )}
+        </Card>
+
         {showFilters ? (
           <Card
             theme={theme}
@@ -1104,45 +1118,6 @@ export default function ComplaintsPage() {
             </div>
           </Card>
         ) : null}
-
-        <Card
-          theme={theme}
-          padding={0}
-          title={copy(locale, "Complaints table", "客訴清單")}
-          subtitle={t("complaints.visible", { count: filteredRecords.length })}
-          actions={
-            <div style={actionRowStyle}>
-              <Btn
-                theme={theme}
-                onClick={() => void loadRecords(selectedCaseNo ?? undefined)}
-              >
-                {t("common.refresh")}
-              </Btn>
-              <Btn
-                theme={theme}
-                variant="ghost"
-                disabled={!selectedRecord}
-                onClick={() => setShowWorkspace((current) => !current)}
-              >
-                {showWorkspace
-                  ? copy(locale, "Hide workspace", "隱藏 workspace")
-                  : copy(locale, "Open workspace", "開啟 workspace")}
-              </Btn>
-            </div>
-          }
-        >
-          {loading ? (
-            <div style={{ padding: 16, color: theme.textMuted }}>
-              {t("complaints.loading")}
-            </div>
-          ) : filteredRecords.length > 0 ? (
-            <Table theme={theme} columns={tableColumns} rows={tableRows} />
-          ) : (
-            <div style={{ padding: 16 }}>
-              <div style={emptyStateStyle}>{t("complaints.empty")}</div>
-            </div>
-          )}
-        </Card>
 
         {showCreate ? (
           <Card
@@ -1303,6 +1278,15 @@ export default function ComplaintsPage() {
                 "Selected complaint workspace",
                 "已選客訴 workspace",
               )}
+              actions={
+                <Btn
+                  theme={theme}
+                  variant="ghost"
+                  onClick={() => setShowWorkspace(false)}
+                >
+                  {copy(locale, "Hide workspace", "隱藏 workspace")}
+                </Btn>
+              }
             >
               <div style={detailStackStyle}>
                 <div style={pillRowStyle}>
