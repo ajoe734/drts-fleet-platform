@@ -10,6 +10,8 @@ import {
   Switch,
   Text,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 import {
   PLATFORM_CODE_REGISTRY,
@@ -20,12 +22,12 @@ import {
 } from "@drts/contracts";
 
 import {
-  Banner,
-  Btn,
-  Card,
-  PageHeader,
-  Pill,
-  Shell,
+  Banner as CanvasBanner,
+  Btn as CanvasBtn,
+  Card as CanvasCard,
+  PageHeader as CanvasPageHeader,
+  Pill as CanvasPill,
+  Shell as CanvasShell,
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
 import {
@@ -169,32 +171,135 @@ function getBindingSubtitle(record: PlatformPresenceRecord): string {
   return parts.join(" · ");
 }
 
-function SectionTitle({
+function ScreenSection({
   title,
   subtitle,
-  action,
+  children,
+  style,
 }: {
   title: string;
   subtitle?: string;
-  action?: ReactNode;
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={styles.sectionHeader}>
-      <View style={styles.sectionCopy}>
-        <Text style={[styles.sectionTitle, { color: THEME.text }]}>{title}</Text>
+    <View style={[styles.sectionBlock, style]}>
+      <View style={styles.sectionHeading}>
+        <Text style={[styles.sectionTitle, { color: THEME.text }]}>
+          {title}
+        </Text>
         {subtitle ? (
           <Text style={[styles.sectionSubtitle, { color: THEME.textMuted }]}>
             {subtitle}
           </Text>
         ) : null}
       </View>
-      {action ? <View>{action}</View> : null}
+      {children}
     </View>
   );
 }
 
-function ListRow({
-  icon,
+function ProfileSummaryCard({
+  initial,
+  name,
+  summary,
+}: {
+  initial: string;
+  name: string;
+  summary: string;
+}) {
+  return (
+    <CanvasCard theme={THEME} padding={16} style={styles.profileCard}>
+      <View style={styles.profileRow}>
+        <View
+          style={[
+            styles.avatar,
+            {
+              backgroundColor: THEME.accentBg,
+              borderColor: THEME.accentBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.avatarText, { color: THEME.accentHi }]}>
+            {initial}
+          </Text>
+        </View>
+        <View style={styles.profileCopy}>
+          <Text style={[styles.profileName, { color: THEME.text }]}>
+            {name}
+          </Text>
+          <Text style={[styles.profileMeta, { color: THEME.textMuted }]}>
+            {summary}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={THEME.textDim} />
+      </View>
+    </CanvasCard>
+  );
+}
+
+function BindingRow({
+  record,
+  last = false,
+  onPress,
+}: {
+  record: PlatformPresenceRecord;
+  last?: boolean;
+  onPress?: () => void;
+}) {
+  const statusTone = getBindingTone(record);
+  const label = getPlatformDisplayName(record);
+  const subtitle = getBindingSubtitle(record);
+  const badgeColor = isOwnedPlatform(record) ? THEME.accentHi : THEME.warn;
+  const badgeBackground = isOwnedPlatform(record)
+    ? THEME.accentBg
+    : THEME.warnBg;
+
+  return (
+    <Pressable
+      accessibilityRole={onPress ? "button" : undefined}
+      onPress={onPress}
+      style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}
+    >
+      <View
+        style={[
+          styles.bindingRow,
+          { borderBottomColor: last ? "transparent" : THEME.border },
+        ]}
+      >
+        <View
+          style={[styles.platformBadge, { backgroundColor: badgeBackground }]}
+        >
+          <Text style={[styles.platformBadgeText, { color: badgeColor }]}>
+            {String(record.platformCode).slice(0, 4).toUpperCase()}
+          </Text>
+        </View>
+        <View style={styles.bindingCopy}>
+          <Text style={[styles.bindingLabel, { color: THEME.text }]}>
+            {label}
+          </Text>
+          <Text
+            style={[
+              styles.bindingSubtitle,
+              {
+                color: record.reauthRequired ? THEME.warn : THEME.textMuted,
+              },
+            ]}
+          >
+            {subtitle}
+          </Text>
+        </View>
+        {record.reauthRequired ? (
+          <CanvasPill theme={THEME} tone={statusTone}>
+            處理
+          </CanvasPill>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+}
+
+function SettingRow({
   label,
   subtitle,
   value,
@@ -203,7 +308,6 @@ function ListRow({
   danger = false,
   last = false,
 }: {
-  icon?: ReactNode;
   label: string;
   subtitle?: string | null;
   value?: string | null;
@@ -215,43 +319,40 @@ function ListRow({
   const content = (
     <View
       style={[
-        styles.row,
+        styles.settingRow,
         { borderBottomColor: last ? "transparent" : THEME.border },
       ]}
     >
-      <View style={styles.rowMain}>
-        {icon ? <View style={styles.rowIcon}>{icon}</View> : null}
-        <View style={styles.rowCopy}>
+      <View style={styles.settingMain}>
+        <Text
+          style={[
+            styles.settingLabel,
+            { color: danger ? THEME.danger : THEME.text },
+          ]}
+        >
+          {label}
+        </Text>
+        {subtitle ? (
           <Text
             style={[
-              styles.rowLabel,
-              { color: danger ? THEME.danger : THEME.text },
+              styles.settingSubtitle,
+              {
+                color:
+                  danger || subtitle.includes("需重新授權")
+                    ? THEME.warn
+                    : THEME.textMuted,
+              },
             ]}
           >
-            {label}
+            {subtitle}
           </Text>
-          {subtitle ? (
-            <Text
-              style={[
-                styles.rowSubtitle,
-                {
-                  color:
-                    danger || subtitle.includes("需重新授權")
-                      ? THEME.warn
-                      : THEME.textMuted,
-                },
-              ]}
-            >
-              {subtitle}
-            </Text>
-          ) : null}
-        </View>
+        ) : null}
       </View>
-      <View style={styles.rowRight}>
+      <View style={styles.settingRight}>
         {value ? (
           <Text
             style={[
-              styles.rowValue,
+              styles.settingValue,
               { color: danger ? THEME.danger : THEME.textMuted },
             ]}
           >
@@ -275,7 +376,10 @@ function ListRow({
   }
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.88 : 1 }]}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [{ opacity: pressed ? 0.88 : 1 }]}
+    >
       {content}
     </Pressable>
   );
@@ -455,43 +559,39 @@ export default function SettingsScreen() {
 
   if (!isProvisioned) {
     return (
-      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
-        <PageHeader
+      <CanvasShell theme={THEME} contentContainerStyle={styles.shellContent}>
+        <CanvasPageHeader
           theme={THEME}
           title={driverStrings.settings.title}
           subtitle="裝置尚未配置司機身份"
         />
-        <Banner
+        <CanvasBanner
           theme={THEME}
           tone="warn"
           title="尚未完成裝置配置"
           body="此裝置尚未分配司機身份，無法載入設定。"
           icon={
-            <Ionicons
-              name="lock-closed-outline"
-              size={16}
-              color={THEME.warn}
-            />
+            <Ionicons name="lock-closed-outline" size={16} color={THEME.warn} />
           }
           actions={
-            <Btn
+            <CanvasBtn
               theme={THEME}
               variant="primary"
               size="sm"
               onPress={() => router.push("/onboarding")}
             >
               前往配置裝置
-            </Btn>
+            </CanvasBtn>
           }
         />
-      </Shell>
+      </CanvasShell>
     );
   }
 
   if (loading) {
     return (
-      <Shell theme={THEME} contentContainerStyle={styles.loadingContent}>
-        <PageHeader
+      <CanvasShell theme={THEME} contentContainerStyle={styles.loadingContent}>
+        <CanvasPageHeader
           theme={THEME}
           title={driverStrings.settings.title}
           subtitle="載入設定中…"
@@ -502,12 +602,12 @@ export default function SettingsScreen() {
             載入設定中…
           </Text>
         </View>
-      </Shell>
+      </CanvasShell>
     );
   }
 
   return (
-    <Shell
+    <CanvasShell
       theme={THEME}
       contentContainerStyle={styles.shellContent}
       footer={
@@ -517,58 +617,39 @@ export default function SettingsScreen() {
         />
       }
     >
-      <PageHeader
+      <CanvasPageHeader
         theme={THEME}
         title={driverStrings.settings.title}
-        subtitle="帳號與綁定"
+        style={styles.pageHeader}
       />
 
       {loadError ? (
-        <Banner
+        <CanvasBanner
           theme={THEME}
           tone="warn"
           body={loadError}
-          icon={<Ionicons name="alert-circle-outline" size={16} color={THEME.warn} />}
+          icon={
+            <Ionicons
+              name="alert-circle-outline"
+              size={16}
+              color={THEME.warn}
+            />
+          }
         />
       ) : null}
 
-      <Card theme={THEME} padding={16} style={styles.profileCard}>
-        <View style={styles.profileRow}>
-          <View
-            style={[
-              styles.avatar,
-              {
-                backgroundColor: THEME.accentBg,
-                borderColor: THEME.accentBorder,
-              },
-            ]}
-          >
-            <Text style={[styles.avatarText, { color: THEME.accentHi }]}>
-              {profileInitial}
-            </Text>
-          </View>
-          <View style={styles.profileCopy}>
-            <Text style={[styles.profileName, { color: THEME.text }]}>
-              {profileValues.profileName.trim() || "尚未填寫司機姓名"}
-            </Text>
-            <Text style={[styles.profileMeta, { color: THEME.textMuted }]}>
-              {identitySummary || "尚未填寫聯絡資訊"}
-            </Text>
-          </View>
-          <Ionicons
-            name="chevron-forward"
-            size={16}
-            color={THEME.textDim}
-          />
-        </View>
-      </Card>
+      <ProfileSummaryCard
+        initial={profileInitial}
+        name={profileValues.profileName.trim() || "尚未填寫司機姓名"}
+        summary={identitySummary || "尚未填寫聯絡資訊"}
+      />
 
-      <View style={styles.sectionStack}>
-        <SectionTitle
-          title={driverStrings.settings.sections.bindings}
-          subtitle="連線後可接收該平台訂單。"
-        />
-        <Card theme={THEME} padding={0}>
+      <ScreenSection
+        title={driverStrings.settings.sections.bindings}
+        subtitle="連線後可接收該平台訂單。"
+        style={styles.bindingsSection}
+      >
+        <CanvasCard theme={THEME} padding={0}>
           {presences.length === 0 ? (
             <View style={styles.emptyCard}>
               <Text style={[styles.emptyText, { color: THEME.textMuted }]}>
@@ -577,59 +658,31 @@ export default function SettingsScreen() {
             </View>
           ) : (
             presences.map((record, index) => (
-              <ListRow
+              <BindingRow
                 key={record.platformCode}
-                icon={
-                  <View
-                    style={[
-                      styles.platformBadge,
-                      {
-                        backgroundColor: isOwnedPlatform(record)
-                          ? THEME.accentBg
-                          : THEME.warnBg,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.platformBadgeText,
-                        {
-                          color: isOwnedPlatform(record)
-                            ? THEME.accentHi
-                            : THEME.warn,
-                        },
-                      ]}
-                    >
-                      {String(record.platformCode).slice(0, 4).toUpperCase()}
-                    </Text>
-                  </View>
-                }
-                label={getPlatformDisplayName(record)}
-                subtitle={getBindingSubtitle(record)}
-                right={
-                  record.reauthRequired ? (
-                    <Pill theme={THEME} tone={getBindingTone(record)}>
-                      處理
-                    </Pill>
-                  ) : undefined
-                }
+                record={record}
                 onPress={() => router.push("/platform-presence")}
                 last={index === presences.length - 1}
               />
             ))
           )}
-        </Card>
-      </View>
+        </CanvasCard>
+      </ScreenSection>
 
-      <View style={styles.sectionStack}>
-        <SectionTitle title={driverStrings.settings.sections.preferences} />
-        <Card theme={THEME} padding={0}>
-          <ListRow label="語言" value={formatLanguage(settingsValues.language)} />
-          <ListRow
+      <ScreenSection
+        title={driverStrings.settings.sections.preferences}
+        style={styles.tightSection}
+      >
+        <CanvasCard theme={THEME} padding={0}>
+          <SettingRow
+            label="語言"
+            value={formatLanguage(settingsValues.language)}
+          />
+          <SettingRow
             label="最大接單距離"
             value={formatRadius(settingsValues.maxAcceptRadius)}
           />
-          <ListRow
+          <SettingRow
             label="自動接單"
             subtitle="僅自營派單可開啟自動接單"
             right={
@@ -643,42 +696,44 @@ export default function SettingsScreen() {
               />
             }
           />
-          <ListRow
+          <SettingRow
             label="通知"
             value={formatNotification(settingsValues.notificationsEnabled)}
             last
           />
-        </Card>
-      </View>
+        </CanvasCard>
+      </ScreenSection>
 
-      <View style={styles.sectionStack}>
-        <SectionTitle title={driverStrings.settings.sections.misc} />
-        <Card theme={THEME} padding={0}>
-          <ListRow
+      <ScreenSection
+        title={driverStrings.settings.sections.misc}
+        style={styles.miscSection}
+      >
+        <CanvasCard theme={THEME} padding={0}>
+          <SettingRow
             label={driverStrings.settings.utilityLabels.emergencyContact}
             subtitle={emergencySummary}
           />
-          <ListRow
+          <SettingRow
             label={driverStrings.settings.utilityLabels.aboutDevice}
             subtitle={driverId || "未設定"}
           />
-          <ListRow
+          <SettingRow
             label={driverStrings.settings.utilityLabels.logout}
             subtitle="登出後需要重新綁定此裝置"
             onPress={handleLogout}
             danger
             last
           />
-        </Card>
-      </View>
-    </Shell>
+        </CanvasCard>
+      </ScreenSection>
+    </CanvasShell>
   );
 }
 
 const styles = StyleSheet.create({
   shellContent: {
     paddingBottom: 24,
-    gap: 14,
+    gap: 0,
   },
   loadingContent: {
     flexGrow: 1,
@@ -695,8 +750,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  pageHeader: {
+    paddingBottom: 8,
+  },
   profileCard: {
-    marginTop: -2,
+    marginTop: 4,
   },
   profileRow: {
     flexDirection: "row",
@@ -729,17 +787,19 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontFamily: THEME.monoFamily,
   },
-  sectionStack: {
+  sectionBlock: {
     gap: 8,
   },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
+  bindingsSection: {
+    marginTop: 14,
   },
-  sectionCopy: {
-    flex: 1,
+  tightSection: {
+    marginTop: 14,
+  },
+  miscSection: {
+    marginTop: 14,
+  },
+  sectionHeading: {
     gap: 2,
   },
   sectionTitle: {
@@ -748,11 +808,34 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   sectionSubtitle: {
-    fontSize: 12.5,
+    fontSize: 12,
     lineHeight: 18,
   },
-  row: {
-    minHeight: 58,
+  bindingRow: {
+    minHeight: 60,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  bindingCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  bindingLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  bindingSubtitle: {
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  settingRow: {
+    minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -761,37 +844,27 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
   },
-  rowMain: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    minWidth: 0,
-    gap: 12,
-  },
-  rowIcon: {
-    flexShrink: 0,
-  },
-  rowCopy: {
+  settingMain: {
     flex: 1,
     minWidth: 0,
     gap: 2,
   },
-  rowLabel: {
+  settingLabel: {
     fontSize: 14,
     fontWeight: "600",
     lineHeight: 18,
   },
-  rowSubtitle: {
+  settingSubtitle: {
     fontSize: 11.5,
     lineHeight: 16,
   },
-  rowRight: {
+  settingRight: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     flexShrink: 0,
   },
-  rowValue: {
+  settingValue: {
     fontSize: 13,
     lineHeight: 17,
   },
