@@ -1,309 +1,570 @@
 import Link from "next/link";
+import type { CSSProperties } from "react";
 import type {
   BookingRecord,
-  FeatureFlagSummary,
   IdentityContext,
-  NotificationRecord,
-  TenantIntegrationGovernancePackage,
+  TenantBillingProfile,
+  TenantBookingApprovalRequestRecord,
   TenantInvoiceRecord,
+  TenantQuotaSummary,
+  TenantUserRoleRecord,
+  TenantWebhookEndpoint,
 } from "@drts/contracts";
 import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasKPI,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasTable,
+  type CanvasTableColumn,
+  type CanvasTone,
+  buildCanvasTheme,
+} from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
-import { formatCount, formatDateTime } from "@/lib/formatters";
-
-const ATTENTION_STATUSES = new Set([
-  "dispatch_failed",
-  "dispatch_timeout",
-  "exception_hold",
-  "no_supply",
-  "proof_pending",
-  "redispatch_required",
-]);
 
 export const dynamic = "force-dynamic";
 
-type DashboardData = {
+const th = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const kpiGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const contentGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 1fr)",
+  gap: 16,
+};
+
+const bookingPrimaryStyle: CSSProperties = {
+  color: th.accent,
+  fontWeight: 600,
+  fontFamily: th.monoFamily,
+};
+
+const bookingLocationStyle: CSSProperties = {
+  color: th.text,
+  fontWeight: 500,
+  whiteSpace: "normal",
+  lineHeight: 1.35,
+};
+
+const bookingWindowStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.35,
+};
+
+const bannerStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: 24,
+  color: th.textMuted,
+  fontSize: 12.5,
+  textAlign: "center",
+};
+
+const linkStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 12,
+  textDecoration: "none",
+};
+
+const dateFormatter = new Intl.DateTimeFormat("zh-Hant", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  weekday: "short",
+});
+
+const shortDateTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+const numberFormatter = new Intl.NumberFormat("en-US");
+
+type HomeData = {
   identity: IdentityContext | null;
-  featureFlags: FeatureFlagSummary | null;
+  users: TenantUserRoleRecord[];
+  billingProfile: TenantBillingProfile | null;
+  quotaSummary: TenantQuotaSummary | null;
   bookings: BookingRecord[];
   invoices: TenantInvoiceRecord[];
-  notifications: NotificationRecord[];
-  governance: TenantIntegrationGovernancePackage | null;
+  webhooks: TenantWebhookEndpoint[];
+  approvalRequests: TenantBookingApprovalRequestRecord[];
   errors: string[];
 };
 
-async function loadDashboardData(): Promise<DashboardData> {
+type BookingRow = BookingRecord & Record<string, unknown>;
+
+type ReminderBanner = {
+  tone: "warn" | "info" | "success";
+  title: string;
+  body: string;
+};
+
+async function loadHomeData(): Promise<HomeData> {
   const client = getTenantClient();
   const [
-    identityResult,
-    flagsResult,
-    bookingsResult,
-    invoicesResult,
-    notificationsResult,
-    governanceResult,
+    identity,
+    users,
+    billingProfile,
+    quotaSummary,
+    bookings,
+    invoices,
+    webhooks,
+    approvalRequests,
   ] = await Promise.allSettled([
     client.getIdentityContext() as Promise<IdentityContext>,
-    client.getFeatureFlags({ tenantId: "tenant-demo-001" }),
-    client.listTenantBookings(),
-    client.listInvoices(),
-    client.listTenantNotificationFeed(),
-    client.getTenantIntegrationGovernancePackage(),
+    client.listTenantUsers() as Promise<TenantUserRoleRecord[]>,
+    client.getBillingProfile() as Promise<TenantBillingProfile>,
+    client.getTenantQuotaSummary() as Promise<TenantQuotaSummary>,
+    client.listTenantBookings() as Promise<BookingRecord[]>,
+    client.listInvoices() as Promise<TenantInvoiceRecord[]>,
+    client.listWebhooks() as Promise<TenantWebhookEndpoint[]>,
+    client.listApprovalRequests({
+      status: "pending",
+    }) as Promise<TenantBookingApprovalRequestRecord[]>,
   ]);
 
   const errors: string[] = [];
-  const collectError = (
-    label: string,
-    result: PromiseSettledResult<unknown>,
-  ) => {
-    if (result.status === "rejected") {
-      errors.push(
-        `${label}: ${result.reason instanceof Error ? result.reason.message : "Unknown error"}`,
-      );
-    }
-  };
+  const tag = (label: string, reason: unknown) =>
+    `${label}: ${reason instanceof Error ? reason.message : "未知錯誤"}`;
 
-  collectError("Identity", identityResult);
-  collectError("Feature flags", flagsResult);
-  collectError("Bookings", bookingsResult);
-  collectError("Invoices", invoicesResult);
-  collectError("Notifications", notificationsResult);
-  collectError("Integration governance", governanceResult);
+  if (identity.status === "rejected")
+    errors.push(tag("租戶身分", identity.reason));
+  if (users.status === "rejected") errors.push(tag("成員清單", users.reason));
+  if (billingProfile.status === "rejected") {
+    errors.push(tag("計費設定", billingProfile.reason));
+  }
+  if (quotaSummary.status === "rejected") {
+    errors.push(tag("租戶配額", quotaSummary.reason));
+  }
+  if (bookings.status === "rejected")
+    errors.push(tag("叫車清單", bookings.reason));
+  if (invoices.status === "rejected")
+    errors.push(tag("對帳單", invoices.reason));
+  if (webhooks.status === "rejected")
+    errors.push(tag("Webhook", webhooks.reason));
+  if (approvalRequests.status === "rejected") {
+    errors.push(tag("待簽核叫車", approvalRequests.reason));
+  }
 
   return {
-    identity:
-      identityResult.status === "fulfilled" ? identityResult.value : null,
-    featureFlags: flagsResult.status === "fulfilled" ? flagsResult.value : null,
-    bookings: bookingsResult.status === "fulfilled" ? bookingsResult.value : [],
-    invoices: invoicesResult.status === "fulfilled" ? invoicesResult.value : [],
-    notifications:
-      notificationsResult.status === "fulfilled"
-        ? notificationsResult.value
-        : [],
-    governance:
-      governanceResult.status === "fulfilled" ? governanceResult.value : null,
+    identity: identity.status === "fulfilled" ? identity.value : null,
+    users: users.status === "fulfilled" ? users.value : [],
+    billingProfile:
+      billingProfile.status === "fulfilled" ? billingProfile.value : null,
+    quotaSummary:
+      quotaSummary.status === "fulfilled" ? quotaSummary.value : null,
+    bookings: bookings.status === "fulfilled" ? bookings.value : [],
+    invoices: invoices.status === "fulfilled" ? invoices.value : [],
+    webhooks: webhooks.status === "fulfilled" ? webhooks.value : [],
+    approvalRequests:
+      approvalRequests.status === "fulfilled" ? approvalRequests.value : [],
     errors,
   };
 }
 
-export default async function HomePage() {
-  const data = await loadDashboardData();
-  const activeBookings = data.bookings.filter(
-    (booking) =>
-      booking.orderStatus !== "completed" &&
-      booking.orderStatus !== "cancelled",
-  );
-  const attentionBookings = activeBookings.filter((booking) =>
-    ATTENTION_STATUSES.has(booking.orderStatus),
-  );
-  const openInvoices = data.invoices.filter(
-    (invoice) => invoice.status !== "paid",
-  );
-  const enabledFlags =
-    data.featureFlags?.flags.filter((flag) => flag.enabled) ?? [];
-  const recentNotifications = data.notifications.slice(0, 3);
+function formatCount(value: number) {
+  return numberFormatter.format(value);
+}
+
+function parseDate(value: string | null | undefined) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateTime(value: string | null | undefined) {
+  const parsed = parseDate(value);
+  if (!parsed) return "—";
+  return shortDateTimeFormatter.format(parsed).replace(",", "");
+}
+
+function isSameUtcDay(value: string | null | undefined, target: Date) {
+  const parsed = parseDate(value);
+  if (!parsed) return false;
 
   return (
-    <div className="page-shell">
-      <PageHero
-        eyebrow="Home"
-        title="Tenant operators now land in a real admin workspace, not a launcher page."
-        description="This dashboard anchors the tenant identity context, active-booking summary, billing reminders, integration posture, and quick-entry actions on top of the new `apps/tenant-console-web` shell."
+    parsed.getUTCFullYear() === target.getUTCFullYear() &&
+    parsed.getUTCMonth() === target.getUTCMonth() &&
+    parsed.getUTCDate() === target.getUTCDate()
+  );
+}
+
+function formatMoneyMinor(amountMinor: number, currency: string) {
+  const prefix = currency === "TWD" ? "NT$" : currency;
+  return `${prefix} ${numberFormatter.format(Math.round(amountMinor / 100))}`;
+}
+
+function formatMoney(
+  value: TenantInvoiceRecord["amount"] | BookingRecord["quotedFare"] | null,
+) {
+  if (!value) return "—";
+  return formatMoneyMinor(value.amountMinor, value.currency);
+}
+
+function formatQuotaLimit(summary: TenantQuotaSummary | null) {
+  if (!summary) return "—";
+
+  if (summary.limit.bookingCountLimit !== null) {
+    return `${formatCount(summary.limit.bookingCountLimit)} 趟`;
+  }
+
+  if (summary.limit.amountMinorLimit !== null) {
+    return formatMoneyMinor(
+      summary.limit.amountMinorLimit,
+      summary.limit.currency,
+    );
+  }
+
+  return "無上限";
+}
+
+function formatQuotaUsage(summary: TenantQuotaSummary | null) {
+  if (!summary) return "—";
+
+  if (summary.limit.bookingCountLimit !== null) {
+    const used =
+      summary.usage.confirmedBookingCount +
+      summary.usage.pendingReservedBookingCount;
+    return formatCount(used);
+  }
+
+  if (summary.limit.amountMinorLimit !== null) {
+    const used =
+      summary.usage.confirmedAmountMinor +
+      summary.usage.pendingReservedAmountMinor;
+    return formatMoneyMinor(used, summary.limit.currency);
+  }
+
+  return "無上限";
+}
+
+function formatQuotaSub(summary: TenantQuotaSummary | null) {
+  if (!summary) return "配額資料尚未載入";
+  if (summary.usage.remainingPercent === null) return "無上限";
+
+  return `${summary.usage.remainingPercent}% of ${formatQuotaLimit(summary)}`;
+}
+
+function formatQuotaHeader(summary: TenantQuotaSummary | null) {
+  if (!summary) {
+    return "本月配額資料尚未載入";
+  }
+
+  return `本月配額 ${formatQuotaUsage(summary)} / ${formatQuotaLimit(summary)}`;
+}
+
+function getGreetingName(data: HomeData) {
+  const activeUser = [...data.users]
+    .filter((user) => user.status === "active")
+    .sort((left, right) =>
+      left.displayName.localeCompare(right.displayName, "zh-Hant"),
+    )[0];
+
+  if (activeUser?.displayName) return activeUser.displayName;
+  if (data.billingProfile?.contactName) return data.billingProfile.contactName;
+  if (data.billingProfile?.invoiceTitle)
+    return data.billingProfile.invoiceTitle;
+  if (data.identity?.actorType === "tenant_admin") return "租戶管理員";
+  return "YAMATO 團隊";
+}
+
+function compareActiveBookings(left: BookingRecord, right: BookingRecord) {
+  const leftTime = parseDate(left.reservationWindowStart)?.getTime() ?? 0;
+  const rightTime = parseDate(right.reservationWindowStart)?.getTime() ?? 0;
+  return leftTime - rightTime;
+}
+
+function getBookingStateTone(status: BookingRecord["orderStatus"]): CanvasTone {
+  switch (status) {
+    case "assigned":
+    case "driver_accepted":
+    case "enroute_pickup":
+    case "arrived_pickup":
+    case "on_trip":
+      return "success";
+    case "ready_for_dispatch":
+    case "preassigned":
+    case "delayed_queue":
+      return "info";
+    case "dispatch_failed":
+    case "dispatch_timeout":
+    case "no_supply":
+    case "exception_hold":
+    case "redispatch_required":
+      return "warn";
+    case "proof_pending":
+      return "accent";
+    default:
+      return "neutral";
+  }
+}
+
+function getBookingStateLabel(status: BookingRecord["orderStatus"]) {
+  switch (status) {
+    case "ready_for_dispatch":
+      return "broadcasting";
+    case "driver_accepted":
+      return "accepted";
+    case "enroute_pickup":
+      return "enroute";
+    case "arrived_pickup":
+      return "arrived";
+    default:
+      return status;
+  }
+}
+
+function buildReminderBanners(data: HomeData): ReminderBanner[] {
+  const banners: ReminderBanner[] = [];
+
+  const pausedWebhook = data.webhooks.find(
+    (webhook) => webhook.status === "disabled",
+  );
+  if (pausedWebhook) {
+    const pausedSince =
+      formatDateTime(
+        pausedWebhook.runtimeMetadata?.disabledAt ?? pausedWebhook.updatedAt,
+      ) || "最近";
+    banners.push({
+      tone: "warn",
+      title: `Webhook ${pausedWebhook.webhookId} 已暫停`,
+      body: `${pausedSince} 起停止投遞，恢復前不會收到事件。`,
+    });
+  }
+
+  if (data.approvalRequests.length > 0) {
+    banners.push({
+      tone: "info",
+      title: `${formatCount(data.approvalRequests.length)} 筆叫車等待簽核`,
+      body: "審批與配額頁面可檢視 pending requests、quota impact 與規則命中結果。",
+    });
+  } else {
+    banners.push({
+      tone: "info",
+      title: "目前沒有待簽核叫車",
+      body: "租戶叫車目前沒有落在 require_approval 的待辦項目。",
+    });
+  }
+
+  if (data.quotaSummary?.usage.remainingPercent !== null) {
+    const remaining = data.quotaSummary?.usage.remainingPercent ?? 0;
+    banners.push({
+      tone: remaining >= 20 ? "success" : "warn",
+      title:
+        remaining >= 20
+          ? `本月配額仍有 ${remaining}%`
+          : `本月配額僅剩 ${remaining}%`,
+      body: `已使用 ${formatQuotaUsage(data.quotaSummary)}，目前強制模式為 ${data.quotaSummary?.limit.enforcementMode ?? "—"}。`,
+    });
+  } else if (data.invoices[0]) {
+    banners.push({
+      tone: "success",
+      title: `當期帳單 ${data.invoices[0].invoiceId} 已就緒`,
+      body: `${formatMoney(data.invoices[0].amount)} · ${data.invoices[0].status}`,
+    });
+  }
+
+  return banners.slice(0, 3);
+}
+
+export default async function HomePage() {
+  const data = await loadHomeData();
+  const now = new Date();
+  const activeBookings = [...data.bookings]
+    .filter(
+      (booking) =>
+        booking.orderStatus !== "completed" &&
+        booking.orderStatus !== "cancelled",
+    )
+    .sort(compareActiveBookings);
+  const completedToday = data.bookings.filter(
+    (booking) =>
+      booking.orderStatus === "completed" &&
+      isSameUtcDay(booking.updatedAt, now),
+  );
+  const latestInvoice = [...data.invoices].sort((left, right) =>
+    right.periodEnd.localeCompare(left.periodEnd),
+  )[0];
+  const inFlightDispatches = activeBookings.filter((booking) =>
+    ["ready_for_dispatch", "preassigned", "delayed_queue"].includes(
+      booking.orderStatus,
+    ),
+  ).length;
+  const assignedDispatches = activeBookings.filter((booking) =>
+    [
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+    ].includes(booking.orderStatus),
+  ).length;
+  const greetingName = getGreetingName(data);
+  const subtitle = `${dateFormatter.format(now)} · ${formatQuotaHeader(data.quotaSummary)}`;
+  const reminderBanners = buildReminderBanners(data);
+  const rows: BookingRow[] = activeBookings.slice(0, 5).map((booking) => ({
+    ...booking,
+  }));
+
+  const columns: CanvasTableColumn<BookingRow>[] = [
+    {
+      h: "BK",
+      w: 120,
+      mono: true,
+      r: (row) => <span style={bookingPrimaryStyle}>{row.bookingId}</span>,
+    },
+    {
+      h: "PASS.",
+      w: 120,
+      r: (row) => row.passenger.name,
+    },
+    {
+      h: "PICKUP",
+      r: (row) => <div style={bookingLocationStyle}>{row.pickup.address}</div>,
+    },
+    {
+      h: "WIN",
+      w: 150,
+      mono: true,
+      r: (row) => (
+        <div style={bookingWindowStyle}>
+          {formatDateTime(row.reservationWindowStart)}
+        </div>
+      ),
+    },
+    {
+      h: "STATE",
+      w: 140,
+      r: (row) => (
+        <CanvasPill theme={th} tone={getBookingStateTone(row.orderStatus)} dot>
+          {getBookingStateLabel(row.orderStatus)}
+        </CanvasPill>
+      ),
+    },
+  ];
+
+  return (
+    <div>
+      <CanvasPageHeader
+        theme={th}
+        title={`您好，${greetingName}`}
+        subtitle={subtitle}
+        actions={
+          <>
+            <CanvasBtn theme={th} icon="ext" size="sm">
+              幫助中心
+            </CanvasBtn>
+            <CanvasBtn theme={th} variant="primary" icon="plus" size="sm">
+              建立叫車
+            </CanvasBtn>
+          </>
+        }
       />
 
-      <section className="metric-grid">
-        <article className="metric-card">
-          <span className="metric-label">Active bookings</span>
-          <strong>{formatCount(activeBookings.length)}</strong>
-          <p>
-            {attentionBookings.length > 0
-              ? `${formatCount(attentionBookings.length)} booking(s) need follow-up across dispatch or proof states.`
-              : "No active bookings currently need tenant-side follow-up."}
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Open invoices</span>
-          <strong>{formatCount(openInvoices.length)}</strong>
-          <p>
-            {data.invoices.length > 0
-              ? `${formatCount(data.invoices.length)} invoice artifact(s) are visible from tenant billing authority.`
-              : "Invoice artifacts are not currently available for this tenant context."}
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Notifications</span>
-          <strong>{formatCount(recentNotifications.length)}</strong>
-          <p>
-            {recentNotifications.length > 0
-              ? "Recent platform and tenant reminders are surfaced here before a user drills into settings."
-              : "No tenant notification feed items were returned in the current snapshot."}
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Integration posture</span>
-          <strong>
-            {data.governance?.onboardingChecklist.length
-              ? formatCount(data.governance.onboardingChecklist.length)
-              : "Ready"}
-          </strong>
-          <p>
-            {data.governance?.onboardingChecklist.length
-              ? "Checklist items still frame the integration work that API keys and webhooks must cover."
-              : "No outstanding onboarding checklist items were returned."}
-          </p>
-        </article>
-      </section>
-
-      <section className="surface-grid surface-grid-wide">
-        <SurfaceCard
-          kicker="Identity"
-          title="Tenant authority context"
-          description="The dashboard reads the backend identity context directly so role, realm, and tenant ownership stay authority-driven."
-        >
-          <dl className="definition-grid">
-            <div>
-              <dt>Tenant</dt>
-              <dd>{data.identity?.tenantId ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>Realm</dt>
-              <dd>{data.identity?.realm ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>Actor</dt>
-              <dd>{data.identity?.actorType ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>Auth mode</dt>
-              <dd>{data.identity?.authMode ?? "Unavailable"}</dd>
-            </div>
-          </dl>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Bookings"
-          title="Tenant operations quick lane"
-          description="Bookings remain the primary operating surface, with the route list and detail model now anchored to `/bookings`."
-        >
-          <div className="panel-stack">
-            <p>
-              Next reservation window:{" "}
-              <strong>
-                {activeBookings[0]
-                  ? formatDateTime(activeBookings[0].reservationWindowStart)
-                  : "No active reservation queued"}
-              </strong>
-            </p>
-            <div className="link-row">
-              <Link className="text-link" href="/bookings">
-                Open booking oversight
-              </Link>
-              <Link className="text-link" href="/bookings/new">
-                Start new booking intake
-              </Link>
-            </div>
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Billing and notices"
-          title="Operational reminders stay visible"
-          description="Billing posture and notification reminders sit on the home lane so tenant admins do not need to discover them through secondary navigation."
-        >
-          {recentNotifications.length > 0 ? (
-            <ul className="panel-list">
-              {recentNotifications.map((notification) => (
-                <li key={notification.notificationId}>
-                  <strong>{notification.title}</strong>
-                  <span className="list-note">
-                    {notification.channel} ·{" "}
-                    {formatDateTime(notification.createdAt)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted-copy">
-              No tenant notification feed items are currently available.
-            </p>
-          )}
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Integration"
-          title="Integration readiness and governance"
-          description="Integration reminders summarize the backend-owned checklist instead of inventing client-local readiness truth."
-        >
-          {data.governance?.onboardingChecklist.length ? (
-            <ul className="panel-list">
-              {data.governance.onboardingChecklist.slice(0, 4).map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted-copy">
-              API key and webhook onboarding is not currently reporting any open
-              checklist item.
-            </p>
-          )}
-          <div className="link-row">
-            <Link className="text-link" href="/api-keys">
-              Review API keys
-            </Link>
-            <Link className="text-link" href="/webhooks">
-              Review webhooks
-            </Link>
-          </div>
-        </SurfaceCard>
-      </section>
-
-      <CalloutPanel
-        title="Enabled module snapshot"
-        description={
-          enabledFlags.length > 0
-            ? `${enabledFlags.length} feature flag(s) currently resolve enabled for this tenant context.`
-            : "Feature flag detail is currently unavailable or no tenant-specific module flag resolved enabled."
-        }
-      >
-        {enabledFlags.length > 0 ? (
-          <div className="chip-row">
-            {enabledFlags.slice(0, 6).map((flag) => (
-              <span className="status-chip" key={flag.key}>
-                {flag.key}
-              </span>
-            ))}
-          </div>
+      <div style={pageBodyStyle}>
+        {data.errors.length > 0 ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="warn"
+            title="首頁快照未完全載入"
+            body={data.errors.join(" · ")}
+          />
         ) : null}
-      </CalloutPanel>
 
-      <CalloutPanel
-        title="Partner mode runs in a constrained shell"
-        description="Partner booking lives at `/partner/*` with its own bootstrap session, partner-only navigation, and no tenant-admin governance exposure. Booking creation requires entry-scoped eligibility verification when the entry is not configured with `eligibility_mode = none`."
-        tone="warning"
-      >
-        <div className="link-row">
-          <Link className="text-link" href="/partner/login">
-            Open partner sign-in
-          </Link>
+        <div style={kpiGridStyle}>
+          <CanvasKPI
+            theme={th}
+            label="進行中"
+            value={formatCount(activeBookings.length)}
+            sub={`${formatCount(inFlightDispatches)} broadcasting · ${formatCount(assignedDispatches)} assigned`}
+          />
+          <CanvasKPI
+            theme={th}
+            label="今日已完成"
+            value={formatCount(completedToday.length)}
+            sub={`${dateFormatter.format(now)} 完成`}
+          />
+          <CanvasKPI
+            theme={th}
+            label="本月用量"
+            value={formatQuotaUsage(data.quotaSummary)}
+            sub={formatQuotaSub(data.quotaSummary)}
+          />
+          <CanvasKPI
+            theme={th}
+            label="當期帳單"
+            value={latestInvoice ? formatMoney(latestInvoice.amount) : "—"}
+            sub={
+              latestInvoice
+                ? `${latestInvoice.periodStart.slice(0, 7)} · ${latestInvoice.status}`
+                : "尚無帳單"
+            }
+          />
         </div>
-      </CalloutPanel>
 
-      {data.errors.length > 0 ? (
-        <CalloutPanel
-          title="Partial data warning"
-          description="Some dashboard slices fell back because the current authority surface did not answer every read."
-          tone="warning"
-        >
-          <ul className="panel-list">
-            {data.errors.map((error) => (
-              <li key={error}>{error}</li>
-            ))}
-          </ul>
-        </CalloutPanel>
-      ) : null}
+        <div style={contentGridStyle}>
+          <CanvasCard
+            theme={th}
+            title="進行中訂單"
+            padding={0}
+            actions={
+              <Link href="/bookings" style={linkStyle}>
+                前往叫車
+              </Link>
+            }
+          >
+            {rows.length > 0 ? (
+              <CanvasTable columns={columns} rows={rows} theme={th} />
+            ) : (
+              <div style={emptyStateStyle}>目前沒有進行中的叫車訂單</div>
+            )}
+          </CanvasCard>
+
+          <CanvasCard theme={th} title="提醒">
+            <div style={bannerStackStyle}>
+              {reminderBanners.map((banner, index) => (
+                <CanvasBanner
+                  body={banner.body}
+                  icon={banner.tone === "success" ? "check" : "warn"}
+                  key={`${banner.title}-${index}`}
+                  theme={th}
+                  title={banner.title}
+                  tone={banner.tone}
+                />
+              ))}
+            </div>
+          </CanvasCard>
+        </div>
+      </div>
     </div>
   );
 }
