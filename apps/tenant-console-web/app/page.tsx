@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type {
   BookingRecord,
@@ -19,6 +20,7 @@ import {
   CanvasTable,
   type CanvasTableColumn,
   type CanvasTone,
+  type CanvasBtnProps,
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
@@ -92,6 +94,18 @@ const emptyStateStyle: CSSProperties = {
   textAlign: "center",
 };
 
+const navButtonWrapStyle: CSSProperties = {
+  position: "relative",
+  display: "inline-flex",
+};
+
+const navButtonLinkStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  borderRadius: 7,
+  zIndex: 1,
+};
+
 const shortDateTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
   year: "numeric",
   month: "2-digit",
@@ -127,6 +141,25 @@ type ReminderBanner = {
   title: string;
   body: string;
 };
+
+type NavCanvasBtnProps = Omit<CanvasBtnProps, "onClick"> & {
+  href: string;
+  ariaLabel: string;
+};
+
+function NavCanvasBtn({
+  href,
+  ariaLabel,
+  children,
+  ...buttonProps
+}: NavCanvasBtnProps) {
+  return (
+    <span style={navButtonWrapStyle}>
+      <CanvasBtn {...buttonProps}>{children}</CanvasBtn>
+      <Link aria-label={ariaLabel} href={href} style={navButtonLinkStyle} />
+    </span>
+  );
+}
 
 async function loadHomeData(): Promise<HomeData> {
   const client = getTenantClient();
@@ -528,12 +561,25 @@ export default async function HomePage() {
         subtitle={subtitle}
         actions={
           <>
-            <CanvasBtn theme={th} icon="ext" size="sm">
+            <NavCanvasBtn
+              ariaLabel="前往 API 金鑰頁面"
+              href="/api-keys"
+              theme={th}
+              icon="ext"
+              size="sm"
+            >
               幫助中心
-            </CanvasBtn>
-            <CanvasBtn theme={th} variant="primary" icon="plus" size="sm">
+            </NavCanvasBtn>
+            <NavCanvasBtn
+              ariaLabel="前往建立叫車頁面"
+              href="/bookings/new"
+              theme={th}
+              variant="primary"
+              icon="plus"
+              size="sm"
+            >
               建立叫車
-            </CanvasBtn>
+            </NavCanvasBtn>
           </>
         }
       />
@@ -588,9 +634,15 @@ export default async function HomePage() {
             title="進行中訂單"
             padding={0}
             actions={
-              <CanvasBtn theme={th} variant="ghost" size="sm">
+              <NavCanvasBtn
+                ariaLabel="前往叫車列表"
+                href="/bookings"
+                theme={th}
+                variant="ghost"
+                size="sm"
+              >
                 前往叫車
-              </CanvasBtn>
+              </NavCanvasBtn>
             }
           >
             {rows.length > 0 ? (
@@ -648,9 +700,15 @@ export default async function HomePage() {
                   <CanvasBanner
                     actions={
                       index === 0 ? (
-                        <CanvasBtn theme={th} variant="ghost" size="xs">
+                        <NavCanvasBtn
+                          ariaLabel="查看 Webhook 設定"
+                          href="/webhooks"
+                          theme={th}
+                          variant="ghost"
+                          size="xs"
+                        >
                           查看
-                        </CanvasBtn>
+                        </NavCanvasBtn>
                       ) : undefined
                     }
                     body={banner.body}
