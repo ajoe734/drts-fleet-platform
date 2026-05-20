@@ -53,21 +53,18 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const pageContentStyle = {
-  padding: 24,
-} as const;
+const shellViewportStyle = {
+  position: "fixed" as const,
+  inset: 0,
+  zIndex: 40,
+  background: theme.bg,
+};
 
 const pageStackStyle = {
+  padding: 24,
   display: "grid",
   gap: 12,
 } as const;
-
-function pageSubtitle(locale: Locale, count: number) {
-  const countLabel = t("drivers.subtitle", locale, { count });
-  return locale === "en"
-    ? `${countLabel} · roster · shift · license · rating · earnings drill-down`
-    : `${countLabel} · 總表 · 班別 · license · 評分 · earnings drill-down`;
-}
 
 async function resolveSearchParams(
   searchParams: DriversPageProps["searchParams"],
@@ -233,12 +230,12 @@ function getStatusTone(
 }
 
 function formatLocationState(
-  driver: DriverRegistryRecord,
+  driverId: string,
   locationByDriver: Map<string, DriverLocationSnapshot>,
   locationsError: string | null,
   locale: Locale,
 ): string {
-  const snapshot = locationByDriver.get(driver.driverId);
+  const snapshot = locationByDriver.get(driverId);
   if (locationsError) {
     return t("drivers.list.locationUnknown", locale);
   }
@@ -260,17 +257,17 @@ function buildTabLinks(locale: Locale, activeTab: DriverTabKey) {
     },
     {
       key: "eligible",
-      label: locale === "en" ? "Dispatch eligible" : "可派",
+      label: t("drivers.col.dispatchEligible", locale),
       href: buildDriversHref("eligible"),
     },
     {
       key: "on_shift",
-      label: locale === "en" ? "On shift" : "在班",
+      label: t("attendance.activeShifts", locale),
       href: buildDriversHref("on_shift"),
     },
     {
       key: "offline",
-      label: locale === "en" ? "Offline" : "下班",
+      label: formatOpsCodeLabel(locale, "offline"),
       href: buildDriversHref("offline"),
     },
   ];
@@ -315,7 +312,11 @@ function matchesTab(driver: DriverRegistryRecord, tab: DriverTabKey) {
 
 function getDeviceLabel(driver: DriverRegistryRecord, locale: Locale) {
   const activeBinding = driver.deviceBindings.find(
-    (binding) => binding.status === "active",
+    (binding: {
+      status: string;
+      deviceLabel?: string | null;
+      deviceId: string;
+    }) => binding.status === "active",
   );
 
   if (!activeBinding) {
@@ -389,7 +390,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     })
     .map((driver) => {
       const locationLabel = formatLocationState(
-        driver,
+        driver.driverId,
         locationByDriver,
         locationsError,
         locale,
@@ -437,7 +438,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
             style={{
               color: theme.textDim,
               fontSize: 11,
-              fontFamily: theme.fontMono,
+              fontFamily: theme.monoFamily,
             }}
           >
             {row.driverId}
@@ -517,36 +518,36 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   ];
 
   return (
-    <Shell
-      theme={theme}
-      nav={buildShellNav(locale)}
-      active="drivers"
-      currentPath="/drivers"
-      breadcrumb={[
-        locale === "en" ? "Registry" : "主資料",
-        t("nav.drivers", locale),
-      ]}
-      searchPlaceholder={locale === "en" ? "Search driver..." : "搜尋司機..."}
-      brandLabel={t("app.name", locale)}
-      brandSubLabel={t("app.sub", locale)}
-      env={locale === "en" ? "staging" : "測試"}
-      versionLabel="OC"
-      avatarLabel="OC"
-    >
-      <PageHeader
+    <div style={shellViewportStyle}>
+      <Shell
         theme={theme}
-        title={t("nav.drivers", locale)}
-        subtitle={pageSubtitle(locale, drivers.length)}
-        tabs={tabs}
-        activeTab={activeTabNode}
-        actions={
-          <Btn theme={theme} icon="filter">
-            {locale === "en" ? "Filter" : "篩選"}
-          </Btn>
-        }
-      />
+        nav={buildShellNav(locale)}
+        active="drivers"
+        currentPath="/drivers"
+        breadcrumb={[
+          locale === "en" ? "Registry" : "主資料",
+          t("nav.drivers", locale),
+        ]}
+        searchPlaceholder={locale === "en" ? "Search driver..." : "搜尋司機..."}
+        brandLabel={t("app.name", locale)}
+        brandSubLabel={t("app.sub", locale)}
+        env={locale === "en" ? "staging" : "測試"}
+        versionLabel="OC"
+        avatarLabel="OC"
+      >
+        <PageHeader
+          theme={theme}
+          title={t("nav.drivers", locale)}
+          subtitle={t("drivers.registryFooter", locale)}
+          tabs={tabs}
+          activeTab={activeTabNode}
+          actions={
+            <Btn theme={theme} icon="filter">
+              {t("reports.detail.filters", locale)}
+            </Btn>
+          }
+        />
 
-      <div style={pageContentStyle}>
         <div style={pageStackStyle}>
           {registryError ? (
             <Banner
@@ -585,7 +586,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
             ) : null}
           </Card>
         </div>
-      </div>
-    </Shell>
+      </Shell>
+    </div>
   );
 }
