@@ -24,6 +24,7 @@ import {
 } from "@drts/ui-web";
 
 type ContractKind = "fleet_lease" | "partner_program" | "forwarder";
+type DisplayContractStatus = VehicleContractRecord["status"] | "expiring";
 
 type ContractRow = Record<string, unknown> & {
   contractId: string;
@@ -31,7 +32,7 @@ type ContractRow = Record<string, unknown> & {
   kind: ContractKind;
   termLabel: string;
   revenueShare: string;
-  status: VehicleContractRecord["status"];
+  displayStatus: DisplayContractStatus;
 };
 
 const theme = buildCanvasTheme({
@@ -50,27 +51,28 @@ const pageBodyStyle = {
   padding: 24,
   display: "grid",
   gap: 16,
+  alignContent: "start",
 };
 
-const kpiGridStyle = {
+const supportGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-  gap: 12,
-};
-
-const summaryCardGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.5fr) minmax(250px, 0.85fr)",
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(260px, 0.9fr)",
   gap: 16,
   alignItems: "start",
 };
 
-const summaryFieldGridStyle = {
+const kpiGridStyle = {
   display: "grid",
-  gap: 14,
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: 12,
 };
 
-const filterRowStyle = {
+const supportStackStyle = {
+  display: "grid",
+  gap: 12,
+};
+
+const pillRowStyle = {
   display: "flex",
   flexWrap: "wrap" as const,
   gap: 8,
@@ -85,7 +87,7 @@ const emptyStateStyle = {
 };
 
 const fieldBodyStyle = {
-  minHeight: 44,
+  minHeight: 48,
   borderRadius: 8,
   border: `1px solid ${theme.border}`,
   background: theme.surfaceLo,
@@ -187,11 +189,9 @@ function buildShellNav(locale: Locale): CanvasShellNavItem[] {
   ];
 }
 
-function contractStatusTone(
-  status: VehicleContractRecord["status"],
-): CanvasTone {
+function contractStatusTone(status: DisplayContractStatus): CanvasTone {
   if (status === "active") return "success";
-  if (status === "draft") return "warn";
+  if (status === "expiring") return "warn";
   return "neutral";
 }
 
@@ -282,6 +282,14 @@ function buildContractRows(
 ): ContractRow[] {
   return contracts.map((contract) => {
     const kind = inferContractKind(contract);
+    const now = Date.now();
+    const endAt = Date.parse(contract.endAt);
+    const expiringSoon =
+      contract.status === "active" &&
+      Number.isFinite(endAt) &&
+      endAt >= now &&
+      endAt - now <= 1000 * 60 * 60 * 24 * 45;
+
     return {
       contractId: contract.contractId,
       counterparty:
@@ -289,7 +297,7 @@ function buildContractRows(
       kind,
       termLabel: formatTerm(contract.startAt, contract.endAt, locale),
       revenueShare: revenueShareLabel(kind),
-      status: contract.status,
+      displayStatus: expiringSoon ? "expiring" : contract.status,
     };
   });
 }
@@ -346,6 +354,9 @@ export default async function ContractsPage() {
       forwarder: 0,
     },
   );
+  const coveredKindsCount = Object.values(kindCounts).filter(
+    (count) => count > 0,
+  ).length;
   const lastUpdatedAt = getLatestUpdatedAt([
     ...contracts.map((contract) => contract.updatedAt),
     ...partnerEntries.map((entry) => entry.updatedAt),
@@ -391,8 +402,8 @@ export default async function ContractsPage() {
       h: "STATUS",
       w: 110,
       r: (row) => (
-        <Pill theme={theme} tone={contractStatusTone(row.status)} dot>
-          {row.status}
+        <Pill theme={theme} tone={contractStatusTone(row.displayStatus)} dot>
+          {row.displayStatus}
         </Pill>
       ),
     },
@@ -454,47 +465,13 @@ export default async function ContractsPage() {
             />
           ) : null}
 
-          <div style={kpiGridStyle}>
-            <KPI
-              theme={theme}
-              label={locale === "zh" ? "Total contracts" : "Total contracts"}
-              value={String(contracts.length)}
-              sub={t("contracts.subtitle", locale, { count: contracts.length })}
-              delta={`${activeContracts} active`}
-              deltaTone={activeContracts > 0 ? "up" : "neutral"}
-            />
-            <KPI
-              theme={theme}
-              label={locale === "zh" ? "Active contracts" : "Active contracts"}
-              value={String(activeContracts)}
-              sub={
-                locale === "zh" ? "可直接支援 dispatch" : "ready for dispatch"
-              }
-              delta={`${draftContracts} draft`}
-              deltaTone={draftContracts > 0 ? "neutral" : "up"}
-            />
-            <KPI
-              theme={theme}
-              label={locale === "zh" ? "Review queue" : "Review queue"}
-              value={String(reviewQueue.length)}
-              sub={t("contracts.reviewRegistrySummary", locale, {
-                total: reviewQueue.length,
-                manual: manualReviewCount,
-              })}
-              delta={`${manualReviewCount} manual`}
-              deltaTone={manualReviewCount > 0 ? "down" : "neutral"}
-            />
-            <KPI
-              theme={theme}
-              label={locale === "zh" ? "Kinds covered" : "Kinds covered"}
-              value={String(
-                Object.values(kindCounts).filter((count) => count > 0).length,
-              )}
-              sub="fleet_lease · partner_program · forwarder"
-              delta={`${kindCounts.forwarder} forwarder`}
-              deltaTone={kindCounts.forwarder > 0 ? "up" : "neutral"}
-            />
-          </div>
+          <Card theme={theme} padding={contractRows.length > 0 ? 0 : 24}>
+            {contractRows.length > 0 ? (
+              <Table theme={theme} columns={columns} rows={contractRows} />
+            ) : (
+              <p style={emptyStateStyle}>{t("contracts.empty", locale)}</p>
+            )}
+          </Card>
 
           <Card
             theme={theme}
@@ -505,19 +482,53 @@ export default async function ContractsPage() {
               attention: reviewQueue.length,
             })}
           >
-            <div style={summaryCardGridStyle}>
-              <div style={summaryFieldGridStyle}>
+            <div style={supportGridStyle}>
+              <div style={supportStackStyle}>
+                <div style={kpiGridStyle}>
+                  <KPI
+                    theme={theme}
+                    label={
+                      locale === "zh" ? "Total contracts" : "Total contracts"
+                    }
+                    value={String(contracts.length)}
+                    sub={t("contracts.subtitle", locale, {
+                      count: contracts.length,
+                    })}
+                    delta={`${activeContracts} active`}
+                    deltaTone={activeContracts > 0 ? "up" : "neutral"}
+                  />
+                  <KPI
+                    theme={theme}
+                    label={locale === "zh" ? "Review queue" : "Review queue"}
+                    value={String(reviewQueue.length)}
+                    sub={t("contracts.reviewRegistrySummary", locale, {
+                      total: reviewQueue.length,
+                      manual: manualReviewCount,
+                    })}
+                    delta={`${manualReviewCount} manual`}
+                    deltaTone={manualReviewCount > 0 ? "down" : "neutral"}
+                  />
+                  <KPI
+                    theme={theme}
+                    label={locale === "zh" ? "Kinds covered" : "Kinds covered"}
+                    value={String(coveredKindsCount)}
+                    sub="fleet_lease · partner_program · forwarder"
+                    delta={`${kindCounts.forwarder} forwarder`}
+                    deltaTone={kindCounts.forwarder > 0 ? "up" : "neutral"}
+                  />
+                </div>
+
                 <Field
                   theme={theme}
                   label={locale === "zh" ? "Registry mix" : "Registry mix"}
                   hint={
                     locale === "zh"
-                      ? "OC_Contracts 以 kind、term、revenue share 與 eligibility attention 做主要掃描面。"
-                      : "OC_Contracts emphasizes kind, term, revenue share, and eligibility attention."
+                      ? "以 kind、term、revenue share 為主軸，維持與 OC_Contracts 相同掃描順序。"
+                      : "The scan order stays aligned to OC_Contracts: kind, term, then revenue share."
                   }
                 >
                   <div style={fieldBodyStyle}>
-                    <div style={filterRowStyle}>
+                    <div style={pillRowStyle}>
                       <Pill theme={theme} tone="neutral">
                         fleet_lease {kindCounts.fleet_lease}
                       </Pill>
@@ -531,42 +542,13 @@ export default async function ContractsPage() {
                         active {activeContracts}
                       </Pill>
                       {draftContracts > 0 ? (
-                        <Pill theme={theme} tone="warn">
+                        <Pill theme={theme} tone="neutral">
                           draft {draftContracts}
                         </Pill>
                       ) : null}
-                    </div>
-                  </div>
-                </Field>
-
-                <Field
-                  theme={theme}
-                  label={locale === "zh" ? "Revenue lanes" : "Revenue lanes"}
-                  hint={
-                    locale === "zh"
-                      ? "以固定租賃、合作分潤、forwarder 清分三種結算節奏對齊 canvas。"
-                      : "Settlements stay split across fixed lease, partner share, and forwarder clearing lanes."
-                  }
-                >
-                  <div style={fieldBodyStyle}>
-                    <div style={filterRowStyle}>
-                      <Pill theme={theme} tone="neutral">
-                        70/30 fleet_lease
-                      </Pill>
-                      <Pill theme={theme} tone="info">
-                        sponsor settle
-                      </Pill>
-                      <Pill theme={theme} tone="accent">
-                        85/15 forwarder
-                      </Pill>
                       {manualReviewCount > 0 ? (
                         <Pill theme={theme} tone="warn">
                           manual_review {manualReviewCount}
-                        </Pill>
-                      ) : null}
-                      {deniedCount > 0 ? (
-                        <Pill theme={theme} tone="danger">
-                          denied {deniedCount}
                         </Pill>
                       ) : null}
                     </div>
@@ -589,16 +571,16 @@ export default async function ContractsPage() {
                     mono: true,
                   },
                   {
-                    k: locale === "zh" ? "Manual review" : "Manual review",
-                    v: String(manualReviewCount),
-                    mono: true,
-                  },
-                  {
                     k:
                       locale === "zh"
                         ? "Eligibility denied"
                         : "Eligibility denied",
                     v: String(deniedCount),
+                    mono: true,
+                  },
+                  {
+                    k: locale === "zh" ? "Revenue lanes" : "Revenue lanes",
+                    v: "70/30 · sponsor settle · 85/15",
                     mono: true,
                   },
                   {
@@ -609,14 +591,6 @@ export default async function ContractsPage() {
                 ]}
               />
             </div>
-          </Card>
-
-          <Card theme={theme} padding={contractRows.length > 0 ? 0 : 24}>
-            {contractRows.length > 0 ? (
-              <Table theme={theme} columns={columns} rows={contractRows} />
-            ) : (
-              <p style={emptyStateStyle}>{t("contracts.empty", locale)}</p>
-            )}
           </Card>
         </div>
       </div>
