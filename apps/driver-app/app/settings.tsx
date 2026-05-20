@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -9,22 +11,31 @@ import {
   Text,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
-import type { DriverProfileRecord, DriverSettings } from "@drts/contracts";
-import { PlatformBinding } from "@/components/platform-binding";
-import { ActionButton } from "@/components/ui/ActionButton";
-import { AppScreen } from "@/components/ui/AppScreen";
-import { BottomActionBar } from "@/components/ui/BottomActionBar";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { FormField } from "@/components/ui/FormField";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { StatusChip, type StatusChipVariant } from "@/components/ui/StatusChip";
-import { Tokens } from "@/components/ui/tokens";
 import {
+  PLATFORM_CODE_REGISTRY,
+  type DriverProfileRecord,
+  type DriverSettings,
+  type PlatformPresenceRecord,
+  type PlatformPresenceSummary,
+} from "@drts/contracts";
+import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
+
+import {
+  Banner,
+  Btn,
+  Card,
+  Field,
+  Input,
+  KPI,
+  PageHeader,
+  Pill,
+  Shell,
+  driverCanvasTheme,
+} from "@/components/canvas-primitives";
+import {
+  clearDriverProvisioning,
   getDriverClient,
   getDriverId,
-  clearDriverProvisioning,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 import {
@@ -44,13 +55,15 @@ import {
   type SaveState,
   type SettingsFormValues,
 } from "@/lib/settings-form";
-import { driverSaveStatusLabels, driverStrings } from "@/lib/strings";
+import { driverStrings } from "@/lib/strings";
+
+const THEME = driverCanvasTheme;
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim();
   }
-  return "要求失敗";
+  return driverStrings.common.requestFailed;
 }
 
 function formatSectionList(labels: string[]): string {
@@ -63,107 +76,216 @@ function formatSectionList(labels: string[]): string {
   return `${labels.slice(0, -1).join("、")}和${labels.at(-1)}`;
 }
 
+function formatLanguage(value: string): string {
+  switch (value.trim()) {
+    case "zh-TW":
+      return "繁體中文";
+    case "en":
+      return "English";
+    case "ja":
+      return "日本語";
+    default:
+      return value.trim() || "未設定";
+  }
+}
+
+function formatRadius(value: string): string {
+  const trimmed = value.trim();
+  return trimmed ? `${trimmed} km` : "未限制";
+}
+
+function formatNotification(value: boolean): string {
+  return value ? "全部" : "已關閉";
+}
+
+function isOwnedPlatform(record: PlatformPresenceRecord): boolean {
+  const normalizedCode = String(record.platformCode).toLowerCase();
+  const displayName =
+    PLATFORM_CODE_REGISTRY[record.platformCode]?.displayName.toLowerCase() ??
+    "";
+
+  return (
+    normalizedCode === "drts" ||
+    normalizedCode === "owned" ||
+    normalizedCode.startsWith("drts-") ||
+    displayName.includes("drts")
+  );
+}
+
+function getPlatformDisplayName(record: PlatformPresenceRecord): string {
+  if (isOwnedPlatform(record)) {
+    return "自營派單";
+  }
+  return (
+    PLATFORM_CODE_REGISTRY[record.platformCode]?.displayName ??
+    record.platformCode
+  );
+}
+
+function formatTokenExpiry(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  const remainingMs = parsed.getTime() - Date.now();
+  if (remainingMs <= 0) {
+    return "已過期";
+  }
+
+  const remainingMinutes = Math.max(1, Math.floor(remainingMs / 60000));
+  if (remainingMinutes < 60) {
+    return `${remainingMinutes} 分鐘後到期`;
+  }
+
+  const remainingHours = Math.floor(remainingMinutes / 60);
+  if (remainingHours < 24) {
+    return `${remainingHours} 小時 ${remainingMinutes % 60} 分鐘後到期`;
+  }
+
+  const remainingDays = Math.floor(remainingHours / 24);
+  return `${remainingDays} 天後到期`;
+}
+
+function getBindingTone(record: PlatformPresenceRecord): CanvasTone {
+  if (record.reauthRequired) {
+    return "warn";
+  }
+  return record.status === "online" ? "success" : "neutral";
+}
+
+function getBindingStatus(record: PlatformPresenceRecord): string {
+  if (record.reauthRequired) {
+    return "需重新授權";
+  }
+  return record.status === "online" ? "已綁定" : "未啟用";
+}
+
+function getBindingSubtitle(record: PlatformPresenceRecord): string | null {
+  const token = formatTokenExpiry(record.tokenExpiresAt);
+  if (record.reauthRequired) {
+    return token ? `憑證 ${token}` : "請重新完成平台驗證";
+  }
+
+  return token;
+}
+
 interface SaveStatusDescriptor {
   label: string;
-  variant: StatusChipVariant;
+  tone: CanvasTone;
 }
 
 function describeSaveStatus(state: SaveState): SaveStatusDescriptor {
   switch (state) {
     case "saving":
-      return driverSaveStatusLabels.saving;
+      return { label: "儲存中…", tone: "info" };
     case "dirty":
-      return driverSaveStatusLabels.dirty;
+      return { label: "尚有未儲存變更", tone: "warn" };
     case "saved":
-      return driverSaveStatusLabels.saved;
+      return { label: "已儲存", tone: "success" };
     case "error":
-      return driverSaveStatusLabels.error;
+      return { label: "儲存失敗", tone: "danger" };
     default:
-      return driverSaveStatusLabels.idle;
+      return { label: "尚未變更", tone: "neutral" };
   }
 }
 
-interface FormSectionProps {
+function SectionTitle({
+  title,
+  subtitle,
+  action,
+}: {
   title: string;
-  description?: string;
-  children: React.ReactNode;
-}
-
-function FormSection({ title, description, children }: FormSectionProps) {
+  subtitle?: string;
+  action?: ReactNode;
+}) {
   return (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {description ? (
-          <Text style={styles.sectionDescription}>{description}</Text>
+    <View style={styles.sectionHeader}>
+      <View style={styles.sectionCopy}>
+        <Text style={[styles.sectionTitle, { color: THEME.text }]}>{title}</Text>
+        {subtitle ? (
+          <Text style={[styles.sectionSubtitle, { color: THEME.textMuted }]}>
+            {subtitle}
+          </Text>
         ) : null}
       </View>
-      <View style={styles.sectionBody}>{children}</View>
+      {action ? <View>{action}</View> : null}
     </View>
   );
 }
 
-interface SwitchRowProps {
-  label: string;
-  description?: string;
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-  disabled?: boolean;
-}
-
-function SwitchRow({
+function Row({
+  icon,
   label,
-  description,
   value,
-  onValueChange,
-  disabled = false,
-}: SwitchRowProps) {
-  return (
-    <View style={styles.switchRow}>
-      <View style={styles.switchTextBlock}>
-        <Text style={styles.switchLabel}>{label}</Text>
-        {description ? (
-          <Text style={styles.switchDescription}>{description}</Text>
+  subtitle,
+  right,
+  onPress,
+  danger = false,
+  last = false,
+}: {
+  icon?: ReactNode;
+  label: string;
+  value?: string | null;
+  subtitle?: string | null;
+  right?: ReactNode;
+  onPress?: () => void;
+  danger?: boolean;
+  last?: boolean;
+}) {
+  const content = (
+    <View
+      style={[
+        styles.row,
+        {
+          borderBottomColor: last ? "transparent" : THEME.border,
+        },
+      ]}
+    >
+      <View style={styles.rowMain}>
+        {icon ? <View style={styles.rowIcon}>{icon}</View> : null}
+        <View style={styles.rowCopy}>
+          <Text
+            style={[
+              styles.rowLabel,
+              { color: danger ? THEME.danger : THEME.text },
+            ]}
+          >
+            {label}
+          </Text>
+          {subtitle ? (
+            <Text style={[styles.rowSubtitle, { color: THEME.textMuted }]}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.rowRight}>
+        {value ? (
+          <Text
+            style={[
+              styles.rowValue,
+              {
+                color: danger ? THEME.danger : THEME.textMuted,
+              },
+            ]}
+          >
+            {value}
+          </Text>
+        ) : null}
+        {right}
+        {onPress ? (
+          <Ionicons
+            name="chevron-forward"
+            size={15}
+            color={danger ? THEME.danger : THEME.textDim}
+          />
         ) : null}
       </View>
-      <Switch value={value} onValueChange={onValueChange} disabled={disabled} />
-    </View>
-  );
-}
-
-interface UtilityRowProps {
-  label: string;
-  detail?: string;
-  tone?: "default" | "danger";
-  onPress?: () => void;
-}
-
-function UtilityRow({
-  label,
-  detail,
-  tone = "default",
-  onPress,
-}: UtilityRowProps) {
-  const content = (
-    <View style={styles.utilityRow}>
-      <View style={styles.utilityTextBlock}>
-        <Text
-          style={[
-            styles.utilityLabel,
-            tone === "danger" ? styles.utilityLabelDanger : null,
-          ]}
-        >
-          {label}
-        </Text>
-        {detail ? <Text style={styles.utilityDetail}>{detail}</Text> : null}
-      </View>
-      <Ionicons
-        name={onPress ? "chevron-forward" : "information-circle-outline"}
-        size={18}
-        color={
-          tone === "danger" ? Tokens.colors.danger : Tokens.colors.textMuted
-        }
-      />
     </View>
   );
 
@@ -172,7 +294,7 @@ function UtilityRow({
   }
 
   return (
-    <Pressable onPress={onPress} style={styles.utilityPressable}>
+    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}>
       {content}
     </Pressable>
   );
@@ -193,6 +315,8 @@ export default function SettingsScreen() {
 
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [presenceSummary, setPresenceSummary] =
+    useState<PlatformPresenceSummary | null>(null);
   const [settingsValues, setSettingsValues] = useState<SettingsFormValues>(
     DEFAULT_SETTINGS_VALUES,
   );
@@ -216,10 +340,12 @@ export default function SettingsScreen() {
     const client = getDriverClient();
 
     const loadAll = async () => {
-      const [settingsResult, profileResult] = await Promise.allSettled([
-        client.getDriverSettings(driverId),
-        client.getDriverProfile(),
-      ]);
+      const [settingsResult, profileResult, presenceResult] =
+        await Promise.allSettled([
+          client.getDriverSettings(driverId),
+          client.getDriverProfile(),
+          client.getPlatformPresence(),
+        ]);
 
       if (!isActive) {
         return;
@@ -247,6 +373,14 @@ export default function SettingsScreen() {
         setProfileLoaded(true);
       } else {
         failures.push(`個人資料（${toErrorMessage(profileResult.reason)}）`);
+      }
+
+      if (presenceResult.status === "fulfilled") {
+        setPresenceSummary(presenceResult.value as PlatformPresenceSummary);
+      } else {
+        failures.push(
+          `平台帳號綁定（${toErrorMessage(presenceResult.reason)}）`,
+        );
       }
 
       if (failures.length > 0) {
@@ -291,6 +425,8 @@ export default function SettingsScreen() {
     lastResult,
   });
   const saveStatus = describeSaveStatus(saveState);
+  const saveDisabled = !dirty || hasValidation || saving;
+
   const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
   const identitySummary = [
     driverId ? `ID ${driverId}` : null,
@@ -305,6 +441,12 @@ export default function SettingsScreen() {
   ]
     .filter(Boolean)
     .join(" · ");
+
+  const presences = [...(presenceSummary?.presences ?? [])].sort((a, b) =>
+    getPlatformDisplayName(a).localeCompare(getPlatformDisplayName(b), "zh-TW"),
+  );
+  const boundCount = presences.filter((entry) => entry.status === "online").length;
+  const reauthCount = presences.filter((entry) => entry.reauthRequired).length;
 
   const updateSettings = (patch: Partial<SettingsFormValues>) => {
     setSettingsValues((prev) => ({ ...prev, ...patch }));
@@ -415,387 +557,587 @@ export default function SettingsScreen() {
 
   if (!isProvisioned) {
     return (
-      <AppScreen scrollable={false}>
-        <PageHeader title={driverStrings.settings.title} />
-        <EmptyState
-          title="尚未完成裝置配置"
-          description="此裝置尚未分配司機身份，無法載入設定。"
-          icon="lock-closed-outline"
-          actionTitle="前往配置裝置"
-          onAction={() => router.push("/onboarding")}
-          style={styles.fillState}
+      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
+        <PageHeader
+          theme={THEME}
+          title={driverStrings.settings.title}
+          subtitle="裝置尚未配置司機身份"
         />
-      </AppScreen>
+        <Banner
+          theme={THEME}
+          tone="warn"
+          title="尚未完成裝置配置"
+          body="此裝置尚未分配司機身份，無法載入設定。"
+          icon={
+            <Ionicons
+              name="lock-closed-outline"
+              size={16}
+              color={THEME.warn}
+            />
+          }
+          actions={
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              onPress={() => router.push("/onboarding")}
+            >
+              前往配置裝置
+            </Btn>
+          }
+        />
+      </Shell>
     );
   }
 
   if (loading) {
     return (
-      <AppScreen scrollable={false}>
-        <PageHeader title={driverStrings.settings.title} />
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={Tokens.colors.primary} />
-          <Text style={styles.loadingLabel}>載入設定中…</Text>
+      <Shell theme={THEME} contentContainerStyle={styles.loadingContent}>
+        <PageHeader
+          theme={THEME}
+          title={driverStrings.settings.title}
+          subtitle="載入設定中…"
+        />
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color={THEME.accent} />
+          <Text style={[styles.loadingLabel, { color: THEME.textMuted }]}>
+            載入設定中…
+          </Text>
         </View>
-      </AppScreen>
+      </Shell>
     );
   }
 
-  const saveDisabled = !dirty || hasValidation || saving;
-
   return (
-    <View style={styles.root}>
-      <AppScreen>
-        <View style={styles.heroHeader}>
-          <Text style={styles.screenTitle}>設定</Text>
-          <Text style={styles.screenSubtitle}>
-            個人資料、偏好設定與平台帳號綁定
-          </Text>
+    <Shell
+      theme={THEME}
+      contentContainerStyle={styles.shellContent}
+      footer={
+        <View style={styles.footerBar}>
+          <Btn
+            theme={THEME}
+            variant="primary"
+            size="md"
+            onPress={() => void handleSave()}
+            disabled={saveDisabled}
+            icon={
+              saving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="save-outline" size={15} color="#FFFFFF" />
+              )
+            }
+            style={styles.footerButton}
+          >
+            {saving ? "儲存中…" : dirty ? "儲存變更" : "已同步"}
+          </Btn>
         </View>
+      }
+    >
+      <PageHeader
+        theme={THEME}
+        title={driverStrings.settings.title}
+        subtitle="個人資料、平台綁定與接單偏好"
+        actions={<Pill theme={THEME} tone={saveStatus.tone}>{saveStatus.label}</Pill>}
+      />
 
-        <View style={styles.content}>
-          {loadError ? <ErrorBanner message={loadError} /> : null}
-          {validationMessage ? (
-            <ErrorBanner message={validationMessage} />
-          ) : null}
-          {saveError ? <ErrorBanner message={saveError} /> : null}
-
-          <FormSection
-            title="司機身份"
-            description="維持最新的聯絡方式以便派遣與行政聯繫。"
-          >
-            <View style={styles.profileHeroCard}>
-              <View style={styles.profileAvatar}>
-                <Text style={styles.profileAvatarText}>{profileInitial}</Text>
-              </View>
-              <View style={styles.profileIdentityBlock}>
-                <Text style={styles.profileName}>
-                  {profileValues.profileName.trim() || "尚未填寫司機姓名"}
-                </Text>
-                <Text style={styles.profileMeta}>
-                  {identitySummary || "尚未填寫聯絡資訊"}
-                </Text>
-              </View>
-              <StatusChip
-                label={saveStatus.label}
-                variant={saveStatus.variant}
-                style={styles.profileStatusChip}
-              />
-            </View>
-
-            <FormField
-              label="姓名"
-              value={profileValues.profileName}
-              onChangeText={(value) => updateProfile({ profileName: value })}
-              placeholder="司機姓名"
-              error={profileErrors.profileName}
-              editable={profileLoaded && !saving}
-            />
-            <FormField
-              label="電話"
-              value={profileValues.profilePhone}
-              onChangeText={(value) => updateProfile({ profilePhone: value })}
-              placeholder="+886-900-000-000"
-              keyboardType="phone-pad"
-              error={profileErrors.profilePhone}
-              editable={profileLoaded && !saving}
-            />
-            <FormField
-              label="電子郵件"
-              value={profileValues.profileEmail}
-              onChangeText={(value) => updateProfile({ profileEmail: value })}
-              placeholder="driver@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              error={profileErrors.profileEmail}
-              editable={profileLoaded && !saving}
-            />
-          </FormSection>
-
-          <FormSection
-            title="緊急聯絡人"
-            description="緊急情況時平台會優先聯絡此人；任一欄位填寫後姓名與電話為必填。"
-          >
-            <FormField
-              label="聯絡人姓名"
-              value={profileValues.emergencyName}
-              onChangeText={(value) => updateProfile({ emergencyName: value })}
-              placeholder="緊急聯絡人姓名"
-              error={profileErrors.emergencyName}
-              editable={profileLoaded && !saving}
-            />
-            <FormField
-              label="聯絡人電話"
-              value={profileValues.emergencyPhone}
-              onChangeText={(value) => updateProfile({ emergencyPhone: value })}
-              placeholder="+886-900-000-001"
-              keyboardType="phone-pad"
-              error={profileErrors.emergencyPhone}
-              editable={profileLoaded && !saving}
-            />
-            <FormField
-              label="關係"
-              value={profileValues.emergencyRelationship}
-              onChangeText={(value) =>
-                updateProfile({ emergencyRelationship: value })
-              }
-              placeholder="配偶、兄弟姐妹、父母…"
-              editable={profileLoaded && !saving}
-            />
-          </FormSection>
-
-          <FormSection
-            title="偏好設定"
-            description="調整系統介面語言、接單範圍與通知行為。"
-          >
-            <FormField
-              label="介面語言"
-              value={settingsValues.language}
-              onChangeText={(value) => updateSettings({ language: value })}
-              placeholder="zh-TW"
-              autoCapitalize="none"
-              error={settingsErrors.language}
-              editable={settingsLoaded && !saving}
-            />
-            <FormField
-              label="最大接單範圍（公里）"
-              value={settingsValues.maxAcceptRadius}
-              onChangeText={(value) =>
-                updateSettings({ maxAcceptRadius: value })
-              }
-              placeholder="例如：10"
-              keyboardType="numeric"
-              error={settingsErrors.maxAcceptRadius}
-              helpText="留白代表不限制；最大可設定到 200 公里。"
-              editable={settingsLoaded && !saving}
-            />
-            <View style={styles.switchCard}>
-              <SwitchRow
-                label="通知"
-                description="關閉後將不會收到任務指派與行政通知。"
-                value={settingsValues.notificationsEnabled}
-                onValueChange={(value) =>
-                  updateSettings({ notificationsEnabled: value })
-                }
-                disabled={!settingsLoaded || saving}
-              />
-              <View style={styles.switchDivider} />
-              <SwitchRow
-                label="自動接單（全平台）"
-                description="開啟後會對所有已綁定平台的合格派遣自動接單；目前尚未提供逐平台覆寫，外部平台仍以該平台的接單規則為準。"
-                value={settingsValues.autoAcceptEnabled}
-                onValueChange={(value) =>
-                  updateSettings({ autoAcceptEnabled: value })
-                }
-                disabled={!settingsLoaded || saving}
-              />
-            </View>
-          </FormSection>
-
-          <FormSection
-            title="平台帳號綁定"
-            description="管理外部平台帳號綁定、重新驗證、平台憑證與接單資格；狀態與「平台健康中心」即時同步。"
-          >
-            <PlatformBinding showSectionTitle={false} />
-          </FormSection>
-
-          <FormSection
-            title="其他"
-            description="快速查看緊急聯絡、裝置資訊與帳號動作。"
-          >
-            <View style={styles.utilityCard}>
-              <UtilityRow label="緊急聯絡人" detail={emergencySummary} />
-              <View style={styles.utilityDivider} />
-              <UtilityRow
-                label="關於本機"
-                detail={identitySummary || driverId}
-              />
-              <View style={styles.utilityDivider} />
-              <UtilityRow
-                label="查看收益"
-                detail="前往收益與月結摘要"
-                onPress={() => router.push("/earnings")}
-              />
-              <View style={styles.utilityDivider} />
-              <UtilityRow
-                label="登出"
-                detail="清除此裝置上的司機登入狀態"
-                tone="danger"
-                onPress={handleLogout}
-              />
-            </View>
-          </FormSection>
-        </View>
-      </AppScreen>
-
-      <BottomActionBar>
-        <ActionButton
-          title={
-            saving
-              ? "正在儲存…"
-              : hasValidation
-                ? "請先修正欄位"
-                : dirty
-                  ? "儲存設定"
-                  : "目前無變更"
-          }
-          icon={saving ? undefined : "save-outline"}
-          onPress={handleSave}
-          loading={saving}
-          disabled={saveDisabled}
-          style={{ flex: 1 }}
+      <View style={styles.kpiRow}>
+        <KPI
+          theme={THEME}
+          label="已綁定平台"
+          value={String(boundCount)}
+          sub={`${presences.length} 個平台`}
         />
-      </BottomActionBar>
-    </View>
+        <KPI
+          theme={THEME}
+          label="待處理"
+          value={String(reauthCount)}
+          sub="需重新授權"
+        />
+        <KPI
+          theme={THEME}
+          label="儲存狀態"
+          value={dirty ? "待同步" : "最新"}
+          sub={saveStatus.label}
+        />
+      </View>
+
+      {loadError ? (
+        <Banner
+          theme={THEME}
+          tone="warn"
+          body={loadError}
+          icon={<Ionicons name="alert-circle-outline" size={16} color={THEME.warn} />}
+        />
+      ) : null}
+      {validationMessage ? (
+        <Banner
+          theme={THEME}
+          tone="danger"
+          body={validationMessage}
+          icon={<Ionicons name="warning-outline" size={16} color={THEME.danger} />}
+        />
+      ) : null}
+      {saveError ? (
+        <Banner
+          theme={THEME}
+          tone="danger"
+          body={saveError}
+          icon={<Ionicons name="close-circle-outline" size={16} color={THEME.danger} />}
+        />
+      ) : null}
+
+      <View style={styles.sectionStack}>
+        <SectionTitle
+          title={driverStrings.settings.sections.identity}
+          subtitle="維持最新的聯絡方式以便派遣與行政聯繫。"
+        />
+        <Card theme={THEME} padding={16}>
+          <View style={styles.profileHero}>
+            <View
+              style={[
+                styles.avatar,
+                { backgroundColor: THEME.accentBg, borderColor: THEME.accentBorder },
+              ]}
+            >
+              <Text style={[styles.avatarText, { color: THEME.accentHi }]}>
+                {profileInitial}
+              </Text>
+            </View>
+            <View style={styles.profileCopy}>
+              <Text style={[styles.profileName, { color: THEME.text }]}>
+                {profileValues.profileName.trim() || "尚未填寫司機姓名"}
+              </Text>
+              <Text style={[styles.profileMeta, { color: THEME.textMuted }]}>
+                {identitySummary || "尚未填寫聯絡資訊"}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.fieldStack}>
+            <Field theme={THEME} label="姓名" required>
+              <Input
+                theme={THEME}
+                value={profileValues.profileName}
+                ph="司機姓名"
+                editable={profileLoaded && !saving}
+                onChangeText={(value) => updateProfile({ profileName: value })}
+              />
+            </Field>
+            {profileErrors.profileName ? (
+              <Text style={[styles.errorText, { color: THEME.danger }]}>
+                {profileErrors.profileName}
+              </Text>
+            ) : null}
+
+            <Field theme={THEME} label="電話">
+              <Input
+                theme={THEME}
+                value={profileValues.profilePhone}
+                ph="+886-900-000-000"
+                editable={profileLoaded && !saving}
+                onChangeText={(value) => updateProfile({ profilePhone: value })}
+              />
+            </Field>
+
+            <Field theme={THEME} label="電子郵件">
+              <Input
+                theme={THEME}
+                value={profileValues.profileEmail}
+                ph="driver@example.com"
+                editable={profileLoaded && !saving}
+                onChangeText={(value) => updateProfile({ profileEmail: value })}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </Field>
+            {profileErrors.profileEmail ? (
+              <Text style={[styles.errorText, { color: THEME.danger }]}>
+                {profileErrors.profileEmail}
+              </Text>
+            ) : null}
+          </View>
+        </Card>
+      </View>
+
+      <View style={styles.sectionStack}>
+        <SectionTitle
+          title={driverStrings.settings.sections.bindings}
+          subtitle="連線後可接收該平台訂單。"
+          action={
+            <Btn
+              theme={THEME}
+              variant="ghost"
+              size="xs"
+              onPress={() => router.push("/platform-presence")}
+            >
+              管理
+            </Btn>
+          }
+        />
+        <Card theme={THEME} padding={0}>
+          {presences.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={[styles.emptyText, { color: THEME.textMuted }]}>
+                目前尚未同步到平台綁定資料。
+              </Text>
+            </View>
+          ) : (
+            presences.map((record, index) => (
+              <Row
+                key={record.platformCode}
+                icon={
+                  <View
+                    style={[
+                      styles.platformBadge,
+                      {
+                        backgroundColor: isOwnedPlatform(record)
+                          ? THEME.accentBg
+                          : THEME.warnBg,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.platformBadgeText,
+                        {
+                          color: isOwnedPlatform(record)
+                            ? THEME.accentHi
+                            : THEME.warn,
+                        },
+                      ]}
+                    >
+                      {String(record.platformCode).slice(0, 4).toUpperCase()}
+                    </Text>
+                  </View>
+                }
+                label={getPlatformDisplayName(record)}
+                subtitle={getBindingSubtitle(record)}
+                right={
+                  <Pill theme={THEME} tone={getBindingTone(record)}>
+                    {getBindingStatus(record)}
+                  </Pill>
+                }
+                last={index === presences.length - 1}
+              />
+            ))
+          )}
+        </Card>
+      </View>
+
+      <View style={styles.sectionStack}>
+        <SectionTitle title="偏好" />
+        <Card theme={THEME} padding={0}>
+          <Row
+            label="語言"
+            value={formatLanguage(settingsValues.language)}
+            subtitle={settingsErrors.language}
+          />
+          <View style={styles.rowForm}>
+            <Field theme={THEME} label="最大接單距離">
+              <Input
+                theme={THEME}
+                value={settingsValues.maxAcceptRadius}
+                ph="8"
+                suffix="km"
+                editable={settingsLoaded && !saving}
+                onChangeText={(value) => updateSettings({ maxAcceptRadius: value })}
+              />
+            </Field>
+            {settingsErrors.maxAcceptRadius ? (
+              <Text style={[styles.errorText, { color: THEME.danger }]}>
+                {settingsErrors.maxAcceptRadius}
+              </Text>
+            ) : (
+              <Text style={[styles.helperText, { color: THEME.textMuted }]}>
+                目前設定：{formatRadius(settingsValues.maxAcceptRadius)}
+              </Text>
+            )}
+          </View>
+          <View style={[styles.toggleRow, { borderTopColor: THEME.border }]}>
+            <View style={styles.toggleCopy}>
+              <Text style={[styles.rowLabel, { color: THEME.text }]}>自動接單</Text>
+              <Text style={[styles.rowSubtitle, { color: THEME.textMuted }]}>
+                僅自營派單可開啟自動接單
+              </Text>
+            </View>
+            <Switch
+              value={settingsValues.autoAcceptEnabled}
+              onValueChange={(value) => updateSettings({ autoAcceptEnabled: value })}
+              disabled={!settingsLoaded || saving}
+              trackColor={{ false: THEME.borderStrong, true: THEME.accentHi }}
+              thumbColor={
+                settingsValues.autoAcceptEnabled ? THEME.accent : "#FFFFFF"
+              }
+            />
+          </View>
+          <View style={[styles.toggleRow, { borderTopColor: THEME.border }]}>
+            <View style={styles.toggleCopy}>
+              <Text style={[styles.rowLabel, { color: THEME.text }]}>通知</Text>
+              <Text style={[styles.rowSubtitle, { color: THEME.textMuted }]}>
+                {formatNotification(settingsValues.notificationsEnabled)}
+              </Text>
+            </View>
+            <Switch
+              value={settingsValues.notificationsEnabled}
+              onValueChange={(value) =>
+                updateSettings({ notificationsEnabled: value })
+              }
+              disabled={!settingsLoaded || saving}
+              trackColor={{ false: THEME.borderStrong, true: THEME.accentHi }}
+              thumbColor={
+                settingsValues.notificationsEnabled ? THEME.accent : "#FFFFFF"
+              }
+            />
+          </View>
+        </Card>
+      </View>
+
+      <View style={styles.sectionStack}>
+        <SectionTitle title={driverStrings.settings.sections.misc} />
+        <Card theme={THEME} padding={0}>
+          <Row
+            label={driverStrings.settings.utilityLabels.emergencyContact}
+            subtitle={emergencySummary}
+          />
+          <Row label={driverStrings.settings.utilityLabels.aboutDevice} subtitle={driverId} />
+          <Row
+            label={driverStrings.settings.utilityLabels.logout}
+            subtitle="登出後需要重新綁定此裝置"
+            onPress={handleLogout}
+            danger
+            last
+          />
+        </Card>
+      </View>
+
+      <View style={styles.sectionStack}>
+        <SectionTitle
+          title={driverStrings.settings.sections.emergency}
+          subtitle="任一欄位填寫後，姓名與電話為必填。"
+        />
+        <Card theme={THEME} padding={16}>
+          <View style={styles.fieldStack}>
+            <Field theme={THEME} label="聯絡人姓名">
+              <Input
+                theme={THEME}
+                value={profileValues.emergencyName}
+                ph="緊急聯絡人姓名"
+                editable={profileLoaded && !saving}
+                onChangeText={(value) => updateProfile({ emergencyName: value })}
+              />
+            </Field>
+            {profileErrors.emergencyName ? (
+              <Text style={[styles.errorText, { color: THEME.danger }]}>
+                {profileErrors.emergencyName}
+              </Text>
+            ) : null}
+
+            <Field theme={THEME} label="聯絡人電話">
+              <Input
+                theme={THEME}
+                value={profileValues.emergencyPhone}
+                ph="+886-900-000-000"
+                editable={profileLoaded && !saving}
+                onChangeText={(value) => updateProfile({ emergencyPhone: value })}
+              />
+            </Field>
+            {profileErrors.emergencyPhone ? (
+              <Text style={[styles.errorText, { color: THEME.danger }]}>
+                {profileErrors.emergencyPhone}
+              </Text>
+            ) : null}
+
+            <Field theme={THEME} label="關係">
+              <Input
+                theme={THEME}
+                value={profileValues.emergencyRelationship}
+                ph="配偶、家人、朋友"
+                editable={profileLoaded && !saving}
+                onChangeText={(value) =>
+                  updateProfile({ emergencyRelationship: value })
+                }
+              />
+            </Field>
+          </View>
+        </Card>
+      </View>
+    </Shell>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  center: {
-    flex: 1,
+  shellContent: {
+    paddingBottom: 28,
+    gap: 14,
+  },
+  loadingContent: {
+    flexGrow: 1,
     justifyContent: "center",
+    gap: 16,
+  },
+  loadingCard: {
+    minHeight: 180,
     alignItems: "center",
-    padding: Tokens.spacing.xxl,
+    justifyContent: "center",
+    gap: 12,
   },
-  fillState: { flex: 1 },
   loadingLabel: {
-    marginTop: Tokens.spacing.sm,
-    color: Tokens.colors.textMuted,
+    fontSize: 14,
   },
-  content: { paddingVertical: Tokens.spacing.lg, gap: Tokens.spacing.lg },
-  heroHeader: {
-    paddingTop: Tokens.spacing.sm,
-    gap: Tokens.spacing.xs,
+  kpiRow: {
+    flexDirection: "row",
+    gap: 8,
   },
-  screenTitle: {
-    ...Tokens.type.screenTitle,
-    color: Tokens.colors.textStrong,
+  sectionStack: {
+    gap: 8,
   },
-  screenSubtitle: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textMuted,
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    gap: 12,
+    paddingHorizontal: 2,
   },
-  section: {
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.lg,
-    gap: Tokens.spacing.sm,
-    ...Tokens.shadows.sm,
+  sectionCopy: {
+    flex: 1,
+    gap: 2,
   },
-  sectionHeader: { marginBottom: Tokens.spacing.md },
   sectionTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
+    fontSize: 14,
+    fontWeight: "700",
   },
-  sectionDescription: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-    marginTop: 4,
+  sectionSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
   },
-  sectionBody: { gap: Tokens.spacing.xs },
-  profileHeroCard: {
+  profileHero: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Tokens.spacing.md,
-    padding: Tokens.spacing.md,
-    borderRadius: Tokens.radius.lg,
-    backgroundColor: Tokens.colors.brandBg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.ownedBorder,
-    marginBottom: Tokens.spacing.md,
+    gap: 12,
+    marginBottom: 16,
   },
-  profileAvatar: {
+  avatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: Tokens.colors.brand,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
   },
-  profileAvatarText: {
-    color: Tokens.colors.textInverse,
+  avatarText: {
     fontSize: 18,
     fontWeight: "700",
   },
-  profileIdentityBlock: {
+  profileCopy: {
     flex: 1,
     gap: 2,
   },
   profileName: {
-    ...Tokens.type.title,
-    color: Tokens.colors.textStrong,
+    fontSize: 16,
+    fontWeight: "700",
   },
   profileMeta: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+    fontSize: 12,
   },
-  profileStatusChip: {
-    alignSelf: "flex-start",
+  fieldStack: {
+    gap: 10,
   },
-  switchRow: {
+  errorText: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: -4,
+  },
+  helperText: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  emptyCard: {
+    padding: 16,
+  },
+  emptyText: {
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  row: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: Tokens.spacing.sm,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
   },
-  switchTextBlock: { flex: 1, marginRight: Tokens.spacing.md },
-  switchLabel: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
-    fontWeight: "600",
-  },
-  switchDescription: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-    marginTop: 2,
-  },
-  switchCard: {
-    borderRadius: Tokens.radius.md,
-    backgroundColor: Tokens.colors.surfaceLo,
-    paddingHorizontal: Tokens.spacing.md,
-  },
-  switchDivider: {
-    height: 1,
-    backgroundColor: Tokens.colors.border,
-  },
-  utilityCard: {
-    borderRadius: Tokens.radius.md,
-    backgroundColor: Tokens.colors.surfaceLo,
-    overflow: "hidden",
-  },
-  utilityPressable: {
-    flex: 1,
-  },
-  utilityRow: {
-    minHeight: 56,
-    paddingHorizontal: Tokens.spacing.md,
-    paddingVertical: Tokens.spacing.md,
+  rowMain: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Tokens.spacing.md,
+    gap: 12,
+    flex: 1,
   },
-  utilityTextBlock: {
+  rowIcon: {
+    width: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowCopy: {
     flex: 1,
     gap: 2,
   },
-  utilityLabel: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
+  rowLabel: {
+    fontSize: 13,
     fontWeight: "600",
   },
-  utilityLabelDanger: {
-    color: Tokens.colors.danger,
+  rowSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
   },
-  utilityDetail: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+  rowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 1,
   },
-  utilityDivider: {
-    height: 1,
-    backgroundColor: Tokens.colors.border,
-    marginHorizontal: Tokens.spacing.md,
+  rowValue: {
+    fontSize: 12,
+  },
+  platformBadge: {
+    minWidth: 40,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  platformBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  rowForm: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: THEME.border,
+    gap: 6,
+  },
+  toggleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+  },
+  toggleCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  footerBar: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  footerButton: {
+    width: "100%",
+    justifyContent: "center",
   },
 });
