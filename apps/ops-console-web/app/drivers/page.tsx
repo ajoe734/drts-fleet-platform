@@ -12,9 +12,6 @@ import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
-  CanvasDL as DL,
-  CanvasField as Field,
-  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasShell as Shell,
@@ -63,35 +60,6 @@ const pageContentStyle = {
 const pageStackStyle = {
   display: "grid",
   gap: 12,
-} as const;
-
-const kpiGridStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-} as const;
-
-const pageBodyStyle = {
-  display: "grid",
-  gap: 12,
-  alignItems: "start",
-  gridTemplateColumns: "minmax(0, 2.2fr) minmax(280px, 0.9fr)",
-} as const;
-
-const railStackStyle = {
-  display: "grid",
-  gap: 12,
-} as const;
-
-const fieldStackStyle = {
-  display: "grid",
-  gap: 8,
-} as const;
-
-const pillWrapStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
 } as const;
 
 function pageSubtitle(locale: Locale, count: number) {
@@ -283,30 +251,26 @@ function formatLocationState(
   return t("drivers.list.locationLive", locale);
 }
 
-function buildTabLinks(
-  locale: Locale,
-  counts: Record<DriverTabKey, number>,
-  activeTab: DriverTabKey,
-) {
+function buildTabLinks(locale: Locale, activeTab: DriverTabKey) {
   const items: Array<{ key: DriverTabKey; label: string; href: string }> = [
     {
       key: "all",
-      label: `${t("common.all", locale)} ${counts.all}`,
+      label: t("common.all", locale),
       href: buildDriversHref("all"),
     },
     {
       key: "eligible",
-      label: `${locale === "en" ? "Dispatch eligible" : "可派"} ${counts.eligible}`,
+      label: locale === "en" ? "Dispatch eligible" : "可派",
       href: buildDriversHref("eligible"),
     },
     {
       key: "on_shift",
-      label: `${locale === "en" ? "On shift" : "在班"} ${counts.on_shift}`,
+      label: locale === "en" ? "On shift" : "在班",
       href: buildDriversHref("on_shift"),
     },
     {
       key: "offline",
-      label: `${locale === "en" ? "Offline" : "下班"} ${counts.offline}`,
+      label: locale === "en" ? "Offline" : "下班",
       href: buildDriversHref("offline"),
     },
   ];
@@ -378,30 +342,6 @@ function getRosterMeta(
   return `${locationLabel} · ${blockedSummary}`;
 }
 
-function summarizeTopBlockers(drivers: DriverRegistryRecord[], locale: Locale) {
-  const counts = new Map<string, { label: string; count: number }>();
-
-  for (const driver of drivers) {
-    for (const reason of driver.eligibilityBlockedReasons) {
-      const existing = counts.get(reason);
-      if (existing) {
-        existing.count += 1;
-        continue;
-      }
-
-      counts.set(reason, {
-        label: formatOpsCodeLabel(locale, reason),
-        count: 1,
-      });
-    }
-  }
-
-  return [...counts.entries()]
-    .map(([key, value]) => ({ key, label: value.label, count: value.count }))
-    .sort((left, right) => right.count - left.count)
-    .slice(0, 4);
-}
-
 export default async function DriversPage({ searchParams }: DriversPageProps) {
   const [client, locale, resolvedSearchParams] = await Promise.all([
     getServerOpsClient(),
@@ -435,18 +375,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     locationByDriver.set(snapshot.driverId, snapshot);
   }
 
-  const counts = {
-    all: drivers.length,
-    eligible: drivers.filter((driver) => driver.dispatchEligible).length,
-    on_shift: drivers.filter((driver) => driver.workState !== "offline").length,
-    offline: drivers.filter((driver) => driver.workState === "offline").length,
-  } satisfies Record<DriverTabKey, number>;
-
-  const { active: activeTabNode, tabs } = buildTabLinks(
-    locale,
-    counts,
-    activeTab,
-  );
+  const { active: activeTabNode, tabs } = buildTabLinks(locale, activeTab);
 
   const rows: DriverTableRow[] = drivers
     .filter((driver) => matchesTab(driver, activeTab))
@@ -491,43 +420,6 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
               : "neutral",
       };
     });
-
-  const liveLocationCount = rows.filter(
-    (row) => row.locationLabel === t("drivers.list.locationLive", locale),
-  ).length;
-  const staleLocationCount = rows.filter(
-    (row) => row.locationLabel === t("drivers.list.locationStale", locale),
-  ).length;
-  const missingLocationCount = rows.filter(
-    (row) => row.locationLabel === t("drivers.list.locationMissing", locale),
-  ).length;
-  const unknownLocationCount = rows.filter(
-    (row) => row.locationLabel === t("drivers.list.locationUnknown", locale),
-  ).length;
-  const blockedCount = drivers.filter(
-    (driver) => !driver.dispatchEligible,
-  ).length;
-  const validLicenseCount = drivers.filter(
-    (driver) => driver.licensesValid,
-  ).length;
-  const activeBindingCount = drivers.filter((driver) =>
-    driver.deviceBindings.some((binding) => binding.status === "active"),
-  ).length;
-  const topBlockers = summarizeTopBlockers(drivers, locale);
-  const selectedTabLabel =
-    activeTab === "eligible"
-      ? locale === "en"
-        ? "Dispatch eligible"
-        : "可派"
-      : activeTab === "on_shift"
-        ? locale === "en"
-          ? "On shift"
-          : "在班"
-        : activeTab === "offline"
-          ? locale === "en"
-            ? "Offline"
-            : "下班"
-          : t("common.all", locale);
 
   const columns: CanvasTableColumn<DriverTableRow>[] = [
     {
@@ -687,191 +579,11 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
               }
             />
           ) : null}
-          <div style={kpiGridStyle}>
-            <KPI
-              theme={theme}
-              label={locale === "en" ? "Drivers" : "司機"}
-              value={drivers.length}
-              delta={`${counts.eligible} ${locale === "en" ? "eligible" : "可派"}`}
-              deltaTone={counts.eligible > 0 ? "up" : "neutral"}
-              sub={pageSubtitle(locale, drivers.length)}
-            />
-            <KPI
-              theme={theme}
-              label={locale === "en" ? "Dispatch Gate" : "可派閘門"}
-              value={counts.eligible}
-              delta={`${blockedCount} ${locale === "en" ? "blocked" : "受阻"}`}
-              deltaTone={blockedCount > 0 ? "down" : "neutral"}
-              sub={t("drivers.registrySummary", locale, {
-                eligible: counts.eligible,
-                blocked: blockedCount,
-                live: liveLocationCount,
-                stale: staleLocationCount,
-              })}
-            />
-            <KPI
-              theme={theme}
-              label={locale === "en" ? "License Valid" : "駕照有效"}
-              value={validLicenseCount}
-              delta={`${drivers.length - validLicenseCount} ${locale === "en" ? "needs review" : "待複核"}`}
-              deltaTone={
-                validLicenseCount === drivers.length ? "up" : "neutral"
-              }
-              sub={locale === "en" ? "registry compliance" : "名冊合規"}
-            />
-            <KPI
-              theme={theme}
-              label={locale === "en" ? "Bound Device" : "已綁定設備"}
-              value={activeBindingCount}
-              delta={`${drivers.length - activeBindingCount} ${locale === "en" ? "unassigned" : "未綁定"}`}
-              deltaTone={
-                activeBindingCount === drivers.length ? "up" : "neutral"
-              }
-              sub={locale === "en" ? "dispatch-ready devices" : "派遣就緒設備"}
-            />
-          </div>
-
-          <div style={pageBodyStyle}>
-            <Card
-              theme={theme}
-              padding={0}
-              title={locale === "en" ? "Drivers Table" : "司機總表"}
-              subtitle={
-                locale === "en"
-                  ? `${selectedTabLabel} · ${rows.length} visible`
-                  : `${selectedTabLabel} · 顯示 ${rows.length} 筆`
-              }
-            >
-              {rows.length > 0 ? (
-                <Table theme={theme} columns={columns} rows={rows} />
-              ) : null}
-            </Card>
-
-            <div style={railStackStyle}>
-              <Card
-                theme={theme}
-                title={locale === "en" ? "Roster Summary" : "名冊摘要"}
-                subtitle={t("drivers.registryFooter", locale)}
-              >
-                <Field
-                  theme={theme}
-                  label={locale === "en" ? "Current Tab" : "目前頁籤"}
-                  hint={
-                    locale === "en"
-                      ? "Canvas handoff keeps list view read-first."
-                      : "Canvas handoff 保持列表頁以讀取判斷為主。"
-                  }
-                >
-                  <div style={pillWrapStyle}>
-                    <Pill theme={theme} tone="info">
-                      {selectedTabLabel}
-                    </Pill>
-                    <Pill theme={theme} tone="neutral">
-                      {rows.length} / {drivers.length}
-                    </Pill>
-                  </div>
-                </Field>
-
-                <Field
-                  theme={theme}
-                  label={locale === "en" ? "Registry Signal" : "名冊訊號"}
-                >
-                  <DL
-                    theme={theme}
-                    cols={1}
-                    items={[
-                      {
-                        label: locale === "en" ? "Summary" : "摘要",
-                        value: t("drivers.registrySummary", locale, {
-                          eligible: counts.eligible,
-                          blocked: blockedCount,
-                          live: liveLocationCount,
-                          stale: staleLocationCount,
-                        }),
-                      },
-                      {
-                        label: locale === "en" ? "On shift" : "在班",
-                        value: `${counts.on_shift}`,
-                        mono: true,
-                      },
-                      {
-                        label: locale === "en" ? "Offline" : "下班",
-                        value: `${counts.offline}`,
-                        mono: true,
-                      },
-                    ]}
-                  />
-                </Field>
-              </Card>
-
-              <Card
-                theme={theme}
-                title={locale === "en" ? "Filter Snapshot" : "篩選快照"}
-                subtitle={
-                  locale === "en" ? "Dispatch-first triage" : "以派遣判斷優先"
-                }
-              >
-                <div style={fieldStackStyle}>
-                  <Field
-                    theme={theme}
-                    label={
-                      locale === "en" ? "Eligibility blockers" : "阻塞原因"
-                    }
-                    hint={
-                      topBlockers.length === 0
-                        ? t("drivers.list.eligibilityClear", locale)
-                        : undefined
-                    }
-                  >
-                    <div style={pillWrapStyle}>
-                      {topBlockers.length > 0 ? (
-                        topBlockers.map((blocker) => (
-                          <Pill key={blocker.key} theme={theme} tone="warn" dot>
-                            {blocker.label} · {blocker.count}
-                          </Pill>
-                        ))
-                      ) : (
-                        <Pill theme={theme} tone="success">
-                          {t("drivers.list.eligibilityClear", locale)}
-                        </Pill>
-                      )}
-                    </div>
-                  </Field>
-
-                  <Field
-                    theme={theme}
-                    label={
-                      locale === "en" ? "Location freshness" : "定位新鮮度"
-                    }
-                  >
-                    <DL
-                      theme={theme}
-                      cols={2}
-                      monoVal
-                      items={[
-                        {
-                          label: t("drivers.list.locationLive", locale),
-                          value: `${liveLocationCount}`,
-                        },
-                        {
-                          label: t("drivers.list.locationStale", locale),
-                          value: `${staleLocationCount}`,
-                        },
-                        {
-                          label: t("drivers.list.locationMissing", locale),
-                          value: `${missingLocationCount}`,
-                        },
-                        {
-                          label: t("drivers.list.locationUnknown", locale),
-                          value: `${unknownLocationCount}`,
-                        },
-                      ]}
-                    />
-                  </Field>
-                </div>
-              </Card>
-            </div>
-          </div>
+          <Card theme={theme} padding={0}>
+            {rows.length > 0 ? (
+              <Table theme={theme} columns={columns} rows={rows} />
+            ) : null}
+          </Card>
         </div>
       </div>
     </Shell>
