@@ -13,9 +13,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
-  CanvasField,
-  CanvasInput,
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
@@ -41,27 +38,15 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const quotaGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.25fr) minmax(280px, 1fr)",
-  gap: 16,
-};
-
-const quotaFieldGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-};
-
 const kpiGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 12,
 };
 
 const contentGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 1fr)",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
   gap: 16,
 };
 
@@ -90,28 +75,11 @@ const bannerStackStyle: CSSProperties = {
   gap: 8,
 };
 
-const quotaMetaStackStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 12,
-};
-
 const emptyStateStyle: CSSProperties = {
   padding: 24,
   color: th.textMuted,
   fontSize: 12.5,
   textAlign: "center",
-};
-
-const mutedTextStyle: CSSProperties = {
-  color: th.textMuted,
-  fontSize: 11.5,
-  lineHeight: 1.45,
-};
-
-const sectionHintStyle: CSSProperties = {
-  ...mutedTextStyle,
-  marginTop: -2,
 };
 
 const dateFormatter = new Intl.DateTimeFormat("zh-Hant", {
@@ -306,25 +274,6 @@ function formatQuotaHeader(summary: TenantQuotaSummary | null) {
   return `本月配額 ${formatQuotaUsage(summary)} / ${formatQuotaLimit(summary)}`;
 }
 
-function formatQuotaRemaining(summary: TenantQuotaSummary | null) {
-  if (!summary) return "—";
-
-  if (summary.limit.bookingCountLimit !== null) {
-    if (summary.usage.bookingCountRemaining === null) return "—";
-    return `${formatCount(summary.usage.bookingCountRemaining)} 趟`;
-  }
-
-  if (summary.limit.amountMinorLimit !== null) {
-    if (summary.usage.amountMinorRemaining === null) return "—";
-    return formatMoneyMinor(
-      summary.usage.amountMinorRemaining,
-      summary.limit.currency,
-    );
-  }
-
-  return "無上限";
-}
-
 function formatQuotaMode(
   mode: TenantQuotaSummary["limit"]["enforcementMode"] | null | undefined,
 ) {
@@ -504,28 +453,6 @@ export default async function HomePage() {
   const latestInvoiceLabel = latestInvoice
     ? `${latestInvoice.periodStart.slice(0, 7)} · ${latestInvoice.status}`
     : "尚無帳單";
-  const quotaMetaItems = [
-    {
-      k: "週期",
-      v: data.quotaSummary?.periodKey ?? "本月",
-      mono: true,
-    },
-    {
-      k: "限額",
-      v: formatQuotaLimit(data.quotaSummary),
-      mono: true,
-    },
-    {
-      k: "待簽核",
-      v: `${formatCount(data.approvalRequests.length)} 筆`,
-      mono: true,
-    },
-    {
-      k: "帳單",
-      v: latestInvoiceLabel,
-      mono: true,
-    },
-  ];
 
   const columns: CanvasTableColumn<BookingRow>[] = [
     {
@@ -593,67 +520,6 @@ export default async function HomePage() {
           />
         ) : null}
 
-        <CanvasCard
-          theme={th}
-          title="本月配額"
-          subtitle="quota / approval / billing snapshot"
-          actions={
-            <CanvasPill theme={th} tone={quotaTone} dot>
-              {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
-            </CanvasPill>
-          }
-        >
-          <div style={quotaGridStyle}>
-            <div>
-              <div style={quotaFieldGridStyle}>
-                <CanvasField
-                  theme={th}
-                  label="已使用"
-                  hint={formatQuotaSub(data.quotaSummary)}
-                >
-                  <CanvasInput
-                    theme={th}
-                    mono
-                    value={formatQuotaUsage(data.quotaSummary)}
-                  />
-                </CanvasField>
-                <CanvasField
-                  theme={th}
-                  label="剩餘"
-                  hint="current monthly balance"
-                >
-                  <CanvasInput
-                    theme={th}
-                    mono
-                    value={formatQuotaRemaining(data.quotaSummary)}
-                  />
-                </CanvasField>
-                <CanvasField
-                  theme={th}
-                  label="強制模式"
-                  hint="tenant-level quota gate"
-                >
-                  <CanvasInput
-                    theme={th}
-                    mono
-                    value={formatQuotaMode(
-                      data.quotaSummary?.limit.enforcementMode,
-                    )}
-                  />
-                </CanvasField>
-              </div>
-            </div>
-
-            <div style={quotaMetaStackStyle}>
-              <CanvasDL theme={th} cols={2} items={quotaMetaItems} />
-              <div style={mutedTextStyle}>
-                配額快照會沿用既有租戶資料抓取結果，與審批頁的 pending requests
-                / quota impact 一致。
-              </div>
-            </div>
-          </div>
-        </CanvasCard>
-
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
@@ -691,7 +557,6 @@ export default async function HomePage() {
           <CanvasCard
             theme={th}
             title="進行中訂單"
-            subtitle="active bookings / dispatch state"
             padding={0}
             actions={
               <CanvasBtn theme={th} variant="ghost" size="sm">
@@ -709,11 +574,12 @@ export default async function HomePage() {
           <CanvasCard
             theme={th}
             title="提醒"
-            subtitle="ops / approval / quota watchlist"
+            actions={
+              <CanvasPill theme={th} tone={quotaTone} dot>
+                {formatQuotaMode(data.quotaSummary?.limit.enforcementMode)}
+              </CanvasPill>
+            }
           >
-            <div style={sectionHintStyle}>
-              依目前首頁快照整理最需要被處理的租戶提醒。
-            </div>
             <div style={bannerStackStyle}>
               {reminderBanners.map((banner, index) => (
                 <CanvasBanner
