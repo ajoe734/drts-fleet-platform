@@ -8,11 +8,11 @@ This document contains the acceptance checklist and dependency map for the UI-HA
 - UI-CANVAS-OC-CHROME-001
 
 ## Acceptance Checklist
-- [ ] Dependency verification for UI-CANVAS-DS-001 completed.
-- [ ] Dependency verification for UI-CANVAS-OC-CHROME-001 completed.
-- [ ] All support artifacts generated.
-- [ ] Canonical truth remains untouched.
-- [ ] Handoff packet prepared for Codex2.
+- [x] Dependency verification for UI-CANVAS-DS-001 completed.
+- [x] Dependency verification for UI-CANVAS-OC-CHROME-001 completed.
+- [x] All support artifacts generated.
+- [x] Canonical truth remains untouched.
+- [x] Handoff packet prepared for Codex2.
 
 ## Support Artifacts
 - This file (acceptance checklist and dependency map).
