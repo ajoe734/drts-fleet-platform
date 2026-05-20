@@ -75,10 +75,12 @@ type ApiListPayload<T> = {
 type QueueRow = Record<string, unknown> & {
   orderId: string;
   orderNo: string;
+  orderCell: ReactNode;
   tenant: string;
   pickup: string;
   window: string;
   state: string;
+  stateCell: ReactNode;
   driver: string;
   eta: string;
 };
@@ -192,6 +194,21 @@ const queueLinkStyle = {
   textDecoration: "none",
   fontWeight: 700,
 };
+
+const dashboardShellResetCss = `
+  body {
+    background: ${theme.bg};
+  }
+
+  body > aside {
+    display: none !important;
+  }
+
+  body > main {
+    padding: 0 !important;
+    background: ${theme.bg} !important;
+  }
+`;
 
 function buildShellNav(
   locale: Locale,
@@ -1524,10 +1541,26 @@ export default async function DashboardPage() {
       return {
         orderId: order.orderId,
         orderNo: order.orderNo,
+        orderCell: (
+          <div style={queueStackStyle}>
+            <Link
+              href={`/dispatch/${encodeURIComponent(order.orderId)}`}
+              style={queueLinkStyle}
+            >
+              {order.orderNo}
+            </Link>
+            <span style={queueSubLabelStyle}>{order.orderId}</span>
+          </div>
+        ),
         tenant: getTenantLabel(order),
         pickup: getAddressLabel(order.pickup),
         window: formatWindow(order, locale),
         state,
+        stateCell: (
+          <Pill theme={theme} tone={getStateTone(state)} dot>
+            {state}
+          </Pill>
+        ),
         driver: task?.driverId ?? "—",
         eta: formatEtaLabel(
           job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes,
@@ -1537,19 +1570,8 @@ export default async function DashboardPage() {
   const queueColumns: CanvasTableColumn<QueueRow>[] = [
     {
       h: getQueueColumnLabel("orderNo", locale),
+      k: "orderCell",
       w: 126,
-      mono: true,
-      r: (row) => (
-        <div style={queueStackStyle}>
-          <Link
-            href={`/dispatch/${encodeURIComponent(row.orderId)}`}
-            style={queueLinkStyle}
-          >
-            {row.orderNo}
-          </Link>
-          <span style={queueSubLabelStyle}>{row.orderId}</span>
-        </div>
-      ),
     },
     {
       h: getQueueColumnLabel("tenant", locale),
@@ -1570,12 +1592,8 @@ export default async function DashboardPage() {
     },
     {
       h: getQueueColumnLabel("statePill", locale),
+      k: "stateCell",
       w: 142,
-      r: (row) => (
-        <Pill theme={theme} tone={getStateTone(row.state)} dot>
-          {row.state}
-        </Pill>
-      ),
     },
     {
       h: getQueueColumnLabel("driver", locale),
@@ -1628,221 +1646,228 @@ export default async function DashboardPage() {
         };
 
   return (
-    <Shell
-      theme={theme}
-      nav={shellNav}
-      active="dashboard"
-      brandLabel={t("app.name", locale)}
-      brandSubLabel={t("app.sub", locale)}
-      breadcrumb={[t("nav.dashboard", locale)]}
-      env="production"
-      versionLabel="canvas"
-      searchPlaceholder={t("common.search", locale)}
-      avatarLabel="OC"
-      style={{ height: "100%" }}
-    >
-      <PageHeader
+    <>
+      <style>{dashboardShellResetCss}</style>
+      <Shell
         theme={theme}
-        title={t("dashboard.title", locale)}
-        subtitle={headerSubtitle}
-        actions={
-          <>
-            <Btn theme={theme} icon="ext">
-              {locale === "en" ? "Duty handbook" : "值班手冊"}
-            </Btn>
-            <Btn theme={theme} variant="primary" icon="phone">
-              {locale === "en" ? "Open call session" : "開新 call session"}
-            </Btn>
-          </>
-        }
-      />
-
-      <div style={pageBodyStyle}>
-        <div style={kpiGridStyle}>
-          <KPI
-            theme={theme}
-            label={t("dashboard.activeOrders", locale)}
-            value={formatCompactNumber(dispatch.activeOrders)}
-            delta={
-              dispatch.redispatchOrders > 0
-                ? `${formatCompactNumber(dispatch.redispatchOrders)} redispatch`
-                : undefined
-            }
-            deltaTone={dispatch.redispatchOrders > 0 ? "down" : "neutral"}
-            sub={t("dashboard.activeOrdersSub", locale)}
-          />
-          <KPI
-            theme={theme}
-            label={t("dashboard.queueDepth", locale)}
-            value={formatCompactNumber(dispatch.queueDepth)}
-            delta={
-              broadcastingCount > 0
-                ? `${formatCompactNumber(broadcastingCount)} broadcasting`
-                : undefined
-            }
-            sub={
-              dispatch.averageEtaMinutes
-                ? t("dashboard.queueDepthSub", locale, {
-                    eta: dispatch.averageEtaMinutes,
-                  })
-                : t("dashboard.queueDepthSubPending", locale)
-            }
-          />
-          <KPI
-            theme={theme}
-            label={t("dashboard.onlineDrivers", locale)}
-            value={formatCompactNumber(dispatchEligibleDrivers)}
-            sub={t("dashboard.onlineDriversSub", locale)}
-            hint={
-              locale === "en"
-                ? `${formatCompactNumber(operations.onlineDrivers)} on shift`
-                : `${formatCompactNumber(operations.onlineDrivers)} 在班`
-            }
-          />
-          <KPI
-            theme={theme}
-            label={t("dashboard.dispatchableVehicles", locale)}
-            value={formatCompactNumber(operations.dispatchableVehicles)}
-            delta={
-              staleLocationDrivers > 0
-                ? locale === "en"
-                  ? `${formatCompactNumber(staleLocationDrivers)} stale`
-                  : `${formatCompactNumber(staleLocationDrivers)} 筆 stale`
-                : undefined
-            }
-            deltaTone={
-              staleLocationDrivers > 0 || operations.offlineVehicles > 0
-                ? "down"
-                : "neutral"
-            }
-            sub={t("dashboard.dispatchableVehiclesSub", locale, {
-              count: operations.offlineVehicles,
-            })}
-            hint={staleLocationDelta}
-          />
-          <KPI
-            theme={theme}
-            label={t("dashboard.openIncidents", locale)}
-            value={formatCompactNumber(operations.openIncidents)}
-            delta={
-              operations.overdueMaintenance > 0
-                ? `${formatCompactNumber(operations.overdueMaintenance)} breach`
-                : undefined
-            }
-            deltaTone={operations.overdueMaintenance > 0 ? "down" : "neutral"}
-            sub={t("dashboard.openIncidentsSub", locale, {
-              count: operations.overdueMaintenance,
-            })}
-          />
-          <KPI
-            theme={theme}
-            label={t("dashboard.todayRevenue", locale)}
-            value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
-            delta={
-              criticalIncidentCount > 0
-                ? locale === "en"
-                  ? `${formatCompactNumber(criticalIncidentCount)} critical`
-                  : `${formatCompactNumber(criticalIncidentCount)} 重大`
-                : undefined
-            }
-            deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
-            sub={t("dashboard.todayRevenueSub", locale, {
-              trips: formatCompactNumber(todayRevenue.completedTrips),
-            })}
-          />
-        </div>
-
-        <div style={splitGridStyle}>
-          <Card
-            theme={theme}
-            title={locale === "en" ? "Today's Attention" : "今日待處理"}
-            subtitle={
-              locale === "en"
-                ? "Critical first, then SLA breach, then blocking queue"
-                : "排序：critical → SLA breach → blocking"
-            }
-            actions={
-              <Btn theme={theme} variant="ghost">
-                {locale === "en" ? "Open all" : "展開所有"}
-              </Btn>
-            }
-          >
-            <div style={bannerStackStyle}>
-              {banners.length > 0 ? (
-                banners.map((banner) => (
-                  <Banner
-                    key={banner.key}
-                    theme={theme}
-                    tone={banner.tone}
-                    icon={<CanvasIcon name="warn" size={16} />}
-                    title={banner.title}
-                    body={banner.body}
-                    actions={
-                      <Link
-                        href={banner.href}
-                        style={{ textDecoration: "none" }}
-                      >
-                        <Btn
-                          theme={theme}
-                          variant={
-                            banner.tone === "danger" ? "primary" : "secondary"
-                          }
-                        >
-                          {banner.cta}
-                        </Btn>
-                      </Link>
-                    }
-                  />
-                ))
-              ) : (
-                <Banner
-                  theme={theme}
-                  tone="info"
-                  icon={<CanvasIcon name="health" size={16} />}
-                  title={t("dashboard.exceptions.title", locale)}
-                  body={t("dashboard.exceptions.none", locale)}
-                />
-              )}
-            </div>
-          </Card>
-
-          <Card
-            theme={theme}
-            title={locale === "en" ? "Health Signals" : "健康訊號"}
-          >
-            <div style={signalListStyle}>
-              {healthSignals.map((signal, index) => (
-                <div key={`${signal.label}-${index}`} style={signalRowStyle}>
-                  <Pill theme={theme} tone={signal.tone} dot>
-                    {signal.value}
-                  </Pill>
-                  <span style={signalLabelStyle}>{signal.label}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
-
-        <Card
+        nav={shellNav}
+        active="dashboard"
+        brandLabel={t("app.name", locale)}
+        brandSubLabel={t("app.sub", locale)}
+        breadcrumb={[t("nav.dashboard", locale)]}
+        env="production"
+        versionLabel="canvas"
+        searchPlaceholder={t("common.search", locale)}
+        avatarLabel="OC"
+        style={{ minHeight: "100vh", height: "100vh" }}
+      >
+        <PageHeader
           theme={theme}
-          title={
-            locale === "en" ? "Current Dispatch Queue" : "當前 dispatch 隊列"
-          }
-          padding={0}
+          title={t("dashboard.title", locale)}
+          subtitle={headerSubtitle}
           actions={
-            <Link
-              href="/dispatch?view=owned"
-              style={{ textDecoration: "none" }}
-            >
-              <Btn theme={theme} variant="ghost">
-                {locale === "en" ? "Open dispatch" : "前往派遣"}
+            <>
+              <Btn theme={theme} icon="ext">
+                {locale === "en" ? "Duty handbook" : "值班手冊"}
               </Btn>
-            </Link>
+              <Btn theme={theme} variant="primary" icon="phone">
+                {locale === "en" ? "Open call session" : "開新 call session"}
+              </Btn>
+            </>
           }
-        >
-          <Table theme={theme} columns={queueColumns} rows={queueRows} />
-        </Card>
-      </div>
-    </Shell>
+        />
+
+        <div style={pageBodyStyle}>
+          <div style={kpiGridStyle}>
+            <KPI
+              theme={theme}
+              label={t("dashboard.activeOrders", locale)}
+              value={formatCompactNumber(dispatch.activeOrders)}
+              delta={
+                dispatch.redispatchOrders > 0
+                  ? `${formatCompactNumber(dispatch.redispatchOrders)} redispatch`
+                  : undefined
+              }
+              deltaTone={dispatch.redispatchOrders > 0 ? "down" : "neutral"}
+              sub={t("dashboard.activeOrdersSub", locale)}
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.queueDepth", locale)}
+              value={formatCompactNumber(dispatch.queueDepth)}
+              delta={
+                broadcastingCount > 0
+                  ? `${formatCompactNumber(broadcastingCount)} broadcasting`
+                  : undefined
+              }
+              sub={
+                dispatch.averageEtaMinutes
+                  ? t("dashboard.queueDepthSub", locale, {
+                      eta: dispatch.averageEtaMinutes,
+                    })
+                  : t("dashboard.queueDepthSubPending", locale)
+              }
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.onlineDrivers", locale)}
+              value={formatCompactNumber(dispatchEligibleDrivers)}
+              sub={t("dashboard.onlineDriversSub", locale)}
+              hint={
+                locale === "en"
+                  ? `${formatCompactNumber(operations.onlineDrivers)} on shift`
+                  : `${formatCompactNumber(operations.onlineDrivers)} 在班`
+              }
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.dispatchableVehicles", locale)}
+              value={formatCompactNumber(operations.dispatchableVehicles)}
+              delta={
+                staleLocationDrivers > 0
+                  ? locale === "en"
+                    ? `${formatCompactNumber(staleLocationDrivers)} stale`
+                    : `${formatCompactNumber(staleLocationDrivers)} 筆 stale`
+                  : undefined
+              }
+              deltaTone={
+                staleLocationDrivers > 0 || operations.offlineVehicles > 0
+                  ? "down"
+                  : "neutral"
+              }
+              sub={t("dashboard.dispatchableVehiclesSub", locale, {
+                count: operations.offlineVehicles,
+              })}
+              hint={staleLocationDelta}
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.openIncidents", locale)}
+              value={formatCompactNumber(operations.openIncidents)}
+              delta={
+                operations.overdueMaintenance > 0
+                  ? `${formatCompactNumber(operations.overdueMaintenance)} breach`
+                  : undefined
+              }
+              deltaTone={
+                operations.overdueMaintenance > 0 ? "down" : "neutral"
+              }
+              sub={t("dashboard.openIncidentsSub", locale, {
+                count: operations.overdueMaintenance,
+              })}
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.todayRevenue", locale)}
+              value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
+              delta={
+                criticalIncidentCount > 0
+                  ? locale === "en"
+                    ? `${formatCompactNumber(criticalIncidentCount)} critical`
+                    : `${formatCompactNumber(criticalIncidentCount)} 重大`
+                  : undefined
+              }
+              deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
+              sub={t("dashboard.todayRevenueSub", locale, {
+                trips: formatCompactNumber(todayRevenue.completedTrips),
+              })}
+            />
+          </div>
+
+          <div style={splitGridStyle}>
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Today's Attention" : "今日待處理"}
+              subtitle={
+                locale === "en"
+                  ? "Critical first, then SLA breach, then blocking queue"
+                  : "排序：critical → SLA breach → blocking"
+              }
+              actions={
+                <Btn theme={theme} variant="ghost">
+                  {locale === "en" ? "Open all" : "展開所有"}
+                </Btn>
+              }
+            >
+              <div style={bannerStackStyle}>
+                {banners.length > 0 ? (
+                  banners.map((banner) => (
+                    <Banner
+                      key={banner.key}
+                      theme={theme}
+                      tone={banner.tone}
+                      icon={<CanvasIcon name="warn" size={16} />}
+                      title={banner.title}
+                      body={banner.body}
+                      actions={
+                        <Link
+                          href={banner.href}
+                          style={{ textDecoration: "none" }}
+                        >
+                          <Btn
+                            theme={theme}
+                            variant={
+                              banner.tone === "danger"
+                                ? "primary"
+                                : "secondary"
+                            }
+                          >
+                            {banner.cta}
+                          </Btn>
+                        </Link>
+                      }
+                    />
+                  ))
+                ) : (
+                  <Banner
+                    theme={theme}
+                    tone="info"
+                    icon={<CanvasIcon name="health" size={16} />}
+                    title={t("dashboard.exceptions.title", locale)}
+                    body={t("dashboard.exceptions.none", locale)}
+                  />
+                )}
+              </div>
+            </Card>
+
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Health Signals" : "健康訊號"}
+            >
+              <div style={signalListStyle}>
+                {healthSignals.map((signal, index) => (
+                  <div key={`${signal.label}-${index}`} style={signalRowStyle}>
+                    <Pill theme={theme} tone={signal.tone} dot>
+                      {signal.value}
+                    </Pill>
+                    <span style={signalLabelStyle}>{signal.label}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+
+          <Card
+            theme={theme}
+            title={
+              locale === "en" ? "Current Dispatch Queue" : "當前 dispatch 隊列"
+            }
+            padding={0}
+            actions={
+              <Link
+                href="/dispatch?view=owned"
+                style={{ textDecoration: "none" }}
+              >
+                <Btn theme={theme} variant="ghost">
+                  {locale === "en" ? "Open dispatch" : "前往派遣"}
+                </Btn>
+              </Link>
+            }
+          >
+            <Table theme={theme} columns={queueColumns} rows={queueRows} />
+          </Card>
+        </div>
+      </Shell>
+    </>
   );
 }
