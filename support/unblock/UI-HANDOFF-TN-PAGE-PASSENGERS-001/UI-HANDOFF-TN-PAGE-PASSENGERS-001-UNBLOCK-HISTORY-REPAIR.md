@@ -114,6 +114,12 @@ branch refs/heads/codex2/ui-handoff-tn-page-passengers-001-unblock-history-repai
 - Re-registered the parent and unblock task in canonical `ai-status.json` so the supervisor can track the fix in machine truth.
 - Closeout will update the parent task to the concrete codex2-lane replay step above.
 
+## Closeout evidence
+
+- Anchor commit: `485ba792` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR): anchor repair packet`
+- Push result: normal push completed to `origin/codex2/ui-handoff-tn-page-passengers-001-unblock-history-repair`
+- PR state after push: `gh pr list --head codex2/ui-handoff-tn-page-passengers-001-unblock-history-repair --json number,state,url,headRefName,baseRefName` returned `[]`
+
 ## PR status
 
-No PR was open for this repair branch when the investigation started. Closeout should record the final branch push and PR state explicitly.
+No PR is currently open for this repair branch.
