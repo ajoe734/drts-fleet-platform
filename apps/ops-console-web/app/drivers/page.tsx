@@ -729,16 +729,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     };
   });
 
-  const subtitleBase =
-    filter === "all"
-      ? t("drivers.subtitle", locale, { count: drivers.length })
-      : `${t("drivers.subtitle", locale, { count: drivers.length })} · ${t("common.visible", locale, { count: filteredDrivers.length })}`;
-  const subtitle = `${subtitleBase} · ${t("drivers.registrySummary", locale, {
-    eligible: dispatchEligibleCount,
-    blocked: blockedCount,
-    live: liveLocationCount,
-    stale: staleLocationCount,
-  })}`;
+  const subtitle = t("drivers.subtitle", locale, { count: drivers.length });
   const showRegistrySummary =
     Boolean(registryError) || Boolean(locationsError) || rows.length === 0;
 
