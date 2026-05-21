@@ -9,10 +9,8 @@ import {
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import { getPlatformLabel } from "@/lib/localized-labels";
 import type { FeatureFlag, FeatureFlagSummary } from "@drts/contracts";
 import {
-  CanvasBanner,
   CanvasCard,
   CanvasPageHeader,
   CanvasShell,
@@ -46,6 +44,12 @@ const bodyStyle = {
 
 const loadingStateStyle = {
   color: theme.textMuted,
+  fontSize: 12.5,
+  padding: 24,
+} satisfies CSSProperties;
+
+const errorStateStyle = {
+  color: theme.danger,
   fontSize: 12.5,
   padding: 24,
 } satisfies CSSProperties;
@@ -376,19 +380,11 @@ export default function FeatureFlagsPage() {
       />
 
       <div style={bodyStyle}>
-        {error ? (
-          <div style={{ marginBottom: 16 }}>
-            <CanvasBanner
-              theme={theme}
-              tone="danger"
-              title={`${getPlatformLabel(locale, "error")}: ${error}`}
-            />
-          </div>
-        ) : null}
-
         <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
           {loading ? (
             <div style={loadingStateStyle}>{copy.loading}</div>
+          ) : error ? (
+            <div style={errorStateStyle}>{error}</div>
           ) : rows.length === 0 ? (
             <div style={emptyStateStyle}>{copy.empty}</div>
           ) : (
