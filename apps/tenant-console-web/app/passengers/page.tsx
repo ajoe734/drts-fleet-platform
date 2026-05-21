@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { TenantPassengerRecord } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -168,6 +168,7 @@ function buildTabNodes(selectedTab: PassengerTabKey) {
       {tab.label}
     </Link>
   ));
+
   const activeIndex = PASSENGER_TABS.findIndex(
     (tab) => tab.key === selectedTab,
   );
@@ -242,7 +243,7 @@ export default async function PassengersPage({
         theme={th}
         title="乘客通訊錄"
         subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本"
-        tabs={tabs}
+        tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={
           <>
