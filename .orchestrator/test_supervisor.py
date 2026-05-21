@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import signal
 import subprocess
 import tempfile
 import unittest
@@ -22,6 +23,27 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+class CommandActivityLogSummaryTests(unittest.TestCase):
+    def test_summarizes_codex_exec_prompt_without_logging_full_prompt(self) -> None:
+        prompt = "read a very large task packet\n" + ("x" * 1000)
+        summary = supervisor.summarize_command_for_activity_log(
+            ["codex", "exec", "--model", "gpt-5.2", prompt]
+        )
+
+        self.assertEqual(summary["argv0"], "codex")
+        self.assertEqual(summary["prompt_chars"], len(prompt))
+        self.assertIn("prompt_sha256", summary)
+        self.assertNotIn(prompt, summary["args_preview"])
+        self.assertLessEqual(len(summary["prompt_preview"]), 243)
+
+    def test_summarizes_flag_prompt_without_logging_argument_value(self) -> None:
+        prompt = "dispatch worker context"
+        summary = supervisor.summarize_command_for_activity_log(
+            ["agent", "run", "--prompt", prompt, "--other", "value"]
+        )
+
+        self.assertEqual(summary["args_preview"], ["agent", "run", "--other", "value"])
+        self.assertEqual(summary["prompt_chars"], len(prompt))
 class DetectWorkerFailureTests(unittest.TestCase):
     def _worker_for_log(self, content: str) -> dict[str, str]:
         handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
@@ -913,6 +935,118 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
         self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
 
+    def test_outstanding_delivery_counts_skip_events_with_active_workers(self) -> None:
+        config = {
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running", "manual_pending"],
+            }
+        }
+        state = {
+            "queue": {
+                "events": {
+                    "evt-active": {"status": "started"},
+                    "evt-pending": {"status": "queued"},
+                }
+            },
+            "workers": {
+                "run-active": {
+                    "queue_event_id": "evt-active",
+                    "agent_id": "codex2",
+                    "task_id": "CODEX2-ACTIVE",
+                    "status": "running",
+                }
+            },
+        }
+        events = [
+            {
+                "event_id": "evt-active",
+                "event_key": "dispatcher:Codex2:CODEX2-ACTIVE",
+                "target_agent": "codex2",
+                "task_id": "CODEX2-ACTIVE",
+            },
+            {
+                "event_id": "evt-pending",
+                "event_key": "dispatcher:Codex2:CODEX2-PENDING",
+                "target_agent": "codex2",
+                "task_id": "CODEX2-PENDING",
+            },
+        ]
+
+        with mock.patch.object(supervisor, "load_event_queue", return_value=events):
+            agents, task_agents, event_keys = supervisor.outstanding_delivery_indexes(config, state)
+            counts = supervisor.outstanding_delivery_agent_counts(config, state)
+
+        self.assertEqual(agents, {"codex2"})
+        self.assertEqual(task_agents, {("CODEX2-PENDING", "codex2")})
+        self.assertEqual(event_keys, {"dispatcher:Codex2:CODEX2-PENDING"})
+        self.assertEqual(counts, {"codex2": 1})
+
+    def test_dispatcher_does_not_double_count_started_events_against_lane_capacity(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 3},
+                "max_dispatches_per_tick": 4,
+            },
+            "agents": {
+                "codex2": {
+                    "id": "codex2",
+                    "display_name": "Codex2",
+                    "provider": "codex2",
+                    "adapter": "codex",
+                }
+            },
+            "providers": {"codex2": {"delivery_mode": "codex"}},
+        }
+        active_task = {"id": "CODEX2-ACTIVE", "status": "in_progress", "owner": "Codex2", "reviewer": "Codex", "depends_on": []}
+        active_event = supervisor.build_dispatch_event(
+            active_task,
+            "Codex2",
+            "owned_in_progress_dispatch",
+            {"CODEX2-ACTIVE": active_task},
+        )
+        active_event["event_id"] = "evt-active"
+        state = {
+            "queue": {"events": {"evt-active": {"status": "started", "run_id": "run-active"}}},
+            "workers": {
+                "run-active": {
+                    "run_id": "run-active",
+                    "queue_event_id": "evt-active",
+                    "task_id": "CODEX2-ACTIVE",
+                    "agent_id": "codex2",
+                    "provider": "codex2",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+            "seen_event_keys": {},
+        }
+        status = {
+            "tasks": [
+                active_task,
+                {"id": "CODEX2-NEXT-1", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-2", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-3", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[active_event]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
+        self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
     def test_prune_completed_dispatch_pauses_removes_done_task_entries(self) -> None:
         state = {
             "dispatch_pauses": [
@@ -1611,6 +1745,43 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
 
 
 class RunOnceSupervisorStateTests(unittest.TestCase):
+    def test_mode_occupancy_does_not_count_active_queue_event_as_pending(self) -> None:
+        state = {
+            "workers": {
+                "run-1": {
+                    "status": "running",
+                    "queue_event_id": "evt-active",
+                    "request_snapshot": {
+                        "reason": "owned_ready_dispatch",
+                        "metadata": {"mode": "execution"},
+                    },
+                }
+            },
+            "queue": {
+                "events": {
+                    "evt-active": {"status": "started", "mode": "execution", "run_id": "run-1"},
+                    "evt-queued": {"status": "queued", "mode": "execution"},
+                    "evt-pending": {"status": "manual_pending", "mode": "coordination"},
+                }
+            },
+            "supervisor": {},
+        }
+
+        supervisor.update_supervisor_mode_metadata(
+            state,
+            focus_mode="execution",
+            heartbeat_at="2026-05-18T00:00:00Z",
+        )
+
+        self.assertEqual(
+            state["supervisor"]["mode_occupancy"]["execution"],
+            {"running": 1, "pending": 0, "queued": 1},
+        )
+        self.assertEqual(
+            state["supervisor"]["mode_occupancy"]["coordination"],
+            {"running": 0, "pending": 1, "queued": 0},
+        )
+
     def test_heartbeat_lag_seconds_reports_gap(self) -> None:
         lag = supervisor.heartbeat_lag_seconds(
             "2026-04-06T12:00:00Z",
@@ -1618,6 +1789,121 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         )
 
         self.assertEqual(lag, 12.0)
+
+    def test_mark_supervisor_stopped_clears_pid_workers_and_chair_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            state_path = root / "state.json"
+            event_queue_path = root / "event-queue.jsonl"
+            activity_log_path = root / "activity-log.jsonl"
+            status_path = root / "ai-status.json"
+            approval_path = root / "approval-queue.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "queue": {
+                            "events": {
+                                "evt-worker": {"status": "started", "run_id": "run-worker"},
+                                "evt-chair": {"status": "started", "run_id": "run-chair"},
+                            }
+                        },
+                        "workers": {
+                            "run-worker": {
+                                "run_id": "run-worker",
+                                "status": "running",
+                                "pid": 4242,
+                                "queue_event_id": "evt-worker",
+                                "task_id": "TASK-1",
+                                "provider": "codex",
+                                "request_snapshot": {
+                                    "reason": "owned_in_progress_dispatch",
+                                    "metadata": {"mode": "execution"},
+                                },
+                            },
+                        },
+                        "chair_review": {
+                            "active_review": {
+                                "agent": "Gemini2",
+                                "agent_id": "gemini2",
+                                "reason": "provider_health_triage",
+                                "queue_event_id": "evt-chair",
+                            }
+                        },
+                        "supervisor": {
+                            "pid": 4241,
+                            "focus_mode": "execution",
+                            "mode_status": "active",
+                            "lifecycle": "running",
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            event_queue_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"event_id": "evt-worker"}),
+                        json.dumps({"event_id": "evt-chair"}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            activity_log_path.write_text("", encoding="utf-8")
+            status_path.write_text('{"tasks":[]}\n', encoding="utf-8")
+            approval_path.write_text('{"pending":[],"history":[]}\n', encoding="utf-8")
+            config = {
+                "paths": {
+                    "state_file": str(state_path),
+                    "event_queue": str(event_queue_path),
+                    "activity_log": str(activity_log_path),
+                    "status_file": str(status_path),
+                    "approval_queue": str(approval_path),
+                },
+                "ready_dispatcher": {
+                    "active_worker_statuses": ["running", "stalled", "waiting_approval", "manual_pending"]
+                },
+            }
+
+            with mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate:
+                changed = supervisor.mark_supervisor_stopped(
+                    config,
+                    reason="signal:SIGTERM",
+                    signum=15,
+                    terminate_workers=True,
+                )
+
+            self.assertTrue(changed)
+            terminate.assert_called_once_with(4242)
+            saved = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertIsNone(saved["supervisor"]["pid"])
+            self.assertEqual(saved["supervisor"]["last_pid"], 4241)
+            self.assertEqual(saved["supervisor"]["lifecycle"], "stopped")
+            self.assertEqual(saved["supervisor"]["mode_status"], "stopped")
+            self.assertEqual(saved["supervisor"]["stop_reason"], "signal:SIGTERM")
+            self.assertEqual(saved["workers"]["run-worker"]["status"], "interrupted")
+            self.assertIsNone(saved["workers"]["run-worker"]["pid"])
+            self.assertEqual(saved["workers"]["run-worker"]["stopped_pid"], 4242)
+            self.assertEqual(saved["queue"]["events"]["evt-worker"]["status"], "failed")
+            self.assertIn("Supervisor stopped", saved["queue"]["events"]["evt-worker"]["error"])
+            self.assertEqual(saved["queue"]["events"]["evt-chair"]["status"], "failed")
+            self.assertIsNone(saved["chair_review"]["active_review"])
+            self.assertEqual(saved["chair_review"]["interrupted_review"]["agent_id"], "gemini2")
+            self.assertEqual(saved["chair_review"]["interrupted_review"]["reason"], "provider_health_triage")
+            self.assertEqual(
+                saved["chair_review"]["interrupted_review"]["interruption_reason"],
+                "signal:SIGTERM",
+            )
+            self.assertEqual(saved["supervisor"]["mode_occupancy"]["execution"]["running"], 0)
+
+    def test_signal_handler_raises_controlled_shutdown(self) -> None:
+        with self.assertRaises(supervisor.SupervisorShutdown) as ctx:
+            supervisor.raise_supervisor_shutdown(signal.SIGTERM, None)
+
+        self.assertEqual(ctx.exception.signum, signal.SIGTERM)
+        self.assertEqual(ctx.exception.reason, "signal:SIGTERM")
 
     def test_run_once_re_stamps_current_pid_after_watch_reload(self) -> None:
         config = {
@@ -2303,9 +2589,114 @@ class PollWorkersRecoveryTests(unittest.TestCase):
                 task_map,
                 state=state,
                 active_statuses={"running"},
+                )
             )
-        )
 
+    def test_chair_guarded_higher_priority_task_does_not_supersede_full_lane(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running"],
+                "review_statuses": ["review"],
+                "dependency_done_statuses": ["done"],
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 1},
+            },
+            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
+        }
+        low_worker = {
+            "task_id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+            "provider": "codex2",
+            "agent_id": "codex2",
+            "status": "running",
+            "queue_event_id": "evt-low",
+            "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+        }
+        state = {
+            "queue": {"events": {"evt-low": {"status": "started"}}},
+            "workers": {"run-low": low_worker},
+            "failure_streaks": {
+                "PBK-UI-003:reviewer": {
+                    "task_id": "PBK-UI-003",
+                    "role": "reviewer",
+                    "agent": "Codex2",
+                    "awaiting_chair": True,
+                }
+            },
+        }
+        task_map = {
+            "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR": {
+                "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                "status": "in_progress",
+                "owner": "Codex2",
+                "reviewer": "Claude2",
+                "depends_on": [],
+            },
+            "PBK-UI-003": {
+                "id": "PBK-UI-003",
+                "status": "review",
+                "owner": "Claude2",
+                "reviewer": "Codex2",
+                "depends_on": [],
+            },
+        }
+
+        with mock.patch.object(supervisor, "load_event_queue", return_value=[]):
+            self.assertFalse(
+                supervisor.higher_priority_ready_task_exists(
+                    config,
+                    low_worker,
+                    task_map,
+                    state=state,
+                    active_statuses={"running"},
+                )
+            )
+
+    def test_agent_dispatch_loads_skip_events_with_active_workers(self) -> None:
+        config = {
+            "ready_dispatcher": {"active_worker_statuses": ["running"]},
+            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
+        }
+        state = {
+            "queue": {
+                "events": {
+                    "evt-active": {"status": "started"},
+                    "evt-pending": {"status": "queued"},
+                }
+            },
+            "workers": {
+                "run-active": {
+                    "queue_event_id": "evt-active",
+                    "agent_id": "codex2",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+        events = [
+            {
+                "event_id": "evt-active",
+                "target_agent": "codex2",
+                "target_display_name": "Codex2",
+                "reason": "owned_in_progress_dispatch",
+            },
+            {
+                "event_id": "evt-pending",
+                "target_agent": "codex2",
+                "target_display_name": "Codex2",
+                "reason": "owned_finalize_dispatch",
+            },
+        ]
+
+        with mock.patch.object(supervisor, "load_event_queue", return_value=events):
+            loads = supervisor.agent_dispatch_loads(config, state, {"running"})
+
+        self.assertEqual(loads, {"Codex2": [2, 1]})
     def test_dead_worker_for_open_task_is_marked_failed_not_completed(self) -> None:
         config = {
             "schema": {
@@ -2472,6 +2863,120 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(worker["status"], "completed")
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_completed")
+
+    def test_dead_owner_worker_completed_when_status_write_lands_between_loads(self) -> None:
+        """Race protection: worker writes status='review' to ai-status.json then exits
+        within the same supervisor tick. The task_map cached at the top of the tick
+        still shows 'in_progress'; only a fresh re-read sees 'review'. The supervisor
+        must not flag this as 'exited before terminal status'."""
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "PBK-UI-003",
+                    "provider": "codex",
+                    "agent_id": "codex",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-05-18T19:07:30Z",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+        stale_status = {"tasks": [{"id": "PBK-UI-003", "status": "in_progress", "owner": "Codex", "reviewer": "Gemini2"}]}
+        fresh_status = {"tasks": [{"id": "PBK-UI-003", "status": "review", "owner": "Codex", "reviewer": "Gemini2"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", side_effect=[stale_status, fresh_status]),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "completed")
+        self.assertNotIn("last_error", {k: v for k, v in worker.items() if k == "last_error" and v})
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_completed")
+        self.assertIn("fresh re-read", write_activity_log.call_args.args[1]["message"])
+
+    def test_dead_owner_worker_still_terminal_when_fresh_status_unchanged(self) -> None:
+        """When the fresh re-read confirms the task did not advance, the worker is
+        still flagged as 'exited before terminal status' (the race-protection re-read
+        must not paper over genuine premature exits)."""
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "EX-009",
+                    "provider": "codex",
+                    "agent_id": "codex",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-05-18T19:07:30Z",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+        # Both cached and fresh agree: still in_progress (worker really did exit prematurely).
+        status = {"tasks": [{"id": "EX-009", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "failed")
+        self.assertEqual(worker["last_error"], "Worker exited before the task reached a terminal status.")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
 
     def test_dead_reviewer_worker_that_advanced_task_to_review_approved_is_completed(self) -> None:
         config = {
@@ -3753,6 +4258,191 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(reason, "provider_health_triage")
 
+    def test_chair_review_reason_prioritizes_dependency_ready_blocked_tasks(self) -> None:
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-005",
+                    "status": "blocked",
+                    "owner": "Codex",
+                    "reviewer": "Codex2",
+                    "depends_on": ["DEP-001"],
+                    "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                },
+            ]
+        }
+
+        reason = supervisor.chair_review_reason(
+            {
+                "provider_pauses": {
+                    "gemini": {
+                        "kind": "quota",
+                        "reason": "QUOTA_EXHAUSTED",
+                        "paused_at": "2026-05-18T00:00:00Z",
+                    }
+                }
+            },
+            {"pending": []},
+            status=status,
+            config={"paths": {}},
+        )
+
+        self.assertEqual(reason, "blocked_task_triage")
+
+    def test_chair_review_message_includes_dependency_ready_blocked_tasks(self) -> None:
+        message = supervisor.build_chair_review_message(
+            {
+                "paths": {},
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                },
+            },
+            reason="blocked_task_triage",
+            markdown_path=Path(".orchestrator/chair-reviews/test.md"),
+            json_path=Path(".orchestrator/chair-reviews/test.json"),
+            approval_state={"pending": []},
+            state={"failure_streaks": {}, "provider_pauses": {}, "dispatch_pauses": []},
+            provider_report={},
+            status={
+                "tasks": [
+                    {"id": "DEP-001", "status": "done"},
+                    {
+                        "id": "ADM-UI-RD-005",
+                        "status": "blocked",
+                        "owner": "Codex",
+                        "reviewer": "Codex2",
+                        "depends_on": ["DEP-001"],
+                        "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                    },
+                ]
+            },
+        )
+
+        self.assertIn("Dependency-ready blocked tasks requiring chair repair", message)
+        self.assertIn("ADM-UI-RD-005", message)
+        self.assertIn("kind=history_repair", message)
+        self.assertIn("create_unblock_task", message)
+
+    def test_blocked_task_triage_requires_unblock_task_action(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "operational_review",
+            "sidecar_approved": False,
+            "approval_ttl_minutes": 45,
+            "max_sidecars": 2,
+            "reason": "blocked task needs repair",
+            "blocked_by": [],
+            "blocked_sidecar_parents": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [],
+        }
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {"id": "TEN-UI-RD-010", "status": "blocked", "depends_on": ["DEP-001"]},
+            ]
+        }
+
+        self.assertEqual(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="blocked_task_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            ),
+            "blocked_task_triage must resolve blocked tasks via TEN-UI-RD-010:create_unblock_task",
+        )
+        payload["task_actions"] = [
+            {
+                "task_id": "TEN-UI-RD-010",
+                "action": "create_unblock_task",
+                "unblock_kind": "planning_decision",
+                "reason": "Missing tenant approval-rule contract needs planning.",
+            }
+        ]
+        self.assertIsNone(supervisor.validate_chair_review_payload(payload))
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="blocked_task_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            )
+        )
+
+    def test_blocked_task_triage_requires_parent_resume_when_unblock_child_is_done(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "operational_review",
+            "sidecar_approved": False,
+            "approval_ttl_minutes": 45,
+            "max_sidecars": 2,
+            "reason": "blocked parent should resume after existing unblock child",
+            "blocked_by": [],
+            "blocked_sidecar_parents": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [],
+        }
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-006",
+                    "status": "blocked",
+                    "owner": "Codex2",
+                    "reviewer": "Codex",
+                    "depends_on": ["DEP-001"],
+                    "next": "See support/unblock/ADM-UI-RD-006/ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR.md",
+                },
+                {
+                    "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                    "status": "done",
+                    "task_class": "unblock",
+                    "helper_parent": "ADM-UI-RD-006",
+                    "helper_kind": "history_repair",
+                    "next": "Repair route documented and pushed.",
+                },
+            ]
+        }
+
+        self.assertEqual(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="blocked_task_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            ),
+            "blocked_task_triage must resolve blocked tasks via ADM-UI-RD-006:resume_parent_task",
+        )
+        payload["task_actions"] = [
+            {
+                "task_id": "ADM-UI-RD-006",
+                "action": "resume_parent_task",
+                "resume_status": "todo",
+                "reason": "Completed history-repair helper already documented the rebuild route.",
+            }
+        ]
+        self.assertIsNone(supervisor.validate_chair_review_payload(payload))
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="blocked_task_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            )
+        )
+
     def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
         state = {
             "provider_pauses": {
@@ -4771,6 +5461,218 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertEqual(events[0]["task_id"], "OPX-CM-003")
             self.assertEqual(events[0]["reason"], "owned_finalize_dispatch")
 
+    def test_refresh_chair_review_state_applies_unblock_task_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260518T000000Z-claude2.md"
+            json_path = review_dir / "20260518T000000Z-claude2.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "operational_review",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "blocked parent needs an unblock task",
+                        "blocked_by": [],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [
+                            {
+                                "task_id": "ADM-UI-RD-005",
+                                "action": "create_unblock_task",
+                                "unblock_kind": "history_repair",
+                                "target_agent": "Codex",
+                                "reviewer": "Codex2",
+                                "reason": "Shared branch history must be disentangled.",
+                            }
+                        ],
+                        "provider_actions": [],
+                        "recommended_focus": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {"id": "DEP-001", "status": "done"},
+                            {
+                                "id": "ADM-UI-RD-005",
+                                "owner": "Codex",
+                                "reviewer": "Codex2",
+                                "status": "blocked",
+                                "depends_on": ["DEP-001"],
+                                "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                    "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude2",
+                        "agent": "Claude2",
+                        "reason": "blocked_task_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "create_chair_unblock_task", return_value=True) as create_unblock,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            create_unblock.assert_called_once()
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reason"], "blocked_task_triage")
+
+    def test_refresh_chair_review_state_applies_resume_parent_task_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260518T000100Z-codex.md"
+            json_path = review_dir / "20260518T000100Z-codex.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "blocked_task_triage",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "existing unblock child is already done",
+                        "blocked_by": [],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [
+                            {
+                                "task_id": "ADM-UI-RD-006",
+                                "action": "resume_parent_task",
+                                "resume_status": "todo",
+                                "reason": "Completed history-repair helper already documented the rebuild route.",
+                            }
+                        ],
+                        "provider_actions": [],
+                        "recommended_focus": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {"id": "DEP-001", "status": "done"},
+                            {
+                                "id": "ADM-UI-RD-006",
+                                "owner": "Codex2",
+                                "reviewer": "Codex",
+                                "status": "blocked",
+                                "depends_on": ["DEP-001"],
+                                "next": "See support/unblock/ADM-UI-RD-006/ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR.md",
+                            },
+                            {
+                                "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                                "owner": "Codex2",
+                                "reviewer": "Codex",
+                                "status": "done",
+                                "task_class": "unblock",
+                                "helper_parent": "ADM-UI-RD-006",
+                                "helper_kind": "history_repair",
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "codex",
+                        "agent": "Codex",
+                        "reason": "blocked_task_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "apply_chair_parent_resume_action", return_value=True) as resume_parent,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            resume_parent.assert_called_once()
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reason"], "blocked_task_triage")
+
     def test_proactive_claim_respects_chair_reassignment_guard(self) -> None:
         config = {
             "agents": {
@@ -4820,6 +5722,134 @@ class ChairmanFlowTests(unittest.TestCase):
         )
 
         self.assertIsNone(plan)
+
+    def test_proactive_claim_respects_paused_explicit_owner(self) -> None:
+        """Don't reshuffle a task whose explicit owner is paused but not loaded.
+
+        Regression: when Gemini's lane is quota-paused (or its CLI dangling),
+        availability-first auto-claim used to drain Gemini-owned backlog onto
+        Codex2 (the only "idle" lane), even though Gemini was unavailable
+        rather than busy. The fix: when the assigned owner is paused AND has
+        no active work, leave the task waiting for that lane.
+
+        See: feedback_supervisor_ignores_explicit_owner.md +
+             feedback_cli_symlink_staleness.md
+        """
+        config = {
+            "agents": {
+                "gemini": {"display_name": "Gemini", "provider": "gemini"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            }
+        }
+        task = {
+            "id": "PROD-RAIL-001",
+            "status": "backlog",
+            "owner": "Gemini",
+            "reviewer": "Gemini2",
+            "depends_on": [],
+        }
+        # Gemini is quota-paused; Codex2 is idle.
+        state = {
+            "provider_pauses": {
+                "gemini": {
+                    "kind": "quota",
+                    "reason": "QUOTA_EXHAUSTED",
+                    "paused_at": "2026-05-19T02:07:48Z",
+                    "resume_at": 9999999999.0,
+                }
+            }
+        }
+
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            config,
+            task=task,
+            task_map={"PROD-RAIL-001": task},
+            idle_agent_name="Codex2",
+            idle_agent_names=["Codex2"],
+            agent_loads={"Gemini": [], "Codex2": []},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["backlog", "todo", "in_progress", "review", "review_approved"],
+                "availability_first": True,
+                "allow_any_idle_lane": True,
+                "prefer_assigned_when_idle": True,
+                "require_assigned_agent_busy": True,
+                "require_owner_higher_priority_load": False,
+                "respect_explicit_owner_when_paused": True,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state=state,
+        )
+
+        self.assertIsNone(
+            plan,
+            "Paused explicit owner with no active load must not be reshuffled; "
+            "task should wait for the assigned lane to resume.",
+        )
+
+    def test_proactive_claim_still_reshuffles_when_explicit_owner_busy(self) -> None:
+        """The paused-owner guard must not block legitimate busy reshuffling.
+
+        If the explicit owner is actually loaded with other tasks (not just
+        paused), availability-first reshuffling is still the right behavior.
+        """
+        config = {
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            }
+        }
+        task = {
+            "id": "FIN-GOV-001",
+            "status": "backlog",
+            "owner": "Codex",
+            "reviewer": "Codex2",
+            "depends_on": [],
+        }
+        # Codex is NOT paused but has 2 active tasks already.
+        state: dict = {"provider_pauses": {}}
+
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            config,
+            task=task,
+            task_map={"FIN-GOV-001": task},
+            idle_agent_name="Codex2",
+            idle_agent_names=["Codex2"],
+            # Codex carries higher-priority load already; Codex2 is idle.
+            agent_loads={"Codex": [0, 1]},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["backlog", "todo", "in_progress", "review", "review_approved"],
+                "availability_first": True,
+                "allow_any_idle_lane": True,
+                "prefer_assigned_when_idle": True,
+                "require_assigned_agent_busy": True,
+                "require_owner_higher_priority_load": False,
+                "respect_explicit_owner_when_paused": True,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state=state,
+        )
+
+        self.assertIsNotNone(
+            plan,
+            "When owner is busy (not paused), availability-first reshuffle is still valid.",
+        )
+
+    def test_helper_claim_settings_default_respects_paused_owner(self) -> None:
+        """`respect_explicit_owner_when_paused` defaults to True.
+
+        Default-true is the safer behavior — protects against the
+        availability-first cascade documented in
+        feedback_supervisor_ignores_explicit_owner.md. Operators can
+        explicitly set False in config to restore the old behavior.
+        """
+        settings = supervisor.helper_claim_settings({})
+        self.assertTrue(settings["respect_explicit_owner_when_paused"])
 
     def test_dispatch_paused_when_provider_auth_is_not_ready(self) -> None:
         config = {"agents": {"gemini2": {"display_name": "Gemini2", "provider": "gemini2"}}}

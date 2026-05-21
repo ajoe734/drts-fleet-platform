@@ -53,6 +53,7 @@ import { GRAB_TAIWAN_PLATFORM_CODE } from "./grab-taiwan.adapter";
 
 type ForwarderSyncStatus =
   | "confirmed_by_platform"
+  | "completed"
   | "lost_race"
   | "cancelled_by_platform";
 
@@ -61,6 +62,7 @@ const FORWARDER_SYNC_STATUS_MAP: Record<
   ForwardedOrderRecord["status"]
 > = {
   confirmed_by_platform: "confirmed_by_platform",
+  completed: "completed_synced",
   lost_race: "lost_race",
   cancelled_by_platform: "cancelled_by_platform",
 };
@@ -321,6 +323,7 @@ export class ForwarderService implements OnModuleInit {
         return order.candidateDriverIds.includes(driverId);
       case "accept_pending":
       case "confirmed_by_platform":
+      case "completed_synced":
       case "lost_race":
       case "cancelled_by_platform":
       case "sync_failed":
@@ -675,6 +678,7 @@ export class ForwarderService implements OnModuleInit {
     const forwardedOrder = this.requireOrder(orderId);
     if (
       forwardedOrder.status === "confirmed_by_platform" ||
+      forwardedOrder.status === "completed_synced" ||
       forwardedOrder.status === "lost_race" ||
       forwardedOrder.status === "cancelled_by_platform"
     ) {
@@ -1782,6 +1786,8 @@ export class ForwarderService implements OnModuleInit {
       case "lost_race":
       case "cancelled_by_platform":
         return "read_only";
+      case "completed_synced":
+        return "completed";
       default:
         return "completed";
     }
@@ -1803,6 +1809,7 @@ export class ForwarderService implements OnModuleInit {
     switch (status) {
       case "accept_pending":
       case "confirmed_by_platform":
+      case "completed_synced":
       case "lost_race":
       case "cancelled_by_platform":
       case "sync_failed":
@@ -1842,6 +1849,8 @@ export class ForwarderService implements OnModuleInit {
         return "Waiting for platform confirmation.";
       case "confirmed_by_platform":
         return "Platform confirmed this order.";
+      case "completed_synced":
+        return "Platform marked this order completed.";
       case "lost_race":
         return "Another driver was confirmed by the platform.";
       case "cancelled_by_platform":

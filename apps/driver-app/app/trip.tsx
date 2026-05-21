@@ -481,6 +481,8 @@ function applyForwardedActionExperienceState(
       return "forwarded_pending";
     case "confirmed_by_platform":
       return "forwarded_confirmed";
+    case "completed_synced":
+      return "forwarded_completed";
     case "lost_race":
       return "forwarded_lost";
     case "cancelled_by_platform":
@@ -501,6 +503,8 @@ function describeForwardedActionOutcome(
       return { title: "已送出接單，等待平台確認", tone: "warning" };
     case "confirmed_by_platform":
       return { title: "平台已確認接單", tone: "success" };
+    case "completed_synced":
+      return { title: "平台已同步此訂單完成", tone: "neutral" };
     case "lost_race":
       return { title: "其他司機已被平台確認", tone: "neutral" };
     case "cancelled_by_platform":
@@ -534,6 +538,11 @@ function getForwardedActionCardCopy(state: TripExperienceState | null): {
       return {
         title: "來源平台已確認",
         note: "平台已確認此單，本地可依目前任務階段繼續後續流程。",
+      };
+    case "forwarded_completed":
+      return {
+        title: "來源平台已完成",
+        note: "此訂單已由平台完成結案，本地僅保留同步結果供查閱。",
       };
     default:
       return {
@@ -571,6 +580,12 @@ function getTripStatusPresentation(
         label: "平台已確認",
         tone: "success",
         detail: "可依平台規則繼續本地行程流程。",
+      };
+    case "forwarded_completed":
+      return {
+        label: "平台已完成",
+        tone: "neutral",
+        detail: "此筆平台訂單已完結，本地僅保留同步結果。",
       };
     case "forwarded_lost":
       return {
@@ -664,6 +679,12 @@ function getTripLockBody(state: TripExperienceState | null): {
         title: "正在等待平台確認…",
         detail: "平台回應前，請勿開始行程或手動變更狀態。",
       };
+    case "forwarded_completed":
+      return {
+        icon: "checkmark-done-outline",
+        title: "平台訂單已完成",
+        detail: "此頁僅保留完結同步結果，本地不再提供後續操作。",
+      };
     case "forwarded_lost":
       return {
         icon: "close-circle-outline",
@@ -702,6 +723,8 @@ function getTripAuthorityDescription(
       return "已送出接單要求，等待來源平台確認前，本地所有行程操作維持鎖定。";
     case "forwarded_confirmed":
       return "來源平台已確認任務，但平台仍掌管最終行程規則；此頁只保留鏡像狀態與路線資訊。";
+    case "forwarded_completed":
+      return "來源平台已將此訂單完成結案，本地只保留最終同步結果與可讀摘要。";
     case "forwarded_lost":
       return "來源平台已將此訂單交給其他司機，本地僅保留結果供查閱。";
     case "forwarded_cancelled":
@@ -739,6 +762,7 @@ function getTripCapabilityItems(
         "此頁提供平台狀態、鏡像狀態與路線資訊。",
         "如需後續人工協調，請依派車台或來源平台指示處理。",
       ];
+    case "forwarded_completed":
     case "forwarded_lost":
     case "forwarded_cancelled":
       return ["此任務已進入終態，本地不再提供操作。"];
@@ -775,6 +799,7 @@ function getTripSurfacePalette(
         borderColor: driverCanvasTheme.successBorder,
         accentColor: driverCanvasTheme.success,
       };
+    case "forwarded_completed":
     case "forwarded_lost":
     case "forwarded_cancelled":
       return {
@@ -821,6 +846,8 @@ function getTripStateEyebrow(
         return "等待來源平台";
       case "forwarded_confirmed":
         return "來源平台已確認";
+      case "forwarded_completed":
+        return "來源平台已完成";
       case "forwarded_lost":
         return "平台已分配給他人";
       case "forwarded_cancelled":
@@ -839,6 +866,8 @@ function getIdleBottomActionLabel(state: TripExperienceState | null) {
       return "等待平台確認";
     case "forwarded_confirmed":
       return "來源平台已確認";
+    case "forwarded_completed":
+      return "來源平台已完成";
     case "forwarded_lost":
       return "平台已交給其他司機";
     case "forwarded_cancelled":
@@ -900,6 +929,15 @@ function getTripAuthorityBannerProps(
           "平台已確認此單。本地畫面會保留可讀的行程鏡像與後續節點，但仍需遵守平台規則。",
         tone: "success",
         icon: "checkmark-circle-outline",
+      };
+    case "forwarded_completed":
+      return {
+        title: "來源平台已完成",
+        authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
+        description:
+          "來源平台已完成此訂單。本地畫面只保留最終同步結果，不再開放操作。",
+        tone: "info",
+        icon: "checkmark-done-outline",
       };
     case "forwarded_lost":
       return {

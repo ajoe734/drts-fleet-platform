@@ -711,6 +711,9 @@ def ensure_review_finalize_handoff(
     owner = canonical_agent_name(task.get("owner"))
     if not owner:
         return
+    from_name = canonical_agent_name(from_agent)
+    if from_name == owner:
+        return
     pending_owner_handoff = next(
         (
             handoff
@@ -734,6 +737,125 @@ def ensure_review_finalize_handoff(
             "message": message or "Review approved. Owner must finalize this task to move it from review_approved to done.",
             "status": "pending",
             "created_at": timestamp,
+        }
+    )
+
+
+def ensure_owner_resume_handoff(
+    state: dict[str, Any],
+    task: dict[str, Any],
+    *,
+    from_agent: str,
+    timestamp: str,
+    message: str,
+) -> None:
+    owner = canonical_agent_name(task.get("owner"))
+    if not owner:
+        return
+    from_name = canonical_agent_name(from_agent)
+    if from_name == owner:
+        return
+    pending_owner_handoff = next(
+        (
+            handoff
+            for handoff in state.get("handoffs", [])
+            if handoff.get("task_id") == task.get("id")
+            and handoff.get("to") == owner
+            and handoff.get("status") != "done"
+        ),
+        None,
+    )
+    if pending_owner_handoff:
+        pending_owner_handoff["message"] = message
+        return
+
+    state.setdefault("handoffs", []).append(
+        {
+            "task_id": task.get("id"),
+            "from": from_name,
+            "to": owner,
+            "message": message,
+            "status": "pending",
+            "created_at": timestamp,
+        }
+    )
+
+
+def apply_unblock_parent_resolution(
+    state: dict[str, Any],
+    task: dict[str, Any],
+    *,
+    actor: str,
+    timestamp: str,
+    message: str,
+) -> None:
+    if str(task.get("task_class") or "").lower() != "unblock":
+        return
+    parent_id = str(task.get("helper_parent") or "").strip()
+    if not parent_id:
+        return
+    parent = get_task(state, parent_id)
+    if parent is None:
+        return
+
+    resume_status = os.environ.get("PARENT_STATUS", "").strip().lower() or "todo"
+    if resume_status not in {"backlog", "todo", "in_progress", "blocked"}:
+        raise SystemExit("PARENT_STATUS must be backlog, todo, in_progress, or blocked")
+    parent_message = (
+        os.environ.get("PARENT_NEXT", "").strip()
+        or f"Unblock resolution complete via {task.get('id')}: {message}"
+    )
+    parent_waiting_for_raw = os.environ.get("PARENT_WAITING_FOR", "").strip()
+    parent_waiting_for = canonical_agent_name(parent_waiting_for_raw) if parent_waiting_for_raw else ""
+    if parent_waiting_for:
+        ensure_agent(parent_waiting_for)
+    elif resume_status == "blocked":
+        parent_waiting_for = canonical_agent_name(parent.get("waiting_for")) or canonical_agent_name(parent.get("owner"))
+
+    task["resolved_parent_status"] = resume_status
+    task["resolved_parent_next"] = parent_message
+    if parent_waiting_for:
+        task["resolved_parent_waiting_for"] = parent_waiting_for
+    else:
+        task.pop("resolved_parent_waiting_for", None)
+
+    parent["status"] = resume_status
+    parent["last_update"] = timestamp
+    parent["next"] = parent_message
+    if parent_waiting_for and resume_status == "blocked":
+        parent["waiting_for"] = parent_waiting_for
+    else:
+        parent.pop("waiting_for", None)
+
+    if resume_status == "blocked":
+        state.setdefault("blockers", []).append(
+            {
+                "task_id": parent_id,
+                "owner": canonical_agent_name(parent.get("owner")),
+                "waiting_for": parent_waiting_for,
+                "message": parent_message,
+                "status": "open",
+                "created_at": timestamp,
+            }
+        )
+        mark_handoffs_done(state, parent_id)
+    else:
+        mark_blockers_resolved(state, parent_id)
+        mark_handoffs_done(state, parent_id)
+        ensure_owner_resume_handoff(
+            state,
+            parent,
+            from_agent=actor,
+            timestamp=timestamp,
+            message=parent_message,
+        )
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": actor,
+            "type": "parent_resume",
+            "task_id": parent_id,
+            "message": parent_message,
         }
     )
 
@@ -833,6 +955,9 @@ def recompute_agents(state: dict[str, Any]) -> None:
         else:
             agent["status"] = "idle"
             agent["current_task_ids"] = []
+
+        current_task_ids = agent.get("current_task_ids", [])
+        agent["current_task"] = current_task_ids[0] if current_task_ids else None
 
         if active:
             latest = sorted(
@@ -1558,6 +1683,13 @@ def command_done(state: dict[str, Any], args: list[str]) -> None:
     task.pop("waiting_for", None)
     mark_blockers_resolved(state, task_id)
     mark_handoffs_done(state, task_id)
+    apply_unblock_parent_resolution(
+        state,
+        task,
+        actor=actor,
+        timestamp=timestamp,
+        message=message,
+    )
     append_log({"ts": timestamp, "agent": actor, "type": "done", "task_id": task_id, "message": message})
 
 

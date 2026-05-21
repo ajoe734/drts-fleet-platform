@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,7 @@ from approval_queue import consume_resume_override, create_approval, find_resume
 from common import ROOT, load_config, load_json, utc_now, write_activity_log, write_json
 from provider_permissions import CLAUDE_LOCAL_SETTINGS_PATH, _verified_claude_policy
 from runtime_state import load_approval_state
+from worker_tree_guard import check_chatbox_tree_guard
 
 
 SAFE_BASH_PATTERNS = [
@@ -830,8 +832,61 @@ def emit_hook_response(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False))
 
 
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _truncate_preview(value: str, limit: int = 240) -> str:
+    preview = value[:limit]
+    return preview + ("..." if len(value) > limit else "")
+
+
+def _sanitize_hook_value(value: Any, *, key: str = "", depth: int = 0) -> Any:
+    if depth > 4:
+        return {"type": type(value).__name__}
+    if isinstance(value, str):
+        if value and (key in {"content", "stdout", "stderr", "old_string", "new_string", "structuredPatch", "raw"} or len(value) > 240):
+            return {
+                "preview": _truncate_preview(value),
+                "chars": len(value),
+                "sha256": _sha256_text(value),
+                "truncated": len(value) > 240 or key in {"content", "stdout", "stderr", "old_string", "new_string", "structuredPatch", "raw"},
+            }
+        return value
+    if isinstance(value, list):
+        if len(value) > 12:
+            serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            return {
+                "items": len(value),
+                "sha256": _sha256_text(serialized),
+                "preview": [_sanitize_hook_value(item, depth=depth + 1) for item in value[:4]],
+                "truncated": True,
+            }
+        return [_sanitize_hook_value(item, depth=depth + 1) for item in value]
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for subkey, subvalue in value.items():
+            sanitized[subkey] = _sanitize_hook_value(subvalue, key=str(subkey), depth=depth + 1)
+        return sanitized
+    return value
+
+
+def sanitize_hook_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return _sanitize_hook_value(payload, depth=0)
+
+
+def hook_log_message(event_name: str, payload: dict[str, Any]) -> str:
+    message = payload.get("tool_name") or payload.get("toolName")
+    if message:
+        return str(message)
+    raw = payload.get("raw")
+    if isinstance(raw, str) and raw:
+        return f"raw:{_truncate_preview(raw)} sha256={_sha256_text(raw)} chars={len(raw)}"
+    return event_name
+
+
 def log_event(config: dict[str, Any], event_name: str, payload: dict[str, Any]) -> None:
-    message = payload.get("tool_name") or payload.get("toolName") or payload.get("raw") or event_name
+    message = hook_log_message(event_name, payload)
     write_activity_log(
         config,
         {
@@ -839,7 +894,7 @@ def log_event(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
             "provider": "claude",
             "message": f"{event_name}: {message}",
             "hook_event": event_name,
-            "hook_payload": payload,
+            "hook_payload": sanitize_hook_payload(payload),
             "ts_local": utc_now(),
         },
     )
@@ -934,6 +989,82 @@ def _session_allow_updates(tool_name: str, tool_input: dict[str, Any]) -> list[d
     ]
 
 
+def _chatbox_tree_guard_reason(block: dict[str, Any]) -> str:
+    """Build the human-readable deny reason for a chatbox guard hit."""
+    paths = list(block.get("dirty_paths") or [])
+    head = paths[:5]
+    extra = ""
+    if len(paths) > 5:
+        extra = f" (+{len(paths) - 5} more)"
+    sample = ", ".join(head) if head else "(no paths)"
+    return (
+        "Working tree has uncommitted edits on fragile surfaces — "
+        f"{sample}{extra}. "
+        "Anchor-commit them on a task branch (branch from origin/dev) before "
+        "adding more edits. See docs/ops/branch-strategy.md §11 and the "
+        "anchor-commit protocol (OPS-GIT-WORKFLOW-004)."
+    )
+
+
+def _maybe_apply_chatbox_tree_guard(
+    config: dict[str, Any],
+    payload: dict[str, Any],
+    tool_name: str,
+) -> bool:
+    """Run the chatbox tree guard and emit a deny if it fires.
+
+    Returns True when the caller should stop processing the event (the
+    hook response has been emitted). Returns False when the caller should
+    fall through to the normal PreToolUse flow — either the guard is off,
+    not applicable to this tool, in log_only canary mode, or the tree is
+    clean.
+
+    Fails open on any unexpected exception: the guard is a safety net, it
+    must never break Claude Code's hook pipeline if its own logic crashes.
+    """
+    try:
+        block = check_chatbox_tree_guard(config, tool_name=tool_name)
+    except Exception as exc:  # noqa: BLE001 — fail open
+        log_event(
+            config,
+            "PreToolUse",
+            {
+                **payload,
+                "broker_decision": {
+                    "decision": "fail_open",
+                    "reason": f"chatbox_tree_guard_error: {exc.__class__.__name__}",
+                },
+                "effective_decision": "fail_open",
+                "effective_reason": "chatbox_tree_guard_error",
+            },
+        )
+        return False
+    if block is None:
+        return False
+    log_payload = {
+        **payload,
+        "broker_decision": {
+            "decision": "deny",
+            "reason": "chatbox_tree_guard_blocked",
+        },
+        "effective_decision": "log_only" if block["log_only"] else "deny",
+        "effective_reason": "chatbox_tree_guard_blocked",
+        "tree_guard": {
+            "dirty_paths": list(block.get("dirty_paths") or [])[:5],
+            "matched_globs": list(block.get("matched_globs") or []),
+            "total_dirty": len(block.get("dirty_paths") or []),
+            "log_only": bool(block.get("log_only")),
+        },
+    }
+    log_event(config, "PreToolUse", log_payload)
+    if block["log_only"]:
+        return False
+    emit_hook_response(
+        _decision_response("PreToolUse", "deny", _chatbox_tree_guard_reason(block))
+    )
+    return True
+
+
 def _matching_approval(
     config: dict[str, Any],
     *,
@@ -994,6 +1125,15 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
         tool_name = payload.get("tool_name") or payload.get("toolName") or ""
         tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
         session_id = payload.get("session_id") or payload.get("sessionId")
+        # Chatbox tree guard fires before override/approval lookups so a
+        # dirty fragile working tree can't be auto-allowed by a prior
+        # session approval. Only PreToolUse; PermissionRequest is the
+        # user-facing prompt path and the guard already blocked at
+        # PreToolUse if applicable.
+        if event_name == "PreToolUse" and _maybe_apply_chatbox_tree_guard(
+            config, payload, tool_name
+        ):
+            return 0
         active_override = find_resume_override(
             config,
             session_id=session_id,
