@@ -1,17 +1,26 @@
+import type { CSSProperties } from "react";
 import type {
   TenantAddressRecord,
   TenantCostCenterRecord,
   TenantPassengerRecord,
 } from "@drts/contracts";
-import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
+import { CanvasBanner, CanvasPageHeader, buildCanvasTheme } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { TenantBookingCreateForm } from "./tenant-booking-create-form";
 
 export const dynamic = "force-dynamic";
+
+const th = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "grid",
+  gap: 16,
+};
 
 export default async function NewBookingPage() {
   const client = getTenantClient();
@@ -26,58 +35,43 @@ export default async function NewBookingPage() {
   const activePassengers = passengers.filter((row) => row.activeFlag);
   const activeAddresses = addresses.filter((row) => row.activeFlag);
   const activeCostCenters = costCenters.filter((row) => row.activeFlag);
+  const directoryWarnings = [
+    activePassengers.length === 0
+      ? "乘客通訊錄目前沒有啟用資料，建立叫車將退回手動填寫乘客資訊。"
+      : null,
+    activeAddresses.length === 0
+      ? "地址簿目前沒有啟用資料，pickup / drop 將改由人工輸入。"
+      : null,
+    activeCostCenters.length === 0
+      ? "成本中心目錄目前沒有啟用資料，將退回 free-text cost center。"
+      : null,
+  ].filter((warning): warning is string => Boolean(warning));
 
   return (
-    <div className="page-shell">
-      <PageHero
-        eyebrow="New booking"
-        title="Create a tenant booking with passenger, cost-center, quota, and approval context in one route."
-        description="This route now stays on the published tenant contracts: directory-backed passenger and address selection, canonical cost-center selection, quota impact preview, approval-rule evaluation, and submit through `/api/tenant/bookings` without inventing a local draft state."
+    <div>
+      <CanvasPageHeader
+        theme={th}
+        title="建立叫車"
+        subtitle="代訂或本人 · 預約 / 即時 · 自動套用 cost center 規則"
       />
 
-      <section className="metric-grid">
-        <article className="metric-card">
-          <span className="metric-label">Passengers</span>
-          <strong>{activePassengers.length}</strong>
-          <p>Active tenant passengers available for booking-on-behalf flows.</p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Addresses</span>
-          <strong>{activeAddresses.length}</strong>
-          <p>
-            Saved pickup and drop-off locations reusable from the directory.
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Cost centers</span>
-          <strong>{activeCostCenters.length}</strong>
-          <p>Active cost centers that can trigger quota and approval rules.</p>
-        </article>
-      </section>
+      <div style={pageBodyStyle}>
+        {directoryWarnings.length > 0 ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="warn"
+            title="目錄資料尚未完整"
+            body={directoryWarnings.join(" ")}
+          />
+        ) : null}
 
-      <TenantBookingCreateForm
-        addresses={activeAddresses}
-        costCenters={activeCostCenters}
-        passengers={activePassengers}
-      />
-
-      <section className="surface-grid">
-        <SurfaceCard
-          kicker="Contract boundary"
-          title="No fake draft or tenant-side fare override"
-          description="The page evaluates cost-center policy from the published quota preview and approval-evaluation contracts. Estimated spend stays preview-only input because tenant booking create cannot set `quotedFare`, and no estimate endpoint is published here."
+        <TenantBookingCreateForm
+          addresses={activeAddresses}
+          costCenters={activeCostCenters}
+          passengers={activePassengers}
         />
-        <SurfaceCard
-          kicker="Authority safety"
-          title="Booking-on-behalf stays explicit"
-          description="Passenger selection is directory-scoped, `bookedBy` is optional metadata, and blocked approval outcomes stop the local submit button instead of guessing a hidden override path."
-        />
-      </section>
-
-      <CalloutPanel
-        title="What happens on submit"
-        description="A clean evaluation submits directly to the tenant booking command. Approval-required evaluations still allow submit, but the created booking carries backend-owned approval state and request IDs. Blocked evaluations stay client-blocked until the input changes."
-      />
+      </div>
     </div>
   );
 }
