@@ -5,9 +5,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
-  CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -37,78 +34,12 @@ const primaryCellStyle: CSSProperties = {
   fontWeight: 600,
 };
 
-const secondaryCellStyle: CSSProperties = {
-  marginTop: 3,
-  color: th.textMuted,
-  fontSize: 11,
-};
-
 const tabLinkStyle: CSSProperties = {
   color: "inherit",
   textDecoration: "none",
 };
 
-const tabLabelStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 8,
-};
-
-const tabCountStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minWidth: 18,
-  height: 18,
-  padding: "0 6px",
-  borderRadius: 999,
-  background: th.surfaceHi,
-  color: th.textMuted,
-  fontSize: 10.5,
-  fontFamily: th.monoFamily,
-};
-
-const cardBodyStyle: CSSProperties = {
-  display: "grid",
-  gap: 16,
-};
-
-const kpiGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-  gap: 12,
-};
-
-const detailGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 0.8fr)",
-  gap: 16,
-  alignItems: "start",
-};
-
-const fieldStackStyle: CSSProperties = {
-  display: "grid",
-  gap: 2,
-};
-
-const pillRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-};
-
-const supportingCopyStyle: CSSProperties = {
-  fontSize: 12,
-  lineHeight: 1.5,
-  color: th.textMuted,
-};
-
-const dividerStyle: CSSProperties = {
-  borderTop: `1px solid ${th.border}`,
-  marginTop: 2,
-};
-
-const tableWrapStyle: CSSProperties = {
+const cardStyle: CSSProperties = {
   overflow: "hidden",
 };
 
@@ -130,16 +61,6 @@ type PassengerRow = TenantPassengerRecord &
 type PassengerPageData = {
   passengers: TenantPassengerRecord[];
   errors: string[];
-};
-
-type PassengerStats = {
-  total: number;
-  active: number;
-  disabled: number;
-  employees: number;
-  visitors: number;
-  flagged: number;
-  latestUpdatedAt: string | null;
 };
 
 type PassengerTabDefinition = {
@@ -177,16 +98,6 @@ function getStateTone(activeFlag: boolean): CanvasTone {
 
 function getStateLabel(activeFlag: boolean) {
   return activeFlag ? "active" : "disabled";
-}
-
-function formatDateTime(value: string | null | undefined) {
-  const parsed = parseDate(value);
-  if (!parsed) return "—";
-
-  return new Intl.DateTimeFormat("zh-Hant", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(parsed);
 }
 
 function comparePassengers(
@@ -247,70 +158,14 @@ function toPassengerRow(passenger: TenantPassengerRecord): PassengerRow {
   };
 }
 
-function getPassengerStats(
-  passengers: TenantPassengerRecord[],
-): PassengerStats {
-  return passengers.reduce<PassengerStats>(
-    (stats, passenger) => {
-      const updatedAt = parseDate(passenger.updatedAt)?.toISOString() ?? null;
-
-      return {
-        total: stats.total + 1,
-        active: stats.active + (passenger.activeFlag ? 1 : 0),
-        disabled: stats.disabled + (passenger.activeFlag ? 0 : 1),
-        employees: stats.employees + (isEmployeePassenger(passenger) ? 1 : 0),
-        visitors: stats.visitors + (isEmployeePassenger(passenger) ? 0 : 1),
-        flagged: stats.flagged + (passenger.qualityIssues?.length ?? 0),
-        latestUpdatedAt:
-          !updatedAt ||
-          (stats.latestUpdatedAt !== null && stats.latestUpdatedAt > updatedAt)
-            ? stats.latestUpdatedAt
-            : updatedAt,
-      };
-    },
-    {
-      total: 0,
-      active: 0,
-      disabled: 0,
-      employees: 0,
-      visitors: 0,
-      flagged: 0,
-      latestUpdatedAt: null,
-    },
-  );
-}
-
-function buildTabCounts(passengers: TenantPassengerRecord[]) {
-  return PASSENGER_TABS.reduce<Record<PassengerTabKey, number>>(
-    (counts, tab) => ({
-      ...counts,
-      [tab.key]: passengers.filter((passenger) =>
-        matchesTab(passenger, tab.key),
-      ).length,
-    }),
-    {
-      all: 0,
-      employee: 0,
-      visitor: 0,
-      disabled: 0,
-    },
-  );
-}
-
-function buildTabNodes(
-  selectedTab: PassengerTabKey,
-  counts: Record<PassengerTabKey, number>,
-) {
+function buildTabNodes(selectedTab: PassengerTabKey) {
   const tabs = PASSENGER_TABS.map((tab) => (
     <Link
       key={tab.key}
       href={tab.key === "all" ? "/passengers" : `/passengers?tab=${tab.key}`}
       style={tabLinkStyle}
     >
-      <span style={tabLabelStyle}>
-        <span>{tab.label}</span>
-        <span style={tabCountStyle}>{counts[tab.key]}</span>
-      </span>
+      {tab.label}
     </Link>
   ));
 
@@ -337,30 +192,17 @@ export default async function PassengersPage({
   const resolvedSearchParams = (await searchParams) ?? {};
   const selectedTab = getSelectedTab(resolvedSearchParams.tab);
   const { passengers, errors } = await loadPassengersData();
-  const stats = getPassengerStats(passengers);
-  const tabCounts = buildTabCounts(passengers);
   const rows = passengers
     .filter((passenger) => matchesTab(passenger, selectedTab))
     .map(toPassengerRow);
-  const { tabs, activeTab } = buildTabNodes(selectedTab, tabCounts);
-  const selectedTabLabel =
-    PASSENGER_TABS.find((tab) => tab.key === selectedTab)?.label ?? "全部";
+  const { tabs, activeTab } = buildTabNodes(selectedTab);
 
   const columns: CanvasTableColumn<PassengerRow>[] = [
     {
       h: "NAME",
       k: "fullName",
       w: 160,
-      r: (row) => (
-        <div>
-          <div style={primaryCellStyle}>{row.fullName}</div>
-          <div style={secondaryCellStyle}>
-            {row.roles && row.roles.length > 0
-              ? row.roles.join(" · ")
-              : "passenger"}
-          </div>
-        </div>
-      ),
+      r: (row) => <span style={primaryCellStyle}>{row.fullName}</span>,
     },
     {
       h: "EMP ID",
@@ -419,142 +261,22 @@ export default async function PassengersPage({
         {errors.length > 0 ? (
           <CanvasBanner
             theme={th}
-            tone="warn"
-            icon="warn"
-            title="部分乘客資料無法載入"
-            body={errors.join(" · ")}
+            tone="danger"
+            title="資料載入失敗"
+            body={errors.join(" / ")}
           />
         ) : null}
 
-        <CanvasCard
-          theme={th}
-          title="Passengers roster"
-          subtitle={`${selectedTabLabel} · ${rows.length} / ${stats.total} records`}
-          actions={
-            stats.flagged > 0 ? (
-              <CanvasPill theme={th} tone="warn" dot>
-                {stats.flagged} quality flags
-              </CanvasPill>
-            ) : (
-              <CanvasPill theme={th} tone="success" dot>
-                directory healthy
-              </CanvasPill>
-            )
-          }
-        >
-          <div style={cardBodyStyle}>
-            <div style={kpiGridStyle}>
-              <CanvasKPI
-                theme={th}
-                label="Passengers"
-                value={stats.total}
-                sub={`${rows.length} in current tab`}
-              />
-              <CanvasKPI
-                theme={th}
-                label="Employees"
-                value={stats.employees}
-                sub={`${stats.visitors} visitor / guest`}
-              />
-              <CanvasKPI
-                theme={th}
-                label="Active"
-                value={stats.active}
-                sub={`${stats.disabled} disabled`}
-              />
-              <CanvasKPI
-                theme={th}
-                label="Last update"
-                value={formatDateTime(stats.latestUpdatedAt)}
-                sub="tenant passenger directory"
-              />
-            </div>
-
-            <div style={detailGridStyle}>
-              <div style={fieldStackStyle}>
-                <CanvasField
-                  theme={th}
-                  label="Segment tabs"
-                  hint="Canvas tabs are mapped to the published tenant passenger directory only."
-                >
-                  <div style={pillRowStyle}>
-                    {PASSENGER_TABS.map((tab) => (
-                      <CanvasPill
-                        key={tab.key}
-                        theme={th}
-                        tone={selectedTab === tab.key ? "info" : "neutral"}
-                      >
-                        {tab.label} · {tabCounts[tab.key]}
-                      </CanvasPill>
-                    ))}
-                  </div>
-                </CanvasField>
-
-                <CanvasField
-                  theme={th}
-                  label="CSV 匯入"
-                  hint="保留 TN_Passengers action 位置，但不擴增未發布的 batch import contract。"
-                >
-                  <div style={supportingCopyStyle}>
-                    目前頁面維持名冊檢視與既有 passenger API 對齊，匯入按鈕僅作
-                    canvas parity。
-                  </div>
-                </CanvasField>
-              </div>
-
-              <CanvasDL
-                theme={th}
-                cols={2}
-                items={[
-                  {
-                    k: "Current tab",
-                    v: selectedTabLabel,
-                  },
-                  {
-                    k: "Rows shown",
-                    v: rows.length,
-                    mono: true,
-                  },
-                  {
-                    k: "Active / disabled",
-                    v: `${stats.active} / ${stats.disabled}`,
-                    mono: true,
-                  },
-                  {
-                    k: "Quality flags",
-                    v: stats.flagged,
-                    mono: true,
-                  },
-                  {
-                    k: "Latest update",
-                    v: formatDateTime(stats.latestUpdatedAt),
-                    mono: true,
-                  },
-                  {
-                    k: "Data source",
-                    v: "GET /tenant/passengers",
-                    mono: true,
-                  },
-                ]}
-              />
-            </div>
-
-            <div style={dividerStyle} />
-
-            <div style={tableWrapStyle}>
-              {rows.length > 0 ? (
-                <CanvasTable<PassengerRow>
-                  theme={th}
-                  columns={columns}
-                  rows={rows}
-                />
-              ) : (
-                <div style={emptyStateStyle}>
-                  目前沒有符合篩選條件的乘客資料。
-                </div>
-              )}
-            </div>
-          </div>
+        <CanvasCard theme={th} padding={0} style={cardStyle}>
+          {rows.length > 0 ? (
+            <CanvasTable<PassengerRow>
+              theme={th}
+              columns={columns}
+              rows={rows}
+            />
+          ) : (
+            <div style={emptyStateStyle}>目前沒有符合篩選條件的乘客資料。</div>
+          )}
         </CanvasCard>
       </div>
     </div>
