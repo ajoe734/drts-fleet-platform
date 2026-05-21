@@ -111,6 +111,7 @@ Canonical history for the same task:
 
 ## Closeout evidence
 
-- Commit: `20c9d5b05011d672b3543b2039c1446835d1d354` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR): anchor wrong-base repair packet`
-- Push: `origin/codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair`
+- Anchor commit: `20c9d5b05011d672b3543b2039c1446835d1d354` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR): anchor wrong-base repair packet`
+- Evidence commit: `0c065c0148fd18ced895be26a7d4c3852f1d3512` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR): anchor closeout evidence`
+- Push: `origin/codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair` contains both commits above plus the latest doc-only corrections to this packet
 - PR status: `gh pr list --head codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair --json number,state,url,headRefName,baseRefName` returned `[]`
