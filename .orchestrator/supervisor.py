@@ -157,8 +157,6 @@ class SupervisorShutdown(Exception):
         self.signum = signum
         self.reason = supervisor_shutdown_reason(signum)
         super().__init__(self.reason)
-
-
 @dataclass(frozen=True)
 class WorkerFailureSignal:
     reason: str
@@ -207,8 +205,6 @@ def raise_supervisor_shutdown(signum: int, _frame: Any) -> None:
 def install_supervisor_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, raise_supervisor_shutdown)
     signal.signal(signal.SIGINT, raise_supervisor_shutdown)
-
-
 def _supervisor_script_arg_matches(
     part: str,
     *,
@@ -4532,8 +4528,6 @@ def active_worker_queue_event_ids(state: dict[str, Any], active_statuses: set[st
         if queue_event_id:
             event_ids.add(queue_event_id)
     return event_ids
-
-
 def outstanding_delivery_indexes(config: dict[str, Any], state: dict[str, Any]) -> tuple[set[str], set[tuple[str, str]], set[str]]:
     agents: set[str] = set()
     task_agents: set[tuple[str, str]] = set()

@@ -44,8 +44,6 @@ class CommandActivityLogSummaryTests(unittest.TestCase):
 
         self.assertEqual(summary["args_preview"], ["agent", "run", "--other", "value"])
         self.assertEqual(summary["prompt_chars"], len(prompt))
-
-
 class DetectWorkerFailureTests(unittest.TestCase):
     def _worker_for_log(self, content: str) -> dict[str, str]:
         handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
@@ -1049,7 +1047,6 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertTrue(changed)
         queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
         self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
-
     def test_prune_completed_dispatch_pauses_removes_done_task_entries(self) -> None:
         state = {
             "dispatch_pauses": [
@@ -2592,8 +2589,8 @@ class PollWorkersRecoveryTests(unittest.TestCase):
                 task_map,
                 state=state,
                 active_statuses={"running"},
+                )
             )
-        )
 
     def test_chair_guarded_higher_priority_task_does_not_supersede_full_lane(self) -> None:
         config = {
@@ -2700,7 +2697,6 @@ class PollWorkersRecoveryTests(unittest.TestCase):
             loads = supervisor.agent_dispatch_loads(config, state, {"running"})
 
         self.assertEqual(loads, {"Codex2": [2, 1]})
-
     def test_dead_worker_for_open_task_is_marked_failed_not_completed(self) -> None:
         config = {
             "schema": {
