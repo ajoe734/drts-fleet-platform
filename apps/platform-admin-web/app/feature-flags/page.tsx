@@ -1,6 +1,6 @@
 "use client";
 
-import React, {
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -30,10 +30,7 @@ import {
   type CanvasShellNavItem,
   type CanvasTableColumn,
   type CanvasTheme,
-  type CanvasTone,
 } from "@drts/ui-web";
-
-type FlagFilter = "all" | "enabled" | "disabled" | "overrides";
 
 type GroupedFeatureFlag = {
   key: string;
@@ -45,7 +42,6 @@ type GroupedFeatureFlag = {
 type PendingToggle = {
   key: string;
   nextEnabled: boolean;
-  overrideCount: number;
 };
 
 type FlagTableRow = {
@@ -55,6 +51,7 @@ type FlagTableRow = {
   overrideCount: number;
   overrideTenantIds: string[];
   latestUpdatedAt: string;
+  updatedBy: string;
 } & Record<string, unknown>;
 
 const theme = buildCanvasTheme({
@@ -67,7 +64,7 @@ const shellStyle = {
   minHeight: "calc(100vh - 64px)",
 } satisfies CSSProperties;
 
-const pageBodyStyle = {
+const bodyStyle = {
   display: "grid",
   gap: 16,
   padding: 24,
@@ -79,43 +76,15 @@ const kpiGridStyle = {
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
 } satisfies CSSProperties;
 
-const splitGridStyle = {
+const topGridStyle = {
   display: "grid",
   gap: 16,
   gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
 } satisfies CSSProperties;
 
-const filterRowStyle = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  flexWrap: "wrap",
-} satisfies CSSProperties;
-
-const pillButtonStyle = {
-  border: "none",
-  background: "transparent",
-  padding: 0,
-  cursor: "pointer",
-} satisfies CSSProperties;
-
-const selectStyle = (th: CanvasTheme, mono = false): CSSProperties => ({
-  width: "100%",
-  boxSizing: "border-box",
-  borderRadius: 7,
-  border: `1px solid ${th.border}`,
-  background: th.bgRaised,
-  color: th.text,
-  fontFamily: mono ? th.monoFamily : th.fontFamily,
-  fontSize: 12.5,
-  padding: "8px 10px",
-  outline: "none",
-});
-
 const loadingStateStyle = {
   color: theme.textMuted,
   fontSize: 12.5,
-  padding: "4px 0",
 } satisfies CSSProperties;
 
 const emptyStateStyle = {
@@ -125,15 +94,25 @@ const emptyStateStyle = {
   padding: "32px 16px",
 } satisfies CSSProperties;
 
-const noteListStyle = {
-  margin: 0,
-  paddingInlineStart: 18,
-  display: "grid",
-  gap: 6,
+const fieldHintStyle = {
+  marginTop: 6,
   color: theme.textMuted,
-  fontSize: 12.5,
+  fontSize: 11.5,
   lineHeight: 1.45,
 } satisfies CSSProperties;
+
+const selectStyle = (th: CanvasTheme): CSSProperties => ({
+  width: "100%",
+  boxSizing: "border-box",
+  borderRadius: 7,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  color: th.text,
+  fontFamily: th.fontFamily,
+  fontSize: 12.5,
+  padding: "8px 10px",
+  outline: "none",
+});
 
 const keyCellStyle = {
   display: "grid",
@@ -164,13 +143,21 @@ const monoMutedStyle = {
   color: theme.textDim,
   fontFamily: theme.monoFamily,
   fontSize: 11,
+  whiteSpace: "normal",
+} satisfies CSSProperties;
+
+const inlinePillRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+  alignItems: "center",
 } satisfies CSSProperties;
 
 const stateCellStyle = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  gap: 10,
+  gap: 12,
   minWidth: 0,
 } satisfies CSSProperties;
 
@@ -178,6 +165,16 @@ const stateMetaStyle = {
   display: "grid",
   gap: 4,
   minWidth: 0,
+} satisfies CSSProperties;
+
+const noteListStyle = {
+  margin: 0,
+  paddingInlineStart: 18,
+  display: "grid",
+  gap: 6,
+  color: theme.textMuted,
+  fontSize: 12,
+  lineHeight: 1.45,
 } satisfies CSSProperties;
 
 function toggleButtonStyle(
@@ -198,6 +195,7 @@ function toggleButtonStyle(
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.55 : 1,
     transition: "all 120ms ease",
+    flexShrink: 0,
   };
 }
 
@@ -362,14 +360,8 @@ function toFlagTableRow(group: GroupedFeatureFlag): FlagTableRow {
       .filter((value): value is string => Boolean(value)),
     latestUpdatedAt:
       getLatestUpdatedAt(group) ?? effectiveRecord?.updatedAt ?? "",
+    updatedBy: "Contract not exposed",
   };
-}
-
-function filterTone(filter: FlagFilter, active: boolean): CanvasTone {
-  if (active) return "accent";
-  if (filter === "enabled") return "success";
-  if (filter === "overrides") return "warn";
-  return "neutral";
 }
 
 export default function FeatureFlagsPage() {
@@ -382,7 +374,6 @@ export default function FeatureFlagsPage() {
   const [loading, setLoading] = useState(true);
   const [tenantLoading, setTenantLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FlagFilter>("all");
   const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(
     null,
   );
@@ -427,6 +418,7 @@ export default function FeatureFlagsPage() {
   }, [loadTenants]);
 
   const groupedFlags = useMemo(() => groupFeatureFlags(flags), [flags]);
+  const rows = useMemo(() => groupedFlags.map(toFlagTableRow), [groupedFlags]);
   const selectedTenant =
     tenants.find((tenant) => tenant.id === selectedTenantId) ?? null;
 
@@ -439,157 +431,124 @@ export default function FeatureFlagsPage() {
   const overrideGroupCount = groupedFlags.filter(
     (group) => group.overrides.length > 0,
   ).length;
-  const overrideRowCount = groupedFlags.reduce(
-    (count, group) => count + group.overrides.length,
-    0,
-  );
-
-  const filteredGroups = useMemo(
-    () =>
-      groupedFlags.filter((group) => {
-        switch (filter) {
-          case "enabled":
-            return group.global?.enabled === true;
-          case "disabled":
-            return group.global?.enabled === false;
-          case "overrides":
-            return group.overrides.length > 0;
-          case "all":
-          default:
-            return true;
-        }
-      }),
-    [filter, groupedFlags],
-  );
-
-  const rows = useMemo(
-    () => filteredGroups.map(toFlagTableRow),
-    [filteredGroups],
-  );
+  const missingGlobalCount = groupedFlags.filter(
+    (group) => !group.global,
+  ).length;
 
   const copy =
     locale === "en"
       ? {
           pageTitle: t("flags.title"),
-          pageSubtitle:
-            "Feature flags stay editable at the platform default layer while tenant overrides remain visible for blast-radius review.",
+          pageSubtitle: t("flags.subtitle", {
+            total: groupedFlags.length,
+            enabled: enabledGlobalCount,
+          }),
           breadcrumbParent: "Platform Layer",
           refresh: t("common.refresh"),
           refreshing: "Refreshing…",
           guardrailTitle:
             "Only the platform default is mutable in this surface.",
           guardrailBody:
-            "Tenant override rows stay read-only here. Use this registry to inspect scope and existing exceptions before changing the default toggle state.",
+            "Tenant override rows stay visible for blast-radius review, but changes here only affect the global default toggle.",
+          scopeCardTitle: "Flag scope",
+          scopeCardSubtitle:
+            "The canvas handoff stays focused on key, scope, state, updater, and recency.",
           scopeField: "Tenant scope",
           scopeHint:
-            "Choose a tenant to inspect its override rows beside platform defaults.",
+            "Choose a tenant to inspect its override rows beside the platform default record.",
           scopeLoading: "Loading tenant list…",
           scopeDefault: "Platform defaults only",
-          summaryTitle: "Review context",
-          summarySubtitle:
-            "Canvas parity keeps the flags view focused on key, scope, state, and recency.",
-          selectedScope: "Scope",
-          selectedScopeValue: selectedTenant
+          scopeSummary: "Current scope",
+          scopeSummaryValue: selectedTenant
             ? `${selectedTenant.name} (${selectedTenant.code})`
             : "Platform defaults only",
-          notesLabel: "Contract notes",
+          notesTitle: "Contract notes",
+          notesFallback:
+            "Current API notes remain visible here without changing the underlying fetch contract.",
           notesValue: `${notes.length} note(s)`,
           updatedByLabel: "Updated by",
-          updatedByValue: "Not exposed by current contract",
-          toggleStateLabel: "State",
-          toggleStateValue: "Global default only",
-          tableTitle: "Flag registry",
-          tableSubtitle:
-            "KEY, SCOPE, STATE, UPDATED BY, and AT stay aligned with the canvas handoff while preserving current data sources.",
-          overrideTitle: "Override visibility",
-          overrideBody:
-            "When a key has tenant overrides, they remain visible in the scope cell and in the summary notes but cannot be edited here.",
+          updatedByValue: "Contract not exposed",
+          stateLabel: "Mutable state",
+          stateValue: "Global default only",
+          noGlobal: "No global record",
+          noGlobalBody:
+            "This key currently exists only through tenant overrides, so the platform default cannot be toggled here.",
           confirmTitle: "Confirm platform default toggle",
           confirmBody:
             "This changes the platform-issued default for the selected key. Existing tenant overrides remain intact.",
           stageEnable: "Stage enable",
           stageDisable: "Stage disable",
-          noGlobal: "No global record",
-          noGlobalBody:
-            "This key currently exists only through tenant overrides, so there is no editable platform default here.",
+          tableTitle: "Feature flag registry",
+          tableSubtitle:
+            "KEY, SCOPE, STATE, UPDATED BY, and AT align to the PA_Flags handoff while preserving current data sources.",
+          colScope: "Scope",
+          colUpdatedBy: "Updated by",
+          platformDefault: "Platform default",
+          overridesLabel: "override(s)",
           noDescription: "No description provided",
+          overrideVisible: "Override visibility retained",
+          globalOnly: "Platform default only",
           empty: t("flags.empty"),
           loading: t("flags.loading"),
         }
       : {
           pageTitle: t("flags.title"),
-          pageSubtitle:
-            "平台預設層仍可編輯功能旗標，tenant override 維持可見但唯讀，方便先評估 blast radius。",
+          pageSubtitle: t("flags.subtitle", {
+            total: groupedFlags.length,
+            enabled: enabledGlobalCount,
+          }),
           breadcrumbParent: "平台層",
           refresh: t("common.refresh"),
           refreshing: "重新整理中…",
           guardrailTitle: "這個頁面只允許變更平台預設值。",
           guardrailBody:
-            "Tenant override 在這裡只保留可見性，不提供編輯。先看清 scope 與既有例外，再決定是否切換全域狀態。",
+            "Tenant override 只保留可見性，方便先看清 blast radius；這裡的切換只會影響全域預設 toggle。",
+          scopeCardTitle: "旗標範圍",
+          scopeCardSubtitle:
+            "畫布 handoff 聚焦在 key、scope、state、updated by 與時間，不改動既有資料來源。",
           scopeField: "Tenant scope",
           scopeHint:
             "選擇 tenant 後，會把該 tenant 的 override 與平台預設一起載入。",
           scopeLoading: "載入 tenant 清單中…",
           scopeDefault: "只看平台預設",
-          summaryTitle: "檢視上下文",
-          summarySubtitle:
-            "這個 canvas 版面聚焦在 key、scope、state 與更新時間，不改動目前資料來源。",
-          selectedScope: "檢視範圍",
-          selectedScopeValue: selectedTenant
+          scopeSummary: "目前檢視範圍",
+          scopeSummaryValue: selectedTenant
             ? `${selectedTenant.name} (${selectedTenant.code})`
             : "只看平台預設",
-          notesLabel: "Contract 備註",
+          notesTitle: "Contract 備註",
+          notesFallback:
+            "保留目前 API notes，可檢視但不變更既有 fetch contract。",
           notesValue: `${notes.length} 筆`,
           updatedByLabel: "Updated by",
           updatedByValue: "目前 contract 未提供",
-          toggleStateLabel: "State",
-          toggleStateValue: "僅限平台預設",
-          tableTitle: "Flag registry",
-          tableSubtitle:
-            "依 canvas handoff 對齊 KEY、SCOPE、STATE、UPDATED BY、AT，同時保留現有資料 contract。",
-          overrideTitle: "Override 可視範圍",
-          overrideBody:
-            "若某個 key 有 tenant override，會在 scope 欄與摘要資訊中呈現，但此頁面不提供修改。",
+          stateLabel: "可變更狀態",
+          stateValue: "僅限平台預設",
+          noGlobal: "沒有 global record",
+          noGlobalBody:
+            "這個 key 目前只透過 tenant override 出現，所以這裡不能切換平台預設狀態。",
           confirmTitle: "確認切換平台預設狀態",
           confirmBody:
             "這會變更所選 key 的平台預設值；既有 tenant override 會保留不變。",
           stageEnable: "準備啟用",
           stageDisable: "準備停用",
-          noGlobal: "沒有 global record",
-          noGlobalBody:
-            "這個 key 目前只透過 tenant override 出現，所以這裡沒有可編輯的平台預設值。",
+          tableTitle: "Feature flag registry",
+          tableSubtitle:
+            "依 PA_Flags handoff 對齊 KEY、SCOPE、STATE、UPDATED BY、AT，同時保留現有資料 contract。",
+          colScope: "範圍",
+          colUpdatedBy: "Updated by",
+          platformDefault: "平台預設",
+          overridesLabel: "筆 override",
           noDescription: "尚未提供描述",
+          overrideVisible: "保留 override 可見性",
+          globalOnly: "僅平台預設",
           empty: t("flags.empty"),
           loading: t("flags.loading"),
         };
 
-  const filters = [
-    {
-      value: "all" as const,
-      label: t("common.all"),
-      count: groupedFlags.length,
-    },
-    {
-      value: "enabled" as const,
-      label: t("common.enabled"),
-      count: enabledGlobalCount,
-    },
-    {
-      value: "disabled" as const,
-      label: t("common.disabled"),
-      count: disabledGlobalCount,
-    },
-    {
-      value: "overrides" as const,
-      label: locale === "en" ? "Overrides" : "含 override",
-      count: overrideGroupCount,
-    },
-  ];
-
   const columns: CanvasTableColumn<FlagTableRow>[] = [
     {
       h: t("flags.col.flag"),
-      w: 270,
+      w: 280,
       r: (row) => (
         <div style={keyCellStyle}>
           <code style={codeStyle}>{row.key}</code>
@@ -600,40 +559,31 @@ export default function FeatureFlagsPage() {
       ),
     },
     {
-      h: t("flags.col.tenantOverride"),
+      h: copy.colScope,
       w: 220,
       r: (row) => (
         <div style={keyCellStyle}>
-          <div>
-            <CanvasPill
-              theme={theme}
-              tone={row.overrideCount > 0 ? "warn" : "neutral"}
-            >
-              {row.overrideCount > 0
-                ? `${row.overrideCount} ${locale === "en" ? "override(s)" : "筆 override"}`
-                : t("flags.global")}
+          <div style={inlinePillRowStyle}>
+            <CanvasPill theme={theme} tone="neutral">
+              {copy.platformDefault}
             </CanvasPill>
+            {row.overrideCount > 0 ? (
+              <CanvasPill theme={theme} tone="warn">
+                {row.overrideCount} {copy.overridesLabel}
+              </CanvasPill>
+            ) : null}
           </div>
           <div style={secondaryTextStyle}>
             {row.overrideCount > 0
-              ? row.overrideTenantIds.slice(0, 3).join(", ")
-              : locale === "en"
-                ? "Platform default record"
-                : "平台預設紀錄"}
+              ? row.overrideTenantIds.join(", ")
+              : copy.globalOnly}
           </div>
-          {row.overrideCount > 3 ? (
-            <div style={monoMutedStyle}>
-              {locale === "en"
-                ? `+${row.overrideCount - 3} more`
-                : `另有 ${row.overrideCount - 3} 筆`}
-            </div>
-          ) : null}
         </div>
       ),
     },
     {
       h: t("flags.col.status"),
-      w: 220,
+      w: 230,
       r: (row) => (
         <div style={stateCellStyle}>
           <div style={stateMetaStyle}>
@@ -669,7 +619,6 @@ export default function FeatureFlagsPage() {
                 setPendingToggle({
                   key: row.key,
                   nextEnabled: !row.globalEnabled,
-                  overrideCount: row.overrideCount,
                 })
               }
               disabled={updating === row.key}
@@ -686,19 +635,15 @@ export default function FeatureFlagsPage() {
       ),
     },
     {
-      h: locale === "en" ? "Updated by" : "更新來源",
-      w: 160,
+      h: copy.colUpdatedBy,
+      w: 170,
       r: (row) => (
         <div style={keyCellStyle}>
-          <span style={secondaryTextStyle}>{copy.updatedByValue}</span>
+          <span style={secondaryTextStyle}>
+            {locale === "en" ? row.updatedBy : copy.updatedByValue}
+          </span>
           <span style={monoMutedStyle}>
-            {row.overrideCount > 0
-              ? locale === "en"
-                ? "Override visibility retained"
-                : "保留 override 可見性"
-              : locale === "en"
-                ? "Platform default only"
-                : "僅平台預設"}
+            {row.overrideCount > 0 ? copy.overrideVisible : copy.globalOnly}
           </span>
         </div>
       ),
@@ -764,7 +709,7 @@ export default function FeatureFlagsPage() {
         }
       />
 
-      <div style={pageBodyStyle}>
+      <div style={bodyStyle}>
         {loading && flags.length === 0 ? (
           <CanvasCard
             theme={theme}
@@ -829,9 +774,9 @@ export default function FeatureFlagsPage() {
             <div style={kpiGridStyle}>
               <CanvasKPI
                 theme={theme}
-                label={locale === "en" ? "Flag groups" : "Flag 群組"}
+                label={locale === "en" ? "Flag keys" : "Flag keys"}
                 value={groupedFlags.length}
-                sub={copy.overrideTitle}
+                sub={copy.platformDefault}
               />
               <CanvasKPI
                 theme={theme}
@@ -839,7 +784,7 @@ export default function FeatureFlagsPage() {
                 value={enabledGlobalCount}
                 delta={`${disabledGlobalCount} ${locale === "en" ? "disabled" : "停用"}`}
                 deltaTone={enabledGlobalCount > 0 ? "up" : "neutral"}
-                sub={copy.toggleStateValue}
+                sub={copy.stateValue}
               />
               <CanvasKPI
                 theme={theme}
@@ -847,27 +792,24 @@ export default function FeatureFlagsPage() {
                   locale === "en" ? "Keys with overrides" : "含 override 的 key"
                 }
                 value={overrideGroupCount}
-                delta={`${overrideRowCount} ${locale === "en" ? "rows" : "筆"}`}
+                delta={`${missingGlobalCount} ${locale === "en" ? "override-only" : "僅 override"}`}
                 deltaTone={overrideGroupCount > 0 ? "neutral" : "up"}
-                sub={copy.overrideBody}
+                sub={copy.guardrailTitle}
               />
               <CanvasKPI
                 theme={theme}
-                label={copy.notesLabel}
+                label={copy.notesTitle}
                 value={notes.length}
-                sub={copy.updatedByValue}
-                hint={
-                  selectedTenant?.code ??
-                  (locale === "en" ? "global" : "global")
-                }
+                sub={selectedTenant?.code ?? copy.scopeDefault}
+                hint={copy.updatedByValue}
               />
             </div>
 
-            <div style={splitGridStyle}>
+            <div style={topGridStyle}>
               <CanvasCard
                 theme={theme}
-                title={copy.summaryTitle}
-                subtitle={copy.summarySubtitle}
+                title={copy.scopeCardTitle}
+                subtitle={copy.scopeCardSubtitle}
               >
                 <CanvasField theme={theme} label={copy.scopeField}>
                   <select
@@ -886,37 +828,39 @@ export default function FeatureFlagsPage() {
                     ))}
                   </select>
                 </CanvasField>
-
-                <CanvasDL
-                  theme={theme}
-                  cols={2}
-                  items={[
-                    {
-                      label: copy.selectedScope,
-                      value: tenantLoading
-                        ? copy.scopeLoading
-                        : copy.selectedScopeValue,
-                    },
-                    {
-                      label: copy.toggleStateLabel,
-                      value: copy.toggleStateValue,
-                    },
-                    {
-                      label: copy.updatedByLabel,
-                      value: copy.updatedByValue,
-                    },
-                    {
-                      label: copy.notesLabel,
-                      value: copy.notesValue,
-                    },
-                  ]}
-                />
+                <div style={fieldHintStyle}>
+                  {tenantLoading ? copy.scopeLoading : copy.scopeHint}
+                </div>
+                <div style={{ marginTop: 16 }}>
+                  <CanvasDL
+                    theme={theme}
+                    cols={2}
+                    items={[
+                      {
+                        label: copy.scopeSummary,
+                        value: copy.scopeSummaryValue,
+                      },
+                      {
+                        label: copy.stateLabel,
+                        value: copy.stateValue,
+                      },
+                      {
+                        label: copy.updatedByLabel,
+                        value: copy.updatedByValue,
+                      },
+                      {
+                        label: copy.notesTitle,
+                        value: copy.notesValue,
+                      },
+                    ]}
+                  />
+                </div>
               </CanvasCard>
 
               <CanvasCard
                 theme={theme}
-                title={copy.notesLabel}
-                subtitle={copy.overrideTitle}
+                title={copy.notesTitle}
+                subtitle={copy.guardrailTitle}
               >
                 {notes.length > 0 ? (
                   <ul style={noteListStyle}>
@@ -925,7 +869,7 @@ export default function FeatureFlagsPage() {
                     ))}
                   </ul>
                 ) : (
-                  <div style={secondaryTextStyle}>{copy.overrideBody}</div>
+                  <div style={secondaryTextStyle}>{copy.notesFallback}</div>
                 )}
               </CanvasCard>
             </div>
@@ -934,26 +878,6 @@ export default function FeatureFlagsPage() {
               theme={theme}
               title={copy.tableTitle}
               subtitle={copy.tableSubtitle}
-              actions={
-                <div style={filterRowStyle}>
-                  {filters.map((item) => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      onClick={() => setFilter(item.value)}
-                      style={pillButtonStyle}
-                    >
-                      <CanvasPill
-                        theme={theme}
-                        tone={filterTone(item.value, filter === item.value)}
-                        dot={filter === item.value}
-                      >
-                        {item.label} ({item.count})
-                      </CanvasPill>
-                    </button>
-                  ))}
-                </div>
-              }
               style={{ overflow: "hidden" }}
             >
               {rows.length === 0 ? (
