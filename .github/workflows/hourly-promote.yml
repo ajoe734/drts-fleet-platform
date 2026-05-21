@@ -11,25 +11,25 @@ name: Hourly promote (publish → master)
 
 on:
   schedule:
-    - cron: '15 * * * *'   # 15 past every hour, staggered from other crons
+    - cron: "15 * * * *" # 15 past every hour, staggered from other crons
   push:
-    branches: [main]       # for tag-on-merge job
+    branches: [main] # for tag-on-merge job
   workflow_dispatch:
     inputs:
       version:
-        description: 'Publish version to promote (e.g. v2026.05.18.0). Default: latest publish/v* on origin.'
+        description: "Publish version to promote (e.g. v2026.05.18.0). Default: latest publish/v* on origin."
         required: false
         type: string
       soak_minutes:
-        description: 'Minimum minutes a publish must have existed before promotion'
+        description: "Minimum minutes a publish must have existed before promotion"
         required: false
-        default: '30'
+        default: "30"
         type: string
 
 permissions:
-  contents: write       # for the auto-PR + tag
+  contents: write # for the auto-PR + tag
   pull-requests: write
-  issues: read          # for the regression-label check
+  issues: write # regression-label check + label provisioning
 
 concurrency:
   group: hourly-promote
@@ -151,7 +151,10 @@ jobs:
             pr_url=$(gh pr create --base main --head "$src" --title "$title" --body "$body")
             pr_number=$(basename "$pr_url")
           fi
-          gh pr edit "$pr_number" --add-label "automated" --add-label "auto-publish" || true
+          # These labels drive the Commit trailers bypass in ci.yml. Provision
+          # them here so missing repo metadata does not silently break promote PRs.
+          scripts/branch-strategy/ensure-github-labels.sh --apply --repo "$GITHUB_REPOSITORY"
+          gh pr edit "$pr_number" --add-label "automated" --add-label "auto-publish"
 
           # Cycle to fire downstream CI on a fresh head event (GITHUB_TOKEN-
           # created PRs don't trigger workflows; reopen acts as a synchronize-
