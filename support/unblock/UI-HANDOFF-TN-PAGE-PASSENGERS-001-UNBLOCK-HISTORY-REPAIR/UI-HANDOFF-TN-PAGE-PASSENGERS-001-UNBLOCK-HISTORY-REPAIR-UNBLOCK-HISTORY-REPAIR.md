@@ -107,10 +107,10 @@ Canonical history for the same task:
 
 1. Added this child repair artifact on the dedicated `codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair` branch.
 2. Advanced `UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR` to `in_progress` in canonical machine truth.
-3. Identified the concrete parent replay path: owner replays `handoff` on the existing Codex2 repair branch, reviewer replays `approve`, owner replays `done`.
+3. Updated the parent task's canonical `next` field to the concrete replay path: owner replays `handoff` on the existing Codex2 repair branch, reviewer replays `approve`, owner replays `done`.
 
 ## Closeout evidence
 
-- Commit: pending
-- Push: pending
-- PR status: pending
+- Commit: `20c9d5b05011d672b3543b2039c1446835d1d354` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR): anchor wrong-base repair packet`
+- Push: `origin/codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair`
+- PR status: `gh pr list --head codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair --json number,state,url,headRefName,baseRefName` returned `[]`
