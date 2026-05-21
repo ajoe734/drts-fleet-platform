@@ -124,7 +124,7 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 - ≥30 min soak time since publish was cut (configurable)
 - no open issue with label `regression:v<date>` (humans/testers can block by opening such an issue)
 - main does not already contain this publish's content (idempotency)
-- auto-PR opens, auto-merge enabled, 3 named CI checks must pass
+- auto-PR opens, `hourly-promote.yml` ensures the static branch-strategy labels exist, and 3 named CI checks must pass
 
 ### Gate 4: prod deploy (manual)
 
@@ -158,6 +158,12 @@ Identical settings on `main` and `dev`:
 `publish/v*` branches are **not** protected by branch protection. They are protected by convention (immutable) and by the fact that nothing in the workflows writes to them after the initial nightly cut.
 
 Applied via `scripts/branch-strategy/apply-branch-protection.sh --apply`.
+
+Static GitHub labels used by the branch-strategy workflows are managed via
+`scripts/branch-strategy/ensure-github-labels.sh --apply`. `hourly-promote.yml`
+also runs that script immediately before applying the `automated` and
+`auto-publish` labels to a promote PR, so missing repo metadata does not
+silently break the `Commit trailers` bypass path in `ci.yml`.
 
 ---
 
