@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type {
   DispatchJobRecord,
   DriverRegistryRecord,
@@ -7,7 +8,10 @@ import type {
   IncidentRecord,
   MaintenanceRecord,
   OperationalAdapterDetailRecord,
+  OperationalAlertRecord,
+  OperationalAlertState,
   OperationalObservabilitySnapshot,
+  OperationalRoleView,
   OwnedOrderRecord,
   ReportJobRecord,
   ShiftRecord,
@@ -15,19 +19,30 @@ import type {
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { getServerLocale } from "@/lib/server-locale";
-import { t } from "@/lib/translations";
 import {
-  buildDashboardTrend,
   buildDispatchInsights,
   buildOperationsOverview,
   buildRevenueInsights,
   formatCompactNumber,
   formatMinorCurrency,
 } from "@/lib/ops-analytics";
-import { PageHeader } from "@drts/ui-web";
-import { StatCard } from "@drts/ui-web";
-import { Card, CardHeader, CardBody } from "@drts/ui-web";
+import { getServerLocale } from "@/lib/server-locale";
+import { t, type Locale } from "@/lib/translations";
+import {
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasIcon,
+  CanvasKPI as KPI,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasShell as Shell,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasShellNavItem,
+  type CanvasTableColumn,
+  type CanvasTone,
+} from "@drts/ui-web";
 
 type IdentitySummary = { realm?: string; actorType?: string } | null;
 type HealthPayload = {
@@ -38,41 +53,510 @@ type HealthPayload = {
   timestamp: string;
 };
 
-const ALERT_STATE_STYLES = {
-  healthy: {
-    background: "#f0fdf4",
-    border: "#bbf7d0",
-    color: "#166534",
-  },
-  warning: {
-    background: "#fff7ed",
-    border: "#fed7aa",
-    color: "#c2410c",
-  },
-  critical: {
-    background: "#fef2f2",
-    border: "#fecaca",
-    color: "#b91c1c",
-  },
-} as const;
+type QueueRow = Record<string, unknown> & {
+  orderId: string;
+  orderNo: string;
+  orderCell: ReactNode;
+  tenant: string;
+  pickup: string;
+  window: string;
+  state: string;
+  stateCell: ReactNode;
+  driver: string;
+  eta: string;
+};
 
-const ADAPTER_STATUS_STYLES = {
-  healthy: {
-    background: "#dcfce7",
-    border: "#86efac",
-    color: "#166534",
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
+
+const DRIVER_TASK_PRIORITY: Record<string, number> = {
+  on_trip: 0,
+  proof_pending: 1,
+  arrived_pickup: 2,
+  enroute_pickup: 3,
+  accepted: 4,
+  pending_acceptance: 5,
+  completed: 6,
+  cancelled: 7,
+  rejected: 8,
+};
+
+const OWNED_STATE_PRIORITY: Record<string, number> = {
+  override_pending: 0,
+  no_supply: 1,
+  exception_hold: 2,
+  broadcasting: 3,
+  queued: 4,
+  assigned: 5,
+};
+
+const pageBodyStyle = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 16,
+};
+
+const kpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+  gap: 10,
+};
+
+const splitGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.5fr) minmax(280px, 1fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const bannerStackStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 8,
+};
+
+const signalListStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 8,
+};
+
+const signalRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "6px 8px",
+  borderRadius: 6,
+  background: theme.surfaceLo,
+};
+
+const signalLabelStyle = {
+  flex: 1,
+  minWidth: 0,
+  fontSize: 12,
+  color: theme.text,
+};
+
+const queueStackStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 2,
+};
+
+const queueSubLabelStyle = {
+  color: theme.textDim,
+  fontSize: 11,
+};
+
+const queueLinkStyle = {
+  color: theme.accent,
+  textDecoration: "none",
+  fontWeight: 700,
+};
+
+const dashboardShellResetCss = `
+  body {
+    background: ${theme.bg};
+  }
+
+  body > aside {
+    display: none !important;
+  }
+
+  body > main {
+    padding: 0 !important;
+    background: ${theme.bg} !important;
+  }
+`;
+
+function buildShellNav(
+  locale: Locale,
+  counts: {
+    dashboard: number;
+    dispatch: number;
+    incidents: number;
   },
-  degraded: {
-    background: "#fef3c7",
-    border: "#fcd34d",
-    color: "#92400e",
-  },
-  down: {
-    background: "#fee2e2",
-    border: "#fca5a5",
-    color: "#b91c1c",
-  },
-} as const;
+): CanvasShellNavItem[] {
+  return [
+    { divider: locale === "en" ? "Workspaces" : "工作面" },
+    {
+      key: "dashboard",
+      href: "/dashboard",
+      icon: "dashboard",
+      label: t("nav.dashboard", locale),
+      ...(counts.dashboard > 0
+        ? { badge: String(counts.dashboard), badgeTone: "warn" as const }
+        : {}),
+    },
+    { divider: locale === "en" ? "Live Ops" : "即時派遣" },
+    {
+      key: "dispatch",
+      href: "/dispatch",
+      icon: "dispatch",
+      label: t("nav.dispatch", locale),
+      matchPaths: ["/dispatch"],
+      ...(counts.dispatch > 0
+        ? { badge: String(counts.dispatch), badgeTone: "accent" as const }
+        : {}),
+    },
+    {
+      key: "callcenter",
+      href: "/callcenter",
+      icon: "callcenter",
+      label: t("nav.callcenter", locale),
+    },
+    { divider: locale === "en" ? "Casework" : "案件處理" },
+    {
+      key: "complaints",
+      href: "/complaints",
+      icon: "complaints",
+      label: t("nav.complaints", locale),
+    },
+    {
+      key: "incidents",
+      href: "/incidents",
+      icon: "incidents",
+      label: t("nav.incidents", locale),
+      matchPaths: ["/incidents"],
+      ...(counts.incidents > 0
+        ? { badge: String(counts.incidents), badgeTone: "danger" as const }
+        : {}),
+    },
+    { divider: locale === "en" ? "Monitoring" : "營運監控" },
+    {
+      key: "reports",
+      href: "/reports",
+      icon: "reports",
+      label: t("nav.reports", locale),
+    },
+    {
+      key: "revenue",
+      href: "/revenue",
+      icon: "revenue",
+      label: t("nav.revenue", locale),
+    },
+    {
+      key: "attendance",
+      href: "/attendance",
+      icon: "attendance",
+      label: t("nav.attendance", locale),
+    },
+    {
+      key: "maintenance",
+      href: "/maintenance",
+      icon: "maintenance",
+      label: t("nav.maintenance", locale),
+    },
+    { divider: locale === "en" ? "Registry" : "主資料" },
+    {
+      key: "drivers",
+      href: "/drivers",
+      icon: "fleet",
+      label: t("nav.drivers", locale),
+    },
+    {
+      key: "vehicles",
+      href: "/vehicles",
+      icon: "vehicles",
+      label: t("nav.vehicles", locale),
+    },
+    {
+      key: "contracts",
+      href: "/contracts",
+      icon: "contracts",
+      label: t("nav.contracts", locale),
+    },
+    {
+      key: "feature-flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: t("nav.featureFlags", locale),
+    },
+  ];
+}
+
+function formatDateTime(locale: Locale, value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
+}
+
+function formatTimestamp(value: string | null, locale: Locale) {
+  if (!value) {
+    return t("dashboard.platformOps.notReported", locale);
+  }
+
+  return `${formatDateTime(locale, value)} UTC`;
+}
+
+function formatEtaLabel(minutes: number | null | undefined) {
+  if (minutes === null || minutes === undefined) {
+    return "—";
+  }
+
+  return `${minutes}m`;
+}
+
+function getQueueColumnLabel(
+  key:
+    | "orderNo"
+    | "tenant"
+    | "pickup"
+    | "window"
+    | "statePill"
+    | "driver"
+    | "eta",
+  locale: Locale,
+): string {
+  if (locale === "en") {
+    switch (key) {
+      case "orderNo":
+        return "ORDER";
+      case "tenant":
+        return "TENANT";
+      case "pickup":
+        return "PICKUP";
+      case "window":
+        return "WIN";
+      case "statePill":
+        return "STATE";
+      case "driver":
+        return "DRIVER";
+      case "eta":
+        return "ETA";
+      default:
+        return String(key).toUpperCase();
+    }
+  }
+
+  switch (key) {
+    case "orderNo":
+      return "訂單";
+    case "tenant":
+      return "租戶";
+    case "pickup":
+      return "上車地";
+    case "window":
+      return "時窗";
+    case "statePill":
+      return "狀態";
+    case "driver":
+      return "司機";
+    case "eta":
+      return "ETA";
+    default:
+      return String(key);
+  }
+}
+
+function formatWindow(order: OwnedOrderRecord, locale: Locale) {
+  if (!order.reservationWindowStart || !order.reservationWindowEnd) {
+    return locale === "zh" ? "即時" : "realtime";
+  }
+
+  return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
+}
+
+function getAddressLabel(
+  address: OwnedOrderRecord["pickup"] | OwnedOrderRecord["dropoff"],
+) {
+  return address.addressName ?? address.address;
+}
+
+function getTenantLabel(order: OwnedOrderRecord) {
+  return (
+    order.tenantId ??
+    order.partnerEntrySlug ??
+    order.partnerId ??
+    order.orderSource
+  );
+}
+
+function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
+  if (order.exceptionHold?.overrideRequest && !order.exceptionHold.resolution) {
+    return "override_pending";
+  }
+
+  if (order.status === "no_supply" || order.status === "delayed_queue") {
+    return "no_supply";
+  }
+
+  if (order.status === "exception_hold") {
+    return "exception_hold";
+  }
+
+  if (job?.status === "assigned") {
+    return "assigned";
+  }
+
+  if (job?.status === "matching") {
+    return "broadcasting";
+  }
+
+  if (
+    job?.status === "queued" ||
+    job?.status === "redispatch_required" ||
+    job?.status === "reserved"
+  ) {
+    return "queued";
+  }
+
+  if (
+    order.status === "ready_for_dispatch" ||
+    order.status === "preassigned" ||
+    order.status === "recording_pending" ||
+    order.status === "redispatch_required"
+  ) {
+    return "queued";
+  }
+
+  return order.status;
+}
+
+function getStateTone(stateCode: string): CanvasTone {
+  if (stateCode === "assigned" || stateCode === "completed") {
+    return "success";
+  }
+  if (stateCode === "no_supply") {
+    return "danger";
+  }
+  if (
+    stateCode === "dispatch_timeout" ||
+    stateCode === "exception_hold" ||
+    stateCode === "override_pending"
+  ) {
+    return "warn";
+  }
+  if (stateCode === "broadcasting" || stateCode === "queued") {
+    return "info";
+  }
+  return "neutral";
+}
+
+function getAlertTone(state: "healthy" | "warning" | "critical"): CanvasTone {
+  if (state === "critical") {
+    return "danger";
+  }
+  if (state === "warning") {
+    return "warn";
+  }
+  return "success";
+}
+
+function getHealthTone(status: string): CanvasTone {
+  if (status === "healthy" || status === "ok") {
+    return "success";
+  }
+  if (status === "warning" || status === "degraded") {
+    return "warn";
+  }
+  if (status === "critical" || status === "down") {
+    return "danger";
+  }
+  return "info";
+}
+
+function pickCurrentTask(tasks: DriverTaskRecord[]) {
+  return (
+    [...tasks].sort((left, right) => {
+      const leftRank = DRIVER_TASK_PRIORITY[left.status] ?? 99;
+      const rightRank = DRIVER_TASK_PRIORITY[right.status] ?? 99;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+
+      const leftTimestamp =
+        left.completedAt ??
+        left.startedAt ??
+        left.arrivedPickupAt ??
+        left.departedAt ??
+        left.acceptedAt ??
+        "";
+      const rightTimestamp =
+        right.completedAt ??
+        right.startedAt ??
+        right.arrivedPickupAt ??
+        right.departedAt ??
+        right.acceptedAt ??
+        "";
+
+      return rightTimestamp.localeCompare(leftTimestamp);
+    })[0] ?? null
+  );
+}
+
+function formatAlertValue(
+  value: number,
+  unit: "count" | "minutes" | "percent",
+  locale: Locale,
+) {
+  if (unit === "minutes") {
+    return locale === "en" ? `${value} min` : `${value} 分鐘`;
+  }
+  if (unit === "percent") {
+    return `${value}%`;
+  }
+  return formatCompactNumber(value);
+}
+
+function getAlertSummary(
+  alertKey: string,
+  observability: OperationalObservabilitySnapshot,
+  locale: Locale,
+) {
+  switch (alertKey) {
+    case "dispatch_lag":
+      return t("dashboard.alert.dispatch_lag.summary", locale, {
+        count: observability.dispatch.laggedOrders,
+      });
+    case "recording_backlog":
+      return t("dashboard.alert.recording_backlog.summary", locale, {
+        count: observability.recording.pendingOrders,
+      });
+    case "driver_state_lag":
+      return t("dashboard.alert.driver_state_lag.summary", locale, {
+        count: observability.driverState.staleLocationDrivers,
+      });
+    case "eligibility_review_backlog":
+      return t("dashboard.alert.eligibility_review_backlog.summary", locale, {
+        count: observability.eligibility.totalReviewQueue,
+      });
+    case "adapter_degradation":
+      return t("dashboard.alert.adapter_degradation.summary", locale, {
+        count:
+          observability.adapters.degradedAdapters +
+          observability.adapters.downAdapters,
+      });
+    default:
+      return "";
+  }
+}
+
+async function resolveOrFallback<T>(
+  loader: () => Promise<T>,
+  fallback: T,
+): Promise<T> {
+  try {
+    return await loader();
+  } catch {
+    return fallback;
+  }
+}
 
 function createFallbackObservabilitySnapshot(
   referenceDate = new Date(),
@@ -147,113 +631,6 @@ function createFallbackObservabilitySnapshot(
     adapterDetails: [],
     roleViews: [],
   };
-}
-
-function formatAlertValue(
-  value: number,
-  unit: "count" | "minutes" | "percent",
-  locale: "en" | "zh",
-) {
-  if (unit === "minutes") {
-    return locale === "en" ? `${value} min` : `${value} 分鐘`;
-  }
-  if (unit === "percent") {
-    return `${value}%`;
-  }
-  return formatCompactNumber(value);
-}
-
-function getAlertSummary(
-  alertKey: string,
-  observability: OperationalObservabilitySnapshot,
-  locale: "en" | "zh",
-) {
-  switch (alertKey) {
-    case "dispatch_lag":
-      return t("dashboard.alert.dispatch_lag.summary", locale, {
-        count: observability.dispatch.laggedOrders,
-      });
-    case "recording_backlog":
-      return t("dashboard.alert.recording_backlog.summary", locale, {
-        count: observability.recording.pendingOrders,
-      });
-    case "driver_state_lag":
-      return t("dashboard.alert.driver_state_lag.summary", locale, {
-        count: observability.driverState.staleLocationDrivers,
-      });
-    case "eligibility_review_backlog":
-      return t("dashboard.alert.eligibility_review_backlog.summary", locale, {
-        count: observability.eligibility.totalReviewQueue,
-      });
-    case "adapter_degradation":
-      return t("dashboard.alert.adapter_degradation.summary", locale, {
-        count:
-          observability.adapters.degradedAdapters +
-          observability.adapters.downAdapters,
-      });
-    default:
-      return "";
-  }
-}
-
-function formatTimestamp(value: string | null, locale: "en" | "zh") {
-  if (!value) {
-    return t("dashboard.platformOps.notReported", locale);
-  }
-
-  return `${new Intl.DateTimeFormat(locale === "en" ? "en-US" : "zh-TW", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "UTC",
-  }).format(new Date(value))} UTC`;
-}
-
-function formatBacklogSummary(value: number | null, locale: "en" | "zh") {
-  if (value === null) {
-    return t("dashboard.platformOps.noLag", locale);
-  }
-
-  return t("dashboard.platformOps.oldestLag", locale, {
-    value: formatAlertValue(value, "minutes", locale),
-  });
-}
-
-function buildAdapterSignalItems(
-  adapter: OperationalAdapterDetailRecord,
-  locale: "en" | "zh",
-) {
-  return [
-    {
-      label: t("dashboard.platformOps.signal.credential", locale),
-      value: formatOpsCodeLabel(locale, adapter.credentialStatus),
-    },
-    {
-      label: t("dashboard.platformOps.signal.auth", locale),
-      value: formatOpsCodeLabel(locale, adapter.authStatus),
-    },
-    {
-      label: t("dashboard.platformOps.signal.webhook", locale),
-      value: formatOpsCodeLabel(locale, adapter.webhookStatus),
-    },
-    {
-      label: t("dashboard.platformOps.signal.rateLimit", locale),
-      value: formatOpsCodeLabel(locale, adapter.rateLimitStatus),
-    },
-  ] as const;
-}
-
-async function resolveOrFallback<T>(
-  loader: () => Promise<T>,
-  fallback: T,
-): Promise<T> {
-  try {
-    return await loader();
-  } catch {
-    return fallback;
-  }
 }
 
 async function loadHealthPayload(): Promise<HealthPayload> {
@@ -345,932 +722,508 @@ export default async function DashboardPage() {
       vehicleId: "all",
     },
   );
-  const trend = buildDashboardTrend(orders, driverTasks, incidents);
-  const maxTrips = Math.max(1, ...trend.map((p) => p.completedTrips));
-  const actionItems = [
-    dispatch.redispatchOrders > 0
-      ? t("dashboard.exceptions.redispatch", locale, {
-          count: dispatch.redispatchOrders,
-        })
-      : null,
-    operations.openIncidents > 0
-      ? t("dashboard.exceptions.incidents", locale, {
-          count: operations.openIncidents,
-        })
-      : null,
-    operations.overdueMaintenance > 0
-      ? t("dashboard.exceptions.maintenance", locale, {
-          count: operations.overdueMaintenance,
-        })
-      : null,
-    operations.failedReports > 0
-      ? t("dashboard.exceptions.reports", locale, {
-          count: operations.failedReports,
-        })
-      : null,
-  ].filter(Boolean) as string[];
+  const criticalIncidentCount = incidents.filter(
+    (incident: IncidentRecord) =>
+      (incident.status === "open" || incident.status === "investigating") &&
+      incident.severity === "critical",
+  ).length;
+  const dispatchEligibleDrivers =
+    observability.driverState.dispatchEligibleDrivers ||
+    operations.onlineDrivers;
+  const staleLocationDrivers = observability.driverState.staleLocationDrivers;
+  const staleLocationDelta =
+    observability.driverState.oldestLocationLagMinutes !== null
+      ? locale === "en"
+        ? `>${observability.driverState.oldestLocationLagMinutes} min`
+        : `>${observability.driverState.oldestLocationLagMinutes} 分鐘`
+      : undefined;
 
-  const quickLinks: [string, string][] = [
-    ["/dispatch", t("dashboard.quicklink.dispatch", locale)],
-    ["/revenue", t("dashboard.quicklink.revenue", locale)],
-    ["/incidents", t("dashboard.quicklink.incidents", locale)],
-    ["/maintenance", t("dashboard.quicklink.maintenance", locale)],
-    ["/reports", t("dashboard.quicklink.reports", locale)],
-  ];
   const opsAlertKeys = new Set(
-    observability.roleViews.find((view) => view.route === "ops")?.alertKeys ??
-      [],
+    observability.roleViews.find(
+      (view: OperationalRoleView) => view.route === "ops",
+    )?.alertKeys ?? [],
   );
   const opsAlerts = observability.alerts
     .filter(
-      (alert) => opsAlertKeys.has(alert.key) || alert.routes.includes("ops"),
+      (alert: OperationalAlertRecord) =>
+        opsAlertKeys.has(alert.key) || alert.routes.includes("ops"),
     )
-    .sort((left, right) => {
-      const severityRank = { critical: 0, warning: 1, healthy: 2 } as const;
-      return severityRank[left.state] - severityRank[right.state];
+    .sort((left: OperationalAlertRecord, right: OperationalAlertRecord) => {
+      const severityRank: Record<OperationalAlertState, number> = {
+        critical: 0,
+        warning: 1,
+        healthy: 2,
+      };
+      const leftSeverity =
+        severityRank[left.state as OperationalAlertState] ?? 99;
+      const rightSeverity =
+        severityRank[right.state as OperationalAlertState] ?? 99;
+      return leftSeverity - rightSeverity;
     });
+
   const adapterAttentionCount =
     observability.adapters.degradedAdapters +
     observability.adapters.downAdapters;
-  const platformOpsCards = [
+  const topAlert = opsAlerts[0];
+
+  const queueAttentionCount =
+    dispatch.redispatchOrders +
+    dispatch.exceptionOrders +
+    observability.dispatch.laggedOrders;
+  const broadcastingCount = dispatchJobs.filter(
+    (job: DispatchJobRecord) => job.status === "matching",
+  ).length;
+
+  const shellNav = buildShellNav(locale, {
+    dashboard: Math.max(opsAlerts.length, adapterAttentionCount),
+    dispatch: dispatch.queueDepth,
+    incidents: operations.openIncidents,
+  });
+
+  const headerSubtitle = [
+    formatTimestamp(health.timestamp, locale),
+    locale === "en"
+      ? `mode ${health.mode}`
+      : `模式 ${formatOpsCodeLabel(locale, health.mode)}`,
+    locale === "en"
+      ? `execution ${health.execution_mode}`
+      : `執行 ${formatOpsCodeLabel(locale, health.execution_mode)}`,
+  ].join(" · ");
+
+  const banners = [
+    topAlert
+      ? {
+          key: topAlert.key,
+          tone: getAlertTone(topAlert.state),
+          title: t(`dashboard.alert.${topAlert.key}.title`, locale),
+          body: `${getAlertSummary(topAlert.key, observability, locale)} · ${t(
+            "dashboard.operational.thresholds",
+            locale,
+            {
+              warning: formatAlertValue(
+                topAlert.thresholds.warning,
+                topAlert.thresholds.unit,
+                locale,
+              ),
+              critical: formatAlertValue(
+                topAlert.thresholds.critical,
+                topAlert.thresholds.unit,
+                locale,
+              ),
+            },
+          )}`,
+          href:
+            topAlert.key === "adapter_degradation" ? "/dispatch" : "/incidents",
+          cta:
+            topAlert.key === "adapter_degradation"
+              ? t("dashboard.platformOps.openDispatch", locale)
+              : t("dashboard.quicklink.incidents", locale),
+        }
+      : null,
+    queueAttentionCount > 0
+      ? {
+          key: "dispatch-queue",
+          tone: queueAttentionCount > dispatch.queueDepth ? "danger" : "warn",
+          title: t("dashboard.dispatchBoards.title", locale),
+          body: t("dashboard.dispatchBoards.ownedSummary", locale, {
+            redispatch: dispatch.redispatchOrders,
+            exceptions: dispatch.exceptionOrders,
+          }),
+          href: "/dispatch?view=owned",
+          cta: t("dashboard.dispatchBoards.openOwned", locale),
+        }
+      : null,
+    adapterAttentionCount > 0
+      ? {
+          key: "platform-ops",
+          tone: "warn" as const,
+          title: t("dashboard.platformOps.metrics.adapters", locale),
+          body: t("dashboard.platformOps.degradedBanner", locale, {
+            count: adapterAttentionCount,
+          }),
+          href: "/dispatch?view=forwarded",
+          cta: t("dashboard.dispatchBoards.openForwarded", locale),
+        }
+      : null,
+  ].filter(Boolean) as Array<{
+    key: string;
+    tone: "info" | "warn" | "danger" | "success";
+    title: string;
+    body: string;
+    href: string;
+    cta: string;
+  }>;
+
+  const healthSignals: Array<{
+    label: string;
+    value: string;
+    tone: CanvasTone;
+  }> = [
     {
-      label: t("dashboard.platformOps.metrics.adapters", locale),
-      value: formatCompactNumber(adapterAttentionCount),
-      sub: t("dashboard.platformOps.metrics.adaptersSub", locale, {
-        healthy: observability.adapters.healthyAdapters,
-        down: observability.adapters.downAdapters,
-        total: observability.adapters.totalAdapters,
-      }),
-      accent: "#0f766e",
+      label: t("dashboard.runtime.apiStatus", locale),
+      value: health.status,
+      tone: getHealthTone(health.status),
     },
     {
-      label: t("dashboard.platformOps.metrics.syncFailed", locale),
-      value: formatCompactNumber(observability.forwarderOps.syncFailedOrders),
-      sub: formatBacklogSummary(
-        observability.forwarderOps.oldestSyncFailedLagMinutes,
-        locale,
-      ),
-      accent: "#dc2626",
+      label: t("dashboard.queueDepth", locale),
+      value: formatCompactNumber(dispatch.queueDepth),
+      tone: dispatch.queueDepth > 0 ? "info" : "success",
     },
     {
-      label: t("dashboard.platformOps.metrics.acceptPending", locale),
-      value: formatCompactNumber(
-        observability.forwarderOps.acceptPendingOrders,
-      ),
-      sub: formatBacklogSummary(
-        observability.forwarderOps.oldestAcceptPendingLagMinutes,
-        locale,
-      ),
-      accent: "#d97706",
+      label: t("dashboard.alert.dispatch_lag.title", locale),
+      value: formatCompactNumber(observability.dispatch.laggedOrders),
+      tone:
+        observability.dispatch.laggedOrders > 0
+          ? "warn"
+          : ("success" as CanvasTone),
+    },
+    ...observability.adapterDetails
+      .slice(0, 2)
+      .map((adapter: OperationalAdapterDetailRecord) => ({
+        label: formatOpsCodeLabel(locale, adapter.platformCode),
+        value: adapter.status,
+        tone: getHealthTone(adapter.status),
+      })),
+    {
+      label: t("dashboard.runtime.title", locale),
+      value: `${identity?.realm ?? t("dashboard.runtime.anonymous", locale)} / ${identity?.actorType ?? t("dashboard.runtime.anonymous", locale)}`,
+      tone: "neutral",
+    },
+  ];
+
+  const jobByOrderId = new Map<string, DispatchJobRecord>(
+    dispatchJobs.map((job: DispatchJobRecord) => [job.orderId, job]),
+  );
+  const tasksByOrderId = new Map<string, DriverTaskRecord[]>();
+  for (const task of driverTasks) {
+    const existing = tasksByOrderId.get(task.orderId);
+    if (existing) {
+      existing.push(task);
+    } else {
+      tasksByOrderId.set(task.orderId, [task]);
+    }
+  }
+
+  const queueRows: QueueRow[] = [...orders]
+    .sort((left, right) => {
+      const leftState = getVisibleStateCode(
+        left,
+        jobByOrderId.get(left.orderId),
+      );
+      const rightState = getVisibleStateCode(
+        right,
+        jobByOrderId.get(right.orderId),
+      );
+      const leftPriority = OWNED_STATE_PRIORITY[leftState] ?? 99;
+      const rightPriority = OWNED_STATE_PRIORITY[rightState] ?? 99;
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority;
+      }
+
+      const leftTimestamp = left.updatedAt ?? left.createdAt ?? "";
+      const rightTimestamp = right.updatedAt ?? right.createdAt ?? "";
+      return rightTimestamp.localeCompare(leftTimestamp);
+    })
+    .slice(0, 5)
+    .map((order) => {
+      const job = jobByOrderId.get(order.orderId);
+      const task = pickCurrentTask(tasksByOrderId.get(order.orderId) ?? []);
+      const state = getVisibleStateCode(order, job);
+
+      return {
+        orderId: order.orderId,
+        orderNo: order.orderNo,
+        orderCell: (
+          <div style={queueStackStyle}>
+            <Link
+              href={`/dispatch/${encodeURIComponent(order.orderId)}`}
+              style={queueLinkStyle}
+            >
+              {order.orderNo}
+            </Link>
+            <span style={queueSubLabelStyle}>{order.orderId}</span>
+          </div>
+        ),
+        tenant: getTenantLabel(order),
+        pickup: getAddressLabel(order.pickup),
+        window: formatWindow(order, locale),
+        state,
+        stateCell: (
+          <Pill theme={theme} tone={getStateTone(state)} dot>
+            {state}
+          </Pill>
+        ),
+        driver: task?.driverId ?? "—",
+        eta: formatEtaLabel(
+          job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes,
+        ),
+      };
+    });
+  const queueColumns: CanvasTableColumn<QueueRow>[] = [
+    {
+      h: getQueueColumnLabel("orderNo", locale),
+      k: "orderCell",
+      w: 126,
     },
     {
-      label: t("dashboard.platformOps.metrics.manualFallback", locale),
-      value: formatCompactNumber(
-        observability.forwarderOps.manualFallbackQueue,
-      ),
-      sub: formatBacklogSummary(
-        observability.forwarderOps.oldestManualFallbackLagMinutes,
-        locale,
-      ),
-      accent: "#7c3aed",
+      h: getQueueColumnLabel("tenant", locale),
+      k: "tenant",
+      w: 140,
+      mono: true,
     },
     {
-      label: t("dashboard.platformOps.metrics.reconciliation", locale),
-      value: formatCompactNumber(
-        observability.forwarderOps.reconciliationQueue,
-      ),
-      sub: formatBacklogSummary(
-        observability.forwarderOps.oldestReconciliationLagMinutes,
-        locale,
-      ),
-      accent: "#0284c7",
+      h: getQueueColumnLabel("pickup", locale),
+      k: "pickup",
+      w: 300,
     },
-  ] as const;
+    {
+      h: getQueueColumnLabel("window", locale),
+      k: "window",
+      w: 132,
+      mono: true,
+    },
+    {
+      h: getQueueColumnLabel("statePill", locale),
+      k: "stateCell",
+      w: 142,
+    },
+    {
+      h: getQueueColumnLabel("driver", locale),
+      k: "driver",
+      w: 112,
+      mono: true,
+    },
+    {
+      h: getQueueColumnLabel("eta", locale),
+      k: "eta",
+      w: 78,
+      mono: true,
+    },
+  ];
 
   return (
     <>
-      <PageHeader
-        title={t("dashboard.title", locale)}
-        subtitle={t("dashboard.subtitle", locale)}
-      />
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "16px",
-          marginBottom: "24px",
-        }}
+      <style>{dashboardShellResetCss}</style>
+      <Shell
+        theme={theme}
+        nav={shellNav}
+        active="dashboard"
+        brandLabel={t("app.name", locale)}
+        brandSubLabel={t("app.sub", locale)}
+        breadcrumb={[t("nav.dashboard", locale)]}
+        env="production"
+        versionLabel="canvas"
+        searchPlaceholder={t("common.search", locale)}
+        avatarLabel="OC"
+        style={{ minHeight: "100vh", height: "100vh" }}
       >
-        <StatCard
-          label={t("dashboard.todayRevenue", locale)}
-          value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
-          sub={t("dashboard.todayRevenueSub", locale, {
-            trips: formatCompactNumber(todayRevenue.completedTrips),
-          })}
-          accent="#15803d"
-        />
-        <StatCard
-          label={t("dashboard.queueDepth", locale)}
-          value={formatCompactNumber(dispatch.queueDepth)}
-          sub={
-            dispatch.averageEtaMinutes
-              ? t("dashboard.queueDepthSub", locale, {
-                  eta: dispatch.averageEtaMinutes,
-                })
-              : t("dashboard.queueDepthSubPending", locale)
+        <PageHeader
+          theme={theme}
+          title={t("dashboard.title", locale)}
+          subtitle={headerSubtitle}
+          actions={
+            <>
+              <Btn theme={theme} icon="ext">
+                {locale === "en" ? "Duty handbook" : "值班手冊"}
+              </Btn>
+              <Btn theme={theme} variant="primary" icon="phone">
+                {locale === "en" ? "Open call session" : "開新 call session"}
+              </Btn>
+            </>
           }
-          accent="#1d4ed8"
         />
-        <StatCard
-          label={t("dashboard.activeOrders", locale)}
-          value={formatCompactNumber(dispatch.activeOrders)}
-          sub={t("dashboard.activeOrdersSub", locale)}
-          accent="#7c3aed"
-        />
-        <StatCard
-          label={t("dashboard.dispatchableVehicles", locale)}
-          value={formatCompactNumber(operations.dispatchableVehicles)}
-          sub={t("dashboard.dispatchableVehiclesSub", locale, {
-            count: operations.offlineVehicles,
-          })}
-          accent="#b45309"
-        />
-        <StatCard
-          label={t("dashboard.onlineDrivers", locale)}
-          value={formatCompactNumber(operations.onlineDrivers)}
-          sub={t("dashboard.onlineDriversSub", locale)}
-          accent="#0891b2"
-        />
-        <StatCard
-          label={t("dashboard.openIncidents", locale)}
-          value={formatCompactNumber(operations.openIncidents)}
-          sub={t("dashboard.openIncidentsSub", locale, {
-            count: operations.overdueMaintenance,
-          })}
-          accent="#dc2626"
-        />
-      </div>
 
-      <Card style={{ marginBottom: "24px" }}>
-        <CardHeader>
-          <div
-            style={{
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "#64748b",
-              marginBottom: "2px",
-            }}
-          >
-            {t("dashboard.dispatchBoards.title", locale)}
+        <div style={pageBodyStyle}>
+          <div style={kpiGridStyle}>
+            <KPI
+              theme={theme}
+              label={t("dashboard.activeOrders", locale)}
+              value={formatCompactNumber(dispatch.activeOrders)}
+              delta={
+                dispatch.redispatchOrders > 0
+                  ? `${formatCompactNumber(dispatch.redispatchOrders)} redispatch`
+                  : undefined
+              }
+              deltaTone={dispatch.redispatchOrders > 0 ? "down" : "neutral"}
+              sub={t("dashboard.activeOrdersSub", locale)}
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.queueDepth", locale)}
+              value={formatCompactNumber(dispatch.queueDepth)}
+              delta={
+                broadcastingCount > 0
+                  ? `${formatCompactNumber(broadcastingCount)} broadcasting`
+                  : undefined
+              }
+              sub={
+                dispatch.averageEtaMinutes
+                  ? t("dashboard.queueDepthSub", locale, {
+                      eta: dispatch.averageEtaMinutes,
+                    })
+                  : t("dashboard.queueDepthSubPending", locale)
+              }
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.onlineDrivers", locale)}
+              value={formatCompactNumber(dispatchEligibleDrivers)}
+              sub={t("dashboard.onlineDriversSub", locale)}
+              hint={
+                locale === "en"
+                  ? `${formatCompactNumber(operations.onlineDrivers)} on shift`
+                  : `${formatCompactNumber(operations.onlineDrivers)} 在班`
+              }
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.dispatchableVehicles", locale)}
+              value={formatCompactNumber(operations.dispatchableVehicles)}
+              delta={
+                staleLocationDrivers > 0
+                  ? locale === "en"
+                    ? `${formatCompactNumber(staleLocationDrivers)} stale`
+                    : `${formatCompactNumber(staleLocationDrivers)} 筆 stale`
+                  : undefined
+              }
+              deltaTone={
+                staleLocationDrivers > 0 || operations.offlineVehicles > 0
+                  ? "down"
+                  : "neutral"
+              }
+              sub={t("dashboard.dispatchableVehiclesSub", locale, {
+                count: operations.offlineVehicles,
+              })}
+              hint={staleLocationDelta}
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.openIncidents", locale)}
+              value={formatCompactNumber(operations.openIncidents)}
+              delta={
+                operations.overdueMaintenance > 0
+                  ? `${formatCompactNumber(operations.overdueMaintenance)} breach`
+                  : undefined
+              }
+              deltaTone={
+                operations.overdueMaintenance > 0 ? "down" : "neutral"
+              }
+              sub={t("dashboard.openIncidentsSub", locale, {
+                count: operations.overdueMaintenance,
+              })}
+            />
+            <KPI
+              theme={theme}
+              label={t("dashboard.todayRevenue", locale)}
+              value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
+              delta={
+                criticalIncidentCount > 0
+                  ? locale === "en"
+                    ? `${formatCompactNumber(criticalIncidentCount)} critical`
+                    : `${formatCompactNumber(criticalIncidentCount)} 重大`
+                  : undefined
+              }
+              deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
+              sub={t("dashboard.todayRevenueSub", locale, {
+                trips: formatCompactNumber(todayRevenue.completedTrips),
+              })}
+            />
           </div>
-          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
-            {t("dashboard.dispatchBoards.subtitle", locale)}
-          </div>
-        </CardHeader>
-        <CardBody>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-              gap: "16px",
-            }}
-          >
-            <div
-              style={{
-                border: "1px solid #dbeafe",
-                borderRadius: "16px",
-                padding: "16px",
-                background:
-                  "linear-gradient(180deg, rgba(239,246,255,0.9), rgba(248,250,252,1))",
-              }}
+
+          <div style={splitGridStyle}>
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Today's Attention" : "今日待處理"}
+              subtitle={
+                locale === "en"
+                  ? "Critical first, then SLA breach, then blocking queue"
+                  : "排序：critical → SLA breach → blocking"
+              }
+              actions={
+                <Btn theme={theme} variant="ghost">
+                  {locale === "en" ? "Open all" : "展開所有"}
+                </Btn>
+              }
             >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                  marginBottom: "12px",
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                      color: "#1d4ed8",
-                    }}
-                  >
-                    {t("dispatch.view.owned", locale)}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "18px",
-                      fontWeight: 700,
-                      color: "#0f172a",
-                    }}
-                  >
-                    {formatCompactNumber(dispatch.queueDepth)}
-                  </div>
-                </div>
-                <div style={{ fontSize: "12px", color: "#475569" }}>
-                  {t("dashboard.dispatchBoards.queueDepth", locale)}
-                </div>
+              <div style={bannerStackStyle}>
+                {banners.length > 0 ? (
+                  banners.map((banner) => (
+                    <Banner
+                      key={banner.key}
+                      theme={theme}
+                      tone={banner.tone}
+                      icon={<CanvasIcon name="warn" size={16} />}
+                      title={banner.title}
+                      body={banner.body}
+                      actions={
+                        <Link
+                          href={banner.href}
+                          style={{ textDecoration: "none" }}
+                        >
+                          <Btn
+                            theme={theme}
+                            variant={
+                              banner.tone === "danger"
+                                ? "primary"
+                                : "secondary"
+                            }
+                          >
+                            {banner.cta}
+                          </Btn>
+                        </Link>
+                      }
+                    />
+                  ))
+                ) : (
+                  <Banner
+                    theme={theme}
+                    tone="info"
+                    icon={<CanvasIcon name="health" size={16} />}
+                    title={t("dashboard.exceptions.title", locale)}
+                    body={t("dashboard.exceptions.none", locale)}
+                  />
+                )}
               </div>
-              <div
-                style={{
-                  fontSize: "13px",
-                  color: "#475569",
-                  marginBottom: "12px",
-                }}
-              >
-                {t("dashboard.dispatchBoards.ownedSummary", locale, {
-                  redispatch: dispatch.redispatchOrders,
-                  exceptions: dispatch.exceptionOrders,
-                })}
+            </Card>
+
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Health Signals" : "健康訊號"}
+            >
+              <div style={signalListStyle}>
+                {healthSignals.map((signal, index) => (
+                  <div key={`${signal.label}-${index}`} style={signalRowStyle}>
+                    <Pill theme={theme} tone={signal.tone} dot>
+                      {signal.value}
+                    </Pill>
+                    <span style={signalLabelStyle}>{signal.label}</span>
+                  </div>
+                ))}
               </div>
+            </Card>
+          </div>
+
+          <Card
+            theme={theme}
+            title={
+              locale === "en" ? "Current Dispatch Queue" : "當前 dispatch 隊列"
+            }
+            padding={0}
+            actions={
               <Link
                 href="/dispatch?view=owned"
-                style={{
-                  display: "inline-block",
-                  padding: "10px 14px",
-                  borderRadius: "10px",
-                  background: "#0f172a",
-                  color: "#ffffff",
-                  textDecoration: "none",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                }}
+                style={{ textDecoration: "none" }}
               >
-                {t("dashboard.dispatchBoards.openOwned", locale)} →
+                <Btn theme={theme} variant="ghost">
+                  {locale === "en" ? "Open dispatch" : "前往派遣"}
+                </Btn>
               </Link>
-            </div>
-
-            <div
-              style={{
-                border: "1px solid #fde68a",
-                borderRadius: "16px",
-                padding: "16px",
-                background:
-                  "linear-gradient(180deg, rgba(255,251,235,0.95), rgba(255,255,255,1))",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                  marginBottom: "12px",
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                      color: "#b45309",
-                    }}
-                  >
-                    {t("dispatch.view.forwarded", locale)}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "18px",
-                      fontWeight: 700,
-                      color: "#0f172a",
-                    }}
-                  >
-                    {formatCompactNumber(
-                      observability.forwarderOps.syncFailedOrders +
-                        observability.forwarderOps.acceptPendingOrders,
-                    )}
-                  </div>
-                </div>
-                <div style={{ fontSize: "12px", color: "#78350f" }}>
-                  {t("dashboard.dispatchBoards.attentionQueue", locale)}
-                </div>
-              </div>
-              <div
-                style={{
-                  fontSize: "13px",
-                  color: "#78350f",
-                  marginBottom: "12px",
-                }}
-              >
-                {t("dashboard.dispatchBoards.forwardedSummary", locale, {
-                  syncFailed: observability.forwarderOps.syncFailedOrders,
-                  reconciliation:
-                    observability.forwarderOps.reconciliationQueue,
-                })}
-              </div>
-              <Link
-                href="/dispatch"
-                style={{
-                  display: "inline-block",
-                  padding: "10px 14px",
-                  borderRadius: "10px",
-                  background: "#fff7ed",
-                  border: "1px solid #fdba74",
-                  color: "#9a3412",
-                  textDecoration: "none",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                }}
-              >
-                {t("dashboard.dispatchBoards.openForwarded", locale)} →
-              </Link>
-            </div>
-          </div>
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div
-            style={{
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "#64748b",
-              marginBottom: "2px",
-            }}
+            }
           >
-            {t("dashboard.operational.title", locale)}
-          </div>
-          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
-            {t("dashboard.operational.subtitle", locale)}
-          </div>
-        </CardHeader>
-        <CardBody>
-          {opsAlerts.length === 0 ? (
-            <p style={{ margin: 0, fontSize: "13.5px", color: "#94a3b8" }}>
-              {t("dashboard.operational.empty", locale)}
-            </p>
-          ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: "14px",
-              }}
-            >
-              {opsAlerts.map((alert) => {
-                const style = ALERT_STATE_STYLES[alert.state];
-                return (
-                  <div
-                    key={alert.key}
-                    style={{
-                      border: `1px solid ${style.border}`,
-                      background: style.background,
-                      borderRadius: "12px",
-                      padding: "14px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        gap: "8px",
-                        marginBottom: "10px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "14px",
-                          fontWeight: 600,
-                          color: "#0f172a",
-                        }}
-                      >
-                        {t(`dashboard.alert.${alert.key}.title`, locale)}
-                      </div>
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          fontWeight: 700,
-                          letterSpacing: "0.04em",
-                          textTransform: "uppercase",
-                          color: style.color,
-                        }}
-                      >
-                        {formatOpsCodeLabel(locale, alert.state)}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "22px",
-                        fontWeight: 700,
-                        color: "#0f172a",
-                        marginBottom: "4px",
-                      }}
-                    >
-                      {formatAlertValue(
-                        alert.measuredValue,
-                        alert.thresholds.unit,
-                        locale,
-                      )}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        color: "#475569",
-                        marginBottom: "8px",
-                      }}
-                    >
-                      {t("dashboard.operational.thresholds", locale, {
-                        warning: formatAlertValue(
-                          alert.thresholds.warning,
-                          alert.thresholds.unit,
-                          locale,
-                        ),
-                        critical: formatAlertValue(
-                          alert.thresholds.critical,
-                          alert.thresholds.unit,
-                          locale,
-                        ),
-                      })}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#334155" }}>
-                      {getAlertSummary(alert.key, observability, locale)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div
-            style={{
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "#64748b",
-              marginBottom: "2px",
-            }}
-          >
-            {t("dashboard.platformOps.title", locale)}
-          </div>
-          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
-            {t("dashboard.platformOps.subtitle", locale, {
-              count: observability.forwarderOps.totalForwardedOrders,
-            })}
-          </div>
-        </CardHeader>
-        <CardBody>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-              gap: "14px",
-              marginBottom: "18px",
-            }}
-          >
-            {platformOpsCards.map((card) => (
-              <div
-                key={card.label}
-                style={{
-                  border: "1px solid #e2e8f0",
-                  borderRadius: "14px",
-                  padding: "14px",
-                  background: "#f8fafc",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "11px",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    color: "#64748b",
-                    marginBottom: "8px",
-                  }}
-                >
-                  {card.label}
-                </div>
-                <div
-                  style={{
-                    fontSize: "26px",
-                    fontWeight: 700,
-                    color: card.accent,
-                    marginBottom: "4px",
-                  }}
-                >
-                  {card.value}
-                </div>
-                <div style={{ fontSize: "12px", color: "#475569" }}>
-                  {card.sub}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {adapterAttentionCount > 0 && (
-            <div
-              style={{
-                marginBottom: "18px",
-                border: "1px solid #fcd34d",
-                background: "#fffbeb",
-                color: "#92400e",
-                borderRadius: "12px",
-                padding: "12px 14px",
-                fontSize: "13px",
-              }}
-            >
-              {t("dashboard.platformOps.degradedBanner", locale, {
-                count: adapterAttentionCount,
-              })}
-            </div>
-          )}
-
-          {observability.adapterDetails.length > 0 ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                gap: "14px",
-              }}
-            >
-              {observability.adapterDetails.map((adapter) => {
-                const signalItems = buildAdapterSignalItems(adapter, locale);
-                const statusStyle = ADAPTER_STATUS_STYLES[adapter.status];
-
-                return (
-                  <div
-                    key={adapter.platformCode}
-                    style={{
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "16px",
-                      padding: "16px",
-                      background: "#fff",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        gap: "12px",
-                        marginBottom: "10px",
-                      }}
-                    >
-                      <div>
-                        <div
-                          style={{
-                            fontSize: "15px",
-                            fontWeight: 600,
-                            color: "#0f172a",
-                          }}
-                        >
-                          {formatOpsCodeLabel(locale, adapter.platformCode)}
-                        </div>
-                        <div style={{ fontSize: "12px", color: "#64748b" }}>
-                          {t("dashboard.platformOps.signal.reason", locale)}:{" "}
-                          {formatOpsCodeLabel(locale, adapter.reason)}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          border: `1px solid ${statusStyle.border}`,
-                          background: statusStyle.background,
-                          color: statusStyle.color,
-                          borderRadius: "999px",
-                          padding: "4px 10px",
-                          fontSize: "11px",
-                          fontWeight: 700,
-                          letterSpacing: "0.04em",
-                          textTransform: "uppercase",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {t(
-                          `dispatch.forwarded.health.status.${adapter.status}`,
-                          locale,
-                        )}
-                      </span>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                        gap: "10px",
-                        marginBottom: "12px",
-                      }}
-                    >
-                      {signalItems.map((item) => (
-                        <div
-                          key={item.label}
-                          style={{
-                            border: "1px solid #e2e8f0",
-                            borderRadius: "12px",
-                            padding: "10px",
-                            background: "#f8fafc",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.05em",
-                              color: "#64748b",
-                              marginBottom: "4px",
-                            }}
-                          >
-                            {item.label}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "13px",
-                              fontWeight: 600,
-                              color: "#0f172a",
-                            }}
-                          >
-                            {item.value}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: "6px",
-                        fontSize: "12px",
-                        color: "#475569",
-                      }}
-                    >
-                      <div>
-                        {t("dashboard.platformOps.signal.lastChecked", locale)}:{" "}
-                        {formatTimestamp(adapter.lastCheckedAt, locale)}
-                      </div>
-                      <div>
-                        {t("dashboard.platformOps.signal.lastError", locale)}:{" "}
-                        {adapter.lastError ??
-                          t("dashboard.platformOps.noError", locale)}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p style={{ margin: 0, fontSize: "13.5px", color: "#94a3b8" }}>
-              {t("dashboard.platformOps.empty", locale)}
-            </p>
-          )}
-
-          <div style={{ marginTop: "18px" }}>
-            <Link
-              href="/dispatch"
-              style={{
-                display: "inline-block",
-                padding: "10px 14px",
-                borderRadius: "10px",
-                background: "#eff6ff",
-                border: "1px solid #bfdbfe",
-                color: "#1d4ed8",
-                textDecoration: "none",
-                fontSize: "13px",
-                fontWeight: 600,
-              }}
-            >
-              {t("dashboard.platformOps.openDispatch", locale)} →
-            </Link>
-          </div>
-        </CardBody>
-      </Card>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 300px",
-          gap: "20px",
-          marginBottom: "24px",
-        }}
-      >
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {t("dashboard.trend.title", locale)}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {t("dashboard.trend.subtitle", locale)}
-            </div>
-          </CardHeader>
-          <CardBody>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(7, 1fr)",
-                gap: "8px",
-                alignItems: "end",
-                minHeight: "120px",
-              }}
-            >
-              {trend.map((point) => (
-                <div
-                  key={point.date}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "4px",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "100%",
-                      maxWidth: "40px",
-                      height: `${Math.max(12, Math.round((point.completedTrips / maxTrips) * 80))}px`,
-                      background: "linear-gradient(180deg, #3b82f6, #06b6d4)",
-                      borderRadius: "4px 4px 2px 2px",
-                    }}
-                    title={`${point.label}: ${point.completedTrips} trips, ${formatMinorCurrency(point.revenueMinor)}`}
-                  />
-                  <span
-                    style={{
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      color: "#0f172a",
-                    }}
-                  >
-                    {point.completedTrips}
-                  </span>
-                  <span style={{ fontSize: "10px", color: "#94a3b8" }}>
-                    {point.label}
-                  </span>
-                  <span style={{ fontSize: "10px", color: "#cbd5e1" }}>
-                    {point.createdOrders} {locale === "en" ? "new" : "新建"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {t("dashboard.exceptions.title", locale)}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {t("dashboard.exceptions.subtitle", locale)}
-            </div>
-          </CardHeader>
-          <CardBody>
-            {actionItems.length > 0 ? (
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: "20px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "8px",
-                }}
-              >
-                {actionItems.map((item) => (
-                  <li
-                    key={item}
-                    style={{ fontSize: "13.5px", color: "#dc2626" }}
-                  >
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p style={{ margin: 0, fontSize: "13.5px", color: "#94a3b8" }}>
-                {t("dashboard.exceptions.none", locale)}
-              </p>
-            )}
-            <div
-              style={{
-                marginTop: "16px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "6px",
-              }}
-            >
-              {quickLinks.map(([href, label]) => (
-                <Link
-                  key={href}
-                  href={href}
-                  style={{
-                    display: "block",
-                    padding: "8px 12px",
-                    borderRadius: "8px",
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    color: "#1d4ed8",
-                    textDecoration: "none",
-                    fontSize: "13px",
-                    fontWeight: 500,
-                  }}
-                >
-                  {label} →
-                </Link>
-              ))}
-            </div>
-          </CardBody>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <div
-            style={{
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "#64748b",
-              marginBottom: "2px",
-            }}
-          >
-            {t("dashboard.runtime.title", locale)}
-          </div>
-          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
-            {t("dashboard.runtime.subtitle", locale)}
-          </div>
-        </CardHeader>
-        <CardBody>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-              gap: "16px",
-            }}
-          >
-            {(
-              [
-                [t("dashboard.runtime.apiStatus", locale), health.status],
-                [t("dashboard.runtime.service", locale), health.service],
-                [t("dashboard.runtime.mode", locale), health.mode],
-                [
-                  t("dashboard.runtime.execution", locale),
-                  health.execution_mode,
-                ],
-                [
-                  t("dashboard.runtime.realm", locale),
-                  identity?.realm ?? t("dashboard.runtime.anonymous", locale),
-                ],
-                [
-                  t("dashboard.runtime.actor", locale),
-                  identity?.actorType ??
-                    t("dashboard.runtime.anonymous", locale),
-                ],
-              ] as [string, string][]
-            ).map(([label, value]) => (
-              <div key={label}>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "#64748b",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                  }}
-                >
-                  {label}
-                </div>
-                <div
-                  style={{
-                    fontSize: "14px",
-                    fontWeight: 600,
-                    color: "#0f172a",
-                    marginTop: "4px",
-                  }}
-                >
-                  {formatOpsCodeLabel(locale, value)}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardBody>
-      </Card>
+            <Table theme={theme} columns={queueColumns} rows={queueRows} />
+          </Card>
+        </div>
+      </Shell>
     </>
   );
 }
