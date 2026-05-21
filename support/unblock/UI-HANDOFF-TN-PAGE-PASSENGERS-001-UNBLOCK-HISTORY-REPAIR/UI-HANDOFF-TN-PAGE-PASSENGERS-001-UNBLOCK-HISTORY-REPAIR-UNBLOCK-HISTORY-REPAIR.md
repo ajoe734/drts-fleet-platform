@@ -1,8 +1,8 @@
 # UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR Unblock History Repair
 
 Last updated: 2026-05-21
-Owner: Codex
-Reviewer: Claude
+Owner: Codex2
+Reviewer: Codex
 Task: `UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR`
 Parent: `UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR`
 
@@ -58,7 +58,7 @@ That means the repair does not require force-pushing, rebasing, or replacing the
 ## Non-destructive repair path
 
 1. Preserve `origin/codex2/ui-handoff-tn-page-passengers-001-unblock-history-repair` at `3a8276ab` as the canonical parent repair branch.
-2. Do not push a competing Codex-lane repair branch for the parent. This child branch exists only to document why the Codex lane was on the wrong base.
+2. Do not push a competing repair branch for the parent. This child branch exists only to document why the extra unblock lane was on the wrong base.
 3. Resume the parent repair task with the existing pushed evidence, using the normal lifecycle:
    `AI_NAME=Codex2 scripts/ai-status.sh handoff UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR Codex "<replay the existing 3a8276ab closeout evidence>"`
 4. After that handoff is replayed, Codex can immediately re-approve the same parent repair packet:
@@ -105,13 +105,14 @@ Canonical history for the same task:
 
 ## Canonical changes from this repair task
 
-1. Added this child repair artifact on the dedicated `codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair` branch.
+1. Added this child repair artifact on the dedicated `codex2/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair` branch, mirroring the previously-pushed Codex-lane evidence without rewriting shared history.
 2. Advanced `UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR` to `in_progress` in canonical machine truth.
 3. Updated the parent task's canonical `next` field to the concrete replay path: owner replays `handoff` on the existing Codex2 repair branch, reviewer replays `approve`, owner replays `done`.
 
 ## Closeout evidence
 
-- Anchor commit: `20c9d5b05011d672b3543b2039c1446835d1d354` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR): anchor wrong-base repair packet`
-- Evidence commit: `0c065c0148fd18ced895be26a7d4c3852f1d3512` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR): anchor closeout evidence`
-- Push: `origin/codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair` contains both commits above plus the latest doc-only corrections to this packet
-- PR status: `gh pr list --head codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair --json number,state,url,headRefName,baseRefName` returned `[]`
+- Mirrored anchor commit on this branch: `e4340481a8ad59023b57ea68faf5a5f781a91a59` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR): anchor wrong-base repair packet`
+- Mirrored evidence commit on this branch: `6d3242153f3895fcc96faf14577964da67f9b5d4` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR): anchor closeout evidence`
+- Mirrored wording commit on this branch: `991d01898b1de3a0f6eb7b2b823c633dcd5f2314` `wip(UI-HANDOFF-TN-PAGE-PASSENGERS-001-UNBLOCK-HISTORY-REPAIR-UNBLOCK-HISTORY-REPAIR): anchor final evidence wording`
+- Push target for owner closeout: `origin/codex2/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair`
+- PR status at evidence capture time: `gh pr list --head codex/ui-handoff-tn-page-passengers-001-unblock-history-repair-unblock-history-repair --json number,state,url,headRefName,baseRefName` returned `[]`; this task does not require opening a new PR to unblock the parent lifecycle replay.
