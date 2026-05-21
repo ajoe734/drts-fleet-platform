@@ -168,6 +168,7 @@ class WorkerFailureSignal:
 
 CHAIRMAN_JSON_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-decision-packet.example.json"
 CHAIRMAN_REPORT_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-review-report-template.md"
+PREMATURE_EXIT_REASON = "Worker exited before the task reached a terminal status."
 
 
 def supervisor_pid_path(config: dict[str, Any]) -> Path:
@@ -1830,6 +1831,13 @@ def detect_worker_failure(worker: dict[str, Any]) -> str | None:
     return signal.reason if signal else None
 
 
+def resolve_terminal_worker_reason(worker: dict[str, Any], reason: str) -> str:
+    if reason != PREMATURE_EXIT_REASON:
+        return reason
+    detected = detect_worker_failure(worker)
+    return detected or reason
+
+
 def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str | None) -> dict[str, Any]:
     provider = str(worker.get("provider") or worker.get("agent_id") or "").strip().lower()
     normalized = str(reason or "").lower()
@@ -2020,6 +2028,22 @@ def pause_provider(
         f"{kind} pause: agent={normalized} reset_in={reset_seconds or 0}s reason={reason}",
         quiet=SUPERVISOR_LOG_QUIET,
     )
+
+
+def maybe_pause_provider_for_terminal_failure(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    reason: str,
+) -> None:
+    failure = classify_worker_failure(config, worker, reason)
+    agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+    if not agent_id:
+        return
+    if failure.get("kind") == "quota_terminal":
+        pause_provider(state, agent_id, reason, kind="quota", reset_seconds=14400)
+    elif failure.get("kind") == "auth":
+        pause_provider(state, agent_id, reason, kind="auth", reset_seconds=None)
 
 
 def clear_provider_pause(state: dict[str, Any], agent_id: str) -> None:
@@ -3147,7 +3171,12 @@ def finalize_terminal_worker_outcome(
     state: dict[str, Any],
     worker: dict[str, Any],
     reason: str,
+    *,
+    allow_provider_pause: bool = False,
 ) -> bool:
+    reason = resolve_terminal_worker_reason(worker, reason)
+    if allow_provider_pause:
+        maybe_pause_provider_for_terminal_failure(config, state, worker, reason)
     failure_kind, failure_summary = summarize_worker_failure(config, worker, reason)
     evidence_ref = record_worker_evidence(config, worker, reason)
     worker["last_error"] = failure_summary
@@ -3978,7 +4007,8 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                         config,
                         state,
                         worker,
-                        "Worker exited before the task reached a terminal status.",
+                        PREMATURE_EXIT_REASON,
+                        allow_provider_pause=True,
                     )
             changed = True
     return changed
