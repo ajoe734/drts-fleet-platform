@@ -1,0 +1,9 @@
+# Evidence: iOS Install Proof
+Status: Placeholder (Mocked)
+Date: 2026-05-22
+Content:
+- App Version: 1.0.0
+- Build: 1024
+- Device: Simulator (Placeholder)
+- Screenshot: [REDACTED_IMAGE_PATH]
+- PII Masking applied: Yes (Driver name: [REDACTED], Phone: [REDACTED])

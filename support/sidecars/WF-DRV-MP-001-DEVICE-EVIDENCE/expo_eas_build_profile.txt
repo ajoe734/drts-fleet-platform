@@ -1,0 +1,8 @@
+# Evidence: Expo/EAS Build Profile
+Status: Placeholder (Mocked)
+Date: 2026-05-22
+Content:
+- EAS Profile: preview
+- Build Environment: EAS Build
+- Config: eas.json
+- PII Masking applied: Yes
