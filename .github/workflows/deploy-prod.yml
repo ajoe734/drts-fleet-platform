@@ -32,10 +32,11 @@ concurrency:
 env:
   PROJECT_ID: ${{ vars.PROD_GCP_PROJECT_ID }}
   REGION: ${{ vars.PROD_GCP_REGION }}
+  ARTIFACT_REGISTRY: ${{ vars.PROD_ARTIFACT_REGISTRY }}
   ARTIFACT_PROJECT_ID: ${{ vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID }}
   ARTIFACT_REGION: ${{ vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION }}
   ARTIFACT_REPOSITORY: ${{ vars.PROD_ARTIFACT_REPOSITORY || 'drts' }}
-  REGISTRY: ${{ (vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION) }}-docker.pkg.dev/${{ vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID }}/${{ vars.PROD_ARTIFACT_REPOSITORY || 'drts' }}
+  REGISTRY: ${{ vars.PROD_ARTIFACT_REGISTRY || format('{0}-docker.pkg.dev/{1}/{2}', vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION, vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID, vars.PROD_ARTIFACT_REPOSITORY || 'drts') }}
   CLOUDSQL: ${{ vars.PROD_GCP_CLOUDSQL_INSTANCE }}
   DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
   RUNTIME_SERVICE_ACCOUNT: ${{ vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT }}
@@ -89,6 +90,7 @@ jobs:
           [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.PROD_GCP_PROJECT_ID")
           [[ -n "${REGION:-}" ]] || missing+=("vars.PROD_GCP_REGION")
           [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.PROD_GCP_CLOUDSQL_INSTANCE")
+          [[ -n "${REGISTRY:-}" ]] || missing+=("vars.PROD_ARTIFACT_REGISTRY or vars.PROD_ARTIFACT_PROJECT_ID + vars.PROD_ARTIFACT_REGION + vars.PROD_ARTIFACT_REPOSITORY")
           [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.PROD_WIF_PROVIDER")
           [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.PROD_WIF_SERVICE_ACCOUNT")
           [[ -n "${RUNTIME_SERVICE_ACCOUNT:-}" ]] || missing+=("vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT")

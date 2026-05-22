@@ -1,13 +1,20 @@
 # Production Deploy And Rollback Runbook
 
+Superseded by:
+
+- `docs/03-runbooks/production-deploy-rail-spec-20260519.md`
+- `docs/03-runbooks/production-rollback-drill-20260519.md`
+
 Last updated: 2026-05-19
 Owner: release engineering
 Workflow: `.github/workflows/deploy-prod.yml`
 
 ## Purpose
 
-This runbook defines the production deployment and rollback contract for
-`WF-PROD-001`.
+This runbook is retained as the 2026-05-19 source artifact that originally
+captured the production deployment and rollback contract for `WF-PROD-001`.
+The canonical operator spec and drill now live in the superseding documents
+listed above.
 
 Production deploys are:
 

@@ -209,8 +209,10 @@ The `production` GitHub environment remains the human approval gate. Add or keep
 required reviewers there if prod dispatch must pause for explicit operator sign-off.
 
 Rollback is an operator re-dispatch of the previous known-good `prod/v<date>` tag,
-normally with `skip_migration=true`. The detailed procedure lives in
-`docs/03-runbooks/prod-deploy-rollback-runbook-20260519.md`.
+normally with `skip_migration=true`. The detailed operator spec lives in
+`docs/03-runbooks/production-deploy-rail-spec-20260519.md`, and the executable
+drill procedure lives in
+`docs/03-runbooks/production-rollback-drill-20260519.md`.
 
 ---
 
