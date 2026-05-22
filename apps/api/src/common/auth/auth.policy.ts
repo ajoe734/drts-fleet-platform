@@ -55,15 +55,20 @@ export function resolveRouteAuthPolicy(
   }
 
   if (routePath === "admin/flags" || routePath.startsWith("admin/flags/")) {
+    const readRoute = isReadMethod(upperMethod);
     return {
       routeKey: `admin:flags:${upperMethod}`,
       requiredScopes: methodScope(
-        "foundation:read",
+        "tenant:read",
         "foundation:write",
         upperMethod,
       ),
-      allowedRealms: baseAllowedRealms("platform"),
-      description: "Platform feature flag administration",
+      allowedRealms: readRoute
+        ? baseAllowedRealms("platform", "tenant")
+        : baseAllowedRealms("platform"),
+      description: readRoute
+        ? "Tenant and platform feature flag reads"
+        : "Platform feature flag administration",
     };
   }
 

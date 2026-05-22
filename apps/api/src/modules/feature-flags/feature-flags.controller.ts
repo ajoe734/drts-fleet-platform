@@ -30,7 +30,7 @@ export class FeatureFlagsController {
       notes: [
         "Feature flags control module-level rollout for Phase 1 client surfaces.",
         "Flags are tenant-scoped; include x-tenant-id header for tenant-specific overrides.",
-        "This endpoint is admin-only; smoke test with x-actor-type=platform_admin.",
+        "Read access allows tenant and platform identities; writes remain platform-admin only.",
       ],
     };
     return toApiSuccessEnvelope(summary, requestId);

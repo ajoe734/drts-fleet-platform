@@ -349,6 +349,45 @@ describe("bootstrap auth guard", () => {
     }
   });
 
+  it("allows tenant JWT identities to read feature flags", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const jwtAuthService = new JwtAuthService();
+    const token = jwtAuthService.sign(
+      {
+        authMode: "jwt_bearer",
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roleFamilies: ["tenant"],
+        roles: ["tenant_admin"],
+        scopes: ["tenant:read"],
+        requestId: "req-tenant-flags-001",
+      },
+      { expiresIn: "10m" },
+    );
+    const guard = new BootstrapAuthGuard(new Reflector(), jwtAuthService);
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-tenant-id": "tenant-demo-001",
+      },
+      method: "GET",
+      originalUrl: "/api/admin/flags",
+    };
+
+    expect(guard.canActivate(createExecutionContext(request))).toBe(true);
+    expect(request.identity).toMatchObject({
+      actorType: "tenant_admin",
+      realm: "tenant",
+      tenantId: "tenant-demo-001",
+      scopes: expect.arrayContaining(["tenant:read"]),
+    });
+  });
+
   it("prefers x-drts-authorization for app JWTs when outer authorization is used elsewhere", () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
