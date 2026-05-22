@@ -83,7 +83,7 @@ WF-PARTNER-001 ↔ matrix row 10  (gate read: PASS (sandbox evidence) minimum)
 WF-PBK-001     ↔ matrix row 11  (gate read: PASS (pilot evidence))
 WF-COM-001     ↔ matrix row 12  (gate read: PASS (sandbox evidence) plus live-provider non-claim)
 WF-FIN-001     ↔ matrix row 13  (gate read: PASS (static evidence) or better)
-WF-FIN-GOV-001 ↔ matrix row 14  (gate read: PASS (live staging evidence))
+WF-FIN-GOV-001 ↔ matrix row 14  (gate read: PASS (static evidence); live staging uplift still blocked pending fresh governed staging rerun)
 WF-ADM-001     ↔ matrix row 15  (gate read: PASS (repo-local or live staging evidence))
 WF-REL-001     ↔ matrix row 16  (gate read: PASS (repo-local audit evidence))
 ```
@@ -105,7 +105,10 @@ WF-PBK-001      →  support/sidecars/PBK-PILOT-001/                (PH1GC-PBK-0
 WF-COM-001      →  support/sidecars/WF-COM-001-LIVE-PROVIDER/     (PH1GC-COM-001)
                    support/sidecars/COM-LIVE-001/                 (existing sandbox evidence)
 WF-FIN-001      →  support/sidecars/FBP-014B/                     (existing baseline)
-WF-FIN-GOV-001  →  E2E-010 chain + governance-aware sidecar TBD via PH1GC-FIN-GOV-001
+WF-FIN-GOV-001  →  tests/e2e/E2E-010-governance-aware-billing-reporting.sh
+                   docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md
+                   docs/04-uat/governance-aware-billing-reporting-uat-20260519.md
+                   support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md
 WF-ADM-001      →  E2E-011 chain + UAT artifact via PH1GC-ADM-001
 WF-REL-001      →  this runbook
 ```

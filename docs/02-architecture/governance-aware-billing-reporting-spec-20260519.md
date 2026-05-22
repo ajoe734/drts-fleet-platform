@@ -1,7 +1,7 @@
 # Governance-Aware Billing & Reporting Spec
 
 **Date**: 2026-05-19 (date stamped to align with directive; reconciled commit 2026-05-22)
-**Authority**: directive §H `FIN-GOV-001` — `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
+**Authority**: `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` §G1 `FIN-GOV-001`, reconciled with `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` §2.14
 **Workflow family**: `WF-FIN-GOV-001` (depends on `WF-TGV-001` + `WF-FIN-001`; do **not** rename or absorb `WF-FIN-001`)
 **Pairs with**: `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` (UAT), `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (executable proof — driven by `PH1GC-E2E-010`)
 
