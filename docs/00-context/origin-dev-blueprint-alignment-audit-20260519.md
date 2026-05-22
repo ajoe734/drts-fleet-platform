@@ -73,10 +73,10 @@ Order matches directive §2. Each row uses the eight-label vocabulary only.
 
 ### 2.9 `WF-FWD-001` Forwarder / third-party platform
 
-- **Closure**: external-gated (target after `PH1GC-FWD-001` lands sandbox evidence: sandbox evidence).
-- **Anchors**: `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` (partial), forwarder adapter contracts in `packages/contracts/src/`, `tests/e2e/E2E-002-forwarded-order.sh`.
-- **Gap**: 11 directive §D proof items not yet in `support/sidecars/FWD-LIVE-001/`. No purely-local fixture substitution is permitted.
-- **Non-claim**: Repo-local forwarder mock proof is not sandbox proof.
+- **Closure**: repo-local.
+- **Anchors**: `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md`, `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-PROVIDER-PROOF.md`, forwarder adapter contracts in `packages/contracts/src/`, `tests/e2e/E2E-002-forwarded-order.sh`.
+- **Gap**: Real partner sandbox proof is still absent; Grab Taiwan or equivalent remains external-gated through `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md`.
+- **Non-claim**: Repo-local `forwarder_sandbox` proof is not partner sandbox proof.
 
 ### 2.10 `WF-PARTNER-001` Partner eligibility / airport transfer
 

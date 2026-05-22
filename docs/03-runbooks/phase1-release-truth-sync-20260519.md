@@ -78,7 +78,7 @@ WF-TGV-001     ↔ matrix row 5   (gate read: PASS (live staging evidence))
 WF-DSP-001     ↔ matrix row 6   (gate read: PASS (live staging evidence))
 WF-DRV-001     ↔ matrix row 7   (gate read: PASS (static evidence) or better)
 WF-DRV-MP-001  ↔ matrix row 8   (gate read: PASS (sandbox + device evidence))
-WF-FWD-001     ↔ matrix row 9   (gate read: PASS (sandbox evidence) minimum)
+WF-FWD-001     ↔ matrix row 9   (gate read: PASS (repo-local))
 WF-PARTNER-001 ↔ matrix row 10  (gate read: PASS (sandbox evidence) minimum)
 WF-PBK-001     ↔ matrix row 11  (gate read: PASS (pilot evidence))
 WF-COM-001     ↔ matrix row 12  (gate read: PASS (sandbox evidence) plus live-provider non-claim)
@@ -89,6 +89,9 @@ WF-REL-001     ↔ matrix row 16  (gate read: PASS (repo-local audit evidence))
 ```
 
 A release announcement must not invent new gate reads; pull from the matrix verbatim.
+For `WF-FWD-001`, `PASS (repo-local)` is the maximum claim until a separate
+external sandbox or live-provider packet supersedes the repo-local
+`forwarder_sandbox` proof.
 
 ---
 

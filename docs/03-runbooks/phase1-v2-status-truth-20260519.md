@@ -87,21 +87,21 @@ The current matrix on `dev`
 families with the following reads. The v2 wave's target reads are the
 right-most column, none of which are on `origin/dev` yet.
 
-| Family ID        | On `dev`? | Current gate read (on `dev`)   | v2 target gate read                                   | Path to v2 target                                 |
-| ---------------- | --------- | ------------------------------ | ----------------------------------------------------- | ------------------------------------------------- |
-| `WF-RLS-001`     | yes       | `PASS (live staging evidence)` | `PASS (live production evidence)`                     | `PROD-RAIL-001` + `TST-E2E-009-PROD-RAIL`         |
-| `WF-TEN-001`     | yes       | `PASS (live staging evidence)` | unchanged                                             | —                                                 |
-| `WF-ORD-001`     | yes       | `PASS (live staging evidence)` | unchanged                                             | —                                                 |
-| `WF-DSP-001`     | yes       | `PASS (live staging evidence)` | unchanged                                             | —                                                 |
-| `WF-DRV-001`     | yes       | `PASS (static evidence)`       | unchanged                                             | —                                                 |
-| `WF-FWD-001`     | yes       | `EXTERNAL-GATED`               | live sandbox + adapter proof, or partial blockers     | `FWD-LIVE-001`                                    |
-| `WF-COM-001`     | yes       | `HOLD`                         | live activation + sidecar, or partial blockers        | `COM-LIVE-001`                                    |
-| `WF-FIN-001`     | yes       | `PASS (static evidence)`       | live cost-center-aware proof                          | `FIN-GOV-001`                                     |
-| `WF-TGV-001`     | **no**    | n/a                            | `PASS (live staging evidence)`                        | `WF-TGV-001` matrix row + `TST-E2E-005-TGV`       |
-| `WF-DRV-MP-001`  | **no**    | n/a                            | `PASS (live staging evidence)`                        | `WF-DRV-MP-001` matrix row + `TST-E2E-006-DRV-MP` |
-| `WF-PARTNER-001` | **no**    | n/a                            | mock-mode `PASS (repo-local)` + live `EXTERNAL-GATED` | `WF-PARTNER-001` matrix row + `TST-E2E-007-PRT`   |
-| `WF-PBK-001`     | **no**    | n/a                            | runbook + rollback drill                              | `PBK-CUTOVER-001` + `TST-E2E-008-PBK-CUTOVER`     |
-| `WF-PROD-001`    | **no**    | n/a                            | `deploy-prod.yml` job-complete + dry-run              | `PROD-RAIL-001` + `TST-E2E-009-PROD-RAIL`         |
+| Family ID        | On `dev`? | Current gate read (on `dev`)   | v2 target gate read                                            | Path to v2 target                                 |
+| ---------------- | --------- | ------------------------------ | -------------------------------------------------------------- | ------------------------------------------------- |
+| `WF-RLS-001`     | yes       | `PASS (live staging evidence)` | `PASS (live production evidence)`                              | `PROD-RAIL-001` + `TST-E2E-009-PROD-RAIL`         |
+| `WF-TEN-001`     | yes       | `PASS (live staging evidence)` | unchanged                                                      | —                                                 |
+| `WF-ORD-001`     | yes       | `PASS (live staging evidence)` | unchanged                                                      | —                                                 |
+| `WF-DSP-001`     | yes       | `PASS (live staging evidence)` | unchanged                                                      | —                                                 |
+| `WF-DRV-001`     | yes       | `PASS (static evidence)`       | unchanged                                                      | —                                                 |
+| `WF-FWD-001`     | yes       | `PASS (repo-local)`            | real sandbox/live adapter proof, or explicit external blockers | `FWD-LIVE-001`                                    |
+| `WF-COM-001`     | yes       | `HOLD`                         | live activation + sidecar, or partial blockers                 | `COM-LIVE-001`                                    |
+| `WF-FIN-001`     | yes       | `PASS (static evidence)`       | live cost-center-aware proof                                   | `FIN-GOV-001`                                     |
+| `WF-TGV-001`     | **no**    | n/a                            | `PASS (live staging evidence)`                                 | `WF-TGV-001` matrix row + `TST-E2E-005-TGV`       |
+| `WF-DRV-MP-001`  | **no**    | n/a                            | `PASS (live staging evidence)`                                 | `WF-DRV-MP-001` matrix row + `TST-E2E-006-DRV-MP` |
+| `WF-PARTNER-001` | **no**    | n/a                            | mock-mode `PASS (repo-local)` + live `EXTERNAL-GATED`          | `WF-PARTNER-001` matrix row + `TST-E2E-007-PRT`   |
+| `WF-PBK-001`     | **no**    | n/a                            | runbook + rollback drill                                       | `PBK-CUTOVER-001` + `TST-E2E-008-PBK-CUTOVER`     |
+| `WF-PROD-001`    | **no**    | n/a                            | `deploy-prod.yml` job-complete + dry-run                       | `PROD-RAIL-001` + `TST-E2E-009-PROD-RAIL`         |
 
 Important corollary: until the 5 new rows are merged to `dev`, **no v2
 closeout statement is allowed to claim those families pass any gate**.

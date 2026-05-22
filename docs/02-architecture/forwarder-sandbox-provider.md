@@ -1,7 +1,7 @@
 # Forwarder Sandbox Provider
 
 Last updated: 2026-05-19
-Status: implementation note for the generic forwarder sandbox harness
+Status: implementation note for the generic forwarder repo-local harness
 
 ## Purpose
 
@@ -9,7 +9,10 @@ Status: implementation note for the generic forwarder sandbox harness
 It exists so `FWD-E2E-001` can exercise the full local mirror lifecycle without
 real partner credentials, webhook secrets, or settlement files.
 
-This provider must never be presented as production evidence.
+Evidence classification: `repo-local`.
+
+This provider must never be presented as partner sandbox, live, or production
+evidence.
 
 ## Scope
 

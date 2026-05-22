@@ -5,6 +5,8 @@
 #
 # This scenario uses the forwarder_sandbox provider introduced by FWD-SBX-001
 # so WF-FWD-001 can be exercised deterministically without live partner creds.
+# The provider name includes "sandbox", but the evidence level is repo-local
+# because the adapter is stub-only and ships inside this repo.
 #
 # Verifies:
 #   1. Sandbox inbound order becomes a visible forwarded mirror.
