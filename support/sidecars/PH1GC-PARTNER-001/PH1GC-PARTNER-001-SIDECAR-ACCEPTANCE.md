@@ -8,14 +8,29 @@
 
 ## 1. Acceptance Checklist
 
-- [ ] Dependency Map drafted
+- [x] Dependency Map drafted
 - [ ] Support Artifacts verified
 - [ ] No changes to canonical truth
 - [ ] Handed off to reviewer
 
 ## 2. Dependency Map
 
-*(To be filled)*
+### Backend Governance
+- **Source:** `.ai-loop-outgoing/BACKEND_DELIVERY_NOTE.md`
+- **Context:** Tenant Governance endpoints for booking, quotas, and approvals.
+- **Contract Version:** `@drts/contracts@0.1.0` and `@drts/api-client@0.1.0`
+
+### Contracts & Locks
+- **Canonical Lock:** `.ai-loop-outgoing/contract-lock.json`
+- **Version Lock:** `.ai-loop-outgoing/CONTRACT_VERSION.lock`
+
+### Error Handling
+- **Canonical Codes:**
+  - `BOOKING_COST_CENTER_INVALID`
+  - `BOOKING_COST_CENTER_UNKNOWN`
+  - `BOOKING_COST_CENTER_DISABLED`
+  - `QUOTA_INSUFFICIENT_AT_COMMIT`
+  - `BOOKING_APPROVAL_PENDING`
 
 ## 3. Support Artifacts
 
