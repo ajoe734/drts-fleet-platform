@@ -297,6 +297,174 @@ Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (di
 
 ---
 
+### 4.6 E2E-006 — Driver Multi-Platform Workbench
+
+**Script:** `tests/e2e/E2E-006-driver-multi-platform.sh`
+**Workflow family:** `WF-DRV-MP-001`
+**Closure driver:** `PH1GC-DRV-MP-001` (E2E hardening) + `PH1GC-DRV-MP-002` (device evidence sidecar)
+
+#### Surface Chain
+
+```
+Forwarder sandbox inbound (mixed owned + forwarded seed)
+  ─► Driver app inbox (owned task visible alongside forwarded task with sourcePlatform metadata)
+  ─► Trip surface (route-locked forwarded task; no owned dispatch assignment created)
+  ─► Earnings surface (by-platform earnings split)
+```
+
+#### Pass Criteria
+
+1. Default environment (no mixed owned+forwarded seed) **hard-fails** with descriptive exit code — no silent passes.
+2. `E2E_ALLOW_MISSING_FORWARDER_SEED=true` is the only way to warning-skip; without it, missing seed is a release blocker.
+3. Seeded execution asserts:
+   - one owned task and one forwarded task present in the same driver inbox
+   - forwarded task carries `sourcePlatform` metadata and `routeLocked = true`
+   - **no owned dispatch assignment is created for the forwarded task**
+   - per-platform earnings split is visible
+4. The directive-§C device packet at `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/` (Android + iOS install / signing / push / permission / weak network / forwarded display / earnings) is required to uplift the gate read from sandbox to sandbox + device evidence.
+
+#### ⚠ Risk — warning-skip is not hard proof
+
+Prior to `PH1GC-DRV-MP-001`, `E2E-006` allowed a warning-skip exit-0 on missing seed by default. That behavior is now an opt-in through `E2E_ALLOW_MISSING_FORWARDER_SEED=true`. **Any release closeout that cites `E2E-006` must confirm the deterministic seed mode ran**; a warning-skipped run does not count as `WF-DRV-MP-001` proof.
+
+#### Verification Snapshot
+
+- `bash -n tests/e2e/E2E-006-driver-multi-platform.sh`
+- `bash tests/e2e/run-e2e.sh --suite 006 --dry-run`
+- (with seed) `bash tests/e2e/E2E-006-driver-multi-platform.sh` exits 0
+- (without seed, default) `bash tests/e2e/E2E-006-driver-multi-platform.sh` exits non-zero
+
+---
+
+### 4.7 E2E-007 — Partner Airport Transfer
+
+**Script:** `tests/e2e/E2E-007-partner-airport-transfer.sh`
+**Workflow family:** `WF-PARTNER-001` (formerly `WF-PRT-001`; renamed per release-truth runbook §1.2 — no alias)
+**Spec:** `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md` (driven by `PH1GC-PARTNER-001`)
+**Sandbox evidence:** `support/sidecars/PARTNER-ELIG-LIVE-001/` (driven by `PH1GC-PARTNER-002`)
+
+#### Surface Chain
+
+```
+Partner entry page ([tenantSlug]/[entrySlug])
+  ─► Eligibility verification (eligible | ineligible | manual_review)
+  ─► Authenticated booking (carries eligibilityVerificationId + referenceHash; cardLast4 only)
+  ─► Driver dispatch → trip → completion
+  ─► Receipt / partner record + governance-aware billing row (cross-references WF-FIN-GOV-001)
+```
+
+#### Pass Criteria
+
+1. Eligibility verification produces a terminal state (`eligible` / `ineligible` / `manual_review`) within the 2-retry timeout budget per spec §4.3.
+2. Refused bookings (ineligible or rejected manual_review) do not enter the billing pipeline.
+3. `referenceToken` appears only in masked form (`maskOpaqueToken(value, 8, 4)`) in every persistence boundary.
+4. Subsidy line item is applied at billing time per published partner-program pricing (`WF-ADM-001` pricing version).
+5. Sandbox uplift requires the 7 directive-§E proof items in `PARTNER-ELIG-LIVE-001/`.
+
+---
+
+### 4.8 E2E-008 — Partner Booking Pilot Cutover Authority
+
+**Script:** `tests/e2e/E2E-008-partner-booking-cutover.sh`
+**Workflow family:** `WF-PBK-001`
+**Plan:** `docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md` (driven by `PH1GC-PBK-001`)
+**Pilot sidecar:** `support/sidecars/PBK-PILOT-001/` (driven by `PH1GC-PBK-001`)
+
+#### Surface Chain
+
+```
+Partner entry resolution ([tenantSlug]/[entrySlug])
+  ─► Eligibility-bound booking
+  ─► Trip + tracking
+  ─► Receipt + partner record
+  ─► Negative paths + rollback retention proof (≥ 14 calendar days)
+```
+
+#### Pass Criteria
+
+1. Partner entry routes resolve with brand + eligibility-mode visible.
+2. Cutover proof includes: target slug, cutover owner, rollback owner, rollback route / host, support hotline, branding metadata, eligibility mode, pilot time window, ≥ 14-day rollback retention demonstrated.
+3. Repo-local UI coverage alone is NOT pilot evidence; gate-read uplift to `PASS (pilot evidence)` requires a real partner entry cutover.
+
+---
+
+### 4.9 E2E-009 — Production Rail Dry-Run
+
+**Script:** `tests/e2e/E2E-009-prod-rail-dry-run.sh`
+**Workflow family:** `WF-PROD-001`
+**Closeout driver:** `PH1GC-PROD-001` (live-execution readiness packet)
+
+#### Pass Criteria
+
+1. `.github/workflows/deploy-prod.yml` validates the full graph: validate-config → build-push → migrate → deploy → health-check.
+2. Dry-run rehearsal confirms the rail's structure without making external Cloud Run / Cloud SQL calls.
+3. Live-execution uplift requires `vars.PROD_GCP_*` + `secrets.PROD_WIF_*` configured in repo Settings, GCP project provisioned (WIF / Cloud SQL / Artifact Registry / Secret Manager), GitHub Environment `production` reviewer rule, and the `PH1GC-PROD-001` rollback drill packet at `support/sidecars/WF-PROD-001-LIVE-EXEC/`.
+4. **Non-claim:** dry-run rehearsal is NOT production-launched proof. Do not state otherwise without an actual deploy + rollback drill + monitoring + human approval gate.
+
+---
+
+### 4.10 E2E-010 — Governance-Aware Billing / Reporting
+
+**Script:** `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (driven by `PH1GC-E2E-010`)
+**Workflow family:** `WF-FIN-GOV-001`
+**Spec:** `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` (driven by `PH1GC-FIN-GOV-001`)
+**UAT:** `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`
+
+#### Surface Chain
+
+```
+WF-TGV-001 cost-center / quota / approval setup
+  ─► Booking with costCenterCode
+  ─► Approval (auto / manual / escalated-then-approved)
+  ─► Trip completion
+  ─► Invoice + report-export generation
+  ─► Verification of 13-field body (costCenterCode + costCenterName + ownerUserId/Name +
+     legacy_unmapped + approvalEvaluationId/RequestId/State + quotaPeriodKey/UsageDelta +
+     partnerProgramCode + eligibilityVerificationId + platformEarningsRef + auditId/reportArtifactId)
+  ─► Audit trail end-to-end
+```
+
+#### Pass Criteria (per `PH1GC-E2E-010` acceptance)
+
+1. **No silent pass on missing seed.** Hard-fail with descriptive error.
+2. All 13 verification-body fields asserted in the generated invoice and report-export artifacts.
+3. `referenceToken` appears only in masked form across all exports and audit rows.
+4. `legacy_unmapped` is monotonic; post-export records are immutable (adjustments via follow-on records).
+5. Script registered in `tests/e2e/run-e2e.sh`.
+
+---
+
+### 4.11 E2E-011 — Platform Admin Control Plane
+
+**Script:** `tests/e2e/E2E-011-platform-admin-control-plane.sh` (driven by `PH1GC-E2E-011`)
+**Workflow family:** `WF-ADM-001`
+**UAT:** `docs/04-uat/platform-admin-control-plane-uat-20260519.md` (driven by `PH1GC-ADM-001`)
+
+#### Surface Chain
+
+```
+Platform admin login
+  ─► Tenant create → module enablement → tenant quotas
+  ─► Partner entry → partner credential issue/revoke
+  ─► Adapter / switchboard health
+  ─► Pricing publish (with version)
+  ─► Feature flag toggle
+  ─► Rollout stage promotion
+  ─► Rollback hold set → blocks production promote
+  ─► Audit verification (every mutation produces an audit row)
+```
+
+#### Pass Criteria (per `PH1GC-E2E-011` acceptance)
+
+1. All 11 happy-path scenarios from `docs/04-uat/platform-admin-control-plane-uat-20260519.md` §2 pass.
+2. ≥ 2 RBAC negative paths verified (e.g., `UAT-ADM-N01` non-admin tenant create blocked, `UAT-ADM-N02` non-admin pricing publish blocked).
+3. Pricing publish carries a non-null `version` field.
+4. Rollback hold blocks production promote with `production_rollback_hold_active` reason code.
+5. Audit log contains an entry for every mutation **and** for every rejected attempt.
+6. Hard-fail on missing seed; no silent pass.
+
+---
+
 ## 5. Fixture Inventory
 
 | Fixture File                     | Used By                             | Description                                                       |
@@ -359,8 +527,17 @@ calls `switch_actor TYPE ID [TENANT_ID]` to change the active actor between surf
 - **E2E-002:** deterministic via `forwarder_sandbox`; not a live partner-adapter claim.
 - **E2E-004:** skipped beyond leg 1 (exit 0 with warning) when `POST /api/platform-admin/tenants`
   does not return a `tenantId` in its response.
+- **E2E-006:** since `PH1GC-DRV-MP-001`, default behavior is to **hard-fail** on missing mixed
+  owned+forwarded seed. Warning-skip is opt-in via `E2E_ALLOW_MISSING_FORWARDER_SEED=true`.
+  A warning-skipped run does **not** count as `WF-DRV-MP-001` release proof — release
+  closeouts must confirm the deterministic seed mode ran.
 - **E2E-008:** skipped (exit 0 with warning) when `PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT`
   is not configured for the seeded partner entry.
+- **E2E-009:** dry-run rehearsal only; live production execution requires `vars.PROD_GCP_*` +
+  `secrets.PROD_WIF_*` configured per `PH1GC-PROD-001`. A dry-run pass is NOT a
+  production-launched claim.
+- **E2E-010, E2E-011:** hard-fail on missing seed by directive design (`PH1GC-E2E-010` /
+  `PH1GC-E2E-011` acceptance). No silent-pass paths.
 
 ---
 
