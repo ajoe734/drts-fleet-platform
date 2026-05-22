@@ -1,10 +1,10 @@
 # PH1GC-FWD-001-UNBLOCK-MANUAL-UNBLOCK
 
-**Task:** `PH1GC-FWD-001-UNBLOCK-MANUAL-UNBLOCK`  
-**Parent:** `PH1GC-FWD-001`  
-**Owner:** `Codex2`  
-**Reviewer:** `Codex`  
-**Date:** `2026-05-22 (UTC)`  
+**Task:** `PH1GC-FWD-001-UNBLOCK-MANUAL-UNBLOCK`
+**Parent:** `PH1GC-FWD-001`
+**Owner:** `Codex2`
+**Reviewer:** `Codex`
+**Date:** `2026-05-22 (UTC)`
 **Outcome:** `remaining blocker documented; no repo-local code fix available`
 
 ## 1. Diagnosis
@@ -62,7 +62,7 @@ misrepresent the release gate.
 
 `PH1GC-FWD-001` should resume as `blocked` with this exact next step:
 
-`Wait for the forwarder sandbox owner to provide a reachable staging endpoint, non-interactive credential path, and at least one seeded forwarded-task flow so FWD-LIVE-001 can collect EXT-002-BLK-002 through EXT-002-BLK-007 evidence without over-claiming WF-FWD-001.`
+`Wait for the forwarder integration owners to provide approved API contract authority, a reachable staging endpoint, a non-interactive credential path, signed webhook/replay-proof samples, and at least one seeded forwarded-task flow so FWD-LIVE-001 can collect and verify EXT-002-BLK-001 through EXT-002-BLK-007 evidence without over-claiming WF-FWD-001.`
 
 Recommended `waiting_for` target in machine truth:
 
