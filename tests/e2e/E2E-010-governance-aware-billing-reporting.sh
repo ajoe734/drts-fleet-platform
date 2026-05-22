@@ -45,8 +45,8 @@
 #   FG-08 — Sensitive invoice/report download audit
 #   FG-09 — Cross-tenant / unauthorized finance access denied
 #
-# Hard-fail vs soft-record discipline (per spec FIN-GOV-SPEC-001):
-#   HARD FAIL (contract regression):
+# Hard-fail vs soft-record discipline (per spec FIN-GOV-SPEC-001 §6):
+#   HARD FAIL (contract regression — always enforced, §6.1):
 #     - cost-center attribution dropped from the governed booking read-back
 #     - driver lifecycle cannot reach `task.status == completed` after the
 #       environment accepted dispatch+assign (drift in WF-DRV-001 coupling)
@@ -55,11 +55,17 @@
 #       resourceId == our invoiceId (audit chain broken)
 #     - FG-09: cross-tenant fetch of our invoice returns 2xx instead of 4xx
 #       (tenant scope widened)
-#   SOFT RECORD (still acceptable while runtime enrichment is partial — see
-#   spec §"Open Gaps" and UAT FG-04):
-#     - any of the 13 verification-body fields may record as NOT_POPULATED
-#       while runtime enrichment is still partial, except for the hard-fail
-#       contract regressions listed above
+#   VERIFICATION-BODY RECORDING (always required, §6.2):
+#     - each of the 13 verification-body fields MUST be recorded at the end
+#       of the run, either with an observed value or with the literal
+#       `NOT_POPULATED` marker. A silently-omitted field is itself a
+#       regression: the recording is mandatory.
+#   STRICT_VERIFICATION_BODY=1 (uplift gate-keeper, §6.2):
+#     - when this env var is set, the final 13-field snapshot hard-fails
+#       (exit 1) if ANY field records as NOT_POPULATED. Use this mode to
+#       gate a `PASS (live staging evidence)` uplift once IAP/credential
+#       gates clear and the governed staging rerun produces enriched
+#       invoice/report artifacts.
 #   SKIP (environment cannot exercise the leg, not a regression):
 #     - seed tenant has no active tenant_admin user
 #     - dispatch/assign returns an env-error status before driver leg starts
@@ -115,12 +121,25 @@ APPROVED=false
 DISPATCHED=false
 DRIVER_COMPLETED=false
 
+# ── Strict-mode toggle (spec FIN-GOV-SPEC-001 §6.2) ──────────────────────────
+# Default (unset / "0" / "false"): NOT_POPULATED fields are soft evidence; the
+# shell exits 0 so the field-presence delta is a reviewable progress signal
+# while runtime enrichment lands incrementally.
+# STRICT_VERIFICATION_BODY=1: the final 13-field snapshot hard-fails if any
+# field is NOT_POPULATED. This is the gate-keeper for a `PASS (live staging
+# evidence)` uplift.
+STRICT_VERIFICATION_BODY="${STRICT_VERIFICATION_BODY:-0}"
+VB_MISSING_FIELDS=()
+
 # ── Field-presence evidence helper ────────────────────────────────────────────
 # record_field SUBCASE FIELD VALUE
 #   - logs whether a governance enrichment field is populated in this run
-#   - never hard-fails: a `null` / empty value is recorded as
+#   - never hard-fails directly: a `null` / empty value is recorded as
 #     `<field>=NOT_POPULATED` so the reviewer can read which directive targets
-#     are still "BLOCKED FOR LIVE" without rewriting the script
+#     are still "BLOCKED FOR LIVE" without rewriting the script. The
+#     verification-body strict-mode check is centralised in
+#     `emit_verification_body_fields` so non-VB recordings (e.g., FG-04 / FG-05
+#     / FG-06 probe details) never accidentally hard-fail a default run.
 record_field() {
   local subcase="$1" field="$2" raw="${3:-}"
   if [[ -z "$raw" || "$raw" == "null" ]]; then
@@ -132,21 +151,49 @@ record_field() {
   fi
 }
 
+# record_vb_field FIELD VALUE
+#   - mandatory recording for one of the 13 verification-body fields
+#   - tracks NOT_POPULATED in VB_MISSING_FIELDS so strict mode can
+#     hard-fail at the end with a complete list
+record_vb_field() {
+  local field="$1" raw="${2:-}"
+  if [[ -z "$raw" || "$raw" == "null" ]]; then
+    save_evidence "$SCENARIO" "VERIFY" "$field" "NOT_POPULATED"
+    log_warn "  VERIFY: ${field} not populated (recorded as NOT_POPULATED)"
+    VB_MISSING_FIELDS+=("$field")
+  else
+    save_evidence "$SCENARIO" "VERIFY" "$field" "$raw"
+    log_ok "  VERIFY: ${field}=${raw}"
+  fi
+}
+
 emit_verification_body_fields() {
-  log_step "Verification body — emit 13-field evidence snapshot"
-  record_field "VERIFY" "costCenterCode" "$VB_COST_CENTER_CODE"
-  record_field "VERIFY" "costCenterName" "$VB_COST_CENTER_NAME"
-  record_field "VERIFY" "ownerUserId" "$VB_OWNER_USER_ID"
-  record_field "VERIFY" "legacy_unmapped" "$VB_LEGACY_UNMAPPED"
-  record_field "VERIFY" "approvalRequestId" "$VB_APPROVAL_REQUEST_ID"
-  record_field "VERIFY" "approvalState" "$VB_APPROVAL_STATE"
-  record_field "VERIFY" "quotaPeriodKey" "$VB_QUOTA_PERIOD_KEY"
-  record_field "VERIFY" "quotaUsageDelta" "$VB_QUOTA_USAGE_DELTA"
-  record_field "VERIFY" "partnerProgramCode" "$VB_PARTNER_PROGRAM_CODE"
-  record_field "VERIFY" "eligibilityVerificationId" "$VB_ELIGIBILITY_VERIFICATION_ID"
-  record_field "VERIFY" "platformEarningsRef" "$VB_PLATFORM_EARNINGS_REF"
-  record_field "VERIFY" "auditId" "$VB_AUDIT_ID"
-  record_field "VERIFY" "reportArtifactId" "$VB_REPORT_ARTIFACT_ID"
+  log_step "Verification body — emit 13-field evidence snapshot (strict=${STRICT_VERIFICATION_BODY})"
+  record_vb_field "costCenterCode" "$VB_COST_CENTER_CODE"
+  record_vb_field "costCenterName" "$VB_COST_CENTER_NAME"
+  record_vb_field "ownerUserId" "$VB_OWNER_USER_ID"
+  record_vb_field "legacy_unmapped" "$VB_LEGACY_UNMAPPED"
+  record_vb_field "approvalRequestId" "$VB_APPROVAL_REQUEST_ID"
+  record_vb_field "approvalState" "$VB_APPROVAL_STATE"
+  record_vb_field "quotaPeriodKey" "$VB_QUOTA_PERIOD_KEY"
+  record_vb_field "quotaUsageDelta" "$VB_QUOTA_USAGE_DELTA"
+  record_vb_field "partnerProgramCode" "$VB_PARTNER_PROGRAM_CODE"
+  record_vb_field "eligibilityVerificationId" "$VB_ELIGIBILITY_VERIFICATION_ID"
+  record_vb_field "platformEarningsRef" "$VB_PLATFORM_EARNINGS_REF"
+  record_vb_field "auditId" "$VB_AUDIT_ID"
+  record_vb_field "reportArtifactId" "$VB_REPORT_ARTIFACT_ID"
+
+  if [[ "$STRICT_VERIFICATION_BODY" == "1" || "$STRICT_VERIFICATION_BODY" == "true" ]]; then
+    if (( ${#VB_MISSING_FIELDS[@]} > 0 )); then
+      save_evidence "$SCENARIO" "VERIFY" "strictModeFailure" "${VB_MISSING_FIELDS[*]}"
+      log_fail "STRICT_VERIFICATION_BODY=1: ${#VB_MISSING_FIELDS[@]} verification-body field(s) recorded as NOT_POPULATED:"
+      log_fail "  ${VB_MISSING_FIELDS[*]}"
+      log_fail "Live-staging uplift is not eligible until every verification-body field is populated."
+      exit 1
+    fi
+    save_evidence "$SCENARIO" "VERIFY" "strictModePass" "all-13-populated"
+    log_ok "STRICT_VERIFICATION_BODY=1: all 13 verification-body fields populated — uplift gate clear"
+  fi
 }
 
 # ── Skip-clean / fail-hard helpers ────────────────────────────────────────────

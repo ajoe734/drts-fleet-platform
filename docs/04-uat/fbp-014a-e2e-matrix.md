@@ -450,23 +450,47 @@ Tenant Console (cost-center + quota + require_approval rule)
 
 #### Pass Criteria
 
+The shell is governed by `FIN-GOV-SPEC-001` §6, which splits acceptance into two tiers: (1) contract regressions that always hard-fail (§6.1) and (2) verification-body field recording that is always required, with `NOT_POPULATED` permitted in default mode and rejected under `STRICT_VERIFICATION_BODY=1` (§6.2).
+
+**Hard-fail contract regressions (§6.1) — apply in every mode:**
+
 1. Booking creation with `costCenterCode` must round-trip through booking read-back — a dropped cost-center is a hard fail.
 2. The approval request for the booking must be approvable as `tenant_admin`; if approval is granted the script drives the driver lifecycle to `complete`. If the environment cannot accept dispatch or assign in the first place, the lifecycle leg is skipped cleanly. If dispatch+assign are accepted but `/driver/tasks/:id/complete` then refuses, that is treated as a WF-DRV-001 coupling regression and hard-fails.
 3. The invoice generated for today's UTC window must contain a `lines[*]` entry whose `orderId` matches the just-completed governed booking. A missing line is a hard fail — the prior implementation could pass on unrelated historical invoice data, which the review specifically called out.
 4. The audit chain must contain an entry with `actionName == generate_tenant_invoice` and `resourceId == <ourInvoiceId>` (FG-08). A missing audit entry is a hard fail per `FIN-GOV-SPEC-001` §5.
 5. A cross-tenant fetch of the governed invoice must return 4xx. A 2xx response is a hard fail (FG-09 tenant-scope widening).
-6. Enrichment fields the spec still marks as runtime gaps (`costCenterName`, `ownerUserId`, explicit `approvalState` on invoice/report lines, `legacy_unmapped`, partner/program/platform aggregations) are recorded in `E2E_EVIDENCE_FILE` as either `<value>` or `NOT_POPULATED`, so the field-presence delta is the reviewable evidence as runtime enrichment lands.
+
+**Verification-body recording (§6.2) — mandatory in every mode:**
+
+6. The shell **must** record one `VERIFY` evidence line for each of the 13 verification-body fields enumerated in `FIN-GOV-SPEC-001` §3 (`costCenterCode`, `costCenterName`, `ownerUserId`, `legacy_unmapped`, `approvalRequestId`, `approvalState`, `quotaPeriodKey`, `quotaUsageDelta`, `partnerProgramCode`, `eligibilityVerificationId`, `platformEarningsRef`, `auditId`, `reportArtifactId`), with one of two values: the observed value, or the literal `NOT_POPULATED` marker. A silently-omitted line is itself a regression — the recording is mandatory so the reviewer can grep the evidence file for `NOT_POPULATED` and see exactly which directive §H targets are still gaps.
+
+**Two pass modes for the 13-field snapshot (§6.2):**
+
+7. **Default mode** (no env var set): `NOT_POPULATED` markers are soft evidence; the shell exits `0`. This is the appropriate mode while `WF-FIN-GOV-001` carries `PASS (static evidence)` on the release-gate matrix and runtime enrichment is still partial.
+8. **`STRICT_VERIFICATION_BODY=1` (uplift gate-keeper)**: the final 13-field snapshot hard-fails (exit `1`) if **any** field is `NOT_POPULATED`, with the complete list of missing fields written to the evidence log. Strict mode is the required green-light before the `WF-FIN-GOV-001` matrix row can be uplifted from `PASS (static evidence)` to `PASS (live staging evidence)`.
+
+Invocations:
+
+```bash
+# Default (soft) — current state of WF-FIN-GOV-001
+bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh
+
+# Strict (uplift gate-keeper) — run after IAP/credential gates clear and
+# the governed staging rerun produces enriched invoice/report artifacts
+STRICT_VERIFICATION_BODY=1 bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh
+```
 
 #### Notes
 
-- This script is a **shell**: per `FIN-GOV-UAT-001` the live promotion for `WF-FIN-GOV-001` is currently `BLOCKED FOR LIVE`. The script's `record_field` helper marks each unpopulated governance field as `NOT_POPULATED` so the field-presence delta becomes the reviewable evidence as enrichment lands incrementally.
-- Hard failures are reserved for contract regressions named in `FIN-GOV-SPEC-001`: cost-center dropped from booking, driver lifecycle cannot reach completion after dispatch accepted, invoice does not include the governed `orderId`, audit chain broken (FG-08), and cross-tenant scope widened (FG-09). All other shape probes are recorded as field-presence evidence so the test does not "pass on unrelated historical invoice data" — a regression flagged in the prior review round and now closed by the orderId-binding rule above.
+- This script is a **shell**: per `FIN-GOV-UAT-001` the live promotion for `WF-FIN-GOV-001` is currently `BLOCKED FOR LIVE`. The script's `record_vb_field` helper marks each unpopulated governance verification-body field as `NOT_POPULATED` and tracks the missing-field list so default runs surface the gap and strict runs gate the uplift.
+- Hard failures are reserved for the §6.1 contract regressions named in `FIN-GOV-SPEC-001`: cost-center dropped from booking, driver lifecycle cannot reach completion after dispatch accepted, invoice does not include the governed `orderId`, audit chain broken (FG-08), and cross-tenant scope widened (FG-09). All other shape probes are recorded as field-presence evidence so the test does not "pass on unrelated historical invoice data" — a regression flagged in the prior review round and now closed by the orderId-binding rule above.
 - Negative-path governance assertions (unknown / disabled / cross-tenant cost centers, rule block, rejected booking, escalation visibility) remain owned by `E2E-005-tenant-governance.sh` and `tests/integ/tenant-governance-negative.test.ts`. The deterministic invoice-line ↔ governed-orderId binding asserted here mirrors `apps/api/tests/integration/tenant-governance-e2e.test.ts:573-579`.
 
 #### Verification Snapshot
 
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
 - `bash tests/e2e/run-e2e.sh --suite 010 --dry-run`
+- Strict-mode dry-check (no live env): `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
 
 ---
 

@@ -83,7 +83,7 @@ WF-PARTNER-001 ↔ matrix row 10  (gate read: PASS (sandbox evidence) minimum)
 WF-PBK-001     ↔ matrix row 11  (gate read: PASS (pilot evidence))
 WF-COM-001     ↔ matrix row 12  (gate read: PASS (sandbox evidence) plus live-provider non-claim)
 WF-FIN-001     ↔ matrix row 13  (gate read: PASS (static evidence) or better)
-WF-FIN-GOV-001 ↔ matrix row 14  (gate read: PASS (static evidence); live staging uplift still blocked pending fresh governed staging rerun)
+WF-FIN-GOV-001 ↔ matrix row 14  (gate read: PASS (static evidence); live staging uplift still blocked pending a green STRICT_VERIFICATION_BODY=1 run of E2E-010 against a fresh governed staging rerun — IAP credential/ingress gate documented in support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md §4)
 WF-ADM-001     ↔ matrix row 15  (gate read: PASS (repo-local or live staging evidence))
 WF-REL-001     ↔ matrix row 16  (gate read: PASS (repo-local audit evidence))
 ```
