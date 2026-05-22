@@ -1,7 +1,7 @@
 # Governance-Aware Billing & Reporting Spec
 
 **Date**: 2026-05-19 (date stamped to align with directive; reconciled commit 2026-05-22)
-**Authority**: directive §H `FIN-GOV-001` — `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
+**Authority**: directive §H `FIN-GOV-001` — `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (with execution-worklist alignment at `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` §G1 and audit reconciliation at `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` §2.14)
 **Workflow family**: `WF-FIN-GOV-001` (depends on `WF-TGV-001` + `WF-FIN-001`; do **not** rename or absorb `WF-FIN-001`)
 **Pairs with**: `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` (UAT), `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (executable proof — driven by `PH1GC-E2E-010`)
 
@@ -41,18 +41,16 @@ If any one is set, **all 13 verification-body fields below are required** (with 
 | `costCenterCode`  | string  | `WF-TGV-001` cost-center registry                                     | governance-aware |
 | `costCenterName`  | string  | resolved at billing time from the cost-center registry snapshot       | governance-aware |
 | `ownerUserId`     | uuid    | the user (driver dispatcher / requester) attributed to the booking    | governance-aware |
-| `ownerName`       | string  | display name at billing time                                          | governance-aware |
 | `legacy_unmapped` | boolean | `true` only when the booking pre-dates the cost-center mapping window | see §3.3         |
 
-`costCenterName` and `ownerName` are resolved at _billing time_ (not booking time) so historical renames do not corrupt the bill. The booking record retains the IDs; the billing record carries the rendered names.
+`costCenterName` is resolved at _billing time_ (not booking time) so historical renames do not corrupt the bill. The booking record retains the IDs; the billing record carries the rendered name snapshot. Human-facing display names such as `ownerName` may still be rendered by downstream reporting, but they are not part of the 13-field verification body for this Phase 1 acceptance slice.
 
 ### 3.2 Approval evaluation
 
-| Field                  | Type | Source                                                                                                         | Required when                   |
-| ---------------------- | ---- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `approvalEvaluationId` | uuid | `WF-TGV-001` approval evaluation row                                                                           | booking ran approval evaluation |
-| `approvalRequestId`    | uuid | the originating approval request (one request can span multiple evaluations)                                   | same as above                   |
-| `approvalState`        | enum | terminal state of the approval at booking confirmation: `approved`, `auto_approved`, `escalated_then_approved` | same as above                   |
+| Field               | Type | Source                                                                                                         | Required when                   |
+| ------------------- | ---- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `approvalRequestId` | uuid | the originating approval request (one request can span multiple evaluations)                                   | booking ran approval evaluation |
+| `approvalState`     | enum | terminal state of the approval at booking confirmation: `approved`, `auto_approved`, `escalated_then_approved` | same as above                   |
 
 For governance-aware billing, the approval must have terminated in one of the three "approved" states above. Rejected approvals do not produce billable bookings.
 
@@ -85,7 +83,7 @@ For governance-aware billing, the approval must have terminated in one of the th
 
 ### 3.7 Legacy-unmapped fallback
 
-For bookings created during the cost-center rollout window (defined as before `WF-TGV-001` rolled to a tenant) that nevertheless ran through approval or quota gates, the billing record may set `legacy_unmapped = true` and leave `costCenterCode` / `costCenterName` / `ownerUserId` / `ownerName` null **only when** the cost-center registry confirms no mapping is available. The remaining nine fields must still be populated.
+For bookings created during the cost-center rollout window (defined as before `WF-TGV-001` rolled to a tenant) that nevertheless ran through approval or quota gates, the billing record may set `legacy_unmapped = true` and leave `costCenterCode` / `costCenterName` / `ownerUserId` null **only when** the cost-center registry confirms no mapping is available. The remaining ten verification-body fields must still be populated according to their own §3.2–§3.6 triggers (and `reportArtifactId` populates lazily on export).
 
 `legacy_unmapped = true` may not be used to bypass cost-center attribution on a tenant where the registry is current; the export pipeline treats unexpectedly-flagged rows as an integrity error.
 
@@ -127,7 +125,7 @@ The audit trail is the canonical reconciliation source. Any disagreement between
 The following transitions on a governance-aware billing record are not permitted via API or operator action:
 
 - Remove `costCenterCode` once set (correction is by issuing a corrective record).
-- Modify `approvalEvaluationId` (approvals are immutable references).
+- Modify `approvalRequestId` or `approvalState` (approval lineage is immutable once the booking is confirmed).
 - Modify `quotaUsageDelta` post-export (post-export corrections go through a follow-on adjustment record, not in-place edit).
 - Flip `legacy_unmapped` from `false` to `true` (the flag is monotonic — once mapped, always mapped).
 
