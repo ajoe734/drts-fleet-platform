@@ -5,7 +5,9 @@ Owner: `Codex2`
 Reviewer: `Codex`
 Branch: `codex2/ph1gc-pbk-001`
 PR: `n/a (worker direct branch closeout)`
-Commit: `pending task-scoped commit at handoff time`
+Commit: `4ac19735d94c38d25d0f27bcb95a7a123cac198a` (`docs(PH1GC-PBK-001): add partner booking pilot proof`)
+Push remote: `origin`
+Push branch: `codex2/ph1gc-pbk-001`
 Files changed:
 - `docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md`
 - `docs/03-runbooks/partner-booking-pilot-cutover-runbook-20260519.md`
