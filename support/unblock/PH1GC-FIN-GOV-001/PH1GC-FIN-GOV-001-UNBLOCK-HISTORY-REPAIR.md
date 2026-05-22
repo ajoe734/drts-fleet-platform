@@ -22,9 +22,11 @@ missing document commit.
    at the same merged `origin/dev` commit `6607dea8`; there is no
    `origin/codex2/ph1gc-fin-gov-001`.
 3. The owner still has two helper branches with the same task stem, but neither
-   is the canonical parent replay branch:
-   `origin/codex2/ph1gc-fin-gov-001-unblock-history-repair @ 4bf930192ccd51f332eaf9e3370cbf7c29cb4da0`
-   carries only this diagnosis artifact, while local
+   is the canonical parent replay branch. The current helper review branch tip
+   is `origin/codex2/ph1gc-fin-gov-001-unblock-history-repair @ d6a6bb69252bf2eac58aac451d26b50d45977237`,
+   which superseded the previously cited helper-only tip `4bf930192ccd51f332eaf9e3370cbf7c29cb4da0`
+   without changing the underlying blockage: it still carries only this
+   diagnosis artifact, while local
    `codex2/ph1gc-fin-gov-001-unblock-manual-unblock @ 6607dea8` remains an empty
    alias of `origin/dev`.
 4. The reviewer-side unblock branch
@@ -43,13 +45,13 @@ missing document commit.
 
 - `origin/dev @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - local `codex2/ph1gc-fin-gov-001 @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
-- local + remote `codex2/ph1gc-fin-gov-001-unblock-history-repair @ 4bf930192ccd51f332eaf9e3370cbf7c29cb4da0`
+- local + remote `codex2/ph1gc-fin-gov-001-unblock-history-repair @ d6a6bb69252bf2eac58aac451d26b50d45977237`
 - local `codex2/ph1gc-fin-gov-001-unblock-manual-unblock @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - `git ls-remote --heads origin` returns no refs for:
   - `refs/heads/codex2/ph1gc-fin-gov-001`
   - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-manual-unblock`
 - `git ls-remote --heads origin` confirms these related pushed refs:
-  - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-history-repair @ 4bf93019`
+  - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-history-repair @ d6a6bb69`
   - `refs/heads/codex/ph1gc-fin-gov-001-unblock-manual-unblock @ 0d4ac04b`
 - `git branch -vv` shows the parent branch and manual-unblock helper still
   tracking `origin/dev`, while the history-repair helper now tracks its own
@@ -80,8 +82,9 @@ The contamination is a four-part mismatch:
 2. The owner kept three branch/worktree names with the same task stem, but only
    the helper review branch was ever pushed; the actual parent branch is still a
    local-only alias of `origin/dev` with no owner-lane remote.
-3. The pushed unblock artifacts live on helper branches, so the control plane
-   has diagnosis evidence but still no owner replay branch.
+3. The pushed unblock artifacts live on helper branches, and the latest helper
+   branch tip merely refreshes that audit evidence, so the control plane still
+   has diagnosis evidence but no owner replay branch.
 4. The two real follow-on delivery commits live on other task branches, so the
    parent cannot be resumed cleanly until one owner branch becomes the canonical
    place where those commits are replayed and pushed.
