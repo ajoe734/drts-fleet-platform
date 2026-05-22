@@ -21,14 +21,16 @@ missing document commit.
 2. The parent owner branch `codex2/ph1gc-fin-gov-001` is still a local-only ref
    at the same merged `origin/dev` commit `6607dea8`; there is no
    `origin/codex2/ph1gc-fin-gov-001`.
-3. The helper branches
-   `codex2/ph1gc-fin-gov-001-unblock-history-repair` and
-   `codex2/ph1gc-fin-gov-001-unblock-manual-unblock` are also local-only refs
-   at the same `6607dea8` tip and still track `origin/dev`.
-4. The only pushed unblock branch in this task family is reviewer-side
-   `origin/codex/ph1gc-fin-gov-001-unblock-manual-unblock @ a6578bf59338fe2eb2c1419782ed6a3a64b976e3`,
-   which documents the blocker but does not create a canonical owner replay
-   branch.
+3. The owner still has two helper branches with the same task stem, but neither
+   is the canonical parent replay branch:
+   `origin/codex2/ph1gc-fin-gov-001-unblock-history-repair @ d04006ae98b40ef5918c6ff5407b104dfb8cb0b4`
+   carries only this diagnosis artifact, while local
+   `codex2/ph1gc-fin-gov-001-unblock-manual-unblock @ 6607dea8` remains an empty
+   alias of `origin/dev`.
+4. The reviewer-side unblock branch
+   `origin/codex/ph1gc-fin-gov-001-unblock-manual-unblock @ 0d4ac04bd198595843f960bfd7bf0a8e8266f4ea`
+   preserves the accepted blocker diagnosis, but it also does not create a
+   canonical owner replay branch.
 5. The real follow-on delivery inputs already exist on separate remote branches:
    `origin/claude2/wf-fin-gov-001-e2e @ ddc02c4e24ecf924e83d47f0cc86c1c21ce223f6`
    and `origin/codex2/ph1gc-matrix-002 @ 07b3a245a87a93fbea09c806e8a7ea5c085d3df5`.
@@ -41,14 +43,17 @@ missing document commit.
 
 - `origin/dev @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - local `codex2/ph1gc-fin-gov-001 @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
-- local `codex2/ph1gc-fin-gov-001-unblock-history-repair @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
+- local + remote `codex2/ph1gc-fin-gov-001-unblock-history-repair @ d04006ae98b40ef5918c6ff5407b104dfb8cb0b4`
 - local `codex2/ph1gc-fin-gov-001-unblock-manual-unblock @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - `git ls-remote --heads origin` returns no refs for:
   - `refs/heads/codex2/ph1gc-fin-gov-001`
-  - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-history-repair`
   - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-manual-unblock`
-- `git branch -vv` shows all three `codex2/ph1gc-fin-gov-001*` branches still
-  tracking `origin/dev`
+- `git ls-remote --heads origin` confirms these related pushed refs:
+  - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-history-repair @ d04006ae`
+  - `refs/heads/codex/ph1gc-fin-gov-001-unblock-manual-unblock @ 0d4ac04b`
+- `git branch -vv` shows the parent branch and manual-unblock helper still
+  tracking `origin/dev`, while the history-repair helper now tracks its own
+  remote review branch
 - `git worktree list --porcelain` shows separate worktrees for:
   - `codex2/ph1gc-fin-gov-001`
   - `codex2/ph1gc-fin-gov-001-unblock-history-repair`
@@ -72,10 +77,11 @@ The contamination is a four-part mismatch:
 
 1. The parent task name `PH1GC-FIN-GOV-001` already points at merged doc work on
    `origin/dev`.
-2. The owner kept three local branches/worktrees with the same task stem, but
-   all three are empty aliases of `origin/dev` with no pushed owner-lane ref.
-3. The reviewer helper branch is the only pushed unblock artifact, so the
-   control plane has diagnosis evidence but no owner replay branch.
+2. The owner kept three branch/worktree names with the same task stem, but only
+   the helper review branch was ever pushed; the actual parent branch is still a
+   local-only alias of `origin/dev` with no owner-lane remote.
+3. The pushed unblock artifacts live on helper branches, so the control plane
+   has diagnosis evidence but still no owner replay branch.
 4. The two real follow-on delivery commits live on other task branches, so the
    parent cannot be resumed cleanly until one owner branch becomes the canonical
    place where those commits are replayed and pushed.
