@@ -22,9 +22,14 @@ shows the parent as blocked and now records it as fully closed out:
 3. Canonical parent `next` already records the closeout result on
    `codex2/ph1gc-bpl-001@7c818c27`, so it is no longer a replay-or-reland
    instruction and no longer a review handoff.
-4. The live helper branch tip is
-   `origin/codex2/ph1gc-bpl-001-unblock-history-repair@9e0055b3169db2d249afb85600606346b5a82806`,
-   not `867b4b85` or `1e9d6445`.
+4. Immediately before this repair pass advanced the helper branch again,
+   `git rev-parse origin/codex2/ph1gc-bpl-001-unblock-history-repair`
+   returned
+   `3f2f790f6c97278cd5cad4b72ea0504004a8fb57`.
+5. Because every helper-note repair commit necessarily changes the helper tip,
+   this note treats helper-branch hashes as audit checkpoints under repair, not
+   as self-updating "live tip" labels for the post-push commit that contains
+   the note itself.
 
 ## Exact Contamination
 
@@ -47,7 +52,10 @@ artifact, not missing content on trunk:
    `867b4b85` still labeled as the live helper tip and `6e3228a1` still labeled
    as the parent owner branch tip even though `codex2/ph1gc-bpl-001` had already
    advanced to `7c818c27`.
-6. The exact remaining contamination is therefore self-referential stale ref
+6. Commit `3f2f790f6c97278cd5cad4b72ea0504004a8fb57` then refreshed the note
+   again, but still described `9e0055b3` as the live helper tip even though
+   `3f2f790f` had already become the live remote ref at review time.
+7. The exact remaining contamination is therefore self-referential stale ref
    evidence inside the helper note, not missing content on trunk and not a need
    to rewrite shared history.
 
@@ -56,7 +64,10 @@ artifact, not missing content on trunk:
 ### Current canonical refs
 
 - `origin/dev @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
-- `origin/codex2/ph1gc-bpl-001-unblock-history-repair @ 9e0055b3169db2d249afb85600606346b5a82806`
+- `origin/codex2/ph1gc-bpl-001-unblock-history-repair @ 3f2f790f6c97278cd5cad4b72ea0504004a8fb57`
+  when this repair pass began; this is the pre-closeout helper checkpoint being
+  repaired by the current note update rather than the post-push tip of the note
+  itself
 - `codex2/ph1gc-bpl-001 @ 7c818c2743f5f10c891945c5a54e3788456a2bfa`
 - `codex/ph1gc-bpl-001 @ bf176edd9c100ad121face524588c3144bdcd15d`
 - `origin/codex2/ph1gc-bpl-001-sidecar-acceptance @ 158629cc66051e1c32c1107813d70f9e4c09430e`
@@ -71,6 +82,9 @@ artifact, not missing content on trunk:
 - `origin/codex2/ph1gc-bpl-001-unblock-history-repair@9e0055b3169db2d249afb85600606346b5a82806`
   is the later pushed commit that corrected the review-state diagnosis but still
   carried forward `867b4b85` and parent tip `6e3228a1` as live refs.
+- `origin/codex2/ph1gc-bpl-001-unblock-history-repair@3f2f790f6c97278cd5cad4b72ea0504004a8fb57`
+  is the later closeout commit that refreshed the parent state to `done` but
+  still labeled `9e0055b3` as the helper branch's live ref inside the note.
 - `codex/ph1gc-bpl-001-unblock-history-repair@6607dea8` remains useful only as
   audit evidence that one helper alias had already been refreshed to the merged
   trunk while the active helper note still described the old blockage.
@@ -99,12 +113,14 @@ Do not rewrite or force-push any shared branch.
    artifact text itself still needed one more repair pass.
 3. Preserve `9e0055b3` as evidence that the diagnosis was corrected before the
    live-ref section was fully refreshed.
-4. Publish this corrected helper note on the same branch/PR so the audit trail
+4. Preserve `3f2f790f` as evidence that one more helper pass updated the parent
+   state to `done` but still used a self-referential live-tip label.
+5. Publish this corrected helper note on the same branch/PR so the audit trail
    shows the exact progression from stale diagnosis to fully consistent current
-   refs.
-5. Do not reopen the parent as `blocked`. Canonical machine truth already has
+   refs without relying on self-invalidating "live helper tip" wording.
+6. Do not reopen the parent as `blocked`. Canonical machine truth already has
    the correct unblocked posture: the parent is `done`.
-6. Preserve the current owner closeout branch/result on
+7. Preserve the current owner closeout branch/result on
    `codex2/ph1gc-bpl-001@7c818c27`; do not route follow-up work through the
    older behind-trunk `codex/ph1gc-bpl-001` branch alias.
 
@@ -149,3 +165,4 @@ Operationally, the resulting parent state is:
   - `git show --no-patch --pretty=fuller 1e9d6445`
   - `git show --no-patch --pretty=fuller 867b4b85`
   - `git show --no-patch --pretty=fuller 9e0055b3`
+  - `git show --no-patch --pretty=fuller 3f2f790f`
