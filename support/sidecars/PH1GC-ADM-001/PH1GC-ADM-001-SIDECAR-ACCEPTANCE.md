@@ -1,26 +1,32 @@
 # PH1GC-ADM-001 — Sidecar Acceptance Packet
 
-**Sidecar task**: `PH1GC-ADM-001-SIDECAR-ACCEPTANCE`  
-**Parent task**: `PH1GC-ADM-001` — Phase 1 gap closure — platform admin control plane UAT  
-**Helper kind**: `acceptance_packet`  
-**Parent owner / reviewer**: `Codex2` / `Codex`  
-**Sidecar owner / reviewer**: `Codex` / `Codex2`  
-**Date prepared**: `2026-05-22`  
-**Scope statement**: Support-only material. Does **not** mutate canonical truth. This packet does not edit `docs/04-uat/platform-admin-control-plane-uat-20260519.md`, `tests/e2e/E2E-011-platform-admin-control-plane.sh`, or the workflow matrix. Parent owner may absorb pieces of this packet into the implementation closeout.  
-**Canonical machine-truth root**: `/home/edna/workspace/drts-fleet-platform`
+- **Sidecar task**: `PH1GC-ADM-001-SIDECAR-ACCEPTANCE`
+- **Parent task**: `PH1GC-ADM-001` — Phase 1 gap closure — platform admin control plane UAT
+- **Helper kind**: `acceptance_packet`
+- **Parent owner / reviewer**: `Codex2` / `Codex`
+- **Sidecar owner / reviewer**: `Codex` / `Codex2`
+- **Date prepared**: `2026-05-22`
+- **Scope statement**: Support-only material. Does **not** mutate canonical truth. This packet does not edit `docs/04-uat/platform-admin-control-plane-uat-20260519.md`, `tests/e2e/E2E-011-platform-admin-control-plane.sh`, or the workflow matrix. Parent owner may absorb pieces of this packet into the implementation closeout.
+- **Canonical machine-truth root**: `/home/edna/workspace/drts-fleet-platform`
 
 **Authority cross-refs**
 
-- Gap-closure implementation spec: `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` §I `ADM-001`, §7, §8, §9, §10.
-- Gap-closure status truth: `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` §2.1, §2.3, §2.5, §4, §5.
+- Collaboration / machine-truth rules: `AI_COLLABORATION_GUIDE.md` §0.5, §0.6, §2.
+- `WF-ADM-001` directive baseline: `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.8 and §7.
+- Approved v3 reconciliation for `E2E-011` numbering and UAT scope: `docs/00-context/phase1-v3-resolution-20260519.md` Q1 and Q4 row 5.
+- Current reporting template visible on canonical root: `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` §7.
 - Canonical task entries in `/home/edna/workspace/drts-fleet-platform/ai-status.json`:
   - `PH1GC-ADM-001`
   - `PH1GC-E2E-011`
   - `PH1GC-MATRIX-001`
+  - `PH1GC-ADM-001-SIDECAR-ACCEPTANCE`
 - Recovery anchors from prior v3 work that never landed on `origin/dev`:
   - `ADM-UAT-001` content commit `64abc10`, closeout anchor `41334df9e01142c0fd053b44d603e59cc1353bb0`
   - `WF-ADM-001-E2E` closeout commit `0d666298f51166712bfbf9a6ac2973117a169792`
   - `WF-ADM-001-MATRIX` closeout commit `91f8f1e49b9bc51d90ed578047cb7597f20df540`
+
+Where the older directive text and the current `PH1GC-*` task board diverge,
+follow current machine truth plus the approved v3 reconciliation docs above.
 
 ---
 
@@ -28,16 +34,17 @@
 
 The parent task is `done`-eligible only when every row below resolves to `PASS`
 against `origin/dev`. This packet deliberately follows the fresh `PH1GC-*`
-authority, not the older `ADM-UAT-001` / `WF-ADM-001-*` `done` markers.
+authority and the approved v3 numbering/scope reconciliation, not the older
+`ADM-UAT-001` / `WF-ADM-001-*` `done` markers.
 
 | # | Acceptance requirement | Verification command / oracle | PASS criterion | Source |
 | --- | --- | --- | --- | --- |
-| 1 | `docs/04-uat/platform-admin-control-plane-uat-20260519.md` is present on `origin/dev`. | `git fetch origin && git ls-tree -r origin/dev -- docs/04-uat/platform-admin-control-plane-uat-20260519.md` | Exactly one tree entry is returned for the path. | Parent acceptance row 1; status truth §5 |
-| 2 | The landed UAT covers all 11 directive §I control-plane areas: tenant create, module enablement, tenant quotas, partner entry setup, partner credential issue/revoke, adapter health, pricing publish, feature flag toggle, rollout stage, rollback hold, audit verification. | Review the landed doc against the implementation-spec §I checklist. A quick static oracle is `grep -n "tenant\\|module\\|quota\\|partner\\|credential\\|adapter\\|pricing\\|flag\\|rollout\\|rollback\\|audit" docs/04-uat/platform-admin-control-plane-uat-20260519.md`. | Every required control-plane area is explicitly named, not implied. | Parent acceptance row 2; implementation spec §I |
-| 3 | The landed UAT stays aligned with the current `origin/dev` platform-admin surfaces instead of depending on non-landed branch-only paths. | Review citations in the landed doc against the baseline anchor inventory in §2.2 of this packet. | The UAT cites current tenant, partner, pricing, adapter, flag, and audit surfaces that are actually visible from `origin/dev`. | Status truth §2.1; baseline anchors in this packet |
-| 4 | The UAT explicitly treats `PH1GC-E2E-011` as the companion automation that must assert every area, include RBAC negatives, preserve pricing version semantics, and prove rollback-hold blocks production promotion. | Compare the landed UAT wording to the `PH1GC-E2E-011` acceptance in canonical `ai-status.json`; optionally inspect recovery script commit `0d666298f51166712bfbf9a6ac2973117a169792`. | The UAT does not downscope the companion script below the machine-truth acceptance bar. | Parent acceptance row 3; `PH1GC-E2E-011` acceptance |
-| 5 | Parent closeout does not over-claim the matrix uplift. `WF-ADM-001` row creation and gate-read update belong to `PH1GC-MATRIX-001`. | Review the parent handoff / closeout note. | Closeout says the UAT artifact is ready for matrix consumption; it does not pretend the matrix row already changed. | Parent acceptance row 4; `PH1GC-MATRIX-001` acceptance |
-| 6 | Parent closeout follows directive §7 format exactly. | Compare closeout text to the template in §5 of this packet. | All 13 required fields are present. | Parent acceptance row 5; implementation spec §7 |
+| 1 | `docs/04-uat/platform-admin-control-plane-uat-20260519.md` is present on `origin/dev`. | `git fetch origin && git ls-tree -r origin/dev -- docs/04-uat/platform-admin-control-plane-uat-20260519.md` | Exactly one tree entry is returned for the path. | Parent acceptance row 1 in `ai-status.json`; directive §3.8.2 |
+| 2 | The landed UAT covers all 11 current-machine-truth control-plane areas: tenant create, module enablement, tenant quotas, partner entry setup, partner credential issue/revoke, adapter health, pricing publish, feature flag toggle, rollout stage, rollback hold, audit verification. | Review the landed doc against `PH1GC-ADM-001` acceptance plus the approved `WF-ADM-001` reconciliation. A quick static oracle is `grep -n "tenant\\|module\\|quota\\|partner\\|credential\\|adapter\\|pricing\\|flag\\|rollout\\|rollback\\|audit" docs/04-uat/platform-admin-control-plane-uat-20260519.md`. | Every required control-plane area is explicitly named, not implied. | Parent acceptance row 2 in `ai-status.json`; directive §3.8.3-§3.8.4; v3 resolution Q4 row 5 |
+| 3 | The landed UAT stays aligned with the current `origin/dev` platform-admin surfaces instead of depending on non-landed branch-only paths. | Review citations in the landed doc against the baseline anchor inventory in §2.2 of this packet. | The UAT cites current tenant, partner, pricing, adapter, flag, and audit surfaces that are actually visible from `origin/dev`. | `AI_COLLABORATION_GUIDE.md` §0.5; baseline anchors in this packet |
+| 4 | The UAT explicitly treats `PH1GC-E2E-011` as the companion automation that must assert every area, include RBAC negatives, preserve pricing version semantics, and prove rollback-hold blocks production promotion. | Compare the landed UAT wording to the `PH1GC-E2E-011` acceptance in canonical `ai-status.json`; optionally inspect recovery script commit `0d666298f51166712bfbf9a6ac2973117a169792`. | The UAT does not downscope the companion script below the machine-truth acceptance bar. | Parent acceptance row 3 in `ai-status.json`; `PH1GC-E2E-011` acceptance rows 2-6 |
+| 5 | Parent closeout does not over-claim the matrix uplift. `WF-ADM-001` row creation and gate-read update belong to `PH1GC-MATRIX-001`. | Review the parent handoff / closeout note. | Closeout says the UAT artifact is ready for matrix consumption; it does not pretend the matrix row already changed. | Parent acceptance row 4 in `ai-status.json`; `PH1GC-MATRIX-001` acceptance rows 3 and 6 |
+| 6 | Parent closeout follows the currently visible canonical reporting format. | Compare closeout text to the template in §5 of this packet and `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` §7. | All 12 required fields are present in order. | Parent acceptance row 5 in `ai-status.json`; execution worklist §7 |
 
 ---
 
@@ -66,9 +73,10 @@ already present on `origin/dev` today.
 
 ### 2.3 Recovery anchors from the prior v3 branch-only work
 
-Canonical status truth says `origin/dev` is still missing the required UAT and
-E2E files even though older tasks were marked `done`. The following commits are
-useful recovery inputs but are **not** themselves proof of PH1GC completion.
+Canonical machine truth still keeps `PH1GC-ADM-001`, `PH1GC-E2E-011`, and
+`PH1GC-MATRIX-001` open/pending even though older tasks were marked `done`.
+The following commits are useful recovery inputs but are **not** themselves
+proof of PH1GC completion.
 
 | Historical task | Branch-only anchor | What the parent owner can safely reuse |
 | --- | --- | --- |
@@ -156,14 +164,16 @@ git show 91f8f1e49b9bc51d90ed578047cb7597f20df540:docs/03-runbooks/phase1-workfl
 
 ## 4. Risks and guardrails
 
-1. Do not mark the parent `done` from machine truth alone. Status truth §1 and
-   §3 exist because prior v3 `done` markers did not land the required files on
-   `origin/dev`.
+1. Do not mark the parent `done` from historical `done` markers alone.
+   `AI_COLLABORATION_GUIDE.md` §0.5 requires current machine truth to carry the
+   official remaining work, and `ai-status.json` still keeps the PH1GC parent,
+   companion E2E, and matrix tasks open/pending.
 2. Do not treat the branch-only `ADM-UAT-001` artifact as canonical closure.
    It is a recovery source, not proof of delivery.
 3. Do not let the parent UAT downscope `adapter health` or `feature flag`
-   coverage just because the earlier v3 draft kept those areas mostly in source
-   anchors. `PH1GC-ADM-001` acceptance explicitly names all 11 areas.
+   coverage just because the older directive flow list is shorter. The current
+   `PH1GC-ADM-001` acceptance and `phase1-v3-resolution-20260519.md` Q4 row 5
+   explicitly require all 11 areas.
 4. Do not let the parent closeout imply the matrix row already changed. Matrix
    uplift belongs to `PH1GC-MATRIX-001`.
 5. Do not let the parent closeout imply the E2E already landed. Script landing
@@ -174,24 +184,28 @@ git show 91f8f1e49b9bc51d90ed578047cb7597f20df540:docs/03-runbooks/phase1-workfl
 ## 5. Closeout report template
 
 Parent owner can reuse this block directly when handing off and finalizing the
-parent task. It mirrors directive §7 verbatim.
+parent task. It mirrors the currently visible reporting block in
+`docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` §7.
 
 ```text
 Task ID: PH1GC-ADM-001
 Owner: Codex2
 Reviewer: Codex
-Branch:
-PR:
-Commit:
+Current status:
+Branch / PR:
 Files changed:
-Verification commands:
+Verification command:
 Evidence artifact:
 Workflow family affected:
 Gate read before:
 Gate read after:
 Remaining non-claim:
-External dependencies, if any:
 ```
+
+Optional reviewer appendices can be added after the required block when useful:
+
+- `Commit: <hash or not yet created>`
+- `External dependencies, if any: <value>`
 
 Recommended notes for the `Gate read after` / `Remaining non-claim` lines:
 
