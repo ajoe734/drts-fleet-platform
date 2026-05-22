@@ -46,24 +46,24 @@ those inputs have been replayed together.
 
 - `origin/dev @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - local `codex2/ph1gc-fin-gov-001 @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
-- local `codex/ph1gc-fin-gov-001-unblock-history-repair @ 6607dea8...`
-  before this repair commit
+- local + remote
+  `codex/ph1gc-fin-gov-001-unblock-history-repair @ dffe0af26e9e671e13f41b1e38af5fd33eb9325b`
 - local + remote
   `codex2/ph1gc-fin-gov-001-unblock-history-repair @ 8080d204d0b86105e57044f69a69babb435964a7`
 - local + remote
   `codex/ph1gc-fin-gov-001-unblock-manual-unblock @ 0d4ac04bd198595843f960bfd7bf0a8e8266f4ea`
 - `git ls-remote --heads origin` returns no refs for:
-  - `refs/heads/codex/ph1gc-fin-gov-001-unblock-history-repair`
   - `refs/heads/codex2/ph1gc-fin-gov-001`
 - `git ls-remote --heads origin` confirms these related pushed refs:
+  - `refs/heads/codex/ph1gc-fin-gov-001-unblock-history-repair @ dffe0af2`
   - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-history-repair @ 8080d204`
   - `refs/heads/codex/ph1gc-fin-gov-001-unblock-manual-unblock @ 0d4ac04b`
   - `refs/heads/claude2/wf-fin-gov-001-e2e @ ddc02c4e`
   - `refs/heads/codex2/ph1gc-matrix-002 @ 07b3a245`
-- `git branch -vv` shows both `codex2/ph1gc-fin-gov-001` and the reassigned
-  helper branch `codex/ph1gc-fin-gov-001-unblock-history-repair` still tracking
-  `origin/dev` before this commit, while the older `codex2/...-unblock-history-repair`
-  helper is the only branch carrying audit evidence
+- `git branch -vv` shows `codex2/ph1gc-fin-gov-001` still tracking
+  `origin/dev`, while `codex/ph1gc-fin-gov-001-unblock-history-repair` now
+  tracks its own pushed helper ref after the lane repair; before `dffe0af2`
+  that reassigned branch was still an empty alias of `origin/dev`
 - `git worktree list --porcelain` shows separate worktrees for:
   - `codex2/ph1gc-fin-gov-001`
   - `codex2/ph1gc-fin-gov-001-unblock-history-repair`
@@ -77,9 +77,10 @@ those inputs have been replayed together.
 
 - Canonical `/home/edna/workspace/drts-fleet-platform/ai-status.json` marks
   `PH1GC-FIN-GOV-001` as `blocked`
-- Parent `next` already describes the real replay work:
-  reuse local `codex2/ph1gc-fin-gov-001`, replay `f450a1e8`, `ddc02c4e`, and
-  `07b3a245`, then push `origin/codex2/ph1gc-fin-gov-001`
+- Before owner closeout, parent `next` still lagged on stale helper-tip wording
+  (`d6a6bb69`) even though the real replay work was already clear: reuse local
+  `codex2/ph1gc-fin-gov-001`, replay `f450a1e8`, `ddc02c4e`, and `07b3a245`,
+  then push `origin/codex2/ph1gc-fin-gov-001`
 - Canonical `/home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl`
   records the history-repair helper as originally started under `Codex2` at
   `2026-05-22T08:37:16Z` and proactively reassigned to `Codex` at
@@ -183,3 +184,15 @@ AI_NAME=Codex2 scripts/ai-status.sh handoff PH1GC-FIN-GOV-001 Codex \
 - Confirmed the follow-on commits are already pushed elsewhere:
   - `git show --stat --summary ddc02c4e`
   - `git show --stat --summary 07b3a245`
+
+## Closeout Evidence
+
+- Current helper-lane repair branch:
+  `origin/codex/ph1gc-fin-gov-001-unblock-history-repair @ dffe0af2`
+- Preserved older audit-only helper branch:
+  `origin/codex2/ph1gc-fin-gov-001-unblock-history-repair @ 8080d204`
+- Existing review PR for the older helper lane remains open at
+  `https://github.com/ajoe734/drts-fleet-platform/pull/244`; formal owner
+  closeout on the reassigned `codex/...` lane must carry its own commit/push
+  evidence and refresh the parent machine-truth `next` field to the replay
+  sequence described above.
