@@ -285,8 +285,10 @@ write_pricing_rule_body() {
 write_pricing_publish_body() {
   local path="$1"
   jq -n \
+    --arg version "$PRICING_VERSION" \
     --arg publishedBy "$PLATFORM_ACTOR_ID" \
     '{
+      version: $version,
       publishedBy: $publishedBy
     }' > "$path"
 }
@@ -373,6 +375,10 @@ write_quota_policy_body "$QUOTA_BODY_UPDATED" 500
 write_maintenance_body "$MAINTENANCE_ENABLE_BODY" true "e2e_011_adapter_maintenance"
 write_maintenance_body "$MAINTENANCE_DISABLE_BODY" false "e2e_011_adapter_resume"
 write_pricing_publish_body "$PRICING_PUBLISH_BODY"
+if [[ "$(jq -r '.version // empty' "$PRICING_PUBLISH_BODY" 2>/dev/null || true)" != "$PRICING_VERSION" ]]; then
+  log_fail "Expected pricing publish payload version ${PRICING_VERSION}"
+  exit 1
+fi
 write_flag_override_body "$FLAG_ENABLE_BODY" true "Enable shift flag for E2E-011 tenant"
 write_flag_override_body "$FLAG_DISABLE_BODY" false "Disable shift flag for E2E-011 tenant"
 write_onboarding_body "$ONBOARDING_BODY"
@@ -608,6 +614,11 @@ http_call POST "/platform-admin/pricing-rules/${PRICING_RULE_ID}/publish" "$PRIC
 assert_status "200"
 if [[ "$(json_get '.data.status')" != "active" ]]; then
   log_fail "Expected published pricing rule to be active"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+fi
+if [[ "$(json_get '.data.version')" != "$PRICING_VERSION" ]]; then
+  log_fail "Expected published pricing rule version ${PRICING_VERSION}"
   log_fail "Body: ${RESP_BODY}"
   exit 1
 fi
