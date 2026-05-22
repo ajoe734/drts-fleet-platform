@@ -4,8 +4,8 @@ Status: resolved by the existing canonical PARTNER-ELIG-LIVE-001 evidence chain
 Task: `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK`
 Dispatch parent: `PH1GC-PARTNER-002`
 Canonical parent: `PARTNER-ELIG-LIVE-001`
-Owner: `Codex`
-Reviewer: `Codex2`
+Owner: `Codex2`
+Reviewer: `Codex`
 
 ## Summary
 
@@ -18,7 +18,7 @@ the remaining gate is external-only and stays bound to `EXT-001-BLK-001`
 through `EXT-001-BLK-006`.
 
 The correct unblock action is therefore to bridge the dispatch name back to the
-existing canonical task chain and keep the parent next step pointed at the
+existing canonical task chain and keep the canonical resume path pointed at the
 external issuer evidence packet.
 
 ## Why this helper exists
@@ -36,6 +36,12 @@ The actual canonical task lineage already exists under:
 Those tasks already diagnose, narrow, and document the remaining blocker. This
 file is the dispatch-to-canonical bridge so the PH1GC name does not imply a
 second parent or a new repo-local scope.
+
+Because no `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK` row exists in
+`ai-status.json`, this dispatch alias also has no direct
+`scripts/ai-status.sh approve|done` lifecycle entry. Any machine-truth status
+changes must stay on the canonical `PARTNER-ELIG-LIVE-001*` task chain unless
+the supervisor explicitly materializes a support-only helper task.
 
 ## Canonical evidence
 
@@ -55,10 +61,13 @@ second parent or a new repo-local scope.
    on `origin/codex/partner-elig-live-001@2628fc7` is the canonical hold-state
    packet for the parent task.
 5. `ai-status.json`
-   keeps `PARTNER-ELIG-LIVE-001.next` on the concrete external resume sequence:
-   keep the sidecar anchored at `2628fc7`, wait for `EXT-001-BLK-001` through
-   `EXT-001-BLK-006`, attach redacted evidence there, and rerun the live issuer
-   proof.
+   records the concrete external resume sequence on the completed helper chain:
+   `PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR.resolved_parent_next` keeps
+   the sidecar anchored at `2628fc7`, waits for `EXT-001-BLK-001` through
+   `EXT-001-BLK-006`, then attaches redacted evidence there and reruns the live
+   issuer proof. The parent task closeout at `PARTNER-ELIG-LIVE-001` separately
+   summarizes that the task is externally gated on `EXT-001-BLK-001..006`
+   only.
 
 ## Remaining blocker
 
