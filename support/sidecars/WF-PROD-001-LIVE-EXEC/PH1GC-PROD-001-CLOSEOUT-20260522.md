@@ -22,6 +22,19 @@ Next action: `Use a real prod/v* tag with the protected production environment g
 - `support/sidecars/WF-PROD-001-LIVE-EXEC/` contains dry-run evidence and rollback-drill evidence for the current non-live closure.
 - `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` names `WF-PROD-001` explicitly and keeps live production execution marked as externally gated.
 
+## Acceptance Mapping
+
+- Workflow acceptance: `.github/workflows/deploy-prod.yml` wires directive §3.9.3 `PROD_*` inputs, Artifact Registry path resolution, Cloud Run service/job overrides, Cloud SQL migration wiring, Secret Manager checks, and post-deploy health verification.
+- Runbook acceptance: the deploy spec and rollback drill are both present on `origin/dev`, executable as written, and aligned with the workflow's `${PROD_GCP_API_SERVICE:-drts-api}` override semantics.
+- Sidecar acceptance: `support/sidecars/WF-PROD-001-LIVE-EXEC/` contains both dry-run evidence and rollback-drill evidence plus this closeout artifact.
+- Non-claim acceptance: the gate remains `PASS (dry-run contract evidence)` and does not claim a live production launch, live rollback, or post-deploy monitoring proof.
+
+## Remaining External Gates
+
+- GitHub Environment `production` must keep its required-reviewer rule active.
+- Repo settings must provide the required `PROD_GCP_*`, `PROD_ARTIFACT_*`, and `PROD_WIF_*` configuration.
+- A real `prod/v*` tag dispatch, post-deploy smoke capture, and rollback-by-prior-prod-tag evidence are still required before any production-launch claim.
+
 ## Verification Commands
 
 ```bash
