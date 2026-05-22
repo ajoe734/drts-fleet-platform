@@ -41,8 +41,12 @@ Canonical machine truth records `PH1GC-BPL-003` as:
 Evidence anchors:
 
 - `ai-status.json` lines `19671-19705`
-- `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` lines `283-310`
-- `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` lines `28-47`
+- `docs/00-context/phase1-v3-resolution-20260519.md` lines `139-183`
+
+Tracked-source note:
+
+- `ai-status.json` still names `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` as the parent `planning_ref` and mentions `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` in `next`.
+- neither file is tracked on this branch or on `origin/codex2/ph1gc-bpl-003-sidecar-acceptance`, so this packet uses tracked branch evidence plus direct git tree inspection instead of citing non-existent paths
 
 ### Sidecar status chronology
 
@@ -106,8 +110,8 @@ Relationship note:
 
 | Input | Anchor | Relevance |
 | --- | --- | --- |
-| Implementation directive | `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md:283-310` | Defines the 12-file output and required thin-stub template. |
-| Status-truth snapshot | `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md:28-47` | Confirms the baseline gap: all 12 stub files are missing on `origin/dev`. |
+| Tracked directive source | `docs/00-context/phase1-v3-resolution-20260519.md:139-183` | Defines the 12-stub rule, required thin-stub template, and stub-to-canonical mapping on this branch. |
+| Baseline tree evidence | `git ls-tree -r origin/dev --name-only docs/00-context/stubs/` | Returns no paths on this branch as of this repair, so the parent acceptance still starts from an empty `origin/dev` stub tree. |
 | Parent machine truth | `ai-status.json:19671-19705` | Records ownership, acceptance list, and artifact targets for `PH1GC-BPL-003`. |
 
 ### Downstream reviewer dependency
@@ -121,7 +125,7 @@ Relationship note:
 
 ## 5. Acceptance Checklist Expansion
 
-Source of truth: `ai-status.json:19693-19698`, expanded with directive and status-truth anchors.
+Source of truth: `ai-status.json:19693-19698`, expanded with tracked directive and direct git tree evidence.
 
 ### AC-1: All 12 thin stub files exist on `origin/dev` under `docs/00-context/stubs/` with the canonical names listed in directive §4.3
 
@@ -143,9 +147,10 @@ Required file inventory:
 Evidence anchors:
 
 - `ai-status.json:19679-19691`
-- `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md:30-47`
+- `docs/00-context/phase1-v3-resolution-20260519.md:166-181`
+- `git ls-tree -r origin/dev --name-only docs/00-context/stubs/` -> empty output at repair time
 
-Current baseline from shared truth: `FAIL at baseline`, because the status-truth snapshot says all 12 files are absent on `origin/dev`.
+Current baseline from shared truth: `FAIL at baseline`, because `ai-status.json` names all 12 target files while the `origin/dev` tree inspection for `docs/00-context/stubs/` returns no tracked paths.
 
 ### AC-2: Each stub follows the directive §A BPL-003 template
 
@@ -161,7 +166,7 @@ Template requirements:
 
 Evidence anchor:
 
-- `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md:287-304`
+- `docs/00-context/phase1-v3-resolution-20260519.md:141-164`
 
 ### AC-3: No stub restates or paraphrases canonical artifact content
 
@@ -174,7 +179,7 @@ Review expectation:
 Evidence anchors:
 
 - `ai-status.json:19695-19696`
-- `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md:295-304`
+- `docs/00-context/phase1-v3-resolution-20260519.md:141-145,155-163`
 
 ### AC-4: `git ls-tree -r origin/dev -- docs/00-context/stubs/` returns the 12 expected paths
 
@@ -182,7 +187,7 @@ Verification target:
 
 - after parent implementation lands, reviewer should compare the `origin/dev` tree listing against the 12-name inventory above
 
-Current baseline from status-truth snapshot:
+Current baseline from direct tree evidence:
 
 - expected to fail before parent implementation because `docs/00-context/stubs/` is recorded as empty
 
