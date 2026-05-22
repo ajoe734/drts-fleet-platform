@@ -16,7 +16,7 @@ Current classification:
 
 - `FWD-LIVE-001-EVIDENCE-PACK.md`
   - dated probe snapshots from `2026-05-19` and `2026-05-22`
-  - current staging reachability and auth boundary evidence
+  - current staging reachability, IAP ingress, and auth boundary evidence
   - blocker mapping for `EXT-002-BLK-001` through `EXT-002-BLK-007`
 
 ## Directive §D proof matrix
@@ -25,7 +25,7 @@ Current classification:
 | --- | --- | --- |
 | Platform name + classification | partial | Grab Taiwan real adapter remains `EXTERNAL-GATED`; shipped repo adapter is still stub-only. |
 | Masked credential ref | missing | No redacted sandbox credential path or secret-version reference was surfaced from this workspace. |
-| Inbound order sample | missing | No real sandbox inbound order could be collected because the documented staging endpoints were unreachable. |
+| Inbound order sample | missing | No real sandbox inbound order could be collected because the legacy staging endpoints were stale/unresolved and the current IAP-protected staging ingress was unusable without fresh bearer credentials. |
 | Accept sample | missing | No real sandbox accept relay / confirmation evidence was collected. |
 | Lost-race sample | missing | No real sandbox lost-race callback or trace evidence was collected. |
 | Cancel sample | missing | No real sandbox cancellation callback evidence was collected. |
@@ -38,7 +38,7 @@ Current classification:
 ## Current blockers
 
 - `EXT-002-BLK-001`: approved forwarder API contract authority
-- `EXT-002-BLK-002`: sandbox credentials plus a reachable endpoint
+- `EXT-002-BLK-002`: sandbox credentials plus a usable authenticated endpoint
 - `EXT-002-BLK-003`: webhook signature and replay-protection details
 - `EXT-002-BLK-004`: at least one seeded forwarded-task flow
 - `EXT-002-BLK-005`: callback lifecycle samples with correlation IDs
@@ -47,14 +47,17 @@ Current classification:
 
 ## Current probe result
 
-Latest revalidation in this workspace was at `2026-05-22T10:20Z`:
+Latest revalidation in this workspace was at `2026-05-22T11:03Z`:
 
 - active `gcloud` account: `bobo.du@cctech-support.com`
 - active `gcloud` project: `drts-dev-bobo-20260503`
 - `gcloud auth print-identity-token`: failed, non-interactive reauthentication required
 - `gcloud run services list` / `gcloud secrets list`: failed behind the same reauthentication boundary
+- `./scripts/print-staging-iap-token.sh`: failed because `gcloud auth print-access-token` hit the same reauthentication boundary
+- direct impersonated IAP token mint for `github-actions-deployer@drts-staging-bobo-20260502.iam.gserviceaccount.com`: failed with the same reauthentication error
 - `https://drts-api-kdhu6wzufa-uc.a.run.app/`, `/health`, `/api/health`: HTTP `404`
 - `api-staging.drts.internal`: `NXDOMAIN`
+- `https://api.staging.drts-fleet.cctech-support.com/` and `/api/health`: HTTP `302` redirect to Google IAP auth without a bearer token
 
 Until those external inputs arrive, this sidecar must remain a partial packet
 and must not claim sandbox closure.
