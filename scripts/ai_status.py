@@ -1279,7 +1279,7 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     if pending_handoffs:
         for handoff in pending_handoffs:
             lines.append(
-                f"| `{handoff['task_id']}` | {handoff['from']} | {handoff['to']} | {handoff['message']} | {handoff['status']} | {handoff['created_at']} |"
+                f"| `{handoff.get('task_id', '-')}` | {handoff.get('from', '-')} | {handoff.get('to', '-')} | {cell(handoff.get('message') or '-')} | {handoff.get('status', '-')} | {handoff.get('created_at', '-')} |"
             )
     else:
         lines.append("| _(none)_ | - | - | - | - | - |")
@@ -1289,7 +1289,7 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     if open_blockers:
         for blocker in open_blockers:
             lines.append(
-                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {blocker['message']} | {blocker['status']} |"
+                f"| `{blocker.get('task_id', '-')}` | {blocker.get('owner', '-')} | {blocker.get('waiting_for', '-')} | {cell(blocker.get('message') or '-')} | {blocker.get('status', '-')} |"
             )
     else:
         lines.append("| _(none)_ | - | - | - | - |")
@@ -1325,8 +1325,10 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     lines.extend(["", "## Latest Checkpoints", ""])
     if current_logs:
         for entry in current_logs:
-            task_id = f" `{entry['task_id']}`" if entry.get("task_id") else ""
-            lines.append(f"- {entry['ts']} {entry['agent']}:{task_id} {entry['message']}")
+            task_id = f" `{entry.get('task_id')}`" if entry.get("task_id") else ""
+            lines.append(
+                f"- {entry.get('ts', '-')} {entry.get('agent', '-')}:{task_id} {entry.get('message', '-')}"
+            )
     else:
         lines.append("- No checkpoints yet.")
 
