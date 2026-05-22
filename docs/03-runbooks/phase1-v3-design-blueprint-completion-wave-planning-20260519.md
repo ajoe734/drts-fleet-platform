@@ -135,7 +135,7 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 | `WF-PROD-001-LIVE-EXEC`         | Needs prod GCP project + WIF + Cloud SQL + Secret Manager + GitHub Environment `production` reviewer rule |
 | `WF-FWD-001-LIVE-SANDBOX`       | Needs real partner platform sandbox credentials (Grab Taiwan or equivalent)                               |
 | `WF-COM-001-LIVE-PROVIDER`      | Needs CTI provider activation + webhook environment                                                       |
-| `PARTNER-ELIG-LIVE-001`         | Needs real issuer/bank sandbox credentials                                                                |
+| `PARTNER-ELIG-LIVE-001`         | Needs real issuer/bank sandbox credentials; scope is sandbox classification proof only, not live issuer activation (see `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md` §6) |
 | `E2E-NUMBERING-DECISION`        | User decision per conflicts doc §1 Q1                                                                     |
 | `WF-PARTNER-RENAME-DECISION`    | User decision per conflicts doc §2 Q2                                                                     |
 | `WF-FIN-GOV-DECISION`           | User decision per conflicts doc §2 Q3                                                                     |
