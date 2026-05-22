@@ -1,23 +1,25 @@
 # PARTNER-ELIG-LIVE-001 — Issuer Sandbox Hold-State Evidence
 
-**Task:** `PH1GC-PARTNER-002`  
-**Canonical live-proof chain:** `PARTNER-ELIG-LIVE-001`  
-**Owner:** `Codex`  
-**Reviewer:** `Codex2`  
-**Collected:** `2026-05-22 (UTC)`  
-**Status:** `partial evidence only — issuer sandbox proof remains external-gated`
+- **Task:** `PH1GC-PARTNER-002`
+- **Canonical live-proof chain:** `PARTNER-ELIG-LIVE-001`
+- **Owner:** `Codex`
+- **Reviewer:** `Codex2`
+- **Collected:** `2026-05-22 (UTC)`
+- **Status:** `partial evidence only — issuer sandbox proof remains external-gated`
 
 ---
 
 ## 1. Executive Summary
 
-This packet restores the canonical sidecar path required by directive section E
+This packet restores the missing sidecar path on the task branch for review
 while keeping the release claim honest.
 
 Current repo truth on `2026-05-22`:
 
-- `PH1GC-PARTNER-001` is done, so the partner eligibility spec and workflow
-  naming boundary are already landed on `origin/dev`.
+- `PH1GC-PARTNER-001` is done, so the partner eligibility spec is already
+  landed on `origin/dev`.
+- The matrix-row rename from `WF-PRT-001` to `WF-PARTNER-001` is tracked
+  separately and is not claimed by this task branch.
 - `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK` and
   `PH1GC-PARTNER-002-UNBLOCK-PLANNING-DECISION` are done, and both route the
   remaining work to the same external issuer gate.
@@ -31,7 +33,8 @@ Current repo truth on `2026-05-22`:
 
 Conclusion:
 
-- The required sidecar path now exists at the canonical location.
+- The required sidecar path now exists on `origin/codex/ph1gc-partner-002`
+  and is ready to land at the canonical location after review.
 - The directive section E acceptance bar is still blocked on
   `EXT-001-BLK-001` through `EXT-001-BLK-006`.
 - `WF-PARTNER-001` must not be uplifted to `PASS (sandbox evidence)` until
@@ -43,9 +46,11 @@ Conclusion:
 
 ### 2.1 Gap-closure directive
 
-`docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
-defines `PH1GC-PARTNER-002` as the issuer sandbox evidence task and requires
-seven section-E proof items under this sidecar path.
+The dispatch brief for `PH1GC-PARTNER-002` defines this as the issuer sandbox
+evidence task and requires seven section-E proof items under this sidecar path.
+That same sidecar target is also cited by
+`docs/03-runbooks/phase1-release-truth-sync-20260519.md` and
+`docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`.
 
 ### 2.2 Partner eligibility spec
 
@@ -78,8 +83,8 @@ Open external blockers remain:
 
 The same hold-state evidence shape was previously recorded on branch-only commit
 `2628fc7`, but the canonical sidecar path never landed on `origin/dev`. This
-packet restores that missing path without changing the underlying external-gated
-truth.
+packet carries that missing path on the current task branch without changing the
+underlying external-gated truth.
 
 ---
 
@@ -114,7 +119,8 @@ truth.
 
 Allowed current claim:
 
-- `PH1GC-PARTNER-002` restored the canonical sidecar path on `origin/dev`.
+- `PH1GC-PARTNER-002` restores the missing sidecar path on
+  `origin/codex/ph1gc-partner-002` and is ready for review/merge.
 - `WF-PARTNER-001` remains below sandbox-proof closure until the issuer
   evidence pack is attached.
 - The only remaining blockers are `EXT-001-BLK-001` through
@@ -157,7 +163,7 @@ Verification in this task was source review only:
 
 - reviewed canonical machine truth for `PH1GC-PARTNER-002`,
   `PH1GC-PARTNER-001`, and the two `PH1GC-PARTNER-002-UNBLOCK-*` helpers
-- reviewed the gap-closure directive and current planning notes
+- reviewed the dispatch-embedded task brief and current planning notes
 - reviewed the partner eligibility spec and manual-review runbook
 - reviewed `EXT-001` blocker definitions
 - confirmed that no repo-local artifact currently carries real issuer sandbox
