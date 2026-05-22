@@ -175,22 +175,56 @@ Interpretation:
 - the live collection path is effectively gated on the protected staging host
   plus valid bearer credentials
 
+### 4.4 GitHub Actions WIF / IAP fallback
+
+Probe target:
+
+- workflow dispatch: `gh workflow run ci-integ.yml --ref codex/ph1gc-fin-gov-001 -f ref=codex/ph1gc-fin-gov-001 -f run_staging_e2e_010=true`
+- resulting run: `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26287551676`
+- branch / commit under test: `origin/codex/ph1gc-fin-gov-001@f8cc61e7`
+
+Observed result from `gh run view 26287551676 --job 77378907824 --log`:
+
+- job `staging-e2e-010` started with the expected staging env inputs:
+  - `PROJECT_ID=drts-staging-bobo-20260502`
+  - `REGION=us-central1`
+  - `CONTROL_PLANE_API_ORIGIN=https://api.staging.drts-fleet.cctech-support.com`
+  - `IAP_CLIENT_ID=1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
+- first `google-github-actions/auth@v2` step failed before any `gcloud` or
+  E2E shell execution:
+  - `failed to generate Google Cloud federated token ... {"error":"invalid_target","error_description":"The target service indicated by the \"audience\" parameters is invalid. This might either be because the pool or provider is disabled or deleted or because it doesn't exist."}`
+- no E2E console/evidence artifacts were produced because auth failed before
+  the shell could start
+
+Interpretation:
+
+- the repo-configured non-interactive WIF path is currently broken
+- this is no longer just a local `gcloud` credential-staleness issue: even the
+  GitHub Actions runner cannot mint the first federated credential from
+  `secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER`
+- until that provider reference is repaired (or an alternate CI-safe bearer
+  path is supplied), the governed staging rerun cannot start from either the
+  current worker or GitHub Actions
+
 ---
 
 ## 5. Blocker Summary
 
 Fresh staging live evidence for the governance-aware `WF-FIN-001` sub-slice is
-currently blocked by two concrete environment issues:
+currently blocked by three concrete environment issues:
 
 1. non-interactive IAP token minting is unavailable on this machine because the
    current `gcloud` session requires reauthentication
 2. the older direct Cloud Run origin is not serving the expected `/api/*`
    routes as a usable fallback
+3. the repository-configured GitHub Actions WIF provider now fails with
+   `invalid_target`, so the CI-side federated token path is also unavailable
 
 Until one of those is resolved, this task can only deliver a consolidated
 static-evidence packet plus a reproducible blocker record. The 2026-05-19
-rerun did not surface a hidden alternate ingress or a valid non-interactive
-token path from this machine.
+local rerun and the 2026-05-22 GitHub Actions rerun did not surface a hidden
+alternate ingress or a valid non-interactive token path from this machine or
+from the repo's configured WIF automation.
 
 ---
 
