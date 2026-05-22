@@ -107,9 +107,9 @@ Order matches directive §2. Each row uses the eight-label vocabulary only.
 
 ### 2.14 `WF-FIN-GOV-001` Governance-aware finance
 
-- **Closure**: backend contract done; spec + UAT + E2E pending (target after `PH1GC-FIN-GOV-001` + `PH1GC-E2E-010`: live staging evidence).
-- **Anchors**: governance-aware fields surface via `WF-TGV-001` contracts; report/export derivation work tracked in FIN-GOV-001 / FIN-GOV-SPEC-001 / FIN-GOV-UAT-001 (orchestrator marks done, but directive paths are unlanded).
-- **Gap**: `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` and `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` are not on `origin/dev`. `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` does not exist (`PH1GC-E2E-010`).
+- **Closure**: backend contract, directive-path spec/UAT, and companion `E2E-010` shell now exist on the Phase 1 gap-closure branches; live staging uplift remains pending a fresh governed rerun.
+- **Anchors**: governance-aware fields surface via `WF-TGV-001` contracts; directive-path artifacts now live at `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`, `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`, and `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`, with current evidence consolidated in `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`.
+- **Gap**: `WF-FIN-GOV-001` is still not eligible for `PASS (live staging evidence)` because the existing sidecar records the governed staging rerun as blocked by IAP credential / ingress access, and the current live evidence does not yet expose a reviewer-readable invoice/report artifact carrying the governance enrichment body.
 - **Non-claim**: Backend-contract-done is not live staging evidence.
 
 ### 2.15 `WF-ADM-001` Platform Admin control-plane
