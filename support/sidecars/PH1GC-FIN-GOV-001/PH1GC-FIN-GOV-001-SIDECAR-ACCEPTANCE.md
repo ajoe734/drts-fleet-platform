@@ -1,10 +1,10 @@
 # PH1GC-FIN-GOV-001 Acceptance Packet & Dependency Map
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `PH1GC-FIN-GOV-001` - governance-aware billing/reporting spec + UAT  
-**Parent Owner / Reviewer:** `Codex2` / `Codex`  
-**Sidecar Owner / Reviewer:** `Codex` / `Codex2`  
-**Generated:** `2026-05-22` (UTC)  
+**Sidecar Kind:** `acceptance_packet`
+**Parent Task:** `PH1GC-FIN-GOV-001` - governance-aware billing/reporting spec + UAT
+**Parent Owner / Reviewer:** `Codex2` / `Codex`
+**Sidecar Owner / Reviewer:** `Codex` / `Codex2`
+**Generated:** `2026-05-22` (UTC)
 **Status:** `READY FOR REVIEW` - support-only packet aligned to current machine truth; parent remains `pending`
 
 This packet is a support artifact only. It does not modify canonical truth,
