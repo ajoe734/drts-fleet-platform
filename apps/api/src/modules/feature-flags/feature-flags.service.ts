@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { FeatureFlag } from "@drts/contracts";
+import type { AuditLogRecord, FeatureFlag } from "@drts/contracts";
 
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -305,9 +305,11 @@ export class FeatureFlagsService {
       return;
     }
 
+    const actorType = this.toAuditActorType(identity?.actorType);
+
     this.auditNotificationService.recordAuditLog({
       actorId: identity?.actorId ?? null,
-      actorType: identity?.actorType ?? "system",
+      actorType,
       tenantId: next.tenantId ?? null,
       moduleName: "feature-flags",
       actionName,
@@ -319,6 +321,20 @@ export class FeatureFlagsService {
       newValuesSummary: this.buildAuditSummary(next),
       ...(requestId ? { requestId } : {}),
     });
+  }
+
+  private toAuditActorType(
+    actorType?: BootstrapRequestIdentity["actorType"] | null,
+  ): AuditLogRecord["actorType"] {
+    switch (actorType) {
+      case "platform_admin":
+      case "tenant_admin":
+      case "ops_user":
+      case "partner_api_key":
+        return actorType;
+      default:
+        return "system";
+    }
   }
 
   private buildAuditSummary(flag: FeatureFlag) {
