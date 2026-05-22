@@ -13,19 +13,18 @@
 
 `PH1GC-PARTNER-002` is not blocked by a missing product decision.
 
-The actual contamination is that the original PH1GC dispatch parent existed in
-historical machine truth, was later replaced by the canonical
-`PRT-SPEC-001` / `PARTNER-ELIG-LIVE-001` chain, and then received new branch
-activity after the dispatch row had already disappeared from canonical
-`ai-status.json`.
+The actual contamination is not that the PH1GC row disappeared. Current
+canonical machine truth still carries `PH1GC-PARTNER-002 status=blocked` while
+also carrying the older canonical `PRT-SPEC-001` / `PARTNER-ELIG-LIVE-001`
+held lineage for the same issuer-sandbox evidence lane.
 
-That leaves the repo with valid task-scoped commits but no single live parent
-row for the PH1GC alias. The result is branch/worktree ambiguity, not a missing
-issuer-sandbox plan.
+That leaves the repo with two task families pointing at one sidecar path and
+one blocker story, but different branch families own the commits. The result is
+branch/worktree/replay ambiguity, not a missing issuer-sandbox plan.
 
 ## Evidence
 
-### 1. Historical task row existed, current canonical row does not
+### 1. Historical PH1GC row existed, and the alias row still exists today
 
 Historical `ai-status.json` still contained the PH1GC parent on:
 
@@ -38,33 +37,45 @@ At `59bae1c9`, the parent state was already:
 - `PH1GC-PARTNER-002 status=blocked`
 - parent `next = "BLOCKED EXTERNAL: ... issuer / bank sandbox credentials + allowed test cards required ..."`
 
-Current canonical machine truth no longer contains `PH1GC-PARTNER-001` or
-`PH1GC-PARTNER-002`. `REL-SYNC-001` replaced that dispatch lineage with the
-canonical tasks:
+Current canonical `/home/edna/workspace/drts-fleet-platform/ai-status.json`
+still records:
 
-- `PRT-SPEC-001`
-- `PARTNER-ELIG-LIVE-001`
-- `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK`
-- `PARTNER-ELIG-LIVE-001-UNBLOCK-PLANNING-DECISION`
-- `PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR`
+- `PH1GC-PARTNER-001 status=done`, closeout commit `68b13f1b`, push branch
+  `origin/codex2/ph1gc-partner-001`
+- `PH1GC-PARTNER-002 status=blocked`, with `next` already stating that
+  `support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md` was
+  restored by `a8b2b3ad` on `origin/codex/ph1gc-partner-002`, and that the
+  remaining blockers are `EXT-001-BLK-001` through `EXT-001-BLK-006`
 
-### 2. Canonical parent is closed on a different lineage
+So the PH1GC lineage was not removed from machine truth. It still exists as a
+live gap-closure alias row.
+
+### 2. Canonical PARTNER-ELIG lineage exists in parallel
 
 Current canonical root records:
 
 - `PRT-SPEC-001 status=done`, closeout commit `bea9ffe`, push branch
   `origin/codex2/prt-spec-001`
-- `PARTNER-ELIG-LIVE-001 status=done`, closeout commit `5213efc`, push branch
-  `origin/codex2/partner-elig-live-001`
+- `PARTNER-ELIG-LIVE-001 status=done`, closeout commit `0f33fae`, push branch
+  `origin/codex/partner-elig-live-001`
 - `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK status=done`, closeout commit
-  `8d5c47c`
+  `130e3f7f`
 - `PARTNER-ELIG-LIVE-001-UNBLOCK-PLANNING-DECISION status=done`, closeout
   commit `a30be45`
 - `PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR status=done`, closeout commit
   `fc2b9bf`
 
-This means the real parent task already has a canonical machine-truth chain.
-The PH1GC lineage is now an alias, not a second parent.
+`PARTNER-ELIG-LIVE-001.next` already says that if current `dev` needs the
+sidecar path before issuer inputs arrive, replay `a8b2b3ad` from
+`origin/codex/ph1gc-partner-002` onto a fresh canonical branch; otherwise stay
+externally gated on `EXT-001-BLK-001` through `EXT-001-BLK-006`.
+
+So canonical machine truth currently carries both:
+
+- the live `PH1GC-PARTNER-002` alias row for the current dev-based sidecar
+  commit
+- the older `PARTNER-ELIG-LIVE-001` held lineage that describes how that same
+  commit should be replayed
 
 ### 3. The same sidecar path diverged across three unmerged branches
 
@@ -103,8 +114,8 @@ Related PH1GC helper branches currently present:
   - separate closeout lineage for the same dispatch alias
 
 The planning helper already has a normal PR. The manual helper exists on two
-separate lane names. The parent alias still has no PR and no live task row of
-its own.
+separate lane names. The parent alias still has a live task row, but its
+current-dev sidecar commit is not yet represented by a normal replay PR.
 
 ### 5. `origin/dev` still lacks the sidecar path
 
@@ -118,32 +129,40 @@ the sidecar path that the canonical parent and PH1GC alias both reference.
 
 ## Exact Contamination
 
-The contamination is a four-part mismatch:
+The contamination is a five-part mismatch:
 
-1. `PH1GC-PARTNER-002` previously existed as a real task row, but canonical
-   machine truth removed that row and continued under `PARTNER-ELIG-LIVE-001`.
-2. After that removal, new `PH1GC-PARTNER-002*` branches were still created and
-   pushed, so the alias lineage kept evolving without a canonical dispatch
-   parent to hand off or close.
-3. The same sidecar path now exists on three different unmerged branch families
-   with different owners, bases, and closeout messages.
-4. The only current-dev-based copy of the sidecar is the PH1GC alias branch,
-   while the canonical parent branches that machine truth cites are both 43
-   commits behind trunk.
+1. Machine truth tracks the same issuer-sandbox evidence lane twice:
+   `PH1GC-PARTNER-002` as a live blocked gap-closure alias, and
+   `PARTNER-ELIG-LIVE-001` as a done/HELD canonical lineage.
+2. The alias row points at current-dev-based sidecar commit `a8b2b3ad`, while
+   the two canonical partner-elig branches remain 43 commits behind
+   `origin/dev`.
+3. `PARTNER-ELIG-LIVE-001.next` already depends on replaying `a8b2b3ad` if the
+   sidecar path is needed on trunk, but that replay has not landed, so
+   `origin/dev` still lacks the sidecar path that both rows reference.
+4. The PH1GC helper branches are split across multiple owners, worktrees, and
+   bases, and only the planning helper currently has a PR.
+5. Without an explicit replay target, future issuer evidence can be attached to
+   the wrong branch family even though both task families describe the same
+   external blocker set.
 
-This keeps the old parent "blocked" in practice because there is no single
-normal-PR replay target recorded for the alias lineage, even though the product
-semantics and external blocker story are already settled.
+This keeps the parent blocked in practice because the repo has a live alias row
+and a canonical held row, but no single merged current-dev branch carrying the
+sidecar path they both rely on.
 
 ## Non-Destructive Repair Path
 
 Do not force-push, rename, or rewrite any published branch.
 
-Repair by treating the PH1GC lineage as an audit alias and replaying only the
-current-dev-based sidecar commit onto the canonical task chain when needed.
+Repair by aligning the live PH1GC alias row and the canonical PARTNER-ELIG held
+lineage around the same additive replay target.
 
-1. Keep canonical machine truth on the `PARTNER-ELIG-LIVE-001` lineage.
-   Do not resurrect `PH1GC-PARTNER-002` as a second authoritative parent.
+1. Keep current machine truth as-is. Do not delete, resurrect, or rewrite task
+   rows during repair:
+   - `PH1GC-PARTNER-002` stays the live blocked alias row for the current
+     gap-closure dispatch.
+   - `PARTNER-ELIG-LIVE-001` stays the canonical held lineage that already
+     names the same external blockers and replay instruction.
 2. Treat `origin/codex/ph1gc-partner-002 @ a8b2b3ad` as the source commit for
    the missing sidecar path on current `dev`, because it is the only pushed
    branch that:
@@ -171,30 +190,35 @@ gh pr create --base dev --head codex2/partner-elig-live-001-replay \
    - `origin/codex/ph1gc-partner-002`
    - `origin/codex/ph1gc-partner-002-unblock-manual-unblock`
    - `origin/codex2/ph1gc-partner-002-unblock-manual-unblock`
-5. Keep the planning scope cut and external-gate story on the canonical chain:
+5. Keep both task families aligned on one blocker story:
    - product semantics are already covered by `PRT-SPEC-001` and PR `#251`
-   - remaining blockers stay `EXT-001-BLK-001` through `EXT-001-BLK-006`
+   - `PH1GC-PARTNER-002` stays blocked until real issuer inputs satisfy
+     `EXT-001-BLK-001` through `EXT-001-BLK-006`
+   - future redacted evidence still belongs under
+     `support/sidecars/PARTNER-ELIG-LIVE-001/`
 
 ## Parent Next Step
 
-The concrete next step for the canonical parent is:
+The concrete next step for the live alias row and its canonical held
+counterpart is:
 
 1. If the repo needs the reserved sidecar path on current `dev`, replay
    `a8b2b3ad` onto a fresh canonical parent branch with a normal PR.
-2. Otherwise keep the parent on the existing external-gated hold sequence:
-   wait for `EXT-001-BLK-001` through `EXT-001-BLK-006`, attach redacted
-   evidence under `support/sidecars/PARTNER-ELIG-LIVE-001/`, and rerun the live
-   issuer proof from the canonical `PARTNER-ELIG-LIVE-001` lineage.
+2. Otherwise keep `PH1GC-PARTNER-002` blocked and `PARTNER-ELIG-LIVE-001`
+   externally gated on `EXT-001-BLK-001` through `EXT-001-BLK-006`, attach
+   redacted evidence under `support/sidecars/PARTNER-ELIG-LIVE-001/`, and rerun
+   the live issuer proof from that shared sidecar path.
 
 That unblocks the history question without reopening any settled spec or
-planning work.
+planning work, and without pretending the live PH1GC alias row disappeared.
 
 ## Why This Is Safe
 
 - no shared branch is force-pushed
 - no old closeout branch is rewritten
+- no existing task row is deleted or recreated
 - the current-dev-based sidecar diff is replayed additively
-- the canonical parent remains unique in machine truth
+- the live alias row and canonical held lineage stay aligned on one blocker story
 - older PH1GC and canonical branches stay available for audit
 
 ## Verification Performed
@@ -205,7 +229,8 @@ planning work.
 - inspected historical and current task state:
   - `git show 26df6fd7:ai-status.json`
   - `git show 59bae1c9:ai-status.json`
-  - current canonical `/home/edna/workspace/drts-fleet-platform/ai-status.json`
+  - `sed -n '18247,18285p' /home/edna/workspace/drts-fleet-platform/ai-status.json`
+  - `sed -n '19981,20110p' /home/edna/workspace/drts-fleet-platform/ai-status.json`
 - inspected branch/worktree state:
   - `git branch -vv | grep 'ph1gc-partner-002\\|partner-elig-live-001'`
   - `git worktree list --porcelain`
