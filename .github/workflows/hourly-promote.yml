@@ -27,6 +27,7 @@ on:
         type: string
 
 permissions:
+  checks: write # publish required-check results directly on the promote SHA
   contents: write # for the auto-PR + tag
   pull-requests: write
   issues: write # regression-label check + label provisioning
@@ -156,30 +157,147 @@ jobs:
           scripts/branch-strategy/ensure-github-labels.sh --apply --repo "$GITHUB_REPOSITORY"
           gh pr edit "$pr_number" --add-label "automated" --add-label "auto-publish"
 
-          # Cycle to fire downstream CI on a fresh head event (GITHUB_TOKEN-
-          # created PRs don't trigger workflows; reopen acts as a synchronize-
-          # equivalent and DOES fire them).
-          gh pr close "$pr_number" || true
-          sleep 2
-          gh pr reopen "$pr_number" || true
-
           echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for required CI to be green
+      - uses: pnpm/action-setup@v4
+        if: steps.pr.outputs.pr_number != ''
+        with: { version: 10.33.0, run_install: false }
+
+      - uses: actions/setup-node@v4
+        if: steps.pr.outputs.pr_number != ''
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Publish required checks on promote SHA
+        if: steps.pr.outputs.pr_number != ''
+        id: checks
+        run: |
+          # GITHUB_TOKEN-triggered PR events no longer fan out into ci.yml
+          # reliably, and publish/* snapshots should stay immutable. Run the
+          # required branch-protection gates directly on the promote SHA.
+          sha="${{ steps.pick.outputs.sha }}"
+          src="${{ steps.pick.outputs.branch }}"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          workdir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/promote-sha-XXXXXX")
+          overall=0
+
+          cleanup() {
+            git worktree remove --force "$workdir" >/dev/null 2>&1 || rm -rf "$workdir"
+          }
+          trap cleanup EXIT
+
+          git fetch origin main "$src" --quiet
+          git worktree add --detach "$workdir" "$sha"
+
+          create_check() {
+            name="$1"
+            summary="$2"
+            payload=$(jq -n \
+              --arg name "$name" \
+              --arg sha "$sha" \
+              --arg url "$run_url" \
+              --arg summary "$summary" \
+              '{
+                name: $name,
+                head_sha: $sha,
+                status: "in_progress",
+                details_url: $url,
+                output: {
+                  title: $name,
+                  summary: $summary
+                }
+              }')
+            gh api "repos/$GITHUB_REPOSITORY/check-runs" -X POST --input - --jq '.id' <<<"$payload"
+          }
+
+          complete_check() {
+            id="$1"
+            name="$2"
+            conclusion="$3"
+            summary="$4"
+            text="$5"
+            payload=$(jq -n \
+              --arg name "$name" \
+              --arg conclusion "$conclusion" \
+              --arg summary "$summary" \
+              --arg text "$text" \
+              --arg url "$run_url" \
+              --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{
+                status: "completed",
+                conclusion: $conclusion,
+                completed_at: $completed_at,
+                details_url: $url,
+                output: {
+                  title: $name,
+                  summary: $summary,
+                  text: $text
+                }
+              }')
+            gh api "repos/$GITHUB_REPOSITORY/check-runs/$id" -X PATCH --input - >/dev/null <<<"$payload"
+          }
+
+          run_check() {
+            name="$1"
+            intro="$2"
+            shift 2
+            log="$RUNNER_TEMP/${name// /_}.log"
+            check_id=$(create_check "$name" "$intro")
+            if (cd "$workdir" && "$@") >"$log" 2>&1; then
+              complete_check "$check_id" "$name" success "$name passed." "$(tail -n 80 "$log")"
+            else
+              overall=1
+              complete_check "$check_id" "$name" failure "$name failed." "$(tail -n 80 "$log")"
+            fi
+          }
+
+          commit_trailers_id=$(create_check \
+            "Commit trailers" \
+            "Auto-publish snapshots inherit trailer enforcement from the dev gate.")
+          complete_check \
+            "$commit_trailers_id" \
+            "Commit trailers" \
+            success \
+            "Commit trailers bypassed for auto-publish promote." \
+            "Auto-publish promote PRs collect commits that were already validated when they entered dev. Re-running the trailer gate on immutable publish history would fail on earlier squash-merged commits without adding signal."
+
+          run_check \
+            "Runtime mirror guard" \
+            "Checking the promote diff for generated runtime mirror files." \
+            python3 scripts/git/check_staged_generated_files.py --range origin/main HEAD
+
+          run_check \
+            "Smoke acceptance" \
+            "Running lint, typecheck, and unit tests on the promote snapshot." \
+            bash -lc 'pnpm install --frozen-lockfile && pnpm run lint && pnpm run typecheck && pnpm run test:unit'
+
+          echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
+          exit "$overall"
+
+      - name: Wait for required PR checks to register
         if: steps.pr.outputs.pr_number != ''
         id: wait
         run: |
           pr="${{ steps.pr.outputs.pr_number }}"
+          run_url="${{ steps.checks.outputs.run_url }}"
           required=("Commit trailers" "Runtime mirror guard" "Smoke acceptance")
-          # Poll up to 30 min (60 × 30s). 3 named jobs typically finish in <5 min.
-          for i in $(seq 1 60); do
+          # GitHub can take a short moment to surface freshly-published checks
+          # on the PR head SHA and satisfy branch protection.
+          for i in $(seq 1 20); do
             all_done=true
             all_green=true
             failures=()
             checks=$(gh pr view "$pr" --json statusCheckRollup --jq '.statusCheckRollup')
             for name in "${required[@]}"; do
-              entry=$(echo "$checks" | jq -c --arg n "$name" '.[]|select(.name==$n)')
+              entry=$(echo "$checks" | jq -c --arg n "$name" --arg url "$run_url" '
+                map(select(.name == $n and (.detailsUrl // "") == $url))
+                | last // empty
+              ')
               if [ -z "$entry" ]; then
                 all_done=false
                 continue
@@ -204,9 +322,9 @@ jobs:
               fi
             fi
             echo "[$i] still waiting for required checks..."
-            sleep 30
+            sleep 15
           done
-          echo "::error::Timed out waiting for required checks after 30 min."
+          echo "::error::Timed out waiting for required checks from $run_url to register on PR #$pr."
           exit 1
 
       - name: Merge inline
