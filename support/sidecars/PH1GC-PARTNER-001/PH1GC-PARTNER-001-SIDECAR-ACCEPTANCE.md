@@ -9,8 +9,8 @@
 ## 1. Acceptance Checklist
 
 - [x] Dependency Map drafted
-- [ ] Support Artifacts verified
-- [ ] No changes to canonical truth
+- [x] Support Artifacts verified
+- [x] No changes to canonical truth
 - [ ] Handed off to reviewer
 
 ## 2. Dependency Map
@@ -34,7 +34,9 @@
 
 ## 3. Support Artifacts
 
-*(To be filled)*
+- `BACKEND_DELIVERY_NOTE.md`: Defines backend-owned tenant governance, booking flow, and error codes.
+- `contract-lock.json`: Authoritative lock for contract compatibility.
+- `CONTRACT_VERSION.lock`: Compatibility mirror.
 
 ---
 *Disclaimer: This is a support artifact for sidecar acceptance.*
