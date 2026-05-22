@@ -37,8 +37,8 @@ by `tests/e2e/E2E-008-partner-booking-cutover.sh`.
 | support hotline | `support-hotline://partner-bank-demo-alpha-airport` |
 | branding metadata | `partnerCode=partner-bank-demo-001`; `programId=program-airport-alpha`; bank-demo airport white-label branding profile |
 | eligibility mode | `credit_card_airport_transfer` with authority-backed partner eligibility verification |
+| monitoring dashboard | `WF-PBK-001` pilot monitoring board keyed by `partnerEntrySlug=bank-demo-alpha-airport`, using the monitoring path and axes defined in `docs/03-runbooks/partner-booking-pilot-cutover-runbook-20260519.md` §`Monitoring And Support` |
 | pilot time window | `2026-05-19T05:04:10Z` to `2026-05-19T07:04:10Z` evidence window, derived from the `TST-E2E-008-PBK-CUTOVER` owner closeout commit timestamp |
-| negative paths | inactive entry bootstrap denial plus the five authority-safe `PBK-UI-004` denial paths: `eligible`, `ineligible`, `manual_review`, `inactive`, `eligibility_required` |
 | rollback retention | not-before retirement date `2026-06-02T05:04:10Z` (14 calendar days after the pilot evidence timestamp) |
 
 ## Workflow Proof Shape
@@ -58,6 +58,11 @@ open partner entry
 
 The concrete evidence bundle for this plan is recorded under
 `support/sidecars/PBK-PILOT-001/`.
+
+The negative-path obligation remains part of the workflow proof, not the
+directive-field contract: inactive entry bootstrap denial plus the five
+authority-safe `PBK-UI-004` denials (`eligible`, `ineligible`,
+`manual_review`, `inactive`, `eligibility_required`) must still be evidenced.
 
 ## Evidence Bundle
 

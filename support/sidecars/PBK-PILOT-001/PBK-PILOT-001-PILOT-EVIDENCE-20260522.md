@@ -25,8 +25,8 @@ production launch or retirement of legacy partner surfaces.
 | support hotline | `support-hotline://partner-bank-demo-alpha-airport` |
 | branding metadata | `partnerCode=partner-bank-demo-001`; `programId=program-airport-alpha`; bank-demo airport white-label profile |
 | eligibility mode | `credit_card_airport_transfer` |
+| monitoring dashboard | `WF-PBK-001` pilot monitoring board keyed by `partnerEntrySlug=bank-demo-alpha-airport`, following `docs/03-runbooks/partner-booking-pilot-cutover-runbook-20260519.md` §`Monitoring And Support` |
 | pilot time window | `2026-05-19T05:04:10Z` to `2026-05-19T07:04:10Z` |
-| negative paths | inactive bootstrap denial plus five `PBK-UI-004` authority-safe denial paths |
 | rollback retention | legacy rollback surfaces retained through at least `2026-06-02T05:04:10Z` |
 
 ## Evidence Anchors
@@ -37,6 +37,10 @@ production launch or retirement of legacy partner surfaces.
 - `docs/03-runbooks/partner-booking-pilot-cutover-runbook-20260519.md`
 - commit `3edd0338a70c265936312f1075503890e54ffa18`
 - commit `c264750e95ec5ce614426da7589c08c7f1be4c8f`
+
+The negative-path obligation is proved in the workflow section rather than the
+directive-field table: inactive bootstrap denial plus the five
+`PBK-UI-004` authority-safe denials remain required evidence.
 
 ## Eight-Step Workflow Proof
 
