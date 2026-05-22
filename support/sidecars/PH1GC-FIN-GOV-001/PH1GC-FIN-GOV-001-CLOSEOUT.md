@@ -22,15 +22,17 @@ This branch replays the missing governance-aware billing/reporting artifact chai
 
 The planning-ref path named in the task brief is not present in this worktree. To avoid keeping a dead citation in shipped artifacts, the spec/UAT authority headers point to the canonical directive §3.7 and cross-reference the execution worklist plus blueprint-alignment audit.
 
+`origin/dev` already carries the earlier directive-path spec/UAT pair for `WF-FIN-GOV-001`. This branch is the reconciliation layer: it tightens the verification body to the canonical 13 fields, adds the `E2E-010` shell plus matrix/release wiring, and records the current live-staging blocker with fresh 2026-05-22 probes.
+
 ## 2. Acceptance Status
 
 | Brief acceptance item | Current state on `codex/ph1gc-fin-gov-001` | Evidence |
 | --- | --- | --- |
-| `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` visible on `origin/dev` | Content is updated on this branch; not yet visible on `origin/dev` until merge. | Spec header + §3 + §6 |
-| `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` visible on `origin/dev` | Content is updated on this branch; not yet visible on `origin/dev` until merge. | UAT header + §2 + §4 |
+| `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` visible on `origin/dev` | Yes. `origin/dev` already carries the earlier spec; this branch layers the 13-field reconciliation and authority-header cleanup on top. | `git show origin/dev:docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`; branch spec header + §3 + §6 |
+| `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` visible on `origin/dev` | Yes. `origin/dev` already carries the earlier UAT; this branch layers the 13-field reconciliation and strict-mode uplift wording on top. | `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`; branch UAT header + §2 + §4 |
 | UAT covers all 13 directive §H verification-body fields | Yes. The happy-path and negative-path scenarios enumerate the 13-field body and the required integrity / RBAC / masking paths. | UAT §2–§4 |
 | `PH1GC-E2E-010` script asserts every verification-body field | Yes, with the two-tier contract now documented explicitly: every field is always recorded, and `STRICT_VERIFICATION_BODY=1` hard-fails if any field remains `NOT_POPULATED`. | Spec §6; `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`; E2E matrix §4.10 |
-| Gate-read update for `WF-FIN-GOV-001 = PASS (live staging evidence)` drives matrix change | **Blocked.** This branch adds the matrix row and keeps it at `PASS (static evidence)` because the governed staging rerun still lacks non-interactive IAP/ingress access and no fresh reviewer-readable live invoice/report artifact is available from this workspace. | Release-gates row `WF-FIN-GOV-001`; release-truth-sync row 14; predecessor evidence pack §4 |
+| Gate-read update for `WF-FIN-GOV-001 = PASS (live staging evidence)` drives matrix change | **Blocked.** The branch adds the matrix row and keeps it at `PASS (static evidence)`. Fresh 2026-05-22 probes still cannot obtain an email-bearing IAP token usable against governed staging, so no fresh reviewer-readable live invoice/report artifact or green strict-mode rerun is available from this workspace. | Release-gates row `WF-FIN-GOV-001`; release-truth-sync row 14; predecessor evidence pack §4; this closeout §4–§5 |
 | Closeout report follows directive §7 format | Yes. This sidecar states delivered scope, non-claims, local verification, and the exact remaining blocker. | This file |
 
 ## 3. Directive §7 Non-Claim Posture
@@ -38,6 +40,7 @@ The planning-ref path named in the task brief is not present in this worktree. T
 - This branch does **not** claim `WF-FIN-GOV-001` is already `PASS (live staging evidence)`.
 - This branch does **not** claim every governance enrichment field is populated on the current runtime; the shell records missing fields as `NOT_POPULATED` and strict mode gates the uplift.
 - This branch does **not** claim the predecessor IAP/credential blocker is resolved.
+- This branch does **not** claim the compute-service-account fallback is sufficient: it can mint an access token, but it still cannot produce an email-bearing IAP token accepted by the protected staging host.
 - This branch does **not** widen any baseline `WF-FIN-001` claim; `WF-FIN-GOV-001` remains an additive governance-enrichment row that depends on `WF-TGV-001` + `WF-FIN-001`.
 
 ## 4. Local Verification
@@ -45,15 +48,27 @@ The planning-ref path named in the task brief is not present in this worktree. T
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
 - `bash tests/e2e/run-e2e.sh --suite 010 --dry-run`
+- `curl -i -sS --max-time 20 https://api.staging.drts-fleet.cctech-support.com/api/health`
+- `curl -i -sS --max-time 20 https://drts-api-kdhu6wzufa-uc.a.run.app/api/health`
+- `gcloud auth list`
+- `gcloud auth print-access-token` for the active user account (`bobo.du@cctech-support.com`) and temporary compute-service-account override
+- `CLOUDSDK_CORE_ACCOUNT=384772941419-compute@developer.gserviceaccount.com ./scripts/print-staging-iap-token.sh`
+- `CLOUDSDK_CORE_ACCOUNT=384772941419-compute@developer.gserviceaccount.com gcloud auth print-identity-token --audiences <IAP_CLIENT_ID>`
 - `git diff --check`
 
-No live staging execution was run from this dispatch because the current governed rerun path remains blocked by protected ingress / token minting constraints documented in the predecessor evidence pack.
+No governed live staging execution was run from this dispatch because the 2026-05-22 access probes still stop before an authenticated E2E request can be issued:
+
+- the protected staging host still redirects unauthenticated requests to Google OAuth and returns `Invalid IAP credentials: empty token`;
+- the historical direct Cloud Run fallback still returns `404 Page not found`;
+- the active user account (`bobo.du@cctech-support.com`) still fails non-interactive `gcloud auth print-access-token` with `Reauthentication failed. cannot prompt during non-interactive execution.`;
+- the temporary compute-service-account override can mint an access token, but `generateIdToken` / service-account impersonation still fails with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`;
+- a bare audience identity token from the compute service account reaches IAP but is rejected with `401 Invalid IAP credentials: JWT 'email' claim isn't a string`.
 
 ## 5. Remaining Blocker
 
 To uplift `WF-FIN-GOV-001` from `PASS (static evidence)` to `PASS (live staging evidence)`, a follow-up owner must:
 
-1. obtain a valid staging bearer / IAP path for the governed tenant,
+1. obtain a valid email-bearing staging bearer / IAP path for the governed tenant (either by refreshing a user credential that can mint the token non-interactively, or by providing a service account / VM scope combination that can generate an acceptable IAP identity token),
 2. run `STRICT_VERIFICATION_BODY=1 bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh` against the governed staging origin,
 3. capture the evidence log plus the reviewer-readable invoice/report artifacts, and
 4. then update the release-gate row, release-truth-sync row, and alignment-audit row from blocked static evidence to live staging evidence.
