@@ -39,8 +39,6 @@ can be replayed without rewriting them from scratch:
 - `origin/codex2/pbk-runbook-001` @
   `f9acf0603375ac335fbb42d375c521d411713f3f`
   provides `docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md`
-- fallback equivalent: `origin/codex/pbk-runbook-001` @
-  `41f74331c7b36baf9f3808bb6689d283a89f1946`
 - `origin/codex2/pbk-uat-001` @
   `50b517f1639f39a77f6f60ad12dc9234ebc977b3`
   provides `docs/04-uat/partner-booking-pilot-uat-20260519.md`
@@ -73,7 +71,7 @@ Without those inputs, the matrix row for `WF-PBK-001` must remain below
 
 Parent owner `Codex2` should:
 
-1. continue `codex2/ph1gc-pbk-001`
+1. create or reuse `codex2/ph1gc-pbk-001` from `origin/dev`
 2. replay `f9acf0603375ac335fbb42d375c521d411713f3f` onto that branch to land
    `docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md`
 3. replay `50b517f1639f39a77f6f60ad12dc9234ebc977b3` (or the doc-creating
