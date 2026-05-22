@@ -5,10 +5,17 @@
 **Helper Kind:** `acceptance_packet`
 **Sidecar Owner:** `Claude`
 **Sidecar Reviewer:** `Codex`
-**Parent Owner:** `Codex` (per `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` §4 row 10)
-**Parent Reviewer:** `Codex2` (per `.orchestrator/task-briefs/PH1GC-FWD-001.md`)
+**Parent Owner:** `Codex` (per `ai-status.json` task `PH1GC-FWD-001`, status `pending`; also row 10 of `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` §4)
+**Parent Reviewer:** `Codex2` (per `ai-status.json` task `PH1GC-FWD-001`)
 **Collected:** `2026-05-22 (UTC)`
+**Revision:** `r2 — refreshed against canonical machine truth after r1 review-reject (stale dependency statuses, non-existent task ids, non-landed file path)`
 **Sidecar status:** `support-only artifact — does NOT mutate canonical truth, does NOT itself flip any workflow gate`
+
+> **Authority note for the reviewer:** every dependency / status / path claim in this packet is sourced from one of two places and explicitly labelled where the difference matters:
+> - **`ai-status.json` (machine truth)** — single source of truth for task ids, statuses, owners, and reviewers. If a task does not appear in `ai-status.json`, this packet does not treat it as a dependency.
+> - **`origin/dev` tree (delivery truth)** — single source of truth for whether a file has actually landed. A task marked `done` in `ai-status.json` whose artifact is not on `origin/dev` is called out explicitly. The status-truth doc (`docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md`) explains the divergence and is the reason the `PH1GC-*` namespace exists.
+>
+> The standalone `.orchestrator/task-briefs/*.md` files are **not** treated as machine truth in this packet. Several brief files (e.g. `FWD-VERIF-001.md`, `BE-FIN-FWD-001.md`) exist on disk but have no matching task in `ai-status.json`; those are listed in §5.2 as non-canonical references only.
 
 ---
 
@@ -33,20 +40,23 @@ If anything below conflicts with the directive at `docs/00-context/phase1-origin
 
 ## 1. Canonical source rollup (for parent owner's reading list)
 
-The parent owner should read these in order before producing the evidence drop:
+The parent owner should read these in order before producing the evidence drop. Every row is annotated `LANDED` (file present on `origin/dev` as of 2026-05-22) or `NOT LANDED` (referenced in a brief / state.json but missing from `origin/dev`). `NOT LANDED` sources may inform planning but **must not** be cited as authoritative truth in the evidence pack.
 
-| Layer | Path | Why |
-| ----- | ---- | --- |
-| Directive | `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` §D + §7 | Defines the 11 proof items and the closeout report format |
-| Status truth | `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` §2.4 + §4 (row 10) | Confirms `support/sidecars/FWD-LIVE-001/` currently has 1 file and lists `PH1GC-FWD-001` as the driving brief |
-| Parent brief | `.orchestrator/task-briefs/PH1GC-FWD-001.md` | Owner = `Codex`, Reviewer = `Codex2`, planning ref = directive |
-| Existing evidence | `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` | Baseline that records why the 2026-05-19 attempt could not collect sandbox proof (gcloud reauth, 404 host, NXDOMAIN) |
-| Adapter proof spec | `docs/02-architecture/forwarder-adapter-proof-spec-20260519.md` | Authoritative spec for the proof set (separates sandbox harness vs mock-path verification vs live external) |
-| Sandbox harness | `docs/02-architecture/forwarder-sandbox-provider.md`, `apps/api/src/modules/forwarder/sandbox.adapter.ts`, `apps/api/src/modules/forwarder/sandbox.fixtures.ts` (in progress under `FWD-SBX-001`) | Generic forwarder sandbox provider — usable as classification = `repo-local` fallback only |
-| Real-platform adapter (still stub) | `apps/api/src/modules/forwarder/grab-taiwan.adapter.ts`, `packages/contracts/src/platform-codes.ts` | Confirms the shipped real adapter is `forwarder_stub` / `mode: "stub"` — sandbox evidence cannot come from the shipped code path; it must come from a real partner sandbox or the §D-described sandbox provider |
-| Release-gate truth | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` | `WF-FWD-001` row — what the gate read must flip to |
-| Cross-repo gap | `docs/03-runbooks/cross-repo-gap-matrix-20260424.md` | Grab Taiwan real adapter classification — currently `external-gated` |
-| Blocker authority | `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md` | Binding blocker packet for `EXT-002-BLK-001..007`; the parent owner closes these blockers by producing the sandbox evidence here |
+| Layer | Path | Lands on origin/dev? | Why |
+| ----- | ---- | -------------------- | --- |
+| Directive | `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` §D + §7 | `LANDED` | Defines the 11 proof items and the closeout report format |
+| Status truth | `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` §2.4 + §4 (row 10) | `LANDED` | Confirms `support/sidecars/FWD-LIVE-001/` currently has 1 file and lists `PH1GC-FWD-001` as the driving brief; explicitly warns that older `done` markers (incl. FWD-LIVE-001, FWD-SPEC-001) do not imply artifacts on `origin/dev` |
+| Parent task record | `ai-status.json` → `PH1GC-FWD-001` | `LANDED` | Authoritative owner/reviewer/status. Currently: owner `Codex`, reviewer `Codex2`, status `pending` |
+| Parent brief | `.orchestrator/task-briefs/PH1GC-FWD-001.md` | `LANDED` (brief file only) | Supplementary planning ref. Brief's "Short Summary" mentions a Codex2 reassignment attempt — ignore if it conflicts with `ai-status.json`, since machine truth wins |
+| Existing evidence baseline | `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` | `LANDED` | The single file that exists in the `FWD-LIVE-001/` sidecar dir today; records why the 2026-05-19 attempt could not collect sandbox proof (gcloud reauth, 404 host, NXDOMAIN). PH1GC-FWD-001 extends this sidecar, it does not replace it |
+| Adapter proof spec | `docs/02-architecture/forwarder-adapter-proof-spec-20260519.md` | **`NOT LANDED`** | Marked `done` under `FWD-SPEC-001` in `ai-status.json` but the file currently exists only on branch `codex2/fwd-spec-001` (commit `34d7f312` / `f249aec`). Parent owner cannot cite this path as authoritative until it merges into `dev`. Until then, fall back to the directive §D wording for proof-item structure |
+| Sandbox harness (doc) | `docs/02-architecture/forwarder-sandbox-provider.md` | `LANDED` | Generic forwarder sandbox provider doc — usable for `repo-local FWD-SBX-001 harness` classification |
+| Sandbox harness (code) | `apps/api/src/modules/forwarder/sandbox.adapter.ts`, `apps/api/src/modules/forwarder/sandbox.fixtures.ts` | `LANDED` | Shipped under `FWD-SBX-001` (status `done` in `ai-status.json`); usable as the in-repo sandbox source when no external partner sandbox is reachable |
+| Real-platform adapter (still stub) | `apps/api/src/modules/forwarder/grab-taiwan.adapter.ts`, `packages/contracts/src/platform-codes.ts` | `LANDED` | Confirms the shipped real adapter is `forwarder_stub` / `mode: "stub"` — sandbox evidence cannot come from the shipped code path; it must come from a real partner sandbox or the `FWD-SBX-001` harness |
+| Release-gate truth | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` (line 69 `WF-FWD-001` row) | `LANDED` | Current gate read is `EXTERNAL-GATED`; this is what the parent owner flips, per §3 below |
+| Cross-repo gap | `docs/03-runbooks/cross-repo-gap-matrix-20260424.md` (line 45 Grab Taiwan adapter row) | `LANDED` | Currently `external-gated`; references `EXT-002-BLK-001..007` |
+| Blocker authority | `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md` | `LANDED` | Binding blocker packet for `EXT-002-BLK-001..007` (lines 34–40); the parent owner partially closes these blockers via the sandbox evidence drop |
+| E2E entry point | `tests/e2e/E2E-002-forwarded-order.sh` | `LANDED` | Already rewired against the sandbox harness under `FWD-E2E-001` (status `done` in `ai-status.json`). If the parent owner reruns E2E-002, link the run id; do not edit the script |
 
 ---
 
@@ -149,50 +159,63 @@ The reviewer rejects the handoff if any line is missing or if `Gate read after:`
 
 ## 5. Dependency map
 
-### 5.1 Upstream prerequisites for PH1GC-FWD-001
+> Every row below cites the actual task entry in `ai-status.json` as machine truth, then separately notes whether the underlying **artifact** is landed on `origin/dev`. The two answers are **not** the same — several `FWD-*` tasks are marked `done` in `ai-status.json` while their target artifacts are not yet on `origin/dev`. This is the central observation of `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` and the reason the `PH1GC-*` namespace exists.
 
-| Task | Status (as of 2026-05-22) | Why it matters |
-| ---- | ------------------------- | -------------- |
-| `FWD-SPEC-001` (Forwarder adapter proof spec) | `review_approved` | Authoritative spec for the proof set. PH1GC-FWD-001 must conform to this spec rather than inventing new structure. |
-| `FWD-SBX-001` (Generic forwarder sandbox provider harness) | `in_progress` (owner Codex) | If a real partner sandbox is unavailable, the only allowed sandbox source is this harness; classification then = `sandbox (repo-local FWD-SBX-001 harness)`. **If FWD-SBX-001 is not yet landed at evidence time, the parent owner must either wait or downgrade to `repo-local mock only`.** |
-| `FWD-VERIF-001` (Real-platform integration evidence verification) | `review_approved` | Establishes the verification methodology PH1GC-FWD-001 must follow for mirror / status sync / settlement chain. |
-| `FWD-LIVE-001` (Forwarder external platform live evidence pack) | `review_approved` | Existing partial evidence baseline. PH1GC-FWD-001 **extends** this sidecar rather than creating a parallel one. |
+### 5.1 Upstream prerequisites for PH1GC-FWD-001 (machine-truth tasks)
 
-### 5.2 Sibling tasks PH1GC-FWD-001 does **not** depend on (but coordinates with)
+| Task | `ai-status.json` status (2026-05-22) | Owner / Reviewer | Artifact on `origin/dev`? | Why it matters for PH1GC-FWD-001 |
+| ---- | ------------------------------------ | ---------------- | ------------------------- | -------------------------------- |
+| `FWD-SPEC-001` (Forwarder adapter proof spec) | `done` | Codex2 / Codex | **No** — file `docs/02-architecture/forwarder-adapter-proof-spec-20260519.md` exists only on branch `codex2/fwd-spec-001` (commit `34d7f312` / `f249aec`); never merged into `dev` | Spec would have shaped the proof-item structure. Since it has not landed, **PH1GC-FWD-001 must derive the 11-item structure directly from the directive §D wording**, not from this spec. Cite the directive, not the unmerged spec, when justifying field layouts |
+| `FWD-SBX-001` (Generic Forwarder Sandbox Provider harness) | `done` | Codex / Codex2 | **Yes** — `apps/api/src/modules/forwarder/sandbox.adapter.ts`, `apps/api/src/modules/forwarder/sandbox.fixtures.ts`, and `docs/02-architecture/forwarder-sandbox-provider.md` are all on `dev` | The only in-repo source legitimately tagged "sandbox" — used when no external partner sandbox is reachable. Allowed classification: `sandbox (repo-local FWD-SBX-001 harness)`; otherwise fall back to `repo-local mock only` |
+| `FWD-E2E-001` (Convert WF-FWD-001 from external-gated to sandbox-proven via E2E-002) | `done` | Codex2 / Codex | **Yes** — `tests/e2e/E2E-002-forwarded-order.sh` is on `dev` | If PH1GC-FWD-001 reruns E2E-002, link the run id; do not modify the script |
+| `FWD-LIVE-001` (Forwarder external platform live evidence pack) | `done` | Codex2 / Codex | **Partial** — `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` is on `dev`, but the dir contains only that one file; the 10 supporting proof files demanded by directive §D are missing | This is the gap PH1GC-FWD-001 closes. **Do not re-mark `FWD-LIVE-001` itself** — PH1GC-FWD-001 extends the same sidecar dir |
+| `EXT-002` (Real forwarder adapter proof gate) | `done` | Gemini2 / Codex | **Yes** — `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md` is on `dev` and lists `EXT-002-BLK-001..007` (lines 34–40) | Defines the seven open blockers. PH1GC-FWD-001's evidence drop partially closes BLK-004..007 (and BLK-001..003 only when real-partner artifacts are present) — see §3 |
 
-| Task | Status | Relationship |
-| ---- | ------ | ------------ |
-| `FWD-E2E-001` (Convert WF-FWD-001 from external-gated to sandbox-proven via E2E-002) | `review_approved` | Already rewired `tests/e2e/E2E-002-forwarded-order.sh` against the sandbox harness. If PH1GC-FWD-001 re-runs E2E-002, link the run id in the evidence pack; do **not** modify the script. |
-| `BE-FIN-FWD-001` (Platform-source settlement report endpoint) | `backlog` (owner Codex) | Provides the `/api/tenant/reports/settlement-by-platform-source` endpoint. If landed, link its OpenAPI ref from D8 (Settlement sample). If not landed, D8 still works using the raw `platform_earnings` row id. |
-| `EXT-002-BLK-001..007` blockers | Open | Closed (partially) by PH1GC-FWD-001's evidence drop, per §3 above. |
+### 5.2 Non-machine-truth references (brief files present, no task in `ai-status.json`)
+
+These IDs appear in `.orchestrator/task-briefs/*.md` but **do not exist as tasks in `ai-status.json`**. Treat them as background planning context only; do not list them as dependencies in the evidence pack or closeout report.
+
+| Brief file | What the brief proposed | Why PH1GC-FWD-001 does not depend on it |
+| ---------- | ----------------------- | --------------------------------------- |
+| `.orchestrator/task-briefs/FWD-VERIF-001.md` | Real-platform integration evidence verification (per `docs/03-runbooks/forwarder-production-adapter-rollout-runbook.md`) | Brief is `review_approved` only on disk; no matching task in `ai-status.json`. The directive §D supplies the verification methodology PH1GC-FWD-001 needs |
+| `.orchestrator/task-briefs/BE-FIN-FWD-001.md` | `/api/tenant/reports/settlement-by-platform-source` endpoint | Brief is `backlog` only on disk; no matching task in `ai-status.json`. If the endpoint lands later, D8 (Settlement sample) may optionally cross-link it; PH1GC-FWD-001 is not blocked on it. Until then, D8 cites the raw `platform_earnings` row id |
 
 ### 5.3 Downstream tasks that read PH1GC-FWD-001's gate flip
 
-| Task / consumer | What it watches |
-| --------------- | --------------- |
-| `PH1GC-MATRIX-001` | Re-reads `WF-FWD-001` after this flip; will cross-check all 11/12 → 16 rows. PH1GC-FWD-001 must land before MATRIX-001 re-runs its cross-check sweep. |
-| Directive §10 final checklist row `[ ] support/sidecars/FWD-LIVE-001/` | Flips from unchecked to checked only when this sidecar contains all 11 §D items. |
-| `final phase1-business-flow-complete-closeout.md` (per directive §8 condition 7) | "Forwarder 至少 sandbox evidence" condition is satisfied here. |
+| Task / consumer | `ai-status.json` status | What it watches |
+| --------------- | ----------------------- | --------------- |
+| `PH1GC-MATRIX-001` (Phase 1 gap closure — release gate matrix reconciliation) | `pending` (Codex2 / Codex) | Re-reads `WF-FWD-001` after the flip; will cross-check all 12 → 16 matrix rows per `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` §2.5. PH1GC-FWD-001 must land before MATRIX-001 reruns its cross-check sweep |
+| Directive §10 final checklist row `[ ] support/sidecars/FWD-LIVE-001/` | n/a (checklist row) | Flips from unchecked to checked only when this sidecar contains all 11 §D items |
+| Directive §8 condition 7 ("Forwarder 至少 sandbox evidence") | n/a (gate condition) | Satisfied once PH1GC-FWD-001 lands sandbox-classified evidence (external or `FWD-SBX-001` harness) |
 
-### 5.4 Dependency graph (textual)
+### 5.4 Dependency graph (textual, machine-truth aligned)
 
 ```
-                FWD-VERIF-001 (review_approved, methodology)
-                       │
-                       ▼
-FWD-SPEC-001 (review_approved) ──► PH1GC-FWD-001 ◄── FWD-SBX-001 (in_progress, harness)
+              ai-status.json: FWD-SBX-001 = done (artifact LANDED on dev)
                                        │
                                        ▼
-                       support/sidecars/FWD-LIVE-001/ (extended with 11 §D items)
+docs/00-context/.../gap-closure-implementation-spec-20260520.md  §D  (LANDED, directive)
+                                       │
+                                       ▼
+            PH1GC-FWD-001  (ai-status.json: pending, owner Codex, reviewer Codex2)
+                                       │
+                                       ▼
+                support/sidecars/FWD-LIVE-001/  (extended with 11 §D items)
                                        │
                 ┌──────────────────────┼──────────────────────┐
                 ▼                      ▼                      ▼
-   WF-FWD-001 gate read      EXT-002-BLK-001..007       PH1GC-MATRIX-001
-   (release-gates.md)        (partial close-out)        (re-runs cross-check)
+   WF-FWD-001 gate read     EXT-002-BLK-001..007       PH1GC-MATRIX-001
+   (release-gates.md)       (partial close-out)        (pending, re-runs cross-check)
                                                               │
                                                               ▼
-                                         directive §10 / §8.7 final readiness rolls forward
+                                         directive §10 / §8 condition 7 rolls forward
 ```
+
+Notes on the graph:
+
+- `FWD-SPEC-001` (status `done`, artifact NOT on `dev`) is intentionally **not** an upstream arrow into PH1GC-FWD-001 — the directive §D wording is the authoritative source for proof-item structure until the spec file actually merges.
+- `FWD-VERIF-001` and `BE-FIN-FWD-001` are intentionally **absent** from the graph because they have no machine-truth task entry.
+- `FWD-LIVE-001` is the sidecar dir PH1GC-FWD-001 extends, not an upstream arrow — its `done` status in `ai-status.json` is what the status-truth doc explicitly flags as incorrect, and PH1GC-FWD-001 is the corrective work.
 
 ---
 
@@ -201,12 +224,13 @@ FWD-SPEC-001 (review_approved) ──► PH1GC-FWD-001 ◄── FWD-SBX-001 (in
 These are **strong suggestions** (not directive overrides) to help the parent owner avoid the failure modes the 2026-05-19 attempt hit:
 
 1. **Decide classification first.** Before producing any sample, decide whether the evidence will be `sandbox (external partner)`, `sandbox (repo-local FWD-SBX-001 harness)`, or `repo-local mock only`. Write the banner at the top of `FWD-LIVE-001-EVIDENCE-PACK.md` before writing anything else; every later choice flows from it.
-2. **If external sandbox creds are blocked**, do not stall the brief — switch classification to `repo-local FWD-SBX-001 harness` (assuming FWD-SBX-001 landed) and produce evidence from the harness with `Gate read after: PASS (repo-local)`. The directive permits this; partial / blocked sandbox creds is the most likely path given the 2026-05-19 telemetry.
+2. **If external sandbox creds are blocked**, do not stall the brief — switch classification to `sandbox (repo-local FWD-SBX-001 harness)` and produce evidence from the harness with `Gate read after: PASS (repo-local)`. `FWD-SBX-001` is `done` in `ai-status.json` and `apps/api/src/modules/forwarder/sandbox.adapter.ts` / `sandbox.fixtures.ts` / `docs/02-architecture/forwarder-sandbox-provider.md` are all already on `origin/dev`, so this path is unblocked today. The 2026-05-19 telemetry (gcloud reauth, 404 host, NXDOMAIN) strongly suggests this is the path of least resistance.
 3. **Idempotency / replay (D10) is the most common failure mode.** Capture the second delivery using the exact same idempotency key and signature; both must return HTTP 2xx and must not create a second mirror row. Reviewer will diff the audit rows directly.
 4. **No-owned-assignment (D9) requires a SQL query result, not prose.** Run `SELECT id, source_platform, owner FROM dispatch_assignments WHERE forwarded_task_id = '<sample id>'` and paste the (empty) result. If the schema columns differ, cite the actual schema in `apps/api/src/modules/forwarder/**` rather than guessing.
 5. **Webhook signature (D11) needs both the positive and the negative path.** Tamper the signature header by one byte and confirm rejection. A single HTTP 200 trace is not enough.
 6. **When updating canonical files, keep the diff to the minimum changes listed in §3.** Reviewer will reject sweeping rewrites of `phase1-workflow-acceptance-release-gates.md` or `cross-repo-gap-matrix-20260424.md` in the same commit as the evidence drop. Touch only the `WF-FWD-001` row and the Grab Taiwan adapter row respectively.
 7. **Anchor-commit on the parent branch (`codex/ph1gc-fwd-001` or whatever the owner picks) before yielding** — per `docs/ops/branch-strategy.md` §11.1, the canonical files in §3 are fragile-surface; do not leave the diff in working tree across a supervisor cycle.
+8. **Do not cite the un-merged FWD-SPEC-001 spec file as authoritative.** `docs/02-architecture/forwarder-adapter-proof-spec-20260519.md` is only on branch `codex2/fwd-spec-001` (commit `34d7f312` / `f249aec`), not on `origin/dev`. Anchor the evidence pack's structure on directive §D (which is landed). If the spec file lands on `dev` mid-task, it is safe to cross-link, but do not treat it as the canonical proof-set definition until then.
 
 ---
 
@@ -230,12 +254,15 @@ Owner: Claude
 Reviewer: Codex
 Branch: claude/ph1gc-fwd-001-sidecar-acceptance
 PR: n/a — sidecar acceptance packet, mutates_canonical = false
+Revision: r2 — refreshed after r1 review-reject; dependency map now sourced from ai-status.json + origin/dev verification, not from brief files
 Commit: <to be filled by anchor commit before handoff>
 Files changed:
-  - support/sidecars/PH1GC-FWD-001/PH1GC-FWD-001-SIDECAR-ACCEPTANCE.md (new)
+  - support/sidecars/PH1GC-FWD-001/PH1GC-FWD-001-SIDECAR-ACCEPTANCE.md (updated, r2)
 Verification commands:
   - `ls support/sidecars/PH1GC-FWD-001/` shows this file
   - `grep -n "§D" support/sidecars/PH1GC-FWD-001/PH1GC-FWD-001-SIDECAR-ACCEPTANCE.md` returns the 11-item checklist
+  - `python3 -c "import json; d=json.load(open('ai-status.json')); print([(t['id'],t['status']) for t in d['tasks'] if t['id'] in {'FWD-SPEC-001','FWD-SBX-001','FWD-E2E-001','FWD-LIVE-001','EXT-002','PH1GC-FWD-001','PH1GC-MATRIX-001'}])"` confirms the statuses cited in §5 match machine truth
+  - `git cat-file -e origin/dev:docs/02-architecture/forwarder-adapter-proof-spec-20260519.md` exits non-zero (file NOT on dev — matches §1 and §5.1 annotations)
 Evidence artifact: support/sidecars/PH1GC-FWD-001/PH1GC-FWD-001-SIDECAR-ACCEPTANCE.md
 Workflow family affected: none (support sidecar; does not flip a gate)
 Gate read before: n/a
@@ -244,5 +271,6 @@ Remaining non-claim:
   - This packet does NOT collect or claim sandbox evidence.
   - WF-FWD-001 remains EXTERNAL-GATED until PH1GC-FWD-001 (parent) lands the evidence drop.
   - Parent task ownership stays with Codex; this packet is read-only support for them.
+  - This packet does NOT add or modify any task in ai-status.json (FWD-VERIF-001 and BE-FIN-FWD-001 brief files remain unactioned; this is not the right task to convert them into machine truth).
 External dependencies, if any: none
 ```
