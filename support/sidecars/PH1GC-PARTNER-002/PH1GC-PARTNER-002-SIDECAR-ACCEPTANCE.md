@@ -16,4 +16,4 @@ Support artifact for acceptance of PH1GC-PARTNER-002.
 - This feature has no identified external dependencies in this repo.
 
 ## Status
-In Progress
+Ready for Review
