@@ -5,6 +5,13 @@ Task ref: `PBK-CUTOVER-001`
 Workflow family: `WF-PBK-001`
 Owner: `Codex`
 Reviewer: `Claude`
+Plan companion: `docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md`
+
+Canonical role: this document is the operational runbook for the cutover day.
+The partner-entry plan artifact that records the named pilot entry, owners,
+retention window, and evidence bundle lives in
+`docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md`
+(`PH1GC-PBK-001`).
 
 This runbook operationalises the partner-entry pilot cutover from the legacy
 `tenant-commute-hub` partner mode (and the legacy
