@@ -45,6 +45,28 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "admin/tenant-governance/summary") {
+    return {
+      routeKey: `admin:tenant-governance:${upperMethod}`,
+      requiredScopes: ["foundation:read"],
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Platform tenant governance summary",
+    };
+  }
+
+  if (routePath === "admin/flags" || routePath.startsWith("admin/flags/")) {
+    return {
+      routeKey: `admin:flags:${upperMethod}`,
+      requiredScopes: methodScope(
+        "foundation:read",
+        "foundation:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Platform feature flag administration",
+    };
+  }
+
   if (routePath === "notifications") {
     return {
       routeKey: `notifications:${upperMethod}`,

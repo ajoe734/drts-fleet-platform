@@ -12,6 +12,8 @@ import { FeatureFlagsService } from "./feature-flags.service";
 import type { FeatureFlagSummary } from "@drts/contracts";
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { ApiRequestError } from "../../common/api-envelope";
+import { CurrentIdentity } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 
 @Controller("admin")
 export class FeatureFlagsController {
@@ -48,9 +50,15 @@ export class FeatureFlagsController {
   async updateFlag(
     @Param("key") key: string,
     @Body() body: { enabled: boolean },
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = await this.service.updateFlag(key, body.enabled);
+    const updated = await this.service.updateFlag(
+      key,
+      body.enabled,
+      requestId,
+      identity,
+    );
     return toApiSuccessEnvelope(updated, requestId);
   }
 
@@ -59,6 +67,7 @@ export class FeatureFlagsController {
     @Param("key") key: string,
     @Query("tenantId") tenantId: string,
     @Body() body: { enabled: boolean; description?: string },
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     if (!tenantId) {
@@ -73,6 +82,8 @@ export class FeatureFlagsController {
       tenantId,
       body.enabled,
       body.description,
+      requestId,
+      identity,
     );
     return toApiSuccessEnvelope(updated, requestId);
   }

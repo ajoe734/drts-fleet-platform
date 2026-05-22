@@ -2,6 +2,8 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type { FeatureFlag } from "@drts/contracts";
 
+import type { BootstrapRequestIdentity } from "../../common/auth";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { FeatureFlagRepository } from "./feature-flag.repository";
 
 export interface FeatureFlagSeed {
@@ -20,6 +22,8 @@ export class FeatureFlagsService {
 
   constructor(
     @Optional() private readonly featureFlagRepository?: FeatureFlagRepository,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {
     this.seedDefaults();
   }
@@ -203,18 +207,36 @@ export class FeatureFlagsService {
   async updateFlag(
     key: string,
     enabled: boolean,
+    requestId?: string,
+    identity?: BootstrapRequestIdentity | null,
   ): Promise<FeatureFlag | undefined> {
-    if (this.getDb()) {
-      return this.featureFlagRepository!.updateFlag(key, enabled);
+    const existing = await this.getByKey(key);
+    if (!existing) {
+      return undefined;
     }
-    const existing = this.inMemoryFlags.get(key);
-    if (!existing) return undefined;
-    const updated: FeatureFlag = {
-      ...existing,
-      enabled,
-      updatedAt: new Date().toISOString(),
-    };
-    this.inMemoryFlags.set(key, updated);
+
+    let updated: FeatureFlag | undefined;
+    if (this.getDb()) {
+      updated = await this.featureFlagRepository!.updateFlag(key, enabled);
+    } else {
+      updated = {
+        ...existing,
+        enabled,
+        updatedAt: new Date().toISOString(),
+      };
+      this.inMemoryFlags.set(key, updated);
+    }
+
+    if (updated) {
+      this.recordAuditLog(
+        "update_feature_flag",
+        updated,
+        requestId,
+        identity,
+        existing,
+      );
+    }
+
     return updated;
   }
 
@@ -228,28 +250,84 @@ export class FeatureFlagsService {
     tenantId: string,
     enabled: boolean,
     description?: string,
+    requestId?: string,
+    identity?: BootstrapRequestIdentity | null,
   ): Promise<FeatureFlag | undefined> {
     const globalFlag = await this.getByKey(key);
+    const existingOverride = this.getDb()
+      ? await this.featureFlagRepository!.findByKey(key, tenantId)
+      : this.getInMemoryTenantOverride(key, tenantId);
+    const previousOverride =
+      existingOverride?.tenantId === tenantId ? existingOverride : undefined;
     const desc =
       description ?? globalFlag?.description ?? `Tenant override for ${key}`;
 
+    let updated: FeatureFlag | undefined;
     if (this.getDb()) {
-      return this.featureFlagRepository!.upsertTenantOverride(
+      updated = await this.featureFlagRepository!.upsertTenantOverride(
         key,
         tenantId,
         enabled,
         desc,
       );
+    } else {
+      updated = {
+        key,
+        enabled,
+        description: desc,
+        updatedAt: new Date().toISOString(),
+        tenantId: tenantId,
+      };
+      this.inMemoryFlags.set(this.inMemoryOverrideKey(key, tenantId), updated);
     }
-    // In-memory fallback
-    const updated: FeatureFlag = {
-      key,
-      enabled,
-      description: desc,
-      updatedAt: new Date().toISOString(),
-      tenantId: tenantId,
-    };
-    this.inMemoryFlags.set(this.inMemoryOverrideKey(key, tenantId), updated);
+
+    if (updated) {
+      this.recordAuditLog(
+        "upsert_feature_flag_tenant_override",
+        updated,
+        requestId,
+        identity,
+        previousOverride,
+      );
+    }
+
     return updated;
+  }
+
+  private recordAuditLog(
+    actionName: "update_feature_flag" | "upsert_feature_flag_tenant_override",
+    next: FeatureFlag,
+    requestId?: string,
+    identity?: BootstrapRequestIdentity | null,
+    previous?: FeatureFlag,
+  ) {
+    if (!this.auditNotificationService) {
+      return;
+    }
+
+    this.auditNotificationService.recordAuditLog({
+      actorId: identity?.actorId ?? null,
+      actorType: identity?.actorType ?? "system",
+      tenantId: next.tenantId ?? null,
+      moduleName: "feature-flags",
+      actionName,
+      resourceType: "feature_flag",
+      resourceId: next.key,
+      ...(previous
+        ? { oldValuesSummary: this.buildAuditSummary(previous) }
+        : {}),
+      newValuesSummary: this.buildAuditSummary(next),
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  private buildAuditSummary(flag: FeatureFlag) {
+    return {
+      key: flag.key,
+      enabled: flag.enabled,
+      description: flag.description,
+      tenantId: flag.tenantId ?? null,
+      updatedAt: flag.updatedAt,
+    };
   }
 }
