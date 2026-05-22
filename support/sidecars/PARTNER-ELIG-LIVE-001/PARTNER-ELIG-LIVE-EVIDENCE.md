@@ -3,7 +3,7 @@
 - **Task:** `PH1GC-PARTNER-002`
 - **Canonical live-proof chain:** `PARTNER-ELIG-LIVE-001`
 - **Owner:** `Claude`
-- **Reviewer:** `Claude2`
+- **Reviewer:** `Gemini2`
 - **Collected:** `2026-05-22 (UTC)`
 - **Status:** `hold-state evidence only — issuer sandbox proof remains external-gated on EXT-001-BLK-001..006`
 
@@ -171,7 +171,7 @@ After those inputs arrive, a follow-up gap-closure task should:
 
 Verification in this task was source review only:
 
-- reviewed canonical `ai-status.json` machine truth for `PH1GC-PARTNER-002` (owner Claude, reviewer Claude2, status `todo` at task pickup), `PH1GC-PARTNER-001` (done), `PARTNER-ELIG-LIVE-001` parent (done), and the three `PARTNER-ELIG-LIVE-001-UNBLOCK-*` helpers (done).
+- reviewed canonical `ai-status.json` machine truth for `PH1GC-PARTNER-002` (owner Claude, reviewer Gemini2, status `in_progress` at task pickup), `PH1GC-PARTNER-001` (done), `PARTNER-ELIG-LIVE-001` parent (done), and the three `PARTNER-ELIG-LIVE-001-UNBLOCK-*` helpers (done).
 - reviewed the dispatch-embedded `PH1GC-PARTNER-002` task brief (seven directive §E items, `blocked_external` fallback allowed).
 - reviewed `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §2.3 evidence classification and §3.5 `WF-PARTNER-001` workflow specification.
 - reviewed `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md` §1–§7 for the canonical contract surfaces.

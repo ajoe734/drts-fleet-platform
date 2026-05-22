@@ -3,7 +3,7 @@
 Date: 2026-05-22
 Task: `PH1GC-PARTNER-002`
 Owner: `Claude`
-Reviewer: `Claude2`
+Reviewer: `Gemini2`
 Directive anchor: `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §2.3, §3.5, §7; dispatch-embedded `PH1GC-PARTNER-002` task brief
 
 Workflow family: `WF-PARTNER-001`
