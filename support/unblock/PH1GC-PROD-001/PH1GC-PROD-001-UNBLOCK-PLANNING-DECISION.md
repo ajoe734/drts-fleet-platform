@@ -65,6 +65,10 @@ The concrete next step for `PH1GC-PROD-001` is:
 This is a routing clarification, not a net-new decision. The parent should
 resume only when those external prerequisites are available.
 
+Until then, `PH1GC-PROD-001` should remain tracked as an external-readiness
+gate rather than being reopened as a product-semantics or contract-definition
+issue.
+
 ## 5. Acceptance Mapping
 
 | Acceptance item | Result |
@@ -75,3 +79,8 @@ resume only when those external prerequisites are available.
 | or explicit follow-up needed by the parent task | Recorded in §4 as the operator-managed production readiness + live deploy evidence step. |
 | Produce task-scoped commit/push/PR evidence for any canonical change | This artifact is the canonical planning change for this helper task. |
 | Update the parent task with the concrete unblocked next step | The parent should point at the external readiness checklist and the first real production deploy / rollback evidence step. |
+
+## 6. Closeout Note
+
+This helper task closes once the routing decision is committed, pushed on the
+task branch, and mirrored into machine truth as the owner's `done` transition.
