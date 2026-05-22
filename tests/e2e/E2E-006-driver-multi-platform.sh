@@ -13,8 +13,9 @@
 #
 # Environment note:
 #   Mixed owned+forwarded visibility depends on seeded driver tasks or live
-#   external-platform adapter data. When the environment lacks that mixed seed,
-#   the scenario exits 0 with warnings instead of hard-failing.
+#   external-platform adapter data. Missing mixed seed is a hard failure by
+#   default. Only E2E_ALLOW_MISSING_FORWARDER_SEED=true may downgrade it to a
+#   warning skip.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +37,29 @@ FORWARDED_TASK_STATUS=""
 FORWARDED_SOURCE_PLATFORM=""
 FORWARDED_ROUTE_LOCKED=""
 FORWARDED_ACCEPTED_AT=""
+ALLOW_MISSING_FORWARDER_SEED="$(printf '%s' "${E2E_ALLOW_MISSING_FORWARDER_SEED:-false}" | tr '[:upper:]' '[:lower:]')"
+SEEDED_OWNED_TASK_ID="${E2E_SEED_OWNED_TASK_ID:-}"
+SEEDED_FORWARDED_TASK_ID="${E2E_SEED_FORWARDED_TASK_ID:-}"
+
+handle_missing_mixed_seed() {
+  local owned_id="$1"
+  local forwarded_id="$2"
+
+  save_evidence "$SCENARIO" "driver" "mixedSeedMissing" "true"
+
+  if [[ "$ALLOW_MISSING_FORWARDER_SEED" == "true" ]]; then
+    log_warn "E2E-006 requires one owned task and one forwarded task in the same driver inbox."
+    log_warn "ownedTaskId=${owned_id:-<missing>} forwardedTaskId=${forwarded_id:-<missing>}"
+    log_warn "Warning-skip enabled via E2E_ALLOW_MISSING_FORWARDER_SEED=true."
+    exit 0
+  fi
+
+  log_fail "E2E-006 requires one owned task and one forwarded task in the same driver inbox."
+  log_fail "ownedTaskId=${owned_id:-<missing>} forwardedTaskId=${forwarded_id:-<missing>}"
+  log_fail "Missing mixed owned+forwarded seed is a hard failure by default."
+  log_fail "Set E2E_ALLOW_MISSING_FORWARDER_SEED=true only when the warning-skip path is explicitly intended."
+  exit 1
+}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LEG 1 — Driver App: mixed owned + forwarded visibility
@@ -51,18 +75,30 @@ assert_status "200"
 TOTAL_TASKS=$(json_get ".data.items | length")
 log_info "Total driver tasks visible: ${TOTAL_TASKS:-0}"
 
-OWNED_TASK_ID=$(echo "$RESP_BODY" | \
-  jq -r '.data.items[] | select(((.sourcePlatform // .source_platform) == null) or ((.sourcePlatform // .source_platform) == "drts")) | (.taskId // .task_id)' \
-    2>/dev/null | head -1 || true)
-FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
-  jq -r '.data.items[] | select(((.sourcePlatform // .source_platform) != null) and ((.sourcePlatform // .source_platform) != "drts")) | (.taskId // .task_id)' \
-    2>/dev/null | head -1 || true)
+if [[ -n "$SEEDED_OWNED_TASK_ID" ]]; then
+  OWNED_TASK_ID=$(echo "$RESP_BODY" | \
+    jq -r --arg taskId "$SEEDED_OWNED_TASK_ID" \
+      '.data.items[] | select((.taskId // .task_id) == $taskId) | (.taskId // .task_id)' \
+      2>/dev/null | head -1 || true)
+else
+  OWNED_TASK_ID=$(echo "$RESP_BODY" | \
+    jq -r '.data.items[] | select(((.sourcePlatform // .source_platform) == null) or ((.sourcePlatform // .source_platform) == "drts")) | (.taskId // .task_id)' \
+      2>/dev/null | head -1 || true)
+fi
+
+if [[ -n "$SEEDED_FORWARDED_TASK_ID" ]]; then
+  FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
+    jq -r --arg taskId "$SEEDED_FORWARDED_TASK_ID" \
+      '.data.items[] | select((.taskId // .task_id) == $taskId) | (.taskId // .task_id)' \
+      2>/dev/null | head -1 || true)
+else
+  FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
+    jq -r '.data.items[] | select(((.sourcePlatform // .source_platform) != null) and ((.sourcePlatform // .source_platform) != "drts")) | (.taskId // .task_id)' \
+      2>/dev/null | head -1 || true)
+fi
 
 if [[ -z "$OWNED_TASK_ID" || -z "$FORWARDED_TASK_ID" ]]; then
-  log_warn "E2E-006 requires one owned task and one forwarded task in the same driver inbox."
-  log_warn "ownedTaskId=${OWNED_TASK_ID:-<missing>} forwardedTaskId=${FORWARDED_TASK_ID:-<missing>}"
-  log_warn "Gracefully skipping — mixed multi-platform seed data is not available in this environment."
-  exit 0
+  handle_missing_mixed_seed "$OWNED_TASK_ID" "$FORWARDED_TASK_ID"
 fi
 
 chain_set "driver" "ownedTaskId" "$OWNED_TASK_ID"
