@@ -18,9 +18,18 @@ on:
         description: 'Branch or commit SHA to run against'
         required: false
         default: 'dev'
+      run_staging_e2e_010:
+        description: 'Also run protected staging E2E-010 with WIF/IAP auth'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: ci-integ-${{ github.ref }}
@@ -101,6 +110,98 @@ jobs:
       - name: Run orchestrator unit tests
         working-directory: .orchestrator
         run: python3 -m unittest discover -s . -p 'test_*.py' -v
+
+  staging-e2e-010:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_staging_e2e_010 == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PROJECT_ID: ${{ vars.STAGING_GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.STAGING_GCP_REGION || vars.GCP_REGION }}
+      DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
+      WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+      SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
+      CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
+      IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Validate staging GitHub config
+        run: |
+          set -euo pipefail
+
+          missing=()
+          [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.STAGING_GCP_PROJECT_ID or vars.GCP_PROJECT_ID")
+          [[ -n "${REGION:-}" ]] || missing+=("vars.STAGING_GCP_REGION or vars.GCP_REGION")
+          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.STAGING_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing staging workflow configuration: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Best-effort fetch internal key
+        run: |
+          set -euo pipefail
+
+          secret_name="${SECRET_PREFIX}-internal-key"
+          if value="$(gcloud secrets versions access latest --secret "$secret_name" --project "$PROJECT_ID" 2>/dev/null)"; then
+            echo "::notice::Loaded optional ${secret_name} for E2E staging calls."
+            echo "::add-mask::$value"
+            printf 'E2E_INTERNAL_KEY=%s\n' "$value" >> "$GITHUB_ENV"
+          else
+            echo "::notice::Optional secret ${secret_name} not accessible; continuing without E2E_INTERNAL_KEY."
+          fi
+
+      - name: Mint IAP verification token
+        id: iap_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.IAP_CLIENT_ID }}
+          id_token_include_email: true
+
+      - name: Syntax check E2E-010
+        run: bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh
+
+      - name: Run E2E-010 against staging
+        env:
+          E2E_API_URL: ${{ env.CONTROL_PLANE_API_ORIGIN }}
+          E2E_AUTH_BEARER_TOKEN: ${{ steps.iap_token.outputs.id_token }}
+          E2E_CHAIN_FILE: ${{ runner.temp }}/e2e-010-chain.json
+          E2E_EVIDENCE_FILE: ${{ runner.temp }}/e2e-010-evidence.log
+          STRICT_VERIFICATION_BODY: 1
+        run: |
+          set -euo pipefail
+
+          bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh | tee "${RUNNER_TEMP}/e2e-010-console.log"
+
+      - name: Upload E2E-010 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-010-staging-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/e2e-010-console.log
+            ${{ runner.temp }}/e2e-010-evidence.log
+            ${{ runner.temp }}/e2e-010-chain.json
 
   # Aggregate job for branch-protection "required check" simplicity.
   ci-integ:
