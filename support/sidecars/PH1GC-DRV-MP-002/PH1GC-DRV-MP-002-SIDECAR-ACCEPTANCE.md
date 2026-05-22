@@ -6,9 +6,12 @@
 **Assigned Reviewer:** `Codex2`  
 **Parent Owner / Reviewer (machine-truth snapshot):** `Codex2` / `Codex`  
 **Generated:** `2026-05-22T02:29:06Z`  
-**Snapshot Status:** sidecar `PH1GC-DRV-MP-002-SIDECAR-ACCEPTANCE` is `in_progress` (`last_update=2026-05-22T02:25:20Z`). Parent `PH1GC-DRV-MP-002` is still `pending` (`last_update=2026-05-22T00:27:55Z`), depends on `PH1GC-DRV-MP-001`, and does not yet carry `commit_hash` / `push_*` closeout fields in `ai-status.json`.
+**Snapshot Status:** sidecar `PH1GC-DRV-MP-002-SIDECAR-ACCEPTANCE` is `in_progress` (`last_update=2026-05-22T02:25:20Z`). Parent `PH1GC-DRV-MP-002` is now resumed by the chairman and should be treated as an active owner task that must either attach real-device evidence or remain explicitly `blocked` / `blocked_external`; it still does not carry `commit_hash` / `push_*` closeout fields in `ai-status.json`.
 
-> Snapshot note. The parent task's `planning_ref` and `next` fields point at `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` and `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md`, but those files are not present in this checkout. This packet therefore limits itself to verifiable machine truth from `ai-status.json` plus repo-visible evidence anchors. It does not paraphrase unseen brief content.
+> Snapshot note. This packet was authored before the owner branch added the
+> canonical `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/` directory. Read
+> it together with that directory's `README.md`, which now closes the required
+> path on the task branch while preserving the same external-block posture.
 
 ## 1. Scope Boundary
 
@@ -22,7 +25,8 @@ This sidecar is support-only.
 
 ### 2.1 Parent task — `PH1GC-DRV-MP-002`
 
-- `status=pending`
+- `status=todo` at the time of the resumed chairman dispatch; owner must not
+  leave it there if the external blockers are still the real outcome
 - `owner=Codex2`
 - `reviewer=Codex`
 - `depends_on=["PH1GC-DRV-MP-001"]`
@@ -102,7 +106,7 @@ This is the strongest current machine-truth signal for `PH1GC-DRV-MP-002`: the r
 
 | Parent acceptance item | Current evidence | Read at packet time | Reviewer note |
 | --- | --- | --- | --- |
-| `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/ exists on origin/dev with all 11 directive §C evidence items.` | `git ls-tree -r --name-only origin/dev` resolves `docs/04-uat/driver-mobile-real-device-test-report-20260519.md`, but this packet did not find a `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/` path in `origin/dev`. Machine truth for `WF-DRV-MP-001-DEVICE-EVIDENCE` itself points at the report, not that sidecar directory. | `NOT YET SATISFIED` | Parent closeout should not claim this acceptance row until the artifact-path mismatch is reconciled by actual support files or by explicit machine-truth correction. |
+| `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/ exists on origin/dev with all 11 directive §C evidence items.` | The owner branch now contains the required directory with all 11 placeholder files, but `git ls-tree -r --name-only origin/dev` still does not show that path and none of the files contain live device captures yet. | `PARTIALLY SATISFIED ON BRANCH ONLY` | Parent closeout must still not claim this row on `origin/dev` until the branch lands and the placeholders are replaced or supplemented with real masked evidence. |
 | `PII masking applied to driver name/phone in all captures.` | No fresh Android/iPhone screenshots, recordings, or install artifacts are attached under the parent's target artifact path in this checkout. | `NOT VERIFIABLE` | Without live captures, masking cannot be audited. The packet should be treated as a blocker reminder, not proof. |
 | `If sandbox device access is blocked, brief status remains blocked_external with the missing dependency surfaced — do NOT mark done.` | Existing hold report + unblock closeout already enumerate Android/iPhone hardware, weak-network environment, credentialed operator, and `EXT-003-BLK-001..007` as the missing inputs. Parent itself is still `pending`, not `done`. | `SUPPORTED AS GUARDRAIL` | If live evidence is still unavailable, reviewer should expect the parent to preserve an external-block posture rather than force a green closeout. |
 | `Closeout report follows directive §7 format.` | The cited `docs/00-context` directive/status-truth files are absent from this checkout, so exact format cannot be audited here. | `DEFERRED TO PARENT CLOSEOUT` | This sidecar does not invent the missing format; it only records the evidence state the parent closeout must faithfully report. |
@@ -129,10 +133,11 @@ The third parent acceptance row bundles several distinct claims. Current evidenc
       `PH1GC-DRV-MP-001` being done,
       `WF-DRV-MP-001-DEVICE-EVIDENCE` being done as a hold/provisional report,
       and `PH1GC-DRV-MP-002` still lacking live real-device artifacts.
-- [ ] Confirm the packet explicitly flags the artifact-path mismatch:
-      parent acceptance expects `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/`,
-      while repo-visible evidence currently centers on
-      `docs/04-uat/driver-mobile-real-device-test-report-20260519.md`.
+- [ ] Confirm the packet explicitly flags the current split:
+      the required sidecar path now exists on the owner branch,
+      while `origin/dev` still centers on
+      `docs/04-uat/driver-mobile-real-device-test-report-20260519.md`
+      and lacks the new sidecar directory.
 - [ ] Confirm `push notification delivery` is not overclaimed from in-app counters/preferences.
 - [ ] Confirm `location permission grant` is left as missing evidence rather than inferred.
 - [ ] Confirm the only file added by this task is this sidecar packet.
@@ -143,6 +148,7 @@ The third parent acceptance row bundles several distinct claims. Current evidenc
 python3 -c 'import json,os; p=os.path.join(os.environ["AI_STATUS_ROOT"],"ai-status.json"); d=json.load(open(p)); ids=["PH1GC-DRV-MP-002-SIDECAR-ACCEPTANCE","PH1GC-DRV-MP-002","PH1GC-DRV-MP-001","WF-DRV-MP-001-DEVICE-EVIDENCE","WF-DRV-MP-001-DEVICE-EVIDENCE-UNBLOCK-MANUAL-UNBLOCK"]; [print(i, next(t for t in d["tasks"] if t["id"]==i)["status"]) for i in ids]'
 git rev-parse 056e79f4d499d60e349939fec928f46bff083e1f 9d93e280acc87b8b7503166d5b09e407cd2abcd8 1abff70f635a72aa6379c55767b283cef647fe1a
 git ls-tree -r --name-only origin/dev | grep 'driver-mobile-real-device-test-report-20260519.md\|WF-DRV-MP-001-DEVICE-EVIDENCE'
+find support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE -maxdepth 1 -type f | sort
 sed -n '1,220p' docs/04-uat/driver-mobile-real-device-test-report-20260519.md
 sed -n '1,200p' support/sidecars/EXT-003/EXT-003-MOBILE-DISTRIBUTION-GATE.md
 git diff --stat -- support/sidecars/PH1GC-DRV-MP-002/PH1GC-DRV-MP-002-SIDECAR-ACCEPTANCE.md
