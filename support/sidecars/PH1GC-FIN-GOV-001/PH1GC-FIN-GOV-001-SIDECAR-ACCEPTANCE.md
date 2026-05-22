@@ -5,12 +5,18 @@
 **Parent Owner / Reviewer:** `Codex2` / `Codex`
 **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 **Generated:** `2026-05-22` (UTC)
-**Status:** `READY FOR REVIEW` - support-only packet aligned to current machine truth; parent remains `pending`
+**Status:** support-only packet refreshed from the canonical machine-truth
+snapshot at `2026-05-22T03:24:43Z`; authoritative lifecycle state remains in
+`ai-status.json`, and the parent remains `pending`
 
 This packet is a support artifact only. It does not modify canonical truth,
 runtime behavior, or the parent task record. Its job is to make the current
 acceptance bar reviewable without overstating what is already visible on
 `origin/dev`.
+
+This file is intentionally a static reviewer packet, not a live task-status
+mirror. If a later handoff, reopen, or approval changes lifecycle state,
+`ai-status.json` wins.
 
 ---
 
@@ -34,7 +40,13 @@ Out of scope:
 
 ---
 
-## 2. Machine Truth Baseline
+## 2. Machine Truth Snapshot
+
+Snapshot source: canonical
+`/home/edna/workspace/drts-fleet-platform/ai-status.json` at
+`2026-05-22T03:24:43Z`. This section records the state seen while refreshing
+the packet; later lifecycle transitions may advance independently in machine
+truth.
 
 ### Sidecar task
 
@@ -42,11 +54,13 @@ Out of scope:
 
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`in_progress`
+- status_at_snapshot=`in_progress`
+- last_update=`2026-05-22T03:24:43Z`
 - helper_parent=`PH1GC-FIN-GOV-001`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
 - artifact=`support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-SIDECAR-ACCEPTANCE.md`
+- recent_lifecycle_note=`owner handoff moved the task to review at 2026-05-22T03:20:42Z; reviewer reopen returned it to in_progress at 2026-05-22T03:23:02Z so this packet could be refreshed`
 
 ### Parent task
 
@@ -54,7 +68,7 @@ Out of scope:
 
 - owner=`Codex2`
 - reviewer=`Codex`
-- status=`pending`
+- status_at_snapshot=`pending`
 - artifacts expected on `origin/dev`:
   - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
   - `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`
@@ -201,16 +215,18 @@ Reviewer should expect the parent spec/UAT/E2E chain to cover all 13 items:
 
 For `Codex2` reviewing this sidecar packet:
 
-1. Confirm the packet does **not** treat feature-branch artifacts as equivalent
+1. Confirm the packet treats `§2` as a timestamped machine-truth snapshot, not
+   as a live status mirror that must still match after later handoff events.
+2. Confirm the packet does **not** treat feature-branch artifacts as equivalent
    to `origin/dev` visibility for the parent acceptance.
-2. Confirm the downstream dependency map does not overstate formal blockers:
+3. Confirm the downstream dependency map does not overstate formal blockers:
    `PH1GC-E2E-010` is the hard child; `PH1GC-MATRIX-002` is the indirect
    consumer.
-3. Confirm the derived 13-field checklist is conservative and useful, rather
+4. Confirm the derived 13-field checklist is conservative and useful, rather
    than pretending to be a new canonical spec.
-4. Confirm the packet keeps the `WF-FIN-001` vs `WF-FIN-GOV-001` split from
+5. Confirm the packet keeps the `WF-FIN-001` vs `WF-FIN-GOV-001` split from
    `Q3=B` intact.
-5. Confirm the live-evidence boundary remains honest: static/provisional evidence
+6. Confirm the live-evidence boundary remains honest: static/provisional evidence
    exists, but live staging proof is still blocked.
 
 ---
@@ -239,19 +255,19 @@ For `Codex2` when landing `PH1GC-FIN-GOV-001`:
 **Owner (`Codex`) -> Reviewer (`Codex2`)**
 
 ```bash
-AI_NAME=Codex python3 scripts/ai_status.py handoff PH1GC-FIN-GOV-001-SIDECAR-ACCEPTANCE Codex2 "PH1GC-FIN-GOV-001 acceptance packet ready at support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-SIDECAR-ACCEPTANCE.md. It preserves the parent pending truth, records that the spec/UAT/E2E files are still absent from the current origin/dev snapshot, maps reusable earlier-wave FIN-GOV branches versus current PH1GC downstream dependencies, and provides a conservative derived 13-field reviewer checklist without changing canonical truth."
+AI_NAME=Codex python3 scripts/ai_status.py handoff PH1GC-FIN-GOV-001-SIDECAR-ACCEPTANCE Codex2 "PH1GC-FIN-GOV-001 acceptance packet refreshed at support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-SIDECAR-ACCEPTANCE.md. Section 2 now treats the sidecar-task details as a timestamped machine-truth snapshot captured at 2026-05-22T03:24:43Z, keeps ai-status.json as the only live lifecycle authority, preserves the parent pending truth, records that the spec/UAT/E2E files are still absent from the current origin/dev snapshot, maps reusable earlier-wave FIN-GOV branches versus current PH1GC downstream dependencies, and provides a conservative derived 13-field reviewer checklist without changing canonical truth."
 ```
 
 **Reviewer (`Codex2`) -> `review_approved`**
 
 ```bash
-AI_NAME=Codex2 python3 scripts/ai_status.py approve PH1GC-FIN-GOV-001-SIDECAR-ACCEPTANCE "PH1GC-FIN-GOV-001 acceptance packet is support-only and aligned to machine truth: parent remains pending, current dev snapshot still lacks the target spec/UAT/E2E files, reusable FIN-GOV branch evidence is mapped without over-claiming origin/dev visibility, and the derived 13-field checklist plus downstream dependency map are coherent."
+AI_NAME=Codex2 python3 scripts/ai_status.py approve PH1GC-FIN-GOV-001-SIDECAR-ACCEPTANCE "PH1GC-FIN-GOV-001 acceptance packet is support-only and correctly frames Section 2 as a timestamped machine-truth snapshot rather than a live status mirror. The parent remains pending, the current dev snapshot still lacks the target spec/UAT/E2E files, reusable FIN-GOV branch evidence is mapped without over-claiming origin/dev visibility, and the derived 13-field checklist plus downstream dependency map are coherent."
 ```
 
 **Reviewer (`Codex2`) -> reopen**
 
 ```bash
-AI_NAME=Codex2 python3 scripts/ai_status.py reopen PH1GC-FIN-GOV-001-SIDECAR-ACCEPTANCE "Packet drifted from current PH1GC machine truth or over-claimed dev-visible governance-finance evidence; refresh the baseline and dependency map."
+AI_NAME=Codex2 python3 scripts/ai_status.py reopen PH1GC-FIN-GOV-001-SIDECAR-ACCEPTANCE "Packet drifted from current PH1GC machine truth, stopped treating Section 2 as a timestamped snapshot, or over-claimed dev-visible governance-finance evidence; refresh the baseline and dependency map."
 ```
 
 ---
