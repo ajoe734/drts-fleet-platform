@@ -92,3 +92,15 @@ the blocker to a specific resume path:
 - then replay the `PH1GC-MATRIX-002` E2E matrix row on the same chain
 - then either supply fresh live staging evidence for `WF-FIN-GOV-001` or keep
   the parent blocked on that external evidence gap
+
+## Delivery Evidence
+
+- Diagnosis artifact branch: `codex/ph1gc-fin-gov-001-unblock-manual-unblock`
+- Diagnosis artifact PR: `#243` against `dev`
+- Initial diagnosis commit already on the task branch:
+  `a6578bf59338fe2eb2c1419782ed6a3a64b976e3`
+- Canonical machine truth was updated so `PH1GC-FIN-GOV-001.next` points to the
+  same resume sequence captured above: adopt
+  `origin/claude2/wf-fin-gov-001-e2e@ddc02c4`, replay
+  `origin/codex2/ph1gc-matrix-002@07b3a245`, then keep the parent blocked until
+  fresh `WF-FIN-GOV-001` live-staging evidence exists
