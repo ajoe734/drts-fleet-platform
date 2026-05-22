@@ -1,9 +1,9 @@
 # FWD-LIVE-001 — Forwarder External Platform Live Evidence Pack
 
-**Task:** `FWD-LIVE-001`  
-**Owner:** `Codex2`  
-**Reviewer:** `Codex`  
-**Collected:** `2026-05-19 (UTC)`  
+**Task:** `FWD-LIVE-001`<br>
+**Owner:** `Codex2`<br>
+**Reviewer:** `Codex`<br>
+**Collected:** `2026-05-19 and 2026-05-22 (UTC)`<br>
 **Status:** `partial evidence only — WF-FWD-001 remains EXTERNAL-GATED`
 
 ---
@@ -13,7 +13,7 @@
 This packet records the current live-evidence posture for the forwarder external
 platform gate tracked by `EXT-002-BLK-001` through `EXT-002-BLK-007`.
 
-Current result on `2026-05-19`:
+Current result through `2026-05-22`:
 
 - `WF-FWD-001` still reads `EXTERNAL-GATED` in the workflow release matrix.
 - The cross-repo gap matrix still classifies the Grab Taiwan real adapter as
@@ -34,6 +34,14 @@ Current result on `2026-05-19`:
   active `gcloud` account still present, token mint still requires
   reauthentication, all three old `run.app` probes still return `404`, and
   `api-staging.drts.internal` still fails DNS resolution from this machine.
+- A third revalidation at `2026-05-22T10:20Z` reconfirmed the same boundary:
+  active `gcloud` account still resolves to
+  `bobo.du@cctech-support.com`, active project still resolves to
+  `drts-dev-bobo-20260503`, identity-token mint still fails with
+  non-interactive reauthentication, Cloud Run / Secret Manager metadata probes
+  fail behind the same auth boundary, all three old `run.app` probes still
+  return `404`, and `api-staging.drts.internal` still fails DNS resolution from
+  this machine.
 
 Conclusion:
 
@@ -87,9 +95,11 @@ The current shipped implementation is still stub-only:
 
 ---
 
-## 3. Fresh Live Attempt On 2026-05-19
+## 3. Live Probe Sequence
 
-### 3.1 Attempted command
+### 3.1 Fresh Live Attempt On 2026-05-19
+
+#### Attempted command
 
 ```bash
 export E2E_API_URL="https://drts-api-kdhu6wzufa-uc.a.run.app"
@@ -98,7 +108,7 @@ export E2E_TIMEOUT=60
 ./tests/e2e/E2E-002-forwarded-order.sh
 ```
 
-### 3.2 Observed results
+#### Observed results
 
 1. `gcloud auth print-identity-token` failed:
 
@@ -115,7 +125,7 @@ Expected HTTP 200, got 404
 3. The returned body was a generic HTML `404 Page not found` page, not an API
    JSON error.
 
-### 3.3 Endpoint probes
+### 3.2 Endpoint probes on 2026-05-19
 
 Probed on `2026-05-19`:
 
@@ -127,7 +137,7 @@ Observed result for all three probes:
 
 - HTTP `404`
 
-### 3.4 Alternate host probe
+### 3.3 Alternate host probe on 2026-05-19
 
 The current E2E matrix documents staging as:
 
@@ -140,7 +150,7 @@ Observed result from this machine on `2026-05-19`:
 - DNS lookup returned `NXDOMAIN`
 - `curl` could not resolve the host
 
-### 3.5 Revalidation snapshot at 2026-05-19T04:18Z
+### 3.4 Revalidation snapshot at 2026-05-19T04:18Z
 
 Observed result from a second probe pass in this session:
 
@@ -154,12 +164,32 @@ Observed result from a second probe pass in this session:
 - `curl -I -sS https://api-staging.drts.internal/api/health` still fails with
   host resolution error
 
+### 3.5 Revalidation snapshot at 2026-05-22T10:20Z
+
+Observed result from a third probe pass in this session:
+
+- active `gcloud` account still resolves to `bobo.du@cctech-support.com`
+- active `gcloud` project still resolves to `drts-dev-bobo-20260503`
+- `gcloud auth print-identity-token` still fails with non-interactive
+  reauthentication required
+- `gcloud run services list` and `gcloud secrets list` both fail before
+  returning metadata because they hit the same reauthentication boundary
+- `https://drts-api-kdhu6wzufa-uc.a.run.app/`
+  `https://drts-api-kdhu6wzufa-uc.a.run.app/health`
+  and `https://drts-api-kdhu6wzufa-uc.a.run.app/api/health` still return HTTP
+  `404`
+- `nslookup api-staging.drts.internal` still returns `NXDOMAIN`
+- `curl -I -sS https://api-staging.drts.internal/` and
+  `curl -I -sS https://api-staging.drts.internal/api/health` still fail with
+  host resolution error
+
 ### 3.6 Interpretation
 
 This session did not fail because `E2E-002` found no forwarded task and
 gracefully skipped. It failed earlier at the environment boundary:
 
 - no usable non-interactive identity token could be minted
+- no GCP metadata call could surface a replacement service URL or secret path
 - the older staging host appears stale or no longer fronts the API
 - the newer internal staging hostname is not reachable from this machine
 
@@ -170,15 +200,15 @@ through `EXT-002-BLK-007` would be testable.
 
 ## 4. Blocker Snapshot
 
-| Blocker ID        | 2026-05-19 status | What was observed this session                                                                                                            |
-| ----------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `EXT-002-BLK-001` | open              | No approved partner API contract artifact was added or surfaced.                                                                          |
-| `EXT-002-BLK-002` | open              | No working sandbox credential path was available; token refresh failed non-interactively and no reachable staging endpoint was confirmed. |
-| `EXT-002-BLK-003` | open              | No signed webhook sample or replay-denial proof was accessible.                                                                           |
-| `EXT-002-BLK-004` | open              | No live forwarded task seed could be queried because staging reachability failed before task discovery.                                   |
-| `EXT-002-BLK-005` | open              | No callback lifecycle logs or correlation IDs were collected.                                                                             |
-| `EXT-002-BLK-006` | open              | No live duplicate / stale / lost-race callback evidence was collected.                                                                    |
-| `EXT-002-BLK-007` | open              | No live no-owned-assignment proof could be produced without a reachable forwarded task flow.                                              |
+| Blocker ID        | 2026-05-22 status | What was observed through the latest probe window                                                                                                                         |
+| ----------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXT-002-BLK-001` | open              | No approved partner API contract artifact was added or surfaced, and no metadata call could enumerate a replacement partner endpoint or API package.                     |
+| `EXT-002-BLK-002` | open              | No working sandbox credential path was available; token refresh failed non-interactively, GCP metadata listing hit the same reauth gate, and no reachable staging host was confirmed. |
+| `EXT-002-BLK-003` | open              | No signed webhook sample, signature algorithm note, or replay-denial proof was accessible.                                                                               |
+| `EXT-002-BLK-004` | open              | No live forwarded task seed could be queried because staging reachability failed before task discovery.                                                                   |
+| `EXT-002-BLK-005` | open              | No callback lifecycle logs or correlation IDs were collected.                                                                                                             |
+| `EXT-002-BLK-006` | open              | No live duplicate / stale / lost-race callback evidence was collected.                                                                                                    |
+| `EXT-002-BLK-007` | open              | No live no-owned-assignment proof could be produced without a reachable forwarded task flow.                                                                              |
 
 ---
 
@@ -205,9 +235,10 @@ Recommended wording:
 
 - "`WF-FWD-001` remains `EXTERNAL-GATED`."
 - "`EXT-002-BLK-001` through `EXT-002-BLK-007` remain open."
-- "A fresh `2026-05-19` live attempt did not reach partner-path verification
-  because the available `gcloud` account required reauthentication and the
-  documented staging hosts were not usable from this machine."
+- "Fresh `2026-05-19` and `2026-05-22` live probes did not reach
+  partner-path verification because the available `gcloud` account required
+  reauthentication, GCP metadata listing failed behind the same auth boundary,
+  and the documented staging hosts were not usable from this machine."
 
 Not allowed:
 
@@ -220,11 +251,16 @@ Not allowed:
 
 ## 7. Evidence Commands Executed
 
-Executed on `2026-05-19`:
+Executed on `2026-05-19` and revalidated on `2026-05-22`:
 
 ```bash
 gcloud auth list --filter=status:ACTIVE --format='value(account)'
+gcloud config get-value project
+gcloud config list --format='text(core.account,core.project)'
 ./tests/e2e/E2E-002-forwarded-order.sh
+gcloud auth print-identity-token
+gcloud run services list --platform=managed --project drts-dev-bobo-20260503 --format='table(metadata.name,location,url,status.url)'
+gcloud secrets list --project drts-dev-bobo-20260503 --format='value(name)'
 curl -I -sS https://drts-api-kdhu6wzufa-uc.a.run.app/
 curl -I -sS https://drts-api-kdhu6wzufa-uc.a.run.app/health
 curl -I -sS https://drts-api-kdhu6wzufa-uc.a.run.app/api/health
@@ -237,7 +273,9 @@ curl -I -sS https://api-staging.drts.internal/api/health
 Observed key outputs:
 
 - active `gcloud` account: `bobo.du@cctech-support.com`
+- active `gcloud` project: `drts-dev-bobo-20260503`
 - identity-token mint: failed, reauthentication required
+- Cloud Run / Secret Manager metadata listing: failed, reauthentication required
 - old `run.app` host: HTTP `404`
 - internal staging host: `NXDOMAIN`
 
