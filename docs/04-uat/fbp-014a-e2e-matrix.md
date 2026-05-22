@@ -426,6 +426,11 @@ Tenant Console (cost-center + quota + require_approval rule)
   ─► Platform Admin (settlement matrix + platform-earnings by-platform)
   ─► Platform Admin (audit MUST contain generate_tenant_invoice for invoiceId)
   ─► Tenant Console (cost-center coverage / legacy_unmapped probe)
+  ─► Verification body asserted field-by-field:
+     costCenterCode, costCenterName, ownerUserId, legacy_unmapped,
+     approvalRequestId, approvalState, quotaPeriodKey, quotaUsageDelta,
+     partnerProgramCode, eligibilityVerificationId, platformEarningsRef,
+     auditId, reportArtifactId
   ─► Tenant Admin (cross-tenant fetch of invoiceId MUST return 4xx)
 ```
 
@@ -594,7 +599,7 @@ Minimum evidence items required for each scenario:
 | E2E-002  | `primaryMirrorOrderId`, `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `primaryDriverCompletedStatus`, `secondaryDriverCancelledStatus`, `settlementLedgerMode` |
 | E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`                                                                                             |
 | E2E-008  | `inactiveBootstrapCode`, `eligibilityVerificationId`, `bookingId`, `receiptOwner`, `invoiceId`                                                                       |
-| E2E-010  | `bookingId`, `costCenter`, `orderId`, `approvalState`, `quotaBookingCountUsed`, `approvalRequestId`, `approvalStateAfterApprove`, `completedAt`, `invoiceId`, `invoiceLineForGovernedOrderId`, `lineCostCenterCode`, `lineApprovalState`, `reportJobId`, `platformCodes`, `coverageUnresolvedCount`, `invoiceAuditId`, `crossTenantStatus` — each enrichment field recorded with the literal value or the `NOT_POPULATED` marker, while the orderId/audit/cross-tenant bindings are hard-failed when contract is broken |
+| E2E-010  | `bookingId`, `orderId`, `invoiceId`, `reportJobId`, `crossTenantStatus`, plus the 13 verification-body fields recorded explicitly as literal values or `NOT_POPULATED`: `costCenterCode`, `costCenterName`, `ownerUserId`, `legacy_unmapped`, `approvalRequestId`, `approvalState`, `quotaPeriodKey`, `quotaUsageDelta`, `partnerProgramCode`, `eligibilityVerificationId`, `platformEarningsRef`, `auditId`, `reportArtifactId` |
 
 ---
 

@@ -34,7 +34,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 4. Generate the invoice for the billing window.
 5. Generate the report export for the billing window.
 
-**Assert**: the billing record carries `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` / `ownerName` populated, `approvalEvaluationId` set, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set. `partnerProgramCode` and `platformEarningsRef` null. `legacy_unmapped = false`. The report export contains the same booking row with the same field values. `reportArtifactId` is non-null on the billing record after the export completes.
+**Assert**: the billing record carries the full 13-field verification body for the non-partner owned flow: `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` populated, `legacy_unmapped = false`, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set, and `reportArtifactId` becomes non-null after export. `partnerProgramCode`, `eligibilityVerificationId`, and `platformEarningsRef` remain null on this owned non-partner path. The report export contains the same governance fields for the same booking row.
 
 ### `UAT-FIN-GOV-002` — Approval-required threshold, manual approval
 
@@ -42,7 +42,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 2. Booking enters approval queue; approver approves.
 3. Trip completes; invoice + report generated.
 
-**Assert**: billing record `approvalState = approved` (not `auto_approved`), `approvalEvaluationId` traces back to the manual approval action, audit log contains the approver's user id and timestamp.
+**Assert**: billing record `approvalState = approved` (not `auto_approved`), `approvalRequestId` traces back to the manual approval action, and the audit log contains the approver's user id and timestamp.
 
 ### `UAT-FIN-GOV-003` — Escalated then approved
 
@@ -67,7 +67,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 3. Cost-center attribution flows through to the partner booking (per tenant configuration).
 4. Trip completes; invoice + report generated.
 
-**Assert**: billing record carries both partner fields (`partnerProgramCode`, `eligibilityVerificationId`) **and** governance fields (`costCenterCode`, `approvalEvaluationId`, `quotaPeriodKey`). `referenceToken` is masked. `referenceHash` is set. Subsidy line item is applied to the booking total.
+**Assert**: billing record carries both partner fields (`partnerProgramCode`, `eligibilityVerificationId`) **and** governance fields (`costCenterCode`, `approvalRequestId`, `quotaPeriodKey`). `referenceToken` is masked. `referenceHash` is set. Subsidy line item is applied to the booking total.
 
 ### `UAT-FIN-GOV-006` — Forwarded booking governance integration
 

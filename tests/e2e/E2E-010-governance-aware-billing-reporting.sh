@@ -57,11 +57,9 @@
 #       (tenant scope widened)
 #   SOFT RECORD (still acceptable while runtime enrichment is partial — see
 #   spec §"Open Gaps" and UAT FG-04):
-#     - costCenterName / ownerUserId / activeFlag / legacy_unmapped on invoice
-#       or report rows (currently `null` in reporting-filing.service.ts)
-#     - explicit `approvalState` column on invoice / report rows
-#     - quota ledger entries when env exposes /tenant/quotas/ledger
-#     - partner / program / platformCode aggregation when env exposes them
+#     - any of the 13 verification-body fields may record as NOT_POPULATED
+#       while runtime enrichment is still partial, except for the hard-fail
+#       contract regressions listed above
 #   SKIP (environment cannot exercise the leg, not a regression):
 #     - seed tenant has no active tenant_admin user
 #     - dispatch/assign returns an env-error status before driver leg starts
@@ -98,6 +96,20 @@ ASSIGN_VEHICLE_ID=""
 ASSIGN_DRIVER_ID=""
 INVOICE_ID=""
 
+VB_COST_CENTER_CODE=""
+VB_COST_CENTER_NAME=""
+VB_OWNER_USER_ID=""
+VB_LEGACY_UNMAPPED=""
+VB_APPROVAL_REQUEST_ID=""
+VB_APPROVAL_STATE=""
+VB_QUOTA_PERIOD_KEY=""
+VB_QUOTA_USAGE_DELTA=""
+VB_PARTNER_PROGRAM_CODE=""
+VB_ELIGIBILITY_VERIFICATION_ID=""
+VB_PLATFORM_EARNINGS_REF=""
+VB_AUDIT_ID=""
+VB_REPORT_ARTIFACT_ID=""
+
 # Lifecycle gates — flipped when a leg actually lands.
 APPROVED=false
 DISPATCHED=false
@@ -118,6 +130,23 @@ record_field() {
     save_evidence "$SCENARIO" "$subcase" "$field" "$raw"
     log_ok "  ${subcase}: ${field}=${raw}"
   fi
+}
+
+emit_verification_body_fields() {
+  log_step "Verification body — emit 13-field evidence snapshot"
+  record_field "VERIFY" "costCenterCode" "$VB_COST_CENTER_CODE"
+  record_field "VERIFY" "costCenterName" "$VB_COST_CENTER_NAME"
+  record_field "VERIFY" "ownerUserId" "$VB_OWNER_USER_ID"
+  record_field "VERIFY" "legacy_unmapped" "$VB_LEGACY_UNMAPPED"
+  record_field "VERIFY" "approvalRequestId" "$VB_APPROVAL_REQUEST_ID"
+  record_field "VERIFY" "approvalState" "$VB_APPROVAL_STATE"
+  record_field "VERIFY" "quotaPeriodKey" "$VB_QUOTA_PERIOD_KEY"
+  record_field "VERIFY" "quotaUsageDelta" "$VB_QUOTA_USAGE_DELTA"
+  record_field "VERIFY" "partnerProgramCode" "$VB_PARTNER_PROGRAM_CODE"
+  record_field "VERIFY" "eligibilityVerificationId" "$VB_ELIGIBILITY_VERIFICATION_ID"
+  record_field "VERIFY" "platformEarningsRef" "$VB_PLATFORM_EARNINGS_REF"
+  record_field "VERIFY" "auditId" "$VB_AUDIT_ID"
+  record_field "VERIFY" "reportArtifactId" "$VB_REPORT_ARTIFACT_ID"
 }
 
 # ── Skip-clean / fail-hard helpers ────────────────────────────────────────────
@@ -357,6 +386,8 @@ subcase_fg01_booking_with_cost_center() {
   save_evidence "$SCENARIO" "FG-01" "costCenter" "$stored_cc"
   save_evidence "$SCENARIO" "FG-01" "orderId" "$ORDER_ID"
   record_field "FG-01" "approvalState" "$approval_state"
+  VB_COST_CENTER_CODE="$stored_cc"
+  VB_APPROVAL_STATE="$approval_state"
   # If no rule matched (e.g., the approval-rule setup returned non-2xx earlier
   # on this environment), the booking is auto-approved (approvalState =
   # `not_required`) and the lifecycle leg should still proceed without going
@@ -382,6 +413,7 @@ subcase_fg02_quota_continuity() {
     quota_limit=$(json_get_first ".data.bookingCountLimit" ".data.limit.bookingCount" ".data.limit.bookingCountLimit")
     record_field "FG-02" "quotaBookingCountUsed" "$quota_used"
     record_field "FG-02" "quotaBookingCountLimit" "$quota_limit"
+    VB_QUOTA_USAGE_DELTA="$quota_used"
   fi
 
   http_call GET "/tenant/quotas/ledger?costCenterCode=${CC_GOV}&bookingId=${BOOKING_ID}"
@@ -389,9 +421,15 @@ subcase_fg02_quota_continuity() {
     log_warn "GET /tenant/quotas/ledger returned ${RESP_STATUS}; ledger continuity not available on this env."
     save_evidence "$SCENARIO" "FG-02" "ledgerStatus" "$RESP_STATUS"
   else
-    local ledger_count
+    local ledger_count ledger_period_key ledger_usage_delta
     ledger_count=$(json_get ".data.items | length")
+    ledger_period_key=$(echo "$RESP_BODY" | jq -r '.data.items[0]? | (.quotaPeriodKey // .quota_period_key // .periodKey // .period_key // empty)' 2>/dev/null || true)
+    ledger_usage_delta=$(echo "$RESP_BODY" | jq -r '.data.items[0]? | (.usageDelta // .usage_delta // .bookingCountDelta // .booking_count_delta // empty)' 2>/dev/null || true)
     save_evidence "$SCENARIO" "FG-02" "ledgerEntryCount" "${ledger_count:-0}"
+    record_field "FG-02" "quotaPeriodKey" "$ledger_period_key"
+    record_field "FG-02" "quotaUsageDelta" "$ledger_usage_delta"
+    [[ -n "$ledger_period_key" ]] && VB_QUOTA_PERIOD_KEY="$ledger_period_key"
+    [[ -n "$ledger_usage_delta" ]] && VB_QUOTA_USAGE_DELTA="$ledger_usage_delta"
     if [[ "${ledger_count:-0}" -lt 1 ]]; then
       log_warn "Quota ledger has no entries for booking ${BOOKING_ID} after governed booking — recording as not-observed."
     else
@@ -423,6 +461,8 @@ subcase_fg03_approval_snapshot() {
   record_field "FG-03" "approvalRequestState" "$approval_state"
   record_field "FG-03" "evaluatedAt" "$evaluated_at"
   record_field "FG-03" "decision" "$decision"
+  VB_APPROVAL_REQUEST_ID="$APPROVAL_REQUEST_ID"
+  [[ -n "$approval_state" ]] && VB_APPROVAL_STATE="$approval_state"
 }
 
 # ── 5. Approval gate — approve the governed booking before dispatch ──────────
@@ -454,6 +494,7 @@ approve_governed_booking() {
     local post_state
     post_state=$(json_get_first ".data.approvalState" ".data.approval_state")
     record_field "FG-03" "approvalStateAfterApprove" "$post_state"
+    [[ -n "$post_state" ]] && VB_APPROVAL_STATE="$post_state"
   fi
 }
 
@@ -640,7 +681,7 @@ subcase_fg04_report_export() {
     return 0
   fi
 
-  local has_cc has_approval has_quota has_partner has_legacy
+  local has_cc has_approval has_quota has_partner has_legacy report_artifact_id
   has_cc=$(echo "$RESP_BODY" | jq -r '
     (..|.costCenterCode? // empty),
     (..|.costCenterName? // empty),
@@ -662,12 +703,20 @@ subcase_fg04_report_export() {
     (..|.legacy_unmapped? // empty),
     (..|.legacyUnmapped? // empty) | select(. != null) | "present"' \
     2>/dev/null | head -1)
+  report_artifact_id=$(echo "$RESP_BODY" | jq -r '
+    (..|.reportArtifactId? // empty),
+    (..|.report_artifact_id? // empty),
+    (..|.artifactId? // empty),
+    (..|.artifact_id? // empty) | select(. != null and . != "")' \
+    2>/dev/null | head -1)
 
   record_field "FG-04" "reportCostCenterField" "${has_cc:-}"
   record_field "FG-04" "reportApprovalStateField" "${has_approval:-}"
   record_field "FG-04" "reportQuotaImpactField" "${has_quota:-}"
   record_field "FG-04" "reportPartnerProgramField" "${has_partner:-}"
   record_field "FG-04" "reportLegacyUnmappedField" "${has_legacy:-}"
+  record_field "FG-04" "reportArtifactId" "${report_artifact_id:-}"
+  [[ -n "$report_artifact_id" ]] && VB_REPORT_ARTIFACT_ID="$report_artifact_id"
 }
 
 # ── 8. FG-01 / FG-08 — Invoice generation tied to governed orderId + audit ──
@@ -725,7 +774,7 @@ subcase_invoice_governance_and_audit() {
 
   # Field presence on the matched governed line (soft — these are runtime
   # enrichment gaps per spec, NOT contract regressions).
-  local matched_line_json cc_code cc_name owner_user_id approval_state active_flag legacy_unmapped partner_id program_id
+  local matched_line_json cc_code cc_name owner_user_id approval_state active_flag legacy_unmapped partner_id program_id eligibility_verification_id platform_earnings_ref
   matched_line_json=$(echo "$RESP_BODY" | jq -c --arg oid "$ORDER_ID" \
     '.data.lines[]? | select((.orderId // .order_id) == $oid)' 2>/dev/null | head -1 || true)
   if [[ -n "$matched_line_json" ]]; then
@@ -737,6 +786,8 @@ subcase_invoice_governance_and_audit() {
     legacy_unmapped=$(echo "$matched_line_json" | jq -r 'if has("legacy_unmapped") then (.legacy_unmapped | tostring) elif has("legacyUnmapped") then (.legacyUnmapped | tostring) else "" end' 2>/dev/null || true)
     partner_id=$(echo "$matched_line_json" | jq -r '.partnerId // empty' 2>/dev/null || true)
     program_id=$(echo "$matched_line_json" | jq -r '.partnerProgramId // empty' 2>/dev/null || true)
+    eligibility_verification_id=$(echo "$matched_line_json" | jq -r '.eligibilityVerificationId // .eligibility_verification_id // empty' 2>/dev/null || true)
+    platform_earnings_ref=$(echo "$matched_line_json" | jq -r '.platformEarningsRef // .platform_earnings_ref // empty' 2>/dev/null || true)
     record_field "FG-01" "lineCostCenterCode" "$cc_code"
     record_field "FG-01" "lineCostCenterName" "$cc_name"
     record_field "FG-01" "lineOwnerUserId" "$owner_user_id"
@@ -745,6 +796,16 @@ subcase_invoice_governance_and_audit() {
     record_field "FG-01" "lineLegacyUnmapped" "$legacy_unmapped"
     record_field "FG-05" "linePartnerId" "$partner_id"
     record_field "FG-05" "linePartnerProgramId" "$program_id"
+    record_field "FG-05" "lineEligibilityVerificationId" "$eligibility_verification_id"
+    record_field "FG-06" "linePlatformEarningsRef" "$platform_earnings_ref"
+    [[ -n "$cc_code" ]] && VB_COST_CENTER_CODE="$cc_code"
+    [[ -n "$cc_name" ]] && VB_COST_CENTER_NAME="$cc_name"
+    [[ -n "$owner_user_id" ]] && VB_OWNER_USER_ID="$owner_user_id"
+    [[ -n "$approval_state" ]] && VB_APPROVAL_STATE="$approval_state"
+    [[ -n "$legacy_unmapped" ]] && VB_LEGACY_UNMAPPED="$legacy_unmapped"
+    [[ -n "$program_id" ]] && VB_PARTNER_PROGRAM_CODE="$program_id"
+    [[ -n "$eligibility_verification_id" ]] && VB_ELIGIBILITY_VERIFICATION_ID="$eligibility_verification_id"
+    [[ -n "$platform_earnings_ref" ]] && VB_PLATFORM_EARNINGS_REF="$platform_earnings_ref"
   fi
 
   # FG-08 — invoice generation must emit an audit entry with resourceId =
@@ -773,6 +834,7 @@ subcase_invoice_governance_and_audit() {
   fi
   save_evidence "$SCENARIO" "FG-08" "invoiceAuditId" "$audit_id"
   log_ok "FG-08 audit evidence: ${audit_id} ties generate_tenant_invoice to invoiceId=${INVOICE_ID}"
+  VB_AUDIT_ID="$audit_id"
 }
 
 # ── 9. FG-05 / FG-06 — Settlement view + platform-earnings aggregation ───────
@@ -802,13 +864,18 @@ subcase_fg05_fg06_settlement_and_platform_earnings() {
     save_evidence "$SCENARIO" "FG-06" "platformEarningsStatus" "$RESP_STATUS"
     return 0
   fi
-  local platform_codes platform_item_count
+  local platform_codes platform_item_count platform_earnings_ref
   platform_item_count=$(json_get ".data.items | length")
   platform_codes=$(echo "$RESP_BODY" | jq -r \
     '[.data.items[]? | (.platformCode // .platform_code // empty)] | map(select(. != "")) | join(",")' \
     2>/dev/null || true)
+  platform_earnings_ref=$(echo "$RESP_BODY" | jq -r \
+    '.data.items[]? | (.platformEarningsRef // .platform_earnings_ref // .earningsRef // .earnings_ref // empty) | select(. != null and . != "")' \
+    2>/dev/null | head -1 || true)
   save_evidence "$SCENARIO" "FG-06" "platformItemCount" "${platform_item_count:-0}"
   record_field "FG-06" "platformCodes" "$platform_codes"
+  record_field "FG-06" "platformEarningsRef" "$platform_earnings_ref"
+  [[ -n "$platform_earnings_ref" ]] && VB_PLATFORM_EARNINGS_REF="$platform_earnings_ref"
 }
 
 # ── 10. FG-07 — Legacy unmapped cost center labelling ────────────────────────
@@ -883,6 +950,8 @@ subcase_invoice_governance_and_audit
 subcase_fg05_fg06_settlement_and_platform_earnings
 subcase_fg07_legacy_unmapped
 subcase_fg09_cross_tenant_scope
+
+emit_verification_body_fields
 
 print_chain_summary
 
