@@ -146,6 +146,21 @@ explicitly branch-aware:
 - The helper branches remain available as audit evidence
 - The repair clarifies the replay target instead of moving commits between refs
 
+## Owner Closeout Evidence
+
+- Canonical repair branch: `origin/codex/ph1gc-fwd-001-unblock-history-repair`
+- Reviewed repair commit already pushed on that branch:
+  `57ff50c14d9781e74d36cbc9beb3542dc236b55c`
+  (`docs(PH1GC-FWD-001-UNBLOCK-HISTORY-REPAIR): document canonical replay path`)
+- Draft PR carrying this repair record: `#252`
+  (`PH1GC-FWD-001-UNBLOCK-HISTORY-REPAIR: document canonical replay path`)
+- Parent machine truth is already branch-aware:
+  `PH1GC-FWD-001.next` now tells the owner to resume from
+  `origin/codex/ph1gc-fwd-001 @ 03f683dd7314e687bf52289e7af6fc2f83f5c7cd`,
+  not from this helper branch
+- Formal owner closeout should add only task-scoped verification and push
+  evidence on top of this branch; it must not rewrite any existing refs
+
 ## Verification Performed For This Repair
 
 - Read `AI_COLLABORATION_GUIDE.md`
