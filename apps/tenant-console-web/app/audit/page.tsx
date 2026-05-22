@@ -1,171 +1,120 @@
+import type { CSSProperties } from "react";
 import type { AuditLogRecord } from "@drts/contracts";
 import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
+  CanvasBtn,
+  CanvasCard,
+  CanvasPageHeader,
+  CanvasTable,
+  type CanvasTableColumn,
+  buildCanvasTheme,
+} from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
-import { formatDateTime } from "@/lib/formatters";
 
 export const dynamic = "force-dynamic";
 
-function groupCounts(values: string[]) {
-  return Array.from(
-    values.reduce((map, value) => {
-      map.set(value, (map.get(value) ?? 0) + 1);
-      return map;
-    }, new Map<string, number>()),
-  ).sort((left, right) => right[1] - left[1]);
+const th = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: 24,
+  color: th.textMuted,
+  fontSize: 12.5,
+  textAlign: "center",
+};
+
+const auditDateFormatter = new Intl.DateTimeFormat("sv-SE", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+function formatAuditAt(value: string | null | undefined) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return auditDateFormatter.format(parsed);
 }
+
+function formatActor(log: AuditLogRecord) {
+  if (log.actorId) return log.actorId;
+  if (log.actorType === "system") return "system";
+  return "—";
+}
+
+function formatResource(log: AuditLogRecord) {
+  return log.resourceId ?? log.resourceType ?? "—";
+}
+
+type AuditRow = {
+  at: string;
+  actor: string;
+  actorType: AuditLogRecord["actorType"];
+  module: string;
+  action: string;
+  resource: string;
+  req: string;
+};
 
 export default async function AuditPage() {
   const client = getTenantClient();
   const logs = (await client.listTenantAuditLogs()) as AuditLogRecord[];
-  const recentLogs = logs.slice(0, 20);
-  const moduleCounts = groupCounts(logs.map((log) => log.moduleName));
-  const actorCounts = groupCounts(logs.map((log) => log.actorType));
-  const requestCoverage = logs.filter((log) => log.requestId).length;
+
+  const rows: AuditRow[] = logs.slice(0, 20).map((log) => ({
+    at: formatAuditAt(log.createdAt),
+    actor: formatActor(log),
+    actorType: log.actorType,
+    module: log.moduleName,
+    action: log.actionName,
+    resource: formatResource(log),
+    req: log.requestId || "—",
+  }));
+
+  const columns: CanvasTableColumn<AuditRow>[] = [
+    { h: "AT", k: "at", w: 170, mono: true },
+    { h: "ACTOR", k: "actor", w: 200 },
+    { h: "TYPE", k: "actorType", w: 120, mono: true },
+    { h: "MODULE", k: "module", w: 140, mono: true },
+    { h: "ACTION", k: "action", w: 200, mono: true },
+    { h: "RESOURCE", k: "resource", w: 150, mono: true },
+    { h: "REQ", k: "req", w: 170, mono: true },
+  ];
 
   return (
-    <div className="page-shell">
-      <PageHero
-        eyebrow="Audit"
-        title="Tenant audit now reads as an append-only governance ledger, not an afterthought export."
-        description="The built view stays on `/api/tenant/audit` and emphasizes request correlation, actor scope, and module-level evidence without inventing tenant-side mutation controls."
+    <div>
+      <CanvasPageHeader
+        theme={th}
+        title="稽核紀錄"
+        subtitle="不可變 · 7 年保存 · 含 request_id 對應"
+        actions={
+          <CanvasBtn theme={th} icon="export" size="sm">
+            匯出
+          </CanvasBtn>
+        }
       />
 
-      <section className="metric-grid">
-        <article className="metric-card">
-          <span className="metric-label">Rows</span>
-          <strong>{logs.length}</strong>
-          <p>Recent tenant-scoped audit rows currently visible in this lane.</p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Modules</span>
-          <strong>{moduleCounts.length}</strong>
-          <p>
-            Distinct backend modules currently represented in the audit trail.
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Actors</span>
-          <strong>{actorCounts.length}</strong>
-          <p>
-            Actor types currently visible across tenant-facing evidence rows.
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Requests</span>
-          <strong>{requestCoverage}</strong>
-          <p>Rows carrying request correlation IDs for downstream tracing.</p>
-        </article>
-      </section>
-
-      <section className="surface-grid surface-grid-wide">
-        <SurfaceCard
-          kicker="Posture"
-          title="What this route proves"
-          description="The tenant console can inspect activity and export evidence posture, but it does not become the authority for retention, deletion, or platform legal hold workflows."
-        >
-          <dl className="definition-grid">
-            <div>
-              <dt>Scope</dt>
-              <dd>Tenant-scoped audit visibility only</dd>
-            </div>
-            <div>
-              <dt>Mutation</dt>
-              <dd>Read-only on this route</dd>
-            </div>
-            <div>
-              <dt>Correlation</dt>
-              <dd>{requestCoverage} request-linked rows</dd>
-            </div>
-            <div>
-              <dt>Latest event</dt>
-              <dd>
-                {recentLogs[0]
-                  ? formatDateTime(recentLogs[0].createdAt)
-                  : "No audit rows returned"}
-              </dd>
-            </div>
-          </dl>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Coverage"
-          title="Module and actor mix"
-          description="The artboard emphasizes a flat, inspectable ledger. These summary chips make it easier to spot where evidence is coming from before drilling into raw rows."
-        >
-          <div className="chip-row">
-            {moduleCounts.slice(0, 4).map(([moduleName, count]) => (
-              <span className="status-chip" key={moduleName}>
-                {moduleName}
-                <span>{count}</span>
-              </span>
-            ))}
-          </div>
-          <ul className="panel-list">
-            {actorCounts.map(([actorType, count]) => (
-              <li key={actorType}>
-                <strong>{actorType}</strong>
-                <span className="list-note">{count} row(s)</span>
-              </li>
-            ))}
-          </ul>
-        </SurfaceCard>
-      </section>
-
-      <SurfaceCard
-        kicker="Evidence"
-        title="Recent audit rows"
-        description="The table stays close to the design canvas: timestamp first, request correlation visible, and no UI-local rewrite of actor or resource vocabulary."
-      >
-        <div className="table-wrap">
-          <table className="data-grid">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Actor</th>
-                <th>Module</th>
-                <th>Action</th>
-                <th>Resource</th>
-                <th>Request</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentLogs.map((log) => (
-                <tr key={log.auditId}>
-                  <td>{formatDateTime(log.createdAt)}</td>
-                  <td>
-                    <div className="table-primary">
-                      {log.actorType}
-                      <span className="table-secondary">
-                        {log.actorId ?? "Unknown actor"}
-                      </span>
-                    </div>
-                  </td>
-                  <td>{log.moduleName}</td>
-                  <td>{log.actionName}</td>
-                  <td>
-                    <div className="table-primary">
-                      {log.resourceType}
-                      <span className="table-secondary">
-                        {log.resourceId ?? "No resource ID"}
-                      </span>
-                    </div>
-                  </td>
-                  <td>{log.requestId}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </SurfaceCard>
-
-      <CalloutPanel
-        title="Scope guardrail"
-        description="Tenant audit stays intentionally narrower than platform evidence governance. Legal holds, deletion exceptions, and storage policy remain outside the tenant-admin lane even when the request ID is visible here."
-      />
+      <div style={pageBodyStyle}>
+        <CanvasCard theme={th} padding={0}>
+          {rows.length > 0 ? (
+            <CanvasTable<AuditRow> theme={th} columns={columns} rows={rows} />
+          ) : (
+            <div style={emptyStateStyle}>目前沒有任何稽核紀錄。</div>
+          )}
+        </CanvasCard>
+      </div>
     </div>
   );
 }

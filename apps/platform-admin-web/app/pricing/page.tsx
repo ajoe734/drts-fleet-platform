@@ -1,12 +1,14 @@
-/**
- * Pricing & Settlement Plans
- * Draft pricing templates plus authoritative driver fee plan publication.
- */
-
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+} from "react";
+import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
   formatPlatformCodeLabel,
@@ -17,6 +19,19 @@ import type {
   PlatformPricingRuleRecord,
   ProductRuleCatalog,
 } from "@drts/contracts";
+import {
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasField,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTone,
+} from "@drts/ui-web";
 
 type PricingFormState = {
   ruleName: string;
@@ -39,6 +54,13 @@ type PublishRuleFormState = {
   effectiveTo: string;
 };
 
+type PricingRuleRow = PlatformPricingRuleRecord &
+  Record<string, unknown> & {
+    _selected?: boolean;
+  };
+
+type FeePlanRow = DriverFeePlanRecord & Record<string, unknown>;
+
 const EMPTY_PRICING_FORM: PricingFormState = {
   ruleName: "",
   version: "",
@@ -58,6 +80,253 @@ const EMPTY_FEE_PLAN_FORM: FeePlanFormState = {
 const EMPTY_PUBLISH_RULE_FORM: PublishRuleFormState = {
   effectiveFrom: "",
   effectiveTo: "",
+};
+
+const th = buildCanvasTheme({
+  surface: "platform",
+  dark: true,
+  density: "compact",
+});
+
+const pageRootStyle: CSSProperties = {
+  minHeight: "100%",
+  background: th.bg,
+  color: th.text,
+  borderRadius: 12,
+  overflow: "hidden",
+  fontFamily: th.fontFamily,
+};
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const loadingStateStyle: CSSProperties = {
+  padding: 24,
+  borderRadius: 12,
+  background: th.bg,
+  color: th.textMuted,
+  fontFamily: th.fontFamily,
+};
+
+const summaryRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const splitLayoutStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 16,
+  alignItems: "flex-start",
+};
+
+const mainColumnStyle: CSSProperties = {
+  flex: "1.65 1 640px",
+  minWidth: 0,
+};
+
+const sideColumnStyle: CSSProperties = {
+  flex: "1 1 320px",
+  minWidth: 280,
+  display: "grid",
+  gap: 16,
+};
+
+const cardToolbarStyle: CSSProperties = {
+  padding: "14px 14px 0",
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const pillButtonStyle: CSSProperties = {
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  cursor: "pointer",
+};
+
+const stackedCellStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
+};
+
+const primaryTextStyle: CSSProperties = {
+  color: th.text,
+  fontWeight: 600,
+};
+
+const secondaryTextStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: th.textMuted,
+  lineHeight: 1.4,
+  whiteSpace: "normal",
+};
+
+const secondaryMonoStyle: CSSProperties = {
+  fontSize: 11,
+  color: th.textDim,
+  fontFamily: th.monoFamily,
+  whiteSpace: "normal",
+};
+
+const composerStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
+const fieldGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+  gap: 14,
+};
+
+const twoFieldRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 14,
+};
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "8px 10px",
+  borderRadius: 7,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  color: th.text,
+  fontSize: 12.5,
+  fontFamily: th.fontFamily,
+};
+
+const monoInputStyle: CSSProperties = {
+  ...inputStyle,
+  fontFamily: th.monoFamily,
+};
+
+const textAreaStyle: CSSProperties = {
+  ...inputStyle,
+  minHeight: 92,
+  resize: "vertical",
+};
+
+const formActionsStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const submitButtonStyle = (disabled: boolean): CSSProperties => ({
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 120,
+  height: 28,
+  padding: "5px 10px",
+  borderRadius: 7,
+  border: `1px solid ${th.accent}`,
+  background: th.accent,
+  color: "#ffffff",
+  fontSize: 12,
+  fontWeight: 500,
+  lineHeight: 1,
+  cursor: disabled ? "not-allowed" : "pointer",
+  opacity: disabled ? 0.55 : 1,
+  fontFamily: th.fontFamily,
+});
+
+const helperTextStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 11.5,
+  color: th.textMuted,
+  lineHeight: 1.45,
+};
+
+const draftSelectorStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+};
+
+const dividerStyle: CSSProperties = {
+  height: 1,
+  background: th.border,
+};
+
+const sectionIntroStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+};
+
+const sectionTitleStyle: CSSProperties = {
+  margin: 0,
+  color: th.text,
+  fontSize: 12.5,
+  fontWeight: 600,
+};
+
+const sectionCopyStyle: CSSProperties = {
+  margin: 0,
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.45,
+};
+
+const bucketGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 10,
+};
+
+const bucketCellStyle = (tone: CanvasTone): CSSProperties => {
+  const borderColor =
+    tone === "accent"
+      ? th.accentBorder
+      : tone === "info"
+        ? th.infoBorder
+        : tone === "warn"
+          ? th.warnBorder
+          : th.successBorder;
+
+  const badgeColor =
+    tone === "accent"
+      ? th.accent
+      : tone === "info"
+        ? th.info
+        : tone === "warn"
+          ? th.warn
+          : th.success;
+
+  const badgeBg =
+    tone === "accent"
+      ? th.accentBg
+      : tone === "info"
+        ? th.infoBg
+        : tone === "warn"
+          ? th.warnBg
+          : th.successBg;
+
+  return {
+    border: `1px solid ${borderColor}`,
+    borderRadius: 8,
+    padding: 12,
+    display: "grid",
+    gap: 8,
+    background: th.surfaceLo,
+    minWidth: 0,
+    boxSizing: "border-box",
+    ["--badge-color" as string]: badgeColor,
+    ["--badge-bg" as string]: badgeBg,
+  };
 };
 
 function normalizeDateTimeLocalValue(value: string) {
@@ -89,6 +358,26 @@ function normalizeDateTimeLocalValue(value: string) {
     localValue,
     isoValue: parsed.toISOString(),
   };
+}
+
+function formatBps(locale: string, value: number) {
+  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
+}
+
+function formatPercent(value: number) {
+  return `${(value / 100).toFixed(2)}%`;
+}
+
+function statusTone(
+  status: PlatformPricingRuleRecord["status"] | DriverFeePlanRecord["status"],
+): CanvasTone {
+  if (status === "active" || status === "published") {
+    return "success";
+  }
+  if (status === "draft") {
+    return "warn";
+  }
+  return "neutral";
 }
 
 export default function PricingPage() {
@@ -124,6 +413,184 @@ export default function PricingPage() {
   const [publishingRuleId, setPublishingRuleId] = useState<string | null>(null);
   const [publishingFeePlan, setPublishingFeePlan] = useState(false);
 
+  const copy =
+    locale === "en"
+      ? {
+          title: "Pricing",
+          subtitle: "pricing rules · driver fee plans · publish windows",
+          tabs: ["Pricing rules", "Driver fee plans", "Override governance"],
+          authorityTitle: "canonical quoted fare authority",
+          authorityFallback:
+            "Backend remains the only quoted-fare source. Manual overrides must keep actor, reason, and trace evidence.",
+          rulesTitle: "Pricing rules",
+          rulesSubtitle:
+            "Platform-owned pricing rules remain the only fare authority for quoted fare.",
+          governanceTitle: "Override governance",
+          governanceSubtitle:
+            "Quoted-fare authority, manual override scope, and draft publish windows.",
+          governanceEmpty:
+            "Select a draft pricing rule to configure effective dates before publish.",
+          governanceNoDrafts: "No draft pricing rules are waiting for publish.",
+          governanceDraftQueue: "Draft publish queue",
+          governancePublishWindow: "Publish window",
+          governancePublishWindowCopy:
+            "Leave either field blank to keep the draft's stored effective window.",
+          feePlansTitle: "Driver fee plans",
+          feePlansSubtitle:
+            "Immutable settlement plans used when generating driver statements and payout trails.",
+          feePlansComposer:
+            "Publish a new immutable fee-plan version for downstream settlement.",
+          bucketTitle: (version: string) =>
+            `Service bucket fee breakdown (${version})`,
+          currentVersionLabel: "canonical version",
+          refresh: "Refresh",
+          configureDraft: "Configure draft",
+          draftSelected: "Selected",
+          openEnded: "open-ended",
+          notAllowed: "Not allowed",
+          bucketCards: [
+            {
+              key: "standard",
+              title: "standard",
+              base: "NT$ 85 / start",
+              continuation: "NT$ 5 / 250m",
+              fee: "180 bps",
+              note: "standard_taxi core lane",
+              tone: "accent" as const,
+            },
+            {
+              key: "business",
+              title: "business",
+              base: "NT$ 120 / start",
+              continuation: "NT$ 6 / 200m",
+              fee: "220 bps",
+              note: "enterprise dispatch",
+              tone: "info" as const,
+            },
+            {
+              key: "airport",
+              title: "airport",
+              base: "NT$ 180 / start",
+              continuation: "flat by zone",
+              fee: "250 bps",
+              note: "credit-card airport transfer",
+              tone: "warn" as const,
+            },
+            {
+              key: "wheelchair",
+              title: "wheelchair",
+              base: "NT$ 95 / start",
+              continuation: "NT$ 5 / 250m",
+              fee: "90 bps · subsidy",
+              note: "manual reimbursement lane",
+              tone: "success" as const,
+            },
+          ],
+          feeColumns: {
+            plan: "PLAN",
+            version: "VERSION",
+            fee: "SERVICE FEE bps",
+            reimburse: "REIMBURSE",
+            status: "STATUS",
+            published: "PUBLISHED",
+          },
+          ruleColumns: {
+            version: "VERSION",
+            name: "Name",
+            status: "STATUS",
+            fee: "SERVICE FEE bps",
+            reimburse: "REIMBURSE",
+            scope: "SCOPE",
+            effective: "EFFECTIVE",
+          },
+        }
+      : {
+          title: "計價",
+          subtitle: "pricing rules · driver fee plans · publish windows",
+          tabs: ["Pricing rules", "Driver fee plans", "Override governance"],
+          authorityTitle: "canonical quoted fare authority",
+          authorityFallback:
+            "後端仍是 quoted fare 的唯一真值，所有 manual override 都必須留下 actor、reason 與 trace 證據。",
+          rulesTitle: "定價規則",
+          rulesSubtitle:
+            "平台自有 pricing rule 是 quoted fare 的唯一規則真值。",
+          governanceTitle: "覆寫治理",
+          governanceSubtitle:
+            "quoted fare authority、manual override 範圍與 draft 發布視窗。",
+          governanceEmpty: "請先選一條 draft pricing rule，再設定發布時間。",
+          governanceNoDrafts: "目前沒有待發布的定價草稿。",
+          governanceDraftQueue: "待發布草稿",
+          governancePublishWindow: "發布視窗",
+          governancePublishWindowCopy:
+            "任一欄位留空時，會沿用草稿原本儲存的生效區間。",
+          feePlansTitle: "司機費用方案",
+          feePlansSubtitle:
+            "發布後不可變更，供 driver statement 與 payout trail 使用。",
+          feePlansComposer: "發布新的 immutable fee plan 版本供後續結算使用。",
+          bucketTitle: (version: string) => `服務 bucket fee 拆解 (${version})`,
+          currentVersionLabel: "canonical version",
+          refresh: "重新整理",
+          configureDraft: "設定發布",
+          draftSelected: "已選取",
+          openEnded: "未設定截止",
+          notAllowed: "不允許",
+          bucketCards: [
+            {
+              key: "standard",
+              title: "standard",
+              base: "NT$ 85 / 起",
+              continuation: "NT$ 5 / 250m",
+              fee: "180 bps",
+              note: "standard_taxi 核心車道",
+              tone: "accent" as const,
+            },
+            {
+              key: "business",
+              title: "business",
+              base: "NT$ 120 / 起",
+              continuation: "NT$ 6 / 200m",
+              fee: "220 bps",
+              note: "enterprise dispatch",
+              tone: "info" as const,
+            },
+            {
+              key: "airport",
+              title: "airport",
+              base: "NT$ 180 / 起",
+              continuation: "依區域 flat rate",
+              fee: "250 bps",
+              note: "信用卡機場接送",
+              tone: "warn" as const,
+            },
+            {
+              key: "wheelchair",
+              title: "wheelchair",
+              base: "NT$ 95 / 起",
+              continuation: "NT$ 5 / 250m",
+              fee: "90 bps · subsidy",
+              note: "補貼型 manual reimbursement",
+              tone: "success" as const,
+            },
+          ],
+          feeColumns: {
+            plan: "方案",
+            version: "版本",
+            fee: "SERVICE FEE bps",
+            reimburse: "報銷",
+            status: "狀態",
+            published: "發布時間",
+          },
+          ruleColumns: {
+            version: "版本",
+            name: "名稱",
+            status: "狀態",
+            fee: "SERVICE FEE bps",
+            reimburse: "報銷",
+            scope: "SCOPE",
+            effective: "EFFECTIVE",
+          },
+        };
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -147,13 +614,71 @@ export default function PricingPage() {
     void loadData();
   }, [loadData]);
 
-  const filteredRules = useMemo(
+  const sortedRules = useMemo(
     () =>
-      filter === "all" ? rules : rules.filter((rule) => rule.status === filter),
-    [filter, rules],
+      [...rules].sort(
+        (left, right) =>
+          new Date(right.updatedAt).getTime() -
+          new Date(left.updatedAt).getTime(),
+      ),
+    [rules],
   );
 
-  async function handleCreatePricingRule(event: React.FormEvent) {
+  const filteredRules = useMemo(() => {
+    if (filter === "all") {
+      return sortedRules;
+    }
+    return sortedRules.filter((rule) => rule.status === filter);
+  }, [filter, sortedRules]);
+
+  const draftRules = useMemo(
+    () => sortedRules.filter((rule) => rule.status === "draft"),
+    [sortedRules],
+  );
+
+  const activeRule = useMemo(
+    () => sortedRules.find((rule) => rule.status === "active") ?? null,
+    [sortedRules],
+  );
+
+  const selectedDraftRule = useMemo(
+    () =>
+      draftRules.find((rule) => rule.ruleId === publishRuleFormRuleId) ?? null,
+    [draftRules, publishRuleFormRuleId],
+  );
+
+  const ruleCounts = useMemo(
+    () => ({
+      all: rules.length,
+      active: rules.filter((rule) => rule.status === "active").length,
+      draft: rules.filter((rule) => rule.status === "draft").length,
+      archived: rules.filter((rule) => rule.status === "archived").length,
+    }),
+    [rules],
+  );
+
+  const ruleRows = useMemo<PricingRuleRow[]>(
+    () =>
+      filteredRules.map((rule) => ({
+        ...rule,
+        _selected: rule.ruleId === publishRuleFormRuleId,
+      })),
+    [filteredRules, publishRuleFormRuleId],
+  );
+
+  const feePlanRows = useMemo<FeePlanRow[]>(
+    () =>
+      [...feePlans]
+        .sort(
+          (left, right) =>
+            new Date(right.publishedAt).getTime() -
+            new Date(left.publishedAt).getTime(),
+        )
+        .map((plan) => ({ ...plan })),
+    [feePlans],
+  );
+
+  async function handleCreatePricingRule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreatingPricingRule(true);
     setError(null);
@@ -246,7 +771,7 @@ export default function PricingPage() {
     }
   }
 
-  async function handlePublishFeePlan(event: React.FormEvent) {
+  async function handlePublishFeePlan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPublishingFeePlan(true);
     setError(null);
@@ -269,203 +794,743 @@ export default function PricingPage() {
     }
   }
 
+  const authorityItems = productRuleCatalog
+    ? [
+        {
+          k: "Canonical source",
+          v: productRuleCatalog.pricingAuthority.canonicalQuotedFareSource,
+          mono: true,
+        },
+        {
+          k: "Rule version",
+          v: productRuleCatalog.pricingAuthority.canonicalPricingRuleVersion,
+          mono: true,
+        },
+        {
+          k: "Tenant quoted fare",
+          v: productRuleCatalog.pricingAuthority.tenantCanSetQuotedFare
+            ? t("common.yes")
+            : copy.notAllowed,
+        },
+        {
+          k: "Partner quoted fare",
+          v: productRuleCatalog.pricingAuthority.partnerCanSetQuotedFare
+            ? t("common.yes")
+            : copy.notAllowed,
+        },
+        {
+          k: "Override actors",
+          v: productRuleCatalog.pricingAuthority.manualOverrideActorTypes.join(
+            " / ",
+          ),
+          mono: true,
+        },
+        {
+          k: "Required fields",
+          v: productRuleCatalog.pricingAuthority.manualOverrideRequiredFields.join(
+            ", ",
+          ),
+          mono: true,
+        },
+      ]
+    : [];
+
+  const ruleColumns: CanvasTableColumn<PricingRuleRow>[] = [
+    {
+      h: copy.ruleColumns.version,
+      w: 124,
+      mono: true,
+      r: (rule) => (
+        <div style={stackedCellStyle}>
+          <span>{rule.version}</span>
+          <span style={secondaryMonoStyle}>
+            {formatDateTime(rule.updatedAt)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: copy.ruleColumns.name,
+      w: 260,
+      r: (rule) => (
+        <div style={stackedCellStyle}>
+          <span style={primaryTextStyle}>{rule.ruleName}</span>
+          <span style={secondaryMonoStyle}>{rule.ruleId}</span>
+          {rule.notes ? (
+            <span style={secondaryTextStyle}>{rule.notes}</span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      h: copy.ruleColumns.status,
+      w: 116,
+      r: (rule) => (
+        <CanvasPill theme={th} tone={statusTone(rule.status)} dot>
+          {formatPlatformCodeLabel(locale, rule.status)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: copy.ruleColumns.fee,
+      w: 148,
+      align: "right",
+      mono: true,
+      r: (rule) => (
+        <div style={stackedCellStyle}>
+          <span>{formatBps(locale, rule.serviceFeeBps)} bps</span>
+          <span style={secondaryMonoStyle}>
+            {formatPercent(rule.serviceFeeBps)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: copy.ruleColumns.reimburse,
+      w: 146,
+      r: (rule) => formatPlatformCodeLabel(locale, rule.reimbursementMode),
+    },
+    {
+      h: copy.ruleColumns.scope,
+      w: 180,
+      mono: true,
+      r: (rule) =>
+        rule.applicableTo === "all"
+          ? t("common.allTenants")
+          : rule.applicableTo,
+    },
+    {
+      h: copy.ruleColumns.effective,
+      w: 220,
+      mono: true,
+      r: (rule) => (
+        <div style={stackedCellStyle}>
+          <span>{formatDateTime(rule.effectiveFrom)}</span>
+          <span style={secondaryMonoStyle}>
+            {rule.effectiveTo
+              ? formatDateTime(rule.effectiveTo)
+              : copy.openEnded}
+          </span>
+        </div>
+      ),
+    },
+  ];
+
+  const feePlanColumns: CanvasTableColumn<FeePlanRow>[] = [
+    {
+      h: copy.feeColumns.plan,
+      w: 240,
+      r: (plan) => (
+        <div style={stackedCellStyle}>
+          <span style={primaryTextStyle}>{plan.planName}</span>
+          <span style={secondaryMonoStyle}>{plan.feePlanId}</span>
+        </div>
+      ),
+    },
+    {
+      h: copy.feeColumns.version,
+      w: 140,
+      mono: true,
+      k: "version",
+    },
+    {
+      h: copy.feeColumns.fee,
+      w: 160,
+      align: "right",
+      mono: true,
+      r: (plan) => (
+        <div style={stackedCellStyle}>
+          <span>{formatBps(locale, plan.serviceFeeBps)} bps</span>
+          <span style={secondaryMonoStyle}>
+            {formatPercent(plan.serviceFeeBps)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: copy.feeColumns.reimburse,
+      w: 140,
+      r: (plan) => formatPlatformCodeLabel(locale, plan.reimbursementMode),
+    },
+    {
+      h: copy.feeColumns.status,
+      w: 120,
+      r: (plan) => (
+        <CanvasPill theme={th} tone={statusTone(plan.status)} dot>
+          {formatPlatformCodeLabel(locale, plan.status)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: copy.feeColumns.published,
+      w: 170,
+      mono: true,
+      r: (plan) => formatDateTime(plan.publishedAt),
+    },
+  ];
+
   if (loading) {
-    return <div className="admin-empty">{t("pricing.loading")}</div>;
+    return <div style={loadingStateStyle}>{t("pricing.loading")}</div>;
   }
 
+  const canonicalVersion =
+    activeRule?.version ??
+    productRuleCatalog?.pricingAuthority.canonicalPricingRuleVersion ??
+    "draft";
+
   return (
-    <div>
-      <div className="admin-page-header">
-        <h1>{t("pricing.title")}</h1>
-        <p>
-          {t("pricing.subtitle", {
-            rules: rules.length,
-            plans: feePlans.length,
-          })}
-        </p>
-      </div>
-
-      {error && (
-        <div
-          className="admin-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
-        >
-          <p style={{ color: "#dc2626", margin: 0 }}>
-            {getPlatformLabel(locale, "error")}: {error}
-          </p>
-        </div>
-      )}
-
-      {productRuleCatalog && (
-        <div className="admin-card" style={{ marginBottom: 16 }}>
-          <h3 style={{ marginTop: 0 }}>{t("pricing.title")} Governance</h3>
-          <p style={{ margin: "0 0 8px", color: "#374151" }}>
-            Canonical quoted fare source:{" "}
-            <strong>
-              {productRuleCatalog.pricingAuthority.canonicalQuotedFareSource}
-            </strong>
-            {" · "}
-            rule version{" "}
-            <strong>
-              {productRuleCatalog.pricingAuthority.canonicalPricingRuleVersion}
-            </strong>
-          </p>
-          <p style={{ margin: "0 0 8px", color: "#6b7280" }}>
-            Tenant and partner booking channels are read-only for quoted fare.
-            Manual override is allowed only for{" "}
-            {productRuleCatalog.pricingAuthority.manualOverrideActorTypes.join(
-              " / ",
-            )}{" "}
-            and must include{" "}
-            {productRuleCatalog.pricingAuthority.manualOverrideRequiredFields.join(
-              ", ",
-            )}
-            .
-          </p>
-        </div>
-      )}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        {[
-          {
-            label: t("pricing.platformDrafts"),
-            value: `${rules.length}`,
-            note: t("pricing.platformDraftsNote"),
-          },
-          {
-            label: t("pricing.activeTemplates"),
-            value: `${rules.filter((rule) => rule.status === "active").length}`,
-            note: t("pricing.platformDraftsNote"),
-          },
-          {
-            label: t("pricing.publishedPlans"),
-            value: `${feePlans.length}`,
-            note: t("pricing.publishedPlansNote"),
-          },
-        ].map((card) => (
-          <div key={card.label} className="admin-card">
-            <p
-              style={{
-                margin: "0 0 8px",
-                fontSize: 13,
-                color: "#6b7280",
+    <div style={pageRootStyle}>
+      <CanvasPageHeader
+        theme={th}
+        title={copy.title}
+        subtitle={copy.subtitle}
+        tabs={copy.tabs}
+        activeTab={copy.tabs[0]}
+        actions={
+          <>
+            <CanvasBtn
+              theme={th}
+              variant="secondary"
+              icon={showCreate ? "x" : "plus"}
+              onClick={() => setShowCreate((current) => !current)}
+            >
+              {showCreate
+                ? t("pricing.cancelDraft")
+                : t("pricing.newPricingDraft")}
+            </CanvasBtn>
+            <CanvasBtn
+              theme={th}
+              variant="primary"
+              icon="check"
+              disabled={draftRules.length === 0}
+              onClick={() => {
+                const nextDraft = selectedDraftRule ?? draftRules[0];
+                if (nextDraft) {
+                  openPublishRuleForm(nextDraft);
+                }
               }}
             >
-              {card.label}
-            </p>
-            <strong style={{ display: "block", fontSize: 22 }}>
-              {card.value}
-            </strong>
-            <small style={{ color: "#6b7280" }}>{card.note}</small>
-          </div>
-        ))}
-      </div>
+              {t("pricing.publishDraft")}
+            </CanvasBtn>
+          </>
+        }
+      />
 
-      <div className="admin-toolbar">
-        <div className="admin-toggle-group">
-          {(["all", "active", "draft", "archived"] as const).map((value) => (
-            <button
-              key={value}
-              className={`admin-toggle-btn ${filter === value ? "active" : ""}`}
-              onClick={() => setFilter(value)}
-            >
-              {formatPlatformCodeLabel(locale, value)}
-            </button>
-          ))}
+      <div style={pageBodyStyle}>
+        {error ? (
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title={getPlatformLabel(locale, "error")}
+            body={error}
+          />
+        ) : null}
+
+        <CanvasBanner
+          theme={th}
+          tone="info"
+          icon="warn"
+          title={copy.authorityTitle}
+          body={
+            productRuleCatalog ? (
+              <>
+                <strong>
+                  {
+                    productRuleCatalog.pricingAuthority
+                      .canonicalQuotedFareSource
+                  }
+                </strong>
+                {" · "}
+                <strong>
+                  {
+                    productRuleCatalog.pricingAuthority
+                      .canonicalPricingRuleVersion
+                  }
+                </strong>
+                {" · "}
+                {productRuleCatalog.pricingAuthority.manualOverrideActorTypes.join(
+                  " / ",
+                )}
+                {" · "}
+                {productRuleCatalog.pricingAuthority.manualOverrideRequiredFields.join(
+                  ", ",
+                )}
+              </>
+            ) : (
+              copy.authorityFallback
+            )
+          }
+        />
+
+        <div style={summaryRowStyle}>
+          <CanvasPill theme={th} tone="warn">
+            {t("pricing.platformDrafts")} {ruleCounts.draft}
+          </CanvasPill>
+          <CanvasPill theme={th} tone="success">
+            {t("pricing.activeTemplates")} {ruleCounts.active}
+          </CanvasPill>
+          <CanvasPill theme={th} tone="info">
+            {t("pricing.publishedPlans")} {feePlanRows.length}
+          </CanvasPill>
+          <CanvasPill theme={th} tone="accent">
+            {copy.currentVersionLabel} {canonicalVersion}
+          </CanvasPill>
         </div>
-        <button
-          className="admin-btn admin-btn--primary"
-          onClick={() => setShowCreate((current) => !current)}
-        >
-          {showCreate ? t("pricing.cancelDraft") : t("pricing.newPricingDraft")}
-        </button>
-        <button
-          className="admin-btn admin-btn--secondary"
-          onClick={() => void loadData()}
-        >
-          {t("common.refresh")}
-        </button>
-      </div>
 
-      {showCreate && (
-        <div className="admin-card" style={{ marginBottom: 16 }}>
-          <h3 style={{ marginTop: 0 }}>{t("pricing.sectionCreateDraft")}</h3>
-          <form onSubmit={handleCreatePricingRule}>
-            <div style={formGridStyle}>
-              <label style={labelStyle}>
-                {t("pricing.form.ruleName")}
-                <input
-                  value={pricingForm.ruleName}
+        {showCreate ? (
+          <CanvasCard
+            theme={th}
+            title={t("pricing.sectionCreateDraft")}
+            subtitle={copy.rulesSubtitle}
+          >
+            <form onSubmit={handleCreatePricingRule} style={composerStyle}>
+              <div style={fieldGridStyle}>
+                <CanvasField
+                  theme={th}
+                  label={t("pricing.form.ruleName")}
+                  required
+                >
+                  <input
+                    value={pricingForm.ruleName}
+                    onChange={(event) =>
+                      setPricingForm((current) => ({
+                        ...current,
+                        ruleName: event.target.value,
+                      }))
+                    }
+                    required
+                    placeholder={defaultPlanName}
+                    style={inputStyle}
+                  />
+                </CanvasField>
+                <CanvasField
+                  theme={th}
+                  label={t("pricing.form.version")}
+                  required
+                >
+                  <input
+                    value={pricingForm.version}
+                    onChange={(event) =>
+                      setPricingForm((current) => ({
+                        ...current,
+                        version: event.target.value,
+                      }))
+                    }
+                    required
+                    style={monoInputStyle}
+                  />
+                </CanvasField>
+                <CanvasField
+                  theme={th}
+                  label={getPlatformLabel(locale, "applicableTo")}
+                >
+                  <input
+                    value={pricingForm.applicableTo}
+                    onChange={(event) =>
+                      setPricingForm((current) => ({
+                        ...current,
+                        applicableTo: event.target.value,
+                      }))
+                    }
+                    style={monoInputStyle}
+                  />
+                </CanvasField>
+                <CanvasField
+                  theme={th}
+                  label={t("pricing.form.serviceFeeBps")}
+                  required
+                >
+                  <input
+                    type="number"
+                    min={0}
+                    value={pricingForm.serviceFeeBps}
+                    onChange={(event) =>
+                      setPricingForm((current) => ({
+                        ...current,
+                        serviceFeeBps: event.target.value,
+                      }))
+                    }
+                    required
+                    style={monoInputStyle}
+                  />
+                </CanvasField>
+                <CanvasField theme={th} label={t("pricing.form.reimbMode")}>
+                  <select
+                    value={pricingForm.reimbursementMode}
+                    onChange={(event) =>
+                      setPricingForm((current) => ({
+                        ...current,
+                        reimbursementMode: event.target
+                          .value as PricingFormState["reimbursementMode"],
+                      }))
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="platform_funded">
+                      {t("pricing.platformFunded")}
+                    </option>
+                    <option value="mixed">{t("pricing.mixed")}</option>
+                  </select>
+                </CanvasField>
+              </div>
+
+              <CanvasField theme={th} label={t("pricing.form.notes")}>
+                <textarea
+                  value={pricingForm.notes}
                   onChange={(event) =>
                     setPricingForm((current) => ({
                       ...current,
-                      ruleName: event.target.value,
+                      notes: event.target.value,
+                    }))
+                  }
+                  rows={3}
+                  style={textAreaStyle}
+                />
+              </CanvasField>
+
+              <div style={formActionsStyle}>
+                <CanvasBtn
+                  theme={th}
+                  variant="secondary"
+                  onClick={() => setShowCreate(false)}
+                >
+                  {t("common.cancel")}
+                </CanvasBtn>
+                <button
+                  type="submit"
+                  disabled={
+                    creatingPricingRule ||
+                    !pricingForm.ruleName.trim() ||
+                    !pricingForm.version.trim()
+                  }
+                  style={submitButtonStyle(
+                    creatingPricingRule ||
+                      !pricingForm.ruleName.trim() ||
+                      !pricingForm.version.trim(),
+                  )}
+                >
+                  {creatingPricingRule
+                    ? t("pricing.creating")
+                    : t("pricing.createDraft")}
+                </button>
+              </div>
+            </form>
+          </CanvasCard>
+        ) : null}
+
+        <div style={splitLayoutStyle}>
+          <div style={mainColumnStyle}>
+            <CanvasCard
+              theme={th}
+              title={copy.rulesTitle}
+              subtitle={copy.rulesSubtitle}
+              padding={0}
+            >
+              <div style={cardToolbarStyle}>
+                {(["all", "active", "draft", "archived"] as const).map(
+                  (value) => {
+                    const count =
+                      value === "all"
+                        ? ruleCounts.all
+                        : value === "active"
+                          ? ruleCounts.active
+                          : value === "draft"
+                            ? ruleCounts.draft
+                            : ruleCounts.archived;
+
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        style={pillButtonStyle}
+                        onClick={() => setFilter(value)}
+                      >
+                        <CanvasPill
+                          theme={th}
+                          tone={filter === value ? "accent" : "neutral"}
+                          dot={value !== "all"}
+                        >
+                          {formatPlatformCodeLabel(locale, value)} {count}
+                        </CanvasPill>
+                      </button>
+                    );
+                  },
+                )}
+                <span style={{ flex: 1 }} />
+                <CanvasBtn
+                  theme={th}
+                  variant="secondary"
+                  onClick={() => void loadData()}
+                >
+                  {copy.refresh}
+                </CanvasBtn>
+              </div>
+
+              <CanvasTable theme={th} columns={ruleColumns} rows={ruleRows} />
+            </CanvasCard>
+          </div>
+
+          <div style={sideColumnStyle}>
+            <CanvasCard
+              theme={th}
+              title={copy.governanceTitle}
+              subtitle={copy.governanceSubtitle}
+            >
+              {authorityItems.length > 0 ? (
+                <CanvasDL theme={th} cols={1} items={authorityItems} />
+              ) : (
+                <p style={helperTextStyle}>{copy.authorityFallback}</p>
+              )}
+
+              <div style={{ height: 16 }} />
+
+              <div style={sectionIntroStyle}>
+                <h3 style={sectionTitleStyle}>{copy.governanceDraftQueue}</h3>
+                <p style={sectionCopyStyle}>{copy.governanceSubtitle}</p>
+              </div>
+
+              <div style={{ height: 10 }} />
+
+              {draftRules.length > 0 ? (
+                <div style={draftSelectorStyle}>
+                  {draftRules.map((rule) => (
+                    <CanvasBtn
+                      key={rule.ruleId}
+                      theme={th}
+                      size="xs"
+                      variant={
+                        publishRuleFormRuleId === rule.ruleId
+                          ? "primary"
+                          : "secondary"
+                      }
+                      onClick={() => openPublishRuleForm(rule)}
+                    >
+                      {rule.version}
+                    </CanvasBtn>
+                  ))}
+                </div>
+              ) : (
+                <p style={helperTextStyle}>{copy.governanceNoDrafts}</p>
+              )}
+
+              <div style={{ height: 16 }} />
+
+              {publishRuleFormError ? (
+                <>
+                  <CanvasBanner
+                    theme={th}
+                    tone="danger"
+                    icon="warn"
+                    title={getPlatformLabel(locale, "error")}
+                    body={publishRuleFormError}
+                  />
+                  <div style={{ height: 12 }} />
+                </>
+              ) : null}
+
+              {selectedDraftRule ? (
+                <div style={composerStyle}>
+                  <div style={sectionIntroStyle}>
+                    <h3 style={sectionTitleStyle}>
+                      {copy.governancePublishWindow}
+                    </h3>
+                    <p style={sectionCopyStyle}>
+                      {selectedDraftRule.ruleName} · {selectedDraftRule.version}
+                    </p>
+                  </div>
+
+                  <div style={twoFieldRowStyle}>
+                    <CanvasField
+                      theme={th}
+                      label={t("pricing.effectiveFromOverride")}
+                    >
+                      <input
+                        type="datetime-local"
+                        value={publishRuleForm.effectiveFrom}
+                        onChange={(event) => {
+                          setPublishRuleFormError(null);
+                          setPublishRuleForm((current) => ({
+                            ...current,
+                            effectiveFrom: event.target.value,
+                          }));
+                        }}
+                        style={inputStyle}
+                        max={publishRuleForm.effectiveTo || undefined}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      label={t("pricing.effectiveToOverride")}
+                    >
+                      <input
+                        type="datetime-local"
+                        value={publishRuleForm.effectiveTo}
+                        onChange={(event) => {
+                          setPublishRuleFormError(null);
+                          setPublishRuleForm((current) => ({
+                            ...current,
+                            effectiveTo: event.target.value,
+                          }));
+                        }}
+                        style={inputStyle}
+                        min={publishRuleForm.effectiveFrom || undefined}
+                      />
+                    </CanvasField>
+                  </div>
+
+                  <p style={helperTextStyle}>
+                    {copy.governancePublishWindowCopy}
+                  </p>
+
+                  <div style={formActionsStyle}>
+                    <CanvasBtn
+                      theme={th}
+                      variant="secondary"
+                      onClick={closePublishRuleForm}
+                      disabled={publishingRuleId === selectedDraftRule.ruleId}
+                    >
+                      {t("common.cancel")}
+                    </CanvasBtn>
+                    <CanvasBtn
+                      theme={th}
+                      variant="primary"
+                      icon="check"
+                      disabled={publishingRuleId === selectedDraftRule.ruleId}
+                      onClick={() =>
+                        void handlePublishRule(selectedDraftRule.ruleId)
+                      }
+                    >
+                      {publishingRuleId === selectedDraftRule.ruleId
+                        ? t("pricing.publishing")
+                        : t("pricing.confirmPublish")}
+                    </CanvasBtn>
+                  </div>
+                </div>
+              ) : (
+                <p style={helperTextStyle}>{copy.governanceEmpty}</p>
+              )}
+            </CanvasCard>
+          </div>
+        </div>
+
+        <CanvasCard theme={th} title={copy.bucketTitle(canonicalVersion)}>
+          <div style={bucketGridStyle}>
+            {copy.bucketCards.map((bucket) => (
+              <div key={bucket.key} style={bucketCellStyle(bucket.tone)}>
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    width: "fit-content",
+                    padding: "2px 7px",
+                    borderRadius: 999,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    letterSpacing: 0.3,
+                    color: "var(--badge-color)",
+                    background: "var(--badge-bg)",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {bucket.title}
+                </div>
+                <div style={{ display: "grid", gap: 3 }}>
+                  <span style={primaryTextStyle}>{bucket.base}</span>
+                  <span style={secondaryTextStyle}>{bucket.continuation}</span>
+                </div>
+                <div
+                  style={{
+                    color: "var(--badge-color)",
+                    fontFamily: th.monoFamily,
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {bucket.fee}
+                </div>
+                <div style={secondaryMonoStyle}>{bucket.note}</div>
+              </div>
+            ))}
+          </div>
+        </CanvasCard>
+
+        <CanvasCard
+          theme={th}
+          title={copy.feePlansTitle}
+          subtitle={copy.feePlansSubtitle}
+        >
+          <form onSubmit={handlePublishFeePlan} style={composerStyle}>
+            <div style={sectionIntroStyle}>
+              <h3 style={sectionTitleStyle}>
+                {t("pricing.sectionPublishPlan")}
+              </h3>
+              <p style={sectionCopyStyle}>{copy.feePlansComposer}</p>
+            </div>
+
+            <div style={fieldGridStyle}>
+              <CanvasField
+                theme={th}
+                label={t("pricing.form.planName")}
+                required
+              >
+                <input
+                  value={feePlanForm.planName}
+                  onChange={(event) =>
+                    setFeePlanForm((current) => ({
+                      ...current,
+                      planName: event.target.value,
                     }))
                   }
                   required
-                  placeholder={defaultPlanName}
                   style={inputStyle}
                 />
-              </label>
-              <label style={labelStyle}>
-                {t("pricing.form.version")}
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label={t("pricing.form.version")}
+                required
+              >
                 <input
-                  value={pricingForm.version}
+                  value={feePlanForm.version}
                   onChange={(event) =>
-                    setPricingForm((current) => ({
+                    setFeePlanForm((current) => ({
                       ...current,
                       version: event.target.value,
                     }))
                   }
                   required
-                  style={inputStyle}
+                  placeholder="drv-fee-v2"
+                  style={monoInputStyle}
                 />
-              </label>
-              <label style={labelStyle}>
-                {t("pricing.form.applicableTo")}
-                <input
-                  value={pricingForm.applicableTo}
-                  onChange={(event) =>
-                    setPricingForm((current) => ({
-                      ...current,
-                      applicableTo: event.target.value,
-                    }))
-                  }
-                  style={inputStyle}
-                />
-              </label>
-              <label style={labelStyle}>
-                {t("pricing.form.serviceFeeBps")}
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label={t("pricing.form.serviceFeeBps")}
+                required
+              >
                 <input
                   type="number"
                   min={0}
-                  value={pricingForm.serviceFeeBps}
+                  value={feePlanForm.serviceFeeBps}
                   onChange={(event) =>
-                    setPricingForm((current) => ({
+                    setFeePlanForm((current) => ({
                       ...current,
                       serviceFeeBps: event.target.value,
                     }))
                   }
                   required
-                  style={inputStyle}
+                  style={monoInputStyle}
                 />
-              </label>
-              <label style={labelStyle}>
-                {t("pricing.form.reimbMode")}
+              </CanvasField>
+              <CanvasField theme={th} label={t("pricing.form.reimbMode")}>
                 <select
-                  value={pricingForm.reimbursementMode}
+                  value={feePlanForm.reimbursementMode}
                   onChange={(event) =>
-                    setPricingForm((current) => ({
+                    setFeePlanForm((current) => ({
                       ...current,
                       reimbursementMode: event.target
-                        .value as PricingFormState["reimbursementMode"],
+                        .value as FeePlanFormState["reimbursementMode"],
                     }))
                   }
                   style={inputStyle}
@@ -475,393 +1540,39 @@ export default function PricingPage() {
                   </option>
                   <option value="mixed">{t("pricing.mixed")}</option>
                 </select>
-              </label>
+              </CanvasField>
             </div>
-            <label style={labelStyle}>
-              {t("pricing.form.notes")}
-              <textarea
-                value={pricingForm.notes}
-                onChange={(event) =>
-                  setPricingForm((current) => ({
-                    ...current,
-                    notes: event.target.value,
-                  }))
-                }
-                rows={3}
-                style={{ ...inputStyle, minHeight: 96, resize: "vertical" }}
-              />
-            </label>
-            <button
-              type="submit"
-              className="admin-btn admin-btn--primary"
-              disabled={
-                creatingPricingRule ||
-                !pricingForm.ruleName.trim() ||
-                !pricingForm.version.trim()
-              }
-            >
-              {creatingPricingRule
-                ? t("pricing.creating")
-                : t("pricing.createDraft")}
-            </button>
-          </form>
-        </div>
-      )}
 
-      <div className="admin-card" style={{ marginBottom: 16 }}>
-        <h3 style={{ marginTop: 0 }}>{t("pricing.sectionPublishPlan")}</h3>
-        <form onSubmit={handlePublishFeePlan}>
-          <div style={formGridStyle}>
-            <label style={labelStyle}>
-              {t("pricing.form.planName")}
-              <input
-                value={feePlanForm.planName}
-                onChange={(event) =>
-                  setFeePlanForm((current) => ({
-                    ...current,
-                    planName: event.target.value,
-                  }))
-                }
-                required
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("pricing.form.version")}
-              <input
-                value={feePlanForm.version}
-                onChange={(event) =>
-                  setFeePlanForm((current) => ({
-                    ...current,
-                    version: event.target.value,
-                  }))
-                }
-                required
-                placeholder="drv-fee-v2"
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("pricing.form.serviceFeeBps")}
-              <input
-                type="number"
-                min={0}
-                value={feePlanForm.serviceFeeBps}
-                onChange={(event) =>
-                  setFeePlanForm((current) => ({
-                    ...current,
-                    serviceFeeBps: event.target.value,
-                  }))
-                }
-                required
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("pricing.form.reimbMode")}
-              <select
-                value={feePlanForm.reimbursementMode}
-                onChange={(event) =>
-                  setFeePlanForm((current) => ({
-                    ...current,
-                    reimbursementMode: event.target
-                      .value as FeePlanFormState["reimbursementMode"],
-                  }))
-                }
-                style={inputStyle}
+            <div style={formActionsStyle}>
+              <button
+                type="submit"
+                disabled={publishingFeePlan || !feePlanForm.version.trim()}
+                style={submitButtonStyle(
+                  publishingFeePlan || !feePlanForm.version.trim(),
+                )}
               >
-                <option value="platform_funded">
-                  {t("pricing.platformFunded")}
-                </option>
-                <option value="mixed">{t("pricing.mixed")}</option>
-              </select>
-            </label>
-          </div>
-          <button
-            type="submit"
-            className="admin-btn admin-btn--primary"
-            disabled={publishingFeePlan || !feePlanForm.version.trim()}
-          >
-            {publishingFeePlan
-              ? t("pricing.publishing")
-              : t("pricing.publishSettlementPlan")}
-          </button>
-        </form>
-      </div>
+                {publishingFeePlan
+                  ? t("pricing.publishing")
+                  : t("pricing.publishSettlementPlan")}
+              </button>
+            </div>
+          </form>
 
-      <div
-        className="admin-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>{t("pricing.sectionSettlementPlans")}</h3>
-          <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {feePlans.length}
-          </span>
-        </div>
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>{t("pricing.col.plan")}</th>
-              <th>{t("pricing.col.version")}</th>
-              <th>{t("pricing.col.serviceFee")}</th>
-              <th>{t("pricing.col.reimbMode")}</th>
-              <th>{t("pricing.col.status")}</th>
-              <th>{t("notices.col.created")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {feePlans.length > 0 ? (
-              feePlans.map((plan) => (
-                <tr key={plan.feePlanId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    <div>{plan.planName}</div>
-                    <div style={{ color: "#6b7280" }}>{plan.feePlanId}</div>
-                  </td>
-                  <td>
-                    <code>{plan.version}</code>
-                  </td>
-                  <td>{(plan.serviceFeeBps / 100).toFixed(2)}%</td>
-                  <td>
-                    <span className="admin-badge admin-badge--info">
-                      {formatPlatformCodeLabel(locale, plan.reimbursementMode)}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="admin-badge admin-badge--success">
-                      {formatPlatformCodeLabel(locale, plan.status)}
-                    </span>
-                  </td>
-                  <td>{formatDateTime(plan.publishedAt)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={6}>{t("pricing.noPlans")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          <div style={{ height: 16 }} />
+          <div style={dividerStyle} />
+          <div style={{ height: 16 }} />
 
-      <div className="admin-card" style={{ overflowX: "auto" }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>{t("pricing.sectionPricingRules")}</h3>
-          <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {filteredRules.length}
-          </span>
-        </div>
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>{t("pricing.col.rule")}</th>
-              <th>{t("pricing.col.version")}</th>
-              <th>{t("pricing.col.serviceFee")}</th>
-              <th>{t("pricing.col.reimbMode")}</th>
-              <th>{getPlatformLabel(locale, "applicableTo")}</th>
-              <th>{t("pricing.col.status")}</th>
-              <th>{t("notices.col.created")}</th>
-              <th>{t("pricing.form.notes")}</th>
-              <th>{t("common.actions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRules.length > 0 ? (
-              filteredRules.map((rule) => (
-                <tr key={rule.ruleId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    <div>{rule.ruleName}</div>
-                    <div style={{ color: "#6b7280" }}>{rule.ruleId}</div>
-                  </td>
-                  <td>
-                    <code>v{rule.version}</code>
-                  </td>
-                  <td>{(rule.serviceFeeBps / 100).toFixed(2)}%</td>
-                  <td>
-                    <span className="admin-badge admin-badge--info">
-                      {formatPlatformCodeLabel(locale, rule.reimbursementMode)}
-                    </span>
-                  </td>
-                  <td>
-                    {rule.applicableTo === "all"
-                      ? t("common.allTenants")
-                      : rule.applicableTo}
-                  </td>
-                  <td>
-                    <span
-                      className={`admin-badge ${
-                        rule.status === "active"
-                          ? "admin-badge--success"
-                          : rule.status === "draft"
-                            ? "admin-badge--warning"
-                            : "admin-badge--neutral"
-                      }`}
-                    >
-                      {formatPlatformCodeLabel(locale, rule.status)}
-                    </span>
-                  </td>
-                  <td>
-                    {rule.publishedAt ? formatDateTime(rule.publishedAt) : "—"}
-                  </td>
-                  <td style={{ fontSize: 12, maxWidth: 260 }}>
-                    {rule.notes || "—"}
-                  </td>
-                  <td>
-                    {rule.status === "draft" ? (
-                      <div style={{ display: "grid", gap: 10, minWidth: 260 }}>
-                        <button
-                          className="admin-btn admin-btn--secondary"
-                          onClick={() =>
-                            publishRuleFormRuleId === rule.ruleId
-                              ? closePublishRuleForm()
-                              : openPublishRuleForm(rule)
-                          }
-                          disabled={publishingRuleId === rule.ruleId}
-                        >
-                          {publishRuleFormRuleId === rule.ruleId
-                            ? t("pricing.hidePublishForm")
-                            : t("pricing.publishDraft")}
-                        </button>
-                        {publishRuleFormRuleId === rule.ruleId ? (
-                          <div
-                            style={{
-                              display: "grid",
-                              gap: 8,
-                              padding: 12,
-                              borderRadius: 12,
-                              background: "#f8fafc",
-                              border: "1px solid rgba(148,163,184,0.24)",
-                            }}
-                          >
-                            {publishRuleFormError ? (
-                              <p style={{ color: "#dc2626", margin: 0 }}>
-                                {publishRuleFormError}
-                              </p>
-                            ) : null}
-                            <label style={labelStyle}>
-                              {t("pricing.effectiveFromOverride")}
-                              <input
-                                type="datetime-local"
-                                value={publishRuleForm.effectiveFrom}
-                                onChange={(event) => {
-                                  setPublishRuleFormError(null);
-                                  setPublishRuleForm((current) => ({
-                                    ...current,
-                                    effectiveFrom: event.target.value,
-                                  }));
-                                }}
-                                style={inputStyle}
-                                max={publishRuleForm.effectiveTo || undefined}
-                              />
-                            </label>
-                            <label style={labelStyle}>
-                              {t("pricing.effectiveToOverride")}
-                              <input
-                                type="datetime-local"
-                                value={publishRuleForm.effectiveTo}
-                                onChange={(event) => {
-                                  setPublishRuleFormError(null);
-                                  setPublishRuleForm((current) => ({
-                                    ...current,
-                                    effectiveTo: event.target.value,
-                                  }));
-                                }}
-                                style={inputStyle}
-                                min={publishRuleForm.effectiveFrom || undefined}
-                              />
-                            </label>
-                            <p style={{ ...subcopyStyle, margin: 0 }}>
-                              {t("pricing.leaveBlank")}
-                            </p>
-                            <div style={actionsStyle}>
-                              <button
-                                className="admin-btn admin-btn--secondary"
-                                type="button"
-                                onClick={closePublishRuleForm}
-                                disabled={publishingRuleId === rule.ruleId}
-                              >
-                                {t("common.cancel")}
-                              </button>
-                              <button
-                                className="admin-btn admin-btn--primary"
-                                type="button"
-                                onClick={() =>
-                                  void handlePublishRule(rule.ruleId)
-                                }
-                                disabled={publishingRuleId === rule.ruleId}
-                              >
-                                {publishingRuleId === rule.ruleId
-                                  ? t("pricing.publishing")
-                                  : t("pricing.confirmPublish")}
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <span style={{ color: "#6b7280", fontSize: 12 }}>
-                        {t("common.immutableHistory")}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={9}>{t("pricing.noRules")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+          {feePlanRows.length > 0 ? (
+            <CanvasTable
+              theme={th}
+              columns={feePlanColumns}
+              rows={feePlanRows}
+            />
+          ) : (
+            <p style={helperTextStyle}>{t("pricing.noPlans")}</p>
+          )}
+        </CanvasCard>
       </div>
     </div>
   );
 }
-
-const formGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: 12,
-  marginBottom: 16,
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 4,
-  fontSize: 13,
-  fontWeight: 500,
-};
-
-const subcopyStyle: React.CSSProperties = {
-  color: "#6b7280",
-  fontSize: 12,
-};
-
-const actionsStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.75rem 0.85rem",
-  borderRadius: 12,
-  border: "1px solid #d1d5db",
-  background: "#fff",
-  fontSize: 14,
-};

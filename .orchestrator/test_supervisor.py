@@ -44,6 +44,8 @@ class CommandActivityLogSummaryTests(unittest.TestCase):
 
         self.assertEqual(summary["args_preview"], ["agent", "run", "--other", "value"])
         self.assertEqual(summary["prompt_chars"], len(prompt))
+
+
 class DetectWorkerFailureTests(unittest.TestCase):
     def _worker_for_log(self, content: str) -> dict[str, str]:
         handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
@@ -1047,6 +1049,7 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertTrue(changed)
         queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
         self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
+
     def test_prune_completed_dispatch_pauses_removes_done_task_entries(self) -> None:
         state = {
             "dispatch_pauses": [
@@ -2589,8 +2592,8 @@ class PollWorkersRecoveryTests(unittest.TestCase):
                 task_map,
                 state=state,
                 active_statuses={"running"},
-                )
             )
+        )
 
     def test_chair_guarded_higher_priority_task_does_not_supersede_full_lane(self) -> None:
         config = {
@@ -2697,6 +2700,7 @@ class PollWorkersRecoveryTests(unittest.TestCase):
             loads = supervisor.agent_dispatch_loads(config, state, {"running"})
 
         self.assertEqual(loads, {"Codex2": [2, 1]})
+
     def test_dead_worker_for_open_task_is_marked_failed_not_completed(self) -> None:
         config = {
             "schema": {
@@ -2975,6 +2979,74 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         worker = state["workers"]["run-1"]
         self.assertEqual(worker["status"], "failed")
         self.assertEqual(worker["last_error"], "Worker exited before the task reached a terminal status.")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
+
+    def test_dead_worker_generic_exit_rehydrates_auth_failure_from_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "codex2.log"
+            log_path.write_text('error: refresh_token_reused\n', encoding="utf-8")
+            config = {
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "supervisor": {"stall_after_seconds": 300},
+                "ready_dispatcher": {},
+                "providers": {},
+                "agents": {
+                    "claude": {"id": "claude", "display_name": "Claude"},
+                    "codex2": {"id": "codex2", "display_name": "Codex2", "provider": "codex2"},
+                },
+            }
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "provider_pauses": {},
+                "quota_paused_agents": {},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "EX-010",
+                        "provider": "codex2",
+                        "agent_id": "codex2",
+                        "status": "running",
+                        "queue_event_id": "evt-1",
+                        "pid": 999999,
+                        "log_path": str(log_path),
+                        "last_event_at": "2026-05-20T04:50:59Z",
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "EX-010", "status": "in_progress", "owner": "Codex2", "reviewer": "Claude"}]}
+            real_detect = supervisor.detect_worker_failure_signal
+            calls = {"count": 0}
+
+            def flaky_detect(worker: dict[str, object]) -> supervisor.WorkerFailureSignal | None:
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return None
+                return real_detect(worker)  # type: ignore[arg-type]
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+                mock.patch.object(supervisor, "detect_worker_failure_signal", side_effect=flaky_detect),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "failed")
+        self.assertEqual(worker["last_error_kind"], "auth")
+        self.assertIn("refresh_token_reused", worker["last_error"])
+        self.assertEqual(state["provider_pauses"]["codex2"]["kind"], "auth")
+        self.assertIn("refresh_token_reused", state["provider_pauses"]["codex2"]["reason"])
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
 

@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import permission_broker
-from provider_permissions import ROOT, _copilot_auth_ready, _copilot_plaintext_token, _verified_claude_hooks, _verified_claude_policy
+from provider_permissions import (
+    ROOT,
+    _codex_auth_ready,
+    _copilot_auth_ready,
+    _copilot_plaintext_token,
+    _verified_claude_hooks,
+    _verified_claude_policy,
+    provider_capabilities,
+)
 
 
 class ProviderPermissionsTest(unittest.TestCase):
@@ -241,6 +250,76 @@ class ProviderPermissionsTest(unittest.TestCase):
             )
             with patch.dict(os.environ, {"COPILOT_CONFIG_DIR": tmp}, clear=False):
                 self.assertTrue(_copilot_auth_ready(None))
+
+    def test_codex_auth_ready_checks_login_status(self) -> None:
+        logged_in = subprocess.CompletedProcess(["codex", "login", "status"], 0, "Logged in using ChatGPT\n", "")
+        logged_out = subprocess.CompletedProcess(["codex", "login", "status"], 1, "Not logged in\n", "")
+
+        with patch("provider_permissions.run_command", return_value=logged_in):
+            self.assertTrue(_codex_auth_ready("/usr/bin/codex"))
+
+        with patch("provider_permissions.run_command", return_value=logged_out):
+            self.assertFalse(_codex_auth_ready("/usr/bin/codex"))
+
+    def test_provider_capabilities_reports_custom_codex_lane_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            status_file = tmp_path / "ai-status.json"
+            activity_log = tmp_path / "ai-activity-log.jsonl"
+            current_work = tmp_path / "current-work.md"
+            dashboard = tmp_path / "docs-site" / "index.html"
+            claude_mcp_config = tmp_path / "claude-approval-broker.mcp.json"
+            for path in [status_file, activity_log, current_work, dashboard, claude_mcp_config]:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("", encoding="utf-8")
+            codex2_home = tmp_path / "codex2-home"
+            codex2_home.mkdir()
+            (codex2_home / "auth.json").write_text("{}", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_file),
+                    "activity_log": str(activity_log),
+                    "current_work": str(current_work),
+                    "dashboard": str(dashboard),
+                    "claude_mcp_config": str(claude_mcp_config),
+                },
+                "agents": {},
+                "providers": {
+                    "codex": {"codex": {}},
+                    "codex2": {
+                        "delivery_mode": "codex",
+                        "codex": {
+                            "cli": "codex",
+                            "config_home": str(codex2_home),
+                            "ask_for_approval": "never",
+                            "sandbox_mode": "workspace-write",
+                            "dangerously_bypass": True,
+                        },
+                    },
+                },
+            }
+            seen_homes: list[str | None] = []
+
+            def fake_command_exists(name: str, **_: object) -> str | None:
+                return "/usr/bin/codex" if name == "codex" else None
+
+            def fake_run_command(cmd: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+                if cmd == ["/usr/bin/codex", "login", "status"]:
+                    seen_homes.append((env or {}).get("CODEX_HOME"))
+                    return subprocess.CompletedProcess(cmd, 0, "Logged in using ChatGPT\n", "")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+
+            with (
+                patch("provider_permissions.command_exists", side_effect=fake_command_exists),
+                patch("provider_permissions.run_command", side_effect=fake_run_command),
+            ):
+                report = provider_capabilities(config)
+
+        codex2 = report["providers"]["codex2"]
+        self.assertTrue(codex2["auth_ready"])
+        self.assertEqual(codex2["paths"]["resolved_codex_home"], str(codex2_home))
+        self.assertEqual(codex2["paths"]["auth_json"], str(codex2_home / "auth.json"))
+        self.assertIn(str(codex2_home), seen_homes)
 
 
 if __name__ == "__main__":

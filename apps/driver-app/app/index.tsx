@@ -22,12 +22,10 @@ import {
   Banner,
   Btn,
   Card,
-  DL,
   KPI,
   PageHeader,
   Pill,
   Shell,
-  Table,
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
 import {
@@ -48,8 +46,7 @@ import {
   getCurrencyLabel,
   sumMoneyAmounts,
 } from "@/lib/money";
-import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
-import { driverForwardedTaskStatusLabels, driverStrings } from "@/lib/strings";
+import { driverStrings } from "@/lib/strings";
 
 type WorkspaceRoute =
   | "/jobs"
@@ -87,19 +84,10 @@ type QuickTileTone = "accent" | "danger";
 type PlatformWorkspaceRow = {
   code: string;
   name: string;
-  detail: string;
-  status: string;
-  lastSync: string;
+  summary: string;
   tone: CanvasTone;
-};
-
-type TaskSnapshotRow = {
-  taskId: string;
-  platform: string;
-  updated: string;
-  status: string;
-  tone: CanvasTone;
-  owned: boolean;
+  enabled: boolean;
+  forwarded: boolean;
 };
 
 const THEME = driverCanvasTheme;
@@ -220,65 +208,6 @@ function getPlatformTone(record: PlatformPresenceRecord): CanvasTone {
   }
 
   return "neutral";
-}
-
-function getPlatformStatusLabel(record: PlatformPresenceRecord) {
-  if (record.reauthRequired) {
-    return "需授權";
-  }
-
-  if (record.eligibility === "ineligible") {
-    return "不可接單";
-  }
-
-  if (record.status === "online") {
-    return "上線";
-  }
-
-  if (record.eligibility === "pending") {
-    return "待審核";
-  }
-
-  return "離線";
-}
-
-function getTaskTone(task: UnifiedDriverTaskView): CanvasTone {
-  if (hasUnifiedTaskSyncIssue(task)) {
-    return "danger";
-  }
-
-  switch (task.driverActionState) {
-    case "action_required":
-      return "warn";
-    case "awaiting_platform":
-      return "info";
-    case "in_progress":
-      return "success";
-    case "completed":
-      return "neutral";
-    default:
-      return "neutral";
-  }
-}
-
-function formatForwardedStatus(status: string | null) {
-  if (!status) {
-    return null;
-  }
-
-  const key = status as keyof typeof driverForwardedTaskStatusLabels;
-  return driverForwardedTaskStatusLabels[key] ?? status;
-}
-
-function formatWorkspaceTaskStatus(task: UnifiedDriverTaskView) {
-  if (!isOwnedUnifiedTask(task)) {
-    return (
-      formatForwardedStatus(task.nativeStatus) ??
-      formatDriverTaskStatusLabel(String(task.localStatus))
-    );
-  }
-
-  return formatDriverTaskStatusLabel(String(task.localStatus));
 }
 
 function formatTaskHeadline(task: UnifiedDriverTaskView) {
@@ -424,9 +353,67 @@ function HeaderAlertButton({
   );
 }
 
+function getToneAccent(tone: Exclude<CanvasTone, "neutral">) {
+  switch (tone) {
+    case "danger":
+      return {
+        fg: THEME.danger,
+        bg: THEME.dangerBg,
+        border: THEME.dangerBorder,
+      };
+    case "warn":
+      return {
+        fg: THEME.warn,
+        bg: THEME.warnBg,
+        border: THEME.warnBorder,
+      };
+    case "info":
+    default:
+      return {
+        fg: THEME.info,
+        bg: THEME.infoBg,
+        border: THEME.infoBorder,
+      };
+  }
+}
+
+function HeroActionButton({
+  label,
+  variant,
+  onPress,
+}: {
+  label: string;
+  variant: "primary" | "ghost";
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.heroButton,
+        variant === "primary"
+          ? styles.heroButtonPrimary
+          : styles.heroButtonSecondary,
+        pressed ? styles.tilePressed : null,
+      ]}
+    >
+      <Text
+        style={[
+          styles.heroButtonLabel,
+          variant === "primary"
+            ? styles.heroButtonLabelPrimary
+            : styles.heroButtonLabelSecondary,
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function HeroCard({
-  badge,
-  badgeTone,
   title,
   detail,
   meta,
@@ -435,8 +422,6 @@ function HeroCard({
   onPrimaryPress,
   onSecondaryPress,
 }: {
-  badge: string;
-  badgeTone: CanvasTone;
   title: string;
   detail: string;
   meta: string;
@@ -450,45 +435,110 @@ function HeroCard({
       <View style={styles.heroSurface}>
         <View style={styles.heroGlowLarge} />
         <View style={styles.heroGlowSmall} />
-        <View style={styles.heroHeader}>
+        <View style={styles.heroEyebrowRow}>
+          <View style={styles.heroEyebrowDot} />
           <Text style={styles.heroEyebrow}>
             {driverStrings.onboarding.heroEyebrow}
           </Text>
-          <Pill theme={THEME} tone={badgeTone} dot>
-            {badge}
-          </Pill>
         </View>
         <Text style={styles.heroTitle}>{title}</Text>
         <Text style={styles.heroDetail}>{detail}</Text>
         <Text style={styles.heroMeta}>{meta}</Text>
         <View style={styles.heroActionRow}>
-          <Btn
-            theme={THEME}
+          <HeroActionButton
+            label={primaryLabel}
             variant="primary"
-            size="md"
             onPress={onPrimaryPress}
-          >
-            {primaryLabel}
-          </Btn>
-          <Btn
-            theme={THEME}
-            variant="secondary"
-            size="md"
+          />
+          <HeroActionButton
+            label={secondaryLabel}
+            variant="ghost"
             onPress={onSecondaryPress}
-          >
-            {secondaryLabel}
-          </Btn>
+          />
         </View>
       </View>
     </Card>
   );
 }
 
-function PlatformTile({
+function PrimaryAlertCard({
+  item,
+  onPress,
+}: {
+  item: UrgentItem;
+  onPress: () => void;
+}) {
+  const accent = getToneAccent(item.tone);
+
+  return (
+    <Card
+      theme={THEME}
+      padding={0}
+      style={[
+        styles.alertCard,
+        {
+          backgroundColor: accent.bg,
+          borderColor: accent.border,
+        },
+      ]}
+    >
+      <View style={styles.alertBodyRow}>
+        <View
+          style={[
+            styles.alertIconWrap,
+            { backgroundColor: `${accent.fg}25` },
+          ]}
+        >
+          <Ionicons name={item.iconName} size={16} color={accent.fg} />
+        </View>
+        <View style={styles.alertCopy}>
+          <Text style={[styles.alertTitle, { color: accent.fg }]}>
+            {item.title}
+          </Text>
+          <Text style={styles.alertDescription}>{item.body}</Text>
+        </View>
+        <Btn
+          theme={THEME}
+          variant="primary"
+          size="sm"
+          onPress={onPress}
+          style={{
+            backgroundColor: accent.fg,
+            borderColor: accent.fg,
+          }}
+        >
+          {item.actionLabel}
+        </Btn>
+      </View>
+    </Card>
+  );
+}
+
+function PlatformStatusSwitch({ enabled }: { enabled: boolean }) {
+  return (
+    <View
+      style={[
+        styles.platformSwitchTrack,
+        enabled ? styles.platformSwitchTrackOn : styles.platformSwitchTrackOff,
+      ]}
+    >
+      <View
+        style={[
+          styles.platformSwitchThumb,
+          enabled ? styles.platformSwitchThumbOn : styles.platformSwitchThumbOff,
+        ]}
+      />
+    </View>
+  );
+}
+
+function PlatformPresenceRow({
   row,
+  isLast,
   onPress,
 }: {
   row: PlatformWorkspaceRow;
+  isLast: boolean;
   onPress: () => void;
 }) {
   return (
@@ -496,34 +546,46 @@ function PlatformTile({
       accessibilityRole="button"
       accessibilityLabel={`${row.name} 平台狀態`}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.platformTileWrap,
-        pressed ? styles.tilePressed : null,
-      ]}
+      style={({ pressed }) => [pressed ? styles.tilePressed : null]}
     >
-      <Card theme={THEME} padding={12} style={styles.platformTileCard}>
-        <View style={styles.platformTileTopRow}>
-          <Text
-            style={[
-              styles.platformTileCode,
-              row.tone === "success"
-                ? styles.platformCodeSuccess
-                : row.tone === "warn"
-                  ? styles.platformCodeWarn
-                  : row.tone === "danger"
-                    ? styles.platformCodeDanger
-                    : styles.platformCodeNeutral,
-            ]}
-          >
-            {row.code}
-          </Text>
-          <Pill theme={THEME} tone={row.tone} dot>
-            {row.status}
-          </Pill>
+      <View
+        style={[
+          styles.platformRow,
+          !isLast ? styles.platformRowBorder : null,
+        ]}
+      >
+        <View style={styles.platformRowCopy}>
+          <Text style={styles.platformRowName}>{row.name}</Text>
+          <Text style={styles.platformRowSummary}>{row.summary}</Text>
         </View>
-        <Text style={styles.platformTileName}>{row.name}</Text>
-        <Text style={styles.platformTileDetail}>{row.detail}</Text>
-      </Card>
+        <View style={styles.platformRowRight}>
+          {row.forwarded ? (
+            <Pill theme={THEME} tone="info">
+              外部
+            </Pill>
+          ) : null}
+          <PlatformStatusSwitch enabled={row.enabled} />
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+function SectionLink({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [pressed ? styles.tilePressed : null]}
+    >
+      <Text style={styles.sectionLink}>{label}</Text>
     </Pressable>
   );
 }
@@ -554,16 +616,17 @@ function QuickLinkTile({
       ]}
     >
       <Card theme={THEME} padding={14}>
-        <View style={styles.quickTileTopRow}>
+        <View style={styles.quickTileRow}>
           <View
             style={[styles.quickTileIconWrap, { backgroundColor: accentBg }]}
           >
             <Ionicons name={iconName} size={17} color={accentColor} />
           </View>
-          <Ionicons name="chevron-forward" size={15} color={THEME.textMuted} />
+          <View style={styles.quickTileCopy}>
+            <Text style={styles.quickTileLabel}>{label}</Text>
+            <Text style={styles.quickTileHelper}>{helper}</Text>
+          </View>
         </View>
-        <Text style={styles.quickTileLabel}>{label}</Text>
-        <Text style={styles.quickTileHelper}>{helper}</Text>
       </Card>
     </Pressable>
   );
@@ -659,38 +722,20 @@ export default function WorkspaceIndex() {
     [externalPresences],
   );
 
-  const shiftStatus = useMemo(() => {
+  const headerStatusLabel = useMemo(() => {
     if (!workspace.shiftFeatureEnabled) {
-      return {
-        tone: "neutral" as CanvasTone,
-        pillLabel: "班次功能未啟用",
-        summary: "排班功能關閉，本機只顯示多平台狀態。",
-      };
+      return "班次功能未啟用";
     }
 
     if (workspace.shiftLoadError) {
-      return {
-        tone: "warn" as CanvasTone,
-        pillLabel: "班次資料待確認",
-        summary: "班次同步延遲，請前往班次頁重新整理。",
-      };
+      return "班次同步延遲";
     }
 
     if (isDriverOnShift) {
-      return {
-        tone: "success" as CanvasTone,
-        pillLabel: `上班中 · ${formatClockLabel(workspace.activeShift?.clockedInAt)}`,
-        summary: `${formatShiftDuration(workspace.activeShift)} · ${
-          workspace.activeShift?.vehicleId ?? "待指派車輛"
-        }`,
-      };
+      return `上班中 · ${formatClockLabel(workspace.activeShift?.clockedInAt)} 起`;
     }
 
-    return {
-      tone: "warn" as CanvasTone,
-      pillLabel: "尚未上班",
-      summary: "先完成上班打卡，自營派單才會切到上線狀態。",
-    };
+    return "尚未上班";
   }, [
     isDriverOnShift,
     workspace.activeShift,
@@ -702,12 +747,12 @@ export default function WorkspaceIndex() {
     const ownedRow: PlatformWorkspaceRow = {
       code: "DRTS",
       name: "自營派單",
-      detail: shiftStatus.summary,
-      status: isDriverOnShift ? "上線" : "離線",
-      lastSync: isDriverOnShift
-        ? formatClockLabel(workspace.activeShift?.clockedInAt)
-        : driverStrings.common.notUpdatedYet,
+      summary: isDriverOnShift
+        ? `已上線 · ${formatClockLabel(workspace.activeShift?.clockedInAt)} 起`
+        : "離線 · 尚未上班",
       tone: isDriverOnShift ? "success" : "neutral",
+      enabled: isDriverOnShift,
+      forwarded: false,
     };
 
     const externalRows = externalPresences
@@ -721,16 +766,16 @@ export default function WorkspaceIndex() {
           name:
             PLATFORM_CODE_REGISTRY[record.platformCode]?.displayName ??
             record.platformCode,
-          detail: record.reauthRequired
-            ? "Token 已過期，需重新授權"
+          summary: record.reauthRequired
+            ? "需重新授權"
             : record.eligibility === "pending"
-              ? "等待平台完成資格審核"
-              : record.eligibility === "ineligible"
-                ? "平台資格異常，暫停接單"
-                : "平台連線狀態正常",
-          status: getPlatformStatusLabel(record),
-          lastSync: formatCompactDateTime(latestAt ?? record.updatedAt),
+              ? "待審核"
+              : `${
+                  record.status === "online" ? "已上線" : "離線"
+                } · ${formatClockLabel(latestAt ?? record.updatedAt)}`,
           tone: getPlatformTone(record),
+          enabled: record.status === "online" && !record.reauthRequired,
+          forwarded: true,
         };
       })
       .sort((left, right) => {
@@ -759,12 +804,11 @@ export default function WorkspaceIndex() {
   }, [
     externalPresences,
     isDriverOnShift,
-    shiftStatus.summary,
     workspace.activeShift,
   ]);
 
   const onlinePlatformCount = useMemo(
-    () => platformRows.filter((row) => row.tone === "success").length,
+    () => platformRows.filter((row) => row.enabled).length,
     [platformRows],
   );
 
@@ -863,6 +907,26 @@ export default function WorkspaceIndex() {
     workspace.shiftFeatureEnabled,
     workspace.shiftLoadError,
   ]);
+  const primaryAlert = useMemo<UrgentItem | null>(() => {
+    if (reauthPlatforms.length > 0) {
+      const platform = reauthPlatforms[0];
+      const name =
+        PLATFORM_CODE_REGISTRY[platform.platformCode]?.displayName ??
+        platform.platformCode;
+
+      return {
+        key: `primary-reauth-${platform.platformCode}`,
+        tone: "warn",
+        title: `${name} 需重新授權`,
+        body: "Token 已過期，無法接單",
+        actionLabel: "處理",
+        route: "/platform-presence",
+        iconName: "lock-closed-outline",
+      };
+    }
+
+    return urgentItems[0] ?? null;
+  }, [reauthPlatforms, urgentItems]);
 
   const heroAction = useMemo(() => {
     if (taskSummary.activeTripTask) {
@@ -872,15 +936,13 @@ export default function WorkspaceIndex() {
         : "車資待確認";
 
       return {
-        badge: task.platformDisplayName,
-        badgeTone: getTaskTone(task),
         title: `繼續行程 · ${formatTaskHeadline(task)}`,
         detail: formatTaskRouteSummary(task),
         meta: `${task.taskId} · ${fareLabel} · ${formatCompactDateTime(task.updatedAt)}`,
         primaryLabel: "前往行程",
         primaryRoute: "/trip" as WorkspaceRoute,
-        secondaryLabel: "查看任務",
-        secondaryRoute: "/jobs" as WorkspaceRoute,
+        secondaryLabel: "查看路線",
+        secondaryRoute: "/trip" as WorkspaceRoute,
       };
     }
 
@@ -888,29 +950,25 @@ export default function WorkspaceIndex() {
       const task = taskSummary.actionRequiredTask;
 
       return {
-        badge: "待司機處理",
-        badgeTone: "warn" as CanvasTone,
         title: `優先回應 · ${formatTaskHeadline(task)}`,
-        detail: `${task.platformDisplayName} · ${formatTaskRouteSummary(task)}`,
-        meta: `${task.taskId} · ${formatCompactDateTime(task.updatedAt)}`,
+        detail: formatTaskRouteSummary(task),
+        meta: `${task.taskId} · ${task.platformDisplayName} · ${formatCompactDateTime(task.updatedAt)}`,
         primaryLabel: "打開任務",
         primaryRoute: "/jobs" as WorkspaceRoute,
-        secondaryLabel: "平台中心",
+        secondaryLabel: "查看平台",
         secondaryRoute: "/platform-presence" as WorkspaceRoute,
       };
     }
 
     if (reauthPlatforms.length > 0) {
       return {
-        badge: "需重新授權",
-        badgeTone: "warn" as CanvasTone,
         title: "處理平台重新授權",
-        detail: `${reauthPlatforms.length} 個平台 Token 失效，接單權限暫停。`,
+        detail: `${reauthPlatforms.length} 個平台 Token 已失效，接單權限暫停。`,
         meta: "完成重新授權後，工作台會恢復平台接單狀態。",
         primaryLabel: "平台中心",
         primaryRoute: "/platform-presence" as WorkspaceRoute,
-        secondaryLabel: "班次",
-        secondaryRoute: "/shift" as WorkspaceRoute,
+        secondaryLabel: "查看路線",
+        secondaryRoute: "/jobs" as WorkspaceRoute,
       };
     }
 
@@ -920,21 +978,17 @@ export default function WorkspaceIndex() {
       !isDriverOnShift
     ) {
       return {
-        badge: "未上班",
-        badgeTone: "warn" as CanvasTone,
         title: "開始班次",
         detail: "先完成上班打卡，自營派單才會切換成上線狀態。",
         meta: "打卡後可同步檢查平台健康、班次與派單就緒度。",
         primaryLabel: "前往班次",
         primaryRoute: "/shift" as WorkspaceRoute,
-        secondaryLabel: "平台中心",
+        secondaryLabel: "查看平台",
         secondaryRoute: "/platform-presence" as WorkspaceRoute,
       };
     }
 
     return {
-      badge: "待命中",
-      badgeTone: "success" as CanvasTone,
       title: "檢查多平台就緒狀態",
       detail: "工作台已待命，可檢查平台健康、收入與班次摘要。",
       meta: "保持平台在線與班次正常，才能穩定接到自營與外部派單。",
@@ -952,53 +1006,6 @@ export default function WorkspaceIndex() {
     workspace.shiftFeatureEnabled,
     workspace.shiftLoadError,
   ]);
-
-  const shiftSummaryItems = useMemo(
-    () => [
-      {
-        label: "司機",
-        value: getDriverId(),
-        mono: true,
-      },
-      {
-        label: "車輛",
-        value: workspace.activeShift?.vehicleId ?? "待指派",
-        mono: true,
-      },
-      {
-        label: "上班時間",
-        value: workspace.activeShift
-          ? formatClockLabel(workspace.activeShift.clockedInAt)
-          : "未打卡",
-      },
-      {
-        label: "值勤時長",
-        value: formatShiftDuration(workspace.activeShift),
-      },
-      {
-        label: "起點",
-        value: workspace.activeShift?.startLocation ?? "待回填",
-      },
-      {
-        label: "班次備註",
-        value: workspace.activeShift?.notes ?? "目前無值勤備註",
-      },
-    ],
-    [workspace.activeShift],
-  );
-
-  const taskSnapshotRows = useMemo(
-    () =>
-      taskSummary.orderedTasks.slice(0, 4).map<TaskSnapshotRow>((task) => ({
-        taskId: task.taskId,
-        platform: task.platformDisplayName,
-        updated: formatClockLabel(task.updatedAt),
-        status: formatWorkspaceTaskStatus(task),
-        tone: getTaskTone(task),
-        owned: isOwnedUnifiedTask(task),
-      })),
-    [taskSummary.orderedTasks],
-  );
 
   const notificationCount = urgentItems.length + taskSummary.urgentCount;
 
@@ -1026,16 +1033,12 @@ export default function WorkspaceIndex() {
             <Text style={styles.headerEyebrow}>
               {driverStrings.onboarding.workspaceGreetingEyebrow}
             </Text>
-            <Text style={styles.headerTitle}>
-              {driverStrings.onboarding.workspaceGreetingTitle}
-            </Text>
           </View>
         }
         subtitle={
           <View style={styles.headerMetaRow}>
-            <Pill theme={THEME} tone={shiftStatus.tone} dot>
-              {shiftStatus.pillLabel}
-            </Pill>
+            <View style={styles.headerStatusDot} />
+            <Text style={styles.headerStatusText}>{headerStatusLabel}</Text>
             <Text style={styles.headerMetaText}>{getDriverId()}</Text>
           </View>
         }
@@ -1094,8 +1097,6 @@ export default function WorkspaceIndex() {
       ) : null}
 
       <HeroCard
-        badge={heroAction.badge}
-        badgeTone={heroAction.badgeTone}
         title={heroAction.title}
         detail={heroAction.detail}
         meta={heroAction.meta}
@@ -1106,257 +1107,75 @@ export default function WorkspaceIndex() {
       />
 
       <View style={styles.kpiRow}>
-        <KPI
-          theme={THEME}
-          label="待處理"
-          value={String(taskSummary.pendingCount)}
-          sub={`${taskSummary.urgentCount} 件需回應`}
-          hint={
-            taskSummary.actionRequiredTask?.taskId ??
-            taskSummary.activeTripTask?.taskId ??
-            "工作台正常"
-          }
-        />
-        <KPI
-          theme={THEME}
-          label="已上線"
-          value={String(onlinePlatformCount)}
-          sub={`/ ${platformRows.length} 平台`}
-          hint={
-            reauthPlatforms.length > 0
-              ? `${reauthPlatforms.length} 需授權`
-              : "全部平台可檢查"
-          }
-        />
-        <KPI
-          theme={THEME}
-          label="今日淨收"
-          value={formatAmountNumber(todayNetSummary.amount, {
-            fractionDigits: 0,
-          })}
-          sub={getCurrencyLabel(todayNetSummary.amount.currency) || "NT$"}
-          hint={`${todayNetSummary.count} 筆已完成`}
-        />
+        <View style={styles.kpiCell}>
+          <KPI
+            theme={THEME}
+            label={driverStrings.onboarding.kpis.pending}
+            value={String(taskSummary.pendingCount)}
+            sub={`${taskSummary.urgentCount} 件需回應`}
+          />
+        </View>
+        <View style={styles.kpiCell}>
+          <KPI
+            theme={THEME}
+            label={driverStrings.onboarding.kpis.online}
+            value={String(onlinePlatformCount)}
+            sub={`/ ${platformRows.length}`}
+          />
+        </View>
+        <View style={styles.kpiCell}>
+          <KPI
+            theme={THEME}
+            label="今日淨收"
+            value={formatAmountNumber(todayNetSummary.amount, {
+              fractionDigits: 0,
+            })}
+            sub={getCurrencyLabel(todayNetSummary.amount.currency) || "NT$"}
+          />
+        </View>
       </View>
 
-      <Card
-        theme={THEME}
-        title="班次狀態"
-        subtitle={shiftStatus.summary}
-        actions={
-          <Pill theme={THEME} tone={shiftStatus.tone} dot>
-            {isDriverOnShift ? "上班中" : "未上班"}
-          </Pill>
-        }
-      >
-        <DL theme={THEME} cols={2} items={shiftSummaryItems} />
-      </Card>
+      {primaryAlert ? (
+        <PrimaryAlertCard
+          item={primaryAlert}
+          onPress={navigate(primaryAlert.route)}
+        />
+      ) : null}
 
-      <Card
-        theme={THEME}
-        title="今日需處理"
-        subtitle={`${urgentItems.length} 件等待回應`}
-        actions={
-          <Btn
-            theme={THEME}
-            variant="ghost"
-            size="sm"
-            onPress={navigate("/jobs")}
-          >
-            查看全部
-          </Btn>
-        }
-      >
-        <View style={styles.bannerStack}>
-          {urgentItems.length > 0 ? (
-            urgentItems.map((item) => (
-              <Banner
-                key={item.key}
-                theme={THEME}
-                tone={item.tone}
-                title={item.title}
-                body={item.body}
-                icon={
-                  <Ionicons
-                    name={item.iconName}
-                    size={15}
-                    color={
-                      item.tone === "danger"
-                        ? THEME.danger
-                        : item.tone === "warn"
-                          ? THEME.warn
-                          : THEME.info
-                    }
-                  />
-                }
-                actions={
-                  <Btn
-                    theme={THEME}
-                    variant="secondary"
-                    size="sm"
-                    onPress={navigate(item.route)}
-                  >
-                    {item.actionLabel}
-                  </Btn>
-                }
-              />
-            ))
-          ) : (
-            <Banner
-              theme={THEME}
-              tone="success"
-              title="今日沒有緊急待辦"
-              body="班次、平台與任務同步正常，維持上線即可等待新派單。"
-            />
-          )}
-        </View>
-      </Card>
-
-      <Card
-        theme={THEME}
-        title="平台連線"
-        subtitle={`${onlinePlatformCount}/${platformRows.length} 已上線`}
-        actions={
-          <Btn
-            theme={THEME}
-            variant="ghost"
-            size="sm"
+      <View style={styles.platformSection}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>
+            {driverStrings.onboarding.platformSectionEyebrow}
+          </Text>
+          <SectionLink
+            label={driverStrings.onboarding.seeAll}
             onPress={navigate("/platform-presence")}
-          >
-            平台中心
-          </Btn>
-        }
-      >
-        <View style={styles.platformTileGrid}>
-          {platformRows.slice(0, 3).map((row) => (
-            <PlatformTile
-              key={row.code}
+          />
+        </View>
+        <Card theme={THEME} padding={0}>
+          {platformRows.map((row, index) => (
+            <PlatformPresenceRow
+              key={`${row.code}-${index}`}
               row={row}
+              isLast={index === platformRows.length - 1}
               onPress={navigate("/platform-presence")}
             />
           ))}
-        </View>
-
-        <Table
-          theme={THEME}
-          columns={[
-            {
-              h: "平台",
-              w: 112,
-              mono: true,
-              r: (row: PlatformWorkspaceRow) => (
-                <View style={styles.tablePlatformCell}>
-                  <Text style={styles.tablePlatformCode}>{row.code}</Text>
-                  <Text style={styles.tablePlatformName}>{row.name}</Text>
-                </View>
-              ),
-            },
-            {
-              h: "狀態",
-              w: 88,
-              r: (row: PlatformWorkspaceRow) => (
-                <Pill theme={THEME} tone={row.tone} dot>
-                  {row.status}
-                </Pill>
-              ),
-            },
-            {
-              h: "最近同步",
-              k: "lastSync",
-              w: 118,
-              mono: true,
-            },
-            {
-              h: "說明",
-              k: "detail",
-              w: 176,
-            },
-          ]}
-          rows={platformRows}
-        />
-      </Card>
-
-      <Card
-        theme={THEME}
-        title="今日任務快照"
-        subtitle="保留 canvas 的密集狀態列與 mono task code"
-        actions={
-          <Btn
-            theme={THEME}
-            variant="ghost"
-            size="sm"
-            onPress={navigate("/jobs")}
-          >
-            任務頁
-          </Btn>
-        }
-      >
-        {taskSnapshotRows.length > 0 ? (
-          <Table
-            theme={THEME}
-            columns={[
-              {
-                h: "任務",
-                w: 98,
-                mono: true,
-                r: (row: TaskSnapshotRow) => (
-                  <Text
-                    style={[
-                      styles.tableTaskCode,
-                      row.owned
-                        ? styles.tableTaskCodeOwned
-                        : styles.tableTaskCodeForwarded,
-                    ]}
-                  >
-                    {row.taskId}
-                  </Text>
-                ),
-              },
-              {
-                h: "平台",
-                k: "platform",
-                w: 106,
-              },
-              {
-                h: "狀態",
-                w: 94,
-                r: (row: TaskSnapshotRow) => (
-                  <Pill theme={THEME} tone={row.tone} dot>
-                    {row.status}
-                  </Pill>
-                ),
-              },
-              {
-                h: "更新",
-                k: "updated",
-                w: 72,
-                mono: true,
-              },
-            ]}
-            rows={taskSnapshotRows}
-          />
-        ) : (
-          <Banner
-            theme={THEME}
-            tone="info"
-            title="目前沒有可顯示任務"
-            body="前往任務頁重新整理，或等待派車台下發新工作。"
-          />
-        )}
-      </Card>
+        </Card>
+      </View>
 
       <View style={styles.quickTileGrid}>
         <QuickLinkTile
           iconName="briefcase-outline"
           label={driverStrings.onboarding.quickLinkLabels.jobs}
-          helper={`${taskSummary.pendingCount} 筆未完成`}
+          helper={`${taskSummary.pendingCount} 待處理`}
           tone="accent"
           onPress={navigate("/jobs")}
         />
         <QuickLinkTile
           iconName="cash-outline"
           label={driverStrings.onboarding.quickLinkLabels.earnings}
-          helper={`${getCurrencyLabel(todayNetSummary.amount.currency) || "NT$"} ${formatAmountNumber(
+          helper={`今日 ${getCurrencyLabel(todayNetSummary.amount.currency) || "NT$"} ${formatAmountNumber(
             todayNetSummary.amount,
             { fractionDigits: 0 },
           )}`}
@@ -1366,36 +1185,17 @@ export default function WorkspaceIndex() {
         <QuickLinkTile
           iconName="time-outline"
           label={driverStrings.onboarding.quickLinkLabels.shift}
-          helper={shiftStatus.pillLabel}
+          helper={formatShiftDuration(workspace.activeShift)}
           tone="accent"
           onPress={navigate("/shift")}
         />
         <QuickLinkTile
           iconName="alert-circle-outline"
-          label="SOS"
+          label={driverStrings.onboarding.footerActions.sos}
           helper="安全求援"
           tone="danger"
           onPress={navigate("/incident")}
         />
-      </View>
-
-      <View style={styles.footerRow}>
-        <Btn
-          theme={THEME}
-          variant="secondary"
-          size="sm"
-          onPress={() => setRefreshSeed((current) => current + 1)}
-        >
-          {loading ? "同步中…" : driverStrings.common.refresh}
-        </Btn>
-        <Btn
-          theme={THEME}
-          variant="secondary"
-          size="sm"
-          onPress={navigate("/settings")}
-        >
-          {driverStrings.onboarding.quickLinkLabels.settings}
-        </Btn>
       </View>
     </Shell>
   );
@@ -1403,8 +1203,8 @@ export default function WorkspaceIndex() {
 
 const styles = StyleSheet.create({
   shellContent: {
-    paddingBottom: 28,
-    gap: 14,
+    paddingBottom: 24,
+    gap: 12,
   },
   loadingShellContent: {
     flexGrow: 1,
@@ -1423,26 +1223,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   headerTitleStack: {
-    gap: 4,
+    gap: 2,
   },
   headerEyebrow: {
-    color: THEME.textMuted,
-    fontFamily: THEME.fontFamily,
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  headerTitle: {
     color: THEME.text,
     fontFamily: THEME.fontFamily,
-    fontSize: 28,
+    fontSize: 17,
     fontWeight: "700",
-    letterSpacing: -0.5,
+    letterSpacing: -0.2,
   },
   headerMetaRow: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
+  },
+  headerStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: THEME.success,
+  },
+  headerStatusText: {
+    color: THEME.textDim,
+    fontFamily: THEME.fontFamily,
+    fontSize: 12,
   },
   headerMetaText: {
     color: THEME.textDim,
@@ -1476,22 +1281,22 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   heroSurface: {
-    padding: 16,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
     borderRadius: 18,
-    backgroundColor: THEME.accentBg,
-    borderWidth: 1,
-    borderColor: THEME.accentBorder,
+    backgroundColor: THEME.accent,
     overflow: "hidden",
-    gap: 8,
+    gap: 6,
   },
   heroGlowLarge: {
     position: "absolute",
-    top: -36,
+    top: -30,
     right: -18,
-    width: 156,
-    height: 156,
-    borderRadius: 78,
-    backgroundColor: "rgba(169, 214, 255, 0.10)",
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "rgba(255,255,255,0.10)",
   },
   heroGlowSmall: {
     position: "absolute",
@@ -1500,24 +1305,29 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: "rgba(123, 192, 255, 0.10)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
-  heroHeader: {
+  heroEyebrowRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
+    gap: 6,
+  },
+  heroEyebrowDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#FFFFFF",
   },
   heroEyebrow: {
-    color: THEME.accentHi,
+    color: "rgba(255,255,255,0.85)",
     fontFamily: THEME.fontFamily,
     fontSize: 11,
     fontWeight: "700",
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
     textTransform: "uppercase",
   },
   heroTitle: {
-    color: THEME.text,
+    color: "#FFFFFF",
     fontFamily: THEME.fontFamily,
     fontSize: 22,
     fontWeight: "700",
@@ -1525,148 +1335,208 @@ const styles = StyleSheet.create({
     lineHeight: 28,
   },
   heroDetail: {
-    color: THEME.text,
+    color: "rgba(255,255,255,0.86)",
     fontFamily: THEME.fontFamily,
-    fontSize: 13.5,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 19,
   },
   heroMeta: {
-    color: THEME.textMuted,
+    color: "rgba(255,255,255,0.72)",
     fontFamily: THEME.monoFamily,
-    fontSize: 11.5,
-    lineHeight: 17,
+    fontSize: 11,
+    lineHeight: 16,
   },
   heroActionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
-    marginTop: 4,
+    marginTop: 8,
+  },
+  heroButton: {
+    minHeight: 34,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 104,
+  },
+  heroButtonPrimary: {
+    backgroundColor: "#FFFFFF",
+  },
+  heroButtonSecondary: {
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  heroButtonLabel: {
+    fontFamily: THEME.fontFamily,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  heroButtonLabelPrimary: {
+    color: THEME.accent,
+  },
+  heroButtonLabelSecondary: {
+    color: "#FFFFFF",
   },
   kpiRow: {
+    flexDirection: "row",
     gap: 8,
   },
-  bannerStack: {
+  kpiCell: {
+    flex: 1,
+    minWidth: 0,
+  },
+  alertCard: {
+    overflow: "hidden",
+  },
+  alertBodyRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  platformTileGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 14,
-  },
-  platformTileWrap: {
-    flexBasis: "31%",
-    flexGrow: 1,
-    minWidth: 96,
-  },
-  platformTileCard: {
-    minHeight: 120,
-  },
-  platformTileTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 6,
-    marginBottom: 8,
-  },
-  platformTileCode: {
-    fontFamily: THEME.monoFamily,
-    fontSize: 11.5,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  platformCodeSuccess: {
-    color: THEME.success,
-  },
-  platformCodeWarn: {
-    color: THEME.warn,
-  },
-  platformCodeDanger: {
-    color: THEME.danger,
-  },
-  platformCodeNeutral: {
-    color: THEME.accent,
-  },
-  platformTileName: {
-    color: THEME.text,
-    fontFamily: THEME.fontFamily,
-    fontSize: 12.5,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  platformTileDetail: {
-    color: THEME.textMuted,
-    fontFamily: THEME.fontFamily,
-    fontSize: 11.5,
-    lineHeight: 16,
-  },
-  tablePlatformCell: {
-    gap: 3,
-  },
-  tablePlatformCode: {
-    color: THEME.accent,
-    fontFamily: THEME.monoFamily,
-    fontSize: 11.5,
-    fontWeight: "700",
-    letterSpacing: 0.4,
-  },
-  tablePlatformName: {
-    color: THEME.text,
-    fontFamily: THEME.fontFamily,
-    fontSize: 11.5,
-  },
-  tableTaskCode: {
-    fontFamily: THEME.monoFamily,
-    fontSize: 11.5,
-    fontWeight: "700",
-    letterSpacing: 0.4,
-  },
-  tableTaskCodeOwned: {
-    color: THEME.accent,
-  },
-  tableTaskCodeForwarded: {
-    color: THEME.info,
-  },
-  quickTileGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  quickTileWrap: {
-    flexBasis: "48%",
-    flexGrow: 1,
-  },
-  quickTileTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  quickTileIconWrap: {
+  alertIconWrap: {
     width: 32,
     height: 32,
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },
+  alertCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  alertTitle: {
+    fontFamily: THEME.fontFamily,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  alertDescription: {
+    color: THEME.textMuted,
+    fontFamily: THEME.fontFamily,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  platformSection: {
+    gap: 8,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  sectionTitle: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  sectionLink: {
+    color: THEME.accent,
+    fontFamily: THEME.fontFamily,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  platformRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  platformRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: THEME.border,
+  },
+  platformRowCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  platformRowName: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  platformRowSummary: {
+    color: THEME.textMuted,
+    fontFamily: THEME.fontFamily,
+    fontSize: 11.5,
+    marginTop: 2,
+  },
+  platformRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  platformSwitchTrack: {
+    width: 34,
+    height: 20,
+    borderRadius: 999,
+    borderWidth: 1,
+    justifyContent: "center",
+    paddingHorizontal: 2,
+  },
+  platformSwitchTrackOn: {
+    backgroundColor: THEME.success,
+    borderColor: THEME.success,
+  },
+  platformSwitchTrackOff: {
+    backgroundColor: THEME.surfaceLo,
+    borderColor: THEME.border,
+  },
+  platformSwitchThumb: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#FFFFFF",
+  },
+  platformSwitchThumbOn: {
+    alignSelf: "flex-end",
+  },
+  platformSwitchThumbOff: {
+    alignSelf: "flex-start",
+  },
+  quickTileGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingBottom: 4,
+  },
+  quickTileWrap: {
+    flexBasis: "48%",
+    flexGrow: 1,
+  },
+  quickTileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  quickTileIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickTileCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
   quickTileLabel: {
     color: THEME.text,
     fontFamily: THEME.fontFamily,
     fontSize: 13,
     fontWeight: "700",
-    marginBottom: 4,
   },
   quickTileHelper: {
     color: THEME.textMuted,
     fontFamily: THEME.fontFamily,
     fontSize: 11.5,
     lineHeight: 16,
-  },
-  footerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 10,
-    marginTop: 4,
+    marginTop: 2,
   },
   tilePressed: {
     opacity: 0.88,

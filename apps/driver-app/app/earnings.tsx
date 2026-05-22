@@ -1,45 +1,44 @@
-import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import {
-  ActivityIndicator,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import type {
-  DriverPayoutStatus,
-  DriverStatementRecord,
-  MoneyAmount,
-  PlatformEarningsByPlatformResponse,
-  PlatformEarningsSummary,
+  PLATFORM_CODE_REGISTRY,
+  type DriverPayoutStatus,
+  type DriverStatementRecord,
+  type MoneyAmount,
+  type PlatformEarningsByPlatformResponse,
+  type PlatformEarningsItem,
+  type PlatformEarningsSummary,
 } from "@drts/contracts";
+
 import {
-  EarningsByPlatform,
+  Banner,
+  Btn,
+  Card,
+  PageHeader,
+  Pill,
+  Shell,
+  driverCanvasTheme,
+} from "@/components/canvas-primitives";
+import {
   isOwnedPlatformCode,
   isShadowOnlyPlatformCode,
 } from "@/components/earnings-by-platform";
-import {
-  ActionButton,
-  AuthorityBanner,
-  EmptyState,
-  ErrorBanner,
-  IconButton,
-  PageHeader,
-  SegmentedControl,
-  StatusChip,
-  Tokens,
-} from "@/components/ui";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
-import { driverEarningsPeriodOptions, driverStrings } from "@/lib/strings";
-import { formatMoney, getCurrencyLabel, sumMoneyAmounts } from "@/lib/money";
+import {
+  formatAmountNumber,
+  formatMoney,
+  formatSignedAmountNumber,
+  getCurrencyLabel,
+  sumMoneyAmounts,
+} from "@/lib/money";
 import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
+import { driverEarningsPeriodOptions, driverStrings } from "@/lib/strings";
 
 type PeriodKey = "today" | "week" | "month";
 
+const THEME = driverCanvasTheme;
 const PERIOD_OPTIONS = driverEarningsPeriodOptions;
-
 const DEFAULT_CURRENCY = "TWD";
 
 function toErrorMessage(error: unknown): string {
@@ -50,21 +49,9 @@ function toErrorMessage(error: unknown): string {
 }
 
 function sumPlatformAmounts(
-  items: Array<{
-    grossEarning: MoneyAmount;
-    serviceFee: MoneyAmount;
-    subsidy: MoneyAmount;
-    netAmount: MoneyAmount;
-    platformCode: string;
-  }>,
+  items: PlatformEarningsItem[],
   key: "grossEarning" | "serviceFee" | "subsidy" | "netAmount",
-  predicate: (item: {
-    grossEarning: MoneyAmount;
-    serviceFee: MoneyAmount;
-    subsidy: MoneyAmount;
-    netAmount: MoneyAmount;
-    platformCode: string;
-  }) => boolean = () => true,
+  predicate: (item: PlatformEarningsItem) => boolean = () => true,
   currency = DEFAULT_CURRENCY,
 ): MoneyAmount {
   return sumMoneyAmounts(
@@ -82,14 +69,11 @@ function sumStatementAmounts(
     statements[0]?.netAmount.currency ??
     statements[0]?.grossEarning.currency ??
     DEFAULT_CURRENCY;
+
   return sumMoneyAmounts(
     statements.filter(predicate).map((statement) => statement[key]),
     currency,
   );
-}
-
-function getStatementStatusVariant(status: DriverPayoutStatus) {
-  return status === "paid" ? ("success" as const) : ("warning" as const);
 }
 
 function getLatestStatementMonth(
@@ -106,52 +90,31 @@ function getLatestStatementMonth(
   return months[0] ?? null;
 }
 
-function filterStatementsForPeriod(
-  statements: DriverStatementRecord[],
-  period: PeriodKey,
-): DriverStatementRecord[] {
-  if (period !== "month") {
-    return [];
-  }
-
-  const latestMonth = getLatestStatementMonth(statements);
-  if (!latestMonth) {
-    return [];
-  }
-
-  return statements.filter(
-    (statement) => statement.periodMonth === latestMonth,
-  );
+function formatCurrentDateLabel() {
+  return new Date().toLocaleDateString("zh-TW", {
+    month: "numeric",
+    day: "numeric",
+  });
 }
 
-function getPeriodDescription(
+function getHeaderSubtitle(
   period: PeriodKey,
   latestStatementMonth: string | null,
-): string {
-  if (period === "month") {
-    return latestStatementMonth
-      ? `顯示最新月結週期 ${latestStatementMonth} 的平台收益與對帳單。`
-      : "顯示最近一次可用的月結收益與對帳資料。";
-  }
-
-  return "今日與本週顯示平台收益切片；月結對帳單仍以本月檢視提供。";
-}
-
-function getEmptyPeriodTitle(period: PeriodKey): string {
+) {
   if (period === "today") {
-    return "今日尚無可用收益切片";
+    return `本日 ${formatCurrentDateLabel()}`;
   }
 
   if (period === "week") {
-    return "本週尚無可用收益切片";
+    return `本週 ${formatCurrentDateLabel()}`;
   }
 
-  return "這個月份還沒有收益資料";
+  return latestStatementMonth ? `月結 ${latestStatementMonth}` : "本月月結";
 }
 
 function getHeroLabel(period: PeriodKey, latestStatementMonth: string | null) {
   if (period === "today") {
-    return "淨收入 · 今日";
+    return "淨收入 · 本日";
   }
 
   if (period === "week") {
@@ -163,78 +126,277 @@ function getHeroLabel(period: PeriodKey, latestStatementMonth: string | null) {
     : "淨收入 · 本月";
 }
 
-function SectionCard({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: ReactNode;
-}) {
+function getHeroContext(period: PeriodKey, latestStatementMonth: string | null) {
+  if (period === "month") {
+    return latestStatementMonth ? `月結 ${latestStatementMonth}` : "本月月結";
+  }
+
+  return "即時切片";
+}
+
+function getHeroNote(period: PeriodKey) {
+  if (period === "month") {
+    return "月結視圖會同時顯示 DRTS 對帳金額與外部平台參考收益。";
+  }
+
+  return "此檢視顯示平台收益切片；月結報表仍列出最近對帳週期。";
+}
+
+function getPeriodMetricLabel(period: PeriodKey) {
+  return period === "month"
+    ? driverStrings.earnings.metrics.pendingPayout
+    : driverStrings.earnings.metrics.external;
+}
+
+function getPlatformDisplayName(platformCode: string) {
   return (
-    <View style={styles.sectionCard}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {subtitle ? (
-          <Text style={styles.sectionSubtitle}>{subtitle}</Text>
-        ) : null}
-      </View>
-      {children}
-    </View>
+    PLATFORM_CODE_REGISTRY[platformCode as keyof typeof PLATFORM_CODE_REGISTRY]
+      ?.displayName ?? platformCode
   );
 }
 
-function MetricColumn({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  tone?: "default" | "danger" | "warning";
-}) {
+function isEmptyBreakdown(item: PlatformEarningsItem) {
   return (
-    <View style={styles.metricColumn}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text
+    item.grossEarning.amountMinor === 0 &&
+    item.serviceFee.amountMinor === 0 &&
+    item.subsidy.amountMinor === 0 &&
+    item.netAmount.amountMinor === 0
+  );
+}
+
+function getStatementTone(status: DriverPayoutStatus) {
+  return status === "paid" ? ("success" as const) : ("warn" as const);
+}
+
+function BreakdownRow({
+  item,
+}: {
+  item: PlatformEarningsByPlatformResponse["items"][number];
+}) {
+  const owned = isOwnedPlatformCode(item.platformCode);
+  const shadowOnly = isShadowOnlyPlatformCode(item.platformCode);
+  const forwarded = !owned;
+  const empty = isEmptyBreakdown(item);
+  const typeLabel = owned
+    ? driverStrings.platformPresence.owned
+    : shadowOnly
+      ? "鏡像"
+      : driverStrings.platformPresence.external;
+  const authorityLabel = owned
+    ? "DRTS 結算"
+    : shadowOnly
+      ? "鏡像參考"
+      : "平台結算";
+  const authorityTone = owned
+    ? ("accent" as const)
+    : shadowOnly
+      ? ("info" as const)
+      : ("warn" as const);
+  const markColor = forwarded ? THEME.warn : THEME.accentHi;
+  const markBg = forwarded ? THEME.warnBg : THEME.accentBg;
+  const displayName = getPlatformDisplayName(item.platformCode);
+
+  return (
+    <View
+      style={[
+        styles.breakdownRow,
+        {
+          backgroundColor: THEME.surface,
+          borderColor: THEME.border,
+        },
+        empty ? styles.breakdownRowEmpty : null,
+      ]}
+    >
+      <View style={styles.breakdownTopRow}>
+        <View style={[styles.platformMark, { backgroundColor: markBg }]}>
+          <Text
+            style={[
+              styles.platformMarkText,
+              { color: markColor, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {String(item.platformCode).slice(0, 4).toUpperCase()}
+          </Text>
+        </View>
+
+        <View style={styles.breakdownMeta}>
+          <View style={styles.breakdownNameRow}>
+            <Text
+              style={[
+                styles.breakdownName,
+                { color: THEME.text, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              {displayName}
+            </Text>
+            <Pill theme={THEME} tone={authorityTone}>
+              {typeLabel}
+            </Pill>
+          </View>
+          <Text
+            style={[
+              styles.breakdownSubline,
+              { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            {owned
+              ? driverStrings.earnings.sections.drtsRecon
+              : driverStrings.earnings.sections.financeAuthority}
+          </Text>
+        </View>
+
+        <View style={styles.breakdownValueWrap}>
+          <Text
+            style={[
+              styles.breakdownValue,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {formatAmountNumber(item.netAmount, { zeroPlaceholder: "—" })}
+          </Text>
+          <Text
+            style={[
+              styles.breakdownCurrency,
+              { color: THEME.textDim, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            {item.netAmount.currency}
+          </Text>
+        </View>
+      </View>
+
+      <View
         style={[
-          styles.metricValue,
-          tone === "danger"
-            ? styles.metricValueDanger
-            : tone === "warning"
-              ? styles.metricValueWarning
-              : null,
+          styles.breakdownDetailRow,
+          {
+            borderTopColor: THEME.border,
+          },
         ]}
       >
-        {value}
-      </Text>
+        <Text
+          style={[
+            styles.breakdownDetailText,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          毛收{" "}
+          <Text
+            style={[
+              styles.breakdownDetailValue,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {formatAmountNumber(item.grossEarning)}
+          </Text>
+        </Text>
+        <Text
+          style={[
+            styles.breakdownDetailText,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          抽成{" "}
+          <Text
+            style={[
+              styles.breakdownDetailValue,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {item.serviceFee.amountMinor === 0
+              ? "0"
+              : formatSignedAmountNumber({
+                  ...item.serviceFee,
+                  amountMinor: -Math.abs(item.serviceFee.amountMinor),
+                })}
+          </Text>
+        </Text>
+        <Text
+          style={[
+            styles.breakdownDetailText,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          補助{" "}
+          <Text
+            style={[
+              styles.breakdownDetailValue,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {formatSignedAmountNumber(item.subsidy)}
+          </Text>
+        </Text>
+        <Text
+          style={[
+            styles.breakdownAuthority,
+            {
+              color:
+                authorityTone === "accent"
+                  ? THEME.accentHi
+                  : authorityTone === "info"
+                    ? THEME.info
+                    : THEME.warn,
+              fontFamily: THEME.fontFamily,
+            },
+          ]}
+        >
+          {authorityLabel}
+        </Text>
+      </View>
     </View>
   );
 }
 
-function StatementSectionEmpty({
-  selectedPeriod,
-  onResetPeriod,
+function StatementRow({
+  statement,
+  last,
 }: {
-  selectedPeriod: PeriodKey;
-  onResetPeriod: () => void;
+  statement: DriverStatementRecord;
+  last: boolean;
 }) {
-  const isMonth = selectedPeriod === "month";
-
   return (
-    <EmptyState
-      title={isMonth ? "尚無對帳單" : "此檢視尚無月結對帳單"}
-      description={
-        isMonth
-          ? "本月還沒有可顯示的對帳單，請稍後重新整理。"
-          : "對帳單目前只提供月結資料，切換到本月即可查看最新對帳彙整。"
-      }
-      icon="document-text-outline"
-      actionTitle={isMonth ? "重新整理" : "切換到本月"}
-      onAction={onResetPeriod}
-      style={styles.inlineEmptyState}
-    />
+    <View
+      style={[
+        styles.statementRow,
+        {
+          borderBottomColor: THEME.border,
+        },
+        last ? styles.statementRowLast : null,
+      ]}
+    >
+      <View style={styles.statementCopy}>
+        <Text
+          style={[
+            styles.statementTitle,
+            { color: THEME.text, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          {statement.periodMonth} 月結
+        </Text>
+        <Text
+          style={[
+            styles.statementSubtitle,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          {statement.lines.length} 趟 · {formatDriverPayoutStatusLabel(statement.payoutStatus)}
+        </Text>
+      </View>
+
+      <View style={styles.statementValueWrap}>
+        <Pill theme={THEME} tone={getStatementTone(statement.payoutStatus)}>
+          {formatDriverPayoutStatusLabel(statement.payoutStatus)}
+        </Pill>
+        <Text
+          style={[
+            styles.statementAmount,
+            { color: THEME.text, fontFamily: THEME.monoFamily },
+          ]}
+        >
+          {formatMoney(statement.netAmount)}
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -244,7 +406,7 @@ export default function EarningsScreen() {
     PlatformEarningsByPlatformResponse["items"]
   >([]);
   const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
-  const [selectedPeriod, setSelectedPeriod] = useState<PeriodKey>("month");
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodKey>("today");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [earningsEnabled, setEarningsEnabled] = useState(true);
@@ -284,6 +446,7 @@ export default function EarningsScreen() {
   useEffect(() => {
     if (!isProvisioned) {
       setLoading(false);
+      setRefreshing(false);
       return;
     }
 
@@ -299,7 +462,10 @@ export default function EarningsScreen() {
         return undefined;
       })
       .catch(() => loadDashboard(selectedPeriod))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, [isProvisioned, selectedPeriod]);
 
   const onRefresh = async () => {
@@ -308,52 +474,75 @@ export default function EarningsScreen() {
     setRefreshing(false);
   };
 
-  if (loading) {
-    return (
-      <View style={styles.screen}>
-        <PageHeader
-          title={driverStrings.earnings.title}
-          subtitle={driverStrings.earnings.loadingSubtitle}
-        />
-        <View style={styles.centerState}>
-          <ActivityIndicator size="large" color={Tokens.colors.primary} />
-          <Text style={styles.loadingLabel}>載入收益資料中…</Text>
-        </View>
-      </View>
-    );
-  }
+  const handleSelectPeriod = (period: PeriodKey) => {
+    if (period === selectedPeriod || refreshing) {
+      return;
+    }
+
+    setRefreshing(true);
+    setSelectedPeriod(period);
+  };
 
   if (!isProvisioned) {
     return (
-      <View style={styles.screen}>
+      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
         <PageHeader
+          theme={THEME}
           title={driverStrings.earnings.title}
           subtitle="需要完成裝置綁定"
         />
-        <EmptyState
+        <Banner
+          theme={THEME}
+          tone="warn"
           title="裝置尚未綁定司機身份"
-          description="完成裝置註冊後，才能查看平台收益與對帳資料。"
-          icon="card-outline"
-          style={styles.fillState}
+          body="完成裝置註冊後，才能查看平台收益與月結報表。"
+          icon={<Ionicons name="card-outline" size={16} color={THEME.warn} />}
         />
-      </View>
+      </Shell>
+    );
+  }
+
+  if (loading) {
+    return (
+      <Shell theme={THEME} contentContainerStyle={styles.loadingShellContent}>
+        <PageHeader
+          theme={THEME}
+          title={driverStrings.earnings.title}
+          subtitle={driverStrings.earnings.loadingSubtitle}
+        />
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color={THEME.accent} />
+          <Text
+            style={[
+              styles.loadingLabel,
+              { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            載入收益資料中…
+          </Text>
+        </View>
+      </Shell>
     );
   }
 
   if (!earningsEnabled) {
     return (
-      <View style={styles.screen}>
+      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
         <PageHeader
+          theme={THEME}
           title={driverStrings.earnings.title}
           subtitle="收益功能未啟用"
         />
-        <EmptyState
+        <Banner
+          theme={THEME}
+          tone="info"
           title="收益儀表板暫停提供"
-          description="此功能目前未啟用，請稍後再試或改從設定頁確認帳務通知。"
-          icon="wallet-outline"
-          style={styles.fillState}
+          body="此功能目前未啟用，請稍後再試或改從設定頁確認帳務通知。"
+          icon={
+            <Ionicons name="wallet-outline" size={16} color={THEME.info} />
+          }
         />
-      </View>
+      </Shell>
     );
   }
 
@@ -364,41 +553,26 @@ export default function EarningsScreen() {
     DEFAULT_CURRENCY;
   const currencyLabel = getCurrencyLabel(baseCurrency);
   const latestStatementMonth = getLatestStatementMonth(statements);
-  const displayedStatements =
-    selectedPeriod === "month"
-      ? filterStatementsForPeriod(statements, "month")
-      : [];
-  const displayedPlatformItems = platformItems;
   const grossAmount = sumPlatformAmounts(
-    displayedPlatformItems,
+    platformItems,
     "grossEarning",
     () => true,
     baseCurrency,
   );
   const feeAmount = sumPlatformAmounts(
-    displayedPlatformItems,
+    platformItems,
     "serviceFee",
     () => true,
     baseCurrency,
   );
   const netAmount = sumPlatformAmounts(
-    displayedPlatformItems,
+    platformItems,
     "netAmount",
     () => true,
     baseCurrency,
   );
-  const drtsStatementAmount = sumStatementAmounts(
-    displayedStatements,
-    "netAmount",
-  );
-  const forwardedPlatformItems = displayedPlatformItems.filter(
-    (item) => !isOwnedPlatformCode(item.platformCode),
-  );
-  const shadowOnlyPlatformItems = displayedPlatformItems.filter((item) =>
-    isShadowOnlyPlatformCode(item.platformCode),
-  );
-  const externalPlatformAmount = sumPlatformAmounts(
-    displayedPlatformItems,
+  const forwardedPlatformAmount = sumPlatformAmounts(
+    platformItems,
     "netAmount",
     (item) =>
       !isOwnedPlatformCode(item.platformCode) &&
@@ -406,471 +580,577 @@ export default function EarningsScreen() {
     baseCurrency,
   );
   const pendingPayoutAmount = sumStatementAmounts(
-    displayedStatements,
+    statements,
     "netAmount",
     (statement) => statement.payoutStatus !== "paid",
   );
-  const paidPayoutAmount = sumStatementAmounts(
-    displayedStatements,
-    "netAmount",
-    (statement) => statement.payoutStatus === "paid",
-  );
+  const hasAnyData = platformItems.length > 0 || statements.length > 0;
+  const metricAmount =
+    selectedPeriod === "month" ? pendingPayoutAmount : forwardedPlatformAmount;
   const summaryNotes = summary?.notes ?? [];
-  const hasAnyData =
-    displayedPlatformItems.length > 0 || displayedStatements.length > 0;
 
   if (error && !hasAnyData) {
     return (
-      <View style={styles.screen}>
+      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
         <PageHeader
+          theme={THEME}
           title={driverStrings.earnings.title}
           subtitle="收益資料同步失敗"
+          actions={
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              icon={
+                <Ionicons name="refresh" size={13} color={THEME.text} />
+              }
+              onPress={() => void onRefresh()}
+            >
+              {driverStrings.common.retry}
+            </Btn>
+          }
         />
-        <View style={styles.errorState}>
-          <ErrorBanner message={`收益資料同步失敗：${error}`} />
-          <ActionButton
-            title="重新整理"
-            icon="refresh"
-            onPress={onRefresh}
-            style={styles.retryButton}
-          />
-        </View>
-      </View>
+        <Banner
+          theme={THEME}
+          tone="danger"
+          title="收益資料同步失敗"
+          body={error}
+          icon={
+            <Ionicons name="alert-circle" size={16} color={THEME.danger} />
+          }
+        />
+      </Shell>
     );
   }
 
   return (
-    <View style={styles.screen}>
+    <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
       <PageHeader
+        theme={THEME}
         title={driverStrings.earnings.title}
-        subtitle={getPeriodDescription(selectedPeriod, latestStatementMonth)}
-        rightElement={
-          <IconButton
-            icon="refresh"
-            onPress={onRefresh}
+        subtitle={getHeaderSubtitle(selectedPeriod, latestStatementMonth)}
+        actions={
+          <Btn
+            theme={THEME}
+            variant="ghost"
+            size="xs"
+            icon={
+              <Ionicons name="refresh" size={13} color={THEME.textMuted} />
+            }
+            onPress={() => void onRefresh()}
             disabled={refreshing}
-            accessibilityLabel="重新整理收益儀表板"
-          />
+          >
+            {refreshing ? "同步中" : driverStrings.common.refresh}
+          </Btn>
         }
       />
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={Tokens.colors.primary}
-          />
-        }
-      >
-        {error ? <ErrorBanner message={`資料可能不是最新：${error}`} /> : null}
+      {error ? (
+        <Banner
+          theme={THEME}
+          tone="warn"
+          title="資料可能不是最新"
+          body={error}
+          icon={<Ionicons name="warning-outline" size={16} color={THEME.warn} />}
+        />
+      ) : null}
 
-        <View style={styles.periodCard}>
-          <Text style={styles.periodEyebrow}>
-            {driverStrings.earnings.periodEyebrow}
-          </Text>
-          <SegmentedControl
-            options={PERIOD_OPTIONS.map((option) => ({
-              label: option.label,
-              value: option.value,
-            }))}
-            selectedValue={selectedPeriod}
-            onValueChange={(value) => setSelectedPeriod(value as PeriodKey)}
-          />
-          <Text style={styles.periodDescription}>
-            {getPeriodDescription(selectedPeriod, latestStatementMonth)}
-          </Text>
-        </View>
-
-        <View style={styles.heroCard}>
-          <Text style={styles.heroEyebrow}>
-            {getHeroLabel(selectedPeriod, latestStatementMonth)}
-          </Text>
-          <View style={styles.heroValueRow}>
-            <Text style={styles.heroValue}>{formatMoney(netAmount)}</Text>
-            <Text style={styles.heroUnit}>{currencyLabel}</Text>
-          </View>
-          <Text style={styles.heroNote}>
-            {selectedPeriod === "month"
-              ? "月結視圖會同時顯示 DRTS 對帳金額與外部平台參考收益。"
-              : "此檢視顯示平台收益切片；實際月結請切換到本月查看。"}
-          </Text>
-
-          <View style={styles.heroMetricsRow}>
-            <MetricColumn label="毛收" value={formatMoney(grossAmount)} />
-            <MetricColumn
-              label="平台抽成"
-              value={formatMoney(feeAmount)}
-              tone="danger"
-            />
-            <MetricColumn
-              label={selectedPeriod === "month" ? "待撥款" : "外部平台"}
-              value={
-                selectedPeriod === "month"
-                  ? formatMoney(pendingPayoutAmount)
-                  : formatMoney(externalPlatformAmount)
-              }
-              tone="warning"
-            />
-          </View>
-        </View>
-
-        <View style={styles.bannerStack}>
-          <AuthorityBanner
-            title="DRTS 對帳與撥款"
-            authorityLabel={
-              displayedStatements.length > 0
-                ? `${displayedStatements.length} 筆 DRTS 對帳單`
-                : "本期尚無 DRTS 對帳單"
-            }
-            description="只有進入 DRTS 對帳單的金額，才會出現在待撥款與已撥款追蹤。"
-            tone="owned"
-            icon="wallet"
-          />
-          <AuthorityBanner
-            title="外部平台 finance authority"
-            authorityLabel={
-              shadowOnlyPlatformItems.length > 0
-                ? `${shadowOnlyPlatformItems.length} 個 shadow-only 平台 / ${forwardedPlatformItems.length} 個 external-platform 平台`
-                : `${forwardedPlatformItems.length} 個 external-platform 平台`
-            }
-            description="外部平台與 shadow-only 鏡像金額僅供比對；不會自動進入 DRTS 待撥款。"
-            tone="platform"
-            icon="swap-horizontal"
-          />
-        </View>
-
-        <SectionCard
-          title="平台分項"
-          subtitle="不同平台有不同的結算權威；外部平台金額為參考值。"
+      <View style={styles.periodStrip}>
+        <Text
+          style={[
+            styles.periodLabel,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
         >
-          <EarningsByPlatform items={displayedPlatformItems} />
-        </SectionCard>
+          {driverStrings.earnings.periodEyebrow}
+        </Text>
+        <View style={styles.periodButtons}>
+          {PERIOD_OPTIONS.map((option) => {
+            const active = option.value === selectedPeriod;
+            return (
+              <Btn
+                key={option.value}
+                theme={THEME}
+                variant={active ? "primary" : "secondary"}
+                size="sm"
+                disabled={refreshing && !active}
+                onPress={() => handleSelectPeriod(option.value as PeriodKey)}
+              >
+                {option.label}
+              </Btn>
+            );
+          })}
+        </View>
+      </View>
 
-        <SectionCard
-          title="月結報表"
-          subtitle={
-            selectedPeriod === "month"
-              ? latestStatementMonth
-                ? `最新週期 ${latestStatementMonth}`
-                : "等待最新月結資料"
-              : "切換到本月可查看最新 DRTS 對帳單"
-          }
+      <Card theme={THEME} padding={18} style={styles.heroCard}>
+        <Text
+          style={[
+            styles.heroEyebrow,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
         >
-          {displayedStatements.length > 0 ? (
-            <View style={styles.statementList}>
-              {displayedStatements.map((item) => (
-                <View key={item.statementId} style={styles.statementCard}>
-                  <View style={styles.statementHeader}>
-                    <View style={styles.statementTextBlock}>
-                      <Text style={styles.statementTitle}>
-                        {item.periodMonth} 月結
-                      </Text>
-                      <Text style={styles.statementSubtitle}>
-                        {item.lines.length} 筆行程 · {item.receiptNo}
-                      </Text>
-                    </View>
-                    <StatusChip
-                      label={formatDriverPayoutStatusLabel(item.payoutStatus)}
-                      variant={getStatementStatusVariant(item.payoutStatus)}
-                    />
-                  </View>
+          {getHeroLabel(selectedPeriod, latestStatementMonth)}
+        </Text>
 
-                  <View style={styles.statementMetaRow}>
-                    <Text style={styles.statementMeta}>
-                      費率版本 {item.feePlanVersion}
-                    </Text>
-                    <Text style={styles.statementAmount}>
-                      {formatMoney(item.netAmount)}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <StatementSectionEmpty
-              selectedPeriod={selectedPeriod}
-              onResetPeriod={
-                selectedPeriod === "month"
-                  ? onRefresh
-                  : () => setSelectedPeriod("month")
-              }
-            />
-          )}
-        </SectionCard>
+        <View style={styles.heroValueRow}>
+          <Text
+            style={[
+              styles.heroValue,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {formatAmountNumber(netAmount)}
+          </Text>
+          <Text
+            style={[
+              styles.heroUnit,
+              { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            {currencyLabel}
+          </Text>
+          <Text
+            style={[
+              styles.heroContext,
+              {
+                color: selectedPeriod === "month" ? THEME.accentHi : THEME.success,
+                fontFamily: THEME.fontFamily,
+              },
+            ]}
+          >
+            {getHeroContext(selectedPeriod, latestStatementMonth)}
+          </Text>
+        </View>
 
-        {!hasAnyData && !error ? (
-          <EmptyState
-            title={getEmptyPeriodTitle(selectedPeriod)}
-            description="本期尚未生成收益或對帳資料，請稍後重新整理。"
-            icon="cash-outline"
-            actionTitle="重新整理"
-            onAction={onRefresh}
-            style={styles.fillEmptyState}
-          />
-        ) : null}
+        <Text
+          style={[
+            styles.heroNote,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          {getHeroNote(selectedPeriod)}
+        </Text>
 
-        {selectedPeriod === "month" ? (
-          <View style={styles.footerSummaryCard}>
-            <View style={styles.footerSummaryRow}>
-              <Text style={styles.footerSummaryLabel}>DRTS 對帳金額</Text>
-              <Text style={styles.footerSummaryValue}>
-                {formatMoney(drtsStatementAmount)}
-              </Text>
-            </View>
-            <View style={styles.footerSummaryRow}>
-              <Text style={styles.footerSummaryLabel}>外部平台結算</Text>
-              <Text style={styles.footerSummaryValue}>
-                {formatMoney(externalPlatformAmount)}
-              </Text>
-            </View>
-            <View style={styles.footerSummaryRow}>
-              <Text style={styles.footerSummaryLabel}>已撥款</Text>
-              <Text style={styles.footerSummaryValue}>
-                {formatMoney(paidPayoutAmount)}
-              </Text>
-            </View>
+        <View
+          style={[
+            styles.heroMetricRow,
+            {
+              borderTopColor: THEME.border,
+            },
+          ]}
+        >
+          <View style={styles.heroMetricItem}>
+            <Text
+              style={[
+                styles.heroMetricLabel,
+                { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              {driverStrings.earnings.metrics.gross}
+            </Text>
+            <Text
+              style={[
+                styles.heroMetricValue,
+                { color: THEME.text, fontFamily: THEME.monoFamily },
+              ]}
+            >
+              {formatAmountNumber(grossAmount)}
+            </Text>
           </View>
-        ) : null}
+          <View style={styles.heroMetricItem}>
+            <Text
+              style={[
+                styles.heroMetricLabel,
+                { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              {driverStrings.earnings.metrics.serviceFee}
+            </Text>
+            <Text
+              style={[
+                styles.heroMetricValue,
+                { color: THEME.danger, fontFamily: THEME.monoFamily },
+              ]}
+            >
+              {feeAmount.amountMinor === 0
+                ? "0"
+                : formatSignedAmountNumber({
+                    ...feeAmount,
+                    amountMinor: -Math.abs(feeAmount.amountMinor),
+                  })}
+            </Text>
+          </View>
+          <View style={styles.heroMetricItem}>
+            <Text
+              style={[
+                styles.heroMetricLabel,
+                { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              {getPeriodMetricLabel(selectedPeriod)}
+            </Text>
+            <Text
+              style={[
+                styles.heroMetricValue,
+                { color: THEME.warn, fontFamily: THEME.monoFamily },
+              ]}
+            >
+              {formatAmountNumber(metricAmount)}
+            </Text>
+          </View>
+        </View>
+      </Card>
 
-        {summaryNotes.length > 0 ? (
-          <View style={styles.notesCard}>
+      <Banner
+        theme={THEME}
+        tone="info"
+        title={driverStrings.earnings.sections.financeAuthority}
+        body={
+          <View style={styles.bannerBody}>
+            <Text
+              style={[
+                styles.bannerText,
+                { color: THEME.text, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              不同平台有不同的結算權威；外部平台金額為參考值。
+            </Text>
             {summaryNotes.map((note) => (
-              <Text key={note} style={styles.noteText}>
-                • {note}
-              </Text>
+              <View key={note} style={styles.bannerNoteRow}>
+                <Ionicons name="sync-outline" size={12} color={THEME.info} />
+                <Text
+                  style={[
+                    styles.bannerNoteText,
+                    { color: THEME.text, fontFamily: THEME.fontFamily },
+                  ]}
+                >
+                  {note}
+                </Text>
+              </View>
             ))}
           </View>
-        ) : null}
-      </ScrollView>
-    </View>
+        }
+        icon={<Ionicons name="wallet-outline" size={16} color={THEME.info} />}
+      />
+
+      <Card
+        theme={THEME}
+        title={driverStrings.earnings.sections.platformBreakdown}
+        subtitle="不同平台有不同的結算權威；外部平台金額為參考值。"
+        padding={14}
+      >
+        {platformItems.length > 0 ? (
+          <View style={styles.breakdownList}>
+            {platformItems.map((item) => (
+              <BreakdownRow key={item.platformCode} item={item} />
+            ))}
+          </View>
+        ) : (
+          <Banner
+            theme={THEME}
+            tone="info"
+            title="這段期間還沒有平台收益"
+            body="切換到其他期間，或稍後再查看最新對帳彙整。"
+            icon={
+              <Ionicons name="cash-outline" size={16} color={THEME.info} />
+            }
+          />
+        )}
+      </Card>
+
+      <Card
+        theme={THEME}
+        title={driverStrings.earnings.sections.monthlyStatements}
+        subtitle={
+          latestStatementMonth
+            ? `依對帳週期排序，最新為 ${latestStatementMonth}`
+            : "等待最新月結資料"
+        }
+        padding={0}
+      >
+        {statements.length > 0 ? (
+          <View>
+            {statements.map((statement, index) => (
+              <StatementRow
+                key={statement.statementId}
+                statement={statement}
+                last={index === statements.length - 1}
+              />
+            ))}
+          </View>
+        ) : (
+          <View style={styles.statementEmpty}>
+            <Text
+              style={[
+                styles.statementEmptyTitle,
+                { color: THEME.text, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              尚無月結報表
+            </Text>
+            <Text
+              style={[
+                styles.statementEmptyBody,
+                { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              本月還沒有可顯示的對帳單，請稍後重新整理。
+            </Text>
+          </View>
+        )}
+      </Card>
+    </Shell>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: Tokens.colors.appBg,
+  shellContent: {
+    paddingBottom: 28,
+    gap: 14,
   },
-  scrollContent: {
-    padding: Tokens.layout.pagePadding,
-    paddingBottom: Tokens.spacing["4xl"],
-    gap: Tokens.spacing.md,
+  loadingShellContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    gap: 16,
   },
-  centerState: {
-    flex: 1,
+  loadingCard: {
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: Tokens.spacing.xl,
-  },
-  fillState: {
-    flex: 1,
-  },
-  fillEmptyState: {
-    minHeight: 220,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    borderRadius: Tokens.radius.lg,
-    backgroundColor: Tokens.colors.surface,
-  },
-  inlineEmptyState: {
-    flex: 0,
+    gap: 12,
     minHeight: 180,
   },
   loadingLabel: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textMuted,
-    marginTop: Tokens.spacing.md,
+    fontSize: 14,
   },
-  errorState: {
-    gap: Tokens.spacing.md,
-    padding: Tokens.layout.pagePadding,
+  periodStrip: {
+    gap: 8,
   },
-  retryButton: {
-    alignSelf: "flex-start",
+  periodLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
   },
-  periodCard: {
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.lg,
-    gap: Tokens.spacing.sm,
-  },
-  periodEyebrow: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  periodDescription: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+  periodButtons: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
   },
   heroCard: {
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.xl,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.xl,
-    gap: Tokens.spacing.sm,
-    ...Tokens.shadows.md,
+    borderRadius: 14,
   },
   heroEyebrow: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
   },
   heroValueRow: {
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: Tokens.spacing.sm,
+    gap: 6,
+    flexWrap: "wrap",
+    marginTop: 4,
   },
   heroValue: {
-    fontSize: 34,
-    lineHeight: 38,
+    fontSize: 38,
+    lineHeight: 40,
     fontWeight: "700",
-    color: Tokens.colors.textStrong,
     letterSpacing: -1,
-    fontFamily: Tokens.fonts.mono,
   },
   heroUnit: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textMuted,
+    fontSize: 14,
+    fontWeight: "500",
     marginBottom: 5,
   },
+  heroContext: {
+    marginLeft: "auto",
+    marginBottom: 6,
+    fontSize: 12,
+    fontWeight: "700",
+  },
   heroNote: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+    marginTop: 10,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
-  heroMetricsRow: {
+  heroMetricRow: {
     flexDirection: "row",
-    gap: Tokens.spacing.md,
-    paddingTop: Tokens.spacing.md,
-    marginTop: Tokens.spacing.xs,
+    gap: 14,
+    marginTop: 14,
+    paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: Tokens.colors.border,
   },
-  metricColumn: {
+  heroMetricItem: {
     flex: 1,
-    gap: 2,
+    gap: 4,
   },
-  metricLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
+  heroMetricLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
   },
-  metricValue: {
-    ...Tokens.type.title,
-    color: Tokens.colors.textStrong,
-    fontFamily: Tokens.fonts.mono,
+  heroMetricValue: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+    letterSpacing: -0.2,
   },
-  metricValueDanger: {
-    color: Tokens.colors.danger,
+  bannerBody: {
+    gap: 8,
   },
-  metricValueWarning: {
-    color: Tokens.colors.warning,
+  bannerText: {
+    fontSize: 12.5,
+    lineHeight: 18,
   },
-  bannerStack: {
-    gap: Tokens.spacing.sm,
-  },
-  sectionCard: {
-    backgroundColor: Tokens.colors.bgRaised,
-    borderRadius: Tokens.radius.xl,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.lg,
-    gap: Tokens.spacing.md,
-  },
-  sectionHeader: {
-    gap: 2,
-  },
-  sectionTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
-  },
-  sectionSubtitle: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-  },
-  statementList: {
-    gap: Tokens.spacing.sm,
-  },
-  statementCard: {
-    backgroundColor: Tokens.colors.surface,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    borderRadius: Tokens.radius.lg,
-    padding: Tokens.spacing.md,
-    gap: Tokens.spacing.md,
-  },
-  statementHeader: {
+  bannerNoteRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: Tokens.spacing.sm,
+    gap: 6,
   },
-  statementTextBlock: {
+  bannerNoteText: {
     flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  breakdownList: {
+    gap: 10,
+  },
+  breakdownRow: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  breakdownRowEmpty: {
+    opacity: 0.65,
+  },
+  breakdownTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  platformMark: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  platformMarkText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  breakdownMeta: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  breakdownNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  breakdownName: {
+    flexShrink: 1,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  breakdownSubline: {
+    fontSize: 11.5,
+    lineHeight: 16,
+  },
+  breakdownValueWrap: {
+    alignItems: "flex-end",
     gap: 2,
   },
+  breakdownValue: {
+    fontSize: 18,
+    lineHeight: 21,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
+  breakdownCurrency: {
+    fontSize: 10.5,
+    lineHeight: 12,
+    fontWeight: "600",
+  },
+  breakdownDetailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderStyle: "dashed",
+    flexWrap: "wrap",
+  },
+  breakdownDetailText: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  breakdownDetailValue: {
+    fontSize: 11.5,
+    lineHeight: 15,
+    fontWeight: "700",
+  },
+  breakdownAuthority: {
+    marginLeft: "auto",
+    fontSize: 11.5,
+    lineHeight: 15,
+    fontWeight: "700",
+  },
+  statementRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  statementRowLast: {
+    borderBottomWidth: 0,
+  },
+  statementCopy: {
+    flex: 1,
+    gap: 4,
+  },
   statementTitle: {
-    ...Tokens.type.title,
-    color: Tokens.colors.textStrong,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "700",
   },
   statementSubtitle: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textBody,
+    fontSize: 11.5,
+    lineHeight: 16,
   },
-  statementMetaRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "baseline",
-    gap: Tokens.spacing.md,
-    paddingTop: Tokens.spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Tokens.colors.border,
-  },
-  statementMeta: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-    flex: 1,
+  statementValueWrap: {
+    alignItems: "flex-end",
+    gap: 6,
   },
   statementAmount: {
-    ...Tokens.type.title,
-    color: Tokens.colors.textStrong,
-    fontFamily: Tokens.fonts.mono,
+    fontSize: 15.5,
+    lineHeight: 18,
+    fontWeight: "700",
+    letterSpacing: -0.2,
   },
-  footerSummaryCard: {
-    backgroundColor: Tokens.colors.surfaceLo,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.lg,
-    gap: Tokens.spacing.sm,
+  statementEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 18,
+    gap: 6,
   },
-  footerSummaryRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: Tokens.spacing.md,
+  statementEmptyTitle: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "700",
   },
-  footerSummaryLabel: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-  },
-  footerSummaryValue: {
-    ...Tokens.type.bodyStrong,
-    color: Tokens.colors.textStrong,
-    fontFamily: Tokens.fonts.mono,
-  },
-  notesCard: {
-    backgroundColor: Tokens.colors.surfaceLo,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.md,
-    gap: Tokens.spacing.xs,
-  },
-  noteText: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+  statementEmptyBody: {
+    fontSize: 12,
+    lineHeight: 17,
   },
 });
