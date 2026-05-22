@@ -57,6 +57,20 @@ This helper therefore serves as a dispatch-to-canonical bridge artifact.
 5. `ai-status.json`
    records `PARTNER-ELIG-LIVE-001` and its unblock helpers as `done`.
 
+## Machine-truth repair
+
+On 2026-05-22, the canonical `PARTNER-ELIG-LIVE-001.next` field was refreshed
+to the concrete external-gate sequence required by the helper reviews:
+
+- keep `support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md`
+  anchored at `2628fc7`
+- wait for `EXT-001-BLK-001` through `EXT-001-BLK-006`
+- attach redacted external evidence there
+- rerun the live issuer proof
+
+This closes the remaining dispatch-level mismatch where machine truth still had
+the old generic closeout summary instead of the canonical external next step.
+
 ## Remaining blocker
 
 No repo-local implementation blocker remains for this dispatch task.
