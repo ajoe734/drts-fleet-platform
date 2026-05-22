@@ -14,6 +14,8 @@ truthfully claim on `origin/dev`:
 - the canonical production deploy spec now exists
 - the canonical rollback drill now exists
 - static contract verification passes
+- Artifact Registry single-path auth host is resolved from `${REGISTRY}` rather
+  than forced to `${PROD_ARTIFACT_REGION}-docker.pkg.dev`
 
 This packet does not claim that production has launched.
 
@@ -47,7 +49,10 @@ The production rail now documents and/or enforces:
 - GitHub variables for project, region, Cloud SQL, runtime service account
 - WIF provider and WIF deployer service account
 - Artifact Registry path through `PROD_ARTIFACT_REGISTRY` or component fallbacks
+- Docker auth host derived from the effective Artifact Registry path
 - Cloud SQL attach for `drts-migrate` and `drts-api`
+- optional Cloud Run service/job overrides via `PROD_GCP_*_SERVICE` /
+  `PROD_GCP_MIGRATION_JOB`
 - Secret Manager mapping for `DATABASE_URL`, `API_KEY_SALT`, `JWT_SECRET`, and `CONTROLLED_DOWNLOAD_SIGNING_SECRET`
 - Cloud Run service deploys for `drts-api`, `drts-platform-admin-web`, and `drts-ops-console-web`
 - post-deploy smoke via IAP-protected `/health` and identity-context endpoints

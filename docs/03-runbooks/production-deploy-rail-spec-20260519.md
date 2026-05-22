@@ -43,17 +43,27 @@ If the component form is omitted, the workflow falls back to:
 - artifact region = `PROD_GCP_REGION`
 - artifact repository = `drts`
 
+At runtime the workflow derives the Docker auth host from the effective
+`${REGISTRY}` value, so the single-path form works even when the registry host
+does not match `${PROD_ARTIFACT_REGION}-docker.pkg.dev`.
+
 ### Optional repository variables
 
 - `PROD_SECRET_PREFIX`
 - `PROD_API_ALLOW_UNAUTHENTICATED`
 - `PROD_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED`
 - `PROD_OPS_CONSOLE_ALLOW_UNAUTHENTICATED`
+- `PROD_GCP_API_SERVICE`
+- `PROD_GCP_PLATFORM_ADMIN_SERVICE`
+- `PROD_GCP_OPS_CONSOLE_SERVICE`
+- `PROD_GCP_MIGRATION_JOB`
 
 Defaults:
 
 - `PROD_SECRET_PREFIX` defaults to `drts-prod`
 - unauthenticated exposure flags default to `false`
+- Cloud Run service/job names default to `drts-api`,
+  `drts-platform-admin-web`, `drts-ops-console-web`, and `drts-migrate`
 
 ### Required repository secrets
 
@@ -110,8 +120,8 @@ Optional mapping:
 
 `PROD_GCP_CLOUDSQL_INSTANCE` is attached to:
 
-- Cloud Run Job `drts-migrate`
-- Cloud Run service `drts-api`
+- Cloud Run Job `${PROD_GCP_MIGRATION_JOB:-drts-migrate}`
+- Cloud Run service `${PROD_GCP_API_SERVICE:-drts-api}`
 
 ## Workflow Graph
 
@@ -155,13 +165,13 @@ Tagging model:
 
 The deploy job updates these Cloud Run services:
 
-- `drts-api`
-- `drts-platform-admin-web`
-- `drts-ops-console-web`
+- `${PROD_GCP_API_SERVICE:-drts-api}`
+- `${PROD_GCP_PLATFORM_ADMIN_SERVICE:-drts-platform-admin-web}`
+- `${PROD_GCP_OPS_CONSOLE_SERVICE:-drts-ops-console-web}`
 
 The migration job is:
 
-- `drts-migrate`
+- `${PROD_GCP_MIGRATION_JOB:-drts-migrate}`
 
 Current production rail scope does not include separate tenant, partner, or
 driver Cloud Run services because those surfaces are shipped through other
