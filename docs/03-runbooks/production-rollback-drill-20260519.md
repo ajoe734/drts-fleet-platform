@@ -75,10 +75,10 @@ gh workflow run deploy-prod.yml -f tag=prod/v2026.05.18.0 -f skip_migration=true
 
 The rollback only passes when all of the following are green:
 
-1. `${PROD_GCP_API_SERVICE:-drts-api}` reaches `Ready=True`
+1. the configured API Cloud Run service `${PROD_GCP_API_SERVICE:-drts-api}` reaches `Ready=True`
 2. `GET ${PROD_CONTROL_PLANE_API_ORIGIN}/health` succeeds with IAP token
-3. platform admin identity-context endpoint succeeds
-4. ops console identity-context endpoint succeeds
+3. platform admin identity-context endpoint succeeds for `${PROD_GCP_PLATFORM_ADMIN_SERVICE:-drts-platform-admin-web}`
+4. ops console identity-context endpoint succeeds for `${PROD_GCP_OPS_CONSOLE_SERVICE:-drts-ops-console-web}`
 5. operator confirms the restored tag matches the intended previous prod tag
 
 ### E. Record evidence

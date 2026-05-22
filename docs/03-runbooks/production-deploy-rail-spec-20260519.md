@@ -205,10 +205,10 @@ gh workflow run deploy-prod.yml -f tag=prod/v2026.05.19.0 -f skip_migration=true
 
 The workflow proves all of the following before it prints completion URLs:
 
-1. Cloud Run service `${PROD_GCP_API_SERVICE:-drts-api}` reaches `Ready=True`
+1. the configured API Cloud Run service `${PROD_GCP_API_SERVICE:-drts-api}` reaches `Ready=True`
 2. `GET ${PROD_CONTROL_PLANE_API_ORIGIN}/health` succeeds with an IAP-minted ID token
-3. `GET ${PROD_PLATFORM_ADMIN_ORIGIN}/control-plane-proxy/identity/context` succeeds
-4. `GET ${PROD_OPS_CONSOLE_ORIGIN}/control-plane-proxy/identity/context` succeeds
+3. `GET ${PROD_PLATFORM_ADMIN_ORIGIN}/control-plane-proxy/identity/context` succeeds for the configured platform-admin surface `${PROD_GCP_PLATFORM_ADMIN_SERVICE:-drts-platform-admin-web}`
+4. `GET ${PROD_OPS_CONSOLE_ORIGIN}/control-plane-proxy/identity/context` succeeds for the configured ops-console surface `${PROD_GCP_OPS_CONSOLE_SERVICE:-drts-ops-console-web}`
 
 Any failure leaves the run red and blocks the production claim.
 

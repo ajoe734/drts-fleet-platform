@@ -50,11 +50,15 @@ The production rail now documents and/or enforces:
 - WIF provider and WIF deployer service account
 - Artifact Registry path through `PROD_ARTIFACT_REGISTRY` or component fallbacks
 - Docker auth host derived from the effective Artifact Registry path
-- Cloud SQL attach for `drts-migrate` and `drts-api`
-- optional Cloud Run service/job overrides via `PROD_GCP_*_SERVICE` /
+- Cloud SQL attach for `${PROD_GCP_MIGRATION_JOB:-drts-migrate}` and
+  `${PROD_GCP_API_SERVICE:-drts-api}`
+- optional Cloud Run service/job overrides via `PROD_GCP_API_SERVICE`,
+  `PROD_GCP_PLATFORM_ADMIN_SERVICE`, `PROD_GCP_OPS_CONSOLE_SERVICE`, and
   `PROD_GCP_MIGRATION_JOB`
 - Secret Manager mapping for `DATABASE_URL`, `API_KEY_SALT`, `JWT_SECRET`, and `CONTROLLED_DOWNLOAD_SIGNING_SECRET`
-- Cloud Run service deploys for `drts-api`, `drts-platform-admin-web`, and `drts-ops-console-web`
+- Cloud Run service deploys for `${PROD_GCP_API_SERVICE:-drts-api}`,
+  `${PROD_GCP_PLATFORM_ADMIN_SERVICE:-drts-platform-admin-web}`, and
+  `${PROD_GCP_OPS_CONSOLE_SERVICE:-drts-ops-console-web}`
 - post-deploy smoke via IAP-protected `/health` and identity-context endpoints
 
 ## Remaining External Gates

@@ -25,7 +25,7 @@ Next action: `Use a real prod/v* tag with the protected production environment g
 ## Acceptance Mapping
 
 - Workflow acceptance: `.github/workflows/deploy-prod.yml` wires directive §3.9.3 `PROD_*` inputs, Artifact Registry path resolution, Cloud Run service/job overrides, Cloud SQL migration wiring, Secret Manager checks, and post-deploy health verification.
-- Runbook acceptance: the deploy spec and rollback drill are both present on `origin/dev`, executable as written, and aligned with the workflow's `${PROD_GCP_API_SERVICE:-drts-api}` override semantics.
+- Runbook acceptance: the deploy spec and rollback drill are both present on `origin/dev`, executable as written, and aligned with the workflow's `${PROD_GCP_API_SERVICE:-drts-api}`, `${PROD_GCP_PLATFORM_ADMIN_SERVICE:-drts-platform-admin-web}`, `${PROD_GCP_OPS_CONSOLE_SERVICE:-drts-ops-console-web}`, and `${PROD_GCP_MIGRATION_JOB:-drts-migrate}` override semantics.
 - Sidecar acceptance: `support/sidecars/WF-PROD-001-LIVE-EXEC/` contains both dry-run evidence and rollback-drill evidence plus this closeout artifact.
 - Non-claim acceptance: the gate remains `PASS (dry-run contract evidence)` and does not claim a live production launch, live rollback, or post-deploy monitoring proof.
 
