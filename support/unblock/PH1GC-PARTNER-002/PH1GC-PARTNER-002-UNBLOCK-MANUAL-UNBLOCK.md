@@ -27,10 +27,11 @@ or contract scope.
 
 ## Why this helper was still needed
 
-The dispatch assigned `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK`, but that task
-id does not exist in `ai-status.json`.
+The dispatch helper now exists in `ai-status.json`, but its state still needed
+to be bridged back to the pre-existing canonical partner hold lineage.
 
-The actual canonical task lineage already exists under:
+The canonical task lineage that actually owns the external issuer gate already
+exists under:
 
 - `PARTNER-ELIG-LIVE-001`
 - `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK`
