@@ -5,7 +5,7 @@
 - Task: `PH1GC-DRV-MP-002-UNBLOCK-PLANNING-DECISION`
 - Parent: `PH1GC-DRV-MP-002`
 - Owner: `Claude`
-- Reviewer: `Claude2`
+- Reviewer: `Codex`
 - Decision date: `2026-05-22`
 - Sibling unblock already closed: `PH1GC-DRV-MP-002-UNBLOCK-MANUAL-UNBLOCK`
   (commit `6de297ffd51ed1072522432b43a93979c5b2d61d`,
