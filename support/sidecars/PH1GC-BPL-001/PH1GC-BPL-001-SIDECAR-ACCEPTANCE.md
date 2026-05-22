@@ -1,6 +1,6 @@
 # PH1GC-BPL-001 Sidecar Acceptance Packet
 
-This document is the support-only acceptance packet for `PH1GC-BPL-001` ("Phase 1 gap closure — origin/dev blueprint alignment audit"). It does not change canonical truth. It packages the current machine-truth state, dependency map, repo baseline, and reviewer checklist that the assigned reviewer (`Codex2`) and parent-task owner (`Codex`) need before closing the parent audit task.
+This document is the support-only acceptance packet for `PH1GC-BPL-001` ("Phase 1 gap closure — origin/dev blueprint alignment audit"). It does not change canonical truth. It packages the current machine-truth state, dependency map, repo baseline, and reviewer checklist that the assigned sidecar reviewer (`Codex`) and parent-task owner (`Codex`) need before closing the parent audit task.
 
 Anchors used here come from:
 
@@ -52,16 +52,20 @@ Machine-truth note:
 
 ### Sidecar Task: `PH1GC-BPL-001-SIDECAR-ACCEPTANCE`
 
+Stable sidecar anchors only:
+
 | Field | Value |
 | --- | --- |
 | Owner | `Codex2` |
 | Reviewer | `Codex` |
-| Status | `in_progress` |
 | `task_class` | `sidecar` |
 | `helper_kind` | `acceptance_packet` |
 | `mutates_canonical` | `false` |
 | Artifact | `support/sidecars/PH1GC-BPL-001/PH1GC-BPL-001-SIDECAR-ACCEPTANCE.md` |
-| Last update | `2026-05-22T01:10:55Z` |
+
+Lifecycle note:
+
+- Do not treat this packet as the authority for the sidecar's live `status`, `next`, or timestamp fields. Re-read canonical `ai-status.json` at review / closeout time because those values are expected to change during handoff.
 
 ## §3 Dependency Map
 
@@ -108,7 +112,7 @@ The current worktree and `origin/dev` snapshot still show why `PH1GC-BPL-001` ex
 - `git ls-tree -r HEAD -- docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` also returns no path in this assigned worktree.
 - `git ls-tree -r HEAD -- docs/03-runbooks/phase1-release-truth-sync-20260519.md` returns no path in this worktree snapshot, even though `REL-SYNC-001` is `done` in machine truth.
 - `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` does exist in the worktree, so the parent audit should treat the gate matrix as a real anchor and avoid inventing alternative release-gate truth.
-- `current-work.md` in this worktree was last generated at `2026-05-20T01:11:05Z`, earlier than the new `PH1GC-BPL-001` row (`2026-05-22T00:27:55Z`), so the parent task must explicitly reconcile "latest current-work" language with machine truth rather than assuming the checked-in file is already current.
+- Canonical `current-work.md` at `/home/edna/workspace/drts-fleet-platform/current-work.md` was last generated at `2026-05-22T01:21:52Z` and already includes both `PH1GC-BPL-001` and `PH1GC-BPL-001-SIDECAR-ACCEPTANCE`, so parent-task wording should align to that canonical snapshot rather than any stale worktree-local copy.
 
 ## §4 Parent-Task Acceptance Checklist (`PH1GC-BPL-001`)
 
