@@ -15,7 +15,6 @@ real-device pass.
 
 For directive `§7` closeout wording of the current blocked state, see
 `PH1GC-DRV-MP-002-CLOSEOUT-20260522.md`.
-
 The current truthful read is:
 
 - `WF-DRV-MP-001` still has only sandbox/static proof on `origin/dev`.
@@ -81,7 +80,6 @@ or backend trace added here must mask driver name and phone number before
 Closeout report:
 
 - `PH1GC-DRV-MP-002-CLOSEOUT-20260522.md` — directive `§7` blocked-external closeout
-
 ## 6. Resume sequence
 
 Once the external bundle lands:
