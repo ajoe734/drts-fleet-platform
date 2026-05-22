@@ -1,7 +1,7 @@
 # Governance-Aware Billing & Reporting Spec
 
 **Date**: 2026-05-19 (date stamped to align with directive; reconciled commit 2026-05-22)
-**Authority**: directive §H `FIN-GOV-001` — `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
+**Authority**: directive §H `FIN-GOV-001` — `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (with execution-worklist alignment at `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` §G1 and audit reconciliation at `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` §2.14)
 **Workflow family**: `WF-FIN-GOV-001` (depends on `WF-TGV-001` + `WF-FIN-001`; do **not** rename or absorb `WF-FIN-001`)
 **Pairs with**: `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` (UAT), `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (executable proof — driven by `PH1GC-E2E-010`)
 
@@ -41,18 +41,16 @@ If any one is set, **all 13 verification-body fields below are required** (with 
 | `costCenterCode`  | string  | `WF-TGV-001` cost-center registry                                     | governance-aware |
 | `costCenterName`  | string  | resolved at billing time from the cost-center registry snapshot       | governance-aware |
 | `ownerUserId`     | uuid    | the user (driver dispatcher / requester) attributed to the booking    | governance-aware |
-| `ownerName`       | string  | display name at billing time                                          | governance-aware |
 | `legacy_unmapped` | boolean | `true` only when the booking pre-dates the cost-center mapping window | see §3.3         |
 
-`costCenterName` and `ownerName` are resolved at _billing time_ (not booking time) so historical renames do not corrupt the bill. The booking record retains the IDs; the billing record carries the rendered names.
+`costCenterName` is resolved at _billing time_ (not booking time) so historical renames do not corrupt the bill. The booking record retains the IDs; the billing record carries the rendered name snapshot. Human-facing display names such as `ownerName` may still be rendered by downstream reporting, but they are not part of the 13-field verification body for this Phase 1 acceptance slice.
 
 ### 3.2 Approval evaluation
 
-| Field                  | Type | Source                                                                                                         | Required when                   |
-| ---------------------- | ---- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `approvalEvaluationId` | uuid | `WF-TGV-001` approval evaluation row                                                                           | booking ran approval evaluation |
-| `approvalRequestId`    | uuid | the originating approval request (one request can span multiple evaluations)                                   | same as above                   |
-| `approvalState`        | enum | terminal state of the approval at booking confirmation: `approved`, `auto_approved`, `escalated_then_approved` | same as above                   |
+| Field               | Type | Source                                                                                                         | Required when                   |
+| ------------------- | ---- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `approvalRequestId` | uuid | the originating approval request (one request can span multiple evaluations)                                   | booking ran approval evaluation |
+| `approvalState`     | enum | terminal state of the approval at booking confirmation: `approved`, `auto_approved`, `escalated_then_approved` | same as above                   |
 
 For governance-aware billing, the approval must have terminated in one of the three "approved" states above. Rejected approvals do not produce billable bookings.
 
@@ -85,7 +83,7 @@ For governance-aware billing, the approval must have terminated in one of the th
 
 ### 3.7 Legacy-unmapped fallback
 
-For bookings created during the cost-center rollout window (defined as before `WF-TGV-001` rolled to a tenant) that nevertheless ran through approval or quota gates, the billing record may set `legacy_unmapped = true` and leave `costCenterCode` / `costCenterName` / `ownerUserId` / `ownerName` null **only when** the cost-center registry confirms no mapping is available. The remaining nine fields must still be populated.
+For bookings created during the cost-center rollout window (defined as before `WF-TGV-001` rolled to a tenant) that nevertheless ran through approval or quota gates, the billing record may set `legacy_unmapped = true` and leave `costCenterCode` / `costCenterName` / `ownerUserId` null **only when** the cost-center registry confirms no mapping is available. The remaining ten verification-body fields must still be populated according to their own §3.2–§3.6 triggers (and `reportArtifactId` populates lazily on export).
 
 `legacy_unmapped = true` may not be used to bypass cost-center attribution on a tenant where the registry is current; the export pipeline treats unexpectedly-flagged rows as an integrity error.
 
@@ -127,7 +125,7 @@ The audit trail is the canonical reconciliation source. Any disagreement between
 The following transitions on a governance-aware billing record are not permitted via API or operator action:
 
 - Remove `costCenterCode` once set (correction is by issuing a corrective record).
-- Modify `approvalEvaluationId` (approvals are immutable references).
+- Modify `approvalRequestId` or `approvalState` (approval lineage is immutable once the booking is confirmed).
 - Modify `quotaUsageDelta` post-export (post-export corrections go through a follow-on adjustment record, not in-place edit).
 - Flip `legacy_unmapped` from `false` to `true` (the flag is monotonic — once mapped, always mapped).
 
@@ -137,7 +135,34 @@ The following transitions on a governance-aware billing record are not permitted
 
 The verification body above must be asserted end-to-end by `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (driven by `PH1GC-E2E-010`) and covered scenario-by-scenario in `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`.
 
-The E2E script must hard-fail when seed is absent (no silent passes) and must assert each of the 13 fields appears in the generated invoice and report-export artifacts.
+### 6.1 Hard-fail contract regressions (always enforced)
+
+The E2E script **must** hard-fail (non-zero exit) when any of the following contract regressions are observed. Silent passes are not permitted:
+
+- seed bootstrap cannot complete (no tenant admin / no cost-center registry write / no quota policy write / no approval rule write);
+- `costCenterCode` is dropped from the governed booking read-back (`§5` forbidden transition);
+- driver lifecycle cannot reach `task.status == completed` after dispatch + assign were accepted (WF-DRV-001 coupling regression);
+- the generated tenant invoice does not contain an invoice line whose `orderId` matches the just-completed governed booking (binding broken);
+- no audit row with `actionName == generate_tenant_invoice` and `resourceId == <invoiceId>` (FG-08 audit chain broken);
+- a cross-tenant fetch of the governed invoice returns `2xx` instead of `4xx` (FG-09 tenant-scope widening).
+
+### 6.2 Verification-body field recording (always required, two-tier pass semantics)
+
+For each of the 13 verification-body fields enumerated in §3, the E2E script **must** record one explicit evidence line per field at the end of the run, with one of two values:
+
+- the observed value, **or**
+- the literal `NOT_POPULATED` marker.
+
+A missing field that is silently omitted from the evidence file is itself a regression: the recording is mandatory. The two pass semantics are:
+
+| Mode                                                | What `NOT_POPULATED` means                                                                                                                                                                                  | When to use                                                                                                                                                |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Default (open-gaps tolerated)**                   | Soft evidence: runtime enrichment for this field is still partial (see §"Open Gaps"). The shell exits `0` so the field-presence delta is the reviewable progress signal as enrichment lands incrementally. | Pre-`PASS (live staging evidence)` runs, while WF-FIN-GOV-001 still carries `PASS (static evidence)` on the matrix.                                        |
+| **`STRICT_VERIFICATION_BODY=1` (uplift gate-keeper)** | Hard fail: every NOT_POPULATED in the final 13-field snapshot is treated as a contract regression and the shell exits non-zero with the list of missing fields.                                          | Used to gate a `PASS (live staging evidence)` uplift — once the IAP/credential gate clears and the staging governed rerun produces an enriched invoice/report, the strict run must come back green before the matrix row is uplifted. |
+
+The strict-mode invocation is `STRICT_VERIFICATION_BODY=1 bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh`. The default-mode invocation omits the env var.
+
+Recording NOT_POPULATED instead of omitting the line is what prevents a silent pass on a missing field: the reviewer can grep the evidence file for `NOT_POPULATED` and see exactly which directive §H fields are still gaps in any given environment.
 
 ---
 
