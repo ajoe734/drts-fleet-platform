@@ -1,10 +1,11 @@
 # PARTNER-ELIG-LIVE-001 — Live Issuer Credential Hold-State Evidence
 
-**Task:** `PARTNER-ELIG-LIVE-001`  
-**Owner:** `Codex`  
-**Reviewer:** `Claude2`  
-**Collected:** `2026-05-19 (UTC)`  
-**Status:** `partial evidence only — live issuer proof remains external-gated`
+- **Task:** `PARTNER-ELIG-LIVE-001`
+- **Owner:** `Codex`
+- **Reviewer:** `Claude2`
+- **Collected:** `2026-05-19 (UTC)`
+- **Refreshed:** `2026-05-22 (UTC)`
+- **Status:** `hold evidence refreshed — live issuer proof remains external-gated`
 
 ---
 
@@ -13,13 +14,18 @@
 This packet records the current hold state for real issuer/bank sandbox
 credentials and live eligibility proof in Phase 1 v3.
 
-Current result on `2026-05-19`:
+Current result on `2026-05-22`:
 
-- `PRT-SPEC-001` is now `done`, so the partner-eligibility architecture/spec
-  dependency is satisfied.
-- `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK` is also `done` and already
-  narrowed the remaining blocker to the `EXT-001-BLK-001` through
-  `EXT-001-BLK-006` external gate family.
+- `PRT-SPEC-001` is `done`, so the repo/static partner-eligibility
+  architecture/spec dependency is satisfied.
+- Canonical machine truth now records
+  `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK` as `done`, and its `2026-05-22`
+  closeout leaves only the `EXT-001-BLK-001` through `EXT-001-BLK-006` external
+  gate family open.
+- Canonical `ai-status.json` keeps the parent resume sequence concrete:
+  preserve this sidecar as the evidence anchor, wait for `EXT-001-BLK-001`
+  through `EXT-001-BLK-006`, attach redacted issuer inputs here, then rerun the
+  live issuer proof.
 - No issuer/bank sandbox package is attached in this repo session:
   - no approved issuer API contract authority artifact
   - no sandbox credential or allowlist package
@@ -30,10 +36,11 @@ Current result on `2026-05-19`:
 
 Conclusion:
 
-- This task can now materialize the missing hold-state evidence packet.
-- It cannot claim live issuer activation, live sandbox proof, or benefit-release
-  approval until the `EXT-001-BLK-*` inputs arrive from the external issuer /
-  bank partnership track.
+- This packet is the durable hold-state evidence anchor for
+  `PARTNER-ELIG-LIVE-001`.
+- It cannot claim live issuer activation, live sandbox proof, or
+  benefit-release approval until the `EXT-001-BLK-*` inputs arrive from the
+  external issuer / bank partnership track.
 
 ---
 
@@ -71,18 +78,24 @@ It still lists these open external blockers:
 - `EXT-001-BLK-005` manual-review fallback business sign-off
 - `EXT-001-BLK-006` sensitive-data handling and retention approval
 
-### 2.4 Latest unblock diagnosis
+### 2.4 Latest machine-truth unblock resolution
 
-`support/unblock/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK.md`
-and the canonical closeout record for commit `8d5c47c` already resolved the
-intermediate dependency question:
+The authoritative `2026-05-22` unblock closeout is the canonical
+`ai-status.json` record for `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK`
+(closeout commit `130e3f7f`), not a branch-local helper document on this task
+branch.
+
+That closeout resolved the intermediate dependency question:
 
 - before `PRT-SPEC-001` closed, the parent task was not dependency-ready
 - after `PRT-SPEC-001` closed, the only remaining blocker is the `EXT-001`
   external-input family above
+- the parent next step is now explicit: keep this evidence packet current, wait
+  for `EXT-001-BLK-001` through `EXT-001-BLK-006`, attach redacted issuer
+  inputs here, then rerun the live issuer proof
 
-This packet does not change that diagnosis. It turns the missing owner artifact
-for `PARTNER-ELIG-LIVE-001` itself into a durable evidence record.
+This refresh does not change that diagnosis. It makes the owner artifact itself
+match the current machine-truth resume sequence.
 
 ---
 
@@ -107,6 +120,9 @@ Allowed current claim:
   `EXT-001-BLK-001` through `EXT-001-BLK-006`."
 - "`PRT-SPEC-001` closed the repo/static spec boundary, not the live issuer
   activation boundary."
+- "When external issuer inputs arrive, extend
+  `support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md` and
+  rerun the live issuer proof."
 
 Not allowed:
 
@@ -136,6 +152,8 @@ Once those inputs arrive, the next execution step is:
 2. Run the real issuer/sandbox verification flow against the approved fixtures.
 3. Update this packet with the dated probe result, redacted evidence pointers,
    and the final gate read.
+4. Hand the refreshed evidence packet to the assigned reviewer so canonical
+   machine truth can move out of the hold-state documentation phase.
 
 Until then, the correct machine-truth state is blocked on external resources,
 not repo implementation.
@@ -147,11 +165,14 @@ not repo implementation.
 Verification in this task was source review only:
 
 - reviewed canonical machine truth for `PARTNER-ELIG-LIVE-001`,
-  `PRT-SPEC-001`, and the unblock helper closeout
+  `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK`, and `PRT-SPEC-001`
+- reviewed canonical `ai-activity-log.jsonl` entries for the `2026-05-22`
+  parent-resume / unblock closeout sequence
 - reviewed the v3 planning runbook
 - reviewed `PRT-SPEC-001` spec boundary language
 - reviewed `EXT-001` blocker definitions
-- reviewed the parent unblock note for the resume sequence
+- verified that this task branch still carries the sidecar path named in the
+  canonical resume sequence
 
 No live issuer probe was executed in this task because the required external
 issuer/bank credential package and approved fixtures are still absent.
