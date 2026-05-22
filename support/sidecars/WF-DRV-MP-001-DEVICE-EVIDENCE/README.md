@@ -1,26 +1,40 @@
 # WF-DRV-MP-001 Device Evidence Packet
 
-**Task lineage:** `WF-DRV-MP-001-DEVICE-EVIDENCE` -> `PH1GC-DRV-MP-002`  
-**Packet status:** `blocked_external`  
-**Last reviewed:** `2026-05-22`  
-**Required output path:** `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/`
+**Directive output:** `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/`
+**Current owner task:** `PH1GC-DRV-MP-002`
+**Task lineage:** `WF-DRV-MP-001-DEVICE-EVIDENCE` -> `PH1GC-DRV-MP-002`
+**Packet status:** `blocked_external`
+**Last reviewed:** `2026-05-22`
 
-## Purpose
+## 1. Executive summary
 
 This directory is the canonical landing zone for directive `§C DRV-MP-002`.
-It now exists on disk, but it does **not** contain a real-device pass. It
-records the 11 required evidence items, the current repo-visible anchors, and
-the external prerequisites that still block collection from this workspace.
+The directory now exists on the `codex2/ph1gc-drv-mp-002` task branch with all
+11 required evidence-item placeholders, but it still does **not** prove a
+real-device pass.
 
 The current truthful read is:
 
-- `WF-DRV-MP-001` is still limited to sandbox/static evidence.
-- Native Android+iPhone evidence is still missing.
-- No item in this directory may be read as a completed proof artifact until the
-  external prerequisites are available and fresh masked captures/logs are
-  attached.
+- `WF-DRV-MP-001` still has only sandbox/static proof on `origin/dev`.
+- `PH1GC-DRV-MP-002` cannot move to `done` until fresh masked Android+iPhone
+  captures are attached here.
+- The correct machine-truth posture is `blocked` / `blocked_external`, not
+  `done`.
 
-## External prerequisites
+## 2. Current repo state
+
+At review time:
+
+- this directory exists on the task branch as the required canonical path
+- `origin/dev` does not yet contain this sidecar directory
+- each file in this packet truthfully remains `blocked_external`
+- `docs/04-uat/driver-mobile-real-device-test-report-20260519.md` remains the
+  main repo-visible hold report for the earlier `WF-DRV-MP-001-DEVICE-EVIDENCE`
+  task lineage
+
+This means the path gap is closed on the branch, but the evidence gap is not.
+
+## 3. External prerequisites
 
 All 11 items remain blocked on some combination of:
 
@@ -32,20 +46,20 @@ All 11 items remain blocked on some combination of:
 - weak-network test environment
 - human-in-loop operator authorized to collect masked artifacts
 
-See also:
+Related blockers and planning records:
 
 - `docs/04-uat/driver-mobile-real-device-test-report-20260519.md`
 - `support/sidecars/EXT-003/EXT-003-MOBILE-DISTRIBUTION-GATE.md`
 - `support/unblock/PH1GC-DRV-MP-002/PH1GC-DRV-MP-002-UNBLOCK-MANUAL-UNBLOCK.md`
 - `support/unblock/PH1GC-DRV-MP-002/PH1GC-DRV-MP-002-UNBLOCK-PLANNING-DECISION.md`
 
-## PII masking rule
+## 4. PII masking rule
 
 Every future screenshot, screen recording, install log, notification capture,
-or backend trace added here must mask driver name and phone number before the
-task can move beyond `blocked_external`.
+or backend trace added here must mask driver name and phone number before
+`PH1GC-DRV-MP-002` can move beyond `blocked_external`.
 
-## Evidence index
+## 5. Evidence index
 
 | # | Required item | Current state | File |
 | --- | --- | --- | --- |
@@ -61,9 +75,28 @@ task can move beyond `blocked_external`.
 | 10 | Forwarded task display proof | `blocked_external` | `10-forwarded-task-display-proof.md` |
 | 11 | Earnings display proof | `blocked_external` | `11-earnings-display-proof.md` |
 
-## Resume rule
+## 6. Resume sequence
 
-When the external bundle lands, replace the placeholder state in each file with
-real artifacts, keep the filenames stable, and then uplift the matrix gate read
-for `WF-DRV-MP-001` from `PASS (sandbox only)` to
-`PASS (sandbox + device evidence)`.
+Once the external bundle lands:
+
+1. Confirm `PH1GC-DRV-MP-001` remains the active baseline for seeded
+   forwarded-task and earnings behavior.
+2. Replace the placeholder state in each file with real masked artifacts while
+   keeping filenames stable.
+3. Verify Android install + signing, iOS install + TestFlight, push
+   notification delivery, location permission grant, weak-network retry,
+   platform online/offline, forwarded task display, and earnings display.
+4. Uplift `WF-DRV-MP-001` from `PASS (sandbox only)` to
+   `PASS (sandbox + device evidence)`.
+
+## 7. Closeout gate for `PH1GC-DRV-MP-002`
+
+This packet does **not** authorize `done`.
+
+Allowed closeout wording while external inputs are still absent:
+
+- "`PH1GC-DRV-MP-002` created the required sidecar path and 11 directive `§C`
+  evidence-item placeholders."
+- "The task remains `blocked_external` on device/distribution prerequisites."
+- "Do not claim Android/iPhone real-device PASS, native push proof, or location
+  permission proof without fresh masked captures."
