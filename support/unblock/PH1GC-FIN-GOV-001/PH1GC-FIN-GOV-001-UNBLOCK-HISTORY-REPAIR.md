@@ -23,7 +23,7 @@ missing document commit.
    `origin/codex2/ph1gc-fin-gov-001`.
 3. The owner still has two helper branches with the same task stem, but neither
    is the canonical parent replay branch:
-   `origin/codex2/ph1gc-fin-gov-001-unblock-history-repair @ d04006ae98b40ef5918c6ff5407b104dfb8cb0b4`
+   `origin/codex2/ph1gc-fin-gov-001-unblock-history-repair @ 4bf930192ccd51f332eaf9e3370cbf7c29cb4da0`
    carries only this diagnosis artifact, while local
    `codex2/ph1gc-fin-gov-001-unblock-manual-unblock @ 6607dea8` remains an empty
    alias of `origin/dev`.
@@ -43,13 +43,13 @@ missing document commit.
 
 - `origin/dev @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - local `codex2/ph1gc-fin-gov-001 @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
-- local + remote `codex2/ph1gc-fin-gov-001-unblock-history-repair @ d04006ae98b40ef5918c6ff5407b104dfb8cb0b4`
+- local + remote `codex2/ph1gc-fin-gov-001-unblock-history-repair @ 4bf930192ccd51f332eaf9e3370cbf7c29cb4da0`
 - local `codex2/ph1gc-fin-gov-001-unblock-manual-unblock @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - `git ls-remote --heads origin` returns no refs for:
   - `refs/heads/codex2/ph1gc-fin-gov-001`
   - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-manual-unblock`
 - `git ls-remote --heads origin` confirms these related pushed refs:
-  - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-history-repair @ d04006ae`
+  - `refs/heads/codex2/ph1gc-fin-gov-001-unblock-history-repair @ 4bf93019`
   - `refs/heads/codex/ph1gc-fin-gov-001-unblock-manual-unblock @ 0d4ac04b`
 - `git branch -vv` shows the parent branch and manual-unblock helper still
   tracking `origin/dev`, while the history-repair helper now tracks its own
