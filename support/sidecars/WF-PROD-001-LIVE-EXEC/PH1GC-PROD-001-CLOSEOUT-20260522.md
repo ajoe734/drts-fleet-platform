@@ -3,7 +3,7 @@
 Date: 2026-05-22
 Task: `PH1GC-PROD-001`
 Owner: `Codex2`
-Reviewer: `Codex`
+Reviewer: `Claude2`
 Directive anchor: `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §2.2, §3.9, §7
 
 Workflow family: `WF-PROD-001`
