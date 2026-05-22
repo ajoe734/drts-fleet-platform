@@ -1,11 +1,11 @@
 # PH1GC-MATRIX-002 Acceptance Packet
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `PH1GC-MATRIX-002` — Phase 1 gap closure E2E matrix reconciliation  
-**Sidecar Owner:** `Codex2`  
-**Assigned Reviewer:** `Codex`  
-**Generated:** `2026-05-22` (UTC)  
-**Snapshot Timestamp:** `2026-05-22T04:52:08Z`
+**Sidecar Kind:** `acceptance_packet`
+**Parent Task:** `PH1GC-MATRIX-002` — Phase 1 gap closure E2E matrix reconciliation
+**Sidecar Owner:** `Codex2`
+**Assigned Reviewer:** `Codex`
+**Generated:** `2026-05-22` (UTC)
+**Snapshot Timestamp:** `2026-05-22T05:00:49Z`
 
 ---
 
@@ -30,8 +30,8 @@ At packet generation time, `/home/edna/workspace/drts-fleet-platform/ai-status.j
 - `owner=Codex2`
 - `reviewer=Codex`
 - `status=in_progress`
-- `last_update=2026-05-22T04:52:08Z`
-- `next="Reviewing current sidecar packet, verifying machine-truth dependencies, and preparing reviewer handoff artifact."`
+- `last_update=2026-05-22T05:00:22Z`
+- `next="Revalidating the support packet against current machine truth and preparing reviewer handoff."`
 
 ### 2.2 Parent task
 
