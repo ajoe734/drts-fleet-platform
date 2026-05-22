@@ -44,9 +44,11 @@ Evidence anchors:
 - `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` lines `283-310`
 - `docs/00-context/phase1-origin-dev-gap-closure-status-truth-20260522.md` lines `28-47`
 
-### Sidecar snapshot
+### Sidecar status chronology
 
-Canonical machine truth records `PH1GC-BPL-003-SIDECAR-ACCEPTANCE` as:
+Canonical machine truth for `PH1GC-BPL-003-SIDECAR-ACCEPTANCE` changed during the first handoff/review loop, so this packet tracks the timeline explicitly instead of presenting a stale fixed snapshot.
+
+Current machine truth as of `2026-05-22T02:04:30Z`:
 
 - status=`in_progress`
 - owner=`Codex2`
@@ -54,11 +56,17 @@ Canonical machine truth records `PH1GC-BPL-003-SIDECAR-ACCEPTANCE` as:
 - artifact=`support/sidecars/PH1GC-BPL-003/PH1GC-BPL-003-SIDECAR-ACCEPTANCE.md`
 - helper kind=`acceptance_packet`
 - `mutates_canonical=false`
+- `next`=`Review failed: ... update the packet to match current machine truth or explicitly label the snapshot as pre-handoff.`
+
+Prior state immediately before the reviewer reopen:
+
+- `2026-05-22T02:00:36Z`: `Codex2` handed off the packet to `Codex`, advancing the task to status=`review`
+- `2026-05-22T02:04:30Z`: `Codex` reopened the task because §2 described the sidecar as `in_progress` without clarifying that the statement was pre-handoff
 
 Evidence anchors:
 
-- `ai-status.json` lines `20220-20243`
-- `ai-activity-log.jsonl` lines `321178-321186`
+- `ai-status.json:20220-20243`
+- `ai-activity-log.jsonl:321186-321200`
 
 ---
 
@@ -208,7 +216,7 @@ Support implication for reviewer:
 
 ## 8. Handoff Notes
 
-This packet is ready to hand off once the owner records final support-only verification. At this stage it provides:
+This packet is being repaired after reviewer reopen so the sidecar status language matches machine truth across the first handoff/review cycle. After this update, the packet is intended for re-handoff with:
 
 - the parent-task acceptance expansion
 - the dependency/evidence map
