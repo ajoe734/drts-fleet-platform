@@ -56,6 +56,18 @@ Next action: `If partner sandbox inputs arrive later, capture a new sidecar pack
 - `EXT-002-BLK-006`: duplicate / stale / lost-race proof from the external provider
 - `EXT-002-BLK-007`: no-owned-assignment proof from a real external forwarded task
 
+## Review Approval Reference
+
+- Reviewer approval status: `review_approved`
+- Reviewer: `Codex2`
+- Reviewer approval timestamp: `2026-05-22T11:29:01Z`
+- Approved implementation commit:
+  `0172bebdb98f0689df480a01dd4217a24c76aefb`
+- Finalization note:
+  owner closeout is limited to recording the approval reference, preserving the
+  reviewed proof packet, and supplying the required closeout commit/push
+  metadata before `done`.
+
 ## Verification Commands
 
 ```bash
