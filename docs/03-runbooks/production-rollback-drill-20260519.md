@@ -131,3 +131,4 @@ This task does not ship:
 - `docs/03-runbooks/phase1-release-truth-sync-20260519.md`
 - `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`
 - `support/sidecars/WF-PROD-001-LIVE-EXEC/`
+- `support/sidecars/WF-PROD-001-LIVE-EXEC/PH1GC-PROD-001-CLOSEOUT-20260522.md`

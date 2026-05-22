@@ -234,5 +234,6 @@ This spec is not enough to claim "production launched". That claim requires:
 
 - `docs/03-runbooks/production-rollback-drill-20260519.md`
 - `support/sidecars/WF-PROD-001-LIVE-EXEC/`
+- `support/sidecars/WF-PROD-001-LIVE-EXEC/PH1GC-PROD-001-CLOSEOUT-20260522.md`
 - `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`
 - `docs/ops/branch-strategy.md` §7
