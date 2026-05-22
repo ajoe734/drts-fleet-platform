@@ -19,6 +19,7 @@ This branch replays the missing governance-aware billing/reporting artifact chai
 3. `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` is added and wired into the E2E suite.
 4. `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`, `docs/03-runbooks/phase1-release-truth-sync-20260519.md`, and `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` are updated so `WF-FIN-GOV-001` is explicitly present as a `PASS (static evidence)` row with an honest live-staging blocker.
 5. `docs/04-uat/fbp-014a-e2e-matrix.md` and `tests/e2e/README.md` document the new `E2E-010` chain and verification surface.
+6. `.github/workflows/ci-integ.yml` now exposes a task-scoped `workflow_dispatch` path that can try the protected staging `E2E-010` rerun from GitHub Actions using the repo's WIF / IAP configuration, so auth failures are captured as reviewable CI evidence instead of being inferred only from local `gcloud` probes.
 
 The planning-ref path named in the task brief is not present in this worktree. To avoid keeping a dead citation in shipped artifacts, the spec/UAT authority headers point to the canonical directive §3.7 and cross-reference the execution worklist plus blueprint-alignment audit.
 
@@ -54,6 +55,8 @@ The planning-ref path named in the task brief is not present in this worktree. T
 - `gcloud auth print-access-token` for the active user account (`bobo.du@cctech-support.com`) and temporary compute-service-account override
 - `CLOUDSDK_CORE_ACCOUNT=384772941419-compute@developer.gserviceaccount.com ./scripts/print-staging-iap-token.sh`
 - `CLOUDSDK_CORE_ACCOUNT=384772941419-compute@developer.gserviceaccount.com gcloud auth print-identity-token --audiences <IAP_CLIENT_ID>`
+- `gh workflow run ci-integ.yml --ref codex/ph1gc-fin-gov-001 -f ref=codex/ph1gc-fin-gov-001 -f run_staging_e2e_010=true`
+- `gh run view 26287551676 --job 77378907824 --log`
 - `git diff --check`
 
 No governed live staging execution was run from this dispatch because the 2026-05-22 access probes still stop before an authenticated E2E request can be issued:
@@ -63,12 +66,14 @@ No governed live staging execution was run from this dispatch because the 2026-0
 - the active user account (`bobo.du@cctech-support.com`) still fails non-interactive `gcloud auth print-access-token` with `Reauthentication failed. cannot prompt during non-interactive execution.`;
 - the temporary compute-service-account override can mint an access token, but `generateIdToken` / service-account impersonation still fails with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`;
 - a bare audience identity token from the compute service account reaches IAP but is rejected with `401 Invalid IAP credentials: JWT 'email' claim isn't a string`.
+- the GitHub Actions fallback path now fails even earlier: workflow run `26287551676` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@f8cc61e7`) reached the `staging-e2e-010` job, but `google-github-actions/auth@v2` could not mint the initial federated token and returned `invalid_target`, meaning the configured workload identity provider behind `secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER` is invalid, disabled, or deleted before any IAP token or E2E request can be issued.
 
 ## 5. Remaining Blocker
 
 To uplift `WF-FIN-GOV-001` from `PASS (static evidence)` to `PASS (live staging evidence)`, a follow-up owner must:
 
 1. obtain a valid email-bearing staging bearer / IAP path for the governed tenant (either by refreshing a user credential that can mint the token non-interactively, or by providing a service account / VM scope combination that can generate an acceptable IAP identity token),
+   or repair the repository-configured GitHub Actions WIF provider so the non-interactive CI path can mint federated credentials again,
 2. run `STRICT_VERIFICATION_BODY=1 bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh` against the governed staging origin,
 3. capture the evidence log plus the reviewer-readable invoice/report artifacts, and
 4. then update the release-gate row, release-truth-sync row, and alignment-audit row from blocked static evidence to live staging evidence.
