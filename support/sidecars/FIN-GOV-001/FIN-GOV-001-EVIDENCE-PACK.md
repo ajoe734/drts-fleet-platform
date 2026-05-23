@@ -236,7 +236,7 @@ Observed results:
   - `failed to generate Google Cloud OpenID Connect ID token ...`
   - `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
   - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, and GitHub warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to upload because the shell never started.
-- the current branch head `bda002e2` records that newest governed staging rerun and confirms the remaining blocker is still OpenID-token mint permission, not provider discovery or Cloud SDK setup.
+- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`; the current local/docs head `2445ea4d` is the evidence-refresh commit that records that rerun and confirms the remaining blocker is still OpenID-token mint permission, not provider discovery or Cloud SDK setup.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
