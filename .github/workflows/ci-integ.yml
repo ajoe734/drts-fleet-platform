@@ -150,13 +150,19 @@ jobs:
           service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
+        continue-on-error: true
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ env.PROJECT_ID }}
+          version: latest
 
       - name: Best-effort fetch internal key
         run: |
           set -euo pipefail
+
+          if ! command -v gcloud >/dev/null 2>&1; then
+            echo "::notice::gcloud is unavailable on this runner; continuing without E2E_INTERNAL_KEY."
+            exit 0
+          fi
 
           secret_name="${SECRET_PREFIX}-internal-key"
           if value="$(gcloud secrets versions access latest --secret "$secret_name" --project "$PROJECT_ID" 2>/dev/null)"; then
