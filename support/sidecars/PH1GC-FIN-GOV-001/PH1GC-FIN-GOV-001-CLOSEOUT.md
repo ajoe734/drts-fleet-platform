@@ -5,7 +5,7 @@
 **Reviewer:** `Claude`
 **Branch:** `codex/ph1gc-fin-gov-001`
 **Directive:** `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (`WF-FIN-GOV-001`)
-**Task-brief planning ref:** `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
+**Task-brief planning ref:** `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` (referenced by dispatch, but the path is not present in this worktree snapshot)
 **Predecessor evidence pack:** `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`
 
 ---
@@ -21,7 +21,7 @@ This branch replays the missing governance-aware billing/reporting artifact chai
 5. `docs/04-uat/fbp-014a-e2e-matrix.md` and `tests/e2e/README.md` document the new `E2E-010` chain and verification surface.
 6. `.github/workflows/ci-integ.yml` now exposes a task-scoped `workflow_dispatch` path that can try the protected staging `E2E-010` rerun from GitHub Actions using the repo's WIF / IAP configuration, so auth failures are captured as reviewable CI evidence instead of being inferred only from local `gcloud` probes.
 
-The planning-ref path named in the task brief is present in this worktree and remains the dispatch/planning context. The shipped spec/UAT authority headers still point to the canonical directive §3.7 because that is the normative source for `WF-FIN-GOV-001`, with the execution worklist plus blueprint-alignment audit cited as alignment anchors.
+The task brief names a planning-ref path that is **not** present in this worktree snapshot. This closeout therefore treats the embedded dispatch brief plus the canonical directive §3.7 as the reviewable planning context and does not claim any unseen repo-local planning spec was read. The shipped spec/UAT authority headers point to the canonical directive §3.7 because that is the normative source for `WF-FIN-GOV-001`, with the execution worklist plus blueprint-alignment audit cited as alignment anchors.
 
 `origin/dev` already carries the earlier directive-path spec/UAT pair for `WF-FIN-GOV-001`. This branch is the reconciliation layer: it tightens the verification body to the canonical 13 fields, adds the `E2E-010` shell plus matrix/release wiring, and records the current live-staging blocker with fresh 2026-05-23 probes.
 
@@ -34,7 +34,7 @@ The planning-ref path named in the task brief is present in this worktree and re
 | UAT covers all 13 directive §H verification-body fields | Yes. The happy-path and negative-path scenarios enumerate the 13-field body and the required integrity / RBAC / masking paths. | UAT §2–§4 |
 | `PH1GC-E2E-010` script asserts every verification-body field | Yes, with the two-tier contract now documented explicitly: every field is always recorded, and `STRICT_VERIFICATION_BODY=1` hard-fails if any field remains `NOT_POPULATED`. | Spec §6; `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`; E2E matrix §4.10 |
 | Gate-read update for `WF-FIN-GOV-001 = PASS (live staging evidence)` drives matrix change | **Blocked.** The branch adds the matrix row and keeps it at `PASS (static evidence)`. Fresh 2026-05-23 probes still cannot obtain an email-bearing IAP token usable against governed staging, so no fresh reviewer-readable live invoice/report artifact or green strict-mode rerun is available from this workspace. | Release-gates row `WF-FIN-GOV-001`; release-truth-sync row 14; predecessor evidence pack §4; this closeout §4–§5 |
-| Closeout report follows directive §7 format | Yes. This sidecar states delivered scope, non-claims, local verification, and the exact remaining blocker. | This file |
+| Closeout report follows directive §7 format | Yes. This sidecar applies directive §7 as a non-claim closeout: delivered scope, explicit non-claims, local verification, and the exact remaining blocker are all stated plainly. | This file |
 
 ## 3. Directive §7 Non-Claim Posture
 
