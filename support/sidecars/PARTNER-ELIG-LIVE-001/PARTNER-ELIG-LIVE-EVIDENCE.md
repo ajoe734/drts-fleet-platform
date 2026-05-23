@@ -2,10 +2,11 @@
 
 **Task:** `PH1GC-PARTNER-002`
 **Workflow family:** `WF-PARTNER-001`
-**Owner:** `Codex2`
-**Reviewer:** `Codex`
+**Owner:** `Codex`
+**Reviewer:** `Codex2`
 **Collected:** `2026-05-23 (UTC)`
-**Status:** `blocked_external`
+**Canonical task status:** `blocked`
+**External hold class:** `blocked_external`
 
 ---
 
@@ -43,6 +44,9 @@ Correct current claim:
   issuer sandbox proof`.
 - `PH1GC-PARTNER-002` remains `blocked_external` until the external issuer/bank
   inputs in `EXT-001-BLK-001` through `EXT-001-BLK-006` arrive.
+- The directive §E acceptance still resolves to seven evidence rows; the
+  negative-path proofs called out by the unblock note are embedded within the
+  sandbox outcome / timeout / linkage evidence, not tracked as separate rows.
 
 ---
 
