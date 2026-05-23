@@ -4,7 +4,7 @@
 **Workflow family:** `WF-PARTNER-001`
 **Owner:** `Codex2`
 **Reviewer:** `Codex`
-**Collected:** `2026-05-23 (UTC)`
+**Collected / re-verified:** `2026-05-23 (UTC)`
 **Canonical task status:** `blocked`
 **External hold class:** `blocked_external`
 
@@ -37,6 +37,11 @@ Current result:
 - Because the directive requires real issuer sandbox data and explicitly rejects
   repo-local mocks, the gate read cannot be promoted to `PASS (sandbox
   evidence)`.
+- A 2026-05-23 repository re-scan found only repo-local specs, UAT references,
+  shell scripts, and unit tests that mention partner eligibility fields. No
+  redacted issuer credential reference, issuer-approved test card matrix, real
+  sandbox transcript, booking linkage record, invoice/report export, or audit
+  extract was added under `support/sidecars/PARTNER-ELIG-LIVE-001/`.
 
 Correct current claim:
 
@@ -149,3 +154,30 @@ Verification in this task was source review and history recovery only:
 
 No live issuer sandbox probe was executed in this task because the required
 external credentials, allowed test cards, and approvals are still absent.
+
+## 8. 2026-05-23 Repository Re-Verification
+
+The following repo-local materials were re-checked and are **not** acceptable
+substitutes for directive §E sandbox evidence:
+
+- `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md`
+  defines the contract and lists the required sandbox proof set, but does not
+  include issuer-issued evidence.
+- `tests/e2e/E2E-007-partner-airport-transfer.sh` and
+  `tests/e2e/E2E-008-partner-booking-cutover.sh` exercise repo-local/system
+  flows, but they do not prove execution against a real issuer sandbox with an
+  issuer-approved test card.
+- `tests/unit/*`, UAT docs, and reporting/billing specs mention
+  `eligibilityVerificationId`, `manual_review`, and downstream linkage fields,
+  but those are contract assertions, not sandbox transcripts.
+- `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` still declares
+  `EXT-001-BLK-001` through `EXT-001-BLK-006` open, which means the credential,
+  fixture, timeout, manual-review approval, and data-handling prerequisites are
+  still unmet.
+
+Therefore the only defensible machine-truth outcome remains:
+
+- `PH1GC-PARTNER-002` = `blocked_external`
+- `WF-PARTNER-001` must not be upgraded to `PASS (sandbox evidence)`
+- this sidecar remains a hold packet until real issuer sandbox evidence is
+  attached
