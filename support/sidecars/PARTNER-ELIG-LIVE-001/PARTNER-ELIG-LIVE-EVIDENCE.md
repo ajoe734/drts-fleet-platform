@@ -2,8 +2,8 @@
 
 **Task:** `PH1GC-PARTNER-002`
 **Workflow family:** `WF-PARTNER-001`
-**Owner:** `Codex`
-**Reviewer:** `Codex2`
+**Owner:** `Codex2`
+**Reviewer:** `Codex`
 **Collected:** `2026-05-23 (UTC)`
 **Canonical task status:** `blocked`
 **External hold class:** `blocked_external`
