@@ -1,5 +1,10 @@
 # FWD-LIVE-001 — Forwarder External Platform Live Evidence Pack
 
+Classification update on 2026-05-23: this file remains a dated partial external
+attempt snapshot only. It is not the 11-item real sandbox proof packet. See
+`README.md` and `FWD-LIVE-001-PROVIDER-PROOF.md` in this same folder for the
+current classification and proof-item matrix.
+
 **Task:** `FWD-LIVE-001`  
 **Owner:** `Codex2`  
 **Reviewer:** `Codex`  
