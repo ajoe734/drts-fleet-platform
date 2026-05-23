@@ -15,7 +15,7 @@
 - Older Codex audit branch still present on origin:
   `origin/codex/ph1gc-partner-002 @ c0452396`
 - Current history-repair packet branch:
-  `origin/codex/ph1gc-partner-002-unblock-history-repair @ 8d3de3a8`
+  `origin/codex/ph1gc-partner-002-unblock-history-repair @ 72efe505`
   (draft PR `#253`, `mergeStateStatus=BEHIND`)
 
 ## Diagnosis
@@ -98,18 +98,20 @@ branch named by canonical machine truth.
 
 Current history-repair packet branch and PR:
 
-- `origin/codex/ph1gc-partner-002-unblock-history-repair @ 8d3de3a8`
+- `origin/codex/ph1gc-partner-002-unblock-history-repair @ 72efe505`
 - draft PR `#253`
   <https://github.com/ajoe734/drts-fleet-platform/pull/253>
 - `gh pr view 253 --json mergeStateStatus` reports `BEHIND`
 - `git rev-list --left-right --count origin/dev...origin/codex/ph1gc-partner-002-unblock-history-repair`
-  = `11 3`
+  = `11 4`
 - `git diff --name-status origin/codex2/ph1gc-partner-002...origin/codex/ph1gc-partner-002-unblock-history-repair`
   shows only:
   - `A support/unblock/PH1GC-PARTNER-002/PH1GC-PARTNER-002-UNBLOCK-HISTORY-REPAIR.md`
 
 So the packet content now correctly points at the live Codex2 restore, but the
-packet branch ancestry still belongs to the older Codex PH1GC family.
+packet branch ancestry still belongs to the older Codex PH1GC family. Commit
+`8d3de3a8` first realigned the packet to the live restore, and current head
+`72efe505` refreshes the lineage evidence against the latest canonical truth.
 
 ### 5. `origin/dev` still lacks the reserved sidecar path
 
@@ -154,8 +156,9 @@ clean current-dev lineage is needed later.
 2. Keep the older Codex family intact as audit history; do not rewrite:
    - `origin/codex/ph1gc-partner-002`
    - `origin/codex/ph1gc-partner-002-unblock-history-repair`
-3. Treat commit `8d3de3a8` on PR `#253` as the content-alignment step that
-   makes the packet explicitly point at the live Codex2 restoration commit.
+3. Treat commits `8d3de3a8` and `72efe505` on PR `#253` as the additive
+   packet-alignment chain that now points the packet at the live Codex2
+   restoration commit and current machine truth.
 4. If maintainers need a mergeable current-dev packet branch, cut a fresh
    dev-based replay branch and cherry-pick only the packet commit instead of
    rebasing or force-pushing the existing published PR branch:
@@ -163,12 +166,12 @@ clean current-dev lineage is needed later.
 ```bash
 git fetch origin
 git switch -c codex/ph1gc-partner-002-unblock-history-repair-replay origin/dev
-git cherry-pick 8d3de3a846d4c0c5a8ec6e2ee6a1c8d3c5efaccc
+git cherry-pick 72efe5058058c90db335ef6c4bbd7a4b2e78b467
 git push -u origin codex/ph1gc-partner-002-unblock-history-repair-replay
 gh pr create --base dev \
   --head codex/ph1gc-partner-002-unblock-history-repair-replay \
   --title "PH1GC-PARTNER-002-UNBLOCK-HISTORY-REPAIR: replay packet on current dev" \
-  --body "Replays the history-repair packet commit 8d3de3a8 onto current dev without rewriting PR #253 or any older PH1GC audit branches."
+  --body "Replays the latest history-repair packet commit 72efe505 onto current dev without rewriting PR #253 or any older PH1GC audit branches."
 ```
 
 5. If trunk needs the reserved hold-state sidecar path before the external
