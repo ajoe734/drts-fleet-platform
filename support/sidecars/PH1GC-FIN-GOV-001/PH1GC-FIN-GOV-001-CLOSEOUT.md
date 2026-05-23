@@ -56,6 +56,7 @@ The planning-ref path named in the task brief is not present in this worktree. T
 - `CLOUDSDK_CORE_ACCOUNT=384772941419-compute@developer.gserviceaccount.com ./scripts/print-staging-iap-token.sh`
 - `CLOUDSDK_CORE_ACCOUNT=384772941419-compute@developer.gserviceaccount.com gcloud auth print-identity-token --audiences <IAP_CLIENT_ID>`
 - `gh workflow run ci-integ.yml --ref codex/ph1gc-fin-gov-001 -f ref=codex/ph1gc-fin-gov-001 -f run_staging_e2e_010=true`
+- `gh run view 26327029664 --json url,status,conclusion,jobs`
 - `gh run view 26287551676 --job 77378907824 --log`
 - `git diff --check`
 
@@ -66,7 +67,7 @@ No governed live staging execution was run from this dispatch because the 2026-0
 - the active user account (`bobo.du@cctech-support.com`) still fails non-interactive `gcloud auth print-access-token` with `Reauthentication failed. cannot prompt during non-interactive execution.`;
 - the temporary compute-service-account override can mint an access token, but `generateIdToken` / service-account impersonation still fails with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`;
 - a bare audience identity token from the compute service account reaches IAP but is rejected with `401 Invalid IAP credentials: JWT 'email' claim isn't a string`.
-- the GitHub Actions fallback path remains blocked at the last verified run: workflow run `26287551676` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@f8cc61e7`) reached the `staging-e2e-010` job, but `google-github-actions/auth@v2` could not mint the initial federated token and returned `invalid_target`, meaning the configured workload identity provider behind `secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER` is invalid, disabled, or deleted before any IAP token or E2E request can be issued. No new CI rerun was launched on 2026-05-23 because the local protected-host and token-minting probes reproduced the same auth gate before any governed request could start.
+- the GitHub Actions fallback path remains blocked after a fresh 2026-05-23 rerun: workflow run `26327029664` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@2cc083d6`) reached job `staging-e2e-010` (`77506520838`), which completed `failure` at `2026-05-23T07:32:52Z`; step 4 `Authenticate to GCP` failed before any Cloud SDK, IAP-token mint, or E2E shell work could begin, and GitHub reported `google-github-actions/auth failed with: failed to generate Google Cloud federated token ... {"error":"invalid_target","error_description":"The target service indicated by the \"audience\" parameters is invalid. This might either be because the pool or provider is disabled or deleted or because it doesn't exist."}`. The earlier run `26287551676` showed the same provider-side `invalid_target` failure, so the repository-configured WIF path is still unusable for governed staging reruns.
 
 ## 5. Remaining Blocker
 
