@@ -2,7 +2,7 @@
 
 **Task:** `PH1GC-FIN-GOV-001` — Phase 1 gap closure: governance-aware billing/reporting spec + UAT
 **Owner:** `Codex`
-**Reviewer:** `Claude2`
+**Reviewer:** `Claude`
 **Branch:** `codex/ph1gc-fin-gov-001`
 **Directive:** `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (`WF-FIN-GOV-001`)
 **Task-brief planning ref:** `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
@@ -21,9 +21,9 @@ This branch replays the missing governance-aware billing/reporting artifact chai
 5. `docs/04-uat/fbp-014a-e2e-matrix.md` and `tests/e2e/README.md` document the new `E2E-010` chain and verification surface.
 6. `.github/workflows/ci-integ.yml` now exposes a task-scoped `workflow_dispatch` path that can try the protected staging `E2E-010` rerun from GitHub Actions using the repo's WIF / IAP configuration, so auth failures are captured as reviewable CI evidence instead of being inferred only from local `gcloud` probes.
 
-The planning-ref path named in the task brief is not present in this worktree. To avoid keeping a dead citation in shipped artifacts, the spec/UAT authority headers point to the canonical directive §3.7 and cross-reference the execution worklist plus blueprint-alignment audit.
+The planning-ref path named in the task brief is present in this worktree and remains the dispatch/planning context. The shipped spec/UAT authority headers still point to the canonical directive §3.7 because that is the normative source for `WF-FIN-GOV-001`, with the execution worklist plus blueprint-alignment audit cited as alignment anchors.
 
-`origin/dev` already carries the earlier directive-path spec/UAT pair for `WF-FIN-GOV-001`. This branch is the reconciliation layer: it tightens the verification body to the canonical 13 fields, adds the `E2E-010` shell plus matrix/release wiring, and records the current live-staging blocker with fresh 2026-05-22 probes.
+`origin/dev` already carries the earlier directive-path spec/UAT pair for `WF-FIN-GOV-001`. This branch is the reconciliation layer: it tightens the verification body to the canonical 13 fields, adds the `E2E-010` shell plus matrix/release wiring, and records the current live-staging blocker with fresh 2026-05-23 probes.
 
 ## 2. Acceptance Status
 
