@@ -23,6 +23,16 @@ if [[ -x "$ROOT_DIR/scripts/repair-codex-symlinks.sh" ]]; then
   "$ROOT_DIR/scripts/repair-codex-symlinks.sh" || true
 fi
 
+# Pre-flight: re-link ~/.local/bin/{codex,claude} to whichever VS Code
+# extension is currently installed. Extension auto-updates leave the stable-
+# name symlink dangling, which causes the codex/claude wrappers in
+# .orchestrator/bin/ to exit 127 with "cannot find real <tool> binary in
+# PATH". See scripts/repair-cli-symlinks.sh and the memory note
+# `feedback_cli_symlink_staleness.md`.
+if [[ -x "$ROOT_DIR/scripts/repair-cli-symlinks.sh" ]]; then
+  "$ROOT_DIR/scripts/repair-cli-symlinks.sh" || true
+fi
+
 # Pre-flight: install the codex wrapper into the gitignored .orchestrator/bin/
 # so it overrides the system codex on the supervisor's PATH. The wrapper
 # itself lives in scripts/ (tracked); .orchestrator/bin/codex is a symlink to

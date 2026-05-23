@@ -146,6 +146,27 @@ The first live-bound `partnerProgramCode` under `WF-PARTNER-001` is `credit_card
 - The verification result is bound to the specific booking; re-quoting the same trip 24 hours later requires a new verification.
 - Benefit price subsidy is applied to the booking total at billing time, sourcing the subsidy amount from the partner program's published rate (versioned via the platform admin pricing module — `WF-ADM-001`).
 
+The airport-transfer payload uses the existing tenant booking contract fields
+`direction`, `flightNo`, `terminal`, and `luggageCount` with these additional
+rules:
+
+- `direction` is required and stays part of the booking + eligibility request
+  context.
+- `flightNo` is required for `direction = pickup`; submission without it is
+  rejected before booking creation.
+- `terminal` is a booking-scoped travel-detail field. It must persist onto the
+  booking/request context and remain visible to operator manual-review flows,
+  but it does not change the issuer eligibility classification by itself.
+- `luggageCount` is a booking-scoped travel-detail field. It persists with the
+  booking/request context for fulfillment, but it does not change issuer
+  eligibility classification by itself.
+- Updating `terminal` or `luggageCount` does not mint a new
+  `eligibilityVerificationId` and does not, by itself, trigger a new
+  eligibility verification. Re-verification stays reserved for changes that
+  materially alter partner entry / eligibility truth, such as
+  `partnerEntrySlug`, the bound verification identifier, or a new pickup-side
+  eligibility request.
+
 Other partner programs follow the same eligibility / linkage / audit contract but may declare program-specific extension fields. Extension fields land in `packages/contracts/src/` as program-scoped schema rather than this spec.
 
 ---

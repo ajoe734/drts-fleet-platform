@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-20T01:11:05Z
+Last updated: 2026-05-22T06:37:56Z
 
 ## Objective
 
@@ -48,9 +48,25 @@ Phase 1 v3 design-blueprint-completion wave: 22 dispatchable P0 tasks + 9 HELD t
 
 ### Primary Project Work
 
-| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
-| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
-| _(none)_ | -     | -    | -     | -      | -          | -        |
+| ID                  | Phase                  | Task                                                                             | Owner  | Status  | Depends On                                           | 中文說明                                                                                                                                                                     |
+| ------------------- | ---------------------- | -------------------------------------------------------------------------------- | ------ | ------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PH1GC-BPL-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — origin/dev blueprint alignment audit                       | Codex  | pending | -                                                    | 依 directive §A 產出 origin-dev-blueprint-alignment-audit-20260519.md，逐項列出 origin/dev 現況並對照 Phase 1 藍圖。                                                         |
+| `PH1GC-BPL-002`     | Phase 1 v3 gap closure | Phase 1 gap closure — release truth sync runbook                                 | Codex2 | pending | `PH1GC-BPL-001`                                      | 依 directive §A 產出 phase1-release-truth-sync-20260519.md，包含 E2E 編號、Workflow ID、matrix mapping、sidecar mapping、publish/release/prod tag 角色與 non-claim wording。 |
+| `PH1GC-BPL-003`     | Phase 1 v3 gap closure | Phase 1 gap closure — 12 thin stubs under docs/00-context/stubs/                 | Codex  | pending | -                                                    | 依 directive §4.3 補齊 12 份 thin stub，每份只指 canonical artifact，不重寫。                                                                                                |
+| `PH1GC-MATRIX-001`  | Phase 1 v3 gap closure | Phase 1 gap closure — release gate matrix reconciliation                         | Codex2 | pending | `PH1GC-BPL-002`                                      | 依 directive §B 更新 phase1-workflow-acceptance-release-gates.md 至 16 條 WF rows；rename WF-PRT-001→WF-PARTNER-001；新增 DRV-MP/FIN-GOV/ADM/REL。                           |
+| `PH1GC-MATRIX-002`  | Phase 1 v3 gap closure | Phase 1 gap closure — E2E matrix reconciliation                                  | Codex2 | pending | `PH1GC-MATRIX-001`, `PH1GC-E2E-010`, `PH1GC-E2E-011` | 依 directive §B 更新 fbp-014a-e2e-matrix.md：補 E2E-007/009/010/011 row；E2E-006 warning-skip 標 risk。                                                                      |
+| `PH1GC-E2E-010`     | Phase 1 v3 gap closure | Phase 1 gap closure — E2E-010 governance-aware billing/reporting script          | Codex  | pending | `PH1GC-FIN-GOV-001`                                  | 依 directive §B/§H 新增 E2E-010-governance-aware-billing-reporting.sh，無 seed 必須 hard fail。                                                                              |
+| `PH1GC-E2E-011`     | Phase 1 v3 gap closure | Phase 1 gap closure — E2E-011 platform admin control plane script                | Codex  | pending | `PH1GC-ADM-001`                                      | 依 directive §B/§I 新增 E2E-011-platform-admin-control-plane.sh，含 RBAC negative、pricing version、rollback hold 阻止 promote。                                             |
+| `PH1GC-DRV-MP-001`  | Phase 1 v3 gap closure | Phase 1 gap closure — harden E2E-006 driver multi-platform seed/gate             | Codex  | pending | -                                                    | 依 directive §C 讓 E2E-006 預設無 seed 就 hard fail；只在 E2E_ALLOW_MISSING_FORWARDER_SEED=true 才 warning skip。                                                            |
+| `PH1GC-DRV-MP-002`  | Phase 1 v3 gap closure | Phase 1 gap closure — driver mobile device evidence packet                       | Codex2 | pending | `PH1GC-DRV-MP-001`                                   | 依 directive §C 補 Android + iOS 真機 evidence 至 WF-DRV-MP-001-DEVICE-EVIDENCE sidecar。                                                                                    |
+| `PH1GC-FWD-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — forwarder sandbox proof set                                | Codex  | pending | -                                                    | 依 directive §D 補齊 FWD-LIVE-001 sidecar 11 項 sandbox proof；no purely-local fixture stand-in。                                                                            |
+| `PH1GC-PARTNER-001` | Phase 1 v3 gap closure | Phase 1 gap closure — partner eligibility/airport transfer rename + spec         | Codex2 | pending | `PH1GC-MATRIX-001`                                   | 依 directive §E rename WF-PRT-001→WF-PARTNER-001 並產 partner-eligibility-airport-transfer-spec-20260519.md。                                                                |
+| `PH1GC-PARTNER-002` | Phase 1 v3 gap closure | Phase 1 gap closure — issuer sandbox eligibility evidence                        | Codex  | pending | `PH1GC-PARTNER-001`                                  | 依 directive §E 產 PARTNER-ELIG-LIVE-001 sidecar 7 項 issuer sandbox proof。                                                                                                 |
+| `PH1GC-PBK-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — partner booking pilot cutover proof                        | Codex2 | pending | `PH1GC-PARTNER-001`                                  | 依 directive §F 產 PBK-PILOT-001 sidecar + partner-booking-live-cutover-plan runbook，含 rollback retention ≥ 14 天。                                                        |
+| `PH1GC-COM-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — CTI/recording/filing live provider evidence classification | Codex  | pending | -                                                    | 依 directive §G 產 cti-recording-filing-blueprint 與 WF-COM-001-LIVE-PROVIDER sidecar；明確分類 sandbox/live provider。                                                      |
+| `PH1GC-FIN-GOV-001` | Phase 1 v3 gap closure | Phase 1 gap closure — governance-aware billing/reporting spec + UAT              | Codex2 | pending | -                                                    | 依 directive §H 產 governance-aware-billing-reporting-spec + UAT；對齊 13 個 verification body 欄位。                                                                        |
+| `PH1GC-ADM-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — platform admin control plane UAT                           | Codex2 | pending | -                                                    | 依 directive §I 產 platform-admin-control-plane-uat-20260519.md；對齊 11 項 control-plane action + audit。                                                                   |
+| `PH1GC-PROD-001`    | Phase 1 v3 gap closure | Phase 1 gap closure — production live execution readiness                        | Codex  | pending | `PH1GC-BPL-002`                                      | 依 directive §J 補 deploy-prod.yml、production-deploy-rail-spec、production-rollback-drill 與 WF-PROD-001-LIVE-EXEC sidecar；不得宣稱 production launched。                  |
 
 ### External / Upstream Integration Work
 
@@ -60,8 +76,25 @@ Phase 1 v3 design-blueprint-completion wave: 22 dispatchable P0 tasks + 9 HELD t
 
 ## Task Board (active only)
 
-| ID  | Phase | Task | Owner | Status | Depends On |
-| --- | ----- | ---- | ----- | ------ | ---------- |
+| ID                  | Phase                  | Task                                                                             | Owner  | Status  | Depends On                                           |
+| ------------------- | ---------------------- | -------------------------------------------------------------------------------- | ------ | ------- | ---------------------------------------------------- |
+| `PH1GC-BPL-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — origin/dev blueprint alignment audit                       | Codex  | pending | -                                                    |
+| `PH1GC-BPL-002`     | Phase 1 v3 gap closure | Phase 1 gap closure — release truth sync runbook                                 | Codex2 | pending | `PH1GC-BPL-001`                                      |
+| `PH1GC-BPL-003`     | Phase 1 v3 gap closure | Phase 1 gap closure — 12 thin stubs under docs/00-context/stubs/                 | Codex  | pending | -                                                    |
+| `PH1GC-MATRIX-001`  | Phase 1 v3 gap closure | Phase 1 gap closure — release gate matrix reconciliation                         | Codex2 | pending | `PH1GC-BPL-002`                                      |
+| `PH1GC-MATRIX-002`  | Phase 1 v3 gap closure | Phase 1 gap closure — E2E matrix reconciliation                                  | Codex2 | pending | `PH1GC-MATRIX-001`, `PH1GC-E2E-010`, `PH1GC-E2E-011` |
+| `PH1GC-E2E-010`     | Phase 1 v3 gap closure | Phase 1 gap closure — E2E-010 governance-aware billing/reporting script          | Codex  | pending | `PH1GC-FIN-GOV-001`                                  |
+| `PH1GC-E2E-011`     | Phase 1 v3 gap closure | Phase 1 gap closure — E2E-011 platform admin control plane script                | Codex  | pending | `PH1GC-ADM-001`                                      |
+| `PH1GC-DRV-MP-001`  | Phase 1 v3 gap closure | Phase 1 gap closure — harden E2E-006 driver multi-platform seed/gate             | Codex  | pending | -                                                    |
+| `PH1GC-DRV-MP-002`  | Phase 1 v3 gap closure | Phase 1 gap closure — driver mobile device evidence packet                       | Codex2 | pending | `PH1GC-DRV-MP-001`                                   |
+| `PH1GC-FWD-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — forwarder sandbox proof set                                | Codex  | pending | -                                                    |
+| `PH1GC-PARTNER-001` | Phase 1 v3 gap closure | Phase 1 gap closure — partner eligibility/airport transfer rename + spec         | Codex2 | pending | `PH1GC-MATRIX-001`                                   |
+| `PH1GC-PARTNER-002` | Phase 1 v3 gap closure | Phase 1 gap closure — issuer sandbox eligibility evidence                        | Codex  | pending | `PH1GC-PARTNER-001`                                  |
+| `PH1GC-PBK-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — partner booking pilot cutover proof                        | Codex2 | pending | `PH1GC-PARTNER-001`                                  |
+| `PH1GC-COM-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — CTI/recording/filing live provider evidence classification | Codex  | pending | -                                                    |
+| `PH1GC-FIN-GOV-001` | Phase 1 v3 gap closure | Phase 1 gap closure — governance-aware billing/reporting spec + UAT              | Codex2 | pending | -                                                    |
+| `PH1GC-ADM-001`     | Phase 1 v3 gap closure | Phase 1 gap closure — platform admin control plane UAT                           | Codex2 | pending | -                                                    |
+| `PH1GC-PROD-001`    | Phase 1 v3 gap closure | Phase 1 gap closure — production live execution readiness                        | Codex  | pending | `PH1GC-BPL-002`                                      |
 
 ## Handoff Queue
 
@@ -98,23 +131,23 @@ Phase 1 v3 design-blueprint-completion wave: 22 dispatchable P0 tasks + 9 HELD t
 
 ## Latest Checkpoints
 
-- 2026-05-20T00:51:30Z Orchestrator: PreToolUse: Bash
-- 2026-05-20T00:51:30Z Orchestrator: PostToolUse: Bash
-- 2026-05-20T00:51:34Z Orchestrator: Stop: Stop
-- 2026-05-20T00:51:49Z Orchestrator: PreToolUse: Bash
-- 2026-05-20T00:51:49Z Orchestrator: PostToolUse: Bash
-- 2026-05-20T00:51:56Z Orchestrator: Stop: Stop
-- 2026-05-20T00:57:04Z Orchestrator: Queued chairman review for provider_health_triage.
-- 2026-05-20T00:57:04Z Orchestrator: Worker started via codex: chair_review:provider_health_triage
-- 2026-05-20T00:58:42Z Orchestrator: Stop: Stop
-- 2026-05-20T01:00:28Z Orchestrator: Applied chairman review from Codex (provider_health_triage).
-- 2026-05-20T01:00:30Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
-- 2026-05-20T01:00:39Z Orchestrator: Coordination worker exited cleanly.
-- 2026-05-20T01:11:00Z Orchestrator: `PRT-SPEC-001` Wake-up queued for supervisor: review_ready_dispatch
-- 2026-05-20T01:11:00Z Orchestrator: `COM-UAT-001` Wake-up queued for supervisor: owned_in_progress_dispatch
-- 2026-05-20T01:11:00Z Orchestrator: `FIN-GOV-UAT-001` Wake-up queued for supervisor: owned_in_progress_dispatch
-- 2026-05-20T01:11:05Z Orchestrator: `WF-DRV-MP-001-DEVICE-EVIDENCE-UNBLOCK-MANUAL-UNBLOCK` Wake-up queued for supervisor: review_ready_dispatch
-- 2026-05-20T01:11:05Z Orchestrator: `PRT-SPEC-001` Skipped stale queued wake event for PRT-SPEC-001: task is no longer eligible for review_ready_dispatch.
-- 2026-05-20T01:11:05Z Orchestrator: `COM-UAT-001` Skipped stale queued wake event for COM-UAT-001: task is no longer eligible for owned_in_progress_dispatch.
-- 2026-05-20T01:11:05Z Orchestrator: `FIN-GOV-UAT-001` Skipped stale queued wake event for FIN-GOV-UAT-001: task is no longer eligible for owned_in_progress_dispatch.
-- 2026-05-20T01:11:05Z Orchestrator: `WF-DRV-MP-001-DEVICE-EVIDENCE-UNBLOCK-MANUAL-UNBLOCK` Skipped stale queued wake event for WF-DRV-MP-001-DEVICE-EVIDENCE-UNBLOCK-MANUAL-UNBLOCK: task is no longer eligible for review_ready_dispatch.
+- 2026-05-22T06:34:30Z Orchestrator: PostToolUse: Bash
+- 2026-05-22T06:34:47Z Orchestrator: PreToolUse: Bash
+- 2026-05-22T06:34:47Z Orchestrator: PostToolUse: Bash
+- 2026-05-22T06:34:56Z Orchestrator: PreToolUse: Bash
+- 2026-05-22T06:34:56Z Orchestrator: PostToolUse: Bash
+- 2026-05-22T06:35:26Z Orchestrator: PreToolUse: Bash
+- 2026-05-22T06:35:26Z Orchestrator: PostToolUse: Bash
+- 2026-05-22T06:35:46Z Orchestrator: PreToolUse: Bash
+- 2026-05-22T06:35:47Z Orchestrator: PostToolUse: Bash
+- 2026-05-22T06:35:58Z Orchestrator: PreToolUse: Bash
+- 2026-05-22T06:36:00Z Orchestrator: PostToolUse: Bash
+- 2026-05-22T06:36:19Z Orchestrator: PreToolUse: Bash
+- 2026-05-22T06:36:21Z Orchestrator: PostToolUse: Bash
+- 2026-05-22T06:36:29Z Orchestrator: PreToolUse: Bash
+- 2026-05-22T06:36:30Z Orchestrator: PostToolUse: Bash
+- 2026-05-22T06:36:45Z Orchestrator: SessionStart: SessionStart
+- 2026-05-22T06:37:08Z Orchestrator: PreToolUse: Bash
+- 2026-05-22T06:37:08Z Orchestrator: PostToolUse: Bash
+- 2026-05-22T06:37:38Z Orchestrator: SessionStart: SessionStart
+- 2026-05-22T06:37:54Z Orchestrator: PreToolUse: Bash
