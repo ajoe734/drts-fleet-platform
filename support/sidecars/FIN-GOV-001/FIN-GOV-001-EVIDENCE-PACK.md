@@ -204,11 +204,13 @@ Probe target:
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327029664`
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327833020`
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327904346`
+  - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26332046380`
 - branch / commits under test:
   - `origin/codex/ph1gc-fin-gov-001@f8cc61e7` on 2026-05-22
   - `origin/codex/ph1gc-fin-gov-001@2cc083d6` on 2026-05-23
   - `origin/codex/ph1gc-fin-gov-001@7aeb2c29` on 2026-05-23
   - `origin/codex/ph1gc-fin-gov-001@2f6387fa` on 2026-05-23
+  - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d` on 2026-05-23
 
 Observed results:
 
@@ -225,6 +227,9 @@ Observed results:
   - `Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist).`
 - branch commit `2f6387fa` made the Cloud SDK path best-effort so it no longer blocked the E2E chain. 2026-05-23 run `26327904346` then advanced through step 6 `Best-effort fetch internal key` and failed in step 7 `Mint IAP verification token` with:
   - `Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
+- the latest rebased-head confirmation run `26332046380` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d` reproduced the same deeper failure: `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all passed, then `Mint IAP verification token` failed with:
+  - `Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
+  - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped, and artifact upload warned that no `e2e-010-*` files existed.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
