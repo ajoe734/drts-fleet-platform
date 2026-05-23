@@ -42,6 +42,9 @@ PRICING_RULE_ID=""
 PRICING_VERSION="2026.05.${RUN_TOKEN}"
 
 CREDENTIAL_KEY_ID=""
+REJECTED_TENANT_CREATE_REQUEST_ID=""
+REJECTED_PRICING_PUBLISH_REQUEST_ID=""
+REJECTED_ROLLOUT_PROMOTE_REQUEST_ID=""
 
 switch_platform_admin() {
   switch_actor "platform_admin" "$PLATFORM_ACTOR_ID" "${1:-}"
@@ -105,6 +108,61 @@ require_audit_jq() {
   chain_set "audit" "$evidence_key" "$audit_id"
   save_evidence "$SCENARIO" "audit" "$evidence_key" "$audit_id"
   log_ok "Audit evidence captured for ${evidence_key}: ${audit_id}"
+}
+
+require_request_audit_jq() {
+  local evidence_key="$1"
+  local expected_request_id="$2"
+  local jq_filter="$3"
+
+  switch_platform_admin
+  http_call GET "/audit"
+  assert_status "200"
+
+  local audit_id
+  audit_id=$(
+    echo "$RESP_BODY" | jq -r "
+      def audit_id: .auditId // .audit_id;
+      def actor_id: .actorId // .actor_id;
+      def action_name: .actionName // .action_name;
+      def request_id: .requestId // .request_id;
+      def resource_id: .resourceId // .resource_id;
+      def tenant_id: .tenantId // .tenant_id;
+      def new_values_summary: .newValuesSummary // .new_values_summary;
+      def old_values_summary: .oldValuesSummary // .old_values_summary;
+      def summary_error_code:
+        new_values_summary.errorCode //
+        new_values_summary.error_code //
+        old_values_summary.errorCode //
+        old_values_summary.error_code //
+        empty;
+      def summary_reason_code:
+        new_values_summary.reasonCode //
+        new_values_summary.reason_code //
+        old_values_summary.reasonCode //
+        old_values_summary.reason_code //
+        empty;
+      def summary_reason:
+        new_values_summary.reason //
+        old_values_summary.reason //
+        empty;
+      def summary_outcome:
+        new_values_summary.outcome //
+        old_values_summary.outcome //
+        empty;
+      ${jq_filter} | audit_id
+    " 2>/dev/null | head -1 || true
+  )
+  if [[ -z "$audit_id" ]]; then
+    log_fail "Missing request audit evidence for ${evidence_key}"
+    log_fail "Expected requestId: ${expected_request_id}"
+    log_fail "Audit filter: ${jq_filter}"
+    exit 1
+  fi
+
+  chain_set "audit" "$evidence_key" "$audit_id"
+  save_evidence "$SCENARIO" "audit" "$evidence_key" "$audit_id"
+  log_ok "Request audit evidence captured for ${evidence_key}: ${audit_id}"
 }
 
 assert_tenant_absent() {
@@ -424,8 +482,13 @@ switch_seed_tenant_admin
 http_call POST "/platform-admin/tenants" "$TENANT_CREATE_BODY"
 assert_status "403"
 require_error_code "AUTH_REALM_DENIED"
+REJECTED_TENANT_CREATE_REQUEST_ID="$LAST_REQUEST_ID"
 assert_tenant_absent
 save_evidence "$SCENARIO" "rbac_negative" "tenant_create_status" "$RESP_STATUS"
+require_request_audit_jq \
+  "reject_tenant_create" \
+  "$REJECTED_TENANT_CREATE_REQUEST_ID" \
+  ".data.items[] | select(request_id == \"${REJECTED_TENANT_CREATE_REQUEST_ID}\" and (summary_error_code == \"AUTH_REALM_DENIED\" or summary_reason_code == \"AUTH_REALM_DENIED\" or summary_reason == \"AUTH_REALM_DENIED\" or summary_outcome == \"rejected\"))"
 log_ok "Tenant-admin actor cannot create platform tenants"
 
 log_surface "Tenant create"
@@ -619,8 +682,13 @@ switch_seed_tenant_admin
 http_call POST "/platform-admin/pricing-rules/${PRICING_RULE_ID}/publish" "$PRICING_PUBLISH_BODY"
 assert_status "403"
 require_error_code "AUTH_REALM_DENIED"
+REJECTED_PRICING_PUBLISH_REQUEST_ID="$LAST_REQUEST_ID"
 assert_pricing_rule_state "draft"
 save_evidence "$SCENARIO" "rbac_negative" "pricing_publish_status" "$RESP_STATUS"
+require_request_audit_jq \
+  "reject_pricing_publish" \
+  "$REJECTED_PRICING_PUBLISH_REQUEST_ID" \
+  ".data.items[] | select(request_id == \"${REJECTED_PRICING_PUBLISH_REQUEST_ID}\" and (summary_error_code == \"AUTH_REALM_DENIED\" or summary_reason_code == \"AUTH_REALM_DENIED\" or summary_reason == \"AUTH_REALM_DENIED\" or summary_outcome == \"rejected\"))"
 log_ok "Tenant-admin actor cannot publish platform pricing rules"
 
 switch_platform_admin
@@ -721,6 +789,11 @@ switch_platform_admin
 http_call POST "/platform-admin/tenants/${TENANT_ID}/rollout" "$ROLLOUT_PRODUCTION_BODY"
 assert_status "409|403"
 require_error_code "TENANT_IN_ROLLBACK_HOLD"
+REJECTED_ROLLOUT_PROMOTE_REQUEST_ID="$LAST_REQUEST_ID"
+require_request_audit_jq \
+  "reject_production_promote" \
+  "$REJECTED_ROLLOUT_PROMOTE_REQUEST_ID" \
+  ".data.items[] | select(request_id == \"${REJECTED_ROLLOUT_PROMOTE_REQUEST_ID}\" and (summary_error_code == \"TENANT_IN_ROLLBACK_HOLD\" or summary_reason_code == \"production_rollback_hold_active\" or summary_reason == \"production_rollback_hold_active\" or summary_outcome == \"rejected\"))"
 
 chain_set "rollback" "productionPromoteBlocked" "true"
 save_evidence "$SCENARIO" "rollback" "errorCode" "TENANT_IN_ROLLBACK_HOLD"
@@ -772,6 +845,9 @@ assert_chain "pricing" "ruleId"
 assert_chain "flag" "key"
 assert_chain "rollout" "stage"
 assert_chain "rollback" "productionPromoteBlocked"
+assert_chain "audit" "reject_tenant_create"
+assert_chain "audit" "reject_pricing_publish"
+assert_chain "audit" "reject_production_promote"
 assert_chain "audit" "finalReview"
 
 print_chain_summary

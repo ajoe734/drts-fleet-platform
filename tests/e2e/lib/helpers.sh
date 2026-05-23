@@ -45,6 +45,7 @@ E2E_POLL_MAX="${E2E_POLL_MAX:-20}"
 _E2E_RUN_ID="${E2E_RUN_ID:-$$}"
 CHAIN_FILE="${E2E_CHAIN_FILE:-/tmp/drts-e2e-chain-${_E2E_RUN_ID}.json}"
 EVIDENCE_FILE="${E2E_EVIDENCE_FILE:-/tmp/drts-e2e-evidence-${_E2E_RUN_ID}.log}"
+LAST_REQUEST_ID=""
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
@@ -94,6 +95,7 @@ http_call() {
   local body_file="${3:-}"
   local request_id
   request_id="e2e-$(date +%s%N | head -c 16)"
+  LAST_REQUEST_ID="$request_id"
 
   local realm="${E2E_REALM:-}"
   if [[ -z "$realm" ]]; then
