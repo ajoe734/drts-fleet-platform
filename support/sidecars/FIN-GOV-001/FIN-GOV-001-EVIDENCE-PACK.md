@@ -205,12 +205,14 @@ Probe target:
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327833020`
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327904346`
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26332046380`
+  - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26332590728`
 - branch / commits under test:
   - `origin/codex/ph1gc-fin-gov-001@f8cc61e7` on 2026-05-22
   - `origin/codex/ph1gc-fin-gov-001@2cc083d6` on 2026-05-23
   - `origin/codex/ph1gc-fin-gov-001@7aeb2c29` on 2026-05-23
   - `origin/codex/ph1gc-fin-gov-001@2f6387fa` on 2026-05-23
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d` on 2026-05-23
+  - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2` on 2026-05-23
 
 Observed results:
 
@@ -230,7 +232,11 @@ Observed results:
 - the latest rebased-head confirmation run at dispatch time, `26332046380` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d`, reproduced the same deeper failure: `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all passed, then `Mint IAP verification token` failed with:
   - `Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
   - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped, and artifact upload warned that no `e2e-010-*` files existed.
-- the current branch head `0a4ae23f` only records that evidence refresh; it did not trigger a newer governed staging rerun after `26332046380`.
+- a fresh 2026-05-23 rerun on the current rebased remote head, `26332590728` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`, advanced one step further in documented reviewability: `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all completed successfully, then `Mint IAP verification token` failed with:
+  - `failed to generate Google Cloud OpenID Connect ID token ...`
+  - `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
+  - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, and GitHub warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to upload because the shell never started.
+- the current branch head `bda002e2` records that newest governed staging rerun and confirms the remaining blocker is still OpenID-token mint permission, not provider discovery or Cloud SDK setup.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
