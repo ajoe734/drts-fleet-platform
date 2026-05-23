@@ -67,6 +67,8 @@ The dispatch planning ref was read directly from this worktree during the 2026-0
 - `gh run view 26331222549 --job 77517556463 --log`
 - `gh run view 26332046380 --json url,status,conclusion,jobs`
 - `gh run view 26332046380 --job 77519603226 --log`
+- `gh run view 26332590728 --json url,status,conclusion,jobs`
+- `gh run watch 26332590728 --exit-status`
 - `gh secret list --repo ajoe734/drts-fleet-platform`
 - `gh variable list --repo ajoe734/drts-fleet-platform`
 - `git diff --check`
@@ -81,8 +83,9 @@ No governed live staging execution was run from this dispatch because the 2026-0
 - branch commit `2f6387fa` then made the Cloud SDK path best-effort so it would not gate the E2E chain. Run `26327904346` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@2f6387fa`) advanced through `Best-effort fetch internal key` and failed at `Mint IAP verification token` with `Permission 'iam.serviceAccounts.getOpenIdToken' denied`.
 - a fresh 2026-05-23 rerun on the pre-rebase owner head, run `26331222549` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@5953c0e1`), reached `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed again at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. Because token minting failed first, both `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped and no `e2e-010-*` artifact files were produced.
 - the latest 2026-05-23 rerun on the rebased remote head that was under test at dispatch time, run `26332046380` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d`), again reached `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, and the upload step warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to publish.
-- the present branch head `0a4ae23f` is a docs-only evidence refresh that records run `26332046380`; no newer governed staging rerun was triggered after that evidence-only commit.
-- those four reruns show the remaining CI blocker is now service-account IAM for the staging deployer identity, not stale provider discovery. No governed E2E shell work or invoice/report evidence can start until an email-bearing IAP token can be minted.
+- a fresh 2026-05-23 rerun on the current rebased remote head, run `26332590728` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`), advanced through `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed again at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, GitHub warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to upload, and the job annotation from `google-github-actions/auth` confirms the blocker is still OpenID-token mint permission for the staging deployer identity.
+- the present branch head `bda002e2` now records that newest governed staging rerun; no governed E2E shell execution or reviewer-readable invoice/report artifact can start until the staging principal can mint the IAP token.
+- those five reruns show the remaining CI blocker is now service-account IAM for the staging deployer identity, not stale provider discovery. No governed E2E shell work or invoice/report evidence can start until an email-bearing IAP token can be minted.
 
 ## 5. Remaining Blocker
 
