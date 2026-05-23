@@ -5,7 +5,7 @@
 **Reviewer:** `Claude`
 **Branch:** `codex/ph1gc-fin-gov-001`
 **Directive:** `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (`WF-FIN-GOV-001`)
-**Task-brief planning ref:** `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` (referenced by dispatch, but the path is not present in this worktree snapshot)
+**Task-brief planning ref:** `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` (read in this worktree during the 2026-05-23 resume)
 **Predecessor evidence pack:** `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`
 
 ---
@@ -21,7 +21,7 @@ This branch replays the missing governance-aware billing/reporting artifact chai
 5. `docs/04-uat/fbp-014a-e2e-matrix.md` and `tests/e2e/README.md` document the new `E2E-010` chain and verification surface.
 6. `.github/workflows/ci-integ.yml` now exposes a task-scoped `workflow_dispatch` path that can try the protected staging `E2E-010` rerun from GitHub Actions using the repo's WIF / IAP configuration, so auth failures are captured as reviewable CI evidence instead of being inferred only from local `gcloud` probes.
 
-The task brief names a planning-ref path that is **not** present in this worktree snapshot. This closeout therefore treats the embedded dispatch brief plus the canonical directive §3.7 as the reviewable planning context and does not claim any unseen repo-local planning spec was read. The shipped spec/UAT authority headers point to the canonical directive §3.7 because that is the normative source for `WF-FIN-GOV-001`, with the execution worklist plus blueprint-alignment audit cited as alignment anchors.
+The dispatch planning ref was read directly from this worktree during the 2026-05-23 resume. The shipped spec/UAT authority headers still point to the canonical directive §3.7 because that is the normative source for `WF-FIN-GOV-001`, with the execution worklist plus blueprint-alignment audit cited as alignment anchors and the planning ref used as dispatch context.
 
 `origin/dev` already carries the earlier directive-path spec/UAT pair for `WF-FIN-GOV-001`. This branch is the reconciliation layer: it tightens the verification body to the canonical 13 fields, adds the `E2E-010` shell plus matrix/release wiring, and records the current live-staging blocker with fresh 2026-05-23 probes.
 
