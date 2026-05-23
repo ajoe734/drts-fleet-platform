@@ -436,6 +436,9 @@ require_error_code "AUTH_REALM_DENIED"
 RBAC_TENANT_CREATE_STATUS="$RESP_STATUS"
 assert_tenant_absent
 save_evidence "$SCENARIO" "rbac_negative" "tenant_create_status" "$RBAC_TENANT_CREATE_STATUS"
+require_audit_jq \
+  "rbac_tenant_create_blocked" \
+  ".data.items[] | select((.actionName // .action_name) == \"create_platform_tenant\" and (.actorType // .actor_type) == \"tenant_admin\" and ((((.newValuesSummary // .new_values_summary).code) // (((.newValuesSummary // .new_values_summary).tenantCode) // ((.newValuesSummary // .new_values_summary).tenant_code))) == \"${TENANT_CODE}\" or ((((.newValuesSummary // .new_values_summary).errorCode) // (((.newValuesSummary // .new_values_summary).error_code) // (((.newValuesSummary // .new_values_summary).reasonCode) // ((.newValuesSummary // .new_values_summary).reason_code)))) == \"AUTH_REALM_DENIED\"))) | (.auditId // .audit_id)"
 log_ok "Tenant-admin actor cannot create platform tenants"
 
 log_surface "Tenant create"
@@ -632,6 +635,9 @@ require_error_code "AUTH_REALM_DENIED"
 RBAC_PRICING_PUBLISH_STATUS="$RESP_STATUS"
 assert_pricing_rule_state "draft"
 save_evidence "$SCENARIO" "rbac_negative" "pricing_publish_status" "$RBAC_PRICING_PUBLISH_STATUS"
+require_audit_jq \
+  "rbac_pricing_publish_blocked" \
+  ".data.items[] | select((.actionName // .action_name) == \"publish_platform_pricing_rule\" and (.actorType // .actor_type) == \"tenant_admin\" and (.resourceId // .resource_id) == \"${PRICING_RULE_ID}\" and ((((.newValuesSummary // .new_values_summary).version) // ((.newValuesSummary // .new_values_summary).pricing_version)) == \"${PRICING_VERSION}\" or ((((.newValuesSummary // .new_values_summary).errorCode) // (((.newValuesSummary // .new_values_summary).error_code) // (((.newValuesSummary // .new_values_summary).reasonCode) // ((.newValuesSummary // .new_values_summary).reason_code)))) == \"AUTH_REALM_DENIED\"))) | (.auditId // .audit_id)"
 log_ok "Tenant-admin actor cannot publish platform pricing rules"
 
 switch_platform_admin
@@ -732,6 +738,9 @@ switch_platform_admin
 http_call POST "/platform-admin/tenants/${TENANT_ID}/rollout" "$ROLLOUT_PRODUCTION_BODY"
 assert_status "409|403"
 require_error_code "TENANT_IN_ROLLBACK_HOLD"
+require_audit_jq \
+  "rollback_hold_blocked_production_promote" \
+  ".data.items[] | select((.actionName // .action_name) == \"update_platform_tenant_rollout\" and (.resourceId // .resource_id) == \"${TENANT_ID}\" and (((((.newValuesSummary // .new_values_summary).stage) // ((.newValuesSummary // .new_values_summary).current_stage)) == \"production\") or ((((.newValuesSummary // .new_values_summary).errorCode) // (((.newValuesSummary // .new_values_summary).error_code) // (((.newValuesSummary // .new_values_summary).reasonCode) // ((.newValuesSummary // .new_values_summary).reason_code)))) == \"TENANT_IN_ROLLBACK_HOLD\"))) | (.auditId // .audit_id)"
 
 chain_set "rollback" "productionPromoteBlocked" "true"
 save_evidence "$SCENARIO" "rollback" "errorCode" "TENANT_IN_ROLLBACK_HOLD"
@@ -768,6 +777,49 @@ for action_name in "${required_audit_actions[@]}"; do
     exit 1
   fi
 done
+
+if ! echo "$RESP_BODY" | jq -e --arg tenantCode "$TENANT_CODE" '
+  .data.items[]
+  | select((.actionName // .action_name) == "create_platform_tenant")
+  | select((.actorType // .actor_type) == "tenant_admin")
+  | select(
+      (((.newValuesSummary // .new_values_summary).code) // (((.newValuesSummary // .new_values_summary).tenantCode) // ((.newValuesSummary // .new_values_summary).tenant_code))) == $tenantCode
+      or
+      ((((.newValuesSummary // .new_values_summary).errorCode) // (((.newValuesSummary // .new_values_summary).error_code) // (((.newValuesSummary // .new_values_summary).reasonCode) // ((.newValuesSummary // .new_values_summary).reason_code)))) == "AUTH_REALM_DENIED")
+    )
+' >/dev/null 2>&1; then
+  log_fail "Audit log missing rejected tenant-create evidence"
+  exit 1
+fi
+
+if ! echo "$RESP_BODY" | jq -e --arg ruleId "$PRICING_RULE_ID" --arg version "$PRICING_VERSION" '
+  .data.items[]
+  | select((.actionName // .action_name) == "publish_platform_pricing_rule")
+  | select((.actorType // .actor_type) == "tenant_admin")
+  | select((.resourceId // .resource_id) == $ruleId)
+  | select(
+      (((.newValuesSummary // .new_values_summary).version) // ((.newValuesSummary // .new_values_summary).pricing_version)) == $version
+      or
+      ((((.newValuesSummary // .new_values_summary).errorCode) // (((.newValuesSummary // .new_values_summary).error_code) // (((.newValuesSummary // .new_values_summary).reasonCode) // ((.newValuesSummary // .new_values_summary).reason_code)))) == "AUTH_REALM_DENIED")
+    )
+' >/dev/null 2>&1; then
+  log_fail "Audit log missing rejected pricing-publish evidence"
+  exit 1
+fi
+
+if ! echo "$RESP_BODY" | jq -e --arg tenantId "$TENANT_ID" '
+  .data.items[]
+  | select((.actionName // .action_name) == "update_platform_tenant_rollout")
+  | select((.resourceId // .resource_id) == $tenantId)
+  | select(
+      ((((.newValuesSummary // .new_values_summary).stage) // ((.newValuesSummary // .new_values_summary).current_stage)) == "production")
+      or
+      ((((.newValuesSummary // .new_values_summary).errorCode) // (((.newValuesSummary // .new_values_summary).error_code) // (((.newValuesSummary // .new_values_summary).reasonCode) // ((.newValuesSummary // .new_values_summary).reason_code)))) == "TENANT_IN_ROLLBACK_HOLD")
+    )
+' >/dev/null 2>&1; then
+  log_fail "Audit log missing rollback-hold blocked production promote evidence"
+  exit 1
+fi
 
 chain_set "audit" "finalReview" "complete"
 save_evidence "$SCENARIO" "audit" "finalReview" "complete"
