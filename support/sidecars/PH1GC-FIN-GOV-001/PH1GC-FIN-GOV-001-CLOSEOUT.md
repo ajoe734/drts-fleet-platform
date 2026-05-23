@@ -33,7 +33,7 @@ The planning-ref path named in the task brief is not present in this worktree. T
 | `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` visible on `origin/dev` | Yes. `origin/dev` already carries the earlier UAT; this branch layers the 13-field reconciliation and strict-mode uplift wording on top. | `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`; branch UAT header + §2 + §4 |
 | UAT covers all 13 directive §H verification-body fields | Yes. The happy-path and negative-path scenarios enumerate the 13-field body and the required integrity / RBAC / masking paths. | UAT §2–§4 |
 | `PH1GC-E2E-010` script asserts every verification-body field | Yes, with the two-tier contract now documented explicitly: every field is always recorded, and `STRICT_VERIFICATION_BODY=1` hard-fails if any field remains `NOT_POPULATED`. | Spec §6; `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`; E2E matrix §4.10 |
-| Gate-read update for `WF-FIN-GOV-001 = PASS (live staging evidence)` drives matrix change | **Blocked.** The branch adds the matrix row and keeps it at `PASS (static evidence)`. Fresh 2026-05-22 probes still cannot obtain an email-bearing IAP token usable against governed staging, so no fresh reviewer-readable live invoice/report artifact or green strict-mode rerun is available from this workspace. | Release-gates row `WF-FIN-GOV-001`; release-truth-sync row 14; predecessor evidence pack §4; this closeout §4–§5 |
+| Gate-read update for `WF-FIN-GOV-001 = PASS (live staging evidence)` drives matrix change | **Blocked.** The branch adds the matrix row and keeps it at `PASS (static evidence)`. Fresh 2026-05-23 probes still cannot obtain an email-bearing IAP token usable against governed staging, so no fresh reviewer-readable live invoice/report artifact or green strict-mode rerun is available from this workspace. | Release-gates row `WF-FIN-GOV-001`; release-truth-sync row 14; predecessor evidence pack §4; this closeout §4–§5 |
 | Closeout report follows directive §7 format | Yes. This sidecar states delivered scope, non-claims, local verification, and the exact remaining blocker. | This file |
 
 ## 3. Directive §7 Non-Claim Posture
@@ -59,14 +59,14 @@ The planning-ref path named in the task brief is not present in this worktree. T
 - `gh run view 26287551676 --job 77378907824 --log`
 - `git diff --check`
 
-No governed live staging execution was run from this dispatch because the 2026-05-22 access probes still stop before an authenticated E2E request can be issued:
+No governed live staging execution was run from this dispatch because the 2026-05-23 access probes still stop before an authenticated E2E request can be issued:
 
 - the protected staging host still redirects unauthenticated requests to Google OAuth and returns `Invalid IAP credentials: empty token`;
 - the historical direct Cloud Run fallback still returns `404 Page not found`;
 - the active user account (`bobo.du@cctech-support.com`) still fails non-interactive `gcloud auth print-access-token` with `Reauthentication failed. cannot prompt during non-interactive execution.`;
 - the temporary compute-service-account override can mint an access token, but `generateIdToken` / service-account impersonation still fails with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`;
 - a bare audience identity token from the compute service account reaches IAP but is rejected with `401 Invalid IAP credentials: JWT 'email' claim isn't a string`.
-- the GitHub Actions fallback path now fails even earlier: workflow run `26287551676` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@f8cc61e7`) reached the `staging-e2e-010` job, but `google-github-actions/auth@v2` could not mint the initial federated token and returned `invalid_target`, meaning the configured workload identity provider behind `secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER` is invalid, disabled, or deleted before any IAP token or E2E request can be issued.
+- the GitHub Actions fallback path remains blocked at the last verified run: workflow run `26287551676` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@f8cc61e7`) reached the `staging-e2e-010` job, but `google-github-actions/auth@v2` could not mint the initial federated token and returned `invalid_target`, meaning the configured workload identity provider behind `secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER` is invalid, disabled, or deleted before any IAP token or E2E request can be issued. No new CI rerun was launched on 2026-05-23 because the local protected-host and token-minting probes reproduced the same auth gate before any governed request could start.
 
 ## 5. Remaining Blocker
 
