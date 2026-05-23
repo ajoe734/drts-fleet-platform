@@ -5,8 +5,8 @@
 **Owner:** `Codex2`
 **Reviewer:** `Codex`
 **Collected / re-verified:** `2026-05-23 (UTC)`
-**Canonical task status:** `blocked`
-**External hold class:** `blocked_external`
+**Workflow evidence status:** `blocked_external`
+**Task lifecycle note:** This packet documents why the workflow evidence remains externally blocked even though the repo-side sidecar path is now restored.
 
 ---
 
@@ -15,7 +15,7 @@
 ```text
 Workflow family: WF-PARTNER-001
 Business flow: Partner eligibility and airport-transfer benefit intake
-Current gate read: EXTERNAL-GATED
+Current gate read: PASS (static evidence); EXTERNAL-GATED for issuer sandbox evidence
 Verification path: sidecar / manual evidence
 Evidence level: static evidence
 Non-claim: No real issuer sandbox credential, allowed test card, eligibility outcome, timeout/retry, booking linkage, billing/reporting linkage, or audit proof is attached yet.
@@ -49,9 +49,11 @@ Correct current claim:
   issuer sandbox proof`.
 - `PH1GC-PARTNER-002` remains `blocked_external` until the external issuer/bank
   inputs in `EXT-001-BLK-001` through `EXT-001-BLK-006` arrive.
-- The directive §E acceptance still resolves to seven evidence rows; the
-  negative-path proofs called out by the unblock note are embedded within the
-  sandbox outcome / timeout / linkage evidence, not tracked as separate rows.
+- The directive §E task acceptance resolves to seven evidence rows. The partner
+  spec's nine-item sandbox proof set is still the source detail, but the named
+  issuer/bank counterparty and credential-source declaration are captured
+  within the credential / fixture / proof rows rather than tracked as separate
+  acceptance rows here.
 
 ---
 
