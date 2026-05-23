@@ -1,10 +1,10 @@
 # PARTNER-ELIG-LIVE-001 - Issuer Sandbox Eligibility Evidence
 
-**Task:** `PH1GC-PARTNER-002`  
-**Workflow family:** `WF-PARTNER-001`  
-**Owner:** `Codex2`  
-**Reviewer:** `Codex`  
-**Collected:** `2026-05-23 (UTC)`  
+**Task:** `PH1GC-PARTNER-002`
+**Workflow family:** `WF-PARTNER-001`
+**Owner:** `Codex2`
+**Reviewer:** `Codex`
+**Collected:** `2026-05-23 (UTC)`
 **Status:** `blocked_external`
 
 ---
