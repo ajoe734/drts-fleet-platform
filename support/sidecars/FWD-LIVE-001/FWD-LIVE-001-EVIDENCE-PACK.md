@@ -9,7 +9,7 @@ current classification and proof-item matrix.
 **Current cycle task:** `PH1GC-FWD-001`
 **Owner:** `Codex2`
 **Reviewer:** `Codex`
-**Current cycle status:** `review`
+**Current cycle status:** `in_progress`
 **Branch:** `codex2/ph1gc-fwd-001`
 **Collected:** `2026-05-19 (UTC)`
 **Status:** `partial evidence only — historical appendix; sidecar verdict remains PASS (repo-local)`
@@ -21,9 +21,9 @@ current classification and proof-item matrix.
 This packet records the current live-evidence posture for the forwarder external
 platform gate tracked by `EXT-002-BLK-001` through `EXT-002-BLK-007`.
 
-Current result on `2026-05-19`:
+Historical result at collection time on `2026-05-19`:
 
-- `WF-FWD-001` still reads `EXTERNAL-GATED` in the workflow release matrix.
+- At collection time, `WF-FWD-001` still read `EXTERNAL-GATED` in the workflow release matrix.
 - The cross-repo gap matrix still classifies the Grab Taiwan real adapter as
   external-gated.
 - The shipped Grab Taiwan adapter is still explicitly stub-only.
@@ -47,8 +47,8 @@ Conclusion:
 
 - No new live external-platform proof was collected in this session.
 - This task can only add a dated partial evidence snapshot.
-- `EXT-002-BLK-001` through `EXT-002-BLK-007` remain open and
-  `WF-FWD-001` must stay `EXTERNAL-GATED`.
+- `EXT-002-BLK-001` through `EXT-002-BLK-007` remain open for any real sandbox
+  promotion.
 
 ---
 
@@ -56,10 +56,11 @@ Conclusion:
 
 ### 2.1 Release-gate truth
 
-`docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` keeps
-`WF-FWD-001` at `EXTERNAL-GATED` and states that live forwarded-task seeds,
-callback behavior, and platform-adapter confirmation remain outside repo-only
-closure.
+`docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` now reads
+`WF-FWD-001` as `PASS (repo-local)` for the internal-mock fallback packet
+while still keeping live forwarded-task seeds, callback behavior, and
+platform-adapter confirmation outside repo-only closure for any real sandbox
+promotion.
 
 ### 2.2 Cross-repo gap truth
 
@@ -211,7 +212,7 @@ This task therefore adds a newer dated field report, not a new pass verdict.
 
 Recommended wording:
 
-- "`WF-FWD-001` remains `EXTERNAL-GATED`."
+- "`WF-FWD-001` is `PASS (repo-local)` only; real partner sandbox promotion remains externally gated."
 - "`EXT-002-BLK-001` through `EXT-002-BLK-007` remain open."
 - "A fresh `2026-05-19` live attempt did not reach partner-path verification
   because the available `gcloud` account required reauthentication and the
