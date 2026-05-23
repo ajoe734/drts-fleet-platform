@@ -15,7 +15,8 @@
 | Sidecar reviewer | `Codex2` |
 | Parent owner | `Codex2` |
 | Parent reviewer | `Codex` |
-| Parent status (ai-status.json) | `todo` (effective: `blocked_external` on EXT-001 inputs) |
+| Parent status (ai-status.json) | `blocked` (effective: `blocked_external` on EXT-001 inputs) |
+| Parent `waiting_for` | `Gemini2` (per `ai-status.json`) |
 | Branch | `claude/ph1gc-partner-002-sidecar-acceptance` |
 | Last update | 2026-05-23 (UTC) |
 
@@ -70,6 +71,9 @@ Out of scope (must not happen in this task):
 `PH1GC-PARTNER-002` is repo-side satisfied per the three closed unblock
 children (see §3.3) but cannot produce sandbox evidence until the
 `EXT-001` external blockers below are released by their respective owners.
+The canonical `ai-status.json` row therefore carries
+`status=blocked` with `waiting_for=Gemini2` (runtime / infra lane staging the
+external integration), pending the `EXT-001-BLK-001..006` releases below.
 
 | Blocker | Missing input | Authority | Owner to confirm |
 | --- | --- | --- | --- |
@@ -181,9 +185,9 @@ outcomes; otherwise the gate-read promotion is invalid.
 
 ## 6. Resume conditions for the parent
 
-`PH1GC-PARTNER-002` may move from "todo / blocked_external" toward
-`in_progress → review → done` only after **all** of the following are true on
-`origin/dev`:
+`PH1GC-PARTNER-002` may move from `blocked` (waiting_for=`Gemini2`,
+effective `blocked_external`) toward `in_progress → review → done` only after
+**all** of the following are true on `origin/dev`:
 
 1. `support/sidecars/PARTNER-ELIG-LIVE-001/` is restored with the seven §E
    evidence items above, sourced from a real issuer sandbox (no mocks).
