@@ -200,10 +200,15 @@ Probe target:
 
 - workflow dispatch: `gh workflow run ci-integ.yml --ref codex/ph1gc-fin-gov-001 -f ref=codex/ph1gc-fin-gov-001 -f run_staging_e2e_010=true`
 - first resulting run: `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26287551676`
-- latest confirmation run: `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327029664`
+- latest confirmation runs:
+  - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327029664`
+  - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327833020`
+  - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327904346`
 - branch / commits under test:
   - `origin/codex/ph1gc-fin-gov-001@f8cc61e7` on 2026-05-22
   - `origin/codex/ph1gc-fin-gov-001@2cc083d6` on 2026-05-23
+  - `origin/codex/ph1gc-fin-gov-001@7aeb2c29` on 2026-05-23
+  - `origin/codex/ph1gc-fin-gov-001@2f6387fa` on 2026-05-23
 
 Observed results:
 
@@ -216,22 +221,27 @@ Observed results:
 - 2026-05-22 run `26287551676`: first `google-github-actions/auth@v2` step failed before any `gcloud` or E2E shell execution:
   - `failed to generate Google Cloud federated token ... {"error":"invalid_target","error_description":"The target service indicated by the \"audience\" parameters is invalid. This might either be because the pool or provider is disabled or deleted or because it doesn't exist."}`
 - 2026-05-23 run `26327029664`: the same `staging-e2e-010` path failed again at step 4 `Authenticate to GCP`; job `77506520838` completed `failure` at `2026-05-23T07:32:52Z`, steps `Set up Cloud SDK`, `Mint IAP verification token`, and `Run E2E-010 against staging` were all skipped, and GitHub repeated the same `invalid_target` provider error during `google-github-actions/auth@v2`
-- no E2E console/evidence artifacts were produced because auth failed before
-  the shell could start
+- branch commit `7aeb2c29` changed the staging workflow fallback order to `STAGING_WIF_PROVIDER || DEV_WIF_PROVIDER || WIF_PROVIDER`, after which 2026-05-23 run `26327833020` advanced past step 4 `Authenticate to GCP` and failed later in step 5 `Set up Cloud SDK` with:
+  - `Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist).`
+- branch commit `2f6387fa` made the Cloud SDK path best-effort so it no longer blocked the E2E chain. 2026-05-23 run `26327904346` then advanced through step 6 `Best-effort fetch internal key` and failed in step 7 `Mint IAP verification token` with:
+  - `Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
+- no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
 
-- the repo-configured non-interactive WIF path is currently broken
-- this is no longer just a local `gcloud` credential-staleness issue: even the
-  GitHub Actions runner cannot mint the first federated credential from
-  `secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER`
+- the original repo-configured staging WIF path was broken because the workflow
+  fell back from missing `STAGING_WIF_PROVIDER` to stale repo-level
+  `WIF_PROVIDER`
 - the 2026-05-23 secret inventory strongly suggests the staging workflow is
   falling back from missing `secrets.STAGING_WIF_PROVIDER` to older repo-level
   `secrets.WIF_PROVIDER`, which is consistent with the repeated
   `invalid_target` failure
-- until that provider reference is repaired (or an alternate CI-safe bearer
-  path is supplied), the governed staging rerun cannot start from either the
-  current worker or GitHub Actions
+- the branch-local fallback to `DEV_WIF_PROVIDER` repairs the first federated
+  auth hop and proves the GitHub runner can now reach GCP non-interactively
+- the remaining GitHub Actions blocker is service-account IAM, not provider
+  discovery: the staging deployer identity can authenticate, but it cannot mint
+  the access token / OpenID token needed for `gcloud` project configuration or
+  the IAP bearer
 
 ---
 
@@ -249,16 +259,19 @@ currently blocked by four concrete environment issues:
    with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`
 3. the older direct Cloud Run origin is not serving the expected `/api/*`
    routes as a usable fallback
-4. the repository-configured GitHub Actions WIF provider path is misconfigured:
-   `gh secret list` shows no `STAGING_WIF_PROVIDER`, so the staging workflow
-   falls back to older repo-level `WIF_PROVIDER` and fails with `invalid_target`
-   on both the 2026-05-22 and 2026-05-23 reruns
+4. the repository-configured GitHub Actions staging path now reaches GCP after
+   the branch-local `DEV_WIF_PROVIDER` fallback, but the staging deployer
+   service account still lacks IAM permissions needed for the IAP bearer path:
+   `26327833020` showed `iam.serviceAccounts.getAccessToken` denied during
+   `setup-gcloud`, and `26327904346` showed the decisive blocker
+   `iam.serviceAccounts.getOpenIdToken` denied during `Mint IAP verification token`
 
 Until one of those is resolved, this task can only deliver a consolidated
 static-evidence packet plus a reproducible blocker record. The 2026-05-19
-local rerun plus the 2026-05-22 and 2026-05-23 GitHub Actions reruns did not
-surface a hidden alternate ingress or a valid non-interactive token path from
-this machine or from the repo's configured WIF automation.
+local rerun plus the 2026-05-22/23 GitHub Actions reruns narrowed the
+remaining CI blocker from provider discovery to service-account token-mint IAM,
+but they still did not surface a valid email-bearing IAP token path from this
+machine or from the repo's configured WIF automation.
 
 ---
 
