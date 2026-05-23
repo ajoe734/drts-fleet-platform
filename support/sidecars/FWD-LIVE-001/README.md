@@ -3,26 +3,35 @@
 Date: 2026-05-23
 Task: `PH1GC-FWD-001`
 Workflow family: `WF-FWD-001`
-Directive anchor: `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` §D, §7
+Directive anchor: `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §D, §7
 
 ## Classification
 
-- Current sidecar classification: `repo-local harness + partial external blocker evidence`
-- Real provider sandbox classification: `not proven`
-- Current gate read: `EXTERNAL-GATED`
+- Current sidecar classification: `repo-local`
+- Current packet read: `PASS (repo-local)`
+- Internal-mock fallback: `forwarder_sandbox`
+- Real provider sandbox classification: `pending / not proven`
 
-## What This Sidecar Can Prove
+## What This Sidecar Proves
 
-- `tests/e2e/E2E-002-forwarded-order.sh` proves the repo-local
-  `forwarder_sandbox` mirror flow.
-- `docs/02-architecture/forwarder-sandbox-provider.md` explicitly classifies
-  `forwarder_sandbox` as non-production and stub-only.
-- `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` records the
-  latest external-access attempt and why it did not reach a real partner
-  sandbox.
-- `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-PROVIDER-PROOF.md` maps the 11
-  directive-§D proof items and marks which remain missing from a real sandbox
-  endpoint.
+This sidecar is the directive-§D internal-mock fallback packet for
+`WF-FWD-001`.
+
+- `docs/02-architecture/forwarder-sandbox-provider.md` names
+  `forwarder_sandbox`, its stub-only classification, and the covered flow
+  steps.
+- `tests/e2e/E2E-002-forwarded-order.sh` provides the repo-local inbound,
+  accept, confirm, cancel, complete, settlement-shadow, and
+  no-owned-assignment evidence path.
+- `support/sidecars/FWD-VERIF-001/FWD-VERIF-001-VERIFICATION.md` provides the
+  repo-local verification anchors for signature failure handling,
+  replay/idempotency, and sync-failure recovery.
+- `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-PROVIDER-PROOF.md` maps all 11
+  directive-§D proof items as present in repo-local form and records the
+  non-claim boundary for real sandbox promotion.
+- `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` remains the
+  dated external-attempt appendix; it is historical blocker evidence, not the
+  packet verdict.
 
 ## Non-Claim
 
@@ -35,9 +44,10 @@ Do not describe this sidecar as:
 
 The strongest truthful reading on 2026-05-23 is:
 
-- repo-local forwarder harness exists and is executable
-- real partner sandbox proof is still absent
-- `WF-FWD-001` must remain `EXTERNAL-GATED`
+- the 11-item proof packet is complete as `forwarder_sandbox` repo-local
+  evidence
+- the packet verdict is `PASS (repo-local)`
+- real partner sandbox classification is still pending
 
 ## Required Future Inputs For Sandbox Claim
 
