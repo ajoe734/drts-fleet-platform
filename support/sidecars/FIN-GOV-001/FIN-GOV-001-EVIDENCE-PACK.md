@@ -193,6 +193,7 @@ Observed results:
   - `REGION=us-central1`
   - `CONTROL_PLANE_API_ORIGIN=https://api.staging.drts-fleet.cctech-support.com`
   - `IAP_CLIENT_ID=1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
+- 2026-05-23 repository secret inventory (`gh secret list --repo ajoe734/drts-fleet-platform`) shows `STAGING_WIF_SERVICE_ACCOUNT` exists but `STAGING_WIF_PROVIDER` does not. The only provider fallback visible to this job is repo-level `WIF_PROVIDER` (last updated `2026-04-16T14:18:02Z`), while the staging project/service-account settings were refreshed on `2026-05-03`.
 - 2026-05-22 run `26287551676`: first `google-github-actions/auth@v2` step failed before any `gcloud` or E2E shell execution:
   - `failed to generate Google Cloud federated token ... {"error":"invalid_target","error_description":"The target service indicated by the \"audience\" parameters is invalid. This might either be because the pool or provider is disabled or deleted or because it doesn't exist."}`
 - 2026-05-23 run `26327029664`: the same `staging-e2e-010` path failed again at step 4 `Authenticate to GCP`; job `77506520838` completed `failure` at `2026-05-23T07:32:52Z`, steps `Set up Cloud SDK`, `Mint IAP verification token`, and `Run E2E-010 against staging` were all skipped, and GitHub repeated the same `invalid_target` provider error during `google-github-actions/auth@v2`
@@ -205,6 +206,10 @@ Interpretation:
 - this is no longer just a local `gcloud` credential-staleness issue: even the
   GitHub Actions runner cannot mint the first federated credential from
   `secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER`
+- the 2026-05-23 secret inventory strongly suggests the staging workflow is
+  falling back from missing `secrets.STAGING_WIF_PROVIDER` to older repo-level
+  `secrets.WIF_PROVIDER`, which is consistent with the repeated
+  `invalid_target` failure
 - until that provider reference is repaired (or an alternate CI-safe bearer
   path is supplied), the governed staging rerun cannot start from either the
   current worker or GitHub Actions
@@ -220,9 +225,10 @@ currently blocked by three concrete environment issues:
    current `gcloud` session requires reauthentication
 2. the older direct Cloud Run origin is not serving the expected `/api/*`
    routes as a usable fallback
-3. the repository-configured GitHub Actions WIF provider now fails with
-   `invalid_target` on both the 2026-05-22 and 2026-05-23 reruns, so the
-   CI-side federated token path is also unavailable
+3. the repository-configured GitHub Actions WIF provider path is misconfigured:
+   `gh secret list` shows no `STAGING_WIF_PROVIDER`, so the staging workflow
+   falls back to older repo-level `WIF_PROVIDER` and fails with `invalid_target`
+   on both the 2026-05-22 and 2026-05-23 reruns
 
 Until one of those is resolved, this task can only deliver a consolidated
 static-evidence packet plus a reproducible blocker record. The 2026-05-19

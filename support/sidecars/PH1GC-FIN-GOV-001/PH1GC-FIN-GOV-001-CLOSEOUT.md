@@ -58,6 +58,8 @@ The planning-ref path named in the task brief is not present in this worktree. T
 - `gh workflow run ci-integ.yml --ref codex/ph1gc-fin-gov-001 -f ref=codex/ph1gc-fin-gov-001 -f run_staging_e2e_010=true`
 - `gh run view 26327029664 --json url,status,conclusion,jobs`
 - `gh run view 26287551676 --job 77378907824 --log`
+- `gh secret list --repo ajoe734/drts-fleet-platform`
+- `gh variable list --repo ajoe734/drts-fleet-platform`
 - `git diff --check`
 
 No governed live staging execution was run from this dispatch because the 2026-05-23 access probes still stop before an authenticated E2E request can be issued:
@@ -67,14 +69,14 @@ No governed live staging execution was run from this dispatch because the 2026-0
 - the active user account (`bobo.du@cctech-support.com`) still fails non-interactive `gcloud auth print-access-token` with `Reauthentication failed. cannot prompt during non-interactive execution.`;
 - the temporary compute-service-account override can mint an access token, but `generateIdToken` / service-account impersonation still fails with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`;
 - a bare audience identity token from the compute service account reaches IAP but is rejected with `401 Invalid IAP credentials: JWT 'email' claim isn't a string`.
-- the GitHub Actions fallback path remains blocked after a fresh 2026-05-23 rerun: workflow run `26327029664` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@2cc083d6`) reached job `staging-e2e-010` (`77506520838`), which completed `failure` at `2026-05-23T07:32:52Z`; step 4 `Authenticate to GCP` failed before any Cloud SDK, IAP-token mint, or E2E shell work could begin, and GitHub reported `google-github-actions/auth failed with: failed to generate Google Cloud federated token ... {"error":"invalid_target","error_description":"The target service indicated by the \"audience\" parameters is invalid. This might either be because the pool or provider is disabled or deleted or because it doesn't exist."}`. The earlier run `26287551676` showed the same provider-side `invalid_target` failure, so the repository-configured WIF path is still unusable for governed staging reruns.
+- the GitHub Actions fallback path remains blocked after a fresh 2026-05-23 rerun: workflow run `26327029664` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@2cc083d6`) reached job `staging-e2e-010` (`77506520838`), which completed `failure` at `2026-05-23T07:32:52Z`; step 4 `Authenticate to GCP` failed before any Cloud SDK, IAP-token mint, or E2E shell work could begin, and GitHub reported `google-github-actions/auth failed with: failed to generate Google Cloud federated token ... {"error":"invalid_target","error_description":"The target service indicated by the \"audience\" parameters is invalid. This might either be because the pool or provider is disabled or deleted or because it doesn't exist."}`. `gh secret list --repo ajoe734/drts-fleet-platform` now makes that actionable: `STAGING_WIF_SERVICE_ACCOUNT` exists, but `STAGING_WIF_PROVIDER` does not, so the staging workflow can only fall back to older repo-level `WIF_PROVIDER` (last updated `2026-04-16T14:18:02Z`) while the staging project/service-account entries were refreshed on `2026-05-03`. That inventory is consistent with the repeated provider-side `invalid_target` failure, so the repository-configured WIF path is still unusable for governed staging reruns.
 
 ## 5. Remaining Blocker
 
 To uplift `WF-FIN-GOV-001` from `PASS (static evidence)` to `PASS (live staging evidence)`, a follow-up owner must:
 
 1. obtain a valid email-bearing staging bearer / IAP path for the governed tenant (either by refreshing a user credential that can mint the token non-interactively, or by providing a service account / VM scope combination that can generate an acceptable IAP identity token),
-   or repair the repository-configured GitHub Actions WIF provider so the non-interactive CI path can mint federated credentials again,
+   or repair the repository-configured GitHub Actions WIF provider by supplying a valid `STAGING_WIF_PROVIDER` (or equivalent working provider reference) that matches `drts-staging-bobo-20260502` and `STAGING_WIF_SERVICE_ACCOUNT`,
 2. run `STRICT_VERIFICATION_BODY=1 bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh` against the governed staging origin,
 3. capture the evidence log plus the reviewer-readable invoice/report artifacts, and
 4. then update the release-gate row, release-truth-sync row, and alignment-audit row from blocked static evidence to live staging evidence.
