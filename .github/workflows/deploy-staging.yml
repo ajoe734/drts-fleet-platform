@@ -42,7 +42,7 @@ env:
   DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
   RUNTIME_SERVICE_ACCOUNT: ${{ vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT || vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
   RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT || secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
-  WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+  WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
   SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
   PLATFORM_ADMIN_ORIGIN: ${{ vars.STAGING_PLATFORM_ADMIN_ORIGIN || 'https://staging.drts-fleet.cctech-support.com' }}
   OPS_CONSOLE_ORIGIN: ${{ vars.STAGING_OPS_CONSOLE_ORIGIN || 'https://ops.staging.drts-fleet.cctech-support.com' }}
@@ -83,7 +83,7 @@ jobs:
           [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.STAGING_GCP_PROJECT_ID or vars.GCP_PROJECT_ID")
           [[ -n "${REGION:-}" ]] || missing+=("vars.STAGING_GCP_REGION or vars.GCP_REGION")
           [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.STAGING_GCP_CLOUDSQL_INSTANCE or vars.GCP_CLOUDSQL_INSTANCE")
-          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.DEV_WIF_PROVIDER or secrets.WIF_PROVIDER")
           [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.STAGING_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
           if [[ -z "${RUNTIME_SERVICE_ACCOUNT:-${RUNTIME_SERVICE_ACCOUNT_FALLBACK:-}}" ]]; then
             missing+=("vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or vars.GCP_RUNTIME_SERVICE_ACCOUNT or secrets.GCP_RUNTIME_SERVICE_ACCOUNT")
