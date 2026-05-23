@@ -3,8 +3,9 @@
 Date: 2026-05-22
 Task: `PH1GC-PROD-001`
 Owner: `Codex2`
-Reviewer: `Claude2`
+Reviewer: `Codex`
 Directive anchor: `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §2.2, §3.9, §7
+Revalidated on: `2026-05-23` against `origin/dev`
 
 Workflow family: `WF-PROD-001`
 Business flow: `Production deploy / rollback rail`
@@ -45,6 +46,6 @@ git grep -n 'WF-PROD-001' docs/03-runbooks/phase1-workflow-acceptance-release-ga
 
 ## Verification Result
 
-- `tests/e2e/E2E-009-prod-rail-dry-run.sh` passes repo-locally on 2026-05-22.
+- `tests/e2e/E2E-009-prod-rail-dry-run.sh` passes repo-locally on 2026-05-23.
 - The release-gate matrix, deploy spec, rollback drill, and sidecar evidence all point to the same `WF-PROD-001` operator path.
 - No artifact in this closeout claims production has launched.
