@@ -4,7 +4,7 @@ Date: 2026-05-23
 Task: `PH1GC-FWD-001`
 Owner: `Codex2`
 Reviewer: `Codex`
-Current cycle status: `ready_for_review`
+Current cycle status: `review`
 Branch: `codex2/ph1gc-fwd-001`
 Workflow family: `WF-FWD-001`
 Target path: `support/sidecars/FWD-LIVE-001/`

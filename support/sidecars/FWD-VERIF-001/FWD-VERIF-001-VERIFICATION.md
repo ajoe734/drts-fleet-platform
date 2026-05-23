@@ -13,7 +13,7 @@ Verdict: `blocked`
 
 - No repo-tracked live sandbox proof exists for Grab Taiwan or another forwarder. `WF-FWD-001` remains `EXTERNAL-GATED`, `EXT-002-BLK-001` to `EXT-002-BLK-007` remain open, the platform registry still marks Grab Taiwan as `forwarder_stub`, and the shipped adapter remains stub-only.
 - Current `HEAD` again has executable repo-local forwarder evidence for the module-scoped Grab Taiwan mock path. `pnpm --filter @drts/contracts build` passes, `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts` passes with `37/37` tests, and `pnpm --filter @drts/api typecheck` passes.
-- The repo-root forwarder harness is still not fully reproducible. `pnpm exec vitest run tests/unit/forwarder.test.ts` fails `2/4` tests because `tests/unit/forwarder.test.ts` constructs `RegulatoryRegistryService` without the now-required `AuditNotificationService` and `DriverProfileService`, then `decorateDriver()` dereferences `driverProfileService.findProfileForDriver(...)`: `tests/unit/forwarder.test.ts:17-21`, `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:329-335`, `1843-1846`.
+- The repo-root forwarder harness is again reproducible on a hydrated reviewer worktree. A fresh `2026-05-23` rerun of `pnpm exec vitest run tests/unit/forwarder.test.ts` passes `1` file / `4` tests.
 - Static source inspection still shows the intended repo-local chain for webhook ingest -> mirror order -> driver forwarded-task view -> accept relay -> native status sync -> reconciliation closeout.
 - Settlement / earnings mirror is still missing from runtime orchestration. The adapter interface defines `complete()` and `fetchEarnings()`, and the stub adapter implements them, but `ForwarderService` does not call them and forwarded finance remains `external_platform` + `shadow_only`.
 
@@ -47,7 +47,7 @@ Current `HEAD` executable state:
 
 - `pnpm --filter @drts/contracts build` passes.
 - `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts` passes with `37/37` tests and exercises the current Grab Taiwan mock-backed mirror/status-sync path.
-- `pnpm exec vitest run tests/unit/forwarder.test.ts` fails `2/4` tests before SC-015 / SC-016 complete because the repo-root fixture under-injects `RegulatoryRegistryService` dependencies, causing `driverProfileService.findProfileForDriver(...)` to throw: `tests/unit/forwarder.test.ts:17-21`, `59-82`, `111-122`; `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:329-335`, `1843-1846`.
+- `pnpm exec vitest run tests/unit/forwarder.test.ts` now passes `1` file / `4` tests on the refreshed reviewer rerun from `2026-05-23`, so the older fixture-regression claim should no longer be treated as current `HEAD` truth.
 
 Static/source evidence map:
 
@@ -77,7 +77,7 @@ Static/source evidence map:
 Important scope limit:
 
 - The module-scoped forwarder tests now execute on current `HEAD`, including webhook ingest at `234`, signature failure at `262`, idempotent replay at `301`, accept relay at `323`, sync-failure reconciliation at `416`, native status resolution at `539`, terminal `lost_race` at `643`, terminal `cancelled_by_platform` at `673`, and reconciliation closeout at `723` in `apps/api/tests/unit/forwarder.service.test.ts`.
-- Acceptance remains blocked because there is still no live sandbox proof, the repo-root forwarder harness has drifted, and runtime settlement / earnings mirroring is absent.
+- Acceptance remains blocked because there is still no live sandbox proof and runtime settlement / earnings mirroring is absent.
 
 ### 3. Capture webhook signature validation evidence + retry/idempotency evidence
 
@@ -115,7 +115,7 @@ Confirmed gaps:
 - The shipped adapter is stub-only, but the unit-test seam models a more capable in-memory adapter. That is valid for mock-path design verification, but it is not live platform evidence: `apps/api/tests/unit/forwarder.service.test.ts:10-68`, `apps/api/src/modules/forwarder/grab-taiwan.adapter.ts:24-40`.
 - `E2E-002` remains an external-gated scaffold; a graceful skip there is not proof of real adapter readiness: `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md:65`, `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md:37-40`.
 - Completion / settlement / earnings mirror is still missing from runtime orchestration even though the adapter seam exists.
-- The repo-root forwarder harness has drifted behind the current `RegulatoryRegistryService` dependency shape, so cross-package forwarder examples are not fully reproducible without fixture repair: `tests/unit/forwarder.test.ts:17-21`, `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:329-335`, `1843-1846`.
+- The repo-root forwarder harness now reruns cleanly on the reviewer branch, so the remaining blocker is evidence classification rather than a current fixture regression.
 
 ### 5. Verification report is support-only (mutates_canonical=false); no production code change
 
@@ -125,7 +125,7 @@ Status: `pass`
 
 ## Executed Verification Commands
 
-Executed on current `HEAD` (`2026-05-13`):
+Executed on current `HEAD` (`2026-05-13`; repo-root vitest result refreshed on `2026-05-23` reviewer rerun):
 
 ```bash
 pnpm --filter @drts/contracts build
@@ -145,10 +145,8 @@ Results:
   - Current executable evidence includes webhook ingest, signature rejection, idempotent replay, accept relay, sync-failure reconciliation, native status sync, terminal closeout, and reconciliation completion.
 
 - `pnpm exec vitest run tests/unit/forwarder.test.ts`
-  - FAIL
-  - `1` failed file, `2` failed tests, `2` passed tests
-  - `TypeError: Cannot read properties of undefined (reading 'findProfileForDriver')`
-  - Failure trace points to `RegulatoryRegistryService.decorateDriver()` after `tests/unit/forwarder.test.ts` instantiates `RegulatoryRegistryService` without the currently required collaborators.
+  - PASS on refreshed `2026-05-23` reviewer rerun
+  - `1` passed file, `4` passed tests
 
 - `pnpm --filter @drts/api typecheck`
   - PASS
@@ -160,7 +158,6 @@ Results:
 Even with that recovery, this task remains `blocked` as a real-platform verification closeout because:
 
 - live third-party forwarder proof is still external-gated and stub-only in repo machine truth
-- the repo-root forwarder harness still has a fixture regression around `RegulatoryRegistryService` dependency injection
 - the intended repo-local mirror / task-view / accept / status-sync / reconciliation seams are present and executable in the API module tests
 - settlement / earnings mirroring remains unimplemented in runtime orchestration
 

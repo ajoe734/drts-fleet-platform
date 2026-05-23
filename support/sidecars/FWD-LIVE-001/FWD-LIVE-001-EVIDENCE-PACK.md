@@ -5,13 +5,13 @@ attempt snapshot only. It is not the 11-item real sandbox proof packet. See
 `README.md` and `FWD-LIVE-001-PROVIDER-PROOF.md` in this same folder for the
 current classification and proof-item matrix.
 
-**Task:** `FWD-LIVE-001`  
-**Current cycle task:** `PH1GC-FWD-001`  
-**Owner:** `Codex2`  
-**Reviewer:** `Codex`  
-**Current cycle status:** `ready_for_review`  
-**Branch:** `codex2/ph1gc-fwd-001`  
-**Collected:** `2026-05-19 (UTC)`  
+**Task:** `FWD-LIVE-001`
+**Current cycle task:** `PH1GC-FWD-001`
+**Owner:** `Codex2`
+**Reviewer:** `Codex`
+**Current cycle status:** `review`
+**Branch:** `codex2/ph1gc-fwd-001`
+**Collected:** `2026-05-19 (UTC)`
 **Status:** `partial evidence only — historical appendix; sidecar verdict remains PASS (repo-local)`
 
 ---
