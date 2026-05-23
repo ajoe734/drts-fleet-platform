@@ -1,6 +1,6 @@
 # PH1GC-PARTNER-002 unblock resolution
 
-Status: resolved by the existing canonical PARTNER-ELIG-LIVE-001 evidence chain
+Status: resolved by canonical parent evidence already landed on 2026-05-19
 Task: `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK`
 Dispatch parent: `PH1GC-PARTNER-002`
 Canonical parent: `PARTNER-ELIG-LIVE-001`
@@ -9,39 +9,37 @@ Reviewer: `Codex`
 
 ## Summary
 
-This dispatch-level helper does not expose a new repo-local blocker.
+This dispatch-level unblock task does not expose a new repo-local blocker.
 
 `PH1GC-PARTNER-002` is the phase-gap-closure dispatch name for the partner live
 issuer evidence sidecar that is already tracked canonically as
-`PARTNER-ELIG-LIVE-001`. The repo-local contract/spec side is already complete;
-the remaining gate is external-only and stays bound to `EXT-001-BLK-001`
-through `EXT-001-BLK-006`.
+`PARTNER-ELIG-LIVE-001`. That canonical parent is already closed in machine
+truth, and its final state is explicit:
 
-The correct unblock action is therefore to bridge the dispatch name back to the
-existing canonical task chain and keep the canonical resume path pointed at the
-external issuer evidence packet.
+- repo-local spec work is done via `PH1GC-PARTNER-001` /
+  `PARTNER-ELIG-LIVE-001` prerequisites
+- the remaining gap is external-only and stays bound to
+  `EXT-001-BLK-001` through `EXT-001-BLK-006`
 
-## Why this helper exists
+So the correct unblock action here is to record the mapping and point the next
+step back to the existing canonical external-gate chain, not to reopen product
+or contract scope.
 
-The dispatch assigned `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK`, but that task
-id does not exist in `ai-status.json`.
+## Why this helper was still needed
 
-The actual canonical task lineage already exists under:
+The dispatch helper now exists in `ai-status.json`, but its state still needed
+to be bridged back to the pre-existing canonical partner hold lineage.
+
+The canonical task lineage that actually owns the external issuer gate already
+exists under:
 
 - `PARTNER-ELIG-LIVE-001`
 - `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK`
 - `PARTNER-ELIG-LIVE-001-UNBLOCK-PLANNING-DECISION`
 - `PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR`
 
-Those tasks already diagnose, narrow, and document the remaining blocker. This
-file is the dispatch-to-canonical bridge so the PH1GC name does not imply a
-second parent or a new repo-local scope.
-
-Because no `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK` row exists in
-`ai-status.json`, this dispatch alias also has no direct
-`scripts/ai-status.sh approve|done` lifecycle entry. Any machine-truth status
-changes must stay on the canonical `PARTNER-ELIG-LIVE-001*` task chain unless
-the supervisor explicitly materializes a support-only helper task.
+Those tasks already diagnose, narrow, and document the remaining blocker.
+This helper therefore serves as a dispatch-to-canonical bridge artifact.
 
 ## Canonical evidence
 
@@ -50,28 +48,33 @@ the supervisor explicitly materializes a support-only helper task.
    `support/sidecars/PARTNER-ELIG-LIVE-001/` and labels it
    `PH1GC-PARTNER-002`.
 2. `support/unblock/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK.md`
-   on `origin/codex2/partner-elig-live-001-unblock-manual-unblock@052de19`
-   narrows the remaining blocker to `EXT-001-BLK-001` through
-   `EXT-001-BLK-006`.
+   records that after the spec dependency closed, the only remaining blocker is
+   `EXT-001-BLK-001` through `EXT-001-BLK-006`.
 3. `support/unblock/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-001-UNBLOCK-PLANNING-DECISION.md`
-   on `origin/codex2/partner-elig-live-001-unblock-planning-decision@91cb3c5`
-   scope-cuts further repo-local design work and routes the task to the
-   existing external issuer gate.
+   scope-cuts any further repo-local design work and routes the task to the
+   external issuer gate.
 4. `support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md`
-   on `origin/codex/partner-elig-live-001@2628fc7` is the canonical hold-state
-   packet for the parent task.
+   is the canonical hold-state packet for the parent task.
 5. `ai-status.json`
-   records the concrete external resume sequence on the completed helper chain:
-   `PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR.resolved_parent_next` keeps
-   the sidecar anchored at `2628fc7`, waits for `EXT-001-BLK-001` through
-   `EXT-001-BLK-006`, then attaches redacted evidence there and reruns the live
-   issuer proof. The parent task closeout at `PARTNER-ELIG-LIVE-001` separately
-   summarizes that the task is externally gated on `EXT-001-BLK-001..006`
-   only.
+   records `PARTNER-ELIG-LIVE-001` and its unblock helpers as `done`.
+
+## Machine-truth repair
+
+On 2026-05-22, the canonical `PARTNER-ELIG-LIVE-001.next` field was refreshed
+to the concrete external-gate sequence required by the helper reviews:
+
+- keep `support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md`
+  anchored at `2628fc7`
+- wait for `EXT-001-BLK-001` through `EXT-001-BLK-006`
+- attach redacted external evidence there
+- rerun the live issuer proof
+
+This closes the remaining dispatch-level mismatch where machine truth still had
+the old generic closeout summary instead of the canonical external next step.
 
 ## Remaining blocker
 
-No repo-local implementation blocker remains for this dispatch helper.
+No repo-local implementation blocker remains for this dispatch task.
 
 The only still-open inputs are the existing `EXT-001` blocker records:
 
