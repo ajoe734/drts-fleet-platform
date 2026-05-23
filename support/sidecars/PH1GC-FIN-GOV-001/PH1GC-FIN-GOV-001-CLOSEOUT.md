@@ -2,11 +2,11 @@
 
 Task ID: `PH1GC-FIN-GOV-001`
 Owner: `Codex2`
-Reviewer: `Claude`
+Reviewer: `Codex`
 Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
-Status: `blocked`
-Branch head before this evidence-pointer refresh: `368eb1da` (`wip(PH1GC-FIN-GOV-001): anchor closeout pointer wording`)
+Status: `in_progress`
+Branch head before this closeout-status correction: `5764c3f3` (`wip(PH1GC-FIN-GOV-001): anchor closeout head pointer sync`)
 Files changed:
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
 - `docs/03-runbooks/phase1-release-truth-sync-20260519.md`
@@ -34,7 +34,7 @@ Workflow family affected:
 Gate read before:
 - `PASS (static evidence)`
 Gate read after:
-- `PASS (static evidence)`; live uplift still blocked
+- branch row still `PASS (static evidence)`; `origin/dev` still lacks the `WF-FIN-GOV-001` matrix row and therefore cannot support a `PASS (live staging evidence)` claim
 Remaining non-claim:
 - No claim that `WF-FIN-GOV-001` is already `PASS (live staging evidence)`
 - No claim that every governance verification-body field is populated on the current reachable staging runtime
@@ -57,8 +57,9 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 
 ## Current Acceptance Read
 
-- Acceptance items 1, 2, 3, 4, and 6 are satisfied on this branch.
-- Acceptance item 5 remains blocked by staging auth, not by missing repo artifacts.
+- Acceptance items 1 and 2 are satisfied on `origin/dev`; both the spec and UAT docs are visible there.
+- Acceptance items 3, 4, and 6 remain satisfied on this branch via the spec/UAT/E2E/closeout evidence chain.
+- Acceptance item 5 is still unsatisfied: the branch matrix row remains `PASS (static evidence)`, `origin/dev` still lacks a `WF-FIN-GOV-001` row entirely, and the governed staging rerun needed for `PASS (live staging evidence)` is still blocked by staging auth.
 
 ## 2026-05-23 Revalidation
 
@@ -66,6 +67,9 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` listed `E2E-010-governance-aware-billing-reporting.sh`.
 - `git diff --check origin/dev...HEAD` passed.
+- `git cat-file -e origin/dev:docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` passed.
+- `git cat-file -e origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` passed.
+- `git show origin/dev:docs/03-runbooks/phase1-workflow-acceptance-release-gates.md | grep -n 'WF-FIN-GOV-001'` returned no match.
 - `curl -i -sS --max-time 20 https://api.staging.drts-fleet.cctech-support.com/api/health` still returns `HTTP/2 302` with body `Invalid IAP credentials: empty token`.
 - `gh secret list --repo ajoe734/drts-fleet-platform | grep 'WIF'` shows `DEV_WIF_PROVIDER`, `DEV_WIF_SERVICE_ACCOUNT`, `STAGING_WIF_SERVICE_ACCOUNT`, `WIF_PROVIDER`, and `WIF_SERVICE_ACCOUNT`; `STAGING_WIF_PROVIDER` is still absent.
 
@@ -77,4 +81,4 @@ Fresh 2026-05-23 validation still shows:
 - local human `gcloud` accounts remain unusable for non-interactive token minting
 - repo secrets show `STAGING_WIF_SERVICE_ACCOUNT` but not `STAGING_WIF_PROVIDER`
 
-Until a valid staging bearer path exists and a governed rerun can pass `STRICT_VERIFICATION_BODY=1`, this task should stay in `progress` or move to `blocked`, not `done`.
+Until `WF-FIN-GOV-001` has a matrix row on `origin/dev` and a valid staging bearer path exists so the governed rerun can pass `STRICT_VERIFICATION_BODY=1`, this task should stay in `progress`, not `done`.
