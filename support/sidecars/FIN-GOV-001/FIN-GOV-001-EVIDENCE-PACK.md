@@ -227,9 +227,10 @@ Observed results:
   - `Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist).`
 - branch commit `2f6387fa` made the Cloud SDK path best-effort so it no longer blocked the E2E chain. 2026-05-23 run `26327904346` then advanced through step 6 `Best-effort fetch internal key` and failed in step 7 `Mint IAP verification token` with:
   - `Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
-- the latest rebased-head confirmation run `26332046380` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d` reproduced the same deeper failure: `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all passed, then `Mint IAP verification token` failed with:
+- the latest rebased-head confirmation run at dispatch time, `26332046380` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d`, reproduced the same deeper failure: `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all passed, then `Mint IAP verification token` failed with:
   - `Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
   - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped, and artifact upload warned that no `e2e-010-*` files existed.
+- the current branch head `0a4ae23f` only records that evidence refresh; it did not trigger a newer governed staging rerun after `26332046380`.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
