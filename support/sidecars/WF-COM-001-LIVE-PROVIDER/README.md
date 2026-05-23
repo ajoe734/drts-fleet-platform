@@ -4,6 +4,7 @@
 **Workflow family**: `WF-COM-001`
 **Authority**: directive §G `COM-001` — `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
 **Blueprint**: `docs/02-architecture/cti-recording-filing-blueprint-20260519.md`
+**Closeout**: `support/sidecars/WF-COM-001-LIVE-PROVIDER/PH1GC-COM-001-CLOSEOUT-20260523.md`
 **Historical probe packet**: `support/sidecars/COM-LIVE-001/COM-LIVE-001-EVIDENCE-PACK.md`
 
 This sidecar is the canonical provider-classification packet for `WF-COM-001`.
@@ -83,5 +84,8 @@ the following non-claim explicit:
   activation evidence.
 - `support/sidecars/COM-LIVE-001/COM-LIVE-001-EVIDENCE-PACK.md`
   remains the dated partial probe packet from 2026-05-19.
+- `support/sidecars/WF-COM-001-LIVE-PROVIDER/PH1GC-COM-001-CLOSEOUT-20260523.md`
+  records the directive-§7 closeout summary for the current
+  `sandbox_provider` classification snapshot.
 - This directory is the canonical classification path referenced by
   `docs/03-runbooks/phase1-release-truth-sync-20260519.md`.
