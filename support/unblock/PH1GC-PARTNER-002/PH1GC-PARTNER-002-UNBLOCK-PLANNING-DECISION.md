@@ -48,16 +48,20 @@ The canonical decision is now recorded in
 
 ## Parent Unblocked Next Step
 
-Once issuer/bank sandbox credentials arrive, `PH1GC-PARTNER-002` should proceed
-by creating `support/sidecars/PARTNER-ELIG-LIVE-001/` and capturing the
-nine-item sandbox proof set from `WF-PARTNER-001` §2.1 using the field contract
-from §6. The sidecar must include:
+Once issuer/bank sandbox credentials and the remaining `EXT-001` gate inputs
+arrive, `PH1GC-PARTNER-002` should proceed by creating
+`support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md` and
+capturing the nine-item sandbox proof set from `WF-PARTNER-001` §2.1 using the
+field contract from §6. The sidecar must include:
 
 1. `eligible`, `ineligible`, and `manual_review` sandbox outcomes.
 2. Timeout / retry proof.
 3. Booking linkage, billing/reporting linkage, and audit-log linkage.
 4. Negative-path proof for `NP-PARTNER-001`, `NP-PARTNER-002`,
    `NP-PARTNER-003`, and `NP-PARTNER-007`.
+
+The external gate remains `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md`
+with blocker records `EXT-001-BLK-001` through `EXT-001-BLK-006`.
 
 This means the parent is no longer blocked on product semantics. The only
 remaining blocker is external credential availability.
