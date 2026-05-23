@@ -6,6 +6,7 @@ Owner: `Codex2`
 Reviewer: `Codex`
 Directive anchor: `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §2.2, §3.9, §7
 Revalidated on: `2026-05-23` against `origin/dev`
+Reviewer-approved branch ref: `origin/codex2/ph1gc-prod-001@e21aa9fd`
 
 Workflow family: `WF-PROD-001`
 Business flow: `Production deploy / rollback rail`
