@@ -4,7 +4,7 @@
 **Intended owner:** `Codex2`
 **Intended reviewer:** `Codex`
 **Collected:** `2026-05-19 (UTC)`
-**Current read:** `PARTIAL - static evidence consolidated; 2026-05-19 live rerun reconfirmed blocked by credential/ingress gates`
+**Current read:** `PARTIAL - static evidence consolidated; 2026-05-23 revalidation still blocked by IAP / WIF / IAM gates`
 
 ---
 
@@ -130,9 +130,11 @@ Interpretation:
 
 ### 4.2 Token helper failure on this machine
 
-Active CLI account:
+Active CLI accounts probed:
 
 - `bobo.du@cctech-support.com`
+- `edna@cctech-support.com`
+- `lupinchen@cctech-support.com`
 
 Attempted helper:
 
@@ -140,20 +142,15 @@ Attempted helper:
 
 Underlying failure:
 
-`gcloud auth print-access-token` returned:
+Each of `gcloud auth print-access-token` and `gcloud auth print-identity-token`
+returned:
 
 `Reauthentication failed. cannot prompt during non-interactive execution.`
 
-The impersonated fallback path failed with the same reauthentication error when
-running:
-
-`gcloud auth print-identity-token --include-email --project drts-staging-bobo-20260502 --impersonate-service-account github-actions-deployer@drts-staging-bobo-20260502.iam.gserviceaccount.com --audiences 1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
-
 Interpretation:
 
-- this workspace had an active `gcloud` account selected
-- the local credentials were stale for non-interactive token minting
-- no fresh IAP token could be produced from this session
+- all locally configured human `gcloud` credentials are stale for non-interactive token minting
+- no fresh email-bearing IAP token can be produced from this session via user-account auth
 
 ### 4.3 Direct Cloud Run fallback
 
@@ -175,17 +172,30 @@ Interpretation:
 - the live collection path is effectively gated on the protected staging host
   plus valid bearer credentials
 
+### 4.4 2026-05-23 revalidation
+
+Fresh probes on `2026-05-23` still stop before any governed E2E request can be issued:
+
+- `curl -i -sS --max-time 20 https://api.staging.drts-fleet.cctech-support.com/api/health` still returns HTTP `302` with `Invalid IAP credentials: empty token`
+- `gh secret list --repo ajoe734/drts-fleet-platform | grep 'WIF'` shows `DEV_WIF_PROVIDER`, `DEV_WIF_SERVICE_ACCOUNT`, `STAGING_WIF_SERVICE_ACCOUNT`, `WIF_PROVIDER`, and `WIF_SERVICE_ACCOUNT`, but **no** `STAGING_WIF_PROVIDER`
+- the missing `STAGING_WIF_PROVIDER` explains why the staging GitHub Actions auth path falls back to older provider settings unless the workflow adds an explicit fallback order
+
+Interpretation:
+
+- the protected staging host is still reachable but still requires a valid email-bearing IAP token
+- repo-side staging WIF configuration remains incomplete on this date
+- `WF-FIN-GOV-001` cannot honestly claim `PASS (live staging evidence)` until the auth path is repaired and a strict-mode governed rerun succeeds
+
 ---
 
 ## 5. Blocker Summary
 
-Fresh staging live evidence for the governance-aware `WF-FIN-001` sub-slice is
-currently blocked by two concrete environment issues:
+Fresh staging live evidence for the governance-aware `WF-FIN-GOV-001` slice is
+currently blocked by three concrete environment issues:
 
-1. non-interactive IAP token minting is unavailable on this machine because the
-   current `gcloud` session requires reauthentication
-2. the older direct Cloud Run origin is not serving the expected `/api/*`
-   routes as a usable fallback
+1. non-interactive user-account IAP token minting is unavailable on this machine because every probed `gcloud` account requires reauthentication
+2. the repo currently exposes `STAGING_WIF_SERVICE_ACCOUNT` but not `STAGING_WIF_PROVIDER`, so the CI-side staging auth path still lacks the intended provider configuration
+3. the older direct Cloud Run origin is not serving the expected `/api/*` routes as a usable fallback
 
 Until one of those is resolved, this task can only deliver a consolidated
 static-evidence packet plus a reproducible blocker record. The 2026-05-19

@@ -1,7 +1,7 @@
 # Governance-Aware Billing & Reporting Spec
 
 **Date**: 2026-05-19 (date stamped to align with directive; reconciled commit 2026-05-22)
-**Authority**: `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` §G1 `FIN-GOV-001`, reconciled with `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` §2.14
+**Authority**: directive §H `FIN-GOV-001` — `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (with execution-worklist alignment at `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` §G1 and audit reconciliation at `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` §2.14)
 **Workflow family**: `WF-FIN-GOV-001` (depends on `WF-TGV-001` + `WF-FIN-001`; do **not** rename or absorb `WF-FIN-001`)
 **Pairs with**: `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` (UAT), `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (executable proof — driven by `PH1GC-E2E-010`)
 
@@ -83,7 +83,7 @@ For governance-aware billing, the approval must have terminated in one of the th
 
 ### 3.7 Legacy-unmapped fallback
 
-For bookings created during the cost-center rollout window (defined as before `WF-TGV-001` rolled to a tenant) that nevertheless ran through approval or quota gates, the billing record may set `legacy_unmapped = true` and leave `costCenterCode` / `costCenterName` / `ownerUserId` null **only when** the cost-center registry confirms no mapping is available. The remaining eight fields must still be populated.
+For bookings created during the cost-center rollout window (defined as before `WF-TGV-001` rolled to a tenant) that nevertheless ran through approval or quota gates, the billing record may set `legacy_unmapped = true` and leave `costCenterCode` / `costCenterName` / `ownerUserId` null **only when** the cost-center registry confirms no mapping is available. The remaining ten verification-body fields must still be populated according to their own §3.2–§3.6 triggers, and `reportArtifactId` still populates lazily once export completes.
 
 `legacy_unmapped = true` may not be used to bypass cost-center attribution on a tenant where the registry is current; the export pipeline treats unexpectedly-flagged rows as an integrity error.
 
@@ -135,7 +135,32 @@ The following transitions on a governance-aware billing record are not permitted
 
 The verification body above must be asserted end-to-end by `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (driven by `PH1GC-E2E-010`) and covered scenario-by-scenario in `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`.
 
-The E2E script must hard-fail when seed is absent (no silent passes) and must assert each of the 13 fields appears in the generated invoice and report-export artifacts.
+### 6.1 Hard-fail contract regressions (always enforced)
+
+The E2E script must hard-fail with a non-zero exit when any of the following contract regressions are observed. Silent passes are not permitted:
+
+- seed bootstrap cannot complete (no tenant admin / no cost-center registry write / no quota policy write / no approval rule write)
+- `costCenterCode` is dropped from the governed booking read-back
+- driver lifecycle cannot reach `task.status == completed` after dispatch + assign were accepted
+- the generated tenant invoice does not contain an invoice line whose `orderId` matches the just-completed governed booking
+- no audit row with `actionName == generate_tenant_invoice` and `resourceId == <invoiceId>`
+- a cross-tenant fetch of the governed invoice returns `2xx` instead of `4xx`
+
+### 6.2 Verification-body field recording (always required, two-tier pass semantics)
+
+For each of the 13 verification-body fields enumerated in §3, the E2E script must record one explicit evidence line per field with either:
+
+- the observed value, or
+- the literal `NOT_POPULATED` marker
+
+A silently omitted field is itself a regression; the recording is mandatory. The pass semantics are:
+
+| Mode | Meaning of `NOT_POPULATED` | When to use |
+| --- | --- | --- |
+| Default | Soft evidence that runtime enrichment for this field is still partial on the currently reachable environment. The shell may still exit `0`, so the field-presence delta remains reviewable evidence. | Pre-live-uplift runs while `WF-FIN-GOV-001` remains `PASS (static evidence)`. |
+| `STRICT_VERIFICATION_BODY=1` | Hard fail. Any `NOT_POPULATED` value in the final 13-field snapshot exits non-zero with the missing-field list. | The gate-keeper mode for uplifting `WF-FIN-GOV-001` to `PASS (live staging evidence)`. |
+
+The strict-mode invocation is `STRICT_VERIFICATION_BODY=1 bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh`. The default invocation omits the env var.
 
 ---
 

@@ -459,7 +459,7 @@ Tenant Console (cost-center + quota + require_approval rule)
 
 #### Notes
 
-- This script is a **shell**: per `FIN-GOV-UAT-001` the live promotion for `WF-FIN-GOV-001` is currently `BLOCKED FOR LIVE`. The script's `record_field` helper marks each unpopulated governance field as `NOT_POPULATED` so the field-presence delta becomes the reviewable evidence as enrichment lands incrementally.
+- This script is a **shell**: per `FIN-GOV-UAT-001` the live promotion for `WF-FIN-GOV-001` is currently `BLOCKED FOR LIVE`. Default-mode runs record each unpopulated verification-body field as `NOT_POPULATED`, and `STRICT_VERIFICATION_BODY=1` is the uplift gate-keeper once a governed staging rerun is available.
 - Hard failures are reserved for contract regressions named in `FIN-GOV-SPEC-001`: cost-center dropped from booking, driver lifecycle cannot reach completion after dispatch accepted, invoice does not include the governed `orderId`, audit chain broken (FG-08), and cross-tenant scope widened (FG-09). All other shape probes are recorded as field-presence evidence so the test does not "pass on unrelated historical invoice data" — a regression flagged in the prior review round and now closed by the orderId-binding rule above.
 - Negative-path governance assertions (unknown / disabled / cross-tenant cost centers, rule block, rejected booking, escalation visibility) remain owned by `E2E-005-tenant-governance.sh` and `tests/integ/tenant-governance-negative.test.ts`. The deterministic invoice-line ↔ governed-orderId binding asserted here mirrors `apps/api/tests/integration/tenant-governance-e2e.test.ts:573-579`.
 
