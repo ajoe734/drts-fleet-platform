@@ -241,8 +241,8 @@ Canonical machine truth for `PH1GC-DRV-MP-002` lives at:
 `/home/edna/workspace/drts-fleet-platform/ai-status.json`
 
 As of this packet draft on `2026-05-23`, that file records `owner=Codex`,
-`reviewer=Claude`, and `status=in_progress`. `current-work.md` still lags and
-must not be treated as machine truth.
+`reviewer=Claude`, and `status=in_progress`. `current-work.md` is a derived
+summary view and must not be treated as machine truth.
 
 This packet is a dated evidence snapshot. It is not the authoritative source for
 owner, reviewer, or task lifecycle state, and it must not be read as a `done`
