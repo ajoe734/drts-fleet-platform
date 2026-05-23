@@ -9,7 +9,7 @@ current classification and proof-item matrix.
 **Current cycle task:** `PH1GC-FWD-001`
 **Owner:** `Codex2`
 **Reviewer:** `Codex`
-**Current cycle status:** `in_progress`
+**Current cycle status:** `review`
 **Branch:** `codex2/ph1gc-fwd-001`
 **Collected:** `2026-05-19 (UTC)`
 **Status:** `partial evidence only — historical appendix; sidecar verdict remains PASS (repo-local)`
