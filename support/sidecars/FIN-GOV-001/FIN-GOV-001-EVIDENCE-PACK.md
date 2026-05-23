@@ -130,9 +130,11 @@ Interpretation:
 
 ### 4.2 Token helper failure on this machine
 
-Active CLI account:
+Active CLI accounts probed:
 
 - `bobo.du@cctech-support.com`
+- `edna@cctech-support.com`
+- `lupinchen@cctech-support.com`
 
 Attempted helper:
 
@@ -140,7 +142,8 @@ Attempted helper:
 
 Underlying failure:
 
-`gcloud auth print-access-token` returned:
+Each of `gcloud auth print-access-token` and `gcloud auth print-identity-token`
+returned:
 
 `Reauthentication failed. cannot prompt during non-interactive execution.`
 
@@ -149,11 +152,27 @@ running:
 
 `gcloud auth print-identity-token --include-email --project drts-staging-bobo-20260502 --impersonate-service-account github-actions-deployer@drts-staging-bobo-20260502.iam.gserviceaccount.com --audiences 1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
 
+Additional machine-local probe on `2026-05-23`:
+
+- metadata server identity mint succeeded via
+  `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?...&format=full`
+- the JWT carried `email='384772941419-compute@developer.gserviceaccount.com'`
+  and the correct IAP audience
+- `curl -i -H "Authorization: Bearer <metadata-token>" https://api.staging.drts-fleet.cctech-support.com/api/health`
+  reached IAP but returned HTTP `403`:
+  `DRTS Fleet Platform: Access denied. For user 384772941419-compute@developer.gserviceaccount.com.`
+- metadata access token based `iamcredentials.googleapis.com ...:generateIdToken`
+  still failed with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`
+
 Interpretation:
 
-- this workspace had an active `gcloud` account selected
-- the local credentials were stale for non-interactive token minting
-- no fresh IAP token could be produced from this session
+- all user-account `gcloud` credentials available on this worker are stale for
+  non-interactive token minting
+- this VM can mint a syntactically valid email-bearing identity token for its
+  default compute service account, so the problem is no longer token shape
+- the remaining local barrier is authorization: the compute service account is
+  not allowed through IAP, and the instance scopes do not permit IAM
+  Credentials impersonation of the staging deployer account
 
 ### 4.3 Direct Cloud Run fallback
 
@@ -219,13 +238,18 @@ Interpretation:
 ## 5. Blocker Summary
 
 Fresh staging live evidence for the governance-aware `WF-FIN-001` sub-slice is
-currently blocked by three concrete environment issues:
+currently blocked by four concrete environment issues:
 
-1. non-interactive IAP token minting is unavailable on this machine because the
-   current `gcloud` session requires reauthentication
-2. the older direct Cloud Run origin is not serving the expected `/api/*`
+1. non-interactive user-account token minting is unavailable on this machine
+   because every locally configured human `gcloud` account now requires
+   reauthentication
+2. the VM metadata path can mint an email-bearing identity token, but the
+   resulting principal `384772941419-compute@developer.gserviceaccount.com` is
+   denied by IAP and the VM scopes still block IAM Credentials impersonation
+   with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`
+3. the older direct Cloud Run origin is not serving the expected `/api/*`
    routes as a usable fallback
-3. the repository-configured GitHub Actions WIF provider path is misconfigured:
+4. the repository-configured GitHub Actions WIF provider path is misconfigured:
    `gh secret list` shows no `STAGING_WIF_PROVIDER`, so the staging workflow
    falls back to older repo-level `WIF_PROVIDER` and fails with `invalid_target`
    on both the 2026-05-22 and 2026-05-23 reruns
