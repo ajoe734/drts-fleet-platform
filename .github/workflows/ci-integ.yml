@@ -119,7 +119,7 @@ jobs:
       PROJECT_ID: ${{ vars.STAGING_GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
       REGION: ${{ vars.STAGING_GCP_REGION || vars.GCP_REGION }}
       DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
-      WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+      WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
       SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
       CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
       IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
@@ -135,7 +135,7 @@ jobs:
           missing=()
           [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.STAGING_GCP_PROJECT_ID or vars.GCP_PROJECT_ID")
           [[ -n "${REGION:-}" ]] || missing+=("vars.STAGING_GCP_REGION or vars.GCP_REGION")
-          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.DEV_WIF_PROVIDER or secrets.WIF_PROVIDER")
           [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.STAGING_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
 
           if (( ${#missing[@]} > 0 )); then
