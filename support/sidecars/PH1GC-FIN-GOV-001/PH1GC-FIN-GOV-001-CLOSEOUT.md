@@ -41,7 +41,7 @@ The planning-ref path named in the task brief is not present in this worktree. T
 - This branch does **not** claim `WF-FIN-GOV-001` is already `PASS (live staging evidence)`.
 - This branch does **not** claim every governance enrichment field is populated on the current runtime; the shell records missing fields as `NOT_POPULATED` and strict mode gates the uplift.
 - This branch does **not** claim the predecessor IAP/credential blocker is resolved.
-- This branch does **not** claim the compute-service-account fallback is sufficient: it can mint an access token, but it still cannot produce an email-bearing IAP token accepted by the protected staging host.
+- This branch does **not** claim the compute-service-account fallback is sufficient: the VM metadata path can mint an email-bearing token, but IAP still returns `403 Access denied` for `384772941419-compute@developer.gserviceaccount.com`, and IAM Credentials impersonation remains blocked by `ACCESS_TOKEN_SCOPE_INSUFFICIENT`.
 - This branch does **not** widen any baseline `WF-FIN-001` claim; `WF-FIN-GOV-001` remains an additive governance-enrichment row that depends on `WF-TGV-001` + `WF-FIN-001`.
 
 ## 4. Local Verification
@@ -55,6 +55,8 @@ The planning-ref path named in the task brief is not present in this worktree. T
 - `gcloud auth print-access-token` for the active user account (`bobo.du@cctech-support.com`) and temporary compute-service-account override
 - `CLOUDSDK_CORE_ACCOUNT=384772941419-compute@developer.gserviceaccount.com ./scripts/print-staging-iap-token.sh`
 - `CLOUDSDK_CORE_ACCOUNT=384772941419-compute@developer.gserviceaccount.com gcloud auth print-identity-token --audiences <IAP_CLIENT_ID>`
+- `curl -sS -H 'Metadata-Flavor: Google' 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=<IAP_CLIENT_ID>&format=full'`
+- `curl -i -sS --max-time 20 -H "Authorization: Bearer <metadata-token>" https://api.staging.drts-fleet.cctech-support.com/api/health`
 - `gh workflow run ci-integ.yml --ref codex/ph1gc-fin-gov-001 -f ref=codex/ph1gc-fin-gov-001 -f run_staging_e2e_010=true`
 - `gh run view 26327029664 --json url,status,conclusion,jobs`
 - `gh run view 26287551676 --job 77378907824 --log`
@@ -66,16 +68,15 @@ No governed live staging execution was run from this dispatch because the 2026-0
 
 - the protected staging host still redirects unauthenticated requests to Google OAuth and returns `Invalid IAP credentials: empty token`;
 - the historical direct Cloud Run fallback still returns `404 Page not found`;
-- the active user account (`bobo.du@cctech-support.com`) still fails non-interactive `gcloud auth print-access-token` with `Reauthentication failed. cannot prompt during non-interactive execution.`;
-- the temporary compute-service-account override can mint an access token, but `generateIdToken` / service-account impersonation still fails with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`;
-- a bare audience identity token from the compute service account reaches IAP but is rejected with `401 Invalid IAP credentials: JWT 'email' claim isn't a string`.
+- the locally configured human `gcloud` accounts (`bobo.du@cctech-support.com`, `edna@cctech-support.com`, and `lupinchen@cctech-support.com`) all still fail non-interactive token minting with `Reauthentication failed. cannot prompt during non-interactive execution.`;
+- the VM metadata path can mint an email-bearing identity token for `384772941419-compute@developer.gserviceaccount.com`, but the protected staging host now returns `403 Access denied` for that principal, and metadata-access-token based `generateIdToken` / service-account impersonation still fails with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`;
 - the GitHub Actions fallback path remains blocked after a fresh 2026-05-23 rerun: workflow run `26327029664` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@2cc083d6`) reached job `staging-e2e-010` (`77506520838`), which completed `failure` at `2026-05-23T07:32:52Z`; step 4 `Authenticate to GCP` failed before any Cloud SDK, IAP-token mint, or E2E shell work could begin, and GitHub reported `google-github-actions/auth failed with: failed to generate Google Cloud federated token ... {"error":"invalid_target","error_description":"The target service indicated by the \"audience\" parameters is invalid. This might either be because the pool or provider is disabled or deleted or because it doesn't exist."}`. `gh secret list --repo ajoe734/drts-fleet-platform` now makes that actionable: `STAGING_WIF_SERVICE_ACCOUNT` exists, but `STAGING_WIF_PROVIDER` does not, so the staging workflow can only fall back to older repo-level `WIF_PROVIDER` (last updated `2026-04-16T14:18:02Z`) while the staging project/service-account entries were refreshed on `2026-05-03`. That inventory is consistent with the repeated provider-side `invalid_target` failure, so the repository-configured WIF path is still unusable for governed staging reruns.
 
 ## 5. Remaining Blocker
 
 To uplift `WF-FIN-GOV-001` from `PASS (static evidence)` to `PASS (live staging evidence)`, a follow-up owner must:
 
-1. obtain a valid email-bearing staging bearer / IAP path for the governed tenant (either by refreshing a user credential that can mint the token non-interactively, or by providing a service account / VM scope combination that can generate an acceptable IAP identity token),
+1. obtain a valid email-bearing staging bearer / IAP path for the governed tenant (either by refreshing a user credential that can mint the token non-interactively, or by granting a principal that already works from this VM access through IAP and enough scope to call IAM Credentials, or by providing another service account / VM scope combination that can generate an acceptable IAP identity token),
    or repair the repository-configured GitHub Actions WIF provider by supplying a valid `STAGING_WIF_PROVIDER` (or equivalent working provider reference) that matches `drts-staging-bobo-20260502` and `STAGING_WIF_SERVICE_ACCOUNT`,
 2. run `STRICT_VERIFICATION_BODY=1 bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh` against the governed staging origin,
 3. capture the evidence log plus the reviewer-readable invoice/report artifacts, and
