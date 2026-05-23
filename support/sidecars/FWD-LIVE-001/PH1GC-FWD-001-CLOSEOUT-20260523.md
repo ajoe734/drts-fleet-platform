@@ -79,13 +79,14 @@ pnpm --filter @drts/api typecheck
   handling, replay/idempotency, and recovery-path behavior on current `HEAD`.
 - The `FWD-LIVE-001` sidecar now reads as a complete 11-item `PASS (repo-local)`
   packet and no longer misstates the repo-local fallback as missing evidence.
-- `FWD-VERIF-001` now matches the fresh reviewer rerun result for
-  `pnpm exec vitest run tests/unit/forwarder.test.ts`: `1` file / `4` tests
-  passed.
-- Executable reruns from this assigned worktree are currently environment-gated:
-  `pnpm --filter @drts/contracts build` and
-  `pnpm --filter @drts/api typecheck` fail with `tsc: not found`, while both
-  `vitest` commands fail with `Command "vitest" not found`. This worktree does
-  not have installed `node_modules`, so the closeout records attempted
-  commands and aligns support prose with the latest branch review that cited
-  `37/37` module-scoped forwarder tests.
+- `FWD-VERIF-001` now matches the refreshed `2026-05-23` reviewer rerun on
+  commit `c8a8f9f570cc5500bc85935e0576f29c56c45b72`: the contracts build,
+  API forwarder service/controller vitest run (`37/37`), repo-root forwarder
+  vitest run (`1` file / `4` tests), and API typecheck all passed on the
+  hydrated reviewer worktree.
+- This isolated task worktree still lacks `node_modules`, so a local replay on
+  `2026-05-23` remains environment-limited here only: `tsc` is not installed
+  for the contracts build and typecheck commands, and `vitest` is not
+  installed for either vitest command. That local dependency gap does not
+  change the branch-level verification truth already recorded in
+  `support/sidecars/FWD-VERIF-001/FWD-VERIF-001-VERIFICATION.md`.
