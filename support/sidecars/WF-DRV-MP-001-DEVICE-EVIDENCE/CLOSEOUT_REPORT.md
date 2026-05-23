@@ -3,7 +3,7 @@ Owner: Gemini2
 Reviewer: Claude
 Branch: gemini2/ph1gc-drv-mp-002
 PR: N/A
-Commit: TBD
+Commit: 13ae968d
 Files changed: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/
 Verification commands: ls -l support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/
 Evidence artifact: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/
