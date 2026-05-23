@@ -29,7 +29,7 @@ the earlier note claimed.
    file and that only `origin/docs/ph1gc-doc-batch-1-20260522@7dd7a23b`
    carries the content.
 5. The active helper branch is now
-   `origin/codex2/ph1gc-bpl-001-unblock-history-repair@71639a72cd89eec74afe9bed075b8d4fbaf3b4ac`.
+   `origin/codex2/ph1gc-bpl-001-unblock-history-repair@59558b678d1b9c34448a0e3143b7e2cce8e9b347`.
 
 ## Exact Contamination
 
@@ -46,7 +46,8 @@ stale branch and commit conclusions that survived into machine truth.
    `origin/docs/ph1gc-doc-batch-1-20260522@7dd7a23b`.
 4. Helper history then accumulated several commits whose artifact text lagged
    behind the helper branch tip itself:
-   `1e9d6445` -> `867b4b85` -> `9e0055b3` -> `3f2f790f` -> `71639a72`.
+   `1e9d6445` -> `867b4b85` -> `9e0055b3` -> `3f2f790f` -> `71639a72` ->
+   `59558b67`.
 5. Those helper commits are not themselves harmful, but they show the same
    class of contamination: self-referential or stale ref labels surviving after
    the branch had already advanced.
@@ -62,7 +63,7 @@ stale branch and commit conclusions that survived into machine truth.
 - audit file introduction on trunk:
   `6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - `origin/codex2/ph1gc-bpl-001 @ 7c818c2743f5f10c891945c5a54e3788456a2bfa`
-- `origin/codex2/ph1gc-bpl-001-unblock-history-repair @ 71639a72cd89eec74afe9bed075b8d4fbaf3b4ac`
+- `origin/codex2/ph1gc-bpl-001-unblock-history-repair @ 59558b678d1b9c34448a0e3143b7e2cce8e9b347`
 - stale branch alias still behind trunk:
   `codex/ph1gc-bpl-001 @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - `origin/codex2/ph1gc-bpl-001-sidecar-acceptance @ 158629cc66051e1c32c1107813d70f9e4c09430e`
@@ -81,6 +82,7 @@ stale branch and commit conclusions that survived into machine truth.
   - `9e0055b3169db2d249afb85600606346b5a82806`
   - `3f2f790f6c97278cd5cad4b72ea0504004a8fb57`
   - `71639a72cd89eec74afe9bed075b8d4fbaf3b4ac`
+  - `59558b678d1b9c34448a0e3143b7e2cce8e9b347`
 
 ## Non-Destructive Repair Path
 
@@ -101,6 +103,8 @@ Do not rewrite or force-push any shared branch.
    closeout metadata in machine truth.
 6. Do not route follow-up work through the stale `codex/ph1gc-bpl-001` branch
    alias and do not describe the old doc-batch ref as the canonical source.
+7. Use this helper branch's pushed closeout commit `59558b67` as the canonical
+   task-scoped evidence for the unblock diagnosis refresh.
 
 ## Parent Next Step
 
@@ -134,6 +138,7 @@ action is:
   - `git rev-parse codex/ph1gc-bpl-001`
 - Verified closeout commit evidence with:
   - `git show --no-patch --format=fuller 7c818c27`
+  - `git show --no-patch --format=fuller 59558b67`
   - `git ls-remote --heads origin codex2/ph1gc-bpl-001 codex2/ph1gc-bpl-001-unblock-history-repair`
 - Verified helper history progression with:
   - `git log --decorate --oneline --max-count=12 codex2/ph1gc-bpl-001-unblock-history-repair`
