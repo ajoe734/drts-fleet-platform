@@ -6,7 +6,7 @@ Reviewer: `Claude`
 Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `blocked`
-Current branch head: `871d61c8` (`wip(PH1GC-FIN-GOV-001): anchor closeout head evidence refresh`)
+Current branch head: `aac5ba47` (`wip(PH1GC-FIN-GOV-001): anchor closeout head evidence current`)
 Files changed:
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
 - `docs/03-runbooks/phase1-release-truth-sync-20260519.md`
