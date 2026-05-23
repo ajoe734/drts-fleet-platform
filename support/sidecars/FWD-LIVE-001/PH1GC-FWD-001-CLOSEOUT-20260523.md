@@ -1,9 +1,11 @@
 # PH1GC-FWD-001 Closeout Report
 
-Date: 2026-05-23
+Date: `2026-05-23`
 Task: `PH1GC-FWD-001`
 Owner: `Codex2`
 Reviewer: `Codex`
+Current status: `ready_for_review`
+Branch / PR: `codex2/ph1gc-fwd-001` / `none recorded for this branch`
 Directive anchor: `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §D, §7
 
 Workflow family: `WF-FWD-001`
@@ -12,7 +14,13 @@ Current gate read: `PASS (repo-local)`
 Verification path: `support/sidecars/FWD-LIVE-001/README.md`; `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-PROVIDER-PROOF.md`; `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md`; `tests/e2e/E2E-002-forwarded-order.sh`; `docs/02-architecture/forwarder-sandbox-provider.md`; `support/sidecars/FWD-VERIF-001/FWD-VERIF-001-VERIFICATION.md`
 Evidence level: `repo-local evidence with historical external blocker appendix`
 Non-claim: `This task does not prove a real partner sandbox endpoint, reachable partner staging host, real partner credentials, signed real-partner webhooks, or any PASS (sandbox evidence) / PASS (live staging evidence) promotion for WF-FWD-001.`
+External dependencies: `Real provider/platform identity, masked sandbox credential reference, reachable endpoint, signed webhook path, seeded forwarded-task flow, settlement sample, and replay/signature evidence from a real sandbox endpoint remain unavailable in repo.`
 Next action: `Obtain a real partner sandbox package (provider identity, masked credential ref, reachable endpoint, signed inbound/callback path, settlement sample), then rerun the same 11-item packet against that environment for sandbox promotion.`
+
+## Supplemental Cycle Metadata
+
+- Files changed: `support/sidecars/FWD-LIVE-001/README.md`; `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-PROVIDER-PROOF.md`; `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md`; `support/sidecars/FWD-LIVE-001/PH1GC-FWD-001-CLOSEOUT-20260523.md`; `support/sidecars/FWD-VERIF-001/FWD-VERIF-001-VERIFICATION.md`
+- Evidence artifact: `support/sidecars/FWD-LIVE-001/`
 
 ## Delivered Scope
 
@@ -53,9 +61,13 @@ Next action: `Obtain a real partner sandbox package (provider identity, masked c
 ```bash
 sed -n '1,220p' docs/02-architecture/forwarder-sandbox-provider.md
 sed -n '1,260p' tests/e2e/E2E-002-forwarded-order.sh
-sed -n '1,220p' support/sidecars/FWD-VERIF-001/FWD-VERIF-001-VERIFICATION.md
+sed -n '1,240p' support/sidecars/FWD-VERIF-001/FWD-VERIF-001-VERIFICATION.md
 sed -n '1,220p' support/sidecars/FWD-LIVE-001/README.md
 sed -n '1,260p' support/sidecars/FWD-LIVE-001/FWD-LIVE-001-PROVIDER-PROOF.md
+pnpm --filter @drts/contracts build
+pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts
+pnpm exec vitest run tests/unit/forwarder.test.ts
+pnpm --filter @drts/api typecheck
 ```
 
 ## Verification Result
@@ -68,3 +80,10 @@ sed -n '1,260p' support/sidecars/FWD-LIVE-001/FWD-LIVE-001-PROVIDER-PROOF.md
   handling, replay/idempotency, and recovery-path behavior on current `HEAD`.
 - The `FWD-LIVE-001` sidecar now reads as a complete 11-item `PASS (repo-local)`
   packet and no longer misstates the repo-local fallback as missing evidence.
+- Executable reruns from this assigned worktree are currently environment-gated:
+  `pnpm --filter @drts/contracts build` and
+  `pnpm --filter @drts/api typecheck` fail with `tsc: not found`, while both
+  `vitest` commands fail with `Command "vitest" not found`. This worktree does
+  not have installed `node_modules`, so the closeout records attempted
+  commands and aligns support prose with the latest branch review that cited
+  `37/37` module-scoped forwarder tests.

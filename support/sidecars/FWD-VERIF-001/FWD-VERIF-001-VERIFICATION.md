@@ -12,7 +12,7 @@
 Verdict: `blocked`
 
 - No repo-tracked live sandbox proof exists for Grab Taiwan or another forwarder. `WF-FWD-001` remains `EXTERNAL-GATED`, `EXT-002-BLK-001` to `EXT-002-BLK-007` remain open, the platform registry still marks Grab Taiwan as `forwarder_stub`, and the shipped adapter remains stub-only.
-- Current `HEAD` again has executable repo-local forwarder evidence for the module-scoped Grab Taiwan mock path. `pnpm --filter @drts/contracts build` passes, `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts` passes with `35/35` tests, and `pnpm --filter @drts/api typecheck` passes.
+- Current `HEAD` again has executable repo-local forwarder evidence for the module-scoped Grab Taiwan mock path. `pnpm --filter @drts/contracts build` passes, `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts` passes with `37/37` tests, and `pnpm --filter @drts/api typecheck` passes.
 - The repo-root forwarder harness is still not fully reproducible. `pnpm exec vitest run tests/unit/forwarder.test.ts` fails `2/4` tests because `tests/unit/forwarder.test.ts` constructs `RegulatoryRegistryService` without the now-required `AuditNotificationService` and `DriverProfileService`, then `decorateDriver()` dereferences `driverProfileService.findProfileForDriver(...)`: `tests/unit/forwarder.test.ts:17-21`, `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:329-335`, `1843-1846`.
 - Static source inspection still shows the intended repo-local chain for webhook ingest -> mirror order -> driver forwarded-task view -> accept relay -> native status sync -> reconciliation closeout.
 - Settlement / earnings mirror is still missing from runtime orchestration. The adapter interface defines `complete()` and `fetchEarnings()`, and the stub adapter implements them, but `ForwarderService` does not call them and forwarded finance remains `external_platform` + `shadow_only`.
@@ -46,7 +46,7 @@ Status: `blocked`
 Current `HEAD` executable state:
 
 - `pnpm --filter @drts/contracts build` passes.
-- `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts` passes with `35/35` tests and exercises the current Grab Taiwan mock-backed mirror/status-sync path.
+- `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts` passes with `37/37` tests and exercises the current Grab Taiwan mock-backed mirror/status-sync path.
 - `pnpm exec vitest run tests/unit/forwarder.test.ts` fails `2/4` tests before SC-015 / SC-016 complete because the repo-root fixture under-injects `RegulatoryRegistryService` dependencies, causing `driverProfileService.findProfileForDriver(...)` to throw: `tests/unit/forwarder.test.ts:17-21`, `59-82`, `111-122`; `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:329-335`, `1843-1846`.
 
 Static/source evidence map:
@@ -92,13 +92,13 @@ Webhook verification evidence:
 Idempotency evidence:
 
 - The forwarder service unit file still contains explicit inbound replay coverage keyed by `(platformCode, externalOrderId)`: `apps/api/tests/unit/forwarder.service.test.ts:301`.
-- The current `35/35` pass confirms that idempotency coverage still executes on `HEAD`.
+- The current `37/37` pass confirms that idempotency coverage still executes on `HEAD`.
 
 Retry evidence:
 
 - The forwarder service unit file still contains explicit sync-failure / queued-reconciliation coverage for adapter accept failures: `apps/api/tests/unit/forwarder.service.test.ts:416`.
 - `syncNativeStatus()` and `completeReconciliation()` still contain the recovery path for queued reconciliation jobs: `apps/api/src/modules/forwarder/forwarder.service.ts:737`, `804`.
-- The current `35/35` pass confirms those retry/reconciliation paths still execute on `HEAD`.
+- The current `37/37` pass confirms those retry/reconciliation paths still execute on `HEAD`.
 
 Important scope limits:
 
@@ -141,7 +141,7 @@ Results:
 
 - `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts`
   - PASS
-  - `2` passed files, `35` passed tests
+  - `2` passed files, `37` passed tests
   - Current executable evidence includes webhook ingest, signature rejection, idempotent replay, accept relay, sync-failure reconciliation, native status sync, terminal closeout, and reconciliation completion.
 
 - `pnpm exec vitest run tests/unit/forwarder.test.ts`
@@ -155,7 +155,7 @@ Results:
 
 ## Overall Conclusion
 
-`FWD-VERIF-001` again has a reproducible module-scoped mock command matrix on current `HEAD`: the contracts build passes, the API forwarder service/controller suites pass `35/35`, and API typecheck passes. The earlier duplicate-contract blocker should no longer be cited.
+`FWD-VERIF-001` again has a reproducible module-scoped mock command matrix on current `HEAD`: the contracts build passes, the API forwarder service/controller suites pass `37/37`, and API typecheck passes. The earlier duplicate-contract blocker should no longer be cited.
 
 Even with that recovery, this task remains `blocked` as a real-platform verification closeout because:
 
