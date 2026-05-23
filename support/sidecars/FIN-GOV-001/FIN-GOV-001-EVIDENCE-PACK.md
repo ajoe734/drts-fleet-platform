@@ -232,11 +232,11 @@ Observed results:
 - the latest rebased-head confirmation run at dispatch time, `26332046380` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d`, reproduced the same deeper failure: `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all passed, then `Mint IAP verification token` failed with:
   - `Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
   - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped, and artifact upload warned that no `e2e-010-*` files existed.
-- a fresh 2026-05-23 rerun on the current rebased remote head, `26332590728` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`, advanced one step further in documented reviewability: `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all completed successfully, then `Mint IAP verification token` failed with:
+- a fresh 2026-05-23 rerun on the then-current rebased remote head, `26332590728` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`, advanced one step further in documented reviewability: `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all completed successfully, then `Mint IAP verification token` failed with:
   - `failed to generate Google Cloud OpenID Connect ID token ...`
   - `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
   - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, and GitHub warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to upload because the shell never started.
-- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`; the current local/docs head `2445ea4d` is the evidence-refresh commit that records that rerun and confirms the remaining blocker is still OpenID-token mint permission, not provider discovery or Cloud SDK setup.
+- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`; the current local/docs head on this branch records that rerun and the later truthfulness refreshes, confirming the remaining blocker is still OpenID-token mint permission rather than provider discovery or Cloud SDK setup.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
