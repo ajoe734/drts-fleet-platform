@@ -9,6 +9,18 @@
 
 ---
 
+## 0. Directive §7 Closeout Format
+
+```text
+Workflow family: WF-PARTNER-001
+Business flow: Partner eligibility and airport-transfer benefit intake
+Current gate read: EXTERNAL-GATED
+Verification path: sidecar / manual evidence
+Evidence level: static evidence
+Non-claim: No real issuer sandbox credential, allowed test card, eligibility outcome, timeout/retry, booking linkage, billing/reporting linkage, or audit proof is attached yet.
+Next action: Keep PH1GC-PARTNER-002 blocked on EXT-001-BLK-001 through EXT-001-BLK-006 until a real issuer sandbox evidence bundle can be attached under this sidecar path.
+```
+
 ## 1. Executive Summary
 
 This sidecar restores the missing canonical evidence path required by
