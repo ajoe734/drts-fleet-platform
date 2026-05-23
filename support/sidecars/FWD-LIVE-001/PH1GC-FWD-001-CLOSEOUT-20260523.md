@@ -80,10 +80,13 @@ pnpm --filter @drts/api typecheck
 - The `FWD-LIVE-001` sidecar now reads as a complete 11-item `PASS (repo-local)`
   packet and no longer misstates the repo-local fallback as missing evidence.
 - `FWD-VERIF-001` now matches the refreshed `2026-05-23` reviewer rerun on
-  commit `c8a8f9f570cc5500bc85935e0576f29c56c45b72`: the contracts build,
-  API forwarder service/controller vitest run (`37/37`), repo-root forwarder
-  vitest run (`1` file / `4` tests), and API typecheck all passed on the
-  hydrated reviewer worktree.
+  reviewed remote tip `0c1e1f23f43a051f1bc5b5a8d03eeba6123a3eeb`: the
+  contracts build, API forwarder service/controller vitest run (`37/37`),
+  repo-root forwarder vitest run (`1` file / `4` tests), and API typecheck
+  all passed on the hydrated reviewer worktree.
+- Commit `65e13352d39b36fe9b77b0422dc0729072ddb0b6` only synced the lingering
+  lifecycle headers in `FWD-LIVE-001-PROVIDER-PROOF.md` and
+  `FWD-LIVE-001-EVIDENCE-PACK.md`; it was not the reviewer rerun tip.
 - This isolated task worktree still lacks `node_modules`, so a local replay on
   `2026-05-23` remains environment-limited here only: `tsc` is not installed
   for the contracts build and typecheck commands, and `vitest` is not
