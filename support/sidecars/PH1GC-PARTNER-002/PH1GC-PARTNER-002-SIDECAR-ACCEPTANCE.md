@@ -2,117 +2,51 @@
 
 **Helper task:** `PH1GC-PARTNER-002-SIDECAR-ACCEPTANCE`
 **Helper owner:** `Codex`
-**Helper reviewer:** `Codex2`
+**Helper reviewer:** `Claude`
 **Parent task:** `PH1GC-PARTNER-002` - issuer sandbox eligibility evidence
 **Parent owner:** `Codex2`
 **Parent reviewer:** `Codex`
-**Prepared:** `2026-05-23T19:13:12Z`
-**Scope:** sidecar support artifact only. This file does not change canonical product truth, runtime behavior, or matrix rows.
+**Prepared:** `2026-05-23T19:41:46Z`
+**Scope:** support-only sidecar artifact. This file does not change canonical product truth, runtime behavior, matrix rows, or external-gate status.
 
-Authority note: use the embedded dispatch brief plus `$AI_STATUS_ROOT/ai-status.json` for ownership/lifecycle, and use `origin/dev` product docs for acceptance semantics. If those sources drift, record the drift explicitly; do not average them.
+Authority rule:
 
-## 0. What this packet is for
+- Use `$AI_STATUS_ROOT/ai-status.json` for task ownership and lifecycle.
+- Use `origin/dev` `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md` for `WF-PARTNER-001` acceptance semantics.
+- When older repo documents disagree with that partner spec, record the drift explicitly; do not average the semantics.
 
-- Expand `PH1GC-PARTNER-002` into a reviewer-usable acceptance checklist.
-- Map the upstream and downstream dependencies that control honest closeout.
-- Freeze the current observable baseline so the parent task is not closed from stale machine-truth assumptions.
+## 1. Machine-truth snapshot
 
-## 1. Baseline checked on 2026-05-23
-
-### 1.1 Canonical machine truth (`$AI_STATUS_ROOT/ai-status.json`)
+### 1.1 Task state checked on 2026-05-23
 
 | Item | Observed state |
 | --- | --- |
-| `PH1GC-PARTNER-001` | `done`; owner `Codex2`; reviewer `Codex`; last update `2026-05-23T14:02:27Z` |
-| `PH1GC-PARTNER-002` | `in_progress`; owner `Codex2`; reviewer `Codex`; last update `2026-05-23T19:08:48Z` |
-| `PH1GC-PARTNER-002-SIDECAR-ACCEPTANCE` | `in_progress`; owner `Codex`; reviewer `Codex2`; last update `2026-05-23T19:09:23Z` |
-| `PARTNER-ELIG-LIVE-001` | `done`; owner `Codex2`; reviewer `Claude2`; last update `2026-05-19T20:31:52Z`; artifact path still needs repo-visible verification |
+| `PH1GC-PARTNER-001` | `done`; owner `Codex2`; reviewer `Codex` |
+| `PH1GC-PARTNER-002` | `blocked`; owner `Codex2`; reviewer `Codex`; `waiting_for=Codex` |
+| `PH1GC-PARTNER-002-SIDECAR-ACCEPTANCE` | `in_progress`; owner `Codex`; reviewer `Claude` |
 
-### 1.2 Observed `origin/dev` and repo facts
+### 1.2 Parent-task baseline the reviewer must keep in view
 
-- `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md` exists on `origin/dev` and names `WF-PARTNER-001` with "formerly `WF-PRT-001`; renamed per directive §3.2 - no alias".
-- That same spec points `PH1GC-PARTNER-002` at `support/sidecars/PARTNER-ELIG-LIVE-001/`.
-- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` on `origin/dev` still exposes `WF-PRT-001` and `PASS (static evidence)`.
-- `support/sidecars/PARTNER-ELIG-LIVE-001/` is not present on `origin/dev`.
-- `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` exists and defines `EXT-001-BLK-001` through `EXT-001-BLK-006`.
-- `docs/03-runbooks/partner-eligibility-manual-review-runbook.md` says `manual_review` is a hold requiring operator evidence, not automatic approval.
+- `ai-status.json` says `PH1GC-PARTNER-002` is blocked because `EXT-001-BLK-001` through `EXT-001-BLK-006` remain open and `WF-PARTNER-001` cannot move to `PASS (sandbox evidence)` yet.
+- The same machine truth notes that branch `codex2/ph1gc-partner-002` already carries a hold-state sidecar update at commit `9907094c`, but `origin/dev` still does not expose `support/sidecars/PARTNER-ELIG-LIVE-001/` from this worker.
+- This helper packet is therefore a reviewer aid only. It must not be read as evidence that the parent task or gate update is complete.
 
-### 1.3 Drift the parent owner must account for
+## 2. Reopen reason and semantic precedence
 
-- `PH1GC-PARTNER-001` is `done` in machine truth and its spec is visible on `origin/dev`, but the matrix rename promised by `PH1GC-MATRIX-001` is not observable from this worker: `origin/dev` still shows `WF-PRT-001`.
-- Legacy task `PARTNER-ELIG-LIVE-001` is `done` in machine truth, but no tracked `support/sidecars/PARTNER-ELIG-LIVE-001/` path is visible on `origin/dev`.
-- Therefore `PH1GC-PARTNER-002` must be reviewed against actual `origin/dev` evidence, not task-status labels alone.
+The previous helper packet mixed two incompatible retry models. That was the reopen reason.
 
-## 2. Parent acceptance checklist
+| Source | Observed statement | How this packet treats it |
+| --- | --- | --- |
+| `origin/dev` `partner-eligibility-airport-transfer-spec-20260519.md` §4.3 | Default issuer timeout `8 seconds` per request; `2` retries; exponential backoff `1s`, `3s`; exhaustion -> terminal `ineligible` with reason `issuer_unreachable`. | Canonical acceptance semantics. |
+| Same partner spec §7 `NP-PARTNER-002` | Timeout across retry budget -> terminal `ineligible`; booking refused. | Canonical negative-path expectation. |
+| `docs/02-architecture/phase1-issuer-eligibility-integration-contract-20260429.md` | `3000ms`, `3` attempts, backoff `250ms` x `2`, cap `1000ms`, exhaustion -> `manual_review`. | Legacy drift. Useful for historical blocker context, not for `WF-PARTNER-001` acceptance truth. |
+| `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` | `EXT-001-BLK-004` and the timeout section still cite `3000ms` / `3` attempts / `manual_review`. | External dependency source only. Do not reuse these values in the acceptance checklist. |
+| `docs/03-runbooks/partner-eligibility-manual-review-runbook.md` | Retry exhaustion is routed into `manual_review` queue semantics. | Operational drift. Keep its "manual review is a hold, not approval" rule, but do not let it override `NP-PARTNER-002`. |
 
-`PH1GC-PARTNER-002` is ready for `done` only when every item below is true and reproducible from the branch and the merged `origin/dev` result.
+Reviewer instruction:
 
-### 2.1 Delivery and path discipline
-
-- [ ] `support/sidecars/PARTNER-ELIG-LIVE-001/` exists as a tracked path on the task branch and on `origin/dev`.
-- [ ] The sidecar contains a primary evidence document plus any redacted logs, screenshots, or attachments needed to reproduce the claim.
-- [ ] The task stays support-only: no canonical L1/L2 docs, runtime code, or matrix rows are treated as implicitly updated by this evidence task.
-- [ ] If `origin/dev` still shows `WF-PRT-001`, the parent closeout says so explicitly instead of pretending the rename already landed everywhere.
-
-### 2.2 Directive `PARTNER-002` evidence families
-
-The directive names seven evidence families. The landed partner spec on `origin/dev` expands them into more granular proof points, but all seven families still need to be present.
-
-| Directive family | Concrete proof the reviewer should expect |
-| --- | --- |
-| Issuer sandbox credential reference | Named issuer/bank counterparty plus masked credential-source reference. |
-| Allowed test cards / reference tokens | Issuer-approved fixture list or reference-token set; raw PAN and unmasked tokens never appear. |
-| Eligible / ineligible / `manual_review` proof | At least one successful sandbox verification for each outcome, with verification IDs and timestamps. |
-| Timeout / retry proof | Evidence of timeout behavior, retry count/backoff, and final terminal result for the sandbox flow actually exercised. |
-| Booking linkage | `eligibilityVerificationId`, `entrySlug`, and masked partner-verification fields are visible in the downstream booking record. |
-| Billing / reporting proof | Invoice/report artifacts carry the partner linkage fields expected by the partner spec. |
-| Audit proof | Audit rows exist for issuer attempt(s) and terminal/manual-review transitions. |
-
-Refinement from the landed partner spec:
-
-- The spec treats the counterparty name, credential-source declaration, the three outcome classes, booking linkage, billing/reporting linkage, and audit linkage as separate proof points under the same `PARTNER-002` evidence set.
-- Use that finer breakdown when assembling the sidecar, but do not drop any of the seven directive families.
-
-### 2.3 Contract, masking, and negative-path guardrails
-
-- [ ] Evidence follows `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md` for `entrySlug`, `WF-PARTNER-001` naming, `cardLast4`, masked `referenceToken`, booking linkage, billing/reporting linkage, and audit linkage.
-- [ ] `manual_review` evidence is consistent with `docs/03-runbooks/partner-eligibility-manual-review-runbook.md`: held for operator review, not auto-approved.
-- [ ] The evidence pack covers the required negative-path set from the partner spec: `NP-PARTNER-001`, `NP-PARTNER-002`, `NP-PARTNER-003`, and `NP-PARTNER-007`, or clearly mapped equivalent sandbox traces.
-- [ ] Any timeout/retry numbers shown in evidence are cited as issuer-approved observed behavior; do not invent a policy just to reconcile stale docs.
-
-### 2.4 Non-claim and blocked-external rule
-
-- [ ] If `EXT-001-BLK-001` through `EXT-001-BLK-006` are still open, `PH1GC-PARTNER-002` remains `in_progress` or `blocked`; it does not go to `done`.
-- [ ] Repo-local mocks, fabricated card numbers, or screenshot-only claims are insufficient for closeout.
-- [ ] Sandbox evidence is not described as live production issuer activation.
-- [ ] If the matrix row is still `WF-PRT-001 = PASS (static evidence)` on `origin/dev`, the closeout treats the evidence sidecar as ready input for a downstream gate update, not as proof that the gate update already landed.
-- [ ] Do not treat the legacy `PARTNER-ELIG-LIVE-001` `done` status as a substitute for repo-visible evidence.
-
-### 2.5 Required closeout shape for the parent task
-
-Directive §7 requires the closeout to use this shape:
-
-```text
-Task ID: PH1GC-PARTNER-002
-Owner: Codex2
-Reviewer: Codex
-Branch: <task branch>
-PR: <url or number>
-Commit: <hash> - <subject>
-Files changed:
-  - support/sidecars/PARTNER-ELIG-LIVE-001/<files>
-Verification commands:
-  - git ls-tree -r --name-only origin/dev -- support/sidecars/PARTNER-ELIG-LIVE-001
-  - git grep -n 'WF-PRT-001\|WF-PARTNER-001\|PARTNER-ELIG-LIVE-001' origin/dev -- docs/03-runbooks/phase1-workflow-acceptance-release-gates.md
-  - git show origin/dev:docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md | grep -n 'WF-PARTNER-001\|PARTNER-ELIG-LIVE-001\|manual_review\|cardLast4\|referenceToken'
-  - git grep -n 'EXT-001-BLK-00[1-6]' origin/dev -- support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md
-Evidence artifact: support/sidecars/PARTNER-ELIG-LIVE-001/<primary evidence file>
-Workflow family affected: WF-PARTNER-001
-Gate read before: WF-PRT-001 = PASS (static evidence)
-Gate read after: <quote the actual merged state; do not speculate>
-Remaining non-claim: <enumerate exact unstated claims, if any>
-External dependencies, if any: <enumerate exact EXT-001 blockers or say none>
-```
+- If a support packet, evidence note, or closeout text cites `3000ms`, `3` attempts, or exhaustion -> `manual_review` as the current `WF-PARTNER-001` truth, treat that as stale wording.
+- For this helper packet, `§5.1 row 4` and `§5.2 NP-PARTNER-002` intentionally align to the partner spec's `8s / 2 retries / 1s,3s / exhaustion -> ineligible`.
 
 ## 3. Dependency map
 
@@ -120,39 +54,70 @@ External dependencies, if any: <enumerate exact EXT-001 blockers or say none>
 
 | Dependency | Type | Current observed state | Why it matters |
 | --- | --- | --- | --- |
-| `PH1GC-PARTNER-001` | Repo task | `done` in machine truth; spec visible on `origin/dev` | Defines `WF-PARTNER-001`, `entrySlug`, masking, manual-review, and the `PH1GC-PARTNER-002` evidence path. |
-| `PH1GC-MATRIX-001` | Adjacent repo task | `done` in machine truth; rename not yet visible on `origin/dev` from this worker | Owns the matrix row change from `WF-PRT-001` to `WF-PARTNER-001`; the evidence sidecar must not over-claim that delivery. |
-| `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` | Repo artifact | Visible on `origin/dev` | Defines the external blocker set `EXT-001-BLK-001..006` for contract authority, sandbox credentials, fixtures, timeout/retry confirmation, manual-review sign-off, and sensitive-data approval. |
-| `docs/03-runbooks/partner-eligibility-manual-review-runbook.md` | Repo artifact | Visible on `origin/dev` | Owns the operator semantics for `manual_review`; evidence must support it, not replace it. |
-| Issuer sandbox credentials and fixtures | External, human-gated | Unresolved until attached in the evidence pack | Required for credential reference, allowed test instruments, and outcome coverage. |
-| Billing/reporting/audit linkage surfaces | Downstream functional consumers | Must be demonstrated in evidence | Acceptance requires proof that partner verification survives beyond the booking screen. |
+| `PH1GC-PARTNER-001` | Canonical repo task | `done`; partner spec is visible on `origin/dev` | Defines `WF-PARTNER-001`, `entrySlug`, masking, linkage fields, negative paths, and the `PARTNER-ELIG-LIVE-001` evidence path. |
+| `PH1GC-PARTNER-002` | Parent repo task | `blocked`; branch-local hold-state sidecar exists at `9907094c` | Owns the actual issuer sandbox evidence pack and the honest blocked-vs-done claim. |
+| `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` | External-gate packet | Present on `origin/dev`; six blockers still open | Names the missing issuer authority, credentials, fixtures, timeout confirmation, business sign-off, and sensitive-data approval inputs. |
+| `docs/02-architecture/phase1-issuer-eligibility-integration-contract-20260429.md` | Older contract baseline | Present on `origin/dev`; retry semantics are now stale | Still useful for contract-field names such as `retryPolicy`, `manualFallbackPolicy`, and `sensitiveDataPolicy`, but not for current timeout truth. |
+| `docs/03-runbooks/partner-eligibility-manual-review-runbook.md` | Operator runbook | Present on `origin/dev`; queue semantics partially drift | Still authoritative that `manual_review` is a hold requiring operator action, not silent approval. |
+| `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` and `PH1GC-MATRIX-001` | Adjacent matrix dependency | `origin/dev` still exposes `WF-PRT-001 = PASS (static evidence)` from this worker | The evidence sidecar must not over-claim a matrix or gate uplift that is not yet merged. |
+| Issuer / bank external inputs | External, human-gated | Missing | Without them, no real sandbox proof can be attached and the parent task remains blocked. |
 
-### 3.2 Drift and legacy edges
+### 3.2 No-touch boundaries
 
-| Edge | Why it matters |
-| --- | --- |
-| Machine truth says `PARTNER-ELIG-LIVE-001` is `done`, but `origin/dev` does not expose the sidecar path from this worker. | Parent review must verify repo-visible artifacts instead of trusting task state alone. |
-| Machine truth says `PH1GC-MATRIX-001` is `done`, but `origin/dev` still shows `WF-PRT-001`. | Parent closeout must distinguish "evidence assembled" from "matrix/gate uplift merged". |
+- Do not edit canonical product docs, runtime code, or matrix rows from this helper task.
+- Do not rewrite `EXT-001` to hide the drift; just call it out.
+- Do not claim that `support/sidecars/PARTNER-ELIG-LIVE-001/` is merged to `origin/dev` unless the reviewer rechecks the merged state directly.
 
-### 3.3 No-touch boundaries
+## 4. Parent closeout constraints
 
-- `support/sidecars/EXT-001/` is the blocker packet, not the new evidence pack. Do not overwrite or rename it.
-- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` belongs to the matrix slice; do not silently treat an evidence-only sidecar as if it already updated the matrix.
-- `docs/03-runbooks/partner-eligibility-manual-review-runbook.md` remains the fallback runbook; the new evidence pack should support it, not replace it.
+`PH1GC-PARTNER-002` is not honestly ready for `done` unless all of the following become true:
 
-## 4. Recommended owner work order
+- `support/sidecars/PARTNER-ELIG-LIVE-001/` is tracked on the task branch and merged `origin/dev`.
+- The evidence pack contains real issuer sandbox proof for the required outcome and linkage families.
+- Any remaining `EXT-001-BLK-*` inputs are either attached or explicitly keep the task in `blocked`.
+- The closeout language distinguishes repo-visible evidence, branch-only evidence, and matrix/gate uplift.
 
-1. Validate current truth from `$AI_STATUS_ROOT/ai-status.json` and `origin/dev`, not from worktree-local snapshots.
-2. Assemble or refresh `support/sidecars/PARTNER-ELIG-LIVE-001/` so all seven directive families and the spec-level refinements are covered.
-3. If any `EXT-001-BLK-*` input is still missing, record `progress` or `blocker` instead of closing the task.
-4. Hand off to review only after the artifact path and verification commands are reproducible from the branch.
+If those conditions are still false, the honest state remains `blocked` or `review` of a blocked-state packet, not `done`.
 
-## 5. Helper review bar
+## 5. Acceptance packet
 
-- [x] File lives only under `support/sidecars/PH1GC-PARTNER-002/`.
-- [x] No canonical L1/L2 product truth was edited.
-- [x] Helper owner/reviewer align with canonical machine truth as of `2026-05-23`.
-- [x] Parent owner/reviewer and live task states are recorded from canonical machine truth.
-- [x] The seven directive evidence families are expanded into a concrete reviewer checklist and tied to the landed partner spec refinement.
-- [x] Dependency mapping names `PH1GC-PARTNER-001`, `PH1GC-MATRIX-001`, `EXT-001`, the manual-review runbook, and the external issuer inputs.
-- [x] Repo-vs-machine-truth drift is called out so the parent task cannot over-claim from stale status alone.
+### 5.1 Canonical acceptance checkpoints
+
+| # | Checkpoint | Reviewer should verify |
+| --- | --- | --- |
+| 1 | Evidence path and branch visibility | `support/sidecars/PARTNER-ELIG-LIVE-001/` exists on the parent task branch, and the closeout says whether `origin/dev` already contains it or not. |
+| 2 | Directive evidence families are complete | The pack covers the directive families for credential reference, allowed fixtures, `eligible`, `ineligible`, `manual_review`, timeout/retry, booking linkage, billing/reporting linkage, and audit proof. |
+| 3 | Sensitive-data and linkage rules follow the partner spec | No raw PAN; only `cardLast4`; `referenceToken` stays masked; `referenceHash` is used for joins; `eligibilityVerificationId` propagates into booking, invoice/report, and audit evidence. |
+| 4 | Timeout/retry semantics match the canonical partner spec | Default issuer timeout is `8 seconds` per request, retry budget is `2` retries, backoff is `1s` then `3s`, and exhaustion ends in terminal `ineligible` with reason `issuer_unreachable`. Any `3000ms` / `3` attempt / `manual_review` wording is drift, not acceptance truth. |
+| 5 | `manual_review` is treated as a hold, not as a retry-exhaustion synonym | `manual_review` evidence must show operator hold/release semantics. If timeout exhaustion proof is supplied, it should be checked against `NP-PARTNER-002` as `ineligible`, not silently remapped to `manual_review`. |
+| 6 | Gate and non-claim language stays honest | If `EXT-001-BLK-001` through `EXT-001-BLK-006` remain open, the parent task stays blocked and the gate read cannot be promoted to `PASS (sandbox evidence)`. |
+
+### 5.2 Required negative-path acceptance map
+
+| ID | Scenario | Expected outcome | Reviewer evidence expectation |
+| --- | --- | --- | --- |
+| `NP-PARTNER-001` | Eligibility verification returns `ineligible` | Booking refused with issuer reason code; no driver dispatch | Sandbox trace shows issuer denial and refused booking path. |
+| `NP-PARTNER-002` | Eligibility verification times out across retry budget | Terminal `ineligible` with reason `issuer_unreachable`; booking refused | Evidence or closeout wording must not convert this case into `manual_review`. |
+| `NP-PARTNER-003` | `manual_review` held longer than tenant SLA | Queue surfaces overdue item; no auto-eligibility flip | Reviewer sees hold-state proof and no silent approval path. |
+| `NP-PARTNER-007` | Reporting export includes a `manual_review`-then-rejected booking | Export row reflects refused state; subsidy not applied | Evidence demonstrates downstream reporting truth rather than UI-only status. |
+
+### 5.3 Reviewer handoff checklist
+
+- [ ] Helper metadata matches machine truth: owner `Codex`, reviewer `Claude`.
+- [ ] Parent metadata matches machine truth: owner `Codex2`, reviewer `Codex`, status `blocked`.
+- [ ] `§5.1 row 4` and `§5.2 NP-PARTNER-002` both use the canonical `8s / 2 retries / 1s,3s / exhaustion -> ineligible` semantics.
+- [ ] Legacy `3000ms` / `3` attempt / `manual_review` wording is preserved only as drift context, never as acceptance criteria.
+- [ ] This helper packet remains support-only and does not claim canonical or runtime edits.
+
+## 6. Suggested parent handoff language
+
+Use language shaped like this when the parent owner hands off or reports status:
+
+```text
+PH1GC-PARTNER-002 remains blocked on EXT-001-BLK-001 through EXT-001-BLK-006.
+The sidecar path and blocked-state evidence packet are prepared on the task branch,
+but merged origin/dev still needs repo-visible PARTNER-ELIG-LIVE-001 evidence before
+WF-PARTNER-001 can claim PASS (sandbox evidence). Acceptance semantics follow
+partner-eligibility-airport-transfer-spec-20260519.md §4.3 and §7:
+timeout exhaustion is terminal ineligible (issuer_unreachable), not manual_review.
+```
