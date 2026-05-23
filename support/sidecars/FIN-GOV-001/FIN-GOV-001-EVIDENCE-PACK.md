@@ -180,19 +180,22 @@ Interpretation:
 Probe target:
 
 - workflow dispatch: `gh workflow run ci-integ.yml --ref codex/ph1gc-fin-gov-001 -f ref=codex/ph1gc-fin-gov-001 -f run_staging_e2e_010=true`
-- resulting run: `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26287551676`
-- branch / commit under test: `origin/codex/ph1gc-fin-gov-001@f8cc61e7`
+- first resulting run: `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26287551676`
+- latest confirmation run: `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26327029664`
+- branch / commits under test:
+  - `origin/codex/ph1gc-fin-gov-001@f8cc61e7` on 2026-05-22
+  - `origin/codex/ph1gc-fin-gov-001@2cc083d6` on 2026-05-23
 
-Observed result from `gh run view 26287551676 --job 77378907824 --log`:
+Observed results:
 
 - job `staging-e2e-010` started with the expected staging env inputs:
   - `PROJECT_ID=drts-staging-bobo-20260502`
   - `REGION=us-central1`
   - `CONTROL_PLANE_API_ORIGIN=https://api.staging.drts-fleet.cctech-support.com`
   - `IAP_CLIENT_ID=1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
-- first `google-github-actions/auth@v2` step failed before any `gcloud` or
-  E2E shell execution:
+- 2026-05-22 run `26287551676`: first `google-github-actions/auth@v2` step failed before any `gcloud` or E2E shell execution:
   - `failed to generate Google Cloud federated token ... {"error":"invalid_target","error_description":"The target service indicated by the \"audience\" parameters is invalid. This might either be because the pool or provider is disabled or deleted or because it doesn't exist."}`
+- 2026-05-23 run `26327029664`: the same `staging-e2e-010` path failed again at step 4 `Authenticate to GCP`; job `77506520838` completed `failure` at `2026-05-23T07:32:52Z`, steps `Set up Cloud SDK`, `Mint IAP verification token`, and `Run E2E-010 against staging` were all skipped, and GitHub repeated the same `invalid_target` provider error during `google-github-actions/auth@v2`
 - no E2E console/evidence artifacts were produced because auth failed before
   the shell could start
 
@@ -218,13 +221,14 @@ currently blocked by three concrete environment issues:
 2. the older direct Cloud Run origin is not serving the expected `/api/*`
    routes as a usable fallback
 3. the repository-configured GitHub Actions WIF provider now fails with
-   `invalid_target`, so the CI-side federated token path is also unavailable
+   `invalid_target` on both the 2026-05-22 and 2026-05-23 reruns, so the
+   CI-side federated token path is also unavailable
 
 Until one of those is resolved, this task can only deliver a consolidated
 static-evidence packet plus a reproducible blocker record. The 2026-05-19
-local rerun and the 2026-05-22 GitHub Actions rerun did not surface a hidden
-alternate ingress or a valid non-interactive token path from this machine or
-from the repo's configured WIF automation.
+local rerun plus the 2026-05-22 and 2026-05-23 GitHub Actions reruns did not
+surface a hidden alternate ingress or a valid non-interactive token path from
+this machine or from the repo's configured WIF automation.
 
 ---
 
