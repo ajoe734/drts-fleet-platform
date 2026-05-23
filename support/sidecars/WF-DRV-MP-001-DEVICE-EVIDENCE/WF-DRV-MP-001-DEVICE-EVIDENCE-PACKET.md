@@ -3,7 +3,7 @@
 **Task:** `PH1GC-DRV-MP-002`  
 **Workflow family:** `WF-DRV-MP-001`  
 **Owner:** `Codex`  
-**Reviewer:** `Codex2`  
+**Reviewer:** `Claude`<br>
 **Collected:** `2026-05-23 (UTC)`  
 **Brief status:** `blocked_external`  
 **Current machine-truth task status at drafting:** `in_progress`
@@ -12,19 +12,23 @@
 
 ## 1. Executive Summary
 
-This sidecar closes the "missing packet path" gap on `origin/dev`, but it does
-not claim that Android or iOS real-device evidence has been collected.
+This sidecar closes the "missing packet path" gap on this task branch, but it
+does not claim that Android or iOS real-device evidence has been collected.
 
 Current read on `2026-05-23`:
 
-- `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/` did not exist before this
-  task.
+- `origin/dev` still does not contain
+  `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/`; this task branch carries
+  the packet draft.
 - This worker has no Android bridge, no Apple device tooling, and no active
   Expo login:
   - `adb`: command not found
   - `xcrun`: command not found
   - `eas`: command not found
   - `npx eas-cli whoami`: `Not logged in`
+- This branch already carried a prior blocked-external anchor commit, but the
+  packet still named the pre-reassignment reviewer lane. This refresh only
+  realigns the packet to current machine truth; it does not change the blocker.
 - The canonical blocker packet `support/sidecars/EXT-003/EXT-003-MOBILE-DISTRIBUTION-GATE.md`
   still keeps `EXT-003-BLK-001` through `EXT-003-BLK-007` open.
 - The existing real-device report
@@ -206,16 +210,16 @@ matrix rows above with captured evidence.
 ```text
 Task ID: PH1GC-DRV-MP-002
 Owner: Codex
-Reviewer: Codex2
+Reviewer: Claude
 Branch: codex/ph1gc-drv-mp-002
 PR: not opened in this session
-Commit: pending task-scoped anchor commit for blocked_external packet
+Commit: branch already carried blocked-external anchor e55ed0c8; this refresh keeps the packet aligned to current machine truth and preserves the blocked_external conclusion
 Files changed: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/WF-DRV-MP-001-DEVICE-EVIDENCE-PACKET.md
 Verification commands: command -v adb || true; adb devices 2>&1 || true; command -v xcrun || true; xcrun simctl list devices 2>&1 || true; command -v eas || true; eas whoami 2>&1 || true; cd apps/driver-app && npx eas-cli --version && npx eas-cli whoami
 Evidence artifact: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/WF-DRV-MP-001-DEVICE-EVIDENCE-PACKET.md
 Workflow family affected: WF-DRV-MP-001
 Gate read before: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/ was missing on origin/dev; existing driver real-device report remained provisional and external-gated
-Gate read after: sidecar path now exists, but the packet remains blocked_external and does not uplift WF-DRV-MP-001 to PASS
+Gate read after: this task branch now carries the missing sidecar path, but the packet remains blocked_external and does not uplift WF-DRV-MP-001 to PASS
 Remaining non-claim: no Android install proof, iOS/TestFlight proof, native push delivery proof, location-grant capture, weak-network replay capture, online/offline capture, forwarded-task live capture, or earnings live capture was collected in this session
 External dependencies, if any: Android hardware, iPhone/TestFlight access, Expo login or EXPO_TOKEN, Android signing, Apple team access, tester group ownership, forwarded-task seed/live data, human operator, weak-network test setup
 ```
@@ -227,6 +231,10 @@ External dependencies, if any: Android hardware, iPhone/TestFlight access, Expo 
 Canonical machine truth for `PH1GC-DRV-MP-002` lives at:
 
 `/home/edna/workspace/drts-fleet-platform/ai-status.json`
+
+As of `2026-05-23T18:44:10Z`, that file records `owner=Codex`,
+`reviewer=Claude`, and `status=in_progress`. `current-work.md` still lags and
+must not be treated as machine truth.
 
 This packet is a dated evidence snapshot. It is not the authoritative source for
 owner, reviewer, or task lifecycle state, and it must not be read as a `done`
