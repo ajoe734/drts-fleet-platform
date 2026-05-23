@@ -5,16 +5,20 @@ Owner: `Codex2`
 Reviewer: `Claude`
 Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
-Commit: pending this reconciliation commit
+Status: `blocked`
+Current branch head: `eb6dc9fd` (`wip(PH1GC-FIN-GOV-001): anchor strict verification and blocker refresh`)
 Files changed:
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
-- `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`
-- `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
-- `tests/e2e/README.md`
 - `docs/03-runbooks/phase1-release-truth-sync-20260519.md`
+- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`
+- `docs/04-uat/fbp-014a-e2e-matrix.md`
+- `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`
 - `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md`
+- `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+- `tests/e2e/README.md`
+- `tests/e2e/run-e2e.sh`
 Verification commands:
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
@@ -55,6 +59,15 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 
 - Acceptance items 1, 2, 3, 4, and 6 are satisfied on this branch.
 - Acceptance item 5 remains blocked by staging auth, not by missing repo artifacts.
+
+## 2026-05-23 Revalidation
+
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` listed `E2E-010-governance-aware-billing-reporting.sh`.
+- `git diff --check origin/dev...HEAD` passed.
+- `curl -i -sS --max-time 20 https://api.staging.drts-fleet.cctech-support.com/api/health` still returns `HTTP/2 302` with body `Invalid IAP credentials: empty token`.
+- `gh secret list --repo ajoe734/drts-fleet-platform | grep 'WIF'` shows `DEV_WIF_PROVIDER`, `DEV_WIF_SERVICE_ACCOUNT`, `STAGING_WIF_SERVICE_ACCOUNT`, `WIF_PROVIDER`, and `WIF_SERVICE_ACCOUNT`; `STAGING_WIF_PROVIDER` is still absent.
 
 ## Blocker
 
