@@ -28,8 +28,10 @@ the earlier note claimed.
    2026-05-22 blocker text claiming `origin/dev` does not contain the audit
    file and that only `origin/docs/ph1gc-doc-batch-1-20260522@7dd7a23b`
    carries the content.
-5. The active helper branch is now
-   `origin/codex2/ph1gc-bpl-001-unblock-history-repair@59558b678d1b9c34448a0e3143b7e2cce8e9b347`.
+5. The active helper branch remains
+   `origin/codex2/ph1gc-bpl-001-unblock-history-repair`; resolve its live tip
+   with `git ls-remote --heads origin codex2/ph1gc-bpl-001-unblock-history-repair`
+   at review time instead of freezing another self-invalidating SHA in this note.
 
 ## Exact Contamination
 
@@ -63,7 +65,7 @@ stale branch and commit conclusions that survived into machine truth.
 - audit file introduction on trunk:
   `6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - `origin/codex2/ph1gc-bpl-001 @ 7c818c2743f5f10c891945c5a54e3788456a2bfa`
-- `origin/codex2/ph1gc-bpl-001-unblock-history-repair @ 59558b678d1b9c34448a0e3143b7e2cce8e9b347`
+- `origin/codex2/ph1gc-bpl-001-unblock-history-repair @ live tip, verify with git ls-remote during review`
 - stale branch alias still behind trunk:
   `codex/ph1gc-bpl-001 @ 6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`
 - `origin/codex2/ph1gc-bpl-001-sidecar-acceptance @ 158629cc66051e1c32c1107813d70f9e4c09430e`
@@ -83,6 +85,7 @@ stale branch and commit conclusions that survived into machine truth.
   - `3f2f790f6c97278cd5cad4b72ea0504004a8fb57`
   - `71639a72cd89eec74afe9bed075b8d4fbaf3b4ac`
   - `59558b678d1b9c34448a0e3143b7e2cce8e9b347`
+  - `7b573b8bc0b91465009847c5aef82299dbdfc4af`
 
 ## Non-Destructive Repair Path
 
@@ -103,8 +106,10 @@ Do not rewrite or force-push any shared branch.
    closeout metadata in machine truth.
 6. Do not route follow-up work through the stale `codex/ph1gc-bpl-001` branch
    alias and do not describe the old doc-batch ref as the canonical source.
-7. Use this helper branch's pushed closeout commit `59558b67` as the canonical
-   task-scoped evidence for the unblock diagnosis refresh.
+7. Use the task-scoped pushed commits on this helper branch as canonical
+   evidence for the unblock diagnosis refresh:
+   `59558b67` captured the repaired diagnosis and `7b573b8b` corrected the
+   stale pinned-tip review finding without rewriting shared history.
 
 ## Parent Next Step
 
@@ -139,6 +144,7 @@ action is:
 - Verified closeout commit evidence with:
   - `git show --no-patch --format=fuller 7c818c27`
   - `git show --no-patch --format=fuller 59558b67`
+  - `git show --no-patch --format=fuller 7b573b8b`
   - `git ls-remote --heads origin codex2/ph1gc-bpl-001 codex2/ph1gc-bpl-001-unblock-history-repair`
 - Verified helper history progression with:
   - `git log --decorate --oneline --max-count=12 codex2/ph1gc-bpl-001-unblock-history-repair`
