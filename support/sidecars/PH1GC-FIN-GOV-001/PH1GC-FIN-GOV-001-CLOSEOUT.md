@@ -62,6 +62,8 @@ The task brief names a planning-ref path that is **not** present in this worktre
 - `gh run view 26287551676 --job 77378907824 --log`
 - `gh run view 26327833020 --job 77508630437 --log`
 - `gh run view 26327904346 --job 77508827724 --log`
+- `gh run view 26331222549 --json url,status,conclusion,jobs`
+- `gh run view 26331222549 --job 77517556463 --log`
 - `gh secret list --repo ajoe734/drts-fleet-platform`
 - `gh variable list --repo ajoe734/drts-fleet-platform`
 - `git diff --check`
@@ -74,7 +76,8 @@ No governed live staging execution was run from this dispatch because the 2026-0
 - the VM metadata path can mint an email-bearing identity token for `384772941419-compute@developer.gserviceaccount.com`, but the protected staging host now returns `403 Access denied` for that principal, and metadata-access-token based `generateIdToken` / service-account impersonation still fails with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`;
 - the GitHub Actions fallback path no longer stops at provider discovery. After branch commit `7aeb2c29` changed the workflow fallback to `STAGING_WIF_PROVIDER || DEV_WIF_PROVIDER || WIF_PROVIDER`, run `26327833020` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@7aeb2c29`) advanced through `Authenticate to GCP` and failed later in `Set up Cloud SDK` with `Permission 'iam.serviceAccounts.getAccessToken' denied`.
 - branch commit `2f6387fa` then made the Cloud SDK path best-effort so it would not gate the E2E chain. Run `26327904346` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@2f6387fa`) advanced through `Best-effort fetch internal key` and failed at `Mint IAP verification token` with `Permission 'iam.serviceAccounts.getOpenIdToken' denied`.
-- those two reruns show the remaining CI blocker is now service-account IAM for the staging deployer identity, not stale provider discovery. No governed E2E shell work or invoice/report evidence can start until an email-bearing IAP token can be minted.
+- a fresh 2026-05-23 rerun on the current branch head, run `26331222549` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@5953c0e1`), reached `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed again at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. Because token minting failed first, both `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped and no `e2e-010-*` artifact files were produced.
+- those three reruns show the remaining CI blocker is now service-account IAM for the staging deployer identity, not stale provider discovery. No governed E2E shell work or invoice/report evidence can start until an email-bearing IAP token can be minted.
 
 ## 5. Remaining Blocker
 
