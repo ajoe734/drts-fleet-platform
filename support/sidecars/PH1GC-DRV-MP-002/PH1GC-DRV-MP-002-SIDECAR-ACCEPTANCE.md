@@ -1,5 +1,11 @@
 # PH1GC-DRV-MP-002 Sidecar Acceptance Packet
 
+## Metadata
+- Sidecar Owner: Gemini2
+- Sidecar Reviewer: Codex
+- Parent Owner: Gemini2
+- Parent Reviewer: Codex
+
 ## Overview
 This packet provides the acceptance artifacts for task PH1GC-DRV-MP-002 (Driver Mobile Device Evidence Packet).
 
