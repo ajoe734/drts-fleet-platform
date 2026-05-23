@@ -1,28 +1,33 @@
 # PARTNER-ELIG-LIVE-001 — Issuer Sandbox Hold-State Evidence
 
-- **Task:** `PH1GC-PARTNER-002`
-- **Canonical live-proof chain:** `PARTNER-ELIG-LIVE-001`
-- **Owner:** `Codex`
-- **Reviewer:** `Codex2`
+- **Legacy gap-closure alias:** `PH1GC-PARTNER-002`
+- **Canonical task:** `PARTNER-ELIG-LIVE-001`
+- **Canonical owner:** `Codex2`
+- **Canonical reviewer:** `Claude2`
 - **Collected:** `2026-05-22 (UTC)`
-- **Status:** `partial evidence only — issuer sandbox proof remains external-gated`
+- **Canonical status:** `done (held evidence); external gate remains open`
+- **Status of this packet:** `hold-state evidence only — issuer sandbox proof remains external-gated`
 
 ---
 
 ## 1. Executive Summary
 
-This packet restores the missing sidecar path on the task branch for review
-while keeping the release claim honest.
+This branch carries the missing sidecar path for `origin/dev` while staying
+consistent with the already-approved canonical held-evidence closeout.
 
-Current repo truth on `2026-05-22`:
+Current repo truth on `2026-05-23`:
 
-- `PH1GC-PARTNER-001` is done, so the partner eligibility spec is already
-  landed on `origin/dev`.
-- The matrix-row rename from `WF-PRT-001` to `WF-PARTNER-001` is tracked
-  separately and is not claimed by this task branch.
-- `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK` and
-  `PH1GC-PARTNER-002-UNBLOCK-PLANNING-DECISION` are done, and both route the
-  remaining work to the same external issuer gate.
+- `PARTNER-ELIG-LIVE-001` is already `done` in canonical `ai-status.json`
+  through commit `5213efc` on `origin/codex2/partner-elig-live-001`; that
+  closeout kept the task externally gated rather than claiming sandbox closure.
+- `PRT-SPEC-001` is done, so the repo-local partner eligibility spec
+  prerequisite is already landed.
+- `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK` and
+  `PARTNER-ELIG-LIVE-001-UNBLOCK-PLANNING-DECISION` are done, and both route
+  the remaining work to the same external issuer gate.
+- `origin/dev` still does not contain `support/sidecars/PARTNER-ELIG-LIVE-001/`,
+  so this branch restores that missing path without reopening the canonical
+  held/external-gated verdict.
 - No real issuer or bank sandbox package is attached in this repo session:
   - no approved issuer API authority artifact
   - no sandbox credential or allowlist package
@@ -33,8 +38,11 @@ Current repo truth on `2026-05-22`:
 
 Conclusion:
 
+- This branch does not supersede the canonical `PARTNER-ELIG-LIVE-001`
+  closeout; it carries the same held-state posture onto the missing sidecar
+  path expected by the gap-closure references.
 - The required sidecar path now exists on `origin/codex/ph1gc-partner-002`
-  and is ready to land at the canonical location after review.
+  and is ready to land on `origin/dev` after review.
 - The directive section E acceptance bar is still blocked on
   `EXT-001-BLK-001` through `EXT-001-BLK-006`.
 - `WF-PARTNER-001` must not be uplifted to `PASS (sandbox evidence)` until
@@ -44,11 +52,11 @@ Conclusion:
 
 ## 2. Canonical Inputs Reviewed
 
-### 2.1 Gap-closure directive
+### 2.1 Dispatch and release-truth anchors
 
-The dispatch brief for `PH1GC-PARTNER-002` defines this as the issuer sandbox
-evidence task and requires seven section-E proof items under this sidecar path.
-That same sidecar target is also cited by
+The dispatch brief for legacy alias `PH1GC-PARTNER-002` defines this as the
+issuer sandbox evidence task and requires seven section-E proof items under
+this sidecar path. That same sidecar target is also cited by
 `docs/03-runbooks/phase1-release-truth-sync-20260519.md` and
 `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`.
 
@@ -81,10 +89,11 @@ Open external blockers remain:
 
 ### 2.4 Historical anchor
 
-The same hold-state evidence shape was previously recorded on branch-only commit
-`2628fc7`, but the canonical sidecar path never landed on `origin/dev`. This
-packet carries that missing path on the current task branch without changing the
-underlying external-gated truth.
+The same hold-state evidence first appeared on branch-only commit `2628fc7`,
+and canonical machine truth later accepted the held/external-gated closeout at
+`5213efc` on `origin/codex2/partner-elig-live-001`. `origin/dev` still lacks
+the sidecar path, so this packet carries the missing path on the current branch
+without changing the underlying external-gated truth.
 
 ---
 
@@ -119,8 +128,9 @@ underlying external-gated truth.
 
 Allowed current claim:
 
-- `PH1GC-PARTNER-002` restores the missing sidecar path on
-  `origin/codex/ph1gc-partner-002` and is ready for review/merge.
+- Legacy alias `PH1GC-PARTNER-002` restores the missing sidecar path on
+  `origin/codex/ph1gc-partner-002` while staying consistent with canonical task
+  `PARTNER-ELIG-LIVE-001`.
 - `WF-PARTNER-001` remains below sandbox-proof closure until the issuer
   evidence pack is attached.
 - The only remaining blockers are `EXT-001-BLK-001` through
@@ -161,8 +171,10 @@ After those inputs arrive:
 
 Verification in this task was source review only:
 
-- reviewed canonical machine truth for `PH1GC-PARTNER-002`,
-  `PH1GC-PARTNER-001`, and the two `PH1GC-PARTNER-002-UNBLOCK-*` helpers
+- reviewed canonical machine truth for `PARTNER-ELIG-LIVE-001`,
+  `PRT-SPEC-001`, and the two `PARTNER-ELIG-LIVE-001-UNBLOCK-*` helpers
+- verified that canonical `PARTNER-ELIG-LIVE-001` is already closed out at
+  commit `5213efc`, while `origin/dev` still lacks this sidecar path
 - reviewed the dispatch-embedded task brief and current planning notes
 - reviewed the partner eligibility spec and manual-review runbook
 - reviewed `EXT-001` blocker definitions
