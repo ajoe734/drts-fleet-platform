@@ -12,14 +12,22 @@
 
 ## 1. Executive Summary
 
-This sidecar closes the "missing packet path" gap on this task branch, but it
-does not claim that Android or iOS real-device evidence has been collected.
+This sidecar directory now closes the missing path gap on this task branch and
+carries a `README`, 11 directive `§C` placeholder files, and blocked-state
+closeout reports. It still does not claim that Android or iOS real-device
+evidence has been collected.
 
 Current read on `2026-05-23`:
 
 - `origin/dev` still does not contain
   `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/`; this task branch carries
-  the packet draft.
+  the sidecar directory only on this branch.
+- This branch now carries:
+  - `README.md`
+  - `01-android-install-proof.md` through `11-earnings-display-proof.md`
+  - `PH1GC-DRV-MP-002-CLOSEOUT-20260522.md`
+  - `PH1GC-DRV-MP-002-CLOSEOUT-20260523.md`
+  - this consolidated packet
 - This worker has no Android bridge, no Apple device tooling, and no active
   Expo login:
   - `adb`: command not found
@@ -213,13 +221,13 @@ Owner: Codex
 Reviewer: Claude
 Branch: codex/ph1gc-drv-mp-002
 PR: not opened in this session
-Commit: branch already carried blocked-external anchor e55ed0c8; this refresh keeps the packet aligned to current machine truth and preserves the blocked_external conclusion
-Files changed: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/WF-DRV-MP-001-DEVICE-EVIDENCE-PACKET.md
-Verification commands: command -v adb || true; adb devices 2>&1 || true; command -v xcrun || true; xcrun simctl list devices 2>&1 || true; command -v eas || true; eas whoami 2>&1 || true; cd apps/driver-app && npx eas-cli --version && npx eas-cli whoami
-Evidence artifact: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/WF-DRV-MP-001-DEVICE-EVIDENCE-PACKET.md
+Commit: branch already carried blocked-external anchor e55ed0c8; this refresh keeps the packet aligned to current machine truth, replays the 11 directive §C placeholder files plus README/closeout structure onto the assigned branch, and preserves the blocked_external conclusion
+Files changed: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/{README.md,01-android-install-proof.md,02-ios-install-proof.md,03-expo-eas-build-profile.md,04-android-signing-evidence.md,05-apple-team-testflight-evidence.md,06-push-notification-proof.md,07-location-permission-proof.md,08-weak-network-proof.md,09-platform-online-offline-proof.md,10-forwarded-task-display-proof.md,11-earnings-display-proof.md,PH1GC-DRV-MP-002-CLOSEOUT-20260522.md,PH1GC-DRV-MP-002-CLOSEOUT-20260523.md,WF-DRV-MP-001-DEVICE-EVIDENCE-PACKET.md}
+Verification commands: command -v adb || true; adb devices 2>&1 || true; command -v xcrun || true; xcrun simctl list devices 2>&1 || true; command -v eas || true; eas whoami 2>&1 || true; cd apps/driver-app && npx eas-cli --version && npx eas-cli whoami; find support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE -maxdepth 1 -type f | sort; git diff --check -- support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE
+Evidence artifact: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/
 Workflow family affected: WF-DRV-MP-001
 Gate read before: support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/ was missing on origin/dev; existing driver real-device report remained provisional and external-gated
-Gate read after: this task branch now carries the missing sidecar path, but the packet remains blocked_external and does not uplift WF-DRV-MP-001 to PASS
+Gate read after: this task branch now carries the missing sidecar path plus README, all 11 directive §C placeholder files, and blocked-state closeout reports, but the packet remains blocked_external and does not uplift WF-DRV-MP-001 to PASS
 Remaining non-claim: no Android install proof, iOS/TestFlight proof, native push delivery proof, location-grant capture, weak-network replay capture, online/offline capture, forwarded-task live capture, or earnings live capture was collected in this session
 External dependencies, if any: Android hardware, iPhone/TestFlight access, Expo login or EXPO_TOKEN, Android signing, Apple team access, tester group ownership, forwarded-task seed/live data, human operator, weak-network test setup
 ```
@@ -232,7 +240,7 @@ Canonical machine truth for `PH1GC-DRV-MP-002` lives at:
 
 `/home/edna/workspace/drts-fleet-platform/ai-status.json`
 
-As of `2026-05-23T18:44:10Z`, that file records `owner=Codex`,
+As of this packet draft on `2026-05-23`, that file records `owner=Codex`,
 `reviewer=Claude`, and `status=in_progress`. `current-work.md` still lags and
 must not be treated as machine truth.
 
