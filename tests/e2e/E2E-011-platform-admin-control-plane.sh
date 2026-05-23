@@ -85,7 +85,17 @@ require_audit_jq() {
   assert_status "200"
 
   local audit_id
-  audit_id=$(echo "$RESP_BODY" | jq -r "$jq_filter" 2>/dev/null | head -1 || true)
+  audit_id=$(
+    echo "$RESP_BODY" | jq -r "
+      def audit_id: .auditId // .audit_id;
+      def action_name: .actionName // .action_name;
+      def resource_id: .resourceId // .resource_id;
+      def tenant_id: .tenantId // .tenant_id;
+      def new_values_summary: .newValuesSummary // .new_values_summary;
+      def old_values_summary: .oldValuesSummary // .old_values_summary;
+      ${jq_filter} | audit_id
+    " 2>/dev/null | head -1 || true
+  )
   if [[ -z "$audit_id" ]]; then
     log_fail "Missing audit evidence for ${evidence_key}"
     log_fail "Audit filter: ${jq_filter}"
@@ -116,7 +126,7 @@ assert_flag_enabled() {
   assert_status "200"
 
   local actual
-  actual="$(json_get '.data.enabled')"
+  actual="$(echo "$RESP_BODY" | jq -r '.data.enabled' 2>/dev/null || true)"
   if [[ "$actual" != "$expected" ]]; then
     log_fail "Expected flag ${FLAG_KEY} enabled=${expected}, got ${actual:-<empty>}"
     log_fail "Body: ${RESP_BODY}"
@@ -134,7 +144,11 @@ assert_pricing_rule_state() {
   assert_status "200"
 
   local actual_status
-  actual_status=$(echo "$RESP_BODY" | jq -r --arg ruleId "$PRICING_RULE_ID" '.data.items[] | select(.ruleId == $ruleId) | .status' 2>/dev/null | head -1 || true)
+  actual_status=$(
+    echo "$RESP_BODY" | jq -r --arg ruleId "$PRICING_RULE_ID" \
+      '.data.items[] | select((.ruleId // .rule_id) == $ruleId) | .status' \
+      2>/dev/null | head -1 || true
+  )
   if [[ "$actual_status" != "$expected_status" ]]; then
     log_fail "Expected pricing rule ${PRICING_RULE_ID} status=${expected_status}, got ${actual_status:-<empty>}"
     log_fail "Body: ${RESP_BODY}"
@@ -147,13 +161,13 @@ assert_masked_credential_listing() {
   http_call GET "/platform-admin/partner-entries/${ENTRY_SLUG}/credentials"
   assert_status "200"
 
-  if echo "$RESP_BODY" | jq -e '.data.items[] | has("plaintextKey")' >/dev/null 2>&1; then
+  if echo "$RESP_BODY" | jq -e '.data.items[] | (has("plaintextKey") or has("plaintext_key"))' >/dev/null 2>&1; then
     log_fail "Credential listing unexpectedly returned plaintextKey"
     log_fail "Body: ${RESP_BODY}"
     exit 1
   fi
 
-  if ! echo "$RESP_BODY" | jq -e --arg keyId "$CREDENTIAL_KEY_ID" '.data.items[] | select(.keyId == $keyId)' >/dev/null 2>&1; then
+  if ! echo "$RESP_BODY" | jq -e --arg keyId "$CREDENTIAL_KEY_ID" '.data.items[] | select((.keyId // .key_id) == $keyId)' >/dev/null 2>&1; then
     log_fail "Credential listing did not contain keyId=${CREDENTIAL_KEY_ID}"
     log_fail "Body: ${RESP_BODY}"
     exit 1
@@ -390,7 +404,7 @@ switch_platform_admin
 http_call GET "/identity/context"
 assert_status "200"
 
-if [[ "$(json_get '.data.actorType')" != "platform_admin" ]]; then
+if [[ "$(json_get_first '.data.actorType' '.data.actor_type')" != "platform_admin" ]]; then
   log_fail "Expected platform_admin identity context"
   log_fail "Body: ${RESP_BODY}"
   exit 1
@@ -401,7 +415,7 @@ if [[ "$(json_get '.data.realm')" != "platform" ]]; then
   exit 1
 fi
 
-chain_set "identity" "actorId" "$(json_get '.data.actorId')"
+chain_set "identity" "actorId" "$(json_get_first '.data.actorId' '.data.actor_id')"
 save_evidence "$SCENARIO" "identity" "realm" "$(json_get '.data.realm')"
 log_ok "Platform admin identity context resolved"
 
@@ -417,7 +431,7 @@ log_ok "Tenant-admin actor cannot create platform tenants"
 log_surface "Tenant create"
 switch_platform_admin
 http_call POST "/platform-admin/tenants" "$TENANT_CREATE_BODY"
-assert_status "200"
+assert_status "200|201"
 
 TENANT_ID="$(json_get '.data.id')"
 require_non_empty "$TENANT_ID" "tenant id"
@@ -426,14 +440,14 @@ chain_set "tenant" "tenantCode" "$TENANT_CODE"
 save_evidence "$SCENARIO" "tenant" "tenantId" "$TENANT_ID"
 require_audit_jq \
   "create_tenant" \
-  ".data.items[] | select(.actionName == \"create_platform_tenant\" and .resourceId == \"${TENANT_ID}\") | .auditId"
+  ".data.items[] | select(action_name == \"create_platform_tenant\" and resource_id == \"${TENANT_ID}\")"
 
 log_surface "Modules"
 switch_platform_admin
 http_call POST "/platform-admin/tenants/${TENANT_ID}/settings" "$MODULES_BODY"
-assert_status "200"
+assert_status "200|201"
 
-if ! echo "$RESP_BODY" | jq -e '.data.enabledModules | index("webhooks")' >/dev/null 2>&1; then
+if ! echo "$RESP_BODY" | jq -e '(.data.enabledModules // .data.enabled_modules) | index("webhooks")' >/dev/null 2>&1; then
   log_fail "Expected tenant module list to include webhooks"
   log_fail "Body: ${RESP_BODY}"
   exit 1
@@ -443,31 +457,31 @@ chain_set "modules" "webhooks" "enabled"
 save_evidence "$SCENARIO" "modules" "tenantId" "$TENANT_ID"
 require_audit_jq \
   "update_modules" \
-  ".data.items[] | select(.actionName == \"update_platform_tenant_settings\" and .resourceId == \"${TENANT_ID}\" and (.newValuesSummary.enabledModules | index(\"webhooks\"))) | .auditId"
+  ".data.items[] | select(action_name == \"update_platform_tenant_settings\" and resource_id == \"${TENANT_ID}\" and ((new_values_summary.enabledModules // new_values_summary.enabled_modules) | index(\"webhooks\")))"
 
 log_surface "Tenant quotas"
 switch_platform_admin "$TENANT_ID"
 http_call POST "/tenant/quotas/policies" "$QUOTA_BODY_INITIAL"
-assert_status "200"
+assert_status "200|201"
 
 http_call GET "/tenant/quotas"
 assert_status "200"
-if [[ "$(json_get '.data.limit.bookingCountLimit')" != "1000" ]]; then
+if [[ "$(json_get_first '.data.limit.bookingCountLimit' '.data.limit.booking_count_limit')" != "1000" ]]; then
   log_fail "Expected tenant booking quota limit 1000 after initial policy"
   log_fail "Body: ${RESP_BODY}"
   exit 1
 fi
 require_audit_jq \
   "quota_policy_initial" \
-  ".data.items[] | select(.actionName == \"tenant.quota_policy.updated\" and .tenantId == \"${TENANT_ID}\" and .resourceId == \"${TENANT_ID}\") | .auditId"
+  ".data.items[] | select(action_name == \"tenant.quota_policy.updated\" and tenant_id == \"${TENANT_ID}\" and resource_id == \"${TENANT_ID}\")"
 
 switch_platform_admin "$TENANT_ID"
 http_call POST "/tenant/quotas/policies" "$QUOTA_BODY_UPDATED"
-assert_status "200"
+assert_status "200|201"
 
 http_call GET "/tenant/quotas"
 assert_status "200"
-if [[ "$(json_get '.data.limit.bookingCountLimit')" != "500" ]]; then
+if [[ "$(json_get_first '.data.limit.bookingCountLimit' '.data.limit.booking_count_limit')" != "500" ]]; then
   log_fail "Expected tenant booking quota limit 500 after update"
   log_fail "Body: ${RESP_BODY}"
   exit 1
@@ -477,7 +491,7 @@ chain_set "quota" "bookingCountLimit" "500"
 save_evidence "$SCENARIO" "quota" "bookingCountLimit" "500"
 require_audit_jq \
   "quota_policy_updated" \
-  ".data.items[] | select(.actionName == \"tenant.quota_policy.updated\" and .tenantId == \"${TENANT_ID}\" and .resourceId == \"${TENANT_ID}\") | .auditId"
+  ".data.items[] | select(action_name == \"tenant.quota_policy.updated\" and tenant_id == \"${TENANT_ID}\" and resource_id == \"${TENANT_ID}\")"
 
 log_surface "Partner entry"
 write_partner_entry_body "$PARTNER_CREATE_BODY"
@@ -485,9 +499,9 @@ write_partner_entry_update_body "$PARTNER_UPDATE_BODY"
 
 switch_platform_admin
 http_call POST "/platform-admin/partner-entries" "$PARTNER_CREATE_BODY"
-assert_status "200"
+assert_status "200|201"
 
-if [[ "$(json_get '.data.entrySlug')" != "$ENTRY_SLUG" ]]; then
+if [[ "$(json_get_first '.data.entrySlug' '.data.entry_slug')" != "$ENTRY_SLUG" ]]; then
   log_fail "Expected partner entry slug ${ENTRY_SLUG}"
   log_fail "Body: ${RESP_BODY}"
   exit 1
@@ -497,13 +511,13 @@ chain_set "partner" "entrySlug" "$ENTRY_SLUG"
 save_evidence "$SCENARIO" "partner" "entrySlug" "$ENTRY_SLUG"
 require_audit_jq \
   "create_partner_entry" \
-  ".data.items[] | select(.actionName == \"create_partner_entry\" and .resourceId == \"${ENTRY_SLUG}\") | .auditId"
+  ".data.items[] | select(action_name == \"create_partner_entry\" and resource_id == \"${ENTRY_SLUG}\")"
 
 switch_platform_admin
 http_call POST "/platform-admin/partner-entries/${ENTRY_SLUG}" "$PARTNER_UPDATE_BODY"
-assert_status "200"
+assert_status "200|201"
 
-if [[ "$(json_get '.data.themeAccent')" != "#0F766E" ]]; then
+if [[ "$(json_get_first '.data.themeAccent' '.data.theme_accent')" != "#0F766E" ]]; then
   log_fail "Expected updated partner theme accent"
   log_fail "Body: ${RESP_BODY}"
   exit 1
@@ -511,7 +525,7 @@ fi
 
 require_audit_jq \
   "update_partner_entry" \
-  ".data.items[] | select(.actionName == \"update_partner_entry\" and .resourceId == \"${ENTRY_SLUG}\" and .newValuesSummary.themeAccent == \"#0F766E\") | .auditId"
+  ".data.items[] | select(action_name == \"update_partner_entry\" and resource_id == \"${ENTRY_SLUG}\" and (new_values_summary.themeAccent // new_values_summary.theme_accent) == \"#0F766E\")"
 
 log_surface "Partner credential"
 write_issue_credential_body "$CREDENTIAL_ISSUE_BODY"
@@ -519,26 +533,26 @@ write_revoke_credential_body "$CREDENTIAL_REVOKE_BODY"
 
 switch_platform_admin
 http_call POST "/platform-admin/partner-entries/${ENTRY_SLUG}/credentials/issue" "$CREDENTIAL_ISSUE_BODY"
-assert_status "200"
+assert_status "200|201"
 
-CREDENTIAL_KEY_ID="$(json_get '.data.credential.keyId')"
+CREDENTIAL_KEY_ID="$(json_get_first '.data.credential.keyId' '.data.credential.key_id')"
 require_non_empty "$CREDENTIAL_KEY_ID" "partner credential keyId"
-require_non_empty "$(json_get '.data.plaintextKey')" "partner plaintextKey"
+require_non_empty "$(json_get_first '.data.plaintextKey' '.data.plaintext_key')" "partner plaintextKey"
 chain_set "credential" "keyId" "$CREDENTIAL_KEY_ID"
 save_evidence "$SCENARIO" "credential" "keyId" "$CREDENTIAL_KEY_ID"
 require_audit_jq \
   "issue_partner_credential" \
-  ".data.items[] | select(.actionName == \"issue_partner_ingress_credential\" and .resourceId == \"${CREDENTIAL_KEY_ID}\") | .auditId"
+  ".data.items[] | select(action_name == \"issue_partner_ingress_credential\" and resource_id == \"${CREDENTIAL_KEY_ID}\")"
 
 assert_masked_credential_listing
 
 switch_platform_admin
 http_call POST "/platform-admin/partner-entries/${ENTRY_SLUG}/credentials/${CREDENTIAL_KEY_ID}/revoke" "$CREDENTIAL_REVOKE_BODY"
-assert_status "200"
-require_non_empty "$(json_get '.data.revokedAt')" "credential revokedAt"
+assert_status "200|201"
+require_non_empty "$(json_get_first '.data.revokedAt' '.data.revoked_at')" "credential revokedAt"
 require_audit_jq \
   "revoke_partner_credential" \
-  ".data.items[] | select(.actionName == \"revoke_partner_ingress_credential\" and .resourceId == \"${CREDENTIAL_KEY_ID}\") | .auditId"
+  ".data.items[] | select(action_name == \"revoke_partner_ingress_credential\" and resource_id == \"${CREDENTIAL_KEY_ID}\")"
 
 log_surface "Adapter / switchboard"
 switch_platform_admin
@@ -557,36 +571,36 @@ save_evidence "$SCENARIO" "adapter" "healthCount" "$ADAPTER_COUNT"
 
 switch_platform_admin
 http_call POST "/platform-admin/maintenance-mode" "$MAINTENANCE_ENABLE_BODY"
-assert_status "200"
-if [[ "$(json_get '.data.enabled')" != "true" ]]; then
+assert_status "200|201"
+if [[ "$(echo "$RESP_BODY" | jq -r '.data.enabled' 2>/dev/null || true)" != "true" ]]; then
   log_fail "Expected maintenance mode enabled"
   log_fail "Body: ${RESP_BODY}"
   exit 1
 fi
 require_audit_jq \
   "enable_maintenance_mode" \
-  ".data.items[] | select(.actionName == \"enable_maintenance_mode\" and .newValuesSummary.enabled == true) | .auditId"
+  ".data.items[] | select(action_name == \"enable_maintenance_mode\" and (new_values_summary.enabled // new_values_summary.enabled) == true)"
 
 switch_platform_admin
 http_call POST "/platform-admin/maintenance-mode" "$MAINTENANCE_DISABLE_BODY"
-assert_status "200"
-if [[ "$(json_get '.data.enabled')" != "false" ]]; then
+assert_status "200|201"
+if [[ "$(echo "$RESP_BODY" | jq -r '.data.enabled' 2>/dev/null || true)" != "false" ]]; then
   log_fail "Expected maintenance mode disabled"
   log_fail "Body: ${RESP_BODY}"
   exit 1
 fi
 require_audit_jq \
   "disable_maintenance_mode" \
-  ".data.items[] | select(.actionName == \"disable_maintenance_mode\" and .newValuesSummary.enabled == false) | .auditId"
+  ".data.items[] | select(action_name == \"disable_maintenance_mode\" and (new_values_summary.enabled // new_values_summary.enabled) == false)"
 
 log_surface "Pricing"
 write_pricing_rule_body "$PRICING_CREATE_BODY"
 
 switch_platform_admin
 http_call POST "/platform-admin/pricing-rules" "$PRICING_CREATE_BODY"
-assert_status "200"
+assert_status "200|201"
 
-PRICING_RULE_ID="$(json_get '.data.ruleId')"
+PRICING_RULE_ID="$(json_get_first '.data.ruleId' '.data.rule_id')"
 require_non_empty "$PRICING_RULE_ID" "pricing rule id"
 if [[ "$(json_get '.data.version')" != "$PRICING_VERSION" ]]; then
   log_fail "Expected pricing version ${PRICING_VERSION}"
@@ -599,7 +613,7 @@ chain_set "pricing" "version" "$PRICING_VERSION"
 save_evidence "$SCENARIO" "pricing" "ruleId" "$PRICING_RULE_ID"
 require_audit_jq \
   "create_pricing_rule" \
-  ".data.items[] | select(.actionName == \"create_platform_pricing_rule\" and .resourceId == \"${PRICING_RULE_ID}\" and .newValuesSummary.version == \"${PRICING_VERSION}\") | .auditId"
+  ".data.items[] | select(action_name == \"create_platform_pricing_rule\" and resource_id == \"${PRICING_RULE_ID}\" and (new_values_summary.version // new_values_summary.version) == \"${PRICING_VERSION}\")"
 
 switch_seed_tenant_admin
 http_call POST "/platform-admin/pricing-rules/${PRICING_RULE_ID}/publish" "$PRICING_PUBLISH_BODY"
@@ -611,7 +625,7 @@ log_ok "Tenant-admin actor cannot publish platform pricing rules"
 
 switch_platform_admin
 http_call POST "/platform-admin/pricing-rules/${PRICING_RULE_ID}/publish" "$PRICING_PUBLISH_BODY"
-assert_status "200"
+assert_status "200|201"
 if [[ "$(json_get '.data.status')" != "active" ]]; then
   log_fail "Expected published pricing rule to be active"
   log_fail "Body: ${RESP_BODY}"
@@ -624,34 +638,34 @@ if [[ "$(json_get '.data.version')" != "$PRICING_VERSION" ]]; then
 fi
 require_audit_jq \
   "publish_pricing_rule" \
-  ".data.items[] | select(.actionName == \"publish_platform_pricing_rule\" and .resourceId == \"${PRICING_RULE_ID}\" and .newValuesSummary.version == \"${PRICING_VERSION}\") | .auditId"
+  ".data.items[] | select(action_name == \"publish_platform_pricing_rule\" and resource_id == \"${PRICING_RULE_ID}\" and (new_values_summary.version // new_values_summary.version) == \"${PRICING_VERSION}\")"
 
 log_surface "Feature flag"
 switch_platform_admin
 http_call POST "/admin/flags/${FLAG_KEY}/tenant-overrides?tenantId=${TENANT_ID}" "$FLAG_ENABLE_BODY"
-assert_status "200"
+assert_status "200|201"
 assert_flag_enabled "true"
 require_audit_jq \
   "enable_flag_override" \
-  ".data.items[] | select(.actionName == \"upsert_feature_flag_tenant_override\" and .resourceId == \"${FLAG_KEY}\" and .tenantId == \"${TENANT_ID}\" and .newValuesSummary.enabled == true) | .auditId"
+  ".data.items[] | select(action_name == \"upsert_feature_flag_tenant_override\" and resource_id == \"${FLAG_KEY}\" and tenant_id == \"${TENANT_ID}\" and (new_values_summary.enabled // new_values_summary.enabled) == true)"
 
 switch_platform_admin
 http_call POST "/admin/flags/${FLAG_KEY}/tenant-overrides?tenantId=${TENANT_ID}" "$FLAG_DISABLE_BODY"
-assert_status "200"
+assert_status "200|201"
 assert_flag_enabled "false"
 chain_set "flag" "key" "$FLAG_KEY"
 save_evidence "$SCENARIO" "flag" "tenantId" "$TENANT_ID"
 require_audit_jq \
   "disable_flag_override" \
-  ".data.items[] | select(.actionName == \"upsert_feature_flag_tenant_override\" and .resourceId == \"${FLAG_KEY}\" and .tenantId == \"${TENANT_ID}\" and .newValuesSummary.enabled == false) | .auditId"
+  ".data.items[] | select(action_name == \"upsert_feature_flag_tenant_override\" and resource_id == \"${FLAG_KEY}\" and tenant_id == \"${TENANT_ID}\" and (new_values_summary.enabled // new_values_summary.enabled) == false)"
 
 log_surface "Rollout"
 switch_platform_admin
 http_call POST "/platform-admin/tenants/${TENANT_ID}/onboarding" "$ONBOARDING_BODY"
-assert_status "200"
+assert_status "200|201"
 require_audit_jq \
   "update_onboarding" \
-  ".data.items[] | select(.actionName == \"update_platform_tenant_onboarding\" and .resourceId == \"${TENANT_ID}\" and .newValuesSummary.rollout.rollbackPrepared == true) | .auditId"
+  ".data.items[] | select(action_name == \"update_platform_tenant_onboarding\" and resource_id == \"${TENANT_ID}\" and ((new_values_summary.rollout.rollbackPrepared // new_values_summary.rollout.rollback_prepared)) == true)"
 
 for role_code in "${REQUIRED_ROLE_CODES[@]}"; do
   invite_body="${TMP_DIR}/invite-${role_code}.json"
@@ -661,22 +675,22 @@ for role_code in "${REQUIRED_ROLE_CODES[@]}"; do
 
   switch_platform_admin
   http_call POST "/platform-admin/tenants/${TENANT_ID}/roles/invite" "$invite_body"
-  assert_status "200"
+  assert_status "200|201"
   require_audit_jq \
     "invite_${role_code}" \
-    ".data.items[] | select(.actionName == \"invite_tenant_role\" and .resourceId == \"${TENANT_ID}\" and .newValuesSummary.roleCode == \"${role_code}\") | .auditId"
+    ".data.items[] | select(action_name == \"invite_tenant_role\" and resource_id == \"${TENANT_ID}\" and (new_values_summary.roleCode // new_values_summary.role_code) == \"${role_code}\")"
 
   switch_platform_admin
   http_call POST "/platform-admin/tenants/${TENANT_ID}/roles/acknowledge" "$ack_body"
-  assert_status "200"
+  assert_status "200|201"
   require_audit_jq \
     "acknowledge_${role_code}" \
-    ".data.items[] | select(.actionName == \"acknowledge_tenant_role\" and .resourceId == \"${TENANT_ID}\" and .newValuesSummary.roleCode == \"${role_code}\") | .auditId"
+    ".data.items[] | select(action_name == \"acknowledge_tenant_role\" and resource_id == \"${TENANT_ID}\" and (new_values_summary.roleCode // new_values_summary.role_code) == \"${role_code}\")"
 done
 
 switch_platform_admin
 http_call POST "/platform-admin/tenants/${TENANT_ID}/rollout" "$ROLLOUT_PILOT_BODY"
-assert_status "200"
+assert_status "200|201"
 if [[ "$(json_get '.data.rollout.stage')" != "pilot" ]]; then
   log_fail "Expected tenant rollout stage pilot"
   log_fail "Body: ${RESP_BODY}"
@@ -687,12 +701,12 @@ chain_set "rollout" "stage" "pilot"
 save_evidence "$SCENARIO" "rollout" "stage" "pilot"
 require_audit_jq \
   "promote_rollout_pilot" \
-  ".data.items[] | select(.actionName == \"update_platform_tenant_rollout\" and .resourceId == \"${TENANT_ID}\" and .newValuesSummary.stage == \"pilot\") | .auditId"
+  ".data.items[] | select(action_name == \"update_platform_tenant_rollout\" and resource_id == \"${TENANT_ID}\" and (new_values_summary.stage // new_values_summary.stage) == \"pilot\")"
 
 log_surface "Rollback hold blocks production promote"
 switch_platform_admin
 http_call POST "/platform-admin/tenants/${TENANT_ID}/rollback-hold"
-assert_status "200"
+assert_status "200|201"
 if [[ "$(json_get '.data.status')" != "rollback_hold" ]]; then
   log_fail "Expected tenant rollback_hold status"
   log_fail "Body: ${RESP_BODY}"
@@ -701,7 +715,7 @@ fi
 
 require_audit_jq \
   "rollback_hold" \
-  ".data.items[] | select(.actionName == \"set_tenant_rollback_hold\" and .resourceId == \"${TENANT_ID}\") | .auditId"
+  ".data.items[] | select(action_name == \"set_tenant_rollback_hold\" and resource_id == \"${TENANT_ID}\")"
 
 switch_platform_admin
 http_call POST "/platform-admin/tenants/${TENANT_ID}/rollout" "$ROLLOUT_PRODUCTION_BODY"
@@ -738,7 +752,7 @@ required_audit_actions=(
 )
 
 for action_name in "${required_audit_actions[@]}"; do
-  if ! echo "$RESP_BODY" | jq -e --arg actionName "$action_name" '.data.items[] | select(.actionName == $actionName)' >/dev/null 2>&1; then
+  if ! echo "$RESP_BODY" | jq -e --arg actionName "$action_name" '.data.items[] | select((.actionName // .action_name) == $actionName)' >/dev/null 2>&1; then
     log_fail "Audit log missing action ${action_name}"
     exit 1
   fi

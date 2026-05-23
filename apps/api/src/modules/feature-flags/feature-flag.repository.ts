@@ -115,11 +115,30 @@ export class FeatureFlagRepository {
 
     try {
       const result = await this.databaseService!.query<FeatureFlagRow>(
-        `INSERT INTO admin.feature_flags (flag_key, enabled, description, tenant_id, updated_at)
-         VALUES ($1, $2, $3, $4, NOW())
-         ON CONFLICT (flag_key, tenant_id)
-         DO UPDATE SET enabled = $2, description = $3, updated_at = NOW()
-         RETURNING flag_key, enabled, description, tenant_id, updated_at`,
+        `WITH updated AS (
+           UPDATE admin.feature_flags
+           SET enabled = $2, description = $3, updated_at = NOW()
+           WHERE flag_key = $1 AND tenant_id = $4
+           RETURNING flag_key, enabled, description, tenant_id, updated_at
+         ),
+         inserted AS (
+           INSERT INTO admin.feature_flags (
+             flag_key,
+             enabled,
+             description,
+             tenant_id,
+             updated_at
+           )
+           SELECT $1, $2, $3, $4, NOW()
+           WHERE NOT EXISTS (SELECT 1 FROM updated)
+           RETURNING flag_key, enabled, description, tenant_id, updated_at
+         )
+         SELECT flag_key, enabled, description, tenant_id, updated_at
+         FROM updated
+         UNION ALL
+         SELECT flag_key, enabled, description, tenant_id, updated_at
+         FROM inserted
+         LIMIT 1`,
         [key, enabled, description, tenantId],
       );
 
