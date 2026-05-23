@@ -1,185 +1,194 @@
-# PARTNER-ELIG-LIVE-001 — Issuer Sandbox Hold-State Evidence
+# PARTNER-ELIG-LIVE-001 - Issuer Sandbox Eligibility Evidence
 
-- **Legacy gap-closure alias:** `PH1GC-PARTNER-002`
-- **Canonical task:** `PARTNER-ELIG-LIVE-001`
-- **Canonical owner:** `Codex2`
-- **Canonical reviewer:** `Claude2`
-- **Collected:** `2026-05-22 (UTC)`
-- **Canonical status:** `done (held evidence); external gate remains open`
-- **Status of this packet:** `hold-state evidence only — issuer sandbox proof remains external-gated`
+**Task:** `PH1GC-PARTNER-002`
+**Workflow family:** `WF-PARTNER-001`
+**Current task owner / reviewer:** `Codex` / `Claude`
+**Canonical parent lineage:** `PARTNER-ELIG-LIVE-001` (`done`, held evidence)
+**Collected / re-verified:** `2026-05-23 (UTC)`
+**Workflow evidence status:** `blocked_external`
+**Task lifecycle note:** The clean dev-based sidecar replay lives on
+`origin/codex2/ph1gc-partner-002@bddba93c`. The current
+`codex/ph1gc-partner-002` branch is older audit history and must not be
+treated as the live merge candidate.
 
 ---
 
+## 0. Directive Section 7 Status Format
+
+```text
+Workflow family: WF-PARTNER-001
+Business flow: Partner eligibility and airport-transfer benefit intake
+Current gate read: PASS (static evidence); EXTERNAL-GATED for issuer sandbox evidence
+Verification path: sidecar / manual evidence
+Evidence level: static evidence
+Non-claim: No real issuer sandbox credential, allowed test card, eligibility outcome, timeout/retry, booking linkage, billing/reporting linkage, or audit proof is attached yet.
+Next action: Keep PH1GC-PARTNER-002 blocked on EXT-001-BLK-001 through EXT-001-BLK-006 until a real issuer sandbox evidence bundle can be attached under this sidecar path.
+```
+
 ## 1. Executive Summary
 
-This branch carries the missing sidecar path for `origin/dev` while staying
-consistent with the already-approved canonical held-evidence closeout.
+This packet documents why `PH1GC-PARTNER-002` remains externally blocked even
+though repo-side sidecar recovery already exists in branch history.
 
-Current repo truth on `2026-05-23`:
+Current result on `2026-05-23`:
 
-- `PARTNER-ELIG-LIVE-001` is already `done` in canonical `ai-status.json`
-  through commit `5213efc` on `origin/codex2/partner-elig-live-001`; that
-  closeout kept the task externally gated rather than claiming sandbox closure.
-- `PRT-SPEC-001` is done, so the repo-local partner eligibility spec
-  prerequisite is already landed.
-- `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK` and
-  `PARTNER-ELIG-LIVE-001-UNBLOCK-PLANNING-DECISION` are done, and both route
-  the remaining work to the same external issuer gate.
-- `origin/dev` still does not contain `support/sidecars/PARTNER-ELIG-LIVE-001/`,
-  so this branch restores that missing path without reopening the canonical
-  held/external-gated verdict.
-- No real issuer or bank sandbox package is attached in this repo session:
-  - no approved issuer API authority artifact
-  - no sandbox credential or allowlist package
-  - no issuer-approved test card or reference-token matrix
-  - no issuer-confirmed timeout or retry guidance
-  - no sponsor or issuer sign-off for manual-review release rules
-  - no sensitive-data approval for live partner eligibility use
+- `support/sidecars/PARTNER-ELIG-LIVE-001/` is still absent from `origin/dev`.
+- The clean replay for the reserved sidecar path is
+  `origin/codex2/ph1gc-partner-002@bddba93c`, which carries the blocked-state
+  evidence packet on top of current `origin/dev`.
+- The current `codex/ph1gc-partner-002` branch is an older audit lineage. It
+  should not be described as ready to land on `origin/dev`.
+- The repo still does **not** contain real issuer/bank sandbox credentials,
+  allowed test cards, issuer-approved sandbox transcripts, or downstream
+  booking / billing / audit proof.
+- Because directive section E requires real issuer sandbox data and explicitly
+  rejects repo-local mocks, `WF-PARTNER-001` cannot be promoted to
+  `PASS (sandbox evidence)`.
 
-Conclusion:
+Correct current claim:
 
-- This branch does not supersede the canonical `PARTNER-ELIG-LIVE-001`
-  closeout; it carries the same held-state posture onto the missing sidecar
-  path expected by the gap-closure references.
-- The required sidecar path now exists on `origin/codex/ph1gc-partner-002`
-  and is ready to land on `origin/dev` after review.
-- The directive section E acceptance bar is still blocked on
-  `EXT-001-BLK-001` through `EXT-001-BLK-006`.
-- `WF-PARTNER-001` must not be uplifted to `PASS (sandbox evidence)` until
-  real issuer sandbox evidence replaces this hold-state packet.
+- `WF-PARTNER-001` remains `PASS (static evidence)` / external-gated for real
+  issuer sandbox proof.
+- `PH1GC-PARTNER-002` remains `blocked_external` until
+  `EXT-001-BLK-001` through `EXT-001-BLK-006` are satisfied.
+- The directive section E task acceptance resolves to seven evidence rows. The
+  partner spec's nine-item sandbox proof set remains the source-detail list,
+  but the named issuer/bank counterparty and credential-source declaration are
+  captured within the credential / fixture / proof rows rather than tracked as
+  separate acceptance rows here.
 
 ---
 
 ## 2. Canonical Inputs Reviewed
 
-### 2.1 Dispatch and release-truth anchors
-
-The dispatch brief for legacy alias `PH1GC-PARTNER-002` defines this as the
-issuer sandbox evidence task and requires seven section-E proof items under
-this sidecar path. That same sidecar target is also cited by
-`docs/03-runbooks/phase1-release-truth-sync-20260519.md` and
-`docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`.
-
-### 2.2 Partner eligibility spec
-
-`docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md`
-is the canonical contract for `WF-PARTNER-001`.
-
-Relevant constraints:
-
-- section 2.1 names the sandbox-classification evidence set
-- section 4 defines `eligible`, `ineligible`, and `manual_review`
-- section 5 defines booking, billing, reporting, and audit linkage
-- section 7 requires `NP-PARTNER-001`, `002`, `003`, and `007` to be shown in
-  the issuer sandbox evidence pack
-
-### 2.3 External-gate truth
-
-`support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` remains the binding gate
-packet for real issuer and bank activation.
-
-Open external blockers remain:
-
-- `EXT-001-BLK-001` issuer or bank API contract authority
-- `EXT-001-BLK-002` sandbox credentials and network allowlist
-- `EXT-001-BLK-003` allowed test card or reference fixture matrix
-- `EXT-001-BLK-004` timeout and retry behavior confirmation
-- `EXT-001-BLK-005` manual-review fallback business sign-off
-- `EXT-001-BLK-006` sensitive-data handling and retention approval
-
-### 2.4 Historical anchor
-
-The same hold-state evidence first appeared on branch-only commit `2628fc7`,
-and canonical machine truth later accepted the held/external-gated closeout at
-`5213efc` on `origin/codex2/partner-elig-live-001`. `origin/dev` still lacks
-the sidecar path, so this packet carries the missing path on the current branch
-without changing the underlying external-gated truth.
+1. `ai-status.json` and `ai-activity-log.jsonl` at the canonical machine-truth
+   root
+2. `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` section
+   2.10
+3. `docs/03-runbooks/phase1-release-truth-sync-20260519.md`
+4. `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md`
+   sections 2, 5, 7
+5. `docs/03-runbooks/partner-eligibility-manual-review-runbook.md`
+6. `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md`
+7. `support/sidecars/PARTNER-ELIG-LIVE-001/PH1GC-PARTNER-002-CLOSEOUT-20260522.md`
 
 ---
 
 ## 3. Directive Section E Evidence Matrix
 
-| Required evidence item | 2026-05-22 state | Repo-local anchor | Missing real issuer sandbox input |
+| Evidence item | Current state | Why not acceptable yet | Required external input |
 | --- | --- | --- | --- |
-| issuer sandbox credential reference | Missing | `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` blocker `EXT-001-BLK-002` names the required credential and allowlist package. | No issuer-approved sandbox client id, token, secret path, mTLS details, or allowlist evidence is attached in this repo session. |
-| allowed test cards / reference tokens | Missing | `EXT-001-BLK-003` names the allowed test fixture requirement; the partner spec section 2.1 requires sandbox-allowed test instruments. | No issuer-approved eligible, ineligible, expired, timeout, or rate-limit fixture matrix is attached. |
-| eligible / ineligible / manual_review proof | Missing | Partner spec sections 2.1 and 4 define the three required decision classes; `docs/03-runbooks/partner-eligibility-manual-review-runbook.md` defines the manual-review handling rules. | No dated sandbox responses or logs exist for issuer-approved fixtures. Repo-local adapters and mocks are explicitly not acceptable proof. |
-| timeout / retry proof | Missing | `EXT-001` names timeout/retry confirmation as blocker `EXT-001-BLK-004`; the spec section 7 also requires `NP-PARTNER-002`. | No issuer-confirmed timeout budget, retry count, or sandbox timeout transcript is attached. |
-| booking linkage | Repo contract exists; real proof missing | Partner spec section 5.1 requires `eligibilityVerificationId`, `entrySlug`, `cardLast4`, `referenceToken`, and `referenceHash` to persist on the partner booking record. | No real sandbox-classified booking record is attached showing an issuer-backed verification flowing into a booking. |
-| billing / reporting proof | Repo contract exists; real proof missing | Partner spec sections 5.2 and 5.3 require `partnerProgramCode`, `eligibilityVerificationId`, and `referenceHash` to flow into invoice and reporting surfaces. | No invoice row or report export derived from a real sandbox-classified partner booking is attached. |
-| audit proof | Repo contract exists; real proof missing | Partner spec section 5.4 requires audit rows for issued, retried, eligible, ineligible, manual_review entered, and manual_review resolved states. | No audit extract from a real issuer sandbox verification lifecycle is attached. |
+| Issuer sandbox credential reference | Missing | No real sandbox credential bundle, secret path, or allowlist proof is attached in repo. | `EXT-001-BLK-002` |
+| Allowed test cards / reference fixtures | Missing | No issuer-approved eligible / ineligible / manual-review / timeout fixture matrix is attached. | `EXT-001-BLK-003` |
+| `eligible` / `ineligible` / `manual_review` proof | Missing | No real issuer sandbox session logs or screenshots exist; repo-local mocks are not acceptable. | `EXT-001-BLK-002`, `EXT-001-BLK-003`, `EXT-001-BLK-005` |
+| Timeout / retry proof | Missing | Repo defaults exist, but there is no issuer-confirmed sandbox run proving accepted timeout/retry behavior. | `EXT-001-BLK-003`, `EXT-001-BLK-004` |
+| Booking linkage proof | Missing | No real sandbox verification id was generated, so no booking record can prove `eligibilityVerificationId` linkage. | `EXT-001-BLK-002`, `EXT-001-BLK-003` |
+| Billing / reporting linkage proof | Missing | Without a real verification id and partner booking, invoice/report linkage cannot be evidenced. | `EXT-001-BLK-002`, `EXT-001-BLK-003`, `EXT-001-BLK-006` |
+| Audit proof | Missing | No real sandbox verification lifecycle exists to emit audit rows under approved data-handling rules. | `EXT-001-BLK-002`, `EXT-001-BLK-003`, `EXT-001-BLK-006` |
 
 ---
 
-## 4. Blocker Snapshot
+## 4. External Gate Snapshot
 
-| Blocker ID | Missing input | Effect on section E acceptance |
-| --- | --- | --- |
-| `EXT-001-BLK-001` | Issuer or bank API contract authority | Cannot prove the DRTS request or response contract matches the real issuer endpoint. |
-| `EXT-001-BLK-002` | Sandbox credentials and network allowlist | Cannot authenticate or reach a real sandbox endpoint. |
-| `EXT-001-BLK-003` | Allowed test card or reference matrix | Cannot run accepted eligible, ineligible, timeout, or rate-limit probes. |
-| `EXT-001-BLK-004` | Timeout and retry behavior confirmation | Cannot claim repo retry behavior matches issuer guidance. |
-| `EXT-001-BLK-005` | Manual-review fallback business sign-off | Cannot claim a held booking may be released by offline review. |
-| `EXT-001-BLK-006` | Sensitive-data handling and retention approval | Cannot claim live-safe masking, audit visibility, or retention posture for real sandbox evidence. |
+`support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` remains the binding
+external gate packet. The remaining blockers are:
+
+| Blocker ID | Missing input |
+| --- | --- |
+| `EXT-001-BLK-001` | Issuer / bank API contract authority |
+| `EXT-001-BLK-002` | Sandbox credentials and network allowlist |
+| `EXT-001-BLK-003` | Allowed test card / reference fixture matrix |
+| `EXT-001-BLK-004` | Timeout and retry behavior confirmation |
+| `EXT-001-BLK-005` | Manual-review fallback business sign-off |
+| `EXT-001-BLK-006` | Sensitive-data handling and retention approval |
+
+Until those six inputs are attached, no claim about sandbox verification,
+manual-review proof, or downstream linkage can be accepted.
 
 ---
 
-## 5. Gate Read And Non-Claim
+## 5. Workflow Gate Read
 
-Allowed current claim:
+Allowed current gate language:
 
-- Legacy alias `PH1GC-PARTNER-002` restores the missing sidecar path on
-  `origin/codex/ph1gc-partner-002` while staying consistent with canonical task
-  `PARTNER-ELIG-LIVE-001`.
-- `WF-PARTNER-001` remains below sandbox-proof closure until the issuer
-  evidence pack is attached.
-- The only remaining blockers are `EXT-001-BLK-001` through
-  `EXT-001-BLK-006`.
+- "`WF-PARTNER-001` is repo/static complete but still external-gated for real
+  issuer sandbox proof."
+- "`PH1GC-PARTNER-002` preserves the blocked-state sidecar path and remaining
+  blocker set; it does not claim sandbox PASS."
 
 Not allowed:
 
-- `WF-PARTNER-001 = PASS (sandbox evidence)`
-- `PARTNER-ELIG-LIVE-001 is complete`
-- `issuer sandbox credentials were validated`
-- `issuer-approved test cards passed`
-- `manual_review was proven with a real sandbox response`
+- "`WF-PARTNER-001` = PASS (sandbox evidence)"
+- "Issuer sandbox credentials are present and validated."
+- "Allowed test cards were executed successfully."
+- "Manual review was proven in a real issuer sandbox."
+- "Booking, billing/reporting, and audit linkage were proven with a real
+  issuer verification id."
 
 ---
 
 ## 6. Resume Conditions
 
-This task can move out of blocked state only after all of the following arrive:
+`PH1GC-PARTNER-002` can resume only after an owner can attach all of the
+following:
 
-1. Approved issuer or bank API contract package
-2. Sandbox credentials plus network allowlist or mTLS requirements
-3. Issuer-approved eligible, ineligible, timeout, and rate-limit fixtures
-4. Issuer-approved timeout and retry guidance
-5. Sponsor or issuer sign-off for manual-review release rules
-6. Sensitive-data handling and retention approval for this flow
+1. Redacted issuer/bank sandbox credential reference plus allowlist path
+2. Issuer-approved allowed test card / reference fixture matrix
+3. Real sandbox outcome evidence for `eligible`, `ineligible`, and
+   `manual_review`
+4. Real sandbox timeout / retry evidence
+5. Booking record linkage showing `eligibilityVerificationId`
+6. Billing/reporting linkage showing invoice/export propagation
+7. Audit-row linkage showing masked reference handling
 
-After those inputs arrive:
+If trunk needs the reserved hold-state sidecar path before those inputs arrive,
+replay the clean restore from `origin/codex2/ph1gc-partner-002@bddba93c` onto a
+fresh `origin/dev` branch instead of merging this older audit lineage.
 
-1. Attach the redacted evidence under `support/sidecars/PARTNER-ELIG-LIVE-001/`.
-2. Run the real issuer sandbox verification flow using the approved fixtures.
-3. Capture the seven section-E proof items with dated logs or screenshots.
-4. Uplift the workflow gate read to `PASS (sandbox evidence)` only if the proof
-   pack is complete and no mock-only artifact is carrying the claim.
+Once the external inputs exist, update this sidecar with dated evidence
+pointers and only then promote the workflow gate read to
+`PASS (sandbox evidence)`.
 
 ---
 
 ## 7. Verification Notes
 
-Verification in this task was source review only:
+Verification in this task was source review and branch-lineage validation only:
 
-- reviewed canonical machine truth for `PARTNER-ELIG-LIVE-001`,
-  `PRT-SPEC-001`, and the two `PARTNER-ELIG-LIVE-001-UNBLOCK-*` helpers
-- verified that canonical `PARTNER-ELIG-LIVE-001` is already closed out at
-  commit `5213efc`, while `origin/dev` still lacks this sidecar path
-- reviewed the dispatch-embedded task brief and current planning notes
-- reviewed the partner eligibility spec and manual-review runbook
-- reviewed `EXT-001` blocker definitions
-- confirmed that no repo-local artifact currently carries real issuer sandbox
-  credentials, issuer-approved fixtures, or dated sandbox proof
+- confirmed `origin/dev` still lacks `support/sidecars/PARTNER-ELIG-LIVE-001/`
+- confirmed the clean replay branch is `origin/codex2/ph1gc-partner-002@bddba93c`
+- confirmed the current `codex/ph1gc-partner-002` branch is older audit
+  history and should not claim merge-readiness
+- confirmed the partner spec still requires real issuer sandbox evidence and
+  rejects mocked card data
+- confirmed `EXT-001` still defines the same unresolved external input set
 
-No live issuer probe was executed in this task because the required external
-issuer or bank sandbox package is still absent.
+No live issuer sandbox probe was executed in this task because the required
+external credentials, allowed test cards, and approvals are still absent.
+
+## 8. Repository Re-Verification
+
+The following repo-local materials were re-checked and are **not** acceptable
+substitutes for directive section E sandbox evidence:
+
+- `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md`
+  defines the contract and lists the required sandbox proof set, but does not
+  include issuer-issued evidence.
+- `tests/e2e/E2E-007-partner-airport-transfer.sh` and
+  `tests/e2e/E2E-008-partner-booking-cutover.sh` exercise repo-local/system
+  flows, but they do not prove execution against a real issuer sandbox with an
+  issuer-approved test card.
+- `tests/unit/*`, UAT docs, and reporting/billing specs mention
+  `eligibilityVerificationId`, `manual_review`, and downstream linkage fields,
+  but those are contract assertions, not sandbox transcripts.
+- `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` still declares
+  `EXT-001-BLK-001` through `EXT-001-BLK-006` open, which means the credential,
+  fixture, timeout, manual-review approval, and data-handling prerequisites are
+  still unmet.
+
+Therefore the only defensible machine-truth outcome remains:
+
+- `PH1GC-PARTNER-002` = `blocked_external`
+- `WF-PARTNER-001` must not be upgraded to `PASS (sandbox evidence)`
+- this sidecar remains a hold packet until real issuer sandbox evidence is
+  attached
