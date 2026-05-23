@@ -76,6 +76,28 @@ require_non_empty() {
   fi
 }
 
+assert_seed_tenant_exists() {
+  if [[ -z "${E2E_SEED_TENANT_ID:-}" ]]; then
+    log_fail "E2E_SEED_TENANT_ID must be set for RBAC negative coverage"
+    exit 1
+  fi
+
+  switch_platform_admin
+  http_call GET "/platform-admin/tenants"
+  assert_status "200"
+
+  if ! echo "$RESP_BODY" | jq -e --arg tenantId "$E2E_SEED_TENANT_ID" \
+    '.data.items[] | select((.id // .tenantId // .tenant_id) == $tenantId)' >/dev/null 2>&1; then
+    log_fail "Seed tenant ${E2E_SEED_TENANT_ID} is not visible to platform admin"
+    log_fail "Body: ${RESP_BODY}"
+    exit 1
+  fi
+
+  chain_set "seed" "tenantId" "$E2E_SEED_TENANT_ID"
+  save_evidence "$SCENARIO" "seed" "tenantId" "$E2E_SEED_TENANT_ID"
+  log_ok "Seed tenant ${E2E_SEED_TENANT_ID} is available for RBAC negative checks"
+}
+
 require_audit_jq() {
   local evidence_key="$1"
   local jq_filter="$2"
@@ -403,13 +425,17 @@ chain_set "identity" "actorId" "$(json_get_first '.data.actorId' '.data.actor_id
 save_evidence "$SCENARIO" "identity" "realm" "$(json_get '.data.realm')"
 log_ok "Platform admin identity context resolved"
 
+log_surface "Seed validation"
+assert_seed_tenant_exists
+
 log_surface "RBAC negative — tenant create blocked"
 switch_seed_tenant_admin
 http_call POST "/platform-admin/tenants" "$TENANT_CREATE_BODY"
 assert_status "403"
 require_error_code "AUTH_REALM_DENIED"
+RBAC_TENANT_CREATE_STATUS="$RESP_STATUS"
 assert_tenant_absent
-save_evidence "$SCENARIO" "rbac_negative" "tenant_create_status" "$RESP_STATUS"
+save_evidence "$SCENARIO" "rbac_negative" "tenant_create_status" "$RBAC_TENANT_CREATE_STATUS"
 log_ok "Tenant-admin actor cannot create platform tenants"
 
 log_surface "Tenant create"
@@ -603,8 +629,9 @@ switch_seed_tenant_admin
 http_call POST "/platform-admin/pricing-rules/${PRICING_RULE_ID}/publish" "$PRICING_PUBLISH_BODY"
 assert_status "403"
 require_error_code "AUTH_REALM_DENIED"
+RBAC_PRICING_PUBLISH_STATUS="$RESP_STATUS"
 assert_pricing_rule_state "draft"
-save_evidence "$SCENARIO" "rbac_negative" "pricing_publish_status" "$RESP_STATUS"
+save_evidence "$SCENARIO" "rbac_negative" "pricing_publish_status" "$RBAC_PRICING_PUBLISH_STATUS"
 log_ok "Tenant-admin actor cannot publish platform pricing rules"
 
 switch_platform_admin
@@ -748,6 +775,7 @@ log_ok "Audit log contains the full control-plane mutation chain"
 
 log_step "Chain continuity assertions"
 assert_chain "identity" "actorId"
+assert_chain "seed" "tenantId"
 assert_chain "tenant" "tenantId"
 assert_chain "partner" "entrySlug"
 assert_chain "credential" "keyId"
