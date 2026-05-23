@@ -169,5 +169,110 @@ class UnblockParentResolutionTest(unittest.TestCase):
         self.assertEqual(state["blockers"][0]["status"], "open")
 
 
+class GitMergeReconciliationTest(unittest.TestCase):
+    def _state(self) -> dict[str, object]:
+        return {
+            "tasks": [
+                {
+                    "id": "PH1GC-E2E-010",
+                    "owner": "Codex",
+                    "reviewer": "Claude",
+                    "status": "backlog",
+                    "next": "Waiting on dispatch.",
+                },
+                {
+                    "id": "PH1GC-COM-001",
+                    "owner": "Codex",
+                    "reviewer": "Claude",
+                    "status": "in_progress",
+                },
+                {
+                    "id": "PH1GC-DONE-EXAMPLE",
+                    "owner": "Codex2",
+                    "reviewer": "Codex",
+                    "status": "done",
+                },
+            ],
+            "blockers": [
+                {
+                    "task_id": "PH1GC-E2E-010",
+                    "owner": "Codex",
+                    "waiting_for": "Claude",
+                    "message": "Waiting on dispatch.",
+                    "status": "open",
+                    "created_at": "2026-05-18T00:00:00Z",
+                }
+            ],
+            "handoffs": [
+                {
+                    "task_id": "PH1GC-E2E-010",
+                    "from": "Claude",
+                    "to": "Codex",
+                    "message": "Owner finalize",
+                    "status": "pending",
+                    "created_at": "2026-05-18T00:00:00Z",
+                }
+            ],
+        }
+
+    def test_reconcile_marks_merged_task_done(self) -> None:
+        state = self._state()
+        closeouts = {
+            "PH1GC-E2E-010": {
+                "sha": "49b49a25002a611c5b3433e3ee36c11a73fb7b83",
+                "subject": "PH1GC-E2E-010: governance-aware billing/reporting E2E script (#256)",
+                "commit_date": "2026-05-23T13:48:47+00:00",
+            }
+        }
+        with mock.patch.object(ai_status, "_git_log_closeouts", return_value=closeouts), mock.patch.object(ai_status, "append_log"):
+            reconciled = ai_status.apply_git_merge_reconciliation(state)
+
+        self.assertEqual(len(reconciled), 1)
+        self.assertEqual(reconciled[0]["task_id"], "PH1GC-E2E-010")
+        self.assertEqual(reconciled[0]["prior_status"], "backlog")
+
+        task = next(t for t in state["tasks"] if t["id"] == "PH1GC-E2E-010")
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(task["commit_hash"], "49b49a25002a611c5b3433e3ee36c11a73fb7b83")
+        self.assertEqual(task["push_remote"], "origin")
+        self.assertEqual(task["push_branch"], "dev")
+        self.assertEqual(task["push_ref"], "origin/dev")
+        self.assertEqual(task["reconciled_from_git_prior_status"], "backlog")
+        self.assertEqual(state["blockers"][0]["status"], "resolved")
+        self.assertEqual(state["handoffs"][0]["status"], "done")
+
+    def test_reconcile_skips_already_done_tasks(self) -> None:
+        state = self._state()
+        closeouts = {
+            "PH1GC-DONE-EXAMPLE": {
+                "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                "subject": "PH1GC-DONE-EXAMPLE: already shipped",
+                "commit_date": "2026-05-23T13:48:47+00:00",
+            }
+        }
+        with mock.patch.object(ai_status, "_git_log_closeouts", return_value=closeouts), mock.patch.object(ai_status, "append_log"):
+            reconciled = ai_status.apply_git_merge_reconciliation(state)
+
+        self.assertEqual(reconciled, [])
+
+    def test_reconcile_skips_tasks_without_closeout_commit(self) -> None:
+        state = self._state()
+        with mock.patch.object(ai_status, "_git_log_closeouts", return_value={}), mock.patch.object(ai_status, "append_log"):
+            reconciled = ai_status.apply_git_merge_reconciliation(state)
+
+        self.assertEqual(reconciled, [])
+        task = next(t for t in state["tasks"] if t["id"] == "PH1GC-E2E-010")
+        self.assertEqual(task["status"], "backlog")
+
+    def test_closeout_regex_excludes_anchor_commits(self) -> None:
+        self.assertIsNotNone(
+            ai_status.CLOSEOUT_SUBJECT_RE.match("PH1GC-E2E-010: governance-aware E2E script (#256)")
+        )
+        # Anchor commits with `wip(TASK):` prefix must NOT be treated as closeouts.
+        self.assertIsNone(
+            ai_status.CLOSEOUT_SUBJECT_RE.match("wip(PH1GC-E2E-010): in-flight anchor")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2745,6 +2745,45 @@ def sync_status_pipeline(config: dict[str, Any]) -> bool:
     return False
 
 
+def reconcile_status_from_git(config: dict[str, Any]) -> bool:
+    """Bridge git-merged closeouts → state-machine `done` once per tick.
+
+    Workers occasionally ship a task via PR + merge but skip `ai-status.sh
+    done`, leaving ai-status.json stuck in in_progress/review/backlog. This
+    invokes the dedicated reconcile-from-git command which scans origin/dev
+    for closeout commits and finalizes any drift. Cheap, idempotent.
+    """
+    script = config_path(config, "status_file").parent / "scripts" / "ai_status.py"
+    if not script.exists():
+        return False
+    result = subprocess.run(
+        [sys.executable, str(script), "reconcile-from-git"],
+        cwd=str(config_path(config, "status_file").parent),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        write_activity_log(
+            config,
+            {
+                "type": "reconcile_status_from_git_failed",
+                "message": result.stderr.strip() or result.stdout.strip() or "unknown error",
+            },
+        )
+        return False
+    stdout = result.stdout.strip()
+    if stdout and "no drift" not in stdout:
+        for line in stdout.splitlines():
+            write_activity_log(
+                config,
+                {
+                    "type": "reconcile_status_from_git",
+                    "message": line.strip(),
+                },
+            )
+    return True
+
+
 def brief_reason_text(text: str | None, max_length: int = 240) -> str:
     raw = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(raw) <= max_length:
@@ -7338,6 +7377,7 @@ def run_once(
     desired_focus_mode = desired_focus_mode_from_status(status)
     changed = poll_workers(config, state) or changed
     changed = reconcile_queue_records(config, state) or changed
+    reconcile_status_from_git(config)
     changed = prune_event_queue(config, state) or changed
     changed = prune_completed_dispatch_pauses(state, status, config=config, provider_report=provider_report) or changed
     changed = prune_failure_streaks(state, status) or changed
