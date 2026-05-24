@@ -21,7 +21,7 @@ substitution.
 
 1. `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` still records
    only a dated partial external attempt plus today's blocker revalidation. The
-   latest captured probes at `2026-05-24T15:48Z` still never reached a real
+   latest captured probes at `2026-05-24T15:59Z` still never reached a real
    partner path because non-interactive identity-token minting failed, the
    older `run.app` staging host returned `404`, and the documented internal
    staging host returned `NXDOMAIN`.
@@ -55,6 +55,7 @@ Observed results:
 - `gcloud auth print-identity-token` still fails with reauthentication
   required and non-interactive execution blocked
 - all three `drts-api-kdhu6wzufa-uc.a.run.app` probes still return HTTP `404`
+  at `2026-05-24T15:58:55Z`
 - `nslookup api-staging.drts.internal` still returns `NXDOMAIN`
 - direct `curl` probes to `api-staging.drts.internal` still fail with
   `Could not resolve host`
