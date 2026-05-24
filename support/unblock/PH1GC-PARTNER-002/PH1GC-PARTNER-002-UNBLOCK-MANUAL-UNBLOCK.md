@@ -4,8 +4,8 @@ Status: resolved by canonical parent evidence already landed on 2026-05-19
 Task: `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK`
 Dispatch parent: `PH1GC-PARTNER-002`
 Canonical parent: `PARTNER-ELIG-LIVE-001`
-Owner: `Codex2`
-Reviewer: `Codex`
+Owner: `Codex`
+Reviewer: `Codex2`
 
 ## Summary
 
@@ -41,6 +41,23 @@ exists under:
 Those tasks already diagnose, narrow, and document the remaining blocker.
 This helper therefore serves as a dispatch-to-canonical bridge artifact.
 
+## Regression diagnosis
+
+The current blocker is a machine-truth regression, not a new partner-sandbox
+gap.
+
+Activity-log evidence shows this helper already reached `done` on
+2026-05-23T14:51:36Z with owner closeout commit `8593a6ca` on
+`origin/codex2/ph1gc-partner-002-unblock-manual-unblock`. However, the current
+committed `ai-status.json` ancestry still leaves `PH1GC-PARTNER-002.next` at
+the older 2026-05-22 generic "BLOCKED EXTERNAL" summary and does not carry this
+helper's closeout state on the same ancestry line.
+
+That mismatch makes the chairman see a dependency-ready blocked parent without
+the already-finished dispatch bridge, so it re-created
+`PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK` on 2026-05-24T14:27:30Z even though
+the repo-local diagnosis had already been completed.
+
 ## Canonical evidence
 
 1. `docs/03-runbooks/phase1-release-truth-sync-20260519.md`
@@ -69,8 +86,10 @@ to the concrete external-gate sequence required by the helper reviews:
 - attach redacted external evidence there
 - rerun the live issuer proof
 
-This closes the remaining dispatch-level mismatch where machine truth still had
-the old generic closeout summary instead of the canonical external next step.
+The required repair is therefore narrow: keep the existing bridge artifact,
+reassert the parent task's `next` field to the canonical `EXT-001-BLK-001`
+through `EXT-001-BLK-006` handoff sequence, and return this helper to normal
+review/closeout flow instead of creating a second canonical parent.
 
 ## Remaining blocker
 
