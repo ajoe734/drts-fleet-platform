@@ -3,7 +3,7 @@
 **Task ID:** `PH1GC-PROD-001-UNBLOCK-PLANNING-DECISION`
 **Parent task:** `PH1GC-PROD-001`
 **Owner:** `Codex2`
-**Reviewer:** `Codex`
+**Reviewer:** `Gemini2`
 **Decision date:** 2026-05-22
 **Decision type:** Routing decision (no new product/contract change)
 
