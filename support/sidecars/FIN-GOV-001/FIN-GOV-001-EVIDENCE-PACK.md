@@ -210,6 +210,7 @@ Probe target:
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26332046380`
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26332590728`
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26366139732`
+  - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26367273638`
 - branch / commits under test:
   - `origin/codex/ph1gc-fin-gov-001@f8cc61e7` on 2026-05-22
   - `origin/codex/ph1gc-fin-gov-001@2cc083d6` on 2026-05-23
@@ -219,6 +220,7 @@ Probe target:
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2` on 2026-05-23
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787` on 2026-05-24
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b` on 2026-05-24
+  - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5c257292` on 2026-05-24
 
 Observed results:
 
@@ -244,7 +246,8 @@ Observed results:
   - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, and GitHub warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to upload because the shell never started.
 - a fresh 2026-05-24 rerun on the probe commit, `26365672590` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787`, added an access-token probe before the IAP ID-token step. That probe showed the same service-account IAM gap on the access-token path: `gcloud auth print-access-token` failed with `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)`, and the follow-on `Mint IAP verification token` step still failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
 - a fresh 2026-05-24 rerun on the current auth-token probe commit, `26366139732` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b`, proved that the GitHub federated `auth_token` is not a valid IAP bearer fallback for this staging host. The new `Probe IAP health with auth_token` step reached the protected host and got `HTTP 401` with body `Invalid IAP credentials: Unable to parse JWT`, so the federated token is the wrong shape for this ingress. The follow-on `Probe IAP health with access token` still failed at `gcloud auth print-access-token` with `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)`, and the fallback `Mint IAP verification token` step again failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
-- the latest governed staging rerun was `26366139732` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b`; the current pushed docs head only tightens the evidence wording around that rerun and does not claim any later live execution.
+- a fresh 2026-05-24 rerun on the current blocker-refresh head, `26367273638` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5c257292`, reconfirmed the same external gate on the actual latest pushed task branch. `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all succeeded; `Probe IAP health with auth_token` again returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; the `Probe IAP health with access token` step remained continue-on-error and still logged `403 Permission 'iam.serviceAccounts.getAccessToken' denied`; and the rerun failed at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped, and no reviewer-readable invoice/report artifact was produced.
+- the latest governed staging rerun is `26367273638` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5c257292`; the blocker has now been reproduced on the current pushed branch head itself, not just on earlier probe commits.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
@@ -282,9 +285,9 @@ currently blocked by four concrete environment issues:
 4. the repository-configured GitHub Actions staging path now reaches GCP after
    the branch-local `DEV_WIF_PROVIDER` fallback, but no repo-local bearer path
    can reach the protected staging API:
-   - the federated `auth_token` path is rejected by IAP with `HTTP 401 Invalid IAP credentials: Unable to parse JWT` (`26366139732`)
-   - the service-account access-token path still fails with `iam.serviceAccounts.getAccessToken` denied (`26365672590`, `26366139732`)
-   - the service-account ID-token path still fails with `iam.serviceAccounts.getOpenIdToken` denied (`26327904346`, `26332046380`, `26332590728`, `26363924897`, `26365672590`, `26366139732`)
+   - the federated `auth_token` path is rejected by IAP with `HTTP 401 Invalid IAP credentials: Unable to parse JWT` (`26366139732`, `26367273638`)
+   - the service-account access-token path still fails with `iam.serviceAccounts.getAccessToken` denied (`26365672590`, `26366139732`, `26367273638`)
+   - the service-account ID-token path still fails with `iam.serviceAccounts.getOpenIdToken` denied (`26327904346`, `26332046380`, `26332590728`, `26363924897`, `26365672590`, `26366139732`, `26367273638`)
 
 Until one of those is resolved, this task can only deliver a consolidated
 static-evidence packet plus a reproducible blocker record. The 2026-05-19
