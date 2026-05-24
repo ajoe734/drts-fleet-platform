@@ -57,7 +57,6 @@ That mismatch makes the chairman see a dependency-ready blocked parent without
 the already-finished dispatch bridge, so it re-created
 `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK` on 2026-05-24T14:27:30Z even though
 the repo-local diagnosis had already been completed.
-
 ## Canonical evidence
 
 1. `docs/03-runbooks/phase1-release-truth-sync-20260519.md`
