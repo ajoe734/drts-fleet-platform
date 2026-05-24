@@ -128,6 +128,24 @@ an explicit audit record and by reaffirming the real parent replay target.
   accidental replay target
 - The repair clarifies branch ownership and preserves all existing refs
 
+## Closeout Evidence
+
+- Reviewed task-owned anchor commit:
+  `a1718d27f4e488fd8fb764760c3ba1ee6461a8c6`
+  (`wip(PH1GC-FWD-001-UNBLOCK-HISTORY-REPAIR): anchor helper history diagnosis`)
+- Reviewer approval was recorded against
+  `origin/codex2/ph1gc-fwd-001-unblock-history-repair@a1718d27` on
+  `2026-05-24T15:31:46Z`
+- Task-scoped remote branch exists:
+  `origin/codex2/ph1gc-fwd-001-unblock-history-repair`
+- Task-scoped draft PR remains open to `dev`:
+  `#277 https://github.com/ajoe734/drts-fleet-platform/pull/277`
+- Canonical parent replay branch remains:
+  `origin/codex2/ph1gc-fwd-001 @ bf1a1256846dce552ca780e1afbf7bd4b5176324`
+- Owner closeout requirement for this dispatch is therefore limited to a formal
+  non-force closeout commit plus `done` machine-truth finalization; no history
+  rewrite or parent-branch replay is required
+
 ## Verification Performed
 
 - Read `AI_COLLABORATION_GUIDE.md`
