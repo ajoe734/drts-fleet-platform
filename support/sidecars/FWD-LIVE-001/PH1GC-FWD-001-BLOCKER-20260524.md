@@ -71,6 +71,18 @@ Second same-day rerun observed at `2026-05-24T16:31:23Z` to
   at `2026-05-24T16:31:23Z`
 - `nslookup api-staging.drts.internal` still returns `NXDOMAIN`
 
+Third same-day rerun observed at `2026-05-24T17:31:43Z`:
+
+- active `gcloud` account still resolves to `bobo.du@cctech-support.com`
+- `gcloud auth print-identity-token` still fails with reauthentication
+  required, non-interactive execution blocked, and instructs
+  `gcloud auth login`
+- all three `drts-api-kdhu6wzufa-uc.a.run.app` probes still return HTTP `404`
+  at `2026-05-24T17:31:43Z`
+- `nslookup api-staging.drts.internal` still returns `NXDOMAIN`
+- direct `curl` probes to `api-staging.drts.internal` still fail with
+  `Could not resolve host`
+
 ## Required External Handoff Bundle
 
 The parent can resume only after the forwarder technical owner or integration
