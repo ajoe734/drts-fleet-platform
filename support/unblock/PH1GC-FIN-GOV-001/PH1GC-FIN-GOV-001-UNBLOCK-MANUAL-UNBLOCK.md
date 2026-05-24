@@ -5,102 +5,122 @@
 - Task: `PH1GC-FIN-GOV-001-UNBLOCK-MANUAL-UNBLOCK`
 - Parent: `PH1GC-FIN-GOV-001`
 - Owner: `Codex`
-- Reviewer: `Codex2`
-- Audit date: `2026-05-22`
+- Reviewer: `Gemini2`
+- Audit date: `2026-05-24`
 
-## Diagnosis
+## Current Diagnosis
 
-`PH1GC-FIN-GOV-001` is not blocked by the spec/UAT documents anymore.
-Those two artifacts are already visible on `origin/dev` via commit
-`6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`:
+`PH1GC-FIN-GOV-001` is no longer blocked by missing repo-local spec, UAT, or
+E2E wiring. The remaining blocker is now a single live-staging evidence gap.
 
-- `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
-- `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`
+What is already true:
 
-The remaining blocker is the acceptance chain after those docs:
+1. The directive-path spec and UAT are already on `origin/dev` via commit
+   `6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`.
+   - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
+   - `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`
+2. `PH1GC-E2E-010` is already closed on `origin/dev` via commit
+   `49b49a25002a611c5b3433e3ee36c11a73fb7b83`
+   (`PH1GC-E2E-010: governance-aware billing/reporting E2E script (#256)`).
+3. The parent delivery branch
+   `origin/codex/ph1gc-fin-gov-001-rebased-20260523@53bd62c16a84e3ffe3ea9d89ca4e4e08d6f570fd`
+   already carries the repo-local release-gate chain:
+   - `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` has
+     `WF-FIN-GOV-001 = PASS (static evidence)`, with explicit wording that the
+     uplift to `PASS (live staging evidence)` requires a green
+     `STRICT_VERIFICATION_BODY=1` rerun.
+   - `docs/04-uat/fbp-014a-e2e-matrix.md` has the `E2E-010` row and documents
+     default-mode vs strict-mode behavior for the governance verification body.
+   - `tests/e2e/README.md` marks `E2E-010` as a shell whose live uplift is
+     still blocked pending a governed staging rerun.
+   - `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md`
+     truthfully keeps the family at `PASS (static evidence)`.
 
-1. `PH1GC-E2E-010` has not been materialized on a PH1GC delivery branch or on
-   `origin/dev`.
-   - `ai-status.json` still keeps `PH1GC-E2E-010` in `backlog`, owned by
-     `Codex`, and formally dependent on `PH1GC-FIN-GOV-001`.
-   - The reusable earlier-wave implementation already exists at
-     `origin/claude2/wf-fin-gov-001-e2e` commit
-     `ddc02c4e24ecf924e83d47f0cc86c1c21ce223f6`, but that branch has not been
-     adopted into the PH1GC task chain.
-2. `PH1GC-MATRIX-002` already has branch-scoped closeout evidence, but that
-   does not satisfy the parent acceptance yet.
-   - `ai-status.json` marks `PH1GC-MATRIX-002` as `done` with commit
-     `07b3a245a87a93fbea09c806e8a7ea5c085d3df5` on
-     `origin/codex2/ph1gc-matrix-002`.
-   - That branch contains the `E2E-010` row in
-     `docs/04-uat/fbp-014a-e2e-matrix.md`, but the file is not updated on
-     `origin/dev`, and the task still formally depends on `PH1GC-E2E-010`.
-3. Even after the repo-local E2E/matrix chain lands, the release-gate uplift is
-   still short of the parent's current acceptance wording.
-   - The candidate `WF-FIN-GOV-001` row on
-     `origin/codex2/ph1gc-matrix-001` sets the gate read to
-     `PASS (repo-local)`, not `PASS (live staging evidence)`.
-   - That same row explicitly says the uplift to `PASS (live staging evidence)`
-     requires a staging run against real `WF-TGV-001` data.
-4. The current live-evidence anchor on `origin/dev` still records that the
-   governance-aware finance uplift is blocked externally.
-   - `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md` says the
-     governance-aware sub-slice is "not yet elevated to PASS (live staging
-     evidence)" and documents the concrete blocker as unavailable non-interactive
-     IAP credentials / no usable direct Cloud Run fallback for the staging rerun.
+The remaining blocker is therefore not a missing file or missing repo-local
+implementation branch. It is the inability to obtain reviewer-usable live
+staging evidence for the governed `WF-FIN-GOV-001` rerun.
+
+## Latest Blocking Evidence
+
+The most recent reviewer-readable attempt is GitHub Actions run
+`26363924897` on `2026-05-24`, against branch
+`codex/ph1gc-fin-gov-001-rebased-20260523` at commit
+`f6ddefffbc8ca27812d538a9cf102bc330b58fea`.
+
+Observed job state:
+
+1. `staging-e2e-010` job `77604277310` successfully completed:
+   - `Validate staging GitHub config`
+   - `Authenticate to GCP`
+   - `Set up Cloud SDK`
+   - `Best-effort fetch internal key`
+2. The same job then failed at:
+   - `Mint IAP verification token`
+   - error: `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`
+3. Because token minting failed before the E2E shell could start:
+   - `Syntax check E2E-010` was skipped
+   - `Run E2E-010 against staging` was skipped
+   - no `e2e-010-console.log`, `e2e-010-evidence.log`, or
+     `e2e-010-chain.json` was produced as reviewer-readable output
+   - no governed invoice/report artifact exists for `WF-FIN-GOV-001`
+
+This confirms the current blocker is the staging IAP/OpenID-token path, not the
+earlier repo-local E2E/matrix dependency chain.
 
 ## Remaining Blocker
 
-The parent is therefore blocked on two distinct surfaces:
+`PH1GC-FIN-GOV-001` remains blocked on one concrete external dependency:
 
-1. Repo-local delivery gap:
-   `PH1GC-E2E-010` still needs a real PH1GC implementation branch that brings
-   `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` onto the current
-   gap-closure chain, after which `PH1GC-MATRIX-002` must be replayed or
-   re-verified on top so the E2E matrix update is truthful on `origin/dev`.
-2. Live-staging evidence gap:
-   the current matrix candidate and evidence pack only justify
-   `PASS (repo-local)` plus a future live uplift, while the parent acceptance
-   still expects `WF-FIN-GOV-001 = PASS (live staging evidence)`.
+1. the staging deployer / WIF service-account path still cannot mint an
+   email-bearing OpenID token that IAP accepts for the governed `E2E-010`
+   staging rerun
+
+Until that permission gap is cleared, the parent cannot satisfy its acceptance
+item:
+
+- `Gate-read update for WF-FIN-GOV-001 = PASS (live staging evidence) drives matrix change.`
+
+The truthful gate read remains `PASS (static evidence)`, not
+`PASS (live staging evidence)`.
 
 ## Parent Resume Sequence
 
-1. `Codex` should lift
-   `origin/claude2/wf-fin-gov-001-e2e@ddc02c4e24ecf924e83d47f0cc86c1c21ce223f6`
-   into the PH1GC chain for `PH1GC-E2E-010`, preserving the 13-field
-   assertions and hard-fail-on-missing-seed behavior.
-2. `Codex2` should then replay or re-verify
-   `origin/codex2/ph1gc-matrix-002@07b3a245a87a93fbea09c806e8a7ea5c085d3df5`
-   so `docs/04-uat/fbp-014a-e2e-matrix.md` lands with the `E2E-010` /
-   `WF-FIN-GOV-001` row on the same delivery path.
-3. After the repo-local chain is merged, `Codex2` should not close
-   `PH1GC-FIN-GOV-001` by claiming `PASS (live staging evidence)` unless a
-   fresh staging rerun exists; the current `WF-FIN-GOV-001` matrix candidate is
-   only `PASS (repo-local)`.
-4. If the parent acceptance keeps the live-staging requirement, the remaining
-   work is a staging evidence pass that captures reviewer-readable proof for the
-   governance-aware 13-field body and uplifts `WF-FIN-GOV-001` from
-   `PASS (repo-local)` to `PASS (live staging evidence)`.
+The parent's next actionable path is now:
+
+1. Keep `PH1GC-FIN-GOV-001` in `blocked`; do not reopen a repo-local code/doc
+   subtask for `E2E-010` or the matrix row.
+2. Restore a non-interactive staging bearer path that can mint an email-bearing
+   IAP token for the governed rerun.
+   - On the GitHub Actions path, this specifically means granting the staging
+     deployer identity the permission required to mint OpenID tokens
+     (`iam.serviceAccounts.getOpenIdToken`).
+   - If the workflow still needs `gcloud`-based secret access, the same path
+     may also need `iam.serviceAccounts.getAccessToken`.
+3. Rerun `ci-integ.yml` with `run_staging_e2e_010=true` against the current
+   owner branch head
+   `origin/codex/ph1gc-fin-gov-001-rebased-20260523@53bd62c16a84e3ffe3ea9d89ca4e4e08d6f570fd`.
+4. Only after that rerun produces:
+   - a green `STRICT_VERIFICATION_BODY=1` governed `E2E-010` execution, and
+   - reviewer-readable invoice/report evidence for the governed body
+   should the owner uplift `WF-FIN-GOV-001` from `PASS (static evidence)` to
+   `PASS (live staging evidence)` and close the parent.
 
 ## Conclusion
 
-This helper does not unblock the parent by changing product code. It narrows
-the blocker to a specific resume path:
+This helper no longer points the parent at a missing E2E or matrix dependency.
+It narrows the blocker to the current live-evidence gate:
 
-- first adopt the existing `WF-FIN-GOV-001-E2E` implementation into
-  `PH1GC-E2E-010`
-- then replay the `PH1GC-MATRIX-002` E2E matrix row on the same chain
-- then either supply fresh live staging evidence for `WF-FIN-GOV-001` or keep
-  the parent blocked on that external evidence gap
+- repo-local spec/UAT/E2E wiring exists
+- the parent delivery branch already carries the truthful `PASS (static evidence)`
+  release posture
+- the only remaining unblock step is restoring IAP/OpenID token minting so the
+  governed staging rerun can produce live evidence
 
 ## Delivery Evidence
 
 - Diagnosis artifact branch: `codex/ph1gc-fin-gov-001-unblock-manual-unblock`
 - Diagnosis artifact PR: `#243` against `dev`
-- Initial diagnosis commit already on the task branch:
-  `a6578bf59338fe2eb2c1419782ed6a3a64b976e3`
-- Canonical machine truth was updated so `PH1GC-FIN-GOV-001.next` points to the
-  same resume sequence captured above: adopt
-  `origin/claude2/wf-fin-gov-001-e2e@ddc02c4`, replay
-  `origin/codex2/ph1gc-matrix-002@07b3a245`, then keep the parent blocked until
-  fresh `WF-FIN-GOV-001` live-staging evidence exists
+- Parent evidence branch under analysis:
+  `origin/codex/ph1gc-fin-gov-001-rebased-20260523`
+- Latest blocking CI evidence:
+  `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26363924897`
