@@ -20,11 +20,11 @@ substitution.
 ## Why The Task Is Still Blocked
 
 1. `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` still records
-   only a dated partial external attempt plus today's blocker revalidation. The
-   latest captured probes at `2026-05-24T15:59Z` still never reached a real
-   partner path because non-interactive identity-token minting failed, the
-   older `run.app` staging host returned `404`, and the documented internal
-   staging host returned `NXDOMAIN`.
+   only a dated partial external attempt plus today's blocker revalidation. A
+   second same-day rerun at `2026-05-24T16:31Z` to `2026-05-24T16:32Z` still
+   never reached a real partner path because non-interactive identity-token
+   minting failed, the older `run.app` staging host returned `404`, and the
+   documented internal staging host returned `NXDOMAIN`.
 2. `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md` still keeps
    `EXT-002-BLK-001` through `EXT-002-BLK-007` open for the real adapter path:
    contract authority, sandbox credentials, webhook signing/replay rules, live
@@ -59,6 +59,17 @@ Observed results:
 - `nslookup api-staging.drts.internal` still returns `NXDOMAIN`
 - direct `curl` probes to `api-staging.drts.internal` still fail with
   `Could not resolve host`
+
+Second same-day rerun observed at `2026-05-24T16:31:23Z` to
+`2026-05-24T16:32:00Z`:
+
+- active `gcloud` account still resolves to `bobo.du@cctech-support.com`
+- `gcloud auth print-identity-token` still fails with reauthentication
+  required, non-interactive execution blocked, and instructs
+  `gcloud auth login`
+- all three `drts-api-kdhu6wzufa-uc.a.run.app` probes still return HTTP `404`
+  at `2026-05-24T16:31:23Z`
+- `nslookup api-staging.drts.internal` still returns `NXDOMAIN`
 
 ## Required External Handoff Bundle
 
