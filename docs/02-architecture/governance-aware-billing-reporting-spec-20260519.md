@@ -147,6 +147,8 @@ The following transitions on a governance-aware billing record are not permitted
 
 The verification body above must be asserted end-to-end by `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (driven by `PH1GC-E2E-010`) and covered scenario-by-scenario in `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`.
 
+The paired UAT's `Verification-body traceability` section is the reviewer-facing field-to-scenario map for these 13 strict fields. `E2E-010` keeps the same field inventory in one explicit shell list so spec/UAT/E2E drift shows up as a reviewable diff instead of a silent omission.
+
 ### 6.1 Hard-fail contract regressions (always enforced)
 
 The E2E script **must** hard-fail (non-zero exit) when any of the following contract regressions are observed. Silent passes are not permitted:
