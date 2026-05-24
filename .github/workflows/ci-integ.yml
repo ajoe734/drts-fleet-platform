@@ -178,6 +178,23 @@ jobs:
             echo "::notice::Optional secret ${secret_name} not accessible; continuing without E2E_INTERNAL_KEY."
           fi
 
+      - name: Resolve direct Cloud Run API origin
+        id: direct_api
+        run: |
+          set -euo pipefail
+
+          api_url="$(gcloud run services describe drts-api \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --format='value(status.url)' 2>/dev/null || true)"
+
+          echo "url=${api_url}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${api_url}" ]]; then
+            echo "::notice::Resolved direct Cloud Run API origin: ${api_url}"
+          else
+            echo "::warning::Could not resolve direct Cloud Run API origin for drts-api."
+          fi
+
       - name: Probe IAP health with auth_token
         id: auth_token_probe
         continue-on-error: true
@@ -354,11 +371,50 @@ jobs:
           echo "Dev fallback id-token probe returned HTTP ${status}"
           cat "${RUNNER_TEMP}/e2e-010-dev-id-token-health-body.txt"
 
-      - name: Fail when no staging bearer path works
-        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_id_token_probe.outputs.status != '200' }}
+      - name: Mint dev fallback direct Cloud Run token
+        id: dev_direct_api_token
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_id_token_probe.outputs.status != '200' && steps.direct_api.outputs.url != '' && env.DEV_WIF_PROVIDER_VALUE != '' && env.DEV_DEPLOYER_SERVICE_ACCOUNT != '' }}
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEV_DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ steps.direct_api.outputs.url }}
+          id_token_include_email: true
+
+      - name: Probe direct Cloud Run health with dev fallback token
+        id: dev_direct_api_probe
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_id_token_probe.outputs.status != '200' && steps.dev_direct_api_token.outputs.id_token != '' && steps.direct_api.outputs.url != '' }}
+        continue-on-error: true
         run: |
-          echo "::error::Unable to obtain an IAP bearer token that returns HTTP 200 from ${CONTROL_PLANE_API_ORIGIN}/api/health."
-          echo "::error::Tried auth_token, primary service-account id token, shared fallback id token, and dev fallback id token."
+          set -euo pipefail
+
+          token="${{ steps.dev_direct_api_token.outputs.id_token }}"
+          api_url="${{ steps.direct_api.outputs.url }}"
+          echo "::add-mask::$token"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-dev-direct-api-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${api_url}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+            printf 'E2E_API_URL=%s\n' "$api_url" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_DIRECT_API_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          echo "Dev direct-API probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-dev-direct-api-health-body.txt"
+
+      - name: Fail when no staging bearer path works
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_id_token_probe.outputs.status != '200' && steps.dev_direct_api_probe.outputs.status != '200' }}
+        run: |
+          echo "::error::Unable to obtain a staging bearer path that returns HTTP 200 from either ${CONTROL_PLANE_API_ORIGIN}/api/health or the direct Cloud Run API origin."
+          echo "::error::Tried auth_token, primary service-account id token, shared fallback id token, dev fallback id token, and dev fallback direct Cloud Run token."
           exit 1
 
       - name: Syntax check E2E-010
@@ -366,7 +422,7 @@ jobs:
 
       - name: Run E2E-010 against staging
         env:
-          E2E_API_URL: ${{ env.CONTROL_PLANE_API_ORIGIN }}
+          E2E_API_URL: ${{ env.E2E_API_URL || env.CONTROL_PLANE_API_ORIGIN }}
           E2E_CHAIN_FILE: ${{ runner.temp }}/e2e-010-chain.json
           E2E_EVIDENCE_FILE: ${{ runner.temp }}/e2e-010-evidence.log
           STRICT_VERIFICATION_BODY: 1
@@ -390,6 +446,7 @@ jobs:
             ${{ runner.temp }}/e2e-010-primary-id-token-health-body.txt
             ${{ runner.temp }}/e2e-010-shared-id-token-health-body.txt
             ${{ runner.temp }}/e2e-010-dev-id-token-health-body.txt
+            ${{ runner.temp }}/e2e-010-dev-direct-api-health-body.txt
 
   # Aggregate job for branch-protection "required check" simplicity.
   ci-integ:
