@@ -59,6 +59,12 @@ still rooted on stale ancestry.
    `codex2/ph1gc-drv-mp-002-sidecar-acceptance` is a local-only worktree still
    parked at `bf176edd`, and several local helper worktrees still point at
    branch names that either have no remote branch or are stale-base audit refs.
+8. A follow-up current-dev-based owner-evidence branch now exists:
+   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair-unblock-history-repair @ 02946f7f72031a5bf0318dae5bfc1f01eccd7db5`
+   with PR `#278`, `mergeStateStatus=CLEAN`. It does not replay the sidecar
+   tree itself; it records the non-destructive repair conclusion that freezes
+   `origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaaf` as the
+   canonical replay branch and demotes the owner helper branch to audit-only.
 
 ## Exact Contamination
 
@@ -118,14 +124,19 @@ treating the stale-base branches as audit evidence only.
 5. Leave `codex2/ph1gc-drv-mp-002-sidecar-acceptance` and the stale-base audit
    branches in
    place for audit. They do not need renaming or history rewrite.
-6. Parent owner `Codex2` should update the parent with this exact next step:
+6. Use owner evidence branch
+   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair-unblock-history-repair @ 02946f7f72031a5bf0318dae5bfc1f01eccd7db5`
+   / PR `#278` as the clean machine-review surface for this repair note. It is
+   based directly on current `origin/dev` and keeps the repair conclusion
+   reviewable without force-pushing or rebasing the stale owner helper branch.
+7. Parent owner `Codex2` should update the parent with this exact next step:
 
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh progress PH1GC-DRV-MP-002 \
   "History repair: review/merge origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469 as the cleanest replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE. Treat origin/codex2/ph1gc-drv-mp-002 @ 9be1a098361ec90b4e30f26854d24441c1c59a8b, origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d (superseding ancestors 0f3f3b5588bb609430b40c9ca50406cc72920ca5 and 38ae69390790f98d627d55967a3739ef9f5b6403), and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance @ 249aafe611730de86965e976c7d0b1c6796b9548 as audit evidence only; no force-push required."
 ```
 
-7. If the control plane requires a review replay instead of a progress note,
+8. If the control plane requires a review replay instead of a progress note,
    use the same canonical branch in the handoff:
 
 ```bash
@@ -133,7 +144,7 @@ AI_NAME=Codex2 scripts/ai-status.sh handoff PH1GC-DRV-MP-002 Codex \
   "Replay review on canonical helper branch origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469. It is the cleanest pushed replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE; origin/codex2/ph1gc-drv-mp-002, origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d, and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance stay as audit evidence only."
 ```
 
-8. After that replay, the parent should remain blocked only on the external
+9. After that replay, the parent should remain blocked only on the external
    device-lab prerequisites already documented in
    `PH1GC-DRV-MP-002-UNBLOCK-MANUAL-UNBLOCK.md`, not on branch ambiguity.
 
@@ -145,6 +156,9 @@ AI_NAME=Codex2 scripts/ai-status.sh handoff PH1GC-DRV-MP-002 Codex \
   surface without touching the stale parent history.
 - The pushed `codex2` helper branch remains available as immutable provenance
   for the earlier owner-lane replay.
+- The clean current-dev-based owner-evidence branch and PR `#278` provide a
+  non-DIRTY review surface for the repair conclusion without rewriting PR
+  `#279`.
 - The contaminated parent branch is preserved unchanged for audit.
 - The stale-base `codex` sidecar branch stays available for audit.
 - The repair replays only task-owned support artifacts instead of trying to
@@ -176,9 +190,12 @@ AI_NAME=Codex2 scripts/ai-status.sh handoff PH1GC-DRV-MP-002 Codex \
   - `git show --stat --summary --name-only 9be1a098361ec90b4e30f26854d24441c1c59a8b`
   - `git show --stat --summary --name-only 0f3f3b5588bb609430b40c9ca50406cc72920ca5`
   - `git show --stat --summary --name-only 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d`
+  - `git show --stat --summary --name-only 02946f7f72031a5bf0318dae5bfc1f01eccd7db5`
   - `git show --stat --summary --name-only dfe8aaafad35e57f38ae78d35a19e70014d09469`
   - `git branch -r --contains 9be1a098`
   - `git branch -r --contains 0f3f3b55`
   - `git branch -r --contains 7d23cc19`
+  - `gh pr view 278 --json number,headRefName,baseRefName,mergeStateStatus,url`
+  - `gh pr view 279 --json number,headRefName,baseRefName,mergeStateStatus,url`
   - `git branch -r --contains dfe8aaaf`
   - `git branch -r --contains 249aafe6`
