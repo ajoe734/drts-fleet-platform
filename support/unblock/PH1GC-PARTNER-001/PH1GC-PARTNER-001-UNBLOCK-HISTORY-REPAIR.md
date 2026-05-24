@@ -20,13 +20,14 @@ history-repair dispatch pointing at the wrong branch/worktree history.
    `codex2/ph1gc-partner-001 @ 68b13f1b3a4c5fea65fd89f1595ca73dbfa7c605`
    with subject `PH1GC-PARTNER-001: finalize merged partner eligibility spec`.
 3. The assigned helper branch
-   `codex2/ph1gc-partner-001-unblock-history-repair @ 92496f04dcd02ff7ddf6d035517b70e4a376a2c7`
+   `codex2/ph1gc-partner-001-unblock-history-repair @ d7091eceb1c8b776d7d7179de853a4613f614985`
    is not descended from the pushed parent tip. Its merge-base with the parent
-   branch is only `6607dea8`, and it is `21` commits ahead of that base while
-   missing the parent closeout commit `68b13f1b`.
-4. There is no remote ref for
-   `refs/heads/codex2/ph1gc-partner-001-unblock-history-repair`, so this helper
-   branch cannot be the canonical review/closeout rail anyway.
+   branch is only `6607dea8`, and the branch remains on the wrong rail even
+   after the audit-only closeout commit because it still omits the parent
+   closeout commit `68b13f1b`.
+4. The helper branch now has a normal remote ref on origin for audit and review
+   evidence, but it still cannot be the canonical review/closeout rail because
+   it is based on the wrong history.
 5. Canonical machine truth currently blocks `PH1GC-PARTNER-001` for a different
    reason: `origin/dev` still contains `WF-PRT-001` rows in
    `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`, while the
@@ -41,8 +42,8 @@ history-repair dispatch pointing at the wrong branch/worktree history.
 
 - `origin/dev @ 92496f04dcd02ff7ddf6d035517b70e4a376a2c7`
 - local + remote `codex2/ph1gc-partner-001 @ 68b13f1b3a4c5fea65fd89f1595ca73dbfa7c605`
-- local-only helper branch
-  `codex2/ph1gc-partner-001-unblock-history-repair @ 92496f04dcd02ff7ddf6d035517b70e4a376a2c7`
+- local + remote helper audit branch
+  `codex2/ph1gc-partner-001-unblock-history-repair @ d7091eceb1c8b776d7d7179de853a4613f614985`
 - reviewer lane branch
   `codex/ph1gc-partner-001 @ febc3fafc078e04bd58c8e3580894521f3adc1f2`
 - `git rev-list --left-right --count codex2/ph1gc-partner-001...origin/codex2/ph1gc-partner-001`
@@ -55,7 +56,7 @@ history-repair dispatch pointing at the wrong branch/worktree history.
   merge point rather than the parent closeout tip.
 - `git ls-remote --heads origin` confirms:
   - `refs/heads/codex2/ph1gc-partner-001 @ 68b13f1b`
-  - no `refs/heads/codex2/ph1gc-partner-001-unblock-history-repair`
+  - `refs/heads/codex2/ph1gc-partner-001-unblock-history-repair @ d7091ece`
 
 ### Parent provenance
 
