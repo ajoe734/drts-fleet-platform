@@ -43,7 +43,7 @@ If any one is set, **all 13 verification-body fields below are required** (with 
 | `ownerUserId`     | uuid    | the user (driver dispatcher / requester) attributed to the booking    | governance-aware |
 | `legacy_unmapped` | boolean | `true` only when the booking pre-dates the cost-center mapping window | see §3.3         |
 
-`costCenterName` is resolved at _billing time_ (not booking time) so historical renames do not corrupt the bill. The booking record retains the IDs; the billing record carries the rendered name snapshot. Human-facing display names such as `ownerName` may still be rendered by downstream reporting, but they are not part of the 13-field verification body for this Phase 1 acceptance slice.
+`costCenterName` is resolved at _billing time_ (not booking time) so historical renames do not corrupt the bill. The booking record retains the IDs; the billing record carries the rendered name snapshot. Human-facing display names such as `ownerName` may still be rendered by downstream reporting, but they are supplemental presentation evidence, not part of the strict 13-field verification body for this Phase 1 acceptance slice. See §3.8 for the directive-to-field reconciliation.
 
 ### 3.2 Approval evaluation
 
@@ -86,6 +86,18 @@ For governance-aware billing, the approval must have terminated in one of the th
 For bookings created during the cost-center rollout window (defined as before `WF-TGV-001` rolled to a tenant) that nevertheless ran through approval or quota gates, the billing record may set `legacy_unmapped = true` and leave `costCenterCode` / `costCenterName` / `ownerUserId` null **only when** the cost-center registry confirms no mapping is available. The remaining ten verification-body fields must still be populated according to their own §3.2–§3.6 triggers (and `reportArtifactId` populates lazily on export).
 
 `legacy_unmapped = true` may not be used to bypass cost-center attribution on a tenant where the registry is current; the export pipeline treats unexpectedly-flagged rows as an integrity error.
+
+### 3.8 Directive §H reconciliation for the 13-field body
+
+The planning ref's directive §H bullet list is intentionally reconciled into the strict 13-field verification body above so the E2E gate can remain executable against the contracts that actually exist on `origin/dev`.
+
+| Directive §H bullet | Strict verification-body field(s) | Supplemental evidence still recorded | Rationale |
+| ------------------- | --------------------------------- | ------------------------------------ | --------- |
+| `ownerUserId / ownerName` | `ownerUserId` | `ownerName` on invoice/report rows when present | `ownerUserId` is the immutable reconciliation key. `ownerName` is a mutable display snapshot, so it is treated as reviewer-readable presentation evidence rather than a strict gate field. |
+| `approvalEvaluationId` | `approvalRequestId`, `approvalState` | `evaluatedAt`, `decision` from the approval snapshot probe (`FG-03`) | Current APIs expose approval lineage through the request id plus its terminal state and evaluation snapshot. No first-class `approvalEvaluationId` contract exists on `origin/dev`, so the executable gate anchors the directive's "approval evaluation snapshot reference" to the observable request + snapshot evidence. |
+| `auditId / reportArtifactId` | `auditId`, `reportArtifactId` | n/a | This directive bullet contributes two distinct strict fields, both kept in the 13-field body. |
+
+This reconciliation is what keeps the task aligned with the brief's "13 verification-body fields" requirement without inventing non-existent runtime fields or collapsing the owner / approval evidence entirely.
 
 ---
 

@@ -8,6 +8,11 @@
 
 This UAT codifies the human-runnable acceptance scenarios for governance-aware billing and reporting. Each scenario maps to a verification-body field cluster in the spec and to an assertion block in `E2E-010`.
 
+The strict gate for this slice is the spec's 13-field verification body. Directive §H items that are observable but not first-class strict fields on current contracts are still required as supplemental evidence:
+
+- `ownerName` should appear as reviewer-readable invoice/report presentation metadata when the runtime exposes it.
+- the approval-evaluation snapshot is evidenced through `approvalRequestId`, `approvalState`, plus the recorded `evaluatedAt` / `decision` probe results from `FG-03`, because `origin/dev` does not expose a separate `approvalEvaluationId` contract.
+
 ---
 
 ## 1. Pre-conditions
@@ -34,7 +39,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 4. Generate the invoice for the billing window.
 5. Generate the report export for the billing window.
 
-**Assert**: the billing record carries the full 13-field verification body for the non-partner owned flow: `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` populated, `legacy_unmapped = false`, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set, and `reportArtifactId` becomes non-null after export. `partnerProgramCode`, `eligibilityVerificationId`, and `platformEarningsRef` remain null on this owned non-partner path. The report export contains the same governance fields for the same booking row.
+**Assert**: the billing record carries the full 13-field verification body for the non-partner owned flow: `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` populated, `legacy_unmapped = false`, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set, and `reportArtifactId` becomes non-null after export. `partnerProgramCode`, `eligibilityVerificationId`, and `platformEarningsRef` remain null on this owned non-partner path. The report export contains the same governance fields for the same booking row, and reviewer-readable owner presentation metadata (`ownerName`) is shown when the runtime emits it.
 
 ### `UAT-FIN-GOV-002` — Approval-required threshold, manual approval
 
@@ -42,7 +47,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 2. Booking enters approval queue; approver approves.
 3. Trip completes; invoice + report generated.
 
-**Assert**: billing record `approvalState = approved` (not `auto_approved`), `approvalRequestId` traces back to the manual approval action, and the audit log contains the approver's user id and timestamp.
+**Assert**: billing record `approvalState = approved` (not `auto_approved`), `approvalRequestId` traces back to the manual approval action, the approval snapshot exposes `evaluatedAt` / `decision`, and the audit log contains the approver's user id and timestamp.
 
 ### `UAT-FIN-GOV-003` — Escalated then approved
 
@@ -50,7 +55,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 2. Approver below threshold rejects → escalation → higher-level approver approves.
 3. Trip completes; invoice + report generated.
 
-**Assert**: `approvalState = escalated_then_approved`. The audit log contains both the rejection and the eventual approval rows.
+**Assert**: `approvalState = escalated_then_approved`. The approval snapshot shows the escalation path through `decision` / `evaluatedAt`, and the audit log contains both the rejection and the eventual approval rows.
 
 ### `UAT-FIN-GOV-004` — Quota usage tracking
 
