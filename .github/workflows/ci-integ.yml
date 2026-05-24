@@ -203,14 +203,24 @@ jobs:
           echo "auth_token probe returned HTTP ${status}"
           cat "${RUNNER_TEMP}/e2e-010-iap-health-auth-token-body.txt"
 
+      - name: Mint service-account access token
+        id: access_token_auth
+        if: ${{ steps.auth_token_probe.outputs.status != '200' }}
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: access_token
+
       - name: Probe IAP health with access token
         id: access_token_probe
-        if: ${{ steps.auth_token_probe.outputs.status != '200' }}
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_auth.outputs.access_token != '' }}
         continue-on-error: true
         run: |
           set -euo pipefail
 
-          token="$(gcloud auth print-access-token)"
+          token="${{ steps.access_token_auth.outputs.access_token }}"
           echo "::add-mask::$token"
 
           status="$(curl -sS \
