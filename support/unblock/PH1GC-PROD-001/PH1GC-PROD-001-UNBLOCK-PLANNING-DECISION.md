@@ -3,8 +3,8 @@
 **Task ID:** `PH1GC-PROD-001-UNBLOCK-PLANNING-DECISION`
 **Parent task:** `PH1GC-PROD-001`
 **Owner:** `Codex2`
-**Reviewer:** `Gemini2`
-**Decision date:** 2026-05-22
+**Reviewer:** `Codex`
+**Decision date:** 2026-05-24
 **Decision type:** Routing decision (no new product/contract change)
 
 ---
@@ -100,24 +100,36 @@ Separate follow-up for canonical doc hygiene:
 | Record the decision | Recorded here: no new decision required; use `prod/v<YYYY.MM.DD>.<N>` per branch-strategy and route the task to external prod readiness plus live evidence collection. |
 | scope cut | Not needed. The parent scope is still valid; only its remaining gate is external. |
 | or explicit follow-up needed by the parent task | Recorded in §4 as the operator-managed production readiness + live deploy evidence step, plus a separate documentation-alignment follow-up for release-truth-sync wording. |
-| Produce task-scoped commit/push/PR evidence for any canonical change | This artifact is the canonical planning change for this helper task. |
+| Produce task-scoped commit/push/PR evidence for any canonical change | Canonical change is pushed on `origin/codex2/ph1gc-prod-001-unblock-planning-decision`; closeout verification commit `a05de04b142073e409484bfc808eb763225bd4ec` is on that branch; owner PR is [#276](https://github.com/ajoe734/drts-fleet-platform/pull/276). |
 | Update the parent task with the concrete unblocked next step | The parent should point at the external readiness checklist and the first real production deploy / rollback evidence step. |
 
 ## 6. Closeout Note
 
-This helper task closes once the routing decision is committed, pushed on the
-task branch, and mirrored into machine truth as the owner's `done` transition.
+This helper task is ready for re-handoff once the refreshed reviewer metadata,
+push evidence, and owner PR evidence are committed on the task branch and
+mirrored into machine truth for the current `Codex2` -> `Codex` review cycle.
 
 ## 7. Review And Verification Evidence
 
-- Reviewer approval for this routing conclusion is recorded on the task as
-  `review_approved` with reviewer `Gemini2`.
+- Current review cycle metadata after reopen:
+  - owner: `Codex2`
+  - reviewer: `Codex`
+  - machine-truth status before re-handoff: `in_progress`
+  - reopen reason: reviewer requested explicit PR evidence plus refreshed
+    reviewer/status metadata for the latest owner branch
+- Task-scoped git/PR evidence for the current owner branch:
+  - pushed branch: `origin/codex2/ph1gc-prod-001-unblock-planning-decision`
+  - verification commit already on that branch: `a05de04b142073e409484bfc808eb763225bd4ec`
+    (`docs(PH1GC-PROD-001-UNBLOCK-PLANNING-DECISION): record closeout verification`)
+  - owner PR for the canonical change: [#276](https://github.com/ajoe734/drts-fleet-platform/pull/276)
 - Verification scope for owner closeout is limited to canonical-artifact
   inspection and git evidence:
   - `AI_COLLABORATION_GUIDE.md` read for collaboration and machine-truth rules
   - `support/unblock/PH1GC-PROD-001/PH1GC-PROD-001-UNBLOCK-PLANNING-DECISION.md`
     reviewed as the canonical unblock artifact
   - `git status -sb` confirmed a task-owned clean working tree before closeout
+  - `gh pr list --head codex2/ph1gc-prod-001-unblock-planning-decision --json number,title,headRefName,baseRefName,state,url`
+    confirmed PR #276 for the owner branch against `dev`
   - `git log --oneline --decorate -n 8` and `git show -s --format=fuller`
     confirmed the task-scoped commit chain and reviewer metadata
 - Parent-task unblock result remains unchanged: `PH1GC-PROD-001` is routed to
