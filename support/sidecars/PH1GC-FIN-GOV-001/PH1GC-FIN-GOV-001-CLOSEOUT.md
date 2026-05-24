@@ -6,8 +6,8 @@ Reviewer: `Gemini2`
 Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `in_progress`
-Machine-truth status on `2026-05-24`: owner reassigned from `Codex` to `Codex2`; repo-local artifact alignment continues under the same task id
-Current anchor after directive-§H verification-body alignment: `4d837e0b` (`wip(PH1GC-FIN-GOV-001): anchor verification-body alignment`)
+Machine-truth status on `2026-05-24`: owner reassigned from `Codex` to `Codex2`; repo-local artifact alignment is complete, but acceptance remains blocked under the same task id
+Current anchor after closeout-status reconciliation: `62561fad` (`wip(PH1GC-FIN-GOV-001): anchor closeout-status packet`)
 Files changed:
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
 - `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`
@@ -24,7 +24,7 @@ Workflow family affected:
 Gate read before:
 - `PASS (static evidence)`
 Gate read after:
-- branch row still `PASS (static evidence)`; `origin/dev` still carries a release-truth-sync pointer to row 14 but the merged release-gate matrix/dashboard do not yet expose a consistent `WF-FIN-GOV-001` gate read and therefore cannot support a `PASS (live staging evidence)` claim
+- this branch keeps `WF-FIN-GOV-001` at `PASS (static evidence)` with an explicit non-claim for live uplift; `origin/dev` currently contains conflicting release-truth statements (`phase1-release-truth-sync-20260519.md` says row 14 is `PASS (live staging evidence)`, while `origin-dev-blueprint-alignment-audit-20260519.md` and the live-evidence sidecar still document missing live proof)
 Remaining non-claim:
 - No claim that `WF-FIN-GOV-001` is already `PASS (live staging evidence)`
 - No claim that every governance verification-body field is populated on the current reachable staging runtime
@@ -48,14 +48,14 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 
 - Acceptance items 1 and 2 are satisfied on `origin/dev`; both the spec and UAT docs are visible there.
 - Acceptance items 3, 4, and 6 remain satisfied on this branch via the spec/UAT/E2E/closeout evidence chain.
-- Acceptance item 5 is still unsatisfied: the branch matrix row remains `PASS (static evidence)`, `origin/dev` still has no merged `WF-FIN-GOV-001` row in the canonical release-gate matrix/dashboard despite the sync doc pointing at one, and the governed staging rerun needed for `PASS (live staging evidence)` is still blocked by staging auth.
+- Acceptance item 5 is still unsatisfied: the governed staging rerun needed for `PASS (live staging evidence)` is still blocked by staging auth, and `origin/dev` release-truth is internally inconsistent about whether that uplift has already happened.
 
 ## 2026-05-24 Revalidation
 
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `git diff --check origin/dev...HEAD` passed.
-- `git rev-parse HEAD` = `4d837e0bd48ec57c9e9545d42aa755327d65877a`.
+- `git rev-parse HEAD` = `62561fadb2668c44aeb234fcf87d8bc477bfbcb8`.
 - `git push -u origin codex2/ph1gc-fin-gov-001` succeeded after the anchor commit.
 
 ## Blocker
@@ -63,7 +63,7 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 Fresh 2026-05-24 validation still shows:
 
 - the prior owner-lane live probes still end at staging IAP/IAM/WIF auth failure, so no new reviewer-readable governed staging artifact can be collected from this workspace
-- `WF-FIN-GOV-001` therefore still cannot claim `PASS (live staging evidence)` without a fresh green `STRICT_VERIFICATION_BODY=1` governed rerun plus invoice/report artifacts
+- `WF-FIN-GOV-001` therefore still cannot honestly claim `PASS (live staging evidence)` without a fresh green `STRICT_VERIFICATION_BODY=1` governed rerun plus reviewer-readable invoice/report artifacts
 - repo-local scope is no longer the blocker; environment access is
 
-Until `WF-FIN-GOV-001` has a matrix row on `origin/dev` and a valid staging bearer path exists so the governed rerun can pass `STRICT_VERIFICATION_BODY=1`, this task should stay in `progress`, not `done`.
+Until the `origin/dev` release-truth mismatch is repaired and a valid staging bearer path exists so the governed rerun can pass `STRICT_VERIFICATION_BODY=1`, this task should stay in `progress` or `blocked`, not `review` or `done`.
