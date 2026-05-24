@@ -7,16 +7,23 @@ Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `in_progress`
 Machine-truth status on `2026-05-24`: owner reassigned from `Codex` to `Codex2`; repo-local artifact alignment is complete, but acceptance remains blocked under the same task id
-Current anchor after closeout-status reconciliation: `62561fad` (`wip(PH1GC-FIN-GOV-001): anchor closeout-status packet`)
+Current anchor after closeout truth-sync reconciliation: `130251e5` (`wip(PH1GC-FIN-GOV-001): anchor closeout truth sync`)
 Files changed:
+- `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
+- `docs/03-runbooks/phase1-release-truth-sync-20260519.md`
+- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`
+- `docs/04-uat/fbp-014a-e2e-matrix.md`
 - `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`
+- `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`
 - `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md`
 - `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+- `tests/e2e/README.md`
+- `tests/e2e/run-e2e.sh`
 Verification commands:
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
-- `git diff --check`
+- `git diff --check origin/dev...HEAD`
 Evidence artifact:
 - `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md`
 Workflow family affected:
@@ -42,7 +49,8 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 2. The UAT now has an explicit field-to-scenario coverage matrix mapping each of the 13 fields to happy-path and integrity-path scenarios.
 3. `E2E-010` now emits the verification body from a single `VB_FIELDS` list, records the field count as evidence, and fails immediately if the list drifts away from 13 fields.
 4. `STRICT_VERIFICATION_BODY=1` remains the only honest uplift gate: every field must still be recorded, and any `NOT_POPULATED` value remains a hard failure in strict mode.
-5. The task remains blocked on staging auth / live evidence, not on repo-local spec/UAT/E2E wording.
+5. Release-truth wording is now aligned across the branch artifacts: the matrix row, release-truth sync, audit, and evidence sidecar all keep `WF-FIN-GOV-001` at `PASS (static evidence)` until live uplift evidence exists.
+6. The task remains blocked on staging auth / live evidence, not on repo-local spec/UAT/E2E wording.
 
 ## Current Acceptance Read
 
@@ -55,7 +63,7 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `git diff --check origin/dev...HEAD` passed.
-- `git rev-parse HEAD` = `62561fadb2668c44aeb234fcf87d8bc477bfbcb8`.
+- `git rev-parse HEAD` = `130251e56f7111a93a56e2ac4fa64e16553446d9`.
 - `git push -u origin codex2/ph1gc-fin-gov-001` succeeded after the anchor commit.
 
 ## Blocker
