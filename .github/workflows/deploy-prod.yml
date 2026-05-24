@@ -32,10 +32,15 @@ concurrency:
 env:
   PROJECT_ID: ${{ vars.PROD_GCP_PROJECT_ID }}
   REGION: ${{ vars.PROD_GCP_REGION }}
+  ARTIFACT_REGISTRY: ${{ vars.PROD_ARTIFACT_REGISTRY }}
   ARTIFACT_PROJECT_ID: ${{ vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID }}
   ARTIFACT_REGION: ${{ vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION }}
   ARTIFACT_REPOSITORY: ${{ vars.PROD_ARTIFACT_REPOSITORY || 'drts' }}
-  REGISTRY: ${{ (vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION) }}-docker.pkg.dev/${{ vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID }}/${{ vars.PROD_ARTIFACT_REPOSITORY || 'drts' }}
+  REGISTRY: ${{ vars.PROD_ARTIFACT_REGISTRY || format('{0}-docker.pkg.dev/{1}/{2}', vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION, vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID, vars.PROD_ARTIFACT_REPOSITORY || 'drts') }}
+  API_SERVICE: ${{ vars.PROD_GCP_API_SERVICE || 'drts-api' }}
+  PLATFORM_ADMIN_SERVICE: ${{ vars.PROD_GCP_PLATFORM_ADMIN_SERVICE || 'drts-platform-admin-web' }}
+  OPS_CONSOLE_SERVICE: ${{ vars.PROD_GCP_OPS_CONSOLE_SERVICE || 'drts-ops-console-web' }}
+  MIGRATION_JOB: ${{ vars.PROD_GCP_MIGRATION_JOB || 'drts-migrate' }}
   CLOUDSQL: ${{ vars.PROD_GCP_CLOUDSQL_INSTANCE }}
   DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
   RUNTIME_SERVICE_ACCOUNT: ${{ vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT }}
@@ -89,6 +94,7 @@ jobs:
           [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.PROD_GCP_PROJECT_ID")
           [[ -n "${REGION:-}" ]] || missing+=("vars.PROD_GCP_REGION")
           [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.PROD_GCP_CLOUDSQL_INSTANCE")
+          [[ -n "${REGISTRY:-}" ]] || missing+=("vars.PROD_ARTIFACT_REGISTRY or vars.PROD_ARTIFACT_PROJECT_ID + vars.PROD_ARTIFACT_REGION + vars.PROD_ARTIFACT_REPOSITORY")
           [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.PROD_WIF_PROVIDER")
           [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.PROD_WIF_SERVICE_ACCOUNT")
           [[ -n "${RUNTIME_SERVICE_ACCOUNT:-}" ]] || missing+=("vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT")
@@ -96,6 +102,10 @@ jobs:
           [[ -n "${OPS_CONSOLE_ORIGIN:-}" ]] || missing+=("vars.PROD_OPS_CONSOLE_ORIGIN")
           [[ -n "${CONTROL_PLANE_API_ORIGIN_ENV:-}" ]] || missing+=("vars.PROD_CONTROL_PLANE_API_ORIGIN")
           [[ -n "${IAP_CLIENT_ID_ENV:-}" ]] || missing+=("vars.PROD_IAP_CLIENT_ID")
+          [[ -n "${API_SERVICE:-}" ]] || missing+=("vars.PROD_GCP_API_SERVICE")
+          [[ -n "${PLATFORM_ADMIN_SERVICE:-}" ]] || missing+=("vars.PROD_GCP_PLATFORM_ADMIN_SERVICE")
+          [[ -n "${OPS_CONSOLE_SERVICE:-}" ]] || missing+=("vars.PROD_GCP_OPS_CONSOLE_SERVICE")
+          [[ -n "${MIGRATION_JOB:-}" ]] || missing+=("vars.PROD_GCP_MIGRATION_JOB")
 
           if (( ${#missing[@]} > 0 )); then
             echo "::error::Missing GitHub Actions production configuration: ${missing[*]}."
@@ -176,8 +186,23 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      - name: Resolve Artifact Registry host
+        id: registry_host
+        run: |
+          set -euo pipefail
+
+          registry="${REGISTRY}"
+          host="${registry%%/*}"
+
+          if [[ -z "$host" || "$host" == "$registry" ]]; then
+            echo "::error::REGISTRY must include an Artifact Registry host and repository path. Got: ${registry}"
+            exit 1
+          fi
+
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ env.ARTIFACT_REGION }}-docker.pkg.dev --quiet
+        run: gcloud auth configure-docker ${{ steps.registry_host.outputs.host }} --quiet
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -276,7 +301,7 @@ jobs:
       - name: Create / update migration job definition
         run: |
           IMAGE="${{ env.REGISTRY }}/migrate:${{ needs.build-push.outputs.image_tag }}"
-          gcloud run jobs update drts-migrate \
+          gcloud run jobs update "${MIGRATION_JOB}" \
             --region "$REGION" \
             --image "$IMAGE" \
             --set-cloudsql-instances "$CLOUDSQL" \
@@ -284,7 +309,7 @@ jobs:
             --set-secrets "DATABASE_URL=${SECRET_PREFIX}-db-url:latest" \
             --max-retries 0 \
             --project "$PROJECT_ID" \
-          || gcloud run jobs create drts-migrate \
+          || gcloud run jobs create "${MIGRATION_JOB}" \
             --region "$REGION" \
             --image "$IMAGE" \
             --set-cloudsql-instances "$CLOUDSQL" \
@@ -297,15 +322,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          if gcloud run jobs execute drts-migrate \
+          if gcloud run jobs execute "${MIGRATION_JOB}" \
             --region "$REGION" \
             --wait \
             --project "$PROJECT_ID"; then
             exit 0
           fi
 
-          echo "::error::drts-migrate execution failed. Capturing latest execution metadata for triage."
-          EXECUTION_NAME="$(gcloud run jobs describe drts-migrate \
+          echo "::error::${MIGRATION_JOB} execution failed. Capturing latest execution metadata for triage."
+          EXECUTION_NAME="$(gcloud run jobs describe "${MIGRATION_JOB}" \
             --region "$REGION" \
             --project "$PROJECT_ID" \
             --format='value(status.latestCreatedExecution.name)' \
@@ -344,7 +369,7 @@ jobs:
 
             echo "Cloud Run execution logs (best effort):"
             gcloud logging read \
-              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"drts-migrate\" AND resource.labels.location=\"${REGION}\" AND labels.\"run.googleapis.com/execution_name\"=\"${EXECUTION_NAME}\"" \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${MIGRATION_JOB}\" AND resource.labels.location=\"${REGION}\" AND labels.\"run.googleapis.com/execution_name\"=\"${EXECUTION_NAME}\"" \
               --project "$PROJECT_ID" \
               --order=asc \
               --limit 200 \
@@ -460,9 +485,9 @@ jobs:
       - name: Deploy — api
         run: |
           IMAGE="${{ env.REGISTRY }}/api:${{ needs.build-push.outputs.image_tag }}"
-          # Use deploy for both create and update so bootstrap flows create drts-api
+          # Use deploy for both create and update so bootstrap flows create the API service
           # before post-deploy IAM / IAP bindings are applied.
-          gcloud run deploy drts-api \
+          gcloud run deploy "${API_SERVICE}" \
             --region "$REGION" \
             --image "$IMAGE" \
             --port 3001 \
@@ -478,7 +503,7 @@ jobs:
 
       - name: Ensure control-plane runtime can invoke drts-api
         run: |
-          gcloud run services add-iam-policy-binding drts-api \
+          gcloud run services add-iam-policy-binding "${API_SERVICE}" \
             --region "$REGION" \
             --project "$PROJECT_ID" \
             --member "serviceAccount:${{ steps.runtime_sa.outputs.email }}" \
@@ -490,7 +515,7 @@ jobs:
         run: |
           gcloud iap web add-iam-policy-binding \
             --resource-type=cloud-run \
-            --service=drts-api \
+            --service="${API_SERVICE}" \
             --region "$REGION" \
             --project "$PROJECT_ID" \
             --member "serviceAccount:${{ steps.runtime_sa.outputs.email }}" \
@@ -504,7 +529,7 @@ jobs:
       - name: Deploy — platform-admin-web
         run: |
           IMAGE="${{ env.REGISTRY }}/platform-admin-web:${{ needs.build-push.outputs.image_tag }}"
-          gcloud run deploy drts-platform-admin-web \
+          gcloud run deploy "${PLATFORM_ADMIN_SERVICE}" \
             --region "$REGION" \
             --image "$IMAGE" \
             --port 3002 \
@@ -520,7 +545,7 @@ jobs:
       - name: Deploy — ops-console-web
         run: |
           IMAGE="${{ env.REGISTRY }}/ops-console-web:${{ needs.build-push.outputs.image_tag }}"
-          gcloud run deploy drts-ops-console-web \
+          gcloud run deploy "${OPS_CONSOLE_SERVICE}" \
             --region "$REGION" \
             --image "$IMAGE" \
             --port 3003 \
@@ -574,9 +599,9 @@ jobs:
 
       - name: Wait for service to be Ready
         run: |
-          echo "Waiting for drts-api Cloud Run service to reach Ready=True ..."
+          echo "Waiting for ${API_SERVICE} Cloud Run service to reach Ready=True ..."
           for i in $(seq 1 24); do
-            READY=$(gcloud run services describe drts-api \
+            READY=$(gcloud run services describe "${API_SERVICE}" \
               --region "$REGION" \
               --project "$PROJECT_ID" \
               --format "value(status.conditions[0].status)" 2>/dev/null || true)
@@ -588,7 +613,7 @@ jobs:
             sleep 10
           done
           echo "Service did not reach Ready state after 240s." >&2
-          gcloud run services describe drts-api \
+          gcloud run services describe "${API_SERVICE}" \
             --region "$REGION" \
             --project "$PROJECT_ID" \
             --format "yaml(status)" || true
@@ -617,7 +642,7 @@ jobs:
       - name: Print production URLs
         run: |
           echo "=== Production deployment complete ==="
-          for SVC in drts-api drts-platform-admin-web drts-ops-console-web; do
+          for SVC in "${API_SERVICE}" "${PLATFORM_ADMIN_SERVICE}" "${OPS_CONSOLE_SERVICE}"; do
             URL=$(gcloud run services describe "$SVC" \
               --region "$REGION" \
               --project "$PROJECT_ID" \

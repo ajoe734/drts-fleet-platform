@@ -16,7 +16,6 @@
     "@drts/control-plane-auth": "workspace:*",
     "@drts/contracts": "workspace:*",
     "@drts/shared-types": "workspace:*",
-    "@drts/ui-tokens": "workspace:*",
     "@drts/ui-web": "workspace:*",
     "@tailwindcss/postcss": "^4.2.4",
     "clsx": "^2.1.1",
