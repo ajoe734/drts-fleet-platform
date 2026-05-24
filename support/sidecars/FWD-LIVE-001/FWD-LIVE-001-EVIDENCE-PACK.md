@@ -44,7 +44,7 @@ Historical result at collection time on `2026-05-19`:
   reauthentication, all three old `run.app` probes still return `404`, and
   `api-staging.drts.internal` still fails DNS resolution from this machine.
 
-Conclusion as of `2026-05-24T17:31Z`:
+Conclusion as of `2026-05-24T18:35Z`:
 
 - No new live external-platform proof was collected in this session.
 - This task can only maintain a dated partial evidence snapshot plus blocker
@@ -210,7 +210,21 @@ Observed result from a third same-day rerun:
   `curl -I -sS https://api-staging.drts.internal/api/health` still fail with
   host resolution errors
 
-### 3.9 Interpretation
+### 3.9 Revalidation snapshot at 2026-05-24T18:35Z
+
+Observed result from a fourth same-day rerun:
+
+- active `gcloud` account still resolves to `bobo.du@cctech-support.com`
+- `gcloud auth print-identity-token` still fails with non-interactive
+  reauthentication required and instructs `gcloud auth login`
+- `https://drts-api-kdhu6wzufa-uc.a.run.app/`
+  and `https://drts-api-kdhu6wzufa-uc.a.run.app/health` still return HTTP
+  `404` at `2026-05-24T18:35:49Z` and `2026-05-24T18:35:58Z`
+- `api-staging.drts.internal` still returns `NXDOMAIN`
+- `curl -I -sS https://api-staging.drts.internal/api/health` still fails with
+  host resolution errors
+
+### 3.10 Interpretation
 
 This session did not fail because `E2E-002` found no forwarded task and
 gracefully skipped. It failed earlier at the environment boundary:

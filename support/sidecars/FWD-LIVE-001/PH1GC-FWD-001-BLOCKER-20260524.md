@@ -21,10 +21,10 @@ substitution.
 
 1. `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` still records
    only a dated partial external attempt plus today's blocker revalidation. A
-   second same-day rerun at `2026-05-24T16:31Z` to `2026-05-24T16:32Z` still
-   never reached a real partner path because non-interactive identity-token
-   minting failed, the older `run.app` staging host returned `404`, and the
-   documented internal staging host returned `NXDOMAIN`.
+   fourth same-day rerun at `2026-05-24T18:35Z` still never reached a real
+   partner path because non-interactive identity-token minting failed, the
+   older `run.app` staging host returned `404`, and the documented internal
+   staging host returned `NXDOMAIN`.
 2. `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md` still keeps
    `EXT-002-BLK-001` through `EXT-002-BLK-007` open for the real adapter path:
    contract authority, sandbox credentials, webhook signing/replay rules, live
@@ -82,6 +82,19 @@ Third same-day rerun observed at `2026-05-24T17:31:43Z`:
 - `nslookup api-staging.drts.internal` still returns `NXDOMAIN`
 - direct `curl` probes to `api-staging.drts.internal` still fail with
   `Could not resolve host`
+
+Fourth same-day rerun observed at `2026-05-24T18:35:49Z` to
+`2026-05-24T18:35:58Z`:
+
+- active `gcloud` account still resolves to `bobo.du@cctech-support.com`
+- `gcloud auth print-identity-token` still fails with reauthentication
+  required, non-interactive execution blocked, and instructs
+  `gcloud auth login`
+- `drts-api-kdhu6wzufa-uc.a.run.app` still returns HTTP `404` for `/` at
+  `2026-05-24T18:35:49Z` and for `/health` at `2026-05-24T18:35:58Z`
+- `nslookup api-staging.drts.internal` still returns `NXDOMAIN`
+- direct `curl` probe to `https://api-staging.drts.internal/api/health` still
+  fails with `Could not resolve host`
 
 ## Required External Handoff Bundle
 
