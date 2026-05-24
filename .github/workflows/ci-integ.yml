@@ -120,6 +120,10 @@ jobs:
       REGION: ${{ vars.STAGING_GCP_REGION || vars.GCP_REGION }}
       DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
       WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+      SHARED_DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      SHARED_WIF_PROVIDER_VALUE: ${{ secrets.WIF_PROVIDER }}
+      DEV_DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      DEV_WIF_PROVIDER_VALUE: ${{ secrets.DEV_WIF_PROVIDER }}
       SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
       CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
       IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
@@ -239,9 +243,10 @@ jobs:
           echo "Access-token probe returned HTTP ${status}"
           cat "${RUNNER_TEMP}/e2e-010-iap-health-body.txt"
 
-      - name: Mint IAP verification token
-        id: iap_token
+      - name: Mint primary IAP verification token
+        id: primary_iap_token
         if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' }}
+        continue-on-error: true
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
@@ -249,6 +254,112 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ env.IAP_CLIENT_ID }}
           id_token_include_email: true
+
+      - name: Probe IAP health with primary id token
+        id: primary_id_token_probe
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_iap_token.outputs.id_token != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="${{ steps.primary_iap_token.outputs.id_token }}"
+          echo "::add-mask::$token"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-primary-id-token-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_PRIMARY_ID_TOKEN_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          echo "Primary id-token probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-primary-id-token-health-body.txt"
+
+      - name: Mint shared fallback IAP verification token
+        id: shared_iap_token
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && env.SHARED_WIF_PROVIDER_VALUE != '' && env.SHARED_DEPLOYER_SERVICE_ACCOUNT != '' }}
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.SHARED_WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.SHARED_DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.IAP_CLIENT_ID }}
+          id_token_include_email: true
+
+      - name: Probe IAP health with shared fallback id token
+        id: shared_id_token_probe
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_iap_token.outputs.id_token != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="${{ steps.shared_iap_token.outputs.id_token }}"
+          echo "::add-mask::$token"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-shared-id-token-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_SHARED_ID_TOKEN_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          echo "Shared fallback id-token probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-shared-id-token-health-body.txt"
+
+      - name: Mint dev fallback IAP verification token
+        id: dev_iap_token
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && env.DEV_WIF_PROVIDER_VALUE != '' && env.DEV_DEPLOYER_SERVICE_ACCOUNT != '' }}
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEV_DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.IAP_CLIENT_ID }}
+          id_token_include_email: true
+
+      - name: Probe IAP health with dev fallback id token
+        id: dev_id_token_probe
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_iap_token.outputs.id_token != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="${{ steps.dev_iap_token.outputs.id_token }}"
+          echo "::add-mask::$token"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-dev-id-token-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_DEV_ID_TOKEN_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          echo "Dev fallback id-token probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-dev-id-token-health-body.txt"
+
+      - name: Fail when no staging bearer path works
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_id_token_probe.outputs.status != '200' }}
+        run: |
+          echo "::error::Unable to obtain an IAP bearer token that returns HTTP 200 from ${CONTROL_PLANE_API_ORIGIN}/api/health."
+          echo "::error::Tried auth_token, primary service-account id token, shared fallback id token, and dev fallback id token."
+          exit 1
 
       - name: Syntax check E2E-010
         run: bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh
@@ -262,9 +373,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -z "${E2E_AUTH_BEARER_TOKEN:-}" ]]; then
-            export E2E_AUTH_BEARER_TOKEN="${{ steps.iap_token.outputs.id_token }}"
-          fi
           bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh | tee "${RUNNER_TEMP}/e2e-010-console.log"
 
       - name: Upload E2E-010 evidence
@@ -279,6 +387,9 @@ jobs:
             ${{ runner.temp }}/e2e-010-chain.json
             ${{ runner.temp }}/e2e-010-iap-health-auth-token-body.txt
             ${{ runner.temp }}/e2e-010-iap-health-body.txt
+            ${{ runner.temp }}/e2e-010-primary-id-token-health-body.txt
+            ${{ runner.temp }}/e2e-010-shared-id-token-health-body.txt
+            ${{ runner.temp }}/e2e-010-dev-id-token-health-body.txt
 
   # Aggregate job for branch-protection "required check" simplicity.
   ci-integ:
