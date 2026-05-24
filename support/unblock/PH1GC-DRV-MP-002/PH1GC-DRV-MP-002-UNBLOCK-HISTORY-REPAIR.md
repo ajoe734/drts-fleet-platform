@@ -26,25 +26,28 @@ still rooted on stale ancestry.
    but they are bundled with stale ancestry and a merge commit, so replaying
    the whole branch would drag unrelated trunk drift into the parent.
 3. The owner-lane helper branch
-   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ebeb84e0e40865195b239cfe1dcddbc809bd4068`
-   now contains seven task commits:
+   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ec50ab54f554d3f69a43eb638bd4641864a2bb4c`
+   now contains eight task commits:
    `b6df1cbc` (initial audit), `38ae6939` (support-tree replay),
    `0f3f3b55` (refresh canonical replay evidence), `7d23cc19`
    (canonical replay handoff recorded in machine truth), `5aaf3b05`
-   (mixed-content drift clarification), `08aaa8df` (clean PR evidence), and
+   (mixed-content drift clarification), `08aaa8df` (clean PR evidence),
    `ebeb84e0` (support-note refresh to catch the moved owner-helper remote
-   head). The branch therefore no longer points at any earlier owner helper
-   audit SHA cited during the failed review sequence; `38ae6939`, `0f3f3b55`,
-   `7d23cc19`, `5aaf3b05`, and `08aaa8df` are only ancestors on the same
-   branch. Relative to current `origin/dev`, the branch is `21 left / 7 right`
-   with merge-base
+   head), and `ec50ab54` (support-note refresh to stop pinning `ebeb84e0` as
+   if it were still branch tip). The branch therefore no longer points at any
+   earlier owner-helper audit SHA cited during the failed review sequence;
+   `38ae6939`, `0f3f3b55`, `7d23cc19`, `5aaf3b05`, `08aaa8df`, and `ebeb84e0`
+   are only ancestors on the same branch. Relative to current `origin/dev`,
+   the branch is `21 left / 8 right` with merge-base
    `6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`. Although the two newest commits
    touch only the support repair note, the branch history still contains the
    mixed-content commit `7d23cc19`, which updates `ai-status.json`,
    `current-work.md`, `docs-site/ai-status.json`, and
    `docs-site/current-work.md`. PR `#279` on this branch is also
-   `mergeStateStatus=DIRTY`. That keeps the owner helper branch as audit
-   provenance only, not a clean replay rail.
+   `mergeStateStatus=DIRTY`. That keeps the owner helper branch as a mutable
+   audit rail, not a clean replay rail; machine truth must stop treating any
+   single tip SHA on this branch as canonical because note-only refresh commits
+   can land later without changing the replay conclusion.
 4. A reviewer-lane helper branch also exists:
    `origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469`.
    It is the cleanest currently pushed replay surface: one replay commit on top
@@ -80,16 +83,16 @@ The contamination is the mismatch between:
    (`origin/codex2/ph1gc-drv-mp-002`) that contains the required sidecar tree
    but sits on stale ancestry (`a7f88919`) and includes a merge commit.
 2. Two different pushed history-repair branches that both look canonical:
-   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ebeb84e0`
+   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ec50ab54`
    and `origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaaf`.
    The support artifact and parent machine truth repeatedly lagged the mutable
-   owner-lane helper head
+   owner-lane helper rail
    (`38ae6939` -> `0f3f3b55` -> `7d23cc19` -> `5aaf3b05` -> `08aaa8df` ->
-   `ebeb84e0`), which made the canonical replay/audit story internally
-   inconsistent with the actual remote ref even after each previous review
-   follow-up. The newest owner-helper head still only refreshes the support
-   note to cite `08aaa8df`, so machine truth can lag again unless the parent
-   next-step and task handoff message are updated at the same time. The owner
+   `ebeb84e0` -> `ec50ab54`), which made the canonical replay/audit story
+   internally inconsistent with the actual remote ref even after each previous
+   review follow-up. The newest owner-helper commits still only refresh the
+   support note, so machine truth will lag again unless the parent next-step
+   and task handoff message stop pinning a single mutable tip SHA. The owner
    helper rail is still mixed-content in ancestry because `7d23cc19` updates
    both support artifacts and machine-truth/dashboard files, and the branch PR
    remains `DIRTY`.
@@ -118,14 +121,13 @@ treating the stale-base branches as audit evidence only.
    - `support/unblock/PH1GC-DRV-MP-002/PH1GC-DRV-MP-002-UNBLOCK-HISTORY-REPAIR.md`
    - `support/sidecars/PH1GC-DRV-MP-002/PH1GC-DRV-MP-002-SIDECAR-ACCEPTANCE.md`
    - `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/*`
-2. Keep
-   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ebeb84e0e40865195b239cfe1dcddbc809bd4068`
-   as the current owner-lane audit branch. It supersedes the earlier replay
-   commits `38ae6939`, `0f3f3b55`, `7d23cc19`, `5aaf3b05`, and `08aaa8df` on
-   the same branch and is still useful provenance, but it is no longer the
-   cleanest replay target now that `origin/dev` has advanced, the reviewer lane
-   has a one-commit replay, the owner rail contains mixed-content ancestry, and
-   PR `#279` is `DIRTY`.
+2. Keep `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair` as the mutable
+   owner-lane audit branch, with `ec50ab54`, `ebeb84e0`, `08aaa8df`,
+   `5aaf3b05`, `7d23cc19`, `0f3f3b55`, and `38ae6939` preserved as audit
+   evidence on the same rail. It is still useful provenance, but it is no
+   longer the cleanest replay target now that `origin/dev` has advanced, the
+   reviewer lane has a one-commit replay, the owner rail contains
+   mixed-content ancestry, and PR `#279` is `DIRTY`.
 3. Do not replay the parent from
    `origin/codex2/ph1gc-drv-mp-002`; keep that branch as immutable evidence of
    the stale-base mixed-ancestry parent branch, not as the canonical review
@@ -145,7 +147,7 @@ treating the stale-base branches as audit evidence only.
 
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh progress PH1GC-DRV-MP-002 \
-  "History repair: review/merge origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469 as the cleanest replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE. Treat origin/codex2/ph1gc-drv-mp-002 @ 9be1a098361ec90b4e30f26854d24441c1c59a8b, origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ebeb84e0e40865195b239cfe1dcddbc809bd4068 (superseding ancestors 08aaa8df486fdc9196fed618114014d3272a8de8, 5aaf3b05775ccaa84aed7b51186e982706a12f23, 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d, 0f3f3b5588bb609430b40c9ca50406cc72920ca5, and 38ae69390790f98d627d55967a3739ef9f5b6403), and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance @ 249aafe611730de86965e976c7d0b1c6796b9548 as audit evidence only; no force-push required."
+  "History repair: review/merge origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469 as the cleanest replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE. Treat origin/codex2/ph1gc-drv-mp-002 @ 9be1a098361ec90b4e30f26854d24441c1c59a8b, the mutable owner-helper rail origin/codex2/ph1gc-drv-mp-002-unblock-history-repair (audit commits ec50ab54f554d3f69a43eb638bd4641864a2bb4c, ebeb84e0e40865195b239cfe1dcddbc809bd4068, 08aaa8df486fdc9196fed618114014d3272a8de8, 5aaf3b05775ccaa84aed7b51186e982706a12f23, 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d, 0f3f3b5588bb609430b40c9ca50406cc72920ca5, and 38ae69390790f98d627d55967a3739ef9f5b6403), and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance @ 249aafe611730de86965e976c7d0b1c6796b9548 as audit evidence only; no force-push required."
 ```
 
 8. If the control plane requires a review replay instead of a progress note,
@@ -153,7 +155,7 @@ AI_NAME=Codex2 scripts/ai-status.sh progress PH1GC-DRV-MP-002 \
 
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh handoff PH1GC-DRV-MP-002 Codex \
-  "Replay review on canonical helper branch origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469. It is the cleanest pushed replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE; origin/codex2/ph1gc-drv-mp-002, origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ebeb84e0e40865195b239cfe1dcddbc809bd4068, and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance stay as audit evidence only."
+  "Replay review on canonical helper branch origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469. It is the cleanest pushed replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE; origin/codex2/ph1gc-drv-mp-002, the mutable owner-helper rail origin/codex2/ph1gc-drv-mp-002-unblock-history-repair (including audit commits ec50ab54f554d3f69a43eb638bd4641864a2bb4c and ebeb84e0e40865195b239cfe1dcddbc809bd4068), and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance stay as audit evidence only."
 ```
 
 9. After that replay, the parent should remain blocked only on the external
