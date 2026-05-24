@@ -2,10 +2,10 @@
 
 **Task:** `PH1GC-FIN-GOV-001` — Phase 1 gap closure: governance-aware billing/reporting spec + UAT
 **Owner:** `Codex`
-**Reviewer:** `Claude`
+**Reviewer:** `Gemini2`
 **Branch:** `codex/ph1gc-fin-gov-001`
 **Directive:** `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (`WF-FIN-GOV-001`)
-**Task-brief planning ref:** `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` (read in this worktree during the 2026-05-23 resume)
+**Task-brief planning ref:** `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` (re-read in this worktree during the 2026-05-24 reassignment / blocker revalidation)
 **Predecessor evidence pack:** `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`
 
 ---
@@ -21,9 +21,9 @@ This branch replays the missing governance-aware billing/reporting artifact chai
 5. `docs/04-uat/fbp-014a-e2e-matrix.md` and `tests/e2e/README.md` document the new `E2E-010` chain and verification surface.
 6. `.github/workflows/ci-integ.yml` now exposes a task-scoped `workflow_dispatch` path that can try the protected staging `E2E-010` rerun from GitHub Actions using the repo's WIF / IAP configuration, so auth failures are captured as reviewable CI evidence instead of being inferred only from local `gcloud` probes.
 
-The dispatch planning ref was read directly from this worktree during the 2026-05-23 resume. The shipped spec/UAT authority headers still point to the canonical directive §3.7 because that is the normative source for `WF-FIN-GOV-001`, with the execution worklist plus blueprint-alignment audit cited as alignment anchors and the planning ref used as dispatch context.
+The dispatch planning ref was read directly from this worktree during the original 2026-05-23 resume and re-read during the 2026-05-24 `Codex` / `Gemini2` reassignment. The shipped spec/UAT authority headers still point to the canonical directive §3.7 because that is the normative source for `WF-FIN-GOV-001`, with the execution worklist plus blueprint-alignment audit cited as alignment anchors and the planning ref used as dispatch context.
 
-`origin/dev` already carries the earlier directive-path spec/UAT pair for `WF-FIN-GOV-001`. This branch is the reconciliation layer: it tightens the verification body to the canonical 13 fields, adds the `E2E-010` shell plus matrix/release wiring, and records the current live-staging blocker with fresh 2026-05-23 probes.
+`origin/dev` already carries the earlier directive-path spec/UAT pair for `WF-FIN-GOV-001`. This branch is the reconciliation layer: it tightens the verification body to the canonical 13 fields, adds the `E2E-010` shell plus matrix/release wiring, and records the current live-staging blocker with fresh 2026-05-23 and 2026-05-24 probes.
 
 ## 2. Acceptance Status
 
@@ -33,7 +33,7 @@ The dispatch planning ref was read directly from this worktree during the 2026-0
 | `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` visible on `origin/dev` | Yes. `origin/dev` already carries the earlier UAT; this branch layers the 13-field reconciliation and strict-mode uplift wording on top. | `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`; branch UAT header + §2 + §4 |
 | UAT covers all 13 directive §H verification-body fields | Yes. The happy-path and negative-path scenarios enumerate the 13-field body and the required integrity / RBAC / masking paths. | UAT §2–§4 |
 | `PH1GC-E2E-010` script asserts every verification-body field | Yes, with the two-tier contract now documented explicitly: every field is always recorded, and `STRICT_VERIFICATION_BODY=1` hard-fails if any field remains `NOT_POPULATED`. | Spec §6; `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`; E2E matrix §4.10 |
-| Gate-read update for `WF-FIN-GOV-001 = PASS (live staging evidence)` drives matrix change | **Blocked.** The branch adds the matrix row and keeps it at `PASS (static evidence)`. Fresh 2026-05-23 probes still cannot obtain an email-bearing IAP token usable against governed staging, so no fresh reviewer-readable live invoice/report artifact or green strict-mode rerun is available from this workspace. | Release-gates row `WF-FIN-GOV-001`; release-truth-sync row 14; predecessor evidence pack §4; this closeout §4–§5 |
+| Gate-read update for `WF-FIN-GOV-001 = PASS (live staging evidence)` drives matrix change | **Blocked.** The branch adds the matrix row and keeps it at `PASS (static evidence)`. A fresh 2026-05-24 `workflow_dispatch` rerun (`CI (integration trunk)` run `26363924897`, staging job `77604277310`) advanced through `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`, so no reviewer-readable live invoice/report artifact or green strict-mode rerun is available from this workspace. | Release-gates row `WF-FIN-GOV-001`; release-truth-sync row 14; predecessor evidence pack §4; this closeout §4–§5 |
 | Closeout report follows directive §7 format | Yes. This sidecar applies directive §7 as a non-claim closeout: delivered scope, explicit non-claims, local verification, and the exact remaining blocker are all stated plainly. | This file |
 
 ## 3. Directive §7 Non-Claim Posture
@@ -69,23 +69,27 @@ The dispatch planning ref was read directly from this worktree during the 2026-0
 - `gh run view 26332046380 --job 77519603226 --log`
 - `gh run view 26332590728 --json url,status,conclusion,jobs`
 - `gh run watch 26332590728 --exit-status`
+- `gh workflow run ci-integ.yml --repo ajoe734/drts-fleet-platform --ref codex/ph1gc-fin-gov-001-rebased-20260523 -f ref=codex/ph1gc-fin-gov-001-rebased-20260523 -f run_staging_e2e_010=true`
+- `gh run view 26363924897 --repo ajoe734/drts-fleet-platform --json url,status,conclusion,jobs`
 - `gh secret list --repo ajoe734/drts-fleet-platform`
 - `gh variable list --repo ajoe734/drts-fleet-platform`
 - `git diff --check`
 
-No governed live staging execution was run from this dispatch because the 2026-05-23 access probes still stop before an authenticated E2E request can be issued:
+No governed live staging execution has yet run from this dispatch because the access probes and GitHub Actions reruns still stop before an authenticated E2E request can be issued:
 
 - the protected staging host still redirects unauthenticated requests to Google OAuth and returns `Invalid IAP credentials: empty token`;
 - the historical direct Cloud Run fallback still returns `404 Page not found`;
 - the locally configured human `gcloud` accounts (`bobo.du@cctech-support.com`, `edna@cctech-support.com`, and `lupinchen@cctech-support.com`) all still fail non-interactive token minting with `Reauthentication failed. cannot prompt during non-interactive execution.`;
 - the VM metadata path can mint an email-bearing identity token for `384772941419-compute@developer.gserviceaccount.com`, but the protected staging host now returns `403 Access denied` for that principal, and metadata-access-token based `generateIdToken` / service-account impersonation still fails with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`;
+- the 2026-05-24 repository secret inventory still shows `STAGING_WIF_SERVICE_ACCOUNT` present but no `STAGING_WIF_PROVIDER`; the branch-local `DEV_WIF_PROVIDER` fallback therefore remains necessary to reach GCP non-interactively, and the 2026-05-24 rerun confirms that this fallback is no longer the blocker once the job reaches token minting;
 - the GitHub Actions fallback path no longer stops at provider discovery. After branch commit `7aeb2c29` changed the workflow fallback to `STAGING_WIF_PROVIDER || DEV_WIF_PROVIDER || WIF_PROVIDER`, run `26327833020` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@7aeb2c29`) advanced through `Authenticate to GCP` and failed later in `Set up Cloud SDK` with `Permission 'iam.serviceAccounts.getAccessToken' denied`.
 - branch commit `2f6387fa` then made the Cloud SDK path best-effort so it would not gate the E2E chain. Run `26327904346` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@2f6387fa`) advanced through `Best-effort fetch internal key` and failed at `Mint IAP verification token` with `Permission 'iam.serviceAccounts.getOpenIdToken' denied`.
 - a fresh 2026-05-23 rerun on the pre-rebase owner head, run `26331222549` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001@5953c0e1`), reached `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed again at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. Because token minting failed first, both `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped and no `e2e-010-*` artifact files were produced.
 - the latest 2026-05-23 rerun on the rebased remote head that was under test at dispatch time, run `26332046380` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d`), again reached `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, and the upload step warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to publish.
 - a fresh 2026-05-23 rerun on the then-current rebased remote head, run `26332590728` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`), advanced through `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed again at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, GitHub warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to upload, and the job annotation from `google-github-actions/auth` confirms the blocker is still OpenID-token mint permission for the staging deployer identity.
-- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`; the current local/docs head on this branch records that rerun plus the later truthfulness refreshes. No governed E2E shell execution or reviewer-readable invoice/report artifact can start until the staging principal can mint the IAP token.
-- those five reruns show the remaining CI blocker is now service-account IAM for the staging deployer identity, not stale provider discovery. No governed E2E shell work or invoice/report evidence can start until an email-bearing IAP token can be minted.
+- a fresh 2026-05-24 rerun on the current rebased remote head, run `26363924897` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f6ddefff`), again reached `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed at `Mint IAP verification token` with the same `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, the upload step found no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files, and the staging job still never emitted a reviewer-readable invoice/report artifact.
+- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f6ddefff`; the current local/docs head on this branch records that rerun plus the earlier truthfulness refreshes. No governed E2E shell execution or reviewer-readable invoice/report artifact can start until the staging principal can mint the IAP token.
+- those six reruns show the remaining CI blocker is now service-account IAM for the staging deployer identity, not stale provider discovery. No governed E2E shell work or invoice/report evidence can start until an email-bearing IAP token can be minted.
 
 ## 5. Remaining Blocker
 
