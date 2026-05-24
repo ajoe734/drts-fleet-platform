@@ -5,7 +5,7 @@
 **Intended reviewer:** `Codex`
 **Collected:** `2026-05-19 (UTC)`
 **Latest refresh:** `2026-05-24 (PH1GC-FIN-GOV-001 / Codex)`
-**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-24 governed staging rerun (run 26369501167) still blocked by external IAM / IAP token-mint gates`
+**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-24 governed staging rerun (run 26370433652) still blocked by external IAM / IAP token-mint gates`
 
 ---
 
@@ -248,7 +248,8 @@ Observed results:
 - a fresh 2026-05-24 rerun on the current auth-token probe commit, `26366139732` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b`, proved that the GitHub federated `auth_token` is not a valid IAP bearer fallback for this staging host. The new `Probe IAP health with auth_token` step reached the protected host and got `HTTP 401` with body `Invalid IAP credentials: Unable to parse JWT`, so the federated token is the wrong shape for this ingress. The follow-on `Probe IAP health with access token` still failed at `gcloud auth print-access-token` with `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)`, and the fallback `Mint IAP verification token` step again failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
 - a fresh 2026-05-24 rerun on the current blocker-refresh head, `26367273638` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5c257292`, reconfirmed the same external gate on the actual latest pushed task branch. `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all succeeded; `Probe IAP health with auth_token` again returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; the `Probe IAP health with access token` step remained continue-on-error and still logged `403 Permission 'iam.serviceAccounts.getAccessToken' denied`; and the rerun failed at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped, and no reviewer-readable invoice/report artifact was produced.
 - a fresh 2026-05-24 rerun on the direct access-token probe commit, `26369501167` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@6739c6cd`, replaced `gcloud auth print-access-token` with a second `google-github-actions/auth@v2` call using `token_format: access_token`. The `auth_token` probe still returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; the direct service-account access-token mint now failed inside `google-github-actions/auth@v2` itself with `403 Permission 'iam.serviceAccounts.getAccessToken' denied`; and the follow-on `Mint IAP verification token` step still failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`. Because the access-token failure now happens before any `gcloud`-backed probe, this rerun confirms the remaining CI blocker is service-account credential-mint IAM rather than Cloud SDK behavior.
-- the latest governed staging rerun is `26369501167` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@6739c6cd`; the blocker has now been reproduced on the current pushed branch head itself, with the access-token path isolated from `gcloud`.
+- a fresh 2026-05-24 rerun on the current pushed head, `26370433652` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5d375722`, revalidated that no external IAM/IAP fix landed after the previous probe commit. `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all succeeded; `Probe IAP health with auth_token` again returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; the direct `google-github-actions/auth@v2 token_format=access_token` step again logged `403 Permission 'iam.serviceAccounts.getAccessToken' denied`; and `Mint IAP verification token` again logged `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`. `Run E2E-010 against staging` remained skipped, so the task still has no reviewer-readable live invoice/report artifact on the actual current branch head.
+- the latest governed staging rerun is `26370433652` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5d375722`; the blocker has now been reproduced on the actual current pushed branch head itself after the latest same-day revalidation, with the access-token path isolated from `gcloud`.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
@@ -296,17 +297,18 @@ currently blocked by four concrete environment issues:
 4. the repository-configured GitHub Actions staging path now reaches GCP after
    the branch-local `DEV_WIF_PROVIDER` fallback, but no repo-local bearer path
    can reach the protected staging API:
-   - the federated `auth_token` path is rejected by IAP with `HTTP 401 Invalid IAP credentials: Unable to parse JWT` (`26366139732`, `26367273638`, `26369501167`)
-   - the service-account access-token path still fails with `iam.serviceAccounts.getAccessToken` denied, including the direct `google-github-actions/auth@v2 token_format=access_token` probe on `26369501167` (`26365672590`, `26369501167`)
-   - the service-account ID-token path still fails with `iam.serviceAccounts.getOpenIdToken` denied (`26327904346`, `26332046380`, `26332590728`, `26363924897`, `26365672590`, `26366139732`, `26367273638`, `26369501167`)
+   - the federated `auth_token` path is rejected by IAP with `HTTP 401 Invalid IAP credentials: Unable to parse JWT` (`26366139732`, `26367273638`, `26369501167`, `26370433652`)
+   - the service-account access-token path still fails with `iam.serviceAccounts.getAccessToken` denied, including the direct `google-github-actions/auth@v2 token_format=access_token` probes on `26369501167` and `26370433652` (`26365672590`, `26369501167`, `26370433652`)
+   - the service-account ID-token path still fails with `iam.serviceAccounts.getOpenIdToken` denied (`26327904346`, `26332046380`, `26332590728`, `26363924897`, `26365672590`, `26366139732`, `26367273638`, `26369501167`, `26370433652`)
 
 Until one of those is resolved, this task can only deliver a consolidated
 static-evidence packet plus a reproducible blocker record. The 2026-05-19
 local rerun plus the 2026-05-22/23/24 GitHub Actions reruns narrowed the
 remaining CI blocker from provider discovery to service-account token-mint IAM,
-and the latest direct access-token rerun proved `gcloud` is no longer a
-confounder. They still did not surface a valid email-bearing IAP token path
-from this machine or from the repo's configured WIF automation.
+and the latest current-head rerun confirmed that no external IAM/IAP fix landed
+after the direct access-token probe. They still did not surface a valid
+email-bearing IAP token path from this machine or from the repo's configured
+WIF automation.
 
 ---
 
