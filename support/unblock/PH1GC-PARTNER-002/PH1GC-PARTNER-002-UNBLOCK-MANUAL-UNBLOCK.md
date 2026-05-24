@@ -113,6 +113,32 @@ owner can attach redacted external evidence for `EXT-001-BLK-001` through
 
 At that point, rerun the live issuer proof from the canonical parent task.
 
+## Review approval and closeout evidence
+
+This closeout note is documentary only. It does not change the redispatch
+diagnosis, canonical parent mapping, or external-only next step already
+approved by `Codex2`.
+
+- `2026-05-24T15:02:16Z`: `Codex2` marked
+  `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK` as `review_approved`
+- approved canonical repair:
+  - `f803195a`
+  - subject:
+    `PH1GC-PARTNER-002-UNBLOCK-MANUAL-UNBLOCK: repair parent machine-truth next step`
+- push evidence:
+  - `origin/codex/ph1gc-partner-002-unblock-manual-unblock` contains
+    `f803195a`
+  - no force-push or second parent task was required for the repair
+- reviewer-confirmed machine truth:
+  - `/home/edna/workspace/drts-fleet-platform/ai-status.json` now records this
+    helper in the closeout path instead of leaving it missing from the active
+    ancestry
+  - parent `PH1GC-PARTNER-002.next` now points to the concrete
+    `EXT-001-BLK-001` through `EXT-001-BLK-006` external-evidence sequence and
+    names
+    `support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md`
+    as the handoff packet
+
 ## Scope cut
 
 Do not create a second canonical parent for `PH1GC-PARTNER-002`.
