@@ -7,7 +7,7 @@ Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `in_progress`
 Machine-truth status on `2026-05-24`: owner reassigned from `Codex` to `Codex2`; repo-local artifact alignment is complete, but acceptance remains blocked under the same task id
-Current anchor after closeout truth-sync reconciliation: `130251e5` (`wip(PH1GC-FIN-GOV-001): anchor closeout truth sync`)
+Current anchor after closeout truth-sync reconciliation: `c894e406` (`wip(PH1GC-FIN-GOV-001): anchor closeout sidecar sync`)
 Files changed:
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
@@ -63,7 +63,7 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `git diff --check origin/dev...HEAD` passed.
-- `git rev-parse HEAD` = `130251e56f7111a93a56e2ac4fa64e16553446d9`.
+- `git rev-parse HEAD` = `c894e4069c6abbf72dddf4f6f90aea8b8dff3823`.
 - `git push -u origin codex2/ph1gc-fin-gov-001` succeeded after the anchor commit.
 
 ## Blocker
