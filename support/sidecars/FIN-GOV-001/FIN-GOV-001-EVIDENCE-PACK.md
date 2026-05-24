@@ -5,7 +5,7 @@
 **Intended reviewer:** `Codex`
 **Collected:** `2026-05-19 (UTC)`
 **Latest refresh:** `2026-05-24 (PH1GC-FIN-GOV-001 / Codex)`
-**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-24 governed staging rerun (run 26370433652) still blocked by external IAM / IAP token-mint gates`
+**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-24 governed staging rerun (run 26370775088 on rebased head 2c4be62a) still blocked by external IAM / IAP token-mint gates`
 
 ---
 
@@ -221,6 +221,9 @@ Probe target:
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787` on 2026-05-24
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b` on 2026-05-24
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5c257292` on 2026-05-24
+  - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@6739c6cd` on 2026-05-24
+  - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5d375722` on 2026-05-24
+  - `origin/codex/ph1gc-fin-gov-001-rebased-20260524@2c4be62a` on 2026-05-24
 
 Observed results:
 
@@ -249,7 +252,8 @@ Observed results:
 - a fresh 2026-05-24 rerun on the current blocker-refresh head, `26367273638` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5c257292`, reconfirmed the same external gate on the actual latest pushed task branch. `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all succeeded; `Probe IAP health with auth_token` again returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; the `Probe IAP health with access token` step remained continue-on-error and still logged `403 Permission 'iam.serviceAccounts.getAccessToken' denied`; and the rerun failed at `Mint IAP verification token` with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped, and no reviewer-readable invoice/report artifact was produced.
 - a fresh 2026-05-24 rerun on the direct access-token probe commit, `26369501167` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@6739c6cd`, replaced `gcloud auth print-access-token` with a second `google-github-actions/auth@v2` call using `token_format: access_token`. The `auth_token` probe still returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; the direct service-account access-token mint now failed inside `google-github-actions/auth@v2` itself with `403 Permission 'iam.serviceAccounts.getAccessToken' denied`; and the follow-on `Mint IAP verification token` step still failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`. Because the access-token failure now happens before any `gcloud`-backed probe, this rerun confirms the remaining CI blocker is service-account credential-mint IAM rather than Cloud SDK behavior.
 - a fresh 2026-05-24 rerun on the current pushed head, `26370433652` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5d375722`, revalidated that no external IAM/IAP fix landed after the previous probe commit. `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all succeeded; `Probe IAP health with auth_token` again returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; the direct `google-github-actions/auth@v2 token_format=access_token` step again logged `403 Permission 'iam.serviceAccounts.getAccessToken' denied`; and `Mint IAP verification token` again logged `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`. `Run E2E-010 against staging` remained skipped, so the task still has no reviewer-readable live invoice/report artifact on the actual current branch head.
-- the latest governed staging rerun is `26370433652` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@5d375722`; the blocker has now been reproduced on the actual current pushed branch head itself after the latest same-day revalidation, with the access-token path isolated from `gcloud`.
+- a fresh 2026-05-24 rerun on the rebased current head under test, `26370775088` on `origin/codex/ph1gc-fin-gov-001-rebased-20260524@2c4be62a`, reconfirmed the blocker after rebasing onto latest `origin/dev` and preserving the task branch on a non-force-pushed remote head. `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key` all succeeded; `Probe IAP health with auth_token` again returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; the continue-on-error `Mint service-account access token` path again annotated `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)` and therefore skipped `Probe IAP health with access token`; and the fallback `Mint IAP verification token` step again failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, and the upload step only produced the auth-token health-body artifact because the shell never started.
+- the latest governed staging rerun is `26370775088` on `origin/codex/ph1gc-fin-gov-001-rebased-20260524@2c4be62a`; the subsequent doc-only anchor `55854adc` updated closeout wording but did not change workflow or E2E behavior, so no newer staging rerun exists from this branch.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
