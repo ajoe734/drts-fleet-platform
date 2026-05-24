@@ -107,3 +107,19 @@ Separate follow-up for canonical doc hygiene:
 
 This helper task closes once the routing decision is committed, pushed on the
 task branch, and mirrored into machine truth as the owner's `done` transition.
+
+## 7. Review And Verification Evidence
+
+- Reviewer approval for this routing conclusion is recorded on the task as
+  `review_approved` with reviewer `Gemini2`.
+- Verification scope for owner closeout is limited to canonical-artifact
+  inspection and git evidence:
+  - `AI_COLLABORATION_GUIDE.md` read for collaboration and machine-truth rules
+  - `support/unblock/PH1GC-PROD-001/PH1GC-PROD-001-UNBLOCK-PLANNING-DECISION.md`
+    reviewed as the canonical unblock artifact
+  - `git status -sb` confirmed a task-owned clean working tree before closeout
+  - `git log --oneline --decorate -n 8` and `git show -s --format=fuller`
+    confirmed the task-scoped commit chain and reviewer metadata
+- Parent-task unblock result remains unchanged: `PH1GC-PROD-001` is routed to
+  external production readiness plus first live deploy / rollback evidence, not
+  to a new planning or contract decision.
