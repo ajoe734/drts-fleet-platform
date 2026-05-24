@@ -28,7 +28,7 @@ PR:
 `none on the expected task branch as of 2026-05-24; baseline spec/UAT visibility on origin/dev came from docs/ph1gc-doc-batch-1-20260522 (PR #237)`
 
 Commit:
-`branch is a multi-anchor blocker-refresh series; latest reviewer-readable remote head before this closeout-format refresh was cb818cd350d0c57e676afaa42714d50671539116 on origin/codex/ph1gc-fin-gov-001-rebased-20260523`
+`branch is a multi-anchor blocker-refresh series; latest pushed remote head is 2b26080a74e40fb3bbcae7362f26d4609483e3bf on origin/codex/ph1gc-fin-gov-001-rebased-20260523`
 
 Files changed:
 `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`, `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`, `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`, `.github/workflows/ci-integ.yml`, `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`, `docs/03-runbooks/phase1-release-truth-sync-20260519.md`, `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`, `docs/04-uat/fbp-014a-e2e-matrix.md`, `tests/e2e/README.md`, `tests/e2e/run-e2e.sh`, `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`, `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md`, `.github/workflows/deploy-staging.yml`
@@ -52,7 +52,7 @@ Remaining non-claim:
 `WF-FIN-GOV-001` is not yet `PASS (live staging evidence)`; no green `STRICT_VERIFICATION_BODY=1` staging rerun exists; the branch does not claim all 13 verification-body fields are populated on the current runtime
 
 External dependencies, if any:
-`iam.serviceAccounts.getOpenIdToken` for the staging deployer / WIF service-account path, plus a valid email-bearing IAP principal that can reach the protected staging API non-interactively
+`iam.serviceAccounts.getAccessToken` and `iam.serviceAccounts.getOpenIdToken` for the staging deployer / WIF service-account path, plus a valid email-bearing IAP principal that can reach the protected staging API non-interactively
 
 ---
 
@@ -139,10 +139,8 @@ No governed live staging execution has yet run from this dispatch because the ac
 - a fresh 2026-05-24 rerun on the current rebased remote head, run `26363924897` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f6ddefff`), again reached `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed at `Mint IAP verification token` with the same `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, the upload step found no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files, and the staging job still never emitted a reviewer-readable invoice/report artifact.
 - a fresh 2026-05-24 rerun on the probe commit, run `26365672590` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787`), added a pre-IAP access-token probe in `.github/workflows/ci-integ.yml`. That rerun reached `Authenticate to GCP`, `Set up Cloud SDK`, and `Best-effort fetch internal key`, then failed even earlier inside the new `Probe IAP health with access token` step: `gcloud auth print-access-token` returned `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)`. The follow-on `Mint IAP verification token` step still independently failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`, so the runner has neither bearer-mint path required to talk to staging non-interactively.
 - a fresh 2026-05-24 rerun on the current auth-token probe commit, run `26366139732` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b`), added a direct probe of `steps.gcp_auth.outputs.auth_token`. That probe reached the protected staging host but returned `HTTP 401` with body `Invalid IAP credentials: Unable to parse JWT`, proving the GitHub federated token is not a valid IAP bearer fallback for this ingress. The follow-on access-token probe still failed at `gcloud auth print-access-token` with `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)`, and the fallback `Mint IAP verification token` step still failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist)`.
-- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f6ddefff`; the current local/docs head on this branch records that rerun plus the earlier truthfulness refreshes. No governed E2E shell execution or reviewer-readable invoice/report artifact can start until the staging principal can mint the IAP token.
-- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787`; the current local/docs head on this branch records that rerun plus the earlier truthfulness refreshes. No governed E2E shell execution or reviewer-readable invoice/report artifact can start until the staging principal can mint either bearer path.
-- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b`; the current local/docs head on this branch records that rerun and the auth-token probe result. No governed E2E shell execution or reviewer-readable invoice/report artifact can start until the staging principal can mint a valid IAP bearer.
-- those eight reruns show the remaining CI blocker is now definitively external IAM for the staging deployer identity, not stale provider discovery or a missing repo-local fallback. The GitHub federated token is not parseable by IAP, and the runner still cannot mint either the service-account access token needed for `gcloud`-backed probing or the email-bearing OpenID token needed for IAP.
+- the latest governed staging rerun was `26366139732` (`CI (integration trunk)` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b`). The current pushed branch head `2b26080a74e40fb3bbcae7362f26d4609483e3bf` only tightens the blocker wording around that rerun and does not claim any later live execution.
+- across the 2026-05-24 probe sequence (`26363924897`, `26365672590`, `26366139732`), the remaining CI blocker is now definitively external IAM / IAP for the staging deployer identity, not stale provider discovery or a missing repo-local fallback. The GitHub federated token is not parseable by IAP, and the runner still cannot mint either the service-account access token needed for `gcloud`-backed probing or the email-bearing OpenID token needed for IAP.
 
 ## 5. Remaining Blocker
 
@@ -153,4 +151,4 @@ To uplift `WF-FIN-GOV-001` from `PASS (static evidence)` to `PASS (live staging 
 3. capture the evidence log plus the reviewer-readable invoice/report artifacts, and
 4. then update the release-gate row, release-truth-sync row, and alignment-audit row from blocked static evidence to live staging evidence.
 
-Until that governed rerun exists, this task should remain in `progress` / `blocker`, not `done`.
+Until that governed rerun exists, this task should remain `blocked`, not `done`.
