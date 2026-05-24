@@ -173,8 +173,30 @@ jobs:
             echo "::notice::Optional secret ${secret_name} not accessible; continuing without E2E_INTERNAL_KEY."
           fi
 
+      - name: Probe IAP health with access token
+        id: access_token_probe
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="$(gcloud auth print-access-token)"
+          echo "::add-mask::$token"
+          printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-iap-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/health")"
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_IAP_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          printf 'E2E_010_IAP_HEALTH_BODY_PATH=%s\n' "${RUNNER_TEMP}/e2e-010-iap-health-body.txt" >> "$GITHUB_ENV"
+          echo "Access-token probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-iap-health-body.txt"
+
       - name: Mint IAP verification token
         id: iap_token
+        if: ${{ steps.access_token_probe.outputs.status != '200' }}
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
@@ -189,13 +211,15 @@ jobs:
       - name: Run E2E-010 against staging
         env:
           E2E_API_URL: ${{ env.CONTROL_PLANE_API_ORIGIN }}
-          E2E_AUTH_BEARER_TOKEN: ${{ steps.iap_token.outputs.id_token }}
           E2E_CHAIN_FILE: ${{ runner.temp }}/e2e-010-chain.json
           E2E_EVIDENCE_FILE: ${{ runner.temp }}/e2e-010-evidence.log
           STRICT_VERIFICATION_BODY: 1
         run: |
           set -euo pipefail
 
+          if [[ -z "${E2E_AUTH_BEARER_TOKEN:-}" ]]; then
+            export E2E_AUTH_BEARER_TOKEN="${{ steps.iap_token.outputs.id_token }}"
+          fi
           bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh | tee "${RUNNER_TEMP}/e2e-010-console.log"
 
       - name: Upload E2E-010 evidence
@@ -208,6 +232,7 @@ jobs:
             ${{ runner.temp }}/e2e-010-console.log
             ${{ runner.temp }}/e2e-010-evidence.log
             ${{ runner.temp }}/e2e-010-chain.json
+            ${{ runner.temp }}/e2e-010-iap-health-body.txt
 
   # Aggregate job for branch-protection "required check" simplicity.
   ci-integ:
