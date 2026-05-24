@@ -60,6 +60,14 @@
 #       of the run, either with an observed value or with the literal
 #       `NOT_POPULATED` marker. A silently-omitted field is itself a
 #       regression: the recording is mandatory.
+#   SUPPLEMENTAL DIRECTIVE RECONCILIATION EVIDENCE:
+#     - owner presentation metadata (`ownerName`) is recorded when invoice /
+#       report payloads expose it, but it is not promoted into the strict
+#       13-field body because `ownerUserId` is the immutable reconciliation
+#       key and `ownerName` is mutable display text.
+#     - approval-evaluation evidence is recorded via `approvalRequestId`,
+#       `approvalState`, `evaluatedAt`, and `decision`; current contracts do
+#       not expose a separate `approvalEvaluationId`.
 #   STRICT_VERIFICATION_BODY=1 (uplift gate-keeper, §6.2):
 #     - when this env var is set, the final 13-field snapshot hard-fails
 #       (exit 1) if ANY field records as NOT_POPULATED. Use this mode to
@@ -728,11 +736,16 @@ subcase_fg04_report_export() {
     return 0
   fi
 
-  local has_cc has_approval has_quota has_partner has_legacy report_artifact_id
+  local has_cc has_owner_user has_owner_name has_approval has_quota has_partner has_legacy report_artifact_id
   has_cc=$(echo "$RESP_BODY" | jq -r '
     (..|.costCenterCode? // empty),
-    (..|.costCenterName? // empty),
+    (..|.costCenterName? // empty) | select(. != null and . != "") | "present"' \
+    2>/dev/null | head -1)
+  has_owner_user=$(echo "$RESP_BODY" | jq -r '
     (..|.ownerUserId? // empty) | select(. != null and . != "") | "present"' \
+    2>/dev/null | head -1)
+  has_owner_name=$(echo "$RESP_BODY" | jq -r '
+    (..|.ownerName? // empty) | select(. != null and . != "") | "present"' \
     2>/dev/null | head -1)
   has_approval=$(echo "$RESP_BODY" | jq -r '
     (..|.approvalState? // empty),
@@ -758,6 +771,8 @@ subcase_fg04_report_export() {
     2>/dev/null | head -1)
 
   record_field "FG-04" "reportCostCenterField" "${has_cc:-}"
+  record_field "FG-04" "reportOwnerUserField" "${has_owner_user:-}"
+  record_field "FG-04" "reportOwnerNameField" "${has_owner_name:-}"
   record_field "FG-04" "reportApprovalStateField" "${has_approval:-}"
   record_field "FG-04" "reportQuotaImpactField" "${has_quota:-}"
   record_field "FG-04" "reportPartnerProgramField" "${has_partner:-}"
@@ -821,13 +836,14 @@ subcase_invoice_governance_and_audit() {
 
   # Field presence on the matched governed line (soft — these are runtime
   # enrichment gaps per spec, NOT contract regressions).
-  local matched_line_json cc_code cc_name owner_user_id approval_state active_flag legacy_unmapped partner_id program_id eligibility_verification_id platform_earnings_ref
+  local matched_line_json cc_code cc_name owner_user_id owner_name approval_state active_flag legacy_unmapped partner_id program_id eligibility_verification_id platform_earnings_ref
   matched_line_json=$(echo "$RESP_BODY" | jq -c --arg oid "$ORDER_ID" \
     '.data.lines[]? | select((.orderId // .order_id) == $oid)' 2>/dev/null | head -1 || true)
   if [[ -n "$matched_line_json" ]]; then
     cc_code=$(echo "$matched_line_json" | jq -r '.costCenterCode // empty' 2>/dev/null || true)
     cc_name=$(echo "$matched_line_json" | jq -r '.costCenterName // empty' 2>/dev/null || true)
     owner_user_id=$(echo "$matched_line_json" | jq -r '.ownerUserId // empty' 2>/dev/null || true)
+    owner_name=$(echo "$matched_line_json" | jq -r '.ownerName // empty' 2>/dev/null || true)
     approval_state=$(echo "$matched_line_json" | jq -r '.approvalState // empty' 2>/dev/null || true)
     active_flag=$(echo "$matched_line_json" | jq -r 'if has("activeFlag") then (.activeFlag | tostring) else "" end' 2>/dev/null || true)
     legacy_unmapped=$(echo "$matched_line_json" | jq -r 'if has("legacy_unmapped") then (.legacy_unmapped | tostring) elif has("legacyUnmapped") then (.legacyUnmapped | tostring) else "" end' 2>/dev/null || true)
@@ -838,6 +854,7 @@ subcase_invoice_governance_and_audit() {
     record_field "FG-01" "lineCostCenterCode" "$cc_code"
     record_field "FG-01" "lineCostCenterName" "$cc_name"
     record_field "FG-01" "lineOwnerUserId" "$owner_user_id"
+    record_field "FG-01" "lineOwnerName" "$owner_name"
     record_field "FG-01" "lineApprovalState" "$approval_state"
     record_field "FG-01" "lineActiveFlag" "$active_flag"
     record_field "FG-01" "lineLegacyUnmapped" "$legacy_unmapped"
