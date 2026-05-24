@@ -2753,12 +2753,16 @@ def reconcile_status_from_git(config: dict[str, Any]) -> bool:
     invokes the dedicated reconcile-from-git command which scans origin/dev
     for closeout commits and finalizes any drift. Cheap, idempotent.
     """
-    script = config_path(config, "status_file").parent / "scripts" / "ai_status.py"
+    try:
+        status_root = config_path(config, "status_file").parent
+    except KeyError:
+        return False
+    script = status_root / "scripts" / "ai_status.py"
     if not script.exists():
         return False
     result = subprocess.run(
         [sys.executable, str(script), "reconcile-from-git"],
-        cwd=str(config_path(config, "status_file").parent),
+        cwd=str(status_root),
         capture_output=True,
         text=True,
     )
