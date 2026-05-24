@@ -1,10 +1,10 @@
 # FWD-LIVE-001 Provider Proof Matrix
 
-Date: 2026-05-23
+Date: 2026-05-24
 Task: `PH1GC-FWD-001`
 Owner: `Codex2`
 Reviewer: `Codex`
-Current cycle status: `review`
+Current cycle status: `blocker`
 Branch: `codex2/ph1gc-fwd-001`
 Workflow family: `WF-FWD-001`
 Target path: `support/sidecars/FWD-LIVE-001/`
@@ -56,6 +56,7 @@ Not allowed:
 ## Historical External Appendix
 
 `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` remains in this
-folder as a dated appendix for the failed external-access attempt. It records
-why a real partner sandbox claim is still blocked, but it does not negate the
-repo-local completeness of this 11-item fallback packet.
+folder as a dated appendix for the failed external-access attempts, including
+the `2026-05-24` revalidation. It records why a real partner sandbox claim is
+still blocked, but it does not negate the repo-local completeness of this
+11-item fallback packet.

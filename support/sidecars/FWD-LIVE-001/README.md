@@ -1,6 +1,6 @@
 # FWD-LIVE-001 Sidecar Classification
 
-Date: 2026-05-23
+Date: 2026-05-24
 Task: `PH1GC-FWD-001`
 Workflow family: `WF-FWD-001`
 Directive anchor: `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §D, §7
@@ -42,7 +42,7 @@ Do not describe this sidecar as:
 - real partner sandbox proof
 - production-ready forwarder adapter proof
 
-The strongest truthful reading on 2026-05-23 is:
+The strongest truthful reading on 2026-05-24 is:
 
 - the 11-item proof packet is complete as `forwarder_sandbox` repo-local
   evidence

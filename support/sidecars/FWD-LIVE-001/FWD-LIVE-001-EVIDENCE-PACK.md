@@ -1,7 +1,8 @@
 # FWD-LIVE-001 — Forwarder External Platform Live Evidence Pack
 
-Classification update on 2026-05-23: this file remains a dated partial external
-attempt snapshot only. It is not the 11-item real sandbox proof packet. See
+Classification update on 2026-05-24: this file remains a dated partial external
+attempt snapshot only. It is not the 11-item real sandbox proof packet. Fresh
+2026-05-24 probes reconfirm the same external-access boundary. See
 `README.md` and `FWD-LIVE-001-PROVIDER-PROOF.md` in this same folder for the
 current classification and proof-item matrix.
 
@@ -9,9 +10,9 @@ current classification and proof-item matrix.
 **Current cycle task:** `PH1GC-FWD-001`
 **Owner:** `Codex2`
 **Reviewer:** `Codex`
-**Current cycle status:** `review`
+**Current cycle status:** `blocker`
 **Branch:** `codex2/ph1gc-fwd-001`
-**Collected:** `2026-05-19 (UTC)`
+**Collected:** `2026-05-19 and 2026-05-24 (UTC)`
 **Status:** `partial evidence only — historical appendix; sidecar verdict remains PASS (repo-local)`
 
 ---
@@ -43,10 +44,11 @@ Historical result at collection time on `2026-05-19`:
   reauthentication, all three old `run.app` probes still return `404`, and
   `api-staging.drts.internal` still fails DNS resolution from this machine.
 
-Conclusion:
+Conclusion as of `2026-05-24T15:48Z`:
 
 - No new live external-platform proof was collected in this session.
-- This task can only add a dated partial evidence snapshot.
+- This task can only maintain a dated partial evidence snapshot plus blocker
+  revalidation.
 - `EXT-002-BLK-001` through `EXT-002-BLK-007` remain open for any real sandbox
   promotion.
 
@@ -163,7 +165,23 @@ Observed result from a second probe pass in this session:
 - `curl -I -sS https://api-staging.drts.internal/api/health` still fails with
   host resolution error
 
-### 3.6 Interpretation
+### 3.6 Revalidation snapshot at 2026-05-24T15:48Z
+
+Observed result from today's probe pass:
+
+- active `gcloud` account still resolves to `bobo.du@cctech-support.com`
+- `gcloud auth print-identity-token` still fails with non-interactive
+  reauthentication required and instructs `gcloud auth login`
+- `https://drts-api-kdhu6wzufa-uc.a.run.app/`
+  `https://drts-api-kdhu6wzufa-uc.a.run.app/health`
+  and `https://drts-api-kdhu6wzufa-uc.a.run.app/api/health` still return HTTP
+  `404`
+- `api-staging.drts.internal` still returns `NXDOMAIN`
+- `curl -I -sS https://api-staging.drts.internal/` and
+  `curl -I -sS https://api-staging.drts.internal/api/health` still fail with
+  host resolution errors
+
+### 3.7 Interpretation
 
 This session did not fail because `E2E-002` found no forwarded task and
 gracefully skipped. It failed earlier at the environment boundary:
@@ -179,12 +197,12 @@ through `EXT-002-BLK-007` would be testable.
 
 ## 4. Blocker Snapshot
 
-| Blocker ID        | 2026-05-19 status | What was observed this session                                                                                                            |
+| Blocker ID        | 2026-05-24 status | What was observed this session                                                                                                            |
 | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `EXT-002-BLK-001` | open              | No approved partner API contract artifact was added or surfaced.                                                                          |
-| `EXT-002-BLK-002` | open              | No working sandbox credential path was available; token refresh failed non-interactively and no reachable staging endpoint was confirmed. |
+| `EXT-002-BLK-002` | open              | No working sandbox credential path was available; token refresh still failed non-interactively and no reachable staging endpoint was confirmed. |
 | `EXT-002-BLK-003` | open              | No signed webhook sample or replay-denial proof was accessible.                                                                           |
-| `EXT-002-BLK-004` | open              | No live forwarded task seed could be queried because staging reachability failed before task discovery.                                   |
+| `EXT-002-BLK-004` | open              | No live forwarded task seed could be queried because staging reachability still failed before task discovery.                             |
 | `EXT-002-BLK-005` | open              | No callback lifecycle logs or correlation IDs were collected.                                                                             |
 | `EXT-002-BLK-006` | open              | No live duplicate / stale / lost-race callback evidence was collected.                                                                    |
 | `EXT-002-BLK-007` | open              | No live no-owned-assignment proof could be produced without a reachable forwarded task flow.                                              |
@@ -214,7 +232,7 @@ Recommended wording:
 
 - "`WF-FWD-001` is `PASS (repo-local)` only; real partner sandbox promotion remains externally gated."
 - "`EXT-002-BLK-001` through `EXT-002-BLK-007` remain open."
-- "A fresh `2026-05-19` live attempt did not reach partner-path verification
+- "Fresh `2026-05-19` and `2026-05-24` live probes did not reach partner-path verification
   because the available `gcloud` account required reauthentication and the
   documented staging hosts were not usable from this machine."
 
@@ -229,10 +247,11 @@ Not allowed:
 
 ## 7. Evidence Commands Executed
 
-Executed on `2026-05-19`:
+Executed on `2026-05-19` and `2026-05-24`:
 
 ```bash
 gcloud auth list --filter=status:ACTIVE --format='value(account)'
+gcloud auth print-identity-token
 ./tests/e2e/E2E-002-forwarded-order.sh
 curl -I -sS https://drts-api-kdhu6wzufa-uc.a.run.app/
 curl -I -sS https://drts-api-kdhu6wzufa-uc.a.run.app/health
@@ -246,7 +265,7 @@ curl -I -sS https://api-staging.drts.internal/api/health
 Observed key outputs:
 
 - active `gcloud` account: `bobo.du@cctech-support.com`
-- identity-token mint: failed, reauthentication required
+- identity-token mint: still failed, reauthentication required
 - old `run.app` host: HTTP `404`
 - internal staging host: `NXDOMAIN`
 

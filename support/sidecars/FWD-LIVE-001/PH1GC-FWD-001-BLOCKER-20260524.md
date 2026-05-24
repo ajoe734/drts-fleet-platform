@@ -20,10 +20,11 @@ substitution.
 ## Why The Task Is Still Blocked
 
 1. `support/sidecars/FWD-LIVE-001/FWD-LIVE-001-EVIDENCE-PACK.md` still records
-   only a dated partial external attempt. The latest captured probes never
-   reached a real partner path because non-interactive identity-token minting
-   failed, the older `run.app` staging host returned `404`, and the documented
-   internal staging host returned `NXDOMAIN`.
+   only a dated partial external attempt plus today's blocker revalidation. The
+   latest captured probes at `2026-05-24T15:48Z` still never reached a real
+   partner path because non-interactive identity-token minting failed, the
+   older `run.app` staging host returned `404`, and the documented internal
+   staging host returned `NXDOMAIN`.
 2. `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md` still keeps
    `EXT-002-BLK-001` through `EXT-002-BLK-007` open for the real adapter path:
    contract authority, sandbox credentials, webhook signing/replay rules, live
@@ -32,6 +33,31 @@ substitution.
 3. `docs/02-architecture/forwarder-sandbox-provider.md` still classifies
    `forwarder_sandbox` as the internal mock harness only. It must not be
    promoted to sandbox evidence.
+
+## 2026-05-24 Revalidation Snapshot
+
+Commands rerun today:
+
+```bash
+gcloud auth list --filter=status:ACTIVE --format='value(account)'
+gcloud auth print-identity-token
+curl -I -sS --max-time 15 https://drts-api-kdhu6wzufa-uc.a.run.app/
+curl -I -sS --max-time 15 https://drts-api-kdhu6wzufa-uc.a.run.app/health
+curl -I -sS --max-time 15 https://drts-api-kdhu6wzufa-uc.a.run.app/api/health
+nslookup api-staging.drts.internal
+curl -I -sS --max-time 15 https://api-staging.drts.internal/
+curl -I -sS --max-time 15 https://api-staging.drts.internal/api/health
+```
+
+Observed results:
+
+- active `gcloud` account still resolves to `bobo.du@cctech-support.com`
+- `gcloud auth print-identity-token` still fails with reauthentication
+  required and non-interactive execution blocked
+- all three `drts-api-kdhu6wzufa-uc.a.run.app` probes still return HTTP `404`
+- `nslookup api-staging.drts.internal` still returns `NXDOMAIN`
+- direct `curl` probes to `api-staging.drts.internal` still fail with
+  `Could not resolve host`
 
 ## Required External Handoff Bundle
 
