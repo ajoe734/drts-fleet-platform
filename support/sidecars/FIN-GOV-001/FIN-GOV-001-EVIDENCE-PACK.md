@@ -236,7 +236,8 @@ Observed results:
   - `failed to generate Google Cloud OpenID Connect ID token ...`
   - `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
   - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, and GitHub warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to upload because the shell never started.
-- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2`; the current local/docs head on this branch records that rerun and the later truthfulness refreshes, confirming the remaining blocker is still OpenID-token mint permission rather than provider discovery or Cloud SDK setup.
+- a fresh 2026-05-24 rerun on the probe commit, `26365672590` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787`, added an access-token probe before the IAP ID-token step. That probe showed the same service-account IAM gap on the access-token path: `gcloud auth print-access-token` failed with `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)`, and the follow-on `Mint IAP verification token` step still failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
+- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787`; the current local/docs head on this branch records that rerun and the later truthfulness refreshes, confirming the remaining blocker is now explicitly both service-account token-mint permissions rather than provider discovery or Cloud SDK setup.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
@@ -252,7 +253,7 @@ Interpretation:
   auth hop and proves the GitHub runner can now reach GCP non-interactively
 - the remaining GitHub Actions blocker is service-account IAM, not provider
   discovery: the staging deployer identity can authenticate, but it cannot mint
-  the access token / OpenID token needed for `gcloud` project configuration or
+  either the access token or the OpenID token needed for `gcloud` project configuration or
   the IAP bearer
 
 ---
