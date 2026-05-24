@@ -65,13 +65,18 @@ jobs:
         id: ver
         run: |
           today_date=$(date -u +%Y.%m.%d)
+          today_pattern=${today_date//./\\.}
           # Find the highest .N already used today; default to .0 if none.
-          existing_nums=$(git ls-remote --tags origin "refs/tags/release/v${today_date}.*" \
-            | awk '{print $2}' | sed 's|refs/tags/release/v[0-9.]*\.||' | sort -n | tail -1)
-          if [ -z "$existing_nums" ]; then
+          existing_num=$(git ls-remote --tags --refs origin "refs/tags/release/v${today_date}.*" \
+            | awk '{print $2}' \
+            | sed -E "s#^refs/tags/release/v${today_pattern}\\.([0-9]+)\$#\\1#" \
+            | grep -E '^[0-9]+$' \
+            | sort -n \
+            | tail -1)
+          if [ -z "$existing_num" ]; then
             n=0
           else
-            n=$((existing_nums + 1))
+            n=$((existing_num + 1))
           fi
           version="v${today_date}.${n}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
