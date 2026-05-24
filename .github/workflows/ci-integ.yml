@@ -118,6 +118,7 @@ jobs:
     env:
       PROJECT_ID: ${{ vars.STAGING_GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
       REGION: ${{ vars.STAGING_GCP_REGION || vars.GCP_REGION }}
+      API_SERVICE: ${{ vars.STAGING_GCP_API_SERVICE || 'drts-api' }}
       DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
       WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
       SHARED_DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
@@ -126,6 +127,7 @@ jobs:
       DEV_WIF_PROVIDER_VALUE: ${{ secrets.DEV_WIF_PROVIDER }}
       SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
       CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
+      DIRECT_API_ORIGIN: ${{ vars.STAGING_DIRECT_API_ORIGIN || '' }}
       IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
     steps:
       - uses: actions/checkout@v4
@@ -183,16 +185,41 @@ jobs:
         run: |
           set -euo pipefail
 
-          api_url="$(gcloud run services describe drts-api \
-            --region "$REGION" \
-            --project "$PROJECT_ID" \
-            --format='value(status.url)' 2>/dev/null || true)"
+          api_service="${API_SERVICE:-drts-api}"
+          direct_override="${DIRECT_API_ORIGIN:-}"
+          stderr_path="${RUNNER_TEMP}/e2e-010-direct-api-resolve.stderr.txt"
 
-          echo "url=${api_url}" >> "$GITHUB_OUTPUT"
-          if [[ -n "${api_url}" ]]; then
-            echo "::notice::Resolved direct Cloud Run API origin: ${api_url}"
+          echo "service=${api_service}" >> "$GITHUB_OUTPUT"
+          echo "stderr_path=${stderr_path}" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "${direct_override}" ]]; then
+            api_url="${direct_override}"
+            echo "source=override" >> "$GITHUB_OUTPUT"
+            echo "url=${api_url}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Using vars.STAGING_DIRECT_API_ORIGIN override for direct Cloud Run API origin: ${api_url}"
+          elif ! command -v gcloud >/dev/null 2>&1; then
+            : >"${stderr_path}"
+            {
+              echo "gcloud is unavailable on this runner."
+              echo "Provide vars.STAGING_DIRECT_API_ORIGIN to enable the direct Cloud Run fallback without Cloud Run describe access."
+            } >"${stderr_path}"
+            echo "source=unavailable" >> "$GITHUB_OUTPUT"
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "::warning::gcloud is unavailable; direct Cloud Run API origin cannot be auto-discovered."
           else
-            echo "::warning::Could not resolve direct Cloud Run API origin for drts-api."
+            if api_url="$(gcloud run services describe "${api_service}" \
+              --region "$REGION" \
+              --project "$PROJECT_ID" \
+              --format='value(status.url)' 2>"${stderr_path}")"; then
+              echo "source=describe" >> "$GITHUB_OUTPUT"
+              echo "url=${api_url}" >> "$GITHUB_OUTPUT"
+              echo "::notice::Resolved direct Cloud Run API origin for ${api_service}: ${api_url}"
+            else
+              echo "source=describe_failed" >> "$GITHUB_OUTPUT"
+              echo "url=" >> "$GITHUB_OUTPUT"
+              echo "::warning::Could not resolve direct Cloud Run API origin for ${api_service}. See uploaded resolve log for the underlying gcloud error."
+              cat "${stderr_path}"
+            fi
           fi
 
       - name: Probe IAP health with auth_token
@@ -447,6 +474,7 @@ jobs:
             ${{ runner.temp }}/e2e-010-shared-id-token-health-body.txt
             ${{ runner.temp }}/e2e-010-dev-id-token-health-body.txt
             ${{ runner.temp }}/e2e-010-dev-direct-api-health-body.txt
+            ${{ runner.temp }}/e2e-010-direct-api-resolve.stderr.txt
 
   # Aggregate job for branch-protection "required check" simplicity.
   ci-integ:
