@@ -4,7 +4,7 @@
 **Current owner task:** `PH1GC-DRV-MP-002`
 **Task lineage:** `WF-DRV-MP-001-DEVICE-EVIDENCE` -> `PH1GC-DRV-MP-002`
 **Packet status:** `blocked_external`
-**Last reviewed:** `2026-05-23`
+**Last reviewed:** `2026-05-24`
 
 ## 1. Executive summary
 
@@ -14,7 +14,7 @@ The directory now exists on the `codex2/ph1gc-drv-mp-002` task branch with all
 real-device pass.
 
 For directive `§7` closeout wording of the current blocked state, see
-`PH1GC-DRV-MP-002-CLOSEOUT-20260523.md`.
+`PH1GC-DRV-MP-002-CLOSEOUT-20260524.md`.
 The current truthful read is:
 
 - `WF-DRV-MP-001` still has only sandbox/static proof on `origin/dev`.
@@ -22,6 +22,8 @@ The current truthful read is:
   captures are attached here.
 - The correct machine-truth posture is `blocked` / `blocked_external`, not
   `done`.
+- `PH1GC-DRV-MP-002-UNBLOCK-HISTORY-REPAIR` removed branch-history ambiguity
+  only; it did not supply any new device or distribution evidence.
 
 ## 2. Current repo state
 
@@ -81,6 +83,7 @@ Closeout report:
 
 - `PH1GC-DRV-MP-002-CLOSEOUT-20260522.md` — historical blocked-external closeout
 - `PH1GC-DRV-MP-002-CLOSEOUT-20260523.md` — post-unblock revalidation closeout
+- `PH1GC-DRV-MP-002-CLOSEOUT-20260524.md` — post-history-repair revalidation closeout
 ## 6. Resume sequence
 
 Once the external bundle lands:
