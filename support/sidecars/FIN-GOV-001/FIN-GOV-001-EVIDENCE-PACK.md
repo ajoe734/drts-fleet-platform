@@ -4,7 +4,8 @@
 **Intended owner:** `Codex2`
 **Intended reviewer:** `Codex`
 **Collected:** `2026-05-19 (UTC)`
-**Current read:** `PARTIAL - static evidence consolidated; 2026-05-19 live rerun reconfirmed blocked by credential/ingress gates`
+**Latest refresh:** `2026-05-24 (PH1GC-FIN-GOV-001 / Codex)`
+**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-24 governed staging rerun still blocked by external IAM / IAP token-mint gates`
 
 ---
 
@@ -18,8 +19,9 @@ slice under `WF-FIN-001`:
 - approval audit chain continuity into billing/reporting
 
 The target outcome for this task was a fresh staging live evidence refresh.
-That refresh could not be completed from this workspace on `2026-05-19`; the
-exact blocker is captured in §4.
+That refresh could not be completed from this workspace; the exact blocker is
+captured in §4, including the latest 2026-05-24 GitHub Actions auth-token /
+access-token / ID-token probes.
 
 ---
 
@@ -105,10 +107,11 @@ justify a gate upgrade on its own.
 
 ---
 
-## 4. 2026-05-19 Live Collection Attempt
+## 4. 2026-05-19 to 2026-05-24 Live Collection Attempts
 
 This workspace re-ran the minimum live access probes on `2026-05-19T03:59Z`
-to determine whether the governance-aware `WF-FIN-001` evidence could be
+and then refreshed the GitHub Actions staging reruns through `2026-05-24` to
+determine whether the governance-aware `WF-FIN-001` evidence could be
 refreshed from staging during this dispatch.
 
 ### 4.1 Protected staging host
@@ -214,6 +217,8 @@ Probe target:
   - `origin/codex/ph1gc-fin-gov-001@2f6387fa` on 2026-05-23
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@f7bea87d` on 2026-05-23
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@bda002e2` on 2026-05-23
+  - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787` on 2026-05-24
+  - `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b` on 2026-05-24
 
 Observed results:
 
@@ -239,8 +244,7 @@ Observed results:
   - `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, and GitHub warned that no `e2e-010-console.log`, `e2e-010-evidence.log`, or `e2e-010-chain.json` files existed to upload because the shell never started.
 - a fresh 2026-05-24 rerun on the probe commit, `26365672590` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787`, added an access-token probe before the IAP ID-token step. That probe showed the same service-account IAM gap on the access-token path: `gcloud auth print-access-token` failed with `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)`, and the follow-on `Mint IAP verification token` step still failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
 - a fresh 2026-05-24 rerun on the current auth-token probe commit, `26366139732` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b`, proved that the GitHub federated `auth_token` is not a valid IAP bearer fallback for this staging host. The new `Probe IAP health with auth_token` step reached the protected host and got `HTTP 401` with body `Invalid IAP credentials: Unable to parse JWT`, so the federated token is the wrong shape for this ingress. The follow-on `Probe IAP health with access token` still failed at `gcloud auth print-access-token` with `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)`, and the fallback `Mint IAP verification token` step again failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied on resource (or it may not exist).`
-- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@0a006787`; the current local/docs head on this branch records that rerun and the later truthfulness refreshes, confirming the remaining blocker is now explicitly both service-account token-mint permissions rather than provider discovery or Cloud SDK setup.
-- the newest governed staging rerun was executed from `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b`; the current local/docs head on this branch records that rerun and the new auth-token probe result, confirming there is still no repo-local bearer path that can start `E2E-010` on staging without external IAM changes.
+- the latest governed staging rerun was `26366139732` on `origin/codex/ph1gc-fin-gov-001-rebased-20260523@c704994b`; the current pushed docs head only tightens the evidence wording around that rerun and does not claim any later live execution.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
