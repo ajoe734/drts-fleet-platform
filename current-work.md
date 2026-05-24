@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-20T01:11:05Z
+Last updated: 2026-05-24T20:05:00Z
 
 ## Objective
 
@@ -40,7 +40,7 @@ Phase 1 v3 design-blueprint-completion wave: 22 dispatchable P0 tasks + 9 HELD t
 - `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 - `Codex`: contracts, schema, state-system, acceptance; next: Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
-- `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
+- `Codex2`: contracts, schema, state-system, acceptance; next: `PH1GC-DRV-MP-002` remains `blocked_external` pending physical Android+iPhone evidence capture, signing/distribution access, weak-network conditioning, and masked human-in-loop artifacts.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
 - `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 
@@ -62,6 +62,7 @@ Phase 1 v3 design-blueprint-completion wave: 22 dispatchable P0 tasks + 9 HELD t
 
 | ID  | Phase | Task | Owner | Status | Depends On |
 | --- | ----- | ---- | ----- | ------ | ---------- |
+| `PH1GC-DRV-MP-002` | Phase 1 gap closure | Driver mobile device evidence packet | Codex2 | blocked | `PH1GC-DRV-MP-001` |
 
 ## Handoff Queue
 
@@ -73,7 +74,7 @@ Phase 1 v3 design-blueprint-completion wave: 22 dispatchable P0 tasks + 9 HELD t
 
 | Task     | Owner | Waiting For | Message | Status |
 | -------- | ----- | ----------- | ------- | ------ |
-| _(none)_ | -     | -           | -       | -      |
+| `PH1GC-DRV-MP-002` | Codex2 | external device/signing/TestFlight/weak-network/human capture bundle | Sidecar exists with all 11 directive §C placeholders, but no fresh masked Android+iPhone evidence is attached yet; keep blocked_external until the external bundle lands. | open |
 
 ## Review Notes (active tasks)
 
