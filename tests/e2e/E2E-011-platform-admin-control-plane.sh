@@ -14,6 +14,8 @@ PLATFORM_ACTOR_ID="e2e-platform-admin-011"
 TENANT_ACTOR_ID="e2e-tenant-admin-011"
 FLAG_KEY="driver-app.shift"
 REQUIRED_ROLE_CODES=("tenant_admin" "tenant_ops_admin")
+LEGACY_SEED_TENANT_ID="10000000-0000-0000-0000-000000000201"
+SEED_TENANT_ID=""
 
 chain_init
 
@@ -51,7 +53,7 @@ switch_platform_admin() {
 }
 
 switch_seed_tenant_admin() {
-  switch_actor "tenant_admin" "$TENANT_ACTOR_ID" "${1:-$E2E_SEED_TENANT_ID}"
+  switch_actor "tenant_admin" "$TENANT_ACTOR_ID" "${1:-$SEED_TENANT_ID}"
 }
 
 json_error_code() {
@@ -76,6 +78,59 @@ require_non_empty() {
     log_fail "Missing ${label}"
     log_fail "Body: ${RESP_BODY}"
     exit 1
+  fi
+}
+
+resolve_seed_tenant_id() {
+  local requested_seed="${E2E_SEED_TENANT_ID:-}"
+  local resolved_seed=""
+  local resolved_code=""
+
+  switch_platform_admin
+  http_call GET "/platform-admin/tenants"
+  assert_status "200"
+
+  if [[ -n "$requested_seed" ]]; then
+    resolved_seed=$(
+      echo "$RESP_BODY" | jq -r --arg tenantId "$requested_seed" \
+        '.data.items[] | select((.id // .tenantId // .tenant_id) == $tenantId) | (.id // .tenantId // .tenant_id)' \
+        2>/dev/null | head -1 || true
+    )
+  fi
+
+  if [[ -z "$resolved_seed" && "$requested_seed" == "$LEGACY_SEED_TENANT_ID" ]]; then
+    resolved_seed=$(
+      echo "$RESP_BODY" | jq -r \
+        '.data.items[] | select((.id // .tenantId // .tenant_id) == "tenant-demo-001" or (.code // .tenantCode // .tenant_code) == "demo") | (.id // .tenantId // .tenant_id)' \
+        2>/dev/null | head -1 || true
+    )
+  fi
+
+  if [[ -z "$resolved_seed" ]]; then
+    log_fail "Unable to resolve seed tenant for E2E-011"
+    log_fail "Requested seed tenant: ${requested_seed:-<empty>}"
+    log_fail "platform-admin/tenants response: ${RESP_BODY}"
+    exit 1
+  fi
+
+  resolved_code=$(
+    echo "$RESP_BODY" | jq -r --arg tenantId "$resolved_seed" \
+      '.data.items[] | select((.id // .tenantId // .tenant_id) == $tenantId) | (.code // .tenantCode // .tenant_code // empty)' \
+      2>/dev/null | head -1 || true
+  )
+
+  SEED_TENANT_ID="$resolved_seed"
+  chain_set "seed" "tenantId" "$SEED_TENANT_ID"
+  save_evidence "$SCENARIO" "seed" "tenantId" "$SEED_TENANT_ID"
+  if [[ -n "$resolved_code" ]]; then
+    chain_set "seed" "tenantCode" "$resolved_code"
+    save_evidence "$SCENARIO" "seed" "tenantCode" "$resolved_code"
+  fi
+
+  if [[ "$requested_seed" != "$SEED_TENANT_ID" ]]; then
+    log_info "Resolved seed tenant ${SEED_TENANT_ID} (requested ${requested_seed})"
+  else
+    log_info "Resolved seed tenant ${SEED_TENANT_ID}"
   fi
 }
 
@@ -477,6 +532,10 @@ chain_set "identity" "actorId" "$(json_get_first '.data.actorId' '.data.actor_id
 save_evidence "$SCENARIO" "identity" "realm" "$(json_get '.data.realm')"
 log_ok "Platform admin identity context resolved"
 
+log_surface "Seed tenant validation"
+resolve_seed_tenant_id
+log_ok "Seed tenant available for negative-path actor context"
+
 log_surface "RBAC negative — tenant create blocked"
 switch_seed_tenant_admin
 http_call POST "/platform-admin/tenants" "$TENANT_CREATE_BODY"
@@ -837,6 +896,7 @@ log_ok "Audit log contains the full control-plane mutation chain"
 
 log_step "Chain continuity assertions"
 assert_chain "identity" "actorId"
+assert_chain "seed" "tenantId"
 assert_chain "tenant" "tenantId"
 assert_chain "partner" "entrySlug"
 assert_chain "credential" "keyId"

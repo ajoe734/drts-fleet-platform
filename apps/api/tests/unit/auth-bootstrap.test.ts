@@ -318,7 +318,13 @@ describe("bootstrap auth guard", () => {
   });
 
   it("rejects tenant bootstrap identities on call-center order creation", () => {
-    const guard = new BootstrapAuthGuard(new Reflector());
+    const { auditNotificationService } = createAuthFixture();
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      undefined,
+      undefined,
+      auditNotificationService,
+    );
     const request: AuthenticatedRequestLike = {
       headers: {
         "x-actor-type": "tenant_admin",
@@ -327,6 +333,7 @@ describe("bootstrap auth guard", () => {
         "x-tenant-id": "tenant-demo-001",
         "x-roles": "tenant_admin",
         "x-scopes": "tenant:read tenant:write owned:write",
+        "x-request-id": "req-callcenter-tenant-denied-001",
       },
       method: "POST",
       originalUrl: "/api/call-center/orders",
@@ -347,6 +354,69 @@ describe("bootstrap auth guard", () => {
         },
       });
     }
+
+    expect(auditNotificationService.getAuditLogsSnapshot()[0]).toMatchObject({
+      actorId: "tenant-admin-001",
+      actionName: "reject_route_access",
+      requestId: "req-callcenter-tenant-denied-001",
+      resourceId: "/api/call-center/orders",
+      newValuesSummary: expect.objectContaining({
+        errorCode: "AUTH_REALM_DENIED",
+        outcome: "rejected",
+        realm: "tenant",
+      }),
+    });
+  });
+
+  it("audits scope-denied tenant bootstrap requests", () => {
+    const { auditNotificationService } = createAuthFixture();
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      undefined,
+      undefined,
+      auditNotificationService,
+    );
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "tenant_admin",
+        "x-actor-id": "tenant-admin-002",
+        "x-realm": "tenant",
+        "x-tenant-id": "tenant-demo-001",
+        "x-roles": "tenant_admin",
+        "x-scopes": "tenant:read tenant:write",
+        "x-request-id": "req-tenant-scope-denied-001",
+      },
+      method: "POST",
+      originalUrl: "/api/tenant/webhooks",
+    };
+
+    expect(() =>
+      guard.canActivate(createExecutionContext(request)),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      guard.canActivate(createExecutionContext(request));
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "AUTH_SCOPE_DENIED",
+        },
+      });
+    }
+
+    expect(auditNotificationService.getAuditLogsSnapshot()[0]).toMatchObject({
+      actorId: "tenant-admin-002",
+      actionName: "reject_route_access",
+      requestId: "req-tenant-scope-denied-001",
+      resourceId: "/api/tenant/webhooks",
+      newValuesSummary: expect.objectContaining({
+        errorCode: "AUTH_SCOPE_DENIED",
+        outcome: "rejected",
+        requiredScopes: ["tenant:webhooks:write"],
+      }),
+    });
   });
 
   it("allows tenant JWT identities to read feature flags", () => {

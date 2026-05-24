@@ -5,9 +5,11 @@ import {
   Optional,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
+import type { AuditLogRecord } from "@drts/contracts";
 
 import { ApiRequestError } from "../api-envelope";
 import { DriverDeviceSessionService } from "../../modules/auth/driver-device-session.service";
+import { AuditNotificationService } from "../../modules/audit-notification/audit-notification.service";
 import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
@@ -106,6 +108,8 @@ export class BootstrapAuthGuard implements CanActivate {
     @Optional() private readonly jwtAuthService?: JwtAuthService,
     @Optional()
     private readonly driverDeviceSessionService?: DriverDeviceSessionService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -191,6 +195,16 @@ export class BootstrapAuthGuard implements CanActivate {
     });
 
     if (!identity) {
+      this.recordRejectedAccess({
+        request,
+        code: "AUTH_REQUIRED",
+        details: {
+          route: request.originalUrl ?? request.url,
+          method: request.method ?? "GET",
+          requiredScopes: policy.requiredScopes,
+          allowedRealms: policy.allowedRealms,
+        },
+      });
       throw new ApiRequestError(
         401,
         "AUTH_REQUIRED",
@@ -257,6 +271,17 @@ export class BootstrapAuthGuard implements CanActivate {
       return;
     }
 
+    this.recordRejectedAccess({
+      request,
+      identity,
+      code: "AUTH_REALM_DENIED",
+      details: {
+        route: request.originalUrl ?? request.url,
+        method: request.method ?? "GET",
+        allowedRealms,
+        realm: identity.realm,
+      },
+    });
     throw new ApiRequestError(
       403,
       "AUTH_REALM_DENIED",
@@ -283,6 +308,17 @@ export class BootstrapAuthGuard implements CanActivate {
       return;
     }
 
+    this.recordRejectedAccess({
+      request,
+      identity,
+      code: "AUTH_SCOPE_DENIED",
+      details: {
+        route: request.originalUrl ?? request.url,
+        method: request.method ?? "GET",
+        requiredScopes,
+        grantedScopes: identity.scopes,
+      },
+    });
     throw new ApiRequestError(
       403,
       "AUTH_SCOPE_DENIED",
@@ -313,5 +349,61 @@ export class BootstrapAuthGuard implements CanActivate {
       payload.sub,
       route,
     );
+  }
+
+  private recordRejectedAccess(input: {
+    request: AuthenticatedRequestLike;
+    code: "AUTH_REQUIRED" | "AUTH_REALM_DENIED" | "AUTH_SCOPE_DENIED";
+    details: Record<string, unknown>;
+    identity?: BootstrapRequestIdentity | null;
+  }) {
+    if (!this.auditNotificationService) {
+      return;
+    }
+
+    const requestId = this.extractHeaderValue(
+      asHeaderRecord(input.request.headers),
+      "x-request-id",
+    );
+    const identity = input.identity ?? null;
+    const route =
+      (input.details.route as string | undefined) ??
+      input.request.originalUrl ??
+      input.request.url ??
+      null;
+    const method =
+      (input.details.method as string | undefined) ??
+      input.request.method ??
+      null;
+
+    this.auditNotificationService.recordAuditLog({
+      actorId: identity?.actorId ?? null,
+      actorType:
+        (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+        "system",
+      tenantId: identity?.tenantId ?? null,
+      moduleName: "auth",
+      actionName: "reject_route_access",
+      resourceType: "route_access",
+      resourceId: route,
+      newValuesSummary: {
+        outcome: "rejected",
+        errorCode: input.code,
+        route,
+        method,
+        realm: identity?.realm ?? null,
+        actorType: identity?.actorType ?? null,
+        ...input.details,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  private extractHeaderValue(
+    headers: Record<string, string | string[] | undefined>,
+    key: string,
+  ) {
+    const value = headers[key];
+    return Array.isArray(value) ? value[0] : value;
   }
 }

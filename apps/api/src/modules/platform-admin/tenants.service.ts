@@ -565,7 +565,18 @@ export class TenantsService implements OnModuleInit {
     const oldRollout = { ...tenant.rollout };
     const nextStage = this.normalizeRolloutStage(command.stage);
 
-    this.enforcePromotionGates(tenant, nextStage);
+    try {
+      this.enforcePromotionGates(tenant, nextStage);
+    } catch (error) {
+      this.recordRejectedRolloutAttempt(
+        tenant,
+        nextStage,
+        oldRollout,
+        requestId,
+        error,
+      );
+      throw error;
+    }
 
     tenant.rollout.stage = nextStage;
     tenant.rollout.lastPromotedAt = new Date().toISOString();
@@ -698,6 +709,56 @@ export class TenantsService implements OnModuleInit {
         { tenantId: tenant.id, nextStage, missing },
       );
     }
+  }
+
+  private recordRejectedRolloutAttempt(
+    tenant: PlatformAdminTenantRecord,
+    nextStage: PlatformTenantRolloutStage,
+    oldRollout: PlatformAdminTenantRecord["rollout"],
+    requestId: string | undefined,
+    error: unknown,
+  ) {
+    if (!(error instanceof ApiRequestError)) {
+      return;
+    }
+
+    const response = error.getResponse() as {
+      error?: {
+        code?: string;
+        details?: Record<string, unknown>;
+      };
+    };
+    const errorCode = response.error?.code;
+    if (
+      errorCode !== "TENANT_IN_ROLLBACK_HOLD" &&
+      errorCode !== "TENANT_PROMOTION_GATE_BLOCKED"
+    ) {
+      return;
+    }
+
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "reject_platform_tenant_rollout",
+        resourceType: "platform_tenant",
+        resourceId: tenant.id,
+        oldValuesSummary: { ...oldRollout },
+        newValuesSummary: {
+          outcome: "rejected",
+          requestedStage: nextStage,
+          errorCode,
+          reasonCode:
+            errorCode === "TENANT_IN_ROLLBACK_HOLD"
+              ? "production_rollback_hold_active"
+              : "tenant_promotion_gate_blocked",
+          ...(response.error?.details ?? {}),
+        },
+      },
+      requestId,
+    );
   }
 
   private requireTenant(tenantId: string): PlatformAdminTenantRecord {

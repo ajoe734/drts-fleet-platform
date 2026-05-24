@@ -241,8 +241,8 @@ describe("TenantsService", () => {
     );
   });
 
-  it("blocks promotion when tenant is in rollback_hold", () => {
-    const { service } = createService();
+  it("blocks promotion when tenant is in rollback_hold and audits the rejection", () => {
+    const { service, auditNotificationService } = createService();
     const created = service.create({ name: "Hold Test", code: "hold_test" });
 
     service.setRollbackHold(created.id);
@@ -250,6 +250,19 @@ describe("TenantsService", () => {
     expectApiError(
       () => service.setRolloutStage(created.id, { stage: "pilot" }),
       "TENANT_IN_ROLLBACK_HOLD",
+    );
+
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "reject_platform_tenant_rollout",
+        resourceId: created.id,
+        newValuesSummary: expect.objectContaining({
+          errorCode: "TENANT_IN_ROLLBACK_HOLD",
+          outcome: "rejected",
+          requestedStage: "pilot",
+          reasonCode: "production_rollback_hold_active",
+        }),
+      }),
     );
   });
 
