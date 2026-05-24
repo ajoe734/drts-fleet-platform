@@ -10,6 +10,52 @@
 
 ---
 
+## 0. Standard Closeout Header
+
+Task ID:
+`PH1GC-FIN-GOV-001`
+
+Owner:
+`Codex`
+
+Reviewer:
+`Gemini2`
+
+Branch:
+`codex/ph1gc-fin-gov-001`
+
+PR:
+`none on the expected task branch as of 2026-05-24; baseline spec/UAT visibility on origin/dev came from docs/ph1gc-doc-batch-1-20260522 (PR #237)`
+
+Commit:
+`branch is a multi-anchor blocker-refresh series; latest reviewer-readable remote head before this closeout-format refresh was cb818cd350d0c57e676afaa42714d50671539116 on origin/codex/ph1gc-fin-gov-001-rebased-20260523`
+
+Files changed:
+`docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`, `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`, `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`, `.github/workflows/ci-integ.yml`, `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`, `docs/03-runbooks/phase1-release-truth-sync-20260519.md`, `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`, `docs/04-uat/fbp-014a-e2e-matrix.md`, `tests/e2e/README.md`, `tests/e2e/run-e2e.sh`, `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`, `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md`, `.github/workflows/deploy-staging.yml`
+
+Verification commands:
+`bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`; `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`; `bash tests/e2e/run-e2e.sh --suite 010 --dry-run`; `gh run view 26363924897 --repo ajoe734/drts-fleet-platform --json url,status,conclusion,jobs`; `git diff --check`
+
+Evidence artifact:
+`support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md`; `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`; GitHub Actions run `26363924897` / staging job `77604277310`
+
+Workflow family affected:
+`WF-FIN-GOV-001`
+
+Gate read before:
+`PASS (static evidence)` on the release-gate matrix
+
+Gate read after:
+`PASS (static evidence)` remains the truthful read because the governed staging rerun is still blocked before `E2E-010` can mint an IAP token or emit a reviewer-readable invoice/report artifact
+
+Remaining non-claim:
+`WF-FIN-GOV-001` is not yet `PASS (live staging evidence)`; no green `STRICT_VERIFICATION_BODY=1` staging rerun exists; the branch does not claim all 13 verification-body fields are populated on the current runtime
+
+External dependencies, if any:
+`iam.serviceAccounts.getOpenIdToken` for the staging deployer / WIF service-account path, plus a valid email-bearing IAP principal that can reach the protected staging API non-interactively
+
+---
+
 ## 1. Delivered Scope
 
 This branch replays the missing governance-aware billing/reporting artifact chain onto the assigned `codex/ph1gc-fin-gov-001` worktree:
