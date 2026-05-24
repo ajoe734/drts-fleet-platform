@@ -87,6 +87,26 @@ For bookings created during the cost-center rollout window (defined as before `W
 
 `legacy_unmapped = true` may not be used to bypass cost-center attribution on a tenant where the registry is current; the export pipeline treats unexpectedly-flagged rows as an integrity error.
 
+### 3.8 Canonical verification-body index
+
+The directive §H verification body for `WF-FIN-GOV-001` is the following exact 13-field set. UAT and `E2E-010` must assert this list field-by-field without adding aliases to the acceptance count.
+
+| # | Field | Trigger / notes |
+| --- | --- | --- |
+| 1 | `costCenterCode` | required on every governance-aware record unless §3.7 legacy-unmapped fallback applies |
+| 2 | `costCenterName` | billing-time registry snapshot paired with `costCenterCode` |
+| 3 | `ownerUserId` | governance ownership attribution; nullable only under §3.7 |
+| 4 | `legacy_unmapped` | boolean integrity flag; `false` for normal mapped flows |
+| 5 | `approvalRequestId` | source approval lineage when approval evaluation ran |
+| 6 | `approvalState` | terminal approved state snapshot for the billed booking |
+| 7 | `quotaPeriodKey` | quota period bound to the governed booking |
+| 8 | `quotaUsageDelta` | usage units charged to the quota policy |
+| 9 | `partnerProgramCode` | partner-origin bookings only; otherwise explicit null evidence |
+| 10 | `eligibilityVerificationId` | partner eligibility reference; otherwise explicit null evidence |
+| 11 | `platformEarningsRef` | forwarded/platform task enrichment; otherwise explicit null evidence |
+| 12 | `auditId` | audit anchor for the governance-aware billing record |
+| 13 | `reportArtifactId` | report export linkage; nullable until export completes, but still part of the required evidence set |
+
 ---
 
 ## 4. Invoice and report-export shape

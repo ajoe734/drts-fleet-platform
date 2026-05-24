@@ -8,6 +8,32 @@
 
 This UAT codifies the human-runnable acceptance scenarios for governance-aware billing and reporting. Each scenario maps to a verification-body field cluster in the spec and to an assertion block in `E2E-010`.
 
+## 0. Verification-body coverage matrix
+
+The directive §H acceptance body for `WF-FIN-GOV-001` is the exact 13-field set declared in the spec §3.8. Review must be able to point to one primary happy-path assertion for each field, plus the negative-path guard that prevents silent drift.
+
+| Field | Primary UAT coverage | Negative / integrity coverage |
+| --- | --- | --- |
+| `costCenterCode` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-006` | `UAT-FIN-GOV-011` |
+| `costCenterName` | `UAT-FIN-GOV-001` | `UAT-FIN-GOV-011` |
+| `ownerUserId` | `UAT-FIN-GOV-001` | `UAT-FIN-GOV-011` |
+| `legacy_unmapped` | `UAT-FIN-GOV-001` (`false` on current mappings) | `UAT-FIN-GOV-011` |
+| `approvalRequestId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003` | `UAT-FIN-GOV-008` |
+| `approvalState` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003` | `UAT-FIN-GOV-008` |
+| `quotaPeriodKey` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-006` | `UAT-FIN-GOV-007` |
+| `quotaUsageDelta` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004` | `UAT-FIN-GOV-007`, `UAT-FIN-GOV-012` |
+| `partnerProgramCode` | `UAT-FIN-GOV-005` | `UAT-FIN-GOV-013` |
+| `eligibilityVerificationId` | `UAT-FIN-GOV-005` | `UAT-FIN-GOV-013` |
+| `platformEarningsRef` | `UAT-FIN-GOV-006` | `UAT-FIN-GOV-010` |
+| `auditId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003` | `UAT-FIN-GOV-009`, `UAT-FIN-GOV-010`, `UAT-FIN-GOV-012` |
+| `reportArtifactId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-005`, `UAT-FIN-GOV-006` | `UAT-FIN-GOV-009`, `UAT-FIN-GOV-010` |
+
+Expected review posture:
+
+- every field above appears in a human-readable scenario assertion
+- every field above is also emitted by `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+- partner-only / forwarded-only fields are still mandatory evidence rows; non-applicable happy-path runs must record explicit null/`NOT_POPULATED`, not omit them
+
 ---
 
 ## 1. Pre-conditions
