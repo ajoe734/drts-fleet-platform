@@ -138,7 +138,34 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 
 ---
 
-## 4. Acceptance criteria for `WF-FIN-GOV-001` gate-read uplift
+## 4. Verification-body traceability
+
+The table below makes the 13-field acceptance body auditable across human UAT and `E2E-010`.
+
+| Strict verification-body field | Primary UAT scenario(s) | `E2E-010` evidence path | Reviewer note |
+| ------------------------------ | ----------------------- | ----------------------- | ------------- |
+| `costCenterCode` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-005`, `UAT-FIN-GOV-006` | `FG-01 lineCostCenterCode`, final `VERIFY costCenterCode` | Must survive from booking attribution into invoice/report evidence. |
+| `costCenterName` | `UAT-FIN-GOV-001` | `FG-01 lineCostCenterName`, `FG-04 reportCostCenterField`, final `VERIFY costCenterName` | Rendered from the billing-time registry snapshot. |
+| `ownerUserId` | `UAT-FIN-GOV-001` | `FG-01 lineOwnerUserId`, `FG-04 reportOwnerUserField`, final `VERIFY ownerUserId` | Immutable owner attribution key; see supplemental `ownerName` evidence below. |
+| `legacy_unmapped` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-011` | `FG-01 lineLegacyUnmapped`, `FG-04 reportLegacyUnmappedField`, `FG-07 coverage*`, final `VERIFY legacy_unmapped` | Defaults `false` on governed happy path; integrity rule is exercised separately. |
+| `approvalRequestId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003`, `UAT-FIN-GOV-005` | `FG-03 approvalRequestId`, final `VERIFY approvalRequestId` | Links the billed booking back to the approval workflow. |
+| `approvalState` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003`, `UAT-FIN-GOV-008` | `FG-01 lineApprovalState`, `FG-03 approvalRequestState` / `approvalStateAfterApprove`, `FG-04 reportApprovalStateField`, final `VERIFY approvalState` | Must show the terminal approved state on billable flows and rejection on negative path. |
+| `quotaPeriodKey` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-005`, `UAT-FIN-GOV-006` | `FG-02 quotaPeriodKey`, final `VERIFY quotaPeriodKey` | Shared period key across bookings in the same quota window. |
+| `quotaUsageDelta` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-012` | `FG-02 quotaUsageDelta`, final `VERIFY quotaUsageDelta` | Used both for positive quota accumulation and post-export immutability checks. |
+| `partnerProgramCode` | `UAT-FIN-GOV-005` | `FG-05 settlementPartnerProgramId`, final `VERIFY partnerProgramCode` | Nullable on non-partner paths, but still must be explicitly recorded. |
+| `eligibilityVerificationId` | `UAT-FIN-GOV-005` | `FG-01 lineEligibilityVerificationId`, final `VERIFY eligibilityVerificationId` | Carries partner eligibility lineage into the governed billing row. |
+| `platformEarningsRef` | `UAT-FIN-GOV-006` | `FG-01 linePlatformEarningsRef`, `FG-06 platformEarningsRef`, final `VERIFY platformEarningsRef` | Nullable on owned flows; required on forwarded/platform-split flows. |
+| `auditId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-009`, `UAT-FIN-GOV-010`, `UAT-FIN-GOV-011`, `UAT-FIN-GOV-012`, `UAT-FIN-GOV-013` | `FG-08 invoiceAuditId`, final `VERIFY auditId` | The strict field is the finance-artifact audit anchor; negative scenarios confirm denied attempts are also audited. |
+| `reportArtifactId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-005`, `UAT-FIN-GOV-006` | `FG-04 reportArtifactId`, final `VERIFY reportArtifactId` | May be lazy-populated until export, but must be present for live uplift. |
+
+Directive §H also expects two reviewer-readable evidence items that are intentionally not promoted into the strict 13-field body on current contracts:
+
+| Supplemental directive evidence | Primary UAT scenario(s) | `E2E-010` evidence path | Why it stays supplemental |
+| ------------------------------- | ----------------------- | ----------------------- | ------------------------- |
+| `ownerName` | `UAT-FIN-GOV-001` | `FG-01 lineOwnerName`, `FG-04 reportOwnerNameField` | Mutable display text; `ownerUserId` remains the strict reconciliation key. |
+| approval-evaluation snapshot (`approvalEvaluationId` intent) | `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003` | `FG-03 evaluatedAt`, `FG-03 decision`, plus `approvalRequestId` / `approvalState` | `origin/dev` exposes approval lineage through the request id + snapshot, not a distinct `approvalEvaluationId` contract. |
+
+## 5. Acceptance criteria for `WF-FIN-GOV-001` gate-read uplift
 
 To uplift `WF-FIN-GOV-001` matrix row to `PASS (live staging evidence)`:
 
@@ -149,7 +176,7 @@ To uplift `WF-FIN-GOV-001` matrix row to `PASS (live staging evidence)`:
 
 ---
 
-## 5. Out of scope
+## 6. Out of scope
 
 - Cross-period reconciliation (Phase 2).
 - Real-time governance dashboards (Phase 2 deferred per spec §7).

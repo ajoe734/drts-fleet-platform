@@ -124,6 +124,26 @@ VB_PLATFORM_EARNINGS_REF=""
 VB_AUDIT_ID=""
 VB_REPORT_ARTIFACT_ID=""
 
+# Single source of truth for the strict verification-body inventory. The spec
+# and paired UAT both describe 13 required fields; this list is the executable
+# lock that keeps the shell's final recording step aligned with those docs.
+readonly EXPECTED_VB_FIELD_COUNT=13
+readonly -a VB_FIELD_NAMES=(
+  "costCenterCode"
+  "costCenterName"
+  "ownerUserId"
+  "legacy_unmapped"
+  "approvalRequestId"
+  "approvalState"
+  "quotaPeriodKey"
+  "quotaUsageDelta"
+  "partnerProgramCode"
+  "eligibilityVerificationId"
+  "platformEarningsRef"
+  "auditId"
+  "reportArtifactId"
+)
+
 # Lifecycle gates — flipped when a leg actually lands.
 APPROVED=false
 DISPATCHED=false
@@ -175,21 +195,37 @@ record_vb_field() {
   fi
 }
 
+vb_field_value() {
+  case "$1" in
+    costCenterCode) printf '%s' "$VB_COST_CENTER_CODE" ;;
+    costCenterName) printf '%s' "$VB_COST_CENTER_NAME" ;;
+    ownerUserId) printf '%s' "$VB_OWNER_USER_ID" ;;
+    legacy_unmapped) printf '%s' "$VB_LEGACY_UNMAPPED" ;;
+    approvalRequestId) printf '%s' "$VB_APPROVAL_REQUEST_ID" ;;
+    approvalState) printf '%s' "$VB_APPROVAL_STATE" ;;
+    quotaPeriodKey) printf '%s' "$VB_QUOTA_PERIOD_KEY" ;;
+    quotaUsageDelta) printf '%s' "$VB_QUOTA_USAGE_DELTA" ;;
+    partnerProgramCode) printf '%s' "$VB_PARTNER_PROGRAM_CODE" ;;
+    eligibilityVerificationId) printf '%s' "$VB_ELIGIBILITY_VERIFICATION_ID" ;;
+    platformEarningsRef) printf '%s' "$VB_PLATFORM_EARNINGS_REF" ;;
+    auditId) printf '%s' "$VB_AUDIT_ID" ;;
+    reportArtifactId) printf '%s' "$VB_REPORT_ARTIFACT_ID" ;;
+    *) return 1 ;;
+  esac
+}
+
 emit_verification_body_fields() {
   log_step "Verification body — emit 13-field evidence snapshot (strict=${STRICT_VERIFICATION_BODY})"
-  record_vb_field "costCenterCode" "$VB_COST_CENTER_CODE"
-  record_vb_field "costCenterName" "$VB_COST_CENTER_NAME"
-  record_vb_field "ownerUserId" "$VB_OWNER_USER_ID"
-  record_vb_field "legacy_unmapped" "$VB_LEGACY_UNMAPPED"
-  record_vb_field "approvalRequestId" "$VB_APPROVAL_REQUEST_ID"
-  record_vb_field "approvalState" "$VB_APPROVAL_STATE"
-  record_vb_field "quotaPeriodKey" "$VB_QUOTA_PERIOD_KEY"
-  record_vb_field "quotaUsageDelta" "$VB_QUOTA_USAGE_DELTA"
-  record_vb_field "partnerProgramCode" "$VB_PARTNER_PROGRAM_CODE"
-  record_vb_field "eligibilityVerificationId" "$VB_ELIGIBILITY_VERIFICATION_ID"
-  record_vb_field "platformEarningsRef" "$VB_PLATFORM_EARNINGS_REF"
-  record_vb_field "auditId" "$VB_AUDIT_ID"
-  record_vb_field "reportArtifactId" "$VB_REPORT_ARTIFACT_ID"
+  if (( ${#VB_FIELD_NAMES[@]} != EXPECTED_VB_FIELD_COUNT )); then
+    log_fail "Verification-body inventory drift: expected ${EXPECTED_VB_FIELD_COUNT} fields, found ${#VB_FIELD_NAMES[@]}"
+    exit 1
+  fi
+
+  local field raw
+  for field in "${VB_FIELD_NAMES[@]}"; do
+    raw="$(vb_field_value "$field" || true)"
+    record_vb_field "$field" "$raw"
+  done
 
   if [[ "$STRICT_VERIFICATION_BODY" == "1" || "$STRICT_VERIFICATION_BODY" == "true" ]]; then
     if (( ${#VB_MISSING_FIELDS[@]} > 0 )); then
