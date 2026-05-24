@@ -26,10 +26,13 @@ still rooted on stale ancestry.
    but they are bundled with stale ancestry and a merge commit, so replaying
    the whole branch would drag unrelated trunk drift into the parent.
 3. The owner-lane helper branch
-   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair`. Before this repair
-   it carried only the history note; after the replay commit it carries the
-   missing sidecar tree plus the history note, but it is now `21 left / 2
-   right` from current `origin/dev` with merge-base
+   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 0f3f3b5588bb609430b40c9ca50406cc72920ca5`
+   now contains three task commits:
+   `b6df1cbc` (initial audit), `38ae6939` (support-tree replay), and
+   `0f3f3b55` (refresh canonical replay evidence). The branch therefore no
+   longer points at the earlier owner helper audit SHA cited by the failed
+   review; `38ae6939` is only an ancestor on the same branch. Relative to
+   current `origin/dev`, the branch is `21 left / 3 right` with merge-base
    `6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`.
 4. A reviewer-lane helper branch also exists:
    `origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469`.
@@ -60,8 +63,11 @@ The contamination is the mismatch between:
    (`origin/codex2/ph1gc-drv-mp-002`) that contains the required sidecar tree
    but sits on stale ancestry (`a7f88919`) and includes a merge commit.
 2. Two different pushed history-repair branches that both look canonical:
-   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 38ae6939` and
-   `origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaaf`.
+   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 0f3f3b55`
+   and `origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaaf`.
+   The support artifact and parent machine truth were still naming the
+   superseded ancestor `38ae6939`, which made the canonical replay/audit story
+   internally inconsistent with the actual remote ref.
 3. A pushed `codex` helper branch carrying related sidecar evidence but still
    rooted on stale base `bf176edd`
    (`origin/codex/ph1gc-drv-mp-002-sidecar-acceptance @ 249aafe6`).
@@ -88,10 +94,11 @@ treating the stale-base branches as audit evidence only.
    - `support/sidecars/PH1GC-DRV-MP-002/PH1GC-DRV-MP-002-SIDECAR-ACCEPTANCE.md`
    - `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/*`
 2. Keep
-   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 38ae69390790f98d627d55967a3739ef9f5b6403`
-   as owner-lane audit evidence of the earlier two-commit repair attempt. It is
-   still useful provenance, but it is no longer the cleanest replay target now
-   that `origin/dev` has advanced and the reviewer lane has a one-commit replay.
+   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 0f3f3b5588bb609430b40c9ca50406cc72920ca5`
+   as the current owner-lane audit branch. It supersedes the earlier replay
+   commit `38ae6939` on the same branch and is still useful provenance, but it
+   is no longer the cleanest replay target now that `origin/dev` has advanced
+   and the reviewer lane has a one-commit replay.
 3. Do not replay the parent from
    `origin/codex2/ph1gc-drv-mp-002`; keep that branch as immutable evidence of
    the stale-base mixed-ancestry parent branch, not as the canonical review
@@ -106,7 +113,7 @@ treating the stale-base branches as audit evidence only.
 
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh progress PH1GC-DRV-MP-002 \
-  "History repair: review/merge origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469 as the cleanest replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE. Treat origin/codex2/ph1gc-drv-mp-002 @ 9be1a098361ec90b4e30f26854d24441c1c59a8b, origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 38ae69390790f98d627d55967a3739ef9f5b6403, and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance @ 249aafe611730de86965e976c7d0b1c6796b9548 as audit evidence only; no force-push required."
+  "History repair: review/merge origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469 as the cleanest replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE. Treat origin/codex2/ph1gc-drv-mp-002 @ 9be1a098361ec90b4e30f26854d24441c1c59a8b, origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 0f3f3b5588bb609430b40c9ca50406cc72920ca5 (superseding ancestor 38ae69390790f98d627d55967a3739ef9f5b6403), and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance @ 249aafe611730de86965e976c7d0b1c6796b9548 as audit evidence only; no force-push required."
 ```
 
 7. If the control plane requires a review replay instead of a progress note,
@@ -114,7 +121,7 @@ AI_NAME=Codex2 scripts/ai-status.sh progress PH1GC-DRV-MP-002 \
 
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh handoff PH1GC-DRV-MP-002 Codex \
-  "Replay review on canonical helper branch origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469. It is the cleanest pushed replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE; origin/codex2/ph1gc-drv-mp-002, origin/codex2/ph1gc-drv-mp-002-unblock-history-repair, and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance stay as audit evidence only."
+  "Replay review on canonical helper branch origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469. It is the cleanest pushed replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE; origin/codex2/ph1gc-drv-mp-002, origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 0f3f3b5588bb609430b40c9ca50406cc72920ca5, and origin/codex/ph1gc-drv-mp-002-sidecar-acceptance stay as audit evidence only."
 ```
 
 8. After that replay, the parent should remain blocked only on the external
@@ -158,9 +165,9 @@ AI_NAME=Codex2 scripts/ai-status.sh handoff PH1GC-DRV-MP-002 Codex \
   - `git diff --name-status origin/dev...origin/codex/ph1gc-drv-mp-002-unblock-history-repair`
   - `git diff --name-status origin/codex2/ph1gc-drv-mp-002-unblock-history-repair...origin/codex/ph1gc-drv-mp-002-unblock-history-repair`
   - `git show --stat --summary --name-only 9be1a098361ec90b4e30f26854d24441c1c59a8b`
-  - `git show --stat --summary --name-only 38ae69390790f98d627d55967a3739ef9f5b6403`
+  - `git show --stat --summary --name-only 0f3f3b5588bb609430b40c9ca50406cc72920ca5`
   - `git show --stat --summary --name-only dfe8aaafad35e57f38ae78d35a19e70014d09469`
   - `git branch -r --contains 9be1a098`
-  - `git branch -r --contains 38ae6939`
+  - `git branch -r --contains 0f3f3b55`
   - `git branch -r --contains dfe8aaaf`
   - `git branch -r --contains 249aafe6`
