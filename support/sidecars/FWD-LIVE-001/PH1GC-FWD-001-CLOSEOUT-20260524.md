@@ -74,3 +74,18 @@ curl -I -sS --max-time 15 https://api-staging.drts.internal/api/health
   sandbox directive-§D proofs could be newly collected in this cycle.
 - The strongest truthful read remains: `WF-FWD-001` is `PASS (repo-local)` and
   `PH1GC-FWD-001` is blocked on external sandbox enablement.
+
+## Owner Finalize Evidence
+
+- Reviewer `Codex` moved `PH1GC-FWD-001` to `review_approved` at
+  `2026-05-24T18:40:40Z` after re-reading the refreshed `18:35Z` blocker
+  evidence and confirming the packet still does not over-claim beyond
+  `PASS (repo-local)`.
+- Before the closeout commit, `git status --short` was clean and
+  `git rev-parse HEAD` matched `origin/codex2/ph1gc-fwd-001` at
+  `660d54d8840337ddf8441b16b9ab9debf106770a`.
+- This closeout cycle preserves the same acceptance outcome: all repo-local
+  directive-§D artifacts remain present under `support/sidecars/FWD-LIVE-001/`,
+  while real sandbox proof remains formally blocked pending the external
+  handoff bundle listed in
+  `support/sidecars/FWD-LIVE-001/PH1GC-FWD-001-BLOCKER-20260524.md`.
