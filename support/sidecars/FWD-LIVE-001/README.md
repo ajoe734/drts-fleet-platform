@@ -65,3 +65,6 @@ must provide:
 9. settlement sample
 10. no-owned-assignment proof
 11. webhook signature and replay/idempotency proof
+
+For the current concrete external handoff request, see
+`support/sidecars/FWD-LIVE-001/PH1GC-FWD-001-BLOCKER-20260524.md`.
