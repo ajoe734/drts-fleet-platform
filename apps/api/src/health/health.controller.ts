@@ -1,15 +1,11 @@
 import { Controller, Get } from "@nestjs/common";
 import { SkipThrottle } from "@nestjs/throttler";
-import type { UiHealthEnvelope } from "@drts/shared-types";
+import type { UiHealthEnvelope, DegradedService } from "@drts/shared-types";
 
 import { RATE_LIMIT_SKIP_DEFAULT } from "../common/throttling/rate-limit.constants";
 
 export function buildHealthPayload(
-  dependencies: {
-    name: string;
-    severity: "low" | "medium" | "high" | "critical";
-    message: string;
-  }[] = [],
+  dependencies: DegradedService[] = [],
 ): UiHealthEnvelope {
   const status =
     dependencies.length === 0
