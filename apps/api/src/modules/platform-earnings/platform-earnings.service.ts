@@ -248,6 +248,7 @@ export class PlatformEarningsService {
     }
 
     start.setUTCDate(1);
+
     return {
       startDate: toIsoDate(start),
       endDate: toIsoDate(end),
@@ -410,6 +411,7 @@ export class PlatformEarningsService {
             messageCode: "driver.earnings.no_data",
           } satisfies EmptyStateEnvelope)
         : null;
+    const firstReconciliationIssue = reconciliationIssues[0] ?? null;
 
     return {
       driverId,
@@ -437,10 +439,9 @@ export class PlatformEarningsService {
       statements: statements
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
         .map((statement) => this.toStatementListItem(statement)),
-      reconciliationIssue:
-        reconciliationIssues.length > 0
-          ? this.toReconciliationIssueCard(reconciliationIssues[0])
-          : null,
+      reconciliationIssue: firstReconciliationIssue
+        ? this.toReconciliationIssueCard(firstReconciliationIssue)
+        : null,
       emptyState,
       availableActions: [
         {
@@ -465,7 +466,7 @@ export class PlatformEarningsService {
         item.platformCode as keyof typeof PLATFORM_CODE_REGISTRY
       ];
     const referenceOnly = registryEntry?.status === "forwarder_stub";
-    const owned = !registryEntry || registryEntry.status === "owned";
+    const owned = !registryEntry;
 
     return {
       ...item,
