@@ -102,6 +102,7 @@ import type {
   IssueTenantApiKeyCommand,
   LinkCallOrderCommand,
   MaintenanceRecord,
+  MarkNotificationsReadCommand,
   MarkReimbursementPaidCommand,
   NotificationRecord,
   OpenCallSessionCommand,
@@ -214,6 +215,7 @@ import type {
   UpdateTenantSlaProfileCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateVehicleComplianceCommand,
+  UserNotificationRecord,
   UpsertTenantAddressCommand,
   UpsertTenantApprovalRuleCommand,
   UpsertTenantCostCenterCommand,
@@ -1614,8 +1616,24 @@ export class ApiClient {
     );
   }
 
-  async listNotifications(): Promise<NotificationRecord[]> {
-    return this.getList<NotificationRecord>("/api/notifications");
+  async listNotifications(): Promise<UserNotificationRecord[]> {
+    return this.getList<UserNotificationRecord>("/api/notifications");
+  }
+
+  async markNotificationRead(
+    notificationId: string,
+  ): Promise<{ updated: number }> {
+    return this.post<{ updated: number }>(
+      `/api/notifications/${encodeURIComponent(notificationId)}/read`,
+    );
+  }
+
+  async markNotificationsBulkRead(
+    command: MarkNotificationsReadCommand,
+  ): Promise<{ updated: number }> {
+    return this.post<{ updated: number }>("/api/notifications/read-bulk", {
+      body: command,
+    });
   }
 
   async listTenantNotificationFeed(): Promise<NotificationRecord[]> {
