@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from "@nestjs/common";
 
 import type {
@@ -57,14 +58,28 @@ export class IncidentController {
 
   @Get()
   listIncidents(
+    @Query("emptyReason") emptyReason?: string,
+    @Query("dispatchExceptionOrderId") dispatchExceptionOrderId?: string,
+    @Query("exceptionReasonCode") exceptionReasonCode?: string,
     @Headers("x-request-id") requestId?: string,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
+    const query: {
+      emptyReason?: string;
+      dispatchExceptionOrderId?: string;
+      exceptionReasonCode?: string;
+    } = {};
+    if (emptyReason) {
+      query.emptyReason = emptyReason;
+    }
+    if (dispatchExceptionOrderId) {
+      query.dispatchExceptionOrderId = dispatchExceptionOrderId;
+    }
+    if (exceptionReasonCode) {
+      query.exceptionReasonCode = exceptionReasonCode;
+    }
+
     return toApiSuccessEnvelope(
-      buildUiReadModelList(this.incidentService.listIncidents(identity), {
-        staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
-        emptyState: buildEmptyStateEnvelope("no_data", "incidents.empty"),
-      }),
+      this.incidentService.getIncidentCenterFeed(query),
       requestId,
     );
   }

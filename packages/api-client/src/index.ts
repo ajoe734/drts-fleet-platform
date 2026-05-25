@@ -97,6 +97,7 @@ import type {
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
   ServiceRecoveryActionRecord,
+  UiCollectionEnvelope,
   InitiateVehicleOffboardingCommand,
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
@@ -2402,6 +2403,28 @@ export class ApiClient {
 
   async listIncidents(): Promise<IncidentRecord[]> {
     return this.getList<IncidentRecord>("/api/incidents");
+  }
+
+  async getIncidentCenterFeed(options?: {
+    emptyReason?: string;
+    dispatchExceptionOrderId?: string;
+    exceptionReasonCode?: string;
+  }): Promise<UiCollectionEnvelope<IncidentRecord>> {
+    const query = new URLSearchParams();
+    if (options?.emptyReason) {
+      query.set("emptyReason", options.emptyReason);
+    }
+    if (options?.dispatchExceptionOrderId) {
+      query.set("dispatchExceptionOrderId", options.dispatchExceptionOrderId);
+    }
+    if (options?.exceptionReasonCode) {
+      query.set("exceptionReasonCode", options.exceptionReasonCode);
+    }
+
+    const suffix = query.toString();
+    return this.get<UiCollectionEnvelope<IncidentRecord>>(
+      `/api/incidents${suffix ? `?${suffix}` : ""}`,
+    );
   }
 
   async createIncident(command: CreateIncidentCommand) {

@@ -4317,7 +4317,6 @@ export interface IncidentRecord {
   resolutionNote: string | null;
   serviceRecoveryActions: ServiceRecoveryActionRecord[];
   availableActions?: ResourceActionDescriptor[];
-  matchingSuppression?: DriverMatchingSuppression | null;
   createdAt: string;
   updatedAt: string;
 }
