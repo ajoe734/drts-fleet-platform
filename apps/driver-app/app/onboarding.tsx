@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -9,9 +10,13 @@ import {
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
+  CrossAppResourceLink,
+  EmptyReason,
   PLATFORM_CODE_REGISTRY,
   PlatformPresenceRecord,
   PlatformPresenceSummary,
+  RefreshTier,
+  ResourceActionDescriptor,
   ShiftRecord,
   UnifiedDriverTaskView,
 } from "@drts/contracts";
@@ -45,6 +50,7 @@ import {
 import { driverActivationSteps, driverStrings } from "@/lib/strings";
 
 type WorkspaceRoute =
+  | "/onboarding"
   | "/jobs"
   | "/trip"
   | "/platform-presence"
@@ -67,6 +73,38 @@ const DEFAULT_TEST_REGISTRATION_CODE =
   process.env.EXPO_PUBLIC_DRIVER_TEST_REGISTRATION_CODE ?? "driver-demo-001";
 const DEFAULT_TEST_DEVICE_LABEL =
   process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "Driver Pixel 01";
+const WORKSPACE_REFRESH_TIER: RefreshTier = "medium";
+const WORKSPACE_REFRESH_INTERVAL_MS = 15_000;
+const CROSS_APP_ORIGINS: Record<CrossAppResourceLink["targetApp"], string> = {
+  "ops-console":
+    process.env.EXPO_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003",
+  "platform-admin":
+    process.env.EXPO_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002",
+  "tenant-console":
+    process.env.EXPO_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3004",
+};
+
+type CockpitAction = ResourceActionDescriptor & {
+  description: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+  route?: WorkspaceRoute;
+};
+
+type EmptyStateSpec = {
+  reason: EmptyReason;
+  title: string;
+  body: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+  tone: CalloutTone;
+  actionLabel?: string;
+  actionRoute?: WorkspaceRoute;
+};
+
+type DeepLinkSpec = {
+  title: string;
+  description: string;
+  link: CrossAppResourceLink;
+};
 
 function LoadingState({ label }: { label: string }) {
   return (
@@ -424,6 +462,195 @@ function QuickTile({
 
 type StatusTone = "success" | "warning" | "danger" | "neutral";
 
+function humanizeCode(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function EmptyStateCard({
+  spec,
+  onPress,
+}: {
+  spec: EmptyStateSpec;
+  onPress?: () => void;
+}) {
+  return (
+    <View style={styles.emptyStateCard}>
+      <View style={styles.emptyStateIconWrap}>
+        <Ionicons
+          color={
+            spec.tone === "danger"
+              ? tokens.colors.danger
+              : spec.tone === "info"
+                ? tokens.colors.brand
+                : tokens.colors.warning
+          }
+          name={spec.iconName}
+          size={18}
+        />
+      </View>
+      <View style={styles.emptyStateBody}>
+        <Text style={styles.emptyStateTitle}>{spec.title}</Text>
+        <Text style={styles.emptyStateDescription}>{spec.body}</Text>
+      </View>
+      {spec.actionLabel && onPress ? (
+        <ActionButton
+          icon="arrow-forward-outline"
+          onPress={onPress}
+          style={styles.emptyStateAction}
+          title={spec.actionLabel}
+          variant="secondary"
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function RefreshTierCard({
+  refreshTier,
+  refreshedAt,
+  onRefresh,
+}: {
+  refreshTier: RefreshTier;
+  refreshedAt: string | null;
+  onRefresh: () => void;
+}) {
+  return (
+    <View style={styles.refreshCard}>
+      <View style={styles.refreshCardBody}>
+        <Text style={styles.refreshCardEyebrow}>Refresh tier</Text>
+        <Text style={styles.refreshCardTitle}>T3 medium · 15 秒輪詢</Text>
+        <Text style={styles.refreshCardMeta}>
+          {refreshTier} · 最近同步 {formatCompactDateTime(refreshedAt)}
+        </Text>
+      </View>
+      <ActionButton
+        icon="refresh-outline"
+        onPress={onRefresh}
+        style={styles.refreshCardAction}
+        title="立即更新"
+        variant="ghost"
+      />
+    </View>
+  );
+}
+
+function AvailableActionsCard({
+  actions,
+  onPress,
+}: {
+  actions: ReadonlyArray<CockpitAction>;
+  onPress: (action: CockpitAction) => void;
+}) {
+  return (
+    <View style={styles.availableActionCard}>
+      <View style={styles.availableActionHeader}>
+        <Text style={styles.availableActionEyebrow}>
+          {driverStrings.trip.sections.availableActions}
+        </Text>
+        <Text style={styles.availableActionTitle}>依可用權限顯示</Text>
+      </View>
+      <View style={styles.availableActionList}>
+        {actions.map((action, index) => (
+          <Pressable
+            accessibilityRole="button"
+            disabled={!action.enabled}
+            key={`${action.action}-${index}`}
+            onPress={() => onPress(action)}
+            style={({ pressed }) => [
+              styles.availableActionRow,
+              index === actions.length - 1
+                ? null
+                : styles.availableActionRowDivider,
+              pressed && action.enabled
+                ? styles.availableActionRowPressed
+                : null,
+            ]}
+          >
+            <View style={styles.availableActionIcon}>
+              <Ionicons
+                color={
+                  action.enabled ? tokens.colors.brand : tokens.colors.textMuted
+                }
+                name={action.iconName}
+                size={16}
+              />
+            </View>
+            <View style={styles.availableActionBody}>
+              <View style={styles.availableActionTitleRow}>
+                <Text style={styles.availableActionLabel}>
+                  {humanizeCode(action.action)}
+                </Text>
+                <StatusChip
+                  label={action.enabled ? "可執行" : "受限"}
+                  variant={action.enabled ? "success" : "warning"}
+                />
+              </View>
+              <Text style={styles.availableActionDescription}>
+                {action.description}
+              </Text>
+              {!action.enabled && action.disabledReasonCode ? (
+                <Text style={styles.availableActionDisabledReason}>
+                  {humanizeCode(action.disabledReasonCode)}
+                </Text>
+              ) : null}
+            </View>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function CrossAppDeepLinkCard({
+  links,
+  onOpen,
+}: {
+  links: ReadonlyArray<DeepLinkSpec>;
+  onOpen: (link: CrossAppResourceLink) => void;
+}) {
+  if (links.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.deepLinkCard}>
+      <View style={styles.deepLinkHeader}>
+        <Text style={styles.deepLinkEyebrow}>Cross-app deep links</Text>
+        <Text style={styles.deepLinkTitle}>需要外部團隊處理時的跳轉</Text>
+      </View>
+      {links.map((entry, index) => (
+        <Pressable
+          accessibilityRole="button"
+          key={`${entry.link.targetApp}-${entry.link.resourceId}-${index}`}
+          onPress={() => onOpen(entry.link)}
+          style={({ pressed }) => [
+            styles.deepLinkRow,
+            index === links.length - 1 ? null : styles.deepLinkRowDivider,
+            pressed ? styles.deepLinkRowPressed : null,
+          ]}
+        >
+          <View style={styles.deepLinkBody}>
+            <Text style={styles.deepLinkRowTitle}>{entry.title}</Text>
+            <Text style={styles.deepLinkRowDescription}>
+              {entry.description}
+            </Text>
+            <Text style={styles.deepLinkRowMeta}>
+              {entry.link.label} · {entry.link.targetApp}
+            </Text>
+          </View>
+          <Ionicons
+            color={tokens.colors.textMuted}
+            name="open-outline"
+            size={16}
+          />
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 function toErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim();
@@ -478,6 +705,12 @@ function resolveWorkspaceIssue(flagsOk: boolean, identityOk: boolean): string {
   return "功能旗標服務暫時不可用。核心資料仍可能可讀，但部分入口會維持降級。";
 }
 
+function buildCrossAppHref(link: CrossAppResourceLink): string {
+  const base = CROSS_APP_ORIGINS[link.targetApp];
+  const route = link.route.startsWith("/") ? link.route : `/${link.route}`;
+  return `${base}${route}`;
+}
+
 export default function OnboardingScreen() {
   const [ready, setReady] = useState(false);
   const [flagsOk, setFlagsOk] = useState<boolean | null>(null);
@@ -506,6 +739,7 @@ export default function OnboardingScreen() {
   >(null);
   const [loadingShiftData, setLoadingShiftData] = useState(false);
   const [shiftLoadError, setShiftLoadError] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
 
   const router = useRouter();
 
@@ -542,6 +776,18 @@ export default function OnboardingScreen() {
   }, []);
 
   const provisioned = ready && isDriverIdentityProvisioned();
+
+  useEffect(() => {
+    if (!provisioned) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setRefreshSeed((current) => current + 1);
+    }, WORKSPACE_REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(intervalId);
+  }, [provisioned]);
 
   useEffect(() => {
     if (!provisioned) {
@@ -637,6 +883,8 @@ export default function OnboardingScreen() {
               ),
             );
           }
+
+          setLastRefreshedAt(new Date().toISOString());
 
           const nextShiftFeatureEnabled =
             shiftFlagResult.status === "fulfilled"
@@ -1177,6 +1425,249 @@ export default function OnboardingScreen() {
     taskSummary,
   ]);
 
+  const currentEmptyState = useMemo<EmptyStateSpec | null>(() => {
+    const identityIssue = getDriverIdentityIssue();
+    if (!provisioned) {
+      return {
+        reason: "not_provisioned",
+        title: "裝置尚未配置",
+        body: "未啟用裝置不能進入工作頁。請輸入車隊發放的註冊碼完成綁定。",
+        iconName: "phone-portrait-outline",
+        tone: "warning",
+      };
+    }
+
+    if (
+      identityIssue?.includes("停權") ||
+      identityIssue?.includes("退役") ||
+      identityIssue?.includes("證件")
+    ) {
+      return {
+        reason: "permission_denied",
+        title: "司機資格受限",
+        body: identityIssue,
+        iconName: "ban-outline",
+        tone: "danger",
+        actionLabel: "查看設定",
+        actionRoute: "/settings",
+      };
+    }
+
+    if (taskLoadError && taskViews.length === 0) {
+      return {
+        reason: "fetch_failed",
+        title: "工作資料尚未同步",
+        body: taskLoadError,
+        iconName: "cloud-offline-outline",
+        tone: "warning",
+        actionLabel: "重新整理",
+        actionRoute: "/onboarding",
+      };
+    }
+
+    if (platformLoadError && externalPresences.length === 0) {
+      return {
+        reason: "external_unavailable",
+        title: "平台狀態暫時不可用",
+        body: platformLoadError,
+        iconName: "globe-outline",
+        tone: "danger",
+        actionLabel: "平台中心",
+        actionRoute: "/platform-presence",
+      };
+    }
+
+    if (
+      externalPresences.length > 0 &&
+      externalPresences.every((record) => record.eligibility === "ineligible")
+    ) {
+      return {
+        reason: "driver_not_eligible",
+        title: "目前不符合接單資格",
+        body: "所有平台都回報資格限制，請先檢查帳號綁定、證件或服務桶設定。",
+        iconName: "shield-outline",
+        tone: "warning",
+        actionLabel: "查看平台",
+        actionRoute: "/platform-presence",
+      };
+    }
+
+    if (
+      taskSummary.pendingCount === 0 &&
+      !taskSummary.activeTripTask &&
+      !taskSummary.awaitingPlatformTask &&
+      !taskSummary.syncIssueTask &&
+      externalPresences.length > 0
+    ) {
+      return {
+        reason: "no_data",
+        title: "目前沒有待處理工作",
+        body: "工作台已待命。保持班次與平台在線，新的任務會在這裡浮現。",
+        iconName: "moon-outline",
+        tone: "info",
+        actionLabel: "查看平台",
+        actionRoute: "/platform-presence",
+      };
+    }
+
+    return null;
+  }, [
+    externalPresences,
+    platformLoadError,
+    provisioned,
+    taskLoadError,
+    taskSummary,
+    taskViews.length,
+  ]);
+
+  const cockpitActions = useMemo<ReadonlyArray<CockpitAction>>(() => {
+    const actions: CockpitAction[] = [];
+
+    if (taskSummary.activeTripTask) {
+      actions.push({
+        action: "return_trip",
+        enabled: true,
+        riskLevel: "low",
+        description: `${taskSummary.activeTripTask.taskId} 正在進行中，回到行程作業台。`,
+        iconName: "navigate-outline",
+        route: "/trip",
+      });
+    } else if (taskSummary.actionRequiredTask) {
+      const allowed = taskSummary.actionRequiredTask.allowedActions;
+      if (allowed.length === 0) {
+        actions.push({
+          action: "review_task",
+          enabled: false,
+          disabledReasonCode:
+            taskSummary.actionRequiredTask.blockingReason ??
+            "relay_unavailable",
+          riskLevel: "medium",
+          description: "此任務仍須查看，但目前沒有可直接執行的司機操作。",
+          iconName: "list-outline",
+          route: "/jobs",
+        });
+      } else {
+        for (const action of allowed.slice(0, 2)) {
+          actions.push({
+            action,
+            enabled: true,
+            riskLevel: action === "complete" ? "high" : "medium",
+            description: `${taskSummary.actionRequiredTask.platformDisplayName} 任務可立即執行。`,
+            iconName:
+              action === "reject"
+                ? "close-circle-outline"
+                : "checkmark-circle-outline",
+            route: "/jobs",
+          });
+        }
+      }
+    }
+
+    actions.push({
+      action: "start_shift",
+      enabled:
+        shiftFeatureEnabled === true &&
+        !loadingShiftData &&
+        !shiftLoadError &&
+        !isDriverOnShift,
+      disabledReasonCode:
+        shiftFeatureEnabled === false
+          ? "shift_feature_disabled"
+          : isDriverOnShift
+            ? "already_on_shift"
+            : loadingShiftData
+              ? "shift_sync_pending"
+              : shiftLoadError
+                ? "shift_sync_failed"
+                : undefined,
+      riskLevel: "medium",
+      description: "未上班時，自營派單會維持待命。",
+      iconName: "time-outline",
+      route: "/shift",
+    });
+
+    actions.push({
+      action: "resolve_reauth",
+      enabled: reauthPlatforms.length > 0,
+      disabledReasonCode:
+        reauthPlatforms.length === 0 ? "no_reauth_required" : undefined,
+      riskLevel: "medium",
+      description: "重新授權後，平台才能恢復把訂單送到此裝置。",
+      iconName: "key-outline",
+      route: "/platform-presence",
+    });
+
+    actions.push({
+      action: "review_platform_health",
+      enabled: true,
+      riskLevel: "low",
+      description: "查看多平台上線、資格、同步與綁定健康狀態。",
+      iconName: "swap-horizontal-outline",
+      route: "/platform-presence",
+    });
+
+    return actions;
+  }, [
+    isDriverOnShift,
+    loadingShiftData,
+    reauthPlatforms.length,
+    shiftFeatureEnabled,
+    shiftLoadError,
+    taskSummary,
+  ]);
+
+  const crossAppLinks = useMemo<ReadonlyArray<DeepLinkSpec>>(() => {
+    const links: DeepLinkSpec[] = [];
+
+    if (taskSummary.syncIssueTask) {
+      links.push({
+        title: "營運協調視角",
+        description: "需要派車台確認任務鏡像、手動接手或同步異常。",
+        link: {
+          targetApp: "ops-console",
+          route: `/drivers/${getDriverId()}`,
+          resourceType: "driver",
+          resourceId: getDriverId(),
+          openMode: "new_tab",
+          label: "前往 Ops Console",
+        },
+      });
+    }
+
+    if (reauthPlatforms.length > 0 || readyExternalCount === 0) {
+      links.push({
+        title: "平台治理視角",
+        description: "需要平台方處理 adapter、授權策略或綁定政策時使用。",
+        link: {
+          targetApp: "platform-admin",
+          route: "/adapter-registry",
+          resourceType: "adapter",
+          resourceId: reauthPlatforms[0]?.platformCode ?? "platform-health",
+          openMode: "new_tab",
+          label: "前往 Platform Admin",
+        },
+      });
+    }
+
+    return links;
+  }, [reauthPlatforms, readyExternalCount, taskSummary.syncIssueTask]);
+
+  const handleWorkspaceRefresh = () => {
+    setRefreshSeed((current) => current + 1);
+  };
+
+  const handleActionPress = (action: CockpitAction) => {
+    if (!action.enabled || !action.route) {
+      return;
+    }
+
+    router.push(action.route);
+  };
+
+  const handleCrossAppOpen = (link: CrossAppResourceLink) => {
+    void Linking.openURL(buildCrossAppHref(link));
+  };
+
   if (!ready) {
     return <LoadingState label="正在檢查裝置配置…" />;
   }
@@ -1203,6 +1694,16 @@ export default function OnboardingScreen() {
         <View style={styles.stepPanel}>
           <StepTimeline steps={ACTIVATION_STEPS} />
         </View>
+
+        <EmptyStateCard
+          spec={{
+            reason: "not_provisioned",
+            title: "尚未進入工作台",
+            body: "依 spec，此狀態會阻擋所有工作頁與 tab bar，直到裝置完成啟用。",
+            iconName: "lock-closed-outline",
+            tone: "warning",
+          }}
+        />
 
         <View style={styles.formCard}>
           {provisioningError ? (
@@ -1348,6 +1849,12 @@ export default function OnboardingScreen() {
         onSecondaryPress={navigate(nextAction.secondaryRoute)}
       />
 
+      <RefreshTierCard
+        onRefresh={handleWorkspaceRefresh}
+        refreshTier={WORKSPACE_REFRESH_TIER}
+        refreshedAt={lastRefreshedAt}
+      />
+
       <View style={styles.kpiRow}>
         <KpiTile
           iconName="alert-circle-outline"
@@ -1373,6 +1880,24 @@ export default function OnboardingScreen() {
           value={String(readyExternalCount)}
         />
       </View>
+
+      {currentEmptyState ? (
+        <EmptyStateCard
+          onPress={
+            currentEmptyState.actionRoute
+              ? currentEmptyState.actionRoute === "/onboarding"
+                ? handleWorkspaceRefresh
+                : navigate(currentEmptyState.actionRoute)
+              : undefined
+          }
+          spec={currentEmptyState}
+        />
+      ) : null}
+
+      <AvailableActionsCard
+        actions={cockpitActions}
+        onPress={handleActionPress}
+      />
 
       <View style={styles.readinessStack}>
         <AuthorityBanner
@@ -1507,6 +2032,8 @@ export default function OnboardingScreen() {
         />
         <Text style={styles.helperHintText}>{helperHint}</Text>
       </View>
+
+      <CrossAppDeepLinkCard links={crossAppLinks} onOpen={handleCrossAppOpen} />
 
       <View style={styles.quickSection}>
         <View style={styles.sectionHeader}>
@@ -1982,6 +2509,135 @@ const styles = StyleSheet.create({
     ...tokens.type.micro,
     color: tokens.colors.textMuted,
   },
+  refreshCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.spacing[12],
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 14,
+    padding: tokens.spacing[12],
+  },
+  refreshCardBody: {
+    flex: 1,
+    gap: 2,
+  },
+  refreshCardEyebrow: {
+    ...tokens.type.micro,
+    color: tokens.colors.textMuted,
+  },
+  refreshCardTitle: {
+    ...tokens.type.bodyStrong,
+    color: tokens.colors.textStrong,
+  },
+  refreshCardMeta: {
+    ...tokens.type.small,
+    color: tokens.colors.textMuted,
+  },
+  refreshCardAction: {
+    minHeight: 36,
+    paddingHorizontal: tokens.spacing[8],
+  },
+  emptyStateCard: {
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 14,
+    padding: tokens.spacing[12],
+    gap: tokens.spacing[12],
+  },
+  emptyStateIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: tokens.colors.surfaceLo,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyStateBody: {
+    gap: 4,
+  },
+  emptyStateTitle: {
+    ...tokens.type.bodyStrong,
+    color: tokens.colors.textStrong,
+  },
+  emptyStateDescription: {
+    ...tokens.type.small,
+    color: tokens.colors.textMuted,
+    lineHeight: 18,
+  },
+  emptyStateAction: {
+    alignSelf: "flex-start",
+  },
+  availableActionCard: {
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 14,
+    padding: tokens.spacing[16],
+    gap: tokens.spacing[12],
+    ...tokens.shadows.sm,
+  },
+  availableActionHeader: {
+    gap: 4,
+  },
+  availableActionEyebrow: {
+    ...tokens.type.micro,
+    color: tokens.colors.textMuted,
+  },
+  availableActionTitle: {
+    ...tokens.type.sectionTitle,
+    color: tokens.colors.textStrong,
+  },
+  availableActionList: {
+    gap: 0,
+  },
+  availableActionRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: tokens.spacing[12],
+    paddingVertical: tokens.spacing[12],
+  },
+  availableActionRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.border,
+  },
+  availableActionRowPressed: {
+    opacity: 0.72,
+  },
+  availableActionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: tokens.colors.surfaceLo,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  availableActionBody: {
+    flex: 1,
+    gap: 4,
+  },
+  availableActionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacing[8],
+  },
+  availableActionLabel: {
+    ...tokens.type.bodyStrong,
+    color: tokens.colors.textStrong,
+    flex: 1,
+  },
+  availableActionDescription: {
+    ...tokens.type.small,
+    color: tokens.colors.textMuted,
+    lineHeight: 18,
+  },
+  availableActionDisabledReason: {
+    ...tokens.type.micro,
+    color: tokens.colors.warning,
+  },
   readinessStack: {
     gap: tokens.spacing[8],
   },
@@ -2112,6 +2768,55 @@ const styles = StyleSheet.create({
     color: tokens.colors.textMuted,
     flex: 1,
     lineHeight: 18,
+  },
+  deepLinkCard: {
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 14,
+    padding: tokens.spacing[16],
+    gap: tokens.spacing[8],
+    ...tokens.shadows.sm,
+  },
+  deepLinkHeader: {
+    gap: 4,
+  },
+  deepLinkEyebrow: {
+    ...tokens.type.micro,
+    color: tokens.colors.textMuted,
+  },
+  deepLinkTitle: {
+    ...tokens.type.sectionTitle,
+    color: tokens.colors.textStrong,
+  },
+  deepLinkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.spacing[12],
+    paddingVertical: tokens.spacing[12],
+  },
+  deepLinkRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.border,
+  },
+  deepLinkRowPressed: {
+    opacity: 0.72,
+  },
+  deepLinkBody: {
+    flex: 1,
+    gap: 2,
+  },
+  deepLinkRowTitle: {
+    ...tokens.type.bodyStrong,
+    color: tokens.colors.textStrong,
+  },
+  deepLinkRowDescription: {
+    ...tokens.type.small,
+    color: tokens.colors.textMuted,
+  },
+  deepLinkRowMeta: {
+    ...tokens.type.micro,
+    color: tokens.colors.brand,
   },
 
   quickGrid: {
