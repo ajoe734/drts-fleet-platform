@@ -258,15 +258,20 @@ export class IncidentService implements OnModuleInit {
     const incident = this.require(incidentId);
 
     const updated = { ...incident, updatedAt: new Date().toISOString() };
+    const timeline = this.getTimeline(incidentId);
+    const pendingTimelineEntries: IncidentTimelineEntry[] = [];
 
     if (command.status !== undefined) {
       this.assertValidStatus(command.status);
       updated.status = command.status;
-      this.appendTimelineEntry(
+      this.appendTimelineEntryTo(
+        timeline,
+        pendingTimelineEntries,
         incidentId,
         TIMELINE_ACTIONS.statusChanged,
         `Status changed to ${command.status}.`,
         "ops_user",
+        updated.updatedAt,
       );
       if (command.status === "resolved" || command.status === "closed") {
         this.applyMatchingSuppressionCommand(
@@ -275,17 +280,22 @@ export class IncidentService implements OnModuleInit {
           identity,
           "system",
           true,
+          timeline,
+          pendingTimelineEntries,
         );
       }
     }
 
     if (command.assignedTo !== undefined) {
       updated.assignedTo = command.assignedTo;
-      this.appendTimelineEntry(
+      this.appendTimelineEntryTo(
+        timeline,
+        pendingTimelineEntries,
         incidentId,
         TIMELINE_ACTIONS.assigned,
         `Assigned to ${command.assignedTo}.`,
         "ops_user",
+        updated.updatedAt,
       );
     }
 
@@ -294,11 +304,14 @@ export class IncidentService implements OnModuleInit {
       const oldSeverity = updated.severity;
       updated.severity = command.severity;
       if (oldSeverity !== command.severity) {
-        this.appendTimelineEntry(
+        this.appendTimelineEntryTo(
+          timeline,
+          pendingTimelineEntries,
           incidentId,
           TIMELINE_ACTIONS.severityEscalated,
           `Severity changed from ${oldSeverity} to ${command.severity}.`,
           "ops_user",
+          updated.updatedAt,
         );
       }
     }
@@ -318,13 +331,16 @@ export class IncidentService implements OnModuleInit {
         );
       }
       updated.escalationTarget = command.escalationTarget;
-      this.appendTimelineEntry(
+      this.appendTimelineEntryTo(
+        timeline,
+        pendingTimelineEntries,
         incidentId,
         TIMELINE_ACTIONS.escalationTargetSet,
         command.escalationTarget
           ? `Escalation target set to ${command.escalationTarget}.`
           : "Escalation target cleared.",
         "ops_user",
+        updated.updatedAt,
       );
     }
 
@@ -337,11 +353,25 @@ export class IncidentService implements OnModuleInit {
         updated,
         command.matchingSuppression,
         identity,
+        "ops_user",
+        false,
+        timeline,
+        pendingTimelineEntries,
       );
     }
 
     this.replace(updated);
-    this.persist({ incidents: [updated] }, "update_incident");
+    this.timelines.set(incidentId, timeline);
+    this.persist(
+      {
+        incidents: [updated],
+        timelines:
+          pendingTimelineEntries.length > 0
+            ? pendingTimelineEntries
+            : undefined,
+      },
+      "update_incident",
+    );
     this.recordAudit(
       {
         actorId: null,
@@ -689,6 +719,26 @@ export class IncidentService implements OnModuleInit {
     this.timelines.set(incidentId, [...current, entry]);
   }
 
+  private appendTimelineEntryTo(
+    timeline: IncidentTimelineEntry[],
+    pendingTimelineEntries: IncidentTimelineEntry[],
+    incidentId: string,
+    action: string,
+    note: string,
+    actor: string,
+    createdAt = new Date().toISOString(),
+  ) {
+    const entry = this.createTimelineEntry(
+      incidentId,
+      action,
+      note,
+      actor,
+      createdAt,
+    );
+    timeline.push(entry);
+    pendingTimelineEntries.push({ ...entry });
+  }
+
   private clone(incident: IncidentRecord) {
     return {
       ...incident,
@@ -722,6 +772,8 @@ export class IncidentService implements OnModuleInit {
     identity?: BootstrapRequestIdentity | null,
     actor = "ops_user",
     allowSystemLift = false,
+    timeline?: IncidentTimelineEntry[],
+    pendingTimelineEntries?: IncidentTimelineEntry[],
   ) {
     const suppression =
       incident.driverMatchingSuppression ??
@@ -779,13 +831,25 @@ export class IncidentService implements OnModuleInit {
         expiresAt: expiresAt.toISOString(),
         liftedAt: null,
       };
-      this.appendTimelineEntry(
-        incident.incidentId,
-        TIMELINE_ACTIONS.matchingSuppressionExtended,
-        `Driver matching suppression extended until ${incident.driverMatchingSuppression.expiresAt}.`,
-        identity?.actorId ?? actor,
-        now,
-      );
+      if (timeline && pendingTimelineEntries) {
+        this.appendTimelineEntryTo(
+          timeline,
+          pendingTimelineEntries,
+          incident.incidentId,
+          TIMELINE_ACTIONS.matchingSuppressionExtended,
+          `Driver matching suppression extended until ${incident.driverMatchingSuppression.expiresAt}.`,
+          identity?.actorId ?? actor,
+          now,
+        );
+      } else {
+        this.appendTimelineEntry(
+          incident.incidentId,
+          TIMELINE_ACTIONS.matchingSuppressionExtended,
+          `Driver matching suppression extended until ${incident.driverMatchingSuppression.expiresAt}.`,
+          identity?.actorId ?? actor,
+          now,
+        );
+      }
       return;
     }
 
@@ -798,6 +862,21 @@ export class IncidentService implements OnModuleInit {
       active: false,
       liftedAt: now,
     };
+    if (timeline && pendingTimelineEntries) {
+      this.appendTimelineEntryTo(
+        timeline,
+        pendingTimelineEntries,
+        incident.incidentId,
+        TIMELINE_ACTIONS.matchingSuppressionLifted,
+        allowSystemLift
+          ? "Driver matching suppression lifted automatically by incident lifecycle."
+          : "Driver matching suppression lifted manually.",
+        identity?.actorId ?? actor,
+        now,
+      );
+      return;
+    }
+
     this.appendTimelineEntry(
       incident.incidentId,
       TIMELINE_ACTIONS.matchingSuppressionLifted,
