@@ -1,5 +1,4 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 import type {
   AdapterHealthRecord,
   DispatchCandidate,
@@ -17,10 +16,7 @@ import type {
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import {
-  formatCompactNumber,
-  formatMinorCurrency,
-} from "@/lib/ops-analytics";
+import { formatCompactNumber, formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import { t } from "@/lib/translations";
@@ -104,7 +100,7 @@ type BoardActionContext = {
   label: string;
   riskLevel: ResourceActionDescriptor["riskLevel"];
   disabled: boolean;
-  disabledReason?: string;
+  disabledReason?: string | undefined;
   external?: boolean;
 };
 
@@ -183,17 +179,19 @@ const BOARD_PRIORITY: Record<DispatchBoard, number> = {
   forwarded: 5,
 };
 
-const FORWARDED_STATUS_PRIORITY: Record<ForwardedOrderRecord["status"], number> =
-  {
-    sync_failed: 0,
-    accept_pending: 1,
-    broadcasted: 2,
-    received: 3,
-    confirmed_by_platform: 4,
-    completed_synced: 5,
-    lost_race: 6,
-    cancelled_by_platform: 7,
-  };
+const FORWARDED_STATUS_PRIORITY: Record<
+  ForwardedOrderRecord["status"],
+  number
+> = {
+  sync_failed: 0,
+  accept_pending: 1,
+  broadcasted: 2,
+  received: 3,
+  confirmed_by_platform: 4,
+  completed_synced: 5,
+  lost_race: 6,
+  cancelled_by_platform: 7,
+};
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -321,9 +319,9 @@ function buildDispatchHref({
   workItemId,
 }: {
   board: DispatchBoard;
-  service?: string;
-  facet?: string;
-  workItemId?: string;
+  service?: string | undefined;
+  facet?: string | undefined;
+  workItemId?: string | undefined;
 }) {
   const params = new URLSearchParams();
   if (board !== "ready") {
@@ -421,7 +419,9 @@ function formatDurationSince(locale: Locale, value: string | null | undefined) {
   }
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return locale === "zh" ? `${hours} 小時 ${minutes} 分` : `${hours}h ${minutes}m`;
+  return locale === "zh"
+    ? `${hours} 小時 ${minutes} 分`
+    : `${hours}h ${minutes}m`;
 }
 
 function formatWindow(order: OwnedOrderRecord, locale: Locale) {
@@ -573,7 +573,10 @@ function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
   return "queued";
 }
 
-function getOwnedBoard(order: OwnedOrderRecord, job?: DispatchJobRecord): DispatchBoard {
+function getOwnedBoard(
+  order: OwnedOrderRecord,
+  job?: DispatchJobRecord,
+): DispatchBoard {
   const state = getVisibleStateCode(order, job);
   if (state === "override_pending") return "governance";
   if (state === "no_supply") return "no_supply";
@@ -800,7 +803,9 @@ function buildActionHref(
   }
 
   return `/dispatch/${encodeURIComponent(record.orderId)}?board=${board}${
-    selectedService !== "all" ? `&service=${encodeURIComponent(selectedService)}` : ""
+    selectedService !== "all"
+      ? `&service=${encodeURIComponent(selectedService)}`
+      : ""
   }`;
 }
 
@@ -837,7 +842,6 @@ function buildActionContexts(
 
 function deriveBoardEmptyState({
   board,
-  locale,
   explicit,
   failed,
   baseCount,
@@ -847,8 +851,7 @@ function deriveBoardEmptyState({
   adapterHealth,
 }: {
   board: DispatchBoard;
-  locale: Locale;
-  explicit?: EmptyStateEnvelope | null;
+  explicit?: EmptyStateEnvelope | null | undefined;
   failed: boolean;
   baseCount: number;
   visibleCount: number;
@@ -880,11 +883,7 @@ function deriveBoardEmptyState({
   if (filtered && baseCount > 0) {
     return { reason: "filtered_empty", messageCode: "dispatch.filtered_empty" };
   }
-  if (
-    board === "forwarded" &&
-    adapterHealth.length === 0 &&
-    baseCount === 0
-  ) {
+  if (board === "forwarded" && adapterHealth.length === 0 && baseCount === 0) {
     return {
       reason: "not_provisioned",
       messageCode: "dispatch.forwarded.not_provisioned",
@@ -971,13 +970,19 @@ function renderEmptyState(
     },
   };
 
-  const contentKey = (emptyState.reason in mapping
-    ? emptyState.reason
-    : "no_data") as keyof typeof mapping;
+  const contentKey = (
+    emptyState.reason in mapping ? emptyState.reason : "no_data"
+  ) as keyof typeof mapping;
   const content: (typeof mapping)[keyof typeof mapping] = mapping[contentKey]!;
+  const tone =
+    content.tone === "danger"
+      ? "danger"
+      : content.tone === "warn"
+        ? "warning"
+        : content.tone;
   return (
     <WorkflowEmptyState
-      tone={content.tone === "danger" ? "critical" : content.tone}
+      tone={tone}
       density="compact"
       title={content.title}
       description={`${content.description} ${
@@ -1002,10 +1007,7 @@ function renderEmptyState(
   );
 }
 
-function renderActionList(
-  actions: BoardActionContext[],
-  locale: Locale,
-) {
+function renderActionList(actions: BoardActionContext[], locale: Locale) {
   if (actions.length === 0) {
     return (
       <WorkflowEmptyState
@@ -1052,9 +1054,11 @@ function renderActionList(
                 {action.riskLevel}
               </Pill>
             </div>
-            <div style={{ color: theme.textDim, fontSize: 12, lineHeight: 1.45 }}>
+            <div
+              style={{ color: theme.textDim, fontSize: 12, lineHeight: 1.45 }}
+            >
               {action.disabled
-                ? action.disabledReason ?? "disabled"
+                ? (action.disabledReason ?? "disabled")
                 : locale === "zh"
                   ? "由 availableActions 驅動的可執行 CTA。"
                   : "CTA emitted from availableActions."}
@@ -1082,16 +1086,12 @@ function renderActionList(
   );
 }
 
-function freshnessBanner(
-  refresh: UiRefreshMetadata,
-  locale: Locale,
-) {
+function freshnessBanner(refresh: UiRefreshMetadata, locale: Locale) {
   if (refresh.dataFreshness === "fresh") {
     return null;
   }
   const zh = locale === "zh";
-  const tone =
-    refresh.dataFreshness === "degraded" ? "warn" : "info";
+  const tone = refresh.dataFreshness === "degraded" ? "warn" : "info";
   const title =
     refresh.dataFreshness === "stale"
       ? zh
@@ -1190,7 +1190,10 @@ export default async function DispatchPage({
     loadListRuntime<RuntimeDispatchJob>(client, "/api/dispatch/tasks"),
     loadListRuntime<DriverTaskRecord>(client, "/api/driver/tasks"),
     loadListRuntime<RuntimeForwardedOrder>(client, "/api/forwarder/orders"),
-    loadListRuntime<AdapterHealthRecord>(client, "/api/forwarder/adapters/health"),
+    loadListRuntime<AdapterHealthRecord>(
+      client,
+      "/api/forwarder/adapters/health",
+    ),
     loadListRuntime<ForwarderReconciliationIssue>(
       client,
       "/api/forwarder/reconciliation-issues",
@@ -1234,7 +1237,8 @@ export default async function DispatchPage({
 
   const boardCounts = {
     ready: sortedOwnedOrders.filter(
-      (order) => getOwnedBoard(order, jobByOrderId.get(order.orderId)) === "ready",
+      (order) =>
+        getOwnedBoard(order, jobByOrderId.get(order.orderId)) === "ready",
     ).length,
     assigned: sortedOwnedOrders.filter(
       (order) =>
@@ -1350,7 +1354,6 @@ export default async function DispatchPage({
     board === "forwarded"
       ? deriveBoardEmptyState({
           board,
-          locale,
           explicit: forwardedOrdersResult.emptyState,
           failed: forwardedOrdersResult.failed,
           baseCount: forwardedBaseCount,
@@ -1361,7 +1364,6 @@ export default async function DispatchPage({
         })
       : deriveBoardEmptyState({
           board,
-          locale,
           explicit: ownedOrdersResult.emptyState,
           failed: ownedOrdersResult.failed || dispatchJobsResult.failed,
           baseCount: boardCounts[board],
@@ -1376,14 +1378,14 @@ export default async function DispatchPage({
 
   const selectedRecord: BoardRecord | null =
     board === "forwarded"
-      ? visibleForwardedOrders.find(
+      ? (visibleForwardedOrders.find(
           (item) => item.mirrorOrderId === focusWorkItemId,
         ) ??
         visibleForwardedOrders[0] ??
-        null
-      : visibleOwnedByBoard.find((item) => item.orderId === focusWorkItemId) ??
+        null)
+      : (visibleOwnedByBoard.find((item) => item.orderId === focusWorkItemId) ??
         visibleOwnedByBoard[0] ??
-        null;
+        null);
 
   const selectedActions = selectedRecord
     ? buildActionContexts(
@@ -1408,7 +1410,11 @@ export default async function DispatchPage({
           <div style={{ display: "grid", gap: 2 }}>
             <Link
               href={`/dispatch/${encodeURIComponent(order.mirrorOrderId)}`}
-              style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+              style={{
+                color: theme.accent,
+                fontWeight: 700,
+                textDecoration: "none",
+              }}
             >
               {order.mirrorOrderId}
             </Link>
@@ -1451,11 +1457,17 @@ export default async function DispatchPage({
             tone={adapter ? getAdapterTone(adapter.status) : "neutral"}
             dot={Boolean(adapter && adapter.status !== "healthy")}
           >
-            {adapter ? `${order.platformCode} · ${adapter.status}` : order.platformCode}
+            {adapter
+              ? `${order.platformCode} · ${adapter.status}`
+              : order.platformCode}
           </Pill>
         ),
         mismatch: (
-          <Pill theme={theme} tone={mismatch.tone} dot={mismatch.tone !== "success"}>
+          <Pill
+            theme={theme}
+            tone={mismatch.tone}
+            dot={mismatch.tone !== "success"}
+          >
             {mismatch.label}
           </Pill>
         ),
@@ -1483,11 +1495,17 @@ export default async function DispatchPage({
           <div style={{ display: "grid", gap: 2 }}>
             <Link
               href={`/dispatch/${encodeURIComponent(order.orderId)}`}
-              style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+              style={{
+                color: theme.accent,
+                fontWeight: 700,
+                textDecoration: "none",
+              }}
             >
               {order.orderNo}
             </Link>
-            <span style={{ color: theme.textDim, fontSize: 11 }}>{order.orderId}</span>
+            <span style={{ color: theme.textDim, fontSize: 11 }}>
+              {order.orderId}
+            </span>
           </div>
         ),
         tenant: getTenantLabel(order),
@@ -1535,11 +1553,17 @@ export default async function DispatchPage({
         <div style={{ display: "grid", gap: 2 }}>
           <Link
             href={`/dispatch/${encodeURIComponent(order.orderId)}`}
-            style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+            style={{
+              color: theme.accent,
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
           >
             {order.orderNo}
           </Link>
-          <span style={{ color: theme.textDim, fontSize: 11 }}>{order.orderId}</span>
+          <span style={{ color: theme.textDim, fontSize: 11 }}>
+            {order.orderId}
+          </span>
         </div>
       ),
       tenant: getTenantLabel(order),
@@ -1548,12 +1572,12 @@ export default async function DispatchPage({
         order.exceptionHold?.overrideRequest?.requestedBy.actorId ??
         order.exceptionHold?.resolution?.actorId ??
         "ops",
-      age: formatDurationSince(locale, order.exceptionHold?.raisedAt ?? order.updatedAt),
+      age: formatDurationSince(
+        locale,
+        order.exceptionHold?.raisedAt ?? order.updatedAt,
+      ),
       related:
-        order.approvalRequestIds[0] ??
-        order.recordingId ??
-        order.callId ??
-        "—",
+        order.approvalRequestIds[0] ?? order.recordingId ?? order.callId ?? "—",
       _selected: selectedRecord === order,
     }));
 
@@ -1576,16 +1600,27 @@ export default async function DispatchPage({
           <div style={{ display: "grid", gap: 2 }}>
             <Link
               href={`/dispatch/${encodeURIComponent(order.orderId)}`}
-              style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+              style={{
+                color: theme.accent,
+                fontWeight: 700,
+                textDecoration: "none",
+              }}
             >
               {order.orderNo}
             </Link>
-            <span style={{ color: theme.textDim, fontSize: 11 }}>{order.orderId}</span>
+            <span style={{ color: theme.textDim, fontSize: 11 }}>
+              {order.orderId}
+            </span>
           </div>
         ),
         tenant: getTenantLabel(order),
-        attempts: String(Math.max(order.dispatchAttemptCount, candidates.length)),
-        reason: order.lastDispatchFailureReason ?? order.dispatchTimeout?.timeoutReasonCode ?? "—",
+        attempts: String(
+          Math.max(order.dispatchAttemptCount, candidates.length),
+        ),
+        reason:
+          order.lastDispatchFailureReason ??
+          order.dispatchTimeout?.timeoutReasonCode ??
+          "—",
         age: formatDurationSince(
           locale,
           order.noSupplyEscalation?.escalatedAt ?? order.updatedAt,
@@ -1612,20 +1647,33 @@ export default async function DispatchPage({
           <div style={{ display: "grid", gap: 2 }}>
             <Link
               href={`/dispatch/${encodeURIComponent(order.orderId)}`}
-              style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+              style={{
+                color: theme.accent,
+                fontWeight: 700,
+                textDecoration: "none",
+              }}
             >
               {order.orderNo}
             </Link>
-            <span style={{ color: theme.textDim, fontSize: 11 }}>{order.orderId}</span>
+            <span style={{ color: theme.textDim, fontSize: 11 }}>
+              {order.orderId}
+            </span>
           </div>
         ),
         tenant: getTenantLabel(order),
         overrideType: request?.overrideType ?? "—",
         requester: request?.requestedBy.actorId ?? "—",
-        age: formatDurationSince(locale, request?.requestedAt ?? order.updatedAt),
+        age: formatDurationSince(
+          locale,
+          request?.requestedAt ?? order.updatedAt,
+        ),
         approval: (
-          <Link href={approvalHref} style={{ color: theme.accent, textDecoration: "none" }}>
-            {order.approvalRequestIds[0] ?? (zh ? "前往 approval" : "Open approval")}
+          <Link
+            href={approvalHref}
+            style={{ color: theme.accent, textDecoration: "none" }}
+          >
+            {order.approvalRequestIds[0] ??
+              (zh ? "前往 approval" : "Open approval")}
           </Link>
         ),
         _selected: selectedRecord === order,
@@ -1653,11 +1701,17 @@ export default async function DispatchPage({
           <div style={{ display: "grid", gap: 2 }}>
             <Link
               href={`/dispatch/${encodeURIComponent(order.orderId)}`}
-              style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+              style={{
+                color: theme.accent,
+                fontWeight: 700,
+                textDecoration: "none",
+              }}
             >
               {order.orderNo}
             </Link>
-            <span style={{ color: theme.textDim, fontSize: 11 }}>{order.orderId}</span>
+            <span style={{ color: theme.textDim, fontSize: 11 }}>
+              {order.orderId}
+            </span>
           </div>
         ),
         tenant: getTenantLabel(order),
@@ -1673,8 +1727,7 @@ export default async function DispatchPage({
         service: order.serviceBucket,
         eta:
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== null &&
-          (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !==
-            undefined
+          (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== undefined
             ? `${job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes}m`
             : "—",
         candidates: String(candidates.length),
@@ -1768,14 +1821,14 @@ export default async function DispatchPage({
                   title={meta.label}
                   subtitle={meta.description}
                   padding={14}
-                  style={
-                    active
-                      ? {
+                  {...(active
+                    ? {
+                        style: {
                           borderColor: theme.accent,
                           boxShadow: `0 0 0 1px ${theme.accent} inset`,
-                        }
-                      : undefined
-                  }
+                        },
+                      }
+                    : {})}
                 >
                   <div
                     style={{
@@ -1857,7 +1910,9 @@ export default async function DispatchPage({
                   >
                     <Pill
                       theme={theme}
-                      tone={selectedService === serviceKey ? "accent" : "neutral"}
+                      tone={
+                        selectedService === serviceKey ? "accent" : "neutral"
+                      }
                       dot={serviceKey !== "all"}
                     >
                       {label}
@@ -1916,7 +1971,11 @@ export default async function DispatchPage({
                 value={formatCompactNumber(boardCounts.governance)}
                 delta={`${formatCompactNumber(boardCounts.no_supply)} no_supply`}
                 deltaTone={boardCounts.governance > 0 ? "down" : "neutral"}
-                sub={zh ? "override / approval linkage" : "override / approval linkage"}
+                sub={
+                  zh
+                    ? "override / approval linkage"
+                    : "override / approval linkage"
+                }
               />
               <KPI
                 theme={theme}
@@ -1928,7 +1987,9 @@ export default async function DispatchPage({
                     : undefined
                 }
                 deltaTone={degradedAdapters.length > 0 ? "down" : "neutral"}
-                sub={zh ? "adapter + reconciliation" : "adapter + reconciliation"}
+                sub={
+                  zh ? "adapter + reconciliation" : "adapter + reconciliation"
+                }
               />
             </div>
 
@@ -2085,7 +2146,8 @@ export default async function DispatchPage({
                   k: zh ? "Revenue-at-risk" : "Revenue-at-risk",
                   v: formatMinorCurrency(
                     sortedOwnedOrders.reduce(
-                      (sum, order) => sum + (order.quotedFare?.amountMinor ?? 0),
+                      (sum, order) =>
+                        sum + (order.quotedFare?.amountMinor ?? 0),
                       0,
                     ),
                   ),
