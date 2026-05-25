@@ -866,9 +866,7 @@ export class ComplaintService implements OnModuleInit {
     const record = { ...complaintCase };
     delete record.slaBreach;
     const slaStatus = this.computeSlaStatus(complaintCase);
-    const slaBreachedAt =
-      complaintCase.slaBreachedAt ??
-      (slaStatus === "breached" ? complaintCase.slaDueAt : null);
+    const slaBreachedAt = this.computeSlaBreachedAt(complaintCase, slaStatus);
 
     return {
       ...record,
@@ -881,7 +879,7 @@ export class ComplaintService implements OnModuleInit {
     complaintCase: PersistedComplaintCaseRecord,
     now = new Date(),
   ): ComplaintSlaStatus {
-    if (complaintCase.slaBreachedAt) {
+    if (complaintCase.slaBreachedAt || complaintCase.slaBreach === true) {
       return "breached";
     }
 
@@ -906,6 +904,21 @@ export class ComplaintService implements OnModuleInit {
     }
 
     return "within_sla";
+  }
+
+  private computeSlaBreachedAt(
+    complaintCase: PersistedComplaintCaseRecord,
+    slaStatus: ComplaintSlaStatus,
+  ) {
+    if (complaintCase.slaBreachedAt) {
+      return complaintCase.slaBreachedAt;
+    }
+
+    if (complaintCase.slaBreach === true) {
+      return complaintCase.updatedAt;
+    }
+
+    return slaStatus === "breached" ? complaintCase.slaDueAt : null;
   }
 
   private getSlaWarningWindowMs(
