@@ -324,6 +324,42 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
       expect(updated.driverMatchingSuppression!.expiresAt).toBe(
         originalExpiresAt,
       );
+      expect(
+        incidentService
+          .getTimeline(incident.incidentId)
+          .filter(
+            (entry) =>
+              entry.action === "status_changed" ||
+              entry.action === "matching_suppression_lifted",
+          ),
+      ).toHaveLength(0);
+    });
+
+    it("commits status and lifecycle lift together after validation passes", () => {
+      const { incidentService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Resolved after validation",
+        description: "Successful lifecycle update.",
+        category: "safety",
+        severity: "high",
+        reportedBy: "ops-user-001",
+      });
+
+      const updated = incidentService.updateIncident(incident.incidentId, {
+        status: "resolved",
+      });
+
+      expect(updated.status).toBe("resolved");
+      const timeline = incidentService.getTimeline(incident.incidentId);
+      expect(
+        timeline.filter((entry) => entry.action === "status_changed"),
+      ).toHaveLength(1);
+      expect(
+        timeline.filter(
+          (entry) => entry.action === "matching_suppression_lifted",
+        ),
+      ).toHaveLength(1);
     });
 
     it("builds incident list/detail read models with refresh, health, and available actions", () => {
