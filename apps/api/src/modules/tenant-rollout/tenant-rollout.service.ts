@@ -395,7 +395,9 @@ export class TenantRolloutService {
         "enter_rollback_hold",
         state.stage !== "rollback_hold",
         "high",
-        state.stage === "rollback_hold" ? "rollback_hold_already_active" : undefined,
+        state.stage === "rollback_hold"
+          ? "tenant_already_in_rollback_hold"
+          : undefined,
         true,
       ),
       this.actionDescriptor(

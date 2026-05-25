@@ -261,6 +261,44 @@ describe("TenantsService", () => {
     );
   });
 
+  it("returns rollout state machine read model and updates gate status", () => {
+    const { service, auditNotificationService } = createService();
+    const created = service.create({
+      name: "Read Model Test",
+      code: "read_model_test",
+    });
+
+    const initialState = service.getRolloutStateMachine(created.id);
+    expect(initialState).toMatchObject({
+      tenantId: created.id,
+      stage: "sandbox",
+      gateStatus: "ready",
+    });
+
+    const updated = service.setRolloutGateStatus(created.id, "approved");
+    const state = service.getRolloutStateMachine(created.id);
+
+    expect(updated).toMatchObject({
+      tenantId: created.id,
+      stage: "sandbox",
+      gateStatus: "approved",
+    });
+    expect(state).toMatchObject({
+      tenantId: created.id,
+      stage: "sandbox",
+      gateStatus: "approved",
+    });
+    expect(
+      state.availableActions.find((action) => action.action === "set_stage_pilot"),
+    ).toMatchObject({ enabled: true });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "update_platform_tenant_rollout_gate",
+        resourceType: "tenant_rollout_state_machine",
+      }),
+    );
+  });
+
   it("invites a role and records invitedAt timestamp", () => {
     const { service, auditNotificationService } = createService();
     const created = service.create({

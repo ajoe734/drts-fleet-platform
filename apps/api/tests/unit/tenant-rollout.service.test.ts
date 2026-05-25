@@ -305,6 +305,16 @@ describe("TenantRolloutService", () => {
       expect(actionEnabled(tenant, "enter_rollback_hold")).toBe(
         stage !== "rollback_hold",
       );
+      if (stage === "rollback_hold") {
+        expect(
+          tenant.rolloutStateMachine?.availableActions.find(
+            (action) => action.action === "enter_rollback_hold",
+          ),
+        ).toMatchObject({
+          enabled: false,
+          disabledReasonCode: "tenant_already_in_rollback_hold",
+        });
+      }
     },
   );
 
