@@ -98,7 +98,7 @@ describe("DriverInstructionService", () => {
         driverId: "drv-demo-001",
         taskId: "task-001",
         message: "Short-lived instruction",
-        expiresAt: new Date(now + 10).toISOString(),
+        expiresAt: new Date(now + 50).toISOString(),
       },
       OPS_IDENTITY,
     );
@@ -112,22 +112,22 @@ describe("DriverInstructionService", () => {
         "task-001",
       );
       expect(listed).toEqual([active]);
+
+      const acknowledged = service.acknowledgeInstruction(
+        active.instructionId,
+        DRIVER_IDENTITY,
+        "req-driver-inst-ack-001",
+      );
+      expect(acknowledged).toMatchObject({
+        instructionId: active.instructionId,
+        taskId: "task-001",
+      });
+      expect(acknowledged.acknowledgedAt).toMatch(/Z$/);
+
+      expect(service.listInstructionsForDriver(DRIVER_IDENTITY)).toEqual([]);
     } finally {
       Date.now = originalDateNow;
     }
-
-    const acknowledged = service.acknowledgeInstruction(
-      active.instructionId,
-      DRIVER_IDENTITY,
-      "req-driver-inst-ack-001",
-    );
-    expect(acknowledged).toMatchObject({
-      instructionId: active.instructionId,
-      taskId: "task-001",
-    });
-    expect(acknowledged.acknowledgedAt).toMatch(/Z$/);
-
-    expect(service.listInstructionsForDriver(DRIVER_IDENTITY)).toEqual([]);
 
     const linkedNotification = auditNotificationService
       .listNotifications()
@@ -162,7 +162,15 @@ describe("DriverInstructionService", () => {
         },
         OPS_IDENTITY,
       ),
-    ).toThrowError(/future/);
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "INVALID_DRIVER_OPS_INSTRUCTION_EXPIRY",
+          }),
+        }),
+      }),
+    );
   });
 
   it("rejects acknowledging an expired instruction", () => {
@@ -185,8 +193,19 @@ describe("DriverInstructionService", () => {
 
     try {
       expect(() =>
-        service.acknowledgeInstruction(instruction.instructionId, DRIVER_IDENTITY),
-      ).toThrowError(/expired/);
+        service.acknowledgeInstruction(
+          instruction.instructionId,
+          DRIVER_IDENTITY,
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "DRIVER_OPS_INSTRUCTION_EXPIRED",
+            }),
+          }),
+        }),
+      );
     } finally {
       Date.now = originalDateNow;
     }

@@ -4,6 +4,7 @@ import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AcknowledgeDriverOpsInstructionResult,
+  AuditLogRecord,
   CreateDriverOpsInstructionCommand,
   DriverOpsInstruction,
   IdentityContext,
@@ -15,6 +16,7 @@ import { DriverInstructionRepository } from "./driver-instruction.repository";
 
 export interface PersistedDriverInstructionRecord extends DriverOpsInstruction {
   driverId: string;
+  expiresAt: string | null;
   acknowledgedAt: string | null;
   notificationId: string | null;
   updatedAt: string;
@@ -22,7 +24,10 @@ export interface PersistedDriverInstructionRecord extends DriverOpsInstruction {
 
 @Injectable()
 export class DriverInstructionService implements OnModuleInit {
-  private readonly instructions = new Map<string, PersistedDriverInstructionRecord>();
+  private readonly instructions = new Map<
+    string,
+    PersistedDriverInstructionRecord
+  >();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -37,7 +42,10 @@ export class DriverInstructionService implements OnModuleInit {
     try {
       const records = await this.repository.loadAll();
       for (const record of records) {
-        this.instructions.set(record.instructionId, this.clonePersisted(record));
+        this.instructions.set(
+          record.instructionId,
+          this.clonePersisted(record),
+        );
       }
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
@@ -86,7 +94,7 @@ export class DriverInstructionService implements OnModuleInit {
     this.persist(instruction, "create_instruction");
     this.auditNotificationService.recordAuditLog({
       actorId: actor.actorId,
-      actorType: actor.actorType,
+      actorType: actor.actorType as AuditLogRecord["actorType"],
       tenantId: null,
       moduleName: "driver-ops-instruction",
       actionName: "issue_driver_ops_instruction",
@@ -129,7 +137,10 @@ export class DriverInstructionService implements OnModuleInit {
     requestId?: string,
   ): AcknowledgeDriverOpsInstructionResult {
     const actor = this.requireDriverIdentity(identity);
-    const normalizedInstructionId = this.requireText("instructionId", instructionId);
+    const normalizedInstructionId = this.requireText(
+      "instructionId",
+      instructionId,
+    );
     const existing = this.instructions.get(normalizedInstructionId);
 
     if (!existing || existing.driverId !== actor.actorId) {
@@ -180,7 +191,7 @@ export class DriverInstructionService implements OnModuleInit {
 
     this.auditNotificationService.recordAuditLog({
       actorId: actor.actorId,
-      actorType: actor.actorType,
+      actorType: actor.actorType as AuditLogRecord["actorType"],
       tenantId: null,
       moduleName: "driver-ops-instruction",
       actionName: "acknowledge_driver_ops_instruction",
@@ -242,7 +253,10 @@ export class DriverInstructionService implements OnModuleInit {
     return normalized;
   }
 
-  private normalizeExpiry(expiresAt: string | null | undefined, issuedAt: string) {
+  private normalizeExpiry(
+    expiresAt: string | null | undefined,
+    issuedAt: string,
+  ) {
     if (expiresAt == null) {
       return null;
     }
