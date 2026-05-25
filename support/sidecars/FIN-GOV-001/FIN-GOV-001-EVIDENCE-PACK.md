@@ -2,10 +2,10 @@
 
 **Task:** `FIN-GOV-001` - governance-aware billing and reporting live evidence pack
 **Current owner:** `Codex`
-**Current reviewer:** `Gemini2`
+**Current reviewer:** `Codex2`
 **Collected:** `2026-05-19 (UTC)`
 **Latest refresh:** `2026-05-25 (PH1GC-FIN-GOV-001 / Codex)`
-**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-24 governed staging rerun (run 26375980122 on current pushed head 4dfa7a6b, staging job 77636204638) still blocked after exhausting repo-local bearer fallbacks. The final fail step still reports no staging bearer path returning HTTP 200; downloaded artifacts still show auth_token -> IAP 401 Invalid IAP credentials, dev fallback -> IAP 403 Access denied, and direct Cloud Run resolution -> iam.serviceAccounts.getAccessToken denied. Job annotations still record the shared fallback provider invalid_target plus staging-deployer getAccessToken/getOpenIdToken denial, so WF-FIN-GOV-001 remains PASS (static evidence) only. A 2026-05-25 GitHub Actions inventory also confirms there is still no successful workflow_dispatch staging rerun for any PH1GC-FIN-GOV-001 branch family; the only success is push run 26334408483 on dev, which did not execute staging-e2e-010.`
+**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-25 governed staging rerun (run 26377013261 on current pushed head 0b3835b8, staging job 77638938926) still blocked after exhausting repo-local bearer fallbacks. The final fail step still reports no staging bearer path returning HTTP 200; downloaded artifacts still show auth_token -> IAP 401 Invalid IAP credentials, dev fallback -> IAP 403 Access denied, and direct Cloud Run resolution stderr -> iam.serviceAccounts.getAccessToken denied. Job annotations still record the shared fallback provider invalid_target plus staging-deployer getAccessToken/getOpenIdToken denial, so WF-FIN-GOV-001 remains PASS (static evidence) only. A 2026-05-25 GitHub Actions inventory also confirms there is still no successful workflow_dispatch staging rerun for any PH1GC-FIN-GOV-001 branch family; the only success is push run 26334408483 on dev, which did not execute staging-e2e-010.`
 
 ---
 
@@ -20,7 +20,7 @@ slice under `WF-FIN-001`:
 
 The target outcome for this task was a fresh staging live evidence refresh.
 That refresh could not be completed from this workspace; the exact blocker is
-captured in §4, including the latest 2026-05-24 GitHub Actions auth-token /
+captured in §4, including the latest 2026-05-25 GitHub Actions auth-token /
 multi-service-account ID-token probes plus the attempted direct Cloud Run
 fallback.
 
@@ -227,6 +227,7 @@ Probe target:
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26374131695`
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26374841176`
   - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26375980122`
+  - `https://github.com/ajoe734/drts-fleet-platform/actions/runs/26377013261`
 - branch / commits under test:
   - `origin/codex/ph1gc-fin-gov-001@f8cc61e7` on 2026-05-22
   - `origin/codex/ph1gc-fin-gov-001@2cc083d6` on 2026-05-23
@@ -244,6 +245,7 @@ Probe target:
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260524@4bbcd8fc` on 2026-05-24
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260524@ceacdf74` on 2026-05-24
   - `origin/codex/ph1gc-fin-gov-001-rebased-20260524@4dfa7a6b` on 2026-05-24
+  - `origin/codex/ph1gc-fin-gov-001-rebased-20260524@0b3835b8` on 2026-05-25
 
 Observed results:
 
@@ -278,7 +280,8 @@ Observed results:
 - a fresh 2026-05-24 rerun on the direct-origin diagnostics head, `26374131695` on `origin/codex/ph1gc-fin-gov-001-rebased-20260524@4f1bb9ad`, kept the staging job blocked but removed the last ambiguity in the direct fallback. The new uploaded artifact `e2e-010-direct-api-resolve.stderr.txt` shows `gcloud run services describe drts-api` failed while refreshing impersonated credentials with `403 Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist)`, so the direct-origin branch is gated by the same service-account access-token permission as the primary bearer path, not by an unknown or missing service name. The rerun still produced `Invalid IAP credentials: Unable to parse JWT` for the GitHub `auth_token` probe and `403 Access denied` for `github-actions-deployer@drts-dev-bobo-20260503.iam.gserviceaccount.com`, and `Run E2E-010 against staging` remained skipped. The workflow now supports `vars.STAGING_DIRECT_API_ORIGIN` as an explicit direct-URL override for a future rerun if an operator already knows the current `run.app` origin.
 - a fresh 2026-05-24 rerun on the then-current workflow-bearing branch head, `26374841176` on `origin/codex/ph1gc-fin-gov-001-rebased-20260524@ceacdf74`, reconfirmed the same external gate after the verification-body traceability anchor. The GitHub `auth_token` probe still returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; the primary staging deployer still failed to mint either an OAuth access token (`iam.serviceAccounts.getAccessToken` denied) or an IAP ID token (`iam.serviceAccounts.getOpenIdToken` denied); the shared fallback provider still failed with `invalid_target`; the dev fallback still produced the first email-bearing token that reached IAP but came back `DRTS Fleet Platform: Access denied. For user github-actions-deployer@drts-dev-bobo-20260503.iam.gserviceaccount.com.`; and direct Cloud Run discovery still failed because `gcloud run services describe drts-api` could not refresh impersonated credentials without the same `iam.serviceAccounts.getAccessToken` permission. `Syntax check E2E-010` and `Run E2E-010 against staging` remained skipped, and the uploaded artifacts were still limited to `e2e-010-iap-health-auth-token-body.txt`, `e2e-010-dev-id-token-health-body.txt`, and `e2e-010-direct-api-resolve.stderr.txt`.
 - a fresh 2026-05-24 rerun on the current pushed head, `26375980122` on `origin/codex/ph1gc-fin-gov-001-rebased-20260524@4dfa7a6b` (staging job `77636204638`), revalidated the blocker after the sidecar truth-sync anchors without changing the workflow-bearing code. The staging job now centralizes the failure in `Fail when no staging bearer path works`, but the underlying evidence did not improve: the downloaded `e2e-010-iap-health-auth-token-body.txt` still says `Invalid IAP credentials: Unable to parse JWT`; `e2e-010-dev-id-token-health-body.txt` still says `DRTS Fleet Platform: Access denied. For user github-actions-deployer@drts-dev-bobo-20260503.iam.gserviceaccount.com.`; `e2e-010-direct-api-resolve.stderr.txt` still shows `gcloud run services describe drts-api` blocked by `403 Permission 'iam.serviceAccounts.getAccessToken' denied`; and job annotations still record `invalid_target` for the shared fallback provider plus `iam.serviceAccounts.getAccessToken` / `iam.serviceAccounts.getOpenIdToken` denial for the staging deployer path. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again, so the shell still never started on the actual current branch head.
-- the latest governed staging rerun is `26375980122` on `origin/codex/ph1gc-fin-gov-001-rebased-20260524@4dfa7a6b` (staging job `77636204638`). This rerun proves the blocker remains reproduced on the latest pushed head, not just the last workflow-bearing anchor, and that the same bearer-path failures persist even after replaying the workflow on the current sidecar-truth-sync head.
+- a fresh 2026-05-25 rerun on the latest pushed head, `26377013261` on `origin/codex/ph1gc-fin-gov-001-rebased-20260524@0b3835b8` (staging job `77638938926`), reconfirmed the same external gate after the 2026-05-25 control-plane truth-sync anchor. The downloaded `e2e-010-iap-health-auth-token-body.txt` still says `Invalid IAP credentials: Unable to parse JWT`; `e2e-010-dev-id-token-health-body.txt` still says `DRTS Fleet Platform: Access denied. For user github-actions-deployer@drts-dev-bobo-20260503.iam.gserviceaccount.com.`; and `e2e-010-direct-api-resolve.stderr.txt` still shows `gcloud run services describe drts-api` failing while refreshing impersonated credentials with `403 Permission 'iam.serviceAccounts.getAccessToken' denied`. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again because `Fail when no staging bearer path works` still tripped before the shell could start.
+- the latest governed staging rerun is `26377013261` on `origin/codex/ph1gc-fin-gov-001-rebased-20260524@0b3835b8` (staging job `77638938926`). This rerun proves the blocker remains reproduced on the latest pushed head, not just the last workflow-bearing anchor, and that the same bearer-path failures persist even after replaying the workflow on the current control-plane-truth-sync head.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
@@ -327,12 +330,12 @@ currently blocked by four concrete environment issues:
 4. the repository-configured GitHub Actions staging path now reaches GCP after
    the branch-local `DEV_WIF_PROVIDER` fallback, but no repo-local bearer path
    can reach the protected staging API or a resolvable direct Cloud Run origin:
-  - the federated `auth_token` path is rejected by IAP with `HTTP 401 Invalid IAP credentials: Unable to parse JWT` (`26366139732`, `26367273638`, `26369501167`, `26370433652`, `26374131695`, `26374841176`, `26375980122`)
-  - the service-account access-token path still fails with `iam.serviceAccounts.getAccessToken` denied, including the direct `google-github-actions/auth@v2 token_format=access_token` probes on `26369501167` and `26370433652`, and now also the direct Cloud Run `gcloud run services describe drts-api` resolution stderr (`26365672590`, `26369501167`, `26370433652`, `26374131695`, `26374841176`, `26375980122`)
-  - the staging-deployer service-account ID-token path still fails with `iam.serviceAccounts.getOpenIdToken` denied (`26327904346`, `26332046380`, `26332590728`, `26363924897`, `26365672590`, `26366139732`, `26367273638`, `26369501167`, `26370433652`, `26373513770`, `26373579304`, `26374131695`, `26374841176`, `26375980122`)
-  - the shared fallback provider remains unusable with `invalid_target` (`26373513770`, `26373579304`, `26374841176`, `26375980122`)
-  - the dev fallback service account can mint an email-bearing IAP token, but staging IAP returns `403 Access denied` for `github-actions-deployer@drts-dev-bobo-20260503.iam.gserviceaccount.com` (`26373513770`, `26373579304`, `26374131695`, `26374841176`, `26375980122`)
-  - the direct Cloud Run fallback remained unavailable in the latest runs because `gcloud run services describe drts-api` could not resolve a current service URL from the runner; the new stderr capture shows that this is itself blocked by `iam.serviceAccounts.getAccessToken` unless `vars.STAGING_DIRECT_API_ORIGIN` is supplied (`26373579304`, `26374131695`, `26374841176`, `26375980122`)
+  - the federated `auth_token` path is rejected by IAP with `HTTP 401 Invalid IAP credentials: Unable to parse JWT` (`26366139732`, `26367273638`, `26369501167`, `26370433652`, `26374131695`, `26374841176`, `26375980122`, `26377013261`)
+  - the service-account access-token path still fails with `iam.serviceAccounts.getAccessToken` denied, including the direct `google-github-actions/auth@v2 token_format=access_token` probes on `26369501167` and `26370433652`, and now also the direct Cloud Run `gcloud run services describe drts-api` resolution stderr (`26365672590`, `26369501167`, `26370433652`, `26374131695`, `26374841176`, `26375980122`, `26377013261`)
+  - the staging-deployer service-account ID-token path still fails with `iam.serviceAccounts.getOpenIdToken` denied (`26327904346`, `26332046380`, `26332590728`, `26363924897`, `26365672590`, `26366139732`, `26367273638`, `26369501167`, `26370433652`, `26373513770`, `26373579304`, `26374131695`, `26374841176`, `26375980122`, `26377013261`)
+  - the shared fallback provider remains unusable with `invalid_target` (`26373513770`, `26373579304`, `26374841176`, `26375980122`, `26377013261`)
+  - the dev fallback service account can mint an email-bearing IAP token, but staging IAP returns `403 Access denied` for `github-actions-deployer@drts-dev-bobo-20260503.iam.gserviceaccount.com` (`26373513770`, `26373579304`, `26374131695`, `26374841176`, `26375980122`, `26377013261`)
+  - the direct Cloud Run fallback remained unavailable in the latest runs because `gcloud run services describe drts-api` could not resolve a current service URL from the runner; the new stderr capture shows that this is itself blocked by `iam.serviceAccounts.getAccessToken` unless `vars.STAGING_DIRECT_API_ORIGIN` is supplied (`26373579304`, `26374131695`, `26374841176`, `26375980122`, `26377013261`)
 
 Until one of those is resolved, this task can only deliver a consolidated
 static-evidence packet plus a reproducible blocker record. The 2026-05-19
