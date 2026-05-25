@@ -2,6 +2,7 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type { AuditLogRecord } from "@drts/contracts";
 
+import type { AuditedActionResult } from "../../common/action-receipt";
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { MaintenanceRepository } from "./maintenance.repository";
@@ -41,7 +42,18 @@ export class MaintenanceService implements OnModuleInit {
 
   createMaintenanceLog(
     command: CreateMaintenanceLogCommand,
+    requestId: string | undefined,
+    options: { captureAudit: true },
+  ): AuditedActionResult<MaintenanceLogRecord>;
+  createMaintenanceLog(
+    command: CreateMaintenanceLogCommand,
     requestId?: string,
+    options?: { captureAudit?: false },
+  ): MaintenanceLogRecord;
+  createMaintenanceLog(
+    command: CreateMaintenanceLogCommand,
+    requestId?: string,
+    options?: { captureAudit?: boolean },
   ) {
     this.assertValidType(command.type);
     this.assertNonBlank(command.vehicleId, "vehicleId");
@@ -66,7 +78,7 @@ export class MaintenanceService implements OnModuleInit {
 
     this.records = [record, ...this.records];
     this.persist({ records: [record] }, "create_maintenance");
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "ops_user",
@@ -84,7 +96,15 @@ export class MaintenanceService implements OnModuleInit {
       requestId,
     );
 
-    return { ...record };
+    const snapshot = { ...record };
+    if (options?.captureAudit) {
+      return {
+        data: snapshot,
+        auditLog,
+      };
+    }
+
+    return snapshot;
   }
 
   listMaintenanceLogs(vehicleId?: string) {
@@ -102,7 +122,20 @@ export class MaintenanceService implements OnModuleInit {
   updateMaintenanceLog(
     maintenanceId: string,
     command: UpdateMaintenanceLogCommand,
+    requestId: string | undefined,
+    options: { captureAudit: true },
+  ): AuditedActionResult<MaintenanceLogRecord>;
+  updateMaintenanceLog(
+    maintenanceId: string,
+    command: UpdateMaintenanceLogCommand,
     requestId?: string,
+    options?: { captureAudit?: false },
+  ): MaintenanceLogRecord;
+  updateMaintenanceLog(
+    maintenanceId: string,
+    command: UpdateMaintenanceLogCommand,
+    requestId?: string,
+    options?: { captureAudit?: boolean },
   ) {
     const record = this.require(maintenanceId);
     const updated: MaintenanceLogRecord = {
@@ -127,7 +160,7 @@ export class MaintenanceService implements OnModuleInit {
 
     this.replace(updated);
     this.persist({ records: [updated] }, "update_maintenance");
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "ops_user",
@@ -144,16 +177,38 @@ export class MaintenanceService implements OnModuleInit {
       requestId,
     );
 
-    return this.normalizeStatus(updated);
+    const normalized = this.normalizeStatus(updated);
+    if (options?.captureAudit) {
+      return {
+        data: normalized,
+        auditLog,
+      };
+    }
+
+    return normalized;
   }
 
-  deleteMaintenanceLog(maintenanceId: string, requestId?: string) {
+  deleteMaintenanceLog(
+    maintenanceId: string,
+    requestId: string | undefined,
+    options: { captureAudit: true },
+  ): AuditedActionResult<{ deleted: true; maintenanceId: string }>;
+  deleteMaintenanceLog(
+    maintenanceId: string,
+    requestId?: string,
+    options?: { captureAudit?: false },
+  ): { deleted: true; maintenanceId: string };
+  deleteMaintenanceLog(
+    maintenanceId: string,
+    requestId?: string,
+    options?: { captureAudit?: boolean },
+  ) {
     const record = this.require(maintenanceId);
     this.records = this.records.filter(
       (candidate) => candidate.maintenanceId !== maintenanceId,
     );
     this.persist({ deletedIds: [maintenanceId] }, "delete_maintenance");
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "ops_user",
@@ -170,7 +225,15 @@ export class MaintenanceService implements OnModuleInit {
       requestId,
     );
 
-    return { deleted: true, maintenanceId };
+    const deletion = { deleted: true as const, maintenanceId };
+    if (options?.captureAudit) {
+      return {
+        data: deletion,
+        auditLog,
+      };
+    }
+
+    return deletion;
   }
 
   private require(maintenanceId: string) {
@@ -231,7 +294,7 @@ export class MaintenanceService implements OnModuleInit {
   ) {
     const log = { ...input };
     if (requestId) (log as any).requestId = requestId;
-    this.auditNotificationService.recordAuditLog(log);
+    return this.auditNotificationService.recordAuditLog(log);
   }
 
   private resolveInitialStatus(
