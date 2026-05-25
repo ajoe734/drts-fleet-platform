@@ -120,6 +120,9 @@ describe("tenant rollout state machine", () => {
     expect(getAction("production", "approved", "enter_rollback_hold")).toMatchObject(
       { enabled: true },
     );
+    expect(
+      getAction("production", "approved", "enter_rollback_hold"),
+    ).not.toHaveProperty("disabledReasonCode");
     expect(getAction("pilot", "approved", "enter_rollback_hold")).toMatchObject({
       enabled: false,
       disabledReasonCode: "rollback_hold_requires_production_cutover",

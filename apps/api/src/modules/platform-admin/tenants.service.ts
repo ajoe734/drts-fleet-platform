@@ -240,7 +240,6 @@ export class TenantsService implements OnModuleInit {
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const before = this.cloneTenant(tenant);
-    const now = new Date().toISOString();
 
     if (typeof command.name === "string") {
       tenant.name = this.requireNonBlank(command.name, "name");
@@ -565,7 +564,7 @@ export class TenantsService implements OnModuleInit {
       gateStatus: this.normalizeGateStatus(gateStatus),
       occurredAt: now,
       actorLabel: "platform_admin",
-      notes: normalizedReason ?? undefined,
+      notes: normalizedReason ?? null,
     });
     tenant.updatedAt = now;
 
