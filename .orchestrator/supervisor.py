@@ -2745,14 +2745,33 @@ def sync_status_pipeline(config: dict[str, Any]) -> bool:
     return False
 
 
-def reconcile_status_from_git(config: dict[str, Any]) -> bool:
-    """Bridge git-merged closeouts → state-machine `done` once per tick.
+def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    """Bridge git-merged closeouts → state-machine `done` periodically.
 
     Workers occasionally ship a task via PR + merge but skip `ai-status.sh
     done`, leaving ai-status.json stuck in in_progress/review/backlog. This
     invokes the dedicated reconcile-from-git command which scans origin/dev
-    for closeout commits and finalizes any drift. Cheap, idempotent.
+    for closeout commits and finalizes any drift.
+
+    The subprocess parses ai-status.json (multi-MB) and runs `git log`, so
+    is ~10-30s per call. Throttled to once per
+    `supervisor.git_reconcile_interval_seconds` (default 60s) to keep the
+    main tick loop responsive — workers' dispatch slots can't refill if a
+    single tick takes longer than the poll interval.
     """
+    interval = float(
+        config.get("supervisor", {}).get("git_reconcile_interval_seconds", 60.0)
+    )
+    supervisor_state = state.setdefault("supervisor", {})
+    last_at_raw = supervisor_state.get("last_git_reconcile_at")
+    now = datetime.now(timezone.utc)
+    if last_at_raw:
+        try:
+            last_at = datetime.fromisoformat(str(last_at_raw).replace("Z", "+00:00"))
+            if (now - last_at).total_seconds() < interval:
+                return False
+        except (ValueError, TypeError):
+            pass
     try:
         status_root = config_path(config, "status_file").parent
     except KeyError:
@@ -2765,6 +2784,9 @@ def reconcile_status_from_git(config: dict[str, Any]) -> bool:
         cwd=str(status_root),
         capture_output=True,
         text=True,
+    )
+    supervisor_state["last_git_reconcile_at"] = (
+        now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     )
     if result.returncode != 0:
         write_activity_log(
@@ -7381,7 +7403,7 @@ def run_once(
     desired_focus_mode = desired_focus_mode_from_status(status)
     changed = poll_workers(config, state) or changed
     changed = reconcile_queue_records(config, state) or changed
-    reconcile_status_from_git(config)
+    reconcile_status_from_git(config, state)
     changed = prune_event_queue(config, state) or changed
     changed = prune_completed_dispatch_pauses(state, status, config=config, provider_report=provider_report) or changed
     changed = prune_failure_streaks(state, status) or changed
