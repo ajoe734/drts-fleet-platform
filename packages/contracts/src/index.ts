@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ResourceActionDescriptor } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -2297,6 +2298,7 @@ export interface OwnedOrderRecord {
   reservationHoldExpiresAt: string | null;
   queueFamily?: DispatchQueueFamily | null;
   queueEntryReason?: DispatchQueueEntryReason | null;
+  availableActions?: ResourceActionDescriptor[];
   dispatchAttemptCount: number;
   lastDispatchFailureReason: string | null;
   noSupplyEscalation: NoSupplyEscalationRecord | null;
@@ -4026,6 +4028,7 @@ export interface ForwardedOrderRecord {
   lastSyncError: ForwarderSyncErrorRecord | null;
   manualFallback: ForwardedOrderManualFallbackRecord;
   reconciliationJob: ReconciliationJobRecord | null;
+  availableActions?: ResourceActionDescriptor[];
   createdAt: string;
   updatedAt: string;
 }

@@ -359,6 +359,70 @@ describe("ForwarderService", () => {
     });
   });
 
+  it("wraps the forwarded queue read model with refresh metadata and row actions", () => {
+    const { service } = createService();
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-read-model-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+
+    expect(service.listOrdersReadModel()).toEqual({
+      items: [
+        expect.objectContaining({
+          mirrorOrderId: order.mirrorOrderId,
+          availableActions: [
+            {
+              action: "reconcile",
+              enabled: true,
+              riskLevel: "medium",
+            },
+            {
+              action: "manual_fallback",
+              enabled: true,
+              riskLevel: "medium",
+            },
+            {
+              action: "force_refresh",
+              enabled: true,
+              riskLevel: "low",
+            },
+            {
+              action: "inspect_adapter",
+              enabled: true,
+              riskLevel: "low",
+            },
+          ],
+        }),
+      ],
+      refresh: {
+        generatedAt: expect.any(String),
+        staleAfterMs: 5000,
+        dataFreshness: "fresh",
+        source: "live",
+      },
+    });
+  });
+
+  it("returns an explicit no_data empty-state envelope for an empty forwarded queue", () => {
+    const { service } = createService();
+
+    expect(service.listOrdersReadModel()).toEqual({
+      items: [],
+      refresh: {
+        generatedAt: expect.any(String),
+        staleAfterMs: 5000,
+        dataFreshness: "fresh",
+        source: "live",
+      },
+      emptyState: {
+        reason: "no_data",
+        messageCode: "dispatch.forwarded_queue.empty.no_data",
+      },
+    });
+  });
+
   it("relays driver accept through the platform adapter and keeps the order pending confirmation", async () => {
     const adapter = createAdapter();
     const { service } = createService({

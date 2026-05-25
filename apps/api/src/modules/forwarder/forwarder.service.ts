@@ -32,11 +32,17 @@ import type {
   ReconciliationJobRecord,
   ReportForwarderSyncFailureCommand,
   RelayDriverAcceptCommand,
+  ResourceActionDescriptor,
   SyncForwardedOrderStatusCommand,
   UnifiedDriverTaskView,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  buildEmptyStateEnvelope,
+  buildUiReadModelList,
+  type UiReadModelList,
+} from "../../common/ui-read-model";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
@@ -75,6 +81,7 @@ const DEFAULT_FORWARDED_ORDER_FINANCE_CONTEXT: ForwardedOrderFinanceContext = {
 };
 
 const DRTS_PLATFORM_DISPLAY_NAME = "DRTS";
+const DISPATCH_READ_MODEL_STALE_AFTER_MS = 5_000;
 
 const DRIVER_TASK_VIEW_PRIORITY: Record<
   UnifiedDriverTaskView["driverActionState"],
@@ -242,6 +249,17 @@ export class ForwarderService implements OnModuleInit {
 
   listOrders() {
     return this.forwardedOrders.map((order) => this.cloneOrder(order));
+  }
+
+  listOrdersReadModel(): UiReadModelList<ForwardedOrderRecord> {
+    const items = this.listOrders();
+    return buildUiReadModelList(items, {
+      staleAfterMs: DISPATCH_READ_MODEL_STALE_AFTER_MS,
+      emptyState: buildEmptyStateEnvelope(
+        "no_data",
+        "dispatch.forwarded_queue.empty.no_data",
+      ),
+    });
   }
 
   getOrder(orderId: string) {
@@ -1579,7 +1597,56 @@ export class ForwarderService implements OnModuleInit {
       reconciliationJob: normalized.reconciliationJob
         ? { ...normalized.reconciliationJob }
         : null,
+      availableActions: this.buildForwardedOrderAvailableActions(normalized),
     };
+  }
+
+  private buildForwardedOrderAvailableActions(
+    order: ForwardedOrderRecord,
+  ): ResourceActionDescriptor[] {
+    const terminal =
+      order.status === "lost_race" ||
+      order.status === "cancelled_by_platform" ||
+      order.status === "completed_synced";
+    const reconciliationEnabled =
+      !terminal &&
+      (order.status === "sync_failed" ||
+        order.reconciliationJob?.status === "queued" ||
+        order.reconciliationJob == null);
+    const manualFallbackEnabled = !terminal && !order.manualFallback.required;
+
+    return [
+      {
+        action: "reconcile",
+        enabled: reconciliationEnabled,
+        riskLevel: "medium",
+        ...(!reconciliationEnabled
+          ? { disabledReasonCode: terminal ? "terminal_status" : "already_queued" }
+          : {}),
+      },
+      {
+        action: "manual_fallback",
+        enabled: manualFallbackEnabled,
+        riskLevel: "medium",
+        ...(!manualFallbackEnabled
+          ? {
+              disabledReasonCode: terminal
+                ? "terminal_status"
+                : "manual_fallback_active",
+            }
+          : {}),
+      },
+      {
+        action: "force_refresh",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "inspect_adapter",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
   }
 
   private normalizeOrder(order: ForwardedOrderRecord): ForwardedOrderRecord {
