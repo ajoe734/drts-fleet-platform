@@ -254,6 +254,10 @@ interface ListEnvelope<T> {
   items: T[];
 }
 
+interface ItemEnvelope<T> {
+  item: T;
+}
+
 function snakeToCamelCase(key: string): string {
   return key.replace(/_([a-z])/g, (_match, letter: string) =>
     letter.toUpperCase(),
@@ -351,6 +355,24 @@ export class ApiClient {
   ): Promise<T[]> {
     const result = await this.get<T[] | ListEnvelope<T>>(path, options);
     return Array.isArray(result) ? result : (result.items ?? []);
+  }
+
+  private async getItem<T>(path: string, options?: RequestOptions): Promise<T> {
+    const result = await this.get<T | ItemEnvelope<T>>(path, options);
+    return this.unwrapItem(result);
+  }
+
+  private unwrapItem<T>(result: T | ItemEnvelope<T>): T {
+    if (
+      result &&
+      typeof result === "object" &&
+      "item" in result &&
+      Object.keys(result).includes("item")
+    ) {
+      return (result as ItemEnvelope<T>).item;
+    }
+
+    return result as T;
   }
 
   private async request<T>(
@@ -959,7 +981,7 @@ export class ApiClient {
   }
 
   async getComplaint(caseNo: string) {
-    return this.get<ComplaintCaseRecord>(
+    return this.getItem<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}`,
     );
   }
@@ -989,7 +1011,7 @@ export class ApiClient {
   async getComplaintExportView(
     caseNo: string,
   ): Promise<ComplaintExportViewRecord> {
-    return this.get<ComplaintExportViewRecord>(
+    return this.getItem<ComplaintExportViewRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/export`,
     );
   }

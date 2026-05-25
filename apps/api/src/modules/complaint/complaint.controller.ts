@@ -11,7 +11,11 @@ import {
 import type {
   AddComplaintCaseNoteCommand,
   AssignComplaintCaseCommand,
+  ComplaintCaseListReadModel,
+  ComplaintTimelineEntry,
+  ComplaintTimelineReadModel,
   CreateComplaintCaseCommand,
+  EmptyStateEnvelope,
   EscalateComplaintToIncidentCommand,
   LinkComplaintToIncidentCommand,
   ReopenComplaintCaseCommand,
@@ -45,10 +49,9 @@ export class ComplaintController {
 
   @Get()
   listComplaintCases(@Headers("x-request-id") requestId?: string) {
+    const items = this.complaintService.listComplaintCases();
     return toApiSuccessEnvelope(
-      {
-        items: this.complaintService.listComplaintCases(),
-      },
+      this.toComplaintListReadModel(items),
       requestId,
     );
   }
@@ -82,7 +85,9 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.complaintService.getComplaintCase(caseNo),
+      this.toComplaintDetailReadModel(
+        this.complaintService.getComplaintCase(caseNo),
+      ),
       requestId,
     );
   }
@@ -92,10 +97,9 @@ export class ComplaintController {
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const items = this.complaintService.getComplaintTimeline(caseNo);
     return toApiSuccessEnvelope(
-      {
-        items: this.complaintService.getComplaintTimeline(caseNo),
-      },
+      this.toComplaintTimelineReadModel(items),
       requestId,
     );
   }
@@ -130,7 +134,9 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.complaintService.getComplaintExportView(caseNo),
+      this.toComplaintDetailReadModel(
+        this.complaintService.getComplaintExportView(caseNo),
+      ),
       requestId,
     );
   }
@@ -284,5 +290,59 @@ export class ComplaintController {
       this.complaintService.markComplaintSlaBreach(caseNo, requestId),
       requestId,
     );
+  }
+
+  private toComplaintListReadModel(
+    items: ReturnType<ComplaintService["listComplaintCases"]>,
+  ): ComplaintCaseListReadModel {
+    return {
+      items,
+      refresh: this.complaintService.getReadModelRefreshMetadata(),
+      ...(items.length === 0
+        ? {
+            emptyState: this.createEmptyState(
+              "no_data",
+              "complaints.empty.no_data",
+            ),
+          }
+        : {}),
+    };
+  }
+
+  private toComplaintDetailReadModel<T>(item: T): {
+    item: T;
+    refresh: ReturnType<ComplaintService["getReadModelRefreshMetadata"]>;
+  } {
+    return {
+      item,
+      refresh: this.complaintService.getReadModelRefreshMetadata(),
+    };
+  }
+
+  private toComplaintTimelineReadModel(
+    items: ComplaintTimelineEntry[],
+  ): ComplaintTimelineReadModel {
+    return {
+      items,
+      refresh: this.complaintService.getReadModelRefreshMetadata(),
+      ...(items.length === 0
+        ? {
+            emptyState: this.createEmptyState(
+              "no_data",
+              "complaints.timeline.empty",
+            ),
+          }
+        : {}),
+    };
+  }
+
+  private createEmptyState(
+    reason: EmptyStateEnvelope["reason"],
+    messageCode: string,
+  ): EmptyStateEnvelope {
+    return {
+      reason,
+      messageCode,
+    };
   }
 }

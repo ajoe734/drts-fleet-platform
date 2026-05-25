@@ -11,6 +11,7 @@ import type {
   ComplaintCategory,
   ComplaintExportViewRecord,
   ComplaintResolutionCode,
+  ComplaintSlaStatus,
   ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
   LinkComplaintToIncidentCommand,
@@ -50,6 +51,11 @@ const DEFAULT_SLA_HOURS_BY_CATEGORY: Record<ComplaintCategory, number> = {
   lost_and_found: 72,
   other: 48,
 };
+
+const COMPLAINT_REFRESH_STALE_AFTER_MS = 15_000;
+const SLA_WARNING_WINDOW_RATIO = 0.25;
+const MIN_SLA_WARNING_WINDOW_MS = 30 * 60 * 1000;
+const MAX_SLA_WARNING_WINDOW_MS = 12 * 60 * 60 * 1000;
 
 const TIMELINE_ACTIONS = {
   created: "case_created",
@@ -123,7 +129,9 @@ export class ComplaintService implements OnModuleInit {
       description: command.description,
       assigneeId: null,
       status: "new",
+      slaStatus: "within_sla",
       slaDueAt: this.calculateSlaDueAt(command.category, command.severity, now),
+      slaBreachedAt: null,
       slaBreach: false,
       reopenCount: 0,
       resolutionCode: null,
@@ -453,6 +461,7 @@ export class ComplaintService implements OnModuleInit {
       ...complaintCase,
       status: "reopened" as ComplaintCaseStatus,
       slaDueAt: newSlaDueAt,
+      slaBreachedAt: null,
       slaBreach: false,
       reopenCount: (complaintCase.reopenCount ?? 0) + 1,
       updatedAt: now.toISOString(),
@@ -508,6 +517,7 @@ export class ComplaintService implements OnModuleInit {
 
     const updated = {
       ...complaintCase,
+      slaBreachedAt: complaintCase.slaBreachedAt ?? new Date().toISOString(),
       slaBreach: true,
       updatedAt: new Date().toISOString(),
     };
@@ -703,6 +713,15 @@ export class ComplaintService implements OnModuleInit {
     return [...(COMPLAINT_CATEGORY_VALID_RESOLUTIONS[category] ?? [])];
   }
 
+  getReadModelRefreshMetadata() {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: COMPLAINT_REFRESH_STALE_AFTER_MS,
+      dataFreshness: "fresh" as const,
+      source: "live" as const,
+    };
+  }
+
   private assertValidResolutionCode(
     code: string,
     category: ComplaintCategory,
@@ -731,9 +750,7 @@ export class ComplaintService implements OnModuleInit {
     severity: CreateComplaintCaseCommand["severity"],
     createdAt: Date,
   ) {
-    const baseHours = DEFAULT_SLA_HOURS_BY_CATEGORY[category] ?? 48;
-    const effectiveHours =
-      severity === "high" ? Math.max(1, Math.floor(baseHours / 2)) : baseHours;
+    const effectiveHours = this.getEffectiveSlaHours(category, severity);
     return new Date(
       createdAt.getTime() + effectiveHours * 60 * 60 * 1000,
     ).toISOString();
@@ -842,9 +859,65 @@ export class ComplaintService implements OnModuleInit {
   }
 
   private cloneComplaintCase(complaintCase: ComplaintCaseRecord) {
+    const slaStatus = this.computeSlaStatus(complaintCase);
+    const slaBreachedAt =
+      complaintCase.slaBreachedAt ??
+      (slaStatus === "breached" ? complaintCase.slaDueAt : null);
+
     return {
       ...complaintCase,
+      slaStatus,
+      slaBreachedAt,
+      slaBreach: complaintCase.slaBreach || slaStatus === "breached",
     };
+  }
+
+  private computeSlaStatus(
+    complaintCase: ComplaintCaseRecord,
+    now = new Date(),
+  ): ComplaintSlaStatus {
+    const dueAtMs = new Date(complaintCase.slaDueAt).getTime();
+    const nowMs = now.getTime();
+
+    if (Number.isNaN(dueAtMs) || dueAtMs <= nowMs) {
+      return "breached";
+    }
+
+    const remainingMs = dueAtMs - nowMs;
+    const warningWindowMs = this.getSlaWarningWindowMs(
+      complaintCase.category,
+      complaintCase.severity,
+    );
+    if (remainingMs <= warningWindowMs) {
+      return "warning";
+    }
+
+    return "within_sla";
+  }
+
+  private getSlaWarningWindowMs(
+    category: ComplaintCategory,
+    severity: CreateComplaintCaseCommand["severity"],
+  ) {
+    const totalSlaMs =
+      this.getEffectiveSlaHours(category, severity) * 60 * 60 * 1000;
+    return Math.min(
+      MAX_SLA_WARNING_WINDOW_MS,
+      Math.max(
+        MIN_SLA_WARNING_WINDOW_MS,
+        totalSlaMs * SLA_WARNING_WINDOW_RATIO,
+      ),
+    );
+  }
+
+  private getEffectiveSlaHours(
+    category: ComplaintCategory,
+    severity: CreateComplaintCaseCommand["severity"],
+  ) {
+    const baseHours = DEFAULT_SLA_HOURS_BY_CATEGORY[category] ?? 48;
+    return severity === "high"
+      ? Math.max(1, Math.floor(baseHours / 2))
+      : baseHours;
   }
 
   private persistChanges(

@@ -93,6 +93,8 @@ export const SUPERVISOR_EXECUTION_MODES = [
 export type SupervisorExecutionMode =
   (typeof SUPERVISOR_EXECUTION_MODES)[number];
 
+import type { EmptyStateEnvelope, UiRefreshMetadata } from "./ui-runtime";
+
 export interface ApiSuccessEnvelope<T> {
   data: T;
   meta: {
@@ -3298,6 +3300,8 @@ export interface LinkComplaintToIncidentCommand {
   incidentId: string;
 }
 
+export type ComplaintSlaStatus = "within_sla" | "warning" | "breached";
+
 export interface ComplaintCaseRecord {
   caseNo: string;
   caseSource: "phone" | "web" | "app" | "ops";
@@ -3309,7 +3313,9 @@ export interface ComplaintCaseRecord {
   description: string;
   assigneeId: string | null;
   status: ComplaintCaseStatus;
+  slaStatus: ComplaintSlaStatus;
   slaDueAt: string;
+  slaBreachedAt: string | null;
   slaBreach: boolean;
   reopenCount: number;
   resolutionCode: ComplaintResolutionCode | null;
@@ -3341,6 +3347,23 @@ export interface ComplaintExportViewRecord {
   timeline: ComplaintTimelineEntry[];
   exportGeneratedAt: string;
   readyForAudit: boolean;
+}
+
+export interface ComplaintCaseListReadModel {
+  items: ComplaintCaseRecord[];
+  refresh: UiRefreshMetadata;
+  emptyState?: EmptyStateEnvelope;
+}
+
+export interface ComplaintCaseDetailReadModel {
+  item: ComplaintCaseRecord;
+  refresh: UiRefreshMetadata;
+}
+
+export interface ComplaintTimelineReadModel {
+  items: ComplaintTimelineEntry[];
+  refresh: UiRefreshMetadata;
+  emptyState?: EmptyStateEnvelope;
 }
 
 // --- Billing ---

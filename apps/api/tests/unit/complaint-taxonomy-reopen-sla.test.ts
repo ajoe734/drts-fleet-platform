@@ -301,3 +301,78 @@ describe("Complaint SLA category mapping", () => {
     expect(normalDeltaHours).toBe(4);
   });
 });
+
+describe("Complaint SLA read model status", () => {
+  it("returns within_sla for cases outside the warning window", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-13T08:00:00.000Z"));
+      const { complaintService } = createServices();
+
+      const complaint = complaintService.createComplaintCase({
+        caseSource: "ops",
+        category: "driver_service",
+        severity: "normal",
+        description: "Fresh complaint",
+      });
+
+      expect(complaint.slaStatus).toBe("within_sla");
+      expect(complaint.slaBreachedAt).toBeNull();
+      expect(complaint.slaBreach).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns warning when the case is close to its SLA due time", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-13T08:00:00.000Z"));
+      const { complaintService } = createServices();
+
+      const complaint = complaintService.createComplaintCase({
+        caseSource: "ops",
+        category: "safety_concern",
+        severity: "high",
+        description: "Approaching SLA",
+      });
+
+      vi.setSystemTime(new Date("2026-05-13T09:31:00.000Z"));
+
+      const warningComplaint = complaintService.getComplaintCase(
+        complaint.caseNo,
+      );
+      expect(warningComplaint.slaStatus).toBe("warning");
+      expect(warningComplaint.slaBreachedAt).toBeNull();
+      expect(warningComplaint.slaBreach).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns breached with computed breachedAt once the due time passes", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-13T08:00:00.000Z"));
+      const { complaintService } = createServices();
+
+      const complaint = complaintService.createComplaintCase({
+        caseSource: "ops",
+        category: "safety_concern",
+        severity: "high",
+        description: "Expired SLA",
+      });
+
+      vi.setSystemTime(new Date("2026-05-13T10:01:00.000Z"));
+
+      const breachedComplaint = complaintService.getComplaintCase(
+        complaint.caseNo,
+      );
+      expect(breachedComplaint.slaStatus).toBe("breached");
+      expect(breachedComplaint.slaBreachedAt).toBe(complaint.slaDueAt);
+      expect(breachedComplaint.slaBreach).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
