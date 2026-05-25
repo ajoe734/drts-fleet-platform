@@ -34,6 +34,16 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
       expect(incident.title).toContain("no_eligible_supply");
       expect(incident.title).toContain("ORD-12345");
       expect(incident.description).toContain("No drivers available in zone A.");
+      expect(incident.driverMatchingSuppression).toMatchObject({
+        active: true,
+        reasonCode: "incident",
+        sourceIncidentId: incident.incidentId,
+        liftedAt: null,
+      });
+      expect(
+        new Date(incident.driverMatchingSuppression!.expiresAt).getTime() -
+          new Date(incident.createdAt).getTime(),
+      ).toBe(24 * 60 * 60 * 1000);
     });
 
     it("creates a timeline entry for dispatch exception handoff", () => {
@@ -47,10 +57,11 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
       });
 
       const timeline = incidentService.getTimeline(incident.incidentId);
-      expect(timeline).toHaveLength(1);
+      expect(timeline).toHaveLength(2);
       expect(timeline[0].action).toBe("dispatch_exception_handoff");
       expect(timeline[0].note).toContain("ORD-99999");
       expect(timeline[0].note).toContain("confirmation_timeout");
+      expect(timeline[1].action).toBe("matching_suppression_created");
     });
 
     it("creates an audit record for dispatch exception creation", () => {
@@ -177,6 +188,145 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
           escalationTarget: "bogus" as any,
         }),
       ).toThrowError(ApiRequestError);
+    });
+  });
+
+  describe("driver matching suppression", () => {
+    it("extends suppression only for ops_manager", () => {
+      const { incidentService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Suppression extension",
+        description: "Ops needs more time.",
+        category: "operational",
+        severity: "high",
+        reportedBy: "ops-user-001",
+      });
+
+      const originalExpiresAt = incident.driverMatchingSuppression!.expiresAt;
+      const extendedExpiresAt = new Date(
+        new Date(originalExpiresAt).getTime() + 2 * 60 * 60 * 1000,
+      ).toISOString();
+
+      expect(() =>
+        incidentService.updateIncident(incident.incidentId, {
+          matchingSuppression: {
+            action: "extend",
+            expiresAt: extendedExpiresAt,
+          },
+        }),
+      ).toThrowError(ApiRequestError);
+
+      const updated = incidentService.updateIncident(
+        incident.incidentId,
+        {
+          matchingSuppression: {
+            action: "extend",
+            expiresAt: extendedExpiresAt,
+          },
+        },
+        undefined,
+        {
+          authMode: "bootstrap_headers",
+          actorType: "ops_user",
+          actorId: "ops-manager-001",
+          realm: "ops",
+          tenantId: null,
+          roleFamilies: ["ops"],
+          roles: ["ops_manager"],
+          scopes: [],
+          requestId: null,
+        },
+      );
+
+      expect(updated.driverMatchingSuppression!.expiresAt).toBe(
+        extendedExpiresAt,
+      );
+      expect(updated.driverMatchingSuppression!.active).toBe(true);
+      expect(
+        incidentService
+          .getTimeline(incident.incidentId)
+          .some((entry) => entry.action === "matching_suppression_extended"),
+      ).toBe(true);
+    });
+
+    it("lifts suppression automatically when the incident resolves", () => {
+      const { incidentService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Resolve suppression",
+        description: "Lifecycle test.",
+        category: "safety",
+        severity: "critical",
+        reportedBy: "ops-user-001",
+      });
+
+      const updated = incidentService.updateIncident(incident.incidentId, {
+        status: "resolved",
+      });
+
+      expect(updated.driverMatchingSuppression).toMatchObject({
+        active: false,
+      });
+      expect(updated.driverMatchingSuppression!.liftedAt).toBeTruthy();
+      expect(
+        incidentService
+          .getTimeline(incident.incidentId)
+          .some((entry) => entry.action === "matching_suppression_lifted"),
+      ).toBe(true);
+    });
+
+    it("builds incident list/detail read models with refresh, health, and available actions", () => {
+      const { incidentService, auditNotificationService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Read model incident",
+        description: "Read model verification.",
+        category: "operational",
+        severity: "medium",
+        reportedBy: "ops-user-001",
+      });
+
+      incidentService.recordServiceRecoveryAction(incident.incidentId, {
+        actionType: "other",
+        note: "Kept passenger informed.",
+        actor: "ops-user-002",
+      });
+
+      const identity = {
+        authMode: "bootstrap_headers" as const,
+        actorType: "ops_user" as const,
+        actorId: "ops-manager-001",
+        realm: "ops" as const,
+        tenantId: null,
+        roleFamilies: ["ops"],
+        roles: ["ops_manager"],
+        scopes: [],
+        requestId: null,
+      };
+
+      const list = incidentService.listIncidentReadModel(identity);
+      expect(list.health.status).toBe("healthy");
+      expect(list.refresh.dataFreshness).toBe("fresh");
+      expect(list.items[0].driverMatchingSuppression?.active).toBe(true);
+      expect(
+        list.items[0].availableActions.some(
+          (action) => action.action === "extend_matching_suppression",
+        ),
+      ).toBe(true);
+
+      const detail = incidentService.getIncidentDetail(
+        incident.incidentId,
+        identity,
+      );
+      expect(detail.timeline.length).toBeGreaterThan(0);
+      expect(detail.serviceRecoveryActions).toHaveLength(1);
+      expect(
+        detail.auditLogs.some((log) => log.resourceId === incident.incidentId),
+      ).toBe(true);
+      expect(auditNotificationService.getAuditLogsSnapshot().length).toBeGreaterThan(
+        0,
+      );
     });
   });
 
@@ -421,6 +571,7 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
       expect(incident.escalationTarget).toBeNull();
       expect(incident.sourceDispatchExceptionOrderId).toBeNull();
       expect(incident.serviceRecoveryActions).toEqual([]);
+      expect(incident.driverMatchingSuppression?.active).toBe(true);
     });
   });
 });
