@@ -90,6 +90,7 @@ type TaskInboxEnvelope = {
   refresh: UiRefreshMetadata;
   refreshTier: "medium";
   empty: EmptyStateEnvelope | null;
+  emptyReasonSource: "server" | "derived" | "local" | null;
 };
 
 const THEME = driverCanvasTheme;
@@ -843,15 +844,26 @@ function inferEmptyReason(tasks: UnifiedDriverTaskView[]): EmptyReason {
   return "no_data";
 }
 
-function resolveDisplayedEmptyReason(
-  envelope: TaskInboxEnvelope,
-  selectedFilter: TaskFilterValue,
-): EmptyReason {
-  if (selectedFilter !== "all" && envelope.items.length > 0) {
-    return "filtered_empty";
+function shouldPreserveLegacyEmptyReason(reason: EmptyReason) {
+  return reason === "driver_not_eligible" || reason === "external_unavailable";
+}
+
+function buildDerivedEmptyEnvelope(
+  items: UnifiedDriverTaskView[],
+  previousEmpty?: EmptyStateEnvelope | null,
+): EmptyStateEnvelope {
+  if (
+    previousEmpty &&
+    shouldPreserveLegacyEmptyReason(previousEmpty.reason) &&
+    items.length === 0
+  ) {
+    return previousEmpty;
   }
 
-  return envelope.empty?.reason ?? inferEmptyReason(envelope.items);
+  return {
+    reason: inferEmptyReason(items),
+    messageCode: "driver.jobs.empty",
+  };
 }
 
 function formatRefreshTierLabel(tier: TaskInboxEnvelope["refreshTier"]) {
@@ -875,7 +887,10 @@ function buildRefreshMetadata(
   };
 }
 
-function parseTaskEnvelope(payload: unknown): TaskInboxEnvelope | null {
+function parseTaskEnvelope(
+  payload: unknown,
+  previousEmpty?: EmptyStateEnvelope | null,
+): TaskInboxEnvelope | null {
   if (!payload || typeof payload !== "object") {
     return null;
   }
@@ -907,10 +922,7 @@ function parseTaskEnvelope(payload: unknown): TaskInboxEnvelope | null {
     record.empty && typeof record.empty === "object"
       ? (record.empty as EmptyStateEnvelope)
       : items.length === 0
-        ? {
-            reason: inferEmptyReason(items),
-            messageCode: "driver.jobs.empty",
-          }
+        ? buildDerivedEmptyEnvelope(items, previousEmpty)
         : null;
 
   return {
@@ -918,6 +930,12 @@ function parseTaskEnvelope(payload: unknown): TaskInboxEnvelope | null {
     refresh,
     refreshTier: "medium",
     empty,
+    emptyReasonSource:
+      record.empty && typeof record.empty === "object"
+        ? "server"
+        : items.length === 0
+          ? "derived"
+          : null,
   };
 }
 
@@ -1259,6 +1277,7 @@ export default function JobsScreen() {
     refresh: buildRefreshMetadata(new Date().toISOString(), false),
     refreshTier: "medium",
     empty: null,
+    emptyReasonSource: null,
   });
 
   const filteredTasks = useMemo(
@@ -1280,7 +1299,23 @@ export default function JobsScreen() {
   }, [envelope.items]);
 
   const refreshState = getRefreshState(envelope.refresh);
-  const emptyReason = resolveDisplayedEmptyReason(envelope, selectedFilter);
+  const displayedEmptyState = useMemo(() => {
+    if (filteredTasks.length > 0) {
+      return null;
+    }
+
+    if (selectedFilter !== "all" && envelope.items.length > 0) {
+      return {
+        reason: "filtered_empty" as const,
+        nextAction: envelope.empty?.nextAction,
+      };
+    }
+
+    return {
+      reason: envelope.empty?.reason ?? inferEmptyReason(envelope.items),
+      nextAction: envelope.empty?.nextAction,
+    };
+  }, [envelope.empty, envelope.items, filteredTasks.length, selectedFilter]);
 
   const openTrip = (taskId?: string) => {
     const route = taskId
@@ -1306,7 +1341,7 @@ export default function JobsScreen() {
 
       try {
         const payload = await client.get<unknown>("/api/driver/task-views");
-        nextEnvelope = parseTaskEnvelope(payload);
+        nextEnvelope = parseTaskEnvelope(payload, envelope.empty);
       } catch {
         nextEnvelope = null;
       }
@@ -1320,11 +1355,9 @@ export default function JobsScreen() {
             refreshTier: "medium",
             empty:
               fetchedTasks.length === 0
-                ? {
-                    reason: inferEmptyReason(fetchedTasks),
-                    messageCode: "driver.jobs.empty",
-                  }
+                ? buildDerivedEmptyEnvelope(fetchedTasks, envelope.empty)
                 : null,
+            emptyReasonSource: fetchedTasks.length === 0 ? "derived" : null,
           };
         } catch {
           const legacyTasks = await client.listDriverTasks();
@@ -1336,11 +1369,9 @@ export default function JobsScreen() {
             refreshTier: "medium",
             empty:
               fallbackTasks.length === 0
-                ? {
-                    reason: inferEmptyReason(fallbackTasks),
-                    messageCode: "driver.jobs.empty",
-                  }
+                ? buildDerivedEmptyEnvelope(fallbackTasks, envelope.empty)
                 : null,
+            emptyReasonSource: fallbackTasks.length === 0 ? "derived" : null,
           };
         }
       }
@@ -1383,6 +1414,7 @@ export default function JobsScreen() {
           reason: "fetch_failed",
           messageCode: "driver.jobs.fetch_failed",
         },
+        emptyReasonSource: "local",
       }));
     }
   };
@@ -1404,6 +1436,7 @@ export default function JobsScreen() {
               reason: "not_provisioned",
               messageCode: "driver.jobs.not_provisioned",
             },
+            emptyReasonSource: "local",
           }));
         }
       })
@@ -1422,22 +1455,6 @@ export default function JobsScreen() {
 
     return () => clearInterval(timer);
   }, [selectedFilter, tasksEnabled]);
-
-  useEffect(() => {
-    if (!loading) {
-      setEnvelope((current) => ({
-        ...current,
-        empty:
-          filteredTasks.length === 0
-            ? {
-                reason: resolveDisplayedEmptyReason(current, selectedFilter),
-                messageCode: current.empty?.messageCode ?? "driver.jobs.empty",
-                nextAction: current.empty?.nextAction,
-              }
-            : null,
-      }));
-    }
-  }, [filteredTasks.length, loading, selectedFilter]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -1686,10 +1703,10 @@ export default function JobsScreen() {
           <ActivityIndicator size="large" color={THEME.accent} />
           <Text style={styles.loadingLabel}>載入任務中…</Text>
         </View>
-      ) : !tasksEnabled || filteredTasks.length === 0 ? (
+      ) : !tasksEnabled || displayedEmptyState ? (
         <EmptyStateCard
-          reason={emptyReason}
-          nextAction={envelope.empty?.nextAction}
+          reason={displayedEmptyState?.reason ?? "no_data"}
+          nextAction={displayedEmptyState?.nextAction}
           onRetry={() => void onRefresh()}
           onOpenPlatform={openPlatformPresence}
           onOpenSettings={openSettings}
