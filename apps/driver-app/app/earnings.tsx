@@ -104,7 +104,54 @@ function formatRefreshLabel(refresh: UiRefreshMetadata) {
   return `${refresh.dataFreshness} · ${stamp}`;
 }
 
-function getEmptyContent(reason: EmptyReason, detail?: string | null) {
+function getRefreshSourceLabel(refresh: UiRefreshMetadata) {
+  switch (refresh.source) {
+    case "live":
+      return "live snapshot";
+    case "cache":
+      return "cache snapshot";
+    case "sandbox":
+      return "sandbox snapshot";
+    case "static":
+      return "static snapshot";
+    default:
+      return "snapshot";
+  }
+}
+
+function getActionLabel(action: ResourceActionDescriptor | null | undefined) {
+  switch (action?.action) {
+    case "refresh_earnings":
+      return "重新整理";
+    case "view_statement_detail":
+      return "查看明細";
+    case "open_manager_review":
+      return "前往派車台覆核";
+    default:
+      return "繼續";
+  }
+}
+
+function getDisabledReasonMessage(code?: string) {
+  switch (code) {
+    case "feature_disabled":
+      return "目前功能尚未開放。";
+    case "permission_denied":
+      return "你的帳號目前沒有這個操作權限。";
+    case "external_unavailable":
+      return "外部平台暫時無法提供這個操作。";
+    case "statement_locked":
+      return "月結尚未完成，暫時不能查看明細。";
+    default:
+      return "目前無法執行這個操作。";
+  }
+}
+
+function getEmptyContent(
+  reason: EmptyReason,
+  detail?: string | null,
+  nextAction?: ResourceActionDescriptor | null,
+) {
   switch (reason) {
     case "not_provisioned":
       return {
@@ -112,6 +159,7 @@ function getEmptyContent(reason: EmptyReason, detail?: string | null) {
         title: "裝置尚未綁定司機身份",
         body: "完成裝置註冊後，才能查看平台收益與月結報表。",
         icon: "card-outline" as const,
+        actionLabel: nextAction ? getActionLabel(nextAction) : "前往設定",
       };
     case "permission_denied":
       return {
@@ -119,6 +167,7 @@ function getEmptyContent(reason: EmptyReason, detail?: string | null) {
         title: "目前無法查看收益頁",
         body: detail ?? "你的目前權限或功能旗標不允許開啟收益資料。",
         icon: "lock-closed-outline" as const,
+        actionLabel: nextAction ? getActionLabel(nextAction) : null,
       };
     case "fetch_failed":
       return {
@@ -126,6 +175,7 @@ function getEmptyContent(reason: EmptyReason, detail?: string | null) {
         title: "收益資料同步失敗",
         body: detail ?? "請稍後重試，或切回工作台確認網路與帳務服務狀態。",
         icon: "alert-circle-outline" as const,
+        actionLabel: nextAction ? getActionLabel(nextAction) : "重新整理",
       };
     case "external_unavailable":
       return {
@@ -133,6 +183,7 @@ function getEmptyContent(reason: EmptyReason, detail?: string | null) {
         title: "外部平台帳務暫時不可用",
         body: "目前只顯示 DRTS 可確認的資料；外部平台對帳需稍後再同步。",
         icon: "cloud-offline-outline" as const,
+        actionLabel: nextAction ? getActionLabel(nextAction) : "重新整理",
       };
     case "driver_not_eligible":
       return {
@@ -140,6 +191,7 @@ function getEmptyContent(reason: EmptyReason, detail?: string | null) {
         title: "目前尚未符合收益顯示條件",
         body: "請先完成派車台要求的綁定或資格檢查，之後再重新整理。",
         icon: "shield-checkmark-outline" as const,
+        actionLabel: nextAction ? getActionLabel(nextAction) : null,
       };
     case "filtered_empty":
       return {
@@ -147,6 +199,7 @@ function getEmptyContent(reason: EmptyReason, detail?: string | null) {
         title: "這個條件下沒有資料",
         body: "調整期間或篩選條件後，再查看其他帳務切片。",
         icon: "funnel-outline" as const,
+        actionLabel: nextAction ? getActionLabel(nextAction) : null,
       };
     case "no_data":
     default:
@@ -155,6 +208,7 @@ function getEmptyContent(reason: EmptyReason, detail?: string | null) {
         title: "這段期間還沒有平台收益",
         body: "切換到其他期間，或稍後再查看最新對帳彙整。",
         icon: "wallet-outline" as const,
+        actionLabel: nextAction ? getActionLabel(nextAction) : "重新整理",
       };
   }
 }
@@ -461,6 +515,13 @@ export default function EarningsScreen() {
     }
   };
 
+  const explainDisabledAction = (action: ResourceActionDescriptor | null) => {
+    Alert.alert(
+      "目前無法執行",
+      getDisabledReasonMessage(action?.disabledReasonCode),
+    );
+  };
+
   const refreshAction = findAction(
     dashboard?.availableActions,
     "refresh_earnings",
@@ -470,6 +531,7 @@ export default function EarningsScreen() {
     dashboard !== null ? formatRefreshLabel(dashboard.refresh) : "manual";
   const refreshTone =
     dashboard !== null ? getRefreshTone(dashboard.refresh) : "neutral";
+  const emptyAction = dashboard?.emptyState?.nextAction ?? null;
 
   if (loading && dashboard === null && error === null) {
     return (
@@ -503,7 +565,12 @@ export default function EarningsScreen() {
         : (dashboard?.emptyState?.reason ?? null);
 
   if (emptyReason !== null) {
-    const emptyContent = getEmptyContent(emptyReason, error);
+    const emptyContent = getEmptyContent(emptyReason, error, emptyAction);
+    const hasRefreshEnvelope = dashboard !== null;
+    const showRetry =
+      emptyReason === "fetch_failed" || emptyReason === "external_unavailable";
+    const showSettingsAction =
+      emptyReason === "not_provisioned" && !emptyAction?.enabled;
 
     return (
       <Shell
@@ -524,14 +591,17 @@ export default function EarningsScreen() {
           title={driverStrings.earnings.title}
           subtitle={getHeaderSubtitle(period)}
           actions={
-            emptyReason === "fetch_failed" ||
-            emptyReason === "external_unavailable" ? (
+            showRetry ? (
               <Btn
                 theme={THEME}
                 variant="secondary"
                 size="sm"
                 icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
-                onPress={() => void onRefresh()}
+                onPress={() =>
+                  refreshEnabled
+                    ? void onRefresh()
+                    : explainDisabledAction(refreshAction)
+                }
               >
                 {driverStrings.common.retry}
               </Btn>
@@ -557,14 +627,50 @@ export default function EarningsScreen() {
             />
           }
         />
-        {emptyReason === "not_provisioned" ? (
+        {hasRefreshEnvelope ? (
+          <View style={styles.emptyMetaRow}>
+            <Pill theme={THEME} tone={refreshTone}>
+              {refreshStatus}
+            </Pill>
+            <Pill theme={THEME} tone="neutral">
+              {getRefreshSourceLabel(dashboard.refresh)}
+            </Pill>
+            <Pill theme={THEME} tone="warn">
+              refresh tier · {dashboard.refreshTier}
+            </Pill>
+          </View>
+        ) : null}
+        {emptyAction ? (
+          <Btn
+            theme={THEME}
+            variant="primary"
+            size="sm"
+            disabled={!emptyAction.enabled}
+            onPress={() => {
+              if (!emptyAction.enabled) {
+                explainDisabledAction(emptyAction);
+                return;
+              }
+              if (emptyAction.action === "refresh_earnings") {
+                void onRefresh();
+                return;
+              }
+              if (emptyReason === "not_provisioned") {
+                router.push("/settings");
+              }
+            }}
+          >
+            {emptyContent.actionLabel}
+          </Btn>
+        ) : null}
+        {showSettingsAction ? (
           <Btn
             theme={THEME}
             variant="primary"
             size="sm"
             onPress={() => router.push("/settings")}
           >
-            前往設定
+            {emptyContent.actionLabel}
           </Btn>
         ) : null}
       </Shell>
@@ -651,31 +757,57 @@ export default function EarningsScreen() {
         </View>
 
         <Card theme={THEME} style={styles.summaryCard}>
-          <Text
-            style={[
-              styles.summaryEyebrow,
-              { color: THEME.textDim, fontFamily: THEME.fontFamily },
-            ]}
-          >
-            {getSummaryLabel(period)}
-          </Text>
-          <View style={styles.summaryHeadlineRow}>
-            <Text
-              style={[
-                styles.summaryAmount,
-                { color: THEME.text, fontFamily: THEME.monoFamily },
-              ]}
-            >
-              {formatAmountNumber(dashboard.summary.netAmount)}
-            </Text>
-            <Text
-              style={[
-                styles.summaryCurrency,
-                { color: THEME.textMuted, fontFamily: THEME.fontFamily },
-              ]}
-            >
-              {getCurrencyLabel(dashboard.summary.netAmount.currency)}
-            </Text>
+          <View style={styles.summaryHeaderRow}>
+            <View style={styles.summaryHeaderCopy}>
+              <Text
+                style={[
+                  styles.summaryEyebrow,
+                  { color: THEME.textDim, fontFamily: THEME.fontFamily },
+                ]}
+              >
+                {getSummaryLabel(period)}
+              </Text>
+              <View style={styles.summaryHeadlineRow}>
+                <Text
+                  style={[
+                    styles.summaryAmount,
+                    { color: THEME.text, fontFamily: THEME.monoFamily },
+                  ]}
+                >
+                  {formatAmountNumber(dashboard.summary.netAmount)}
+                </Text>
+                <Text
+                  style={[
+                    styles.summaryCurrency,
+                    { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+                  ]}
+                >
+                  {getCurrencyLabel(dashboard.summary.netAmount.currency)}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.summaryRightCol}>
+              <Pill
+                theme={THEME}
+                tone={
+                  dashboard.summary.pendingPayoutAmount.amountMinor > 0
+                    ? "warn"
+                    : "success"
+                }
+              >
+                {dashboard.summary.pendingPayoutAmount.amountMinor > 0
+                  ? "待撥款"
+                  : "已入帳"}
+              </Pill>
+              <Text
+                style={[
+                  styles.summarySourceText,
+                  { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+                ]}
+              >
+                {getRefreshSourceLabel(dashboard.refresh)}
+              </Text>
+            </View>
           </View>
           <View style={styles.summaryMetaRow}>
             <Pill theme={THEME} tone={refreshTone}>
@@ -713,6 +845,36 @@ export default function EarningsScreen() {
             />
           </View>
         </Card>
+
+        {dashboard.notes?.length ? (
+          <Card theme={THEME} style={styles.notesCard}>
+            <Text
+              style={[
+                styles.notesTitle,
+                { color: THEME.text, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              對帳說明
+            </Text>
+            <View style={styles.notesList}>
+              {dashboard.notes.map((note) => (
+                <View key={note} style={styles.noteRow}>
+                  <View
+                    style={[styles.noteDot, { backgroundColor: THEME.textDim }]}
+                  />
+                  <Text
+                    style={[
+                      styles.noteText,
+                      { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+                    ]}
+                  >
+                    {note}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
 
         <Card
           theme={THEME}
@@ -864,6 +1026,22 @@ export default function EarningsScreen() {
                         {item.authorityLabel}
                       </Text>
                     </View>
+                    {item.availableActions.length > 0 ? (
+                      <View style={styles.breakdownActionRow}>
+                        {item.availableActions.map((action) => (
+                          <Btn
+                            key={action.action}
+                            theme={THEME}
+                            variant="ghost"
+                            size="xs"
+                            disabled={!action.enabled}
+                            onPress={() => explainDisabledAction(action)}
+                          >
+                            {getActionLabel(action)}
+                          </Btn>
+                        ))}
+                      </View>
+                    ) : null}
                     {item.referenceOnly ? (
                       <Text
                         style={[
@@ -886,18 +1064,7 @@ export default function EarningsScreen() {
 
         {dashboard.reconciliationIssue ? (
           <Card theme={THEME} style={styles.reconciliationCard}>
-            <Pressable
-              disabled={!reconciliationAction?.enabled}
-              onPress={() =>
-                void openManagerReview(
-                  dashboard.reconciliationIssue!.managerReviewLink,
-                )
-              }
-              style={({ pressed }) => [
-                styles.reconciliationPressable,
-                { opacity: pressed ? 0.88 : 1 },
-              ]}
-            >
+            <View style={styles.reconciliationPressable}>
               <Ionicons
                 name="warning-outline"
                 size={16}
@@ -921,13 +1088,32 @@ export default function EarningsScreen() {
                 >
                   {dashboard.reconciliationIssue.detail}
                 </Text>
+                <Text
+                  style={[
+                    styles.reconciliationMeta,
+                    { color: THEME.textDim, fontFamily: THEME.fontFamily },
+                  ]}
+                >
+                  deep link ·{" "}
+                  {dashboard.reconciliationIssue.managerReviewLink.targetApp}
+                </Text>
               </View>
-              <Ionicons
-                name="chevron-forward"
-                size={16}
-                color={THEME.textDim}
-              />
-            </Pressable>
+            </View>
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              disabled={!reconciliationAction?.enabled}
+              onPress={() =>
+                reconciliationAction?.enabled
+                  ? void openManagerReview(
+                      dashboard.reconciliationIssue!.managerReviewLink,
+                    )
+                  : explainDisabledAction(reconciliationAction)
+              }
+            >
+              {getActionLabel(reconciliationAction)}
+            </Btn>
           </Card>
         ) : null}
 
@@ -969,11 +1155,12 @@ export default function EarningsScreen() {
                       key={statement.statementId}
                       disabled={!canView}
                       onPress={() => void openStatementDetail(statement)}
-                      style={[
+                      style={({ pressed }) => [
                         styles.statementRow,
                         index < dashboard.statements.length - 1
                           ? { borderBottomColor: THEME.border }
                           : null,
+                        { opacity: canView ? (pressed ? 0.88 : 1) : 0.74 },
                       ]}
                     >
                       <View style={styles.statementCopy}>
@@ -1000,6 +1187,24 @@ export default function EarningsScreen() {
                           {statement.receiptNo} · {statement.tripCount} 趟 · fee{" "}
                           {statement.feePlanVersion}
                         </Text>
+                        {!canView ? (
+                          <Text
+                            style={[
+                              styles.statementDisabledText,
+                              {
+                                color: THEME.warn,
+                                fontFamily: THEME.fontFamily,
+                              },
+                            ]}
+                          >
+                            {getDisabledReasonMessage(
+                              findAction(
+                                statement.availableActions,
+                                "view_statement_detail",
+                              )?.disabledReasonCode,
+                            )}
+                          </Text>
+                        ) : null}
                       </View>
                       <View style={styles.statementValueWrap}>
                         <Pill
@@ -1137,6 +1342,20 @@ const styles = StyleSheet.create({
   summaryCard: {
     gap: 12,
   },
+  emptyMetaRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  summaryHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  summaryHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
   summaryEyebrow: {
     fontSize: 10.5,
     textTransform: "uppercase",
@@ -1155,6 +1374,13 @@ const styles = StyleSheet.create({
   summaryCurrency: {
     fontSize: 14,
     marginBottom: 6,
+  },
+  summaryRightCol: {
+    alignItems: "flex-end",
+    gap: 6,
+  },
+  summarySourceText: {
+    fontSize: 10.5,
   },
   summaryMetaRow: {
     flexDirection: "row",
@@ -1179,6 +1405,32 @@ const styles = StyleSheet.create({
   summaryMetricValue: {
     fontSize: 15,
     fontWeight: "700",
+  },
+  notesCard: {
+    gap: 10,
+  },
+  notesTitle: {
+    fontSize: 12.5,
+    fontWeight: "600",
+  },
+  notesList: {
+    gap: 8,
+  },
+  noteRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  noteDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 999,
+    marginTop: 7,
+  },
+  noteText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
   },
   breakdownList: {
     gap: 10,
@@ -1225,13 +1477,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
+  breakdownActionRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
   reconciliationCard: {
-    paddingVertical: 0,
-    paddingHorizontal: 0,
+    gap: 12,
   },
   reconciliationPressable: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 10,
   },
   reconciliationIcon: {
@@ -1248,6 +1504,10 @@ const styles = StyleSheet.create({
   reconciliationDetail: {
     fontSize: 11,
     lineHeight: 16,
+  },
+  reconciliationMeta: {
+    fontSize: 10.5,
+    marginTop: 4,
   },
   statementList: {
     borderWidth: 1,
@@ -1272,6 +1532,10 @@ const styles = StyleSheet.create({
   },
   statementSubtitle: {
     fontSize: 11,
+  },
+  statementDisabledText: {
+    fontSize: 10.5,
+    marginTop: 4,
   },
   statementValueWrap: {
     alignItems: "flex-end",
