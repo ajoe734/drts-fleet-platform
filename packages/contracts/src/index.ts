@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ResourceActionDescriptor } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -2350,9 +2351,56 @@ export interface BookingRecord {
   approvalRequestIds: string[];
   complianceGates?: ComplianceGateRecord[];
   orderStatus: OwnedOrderStatus;
+  /**
+   * Q-TEN05 — moment after which the booking can no longer be modified.
+   * `null` means no time-based lock (e.g. completed or cancelled bookings
+   * fall back to `readOnlyReasonCode` for the reason).
+   */
+  editableUntil: string | null;
+  /**
+   * Q-TEN05 — non-null when the booking is read-only. The UI uses this
+   * instead of deriving from `status` alone.
+   */
+  readOnlyReasonCode: TenantBookingReadOnlyReasonCode | null;
+  /**
+   * Q-TEN05 / Q-X13 — backend-decided action affordances. UI must not
+   * hard-code per-role CTA visibility; a 0-length list means the booking
+   * is effectively read-only for the current actor.
+   */
+  availableActions: ResourceActionDescriptor[];
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Q-TEN05 — canonical machine-readable reasons a booking is read-only.
+ */
+export type TenantBookingReadOnlyReasonCode =
+  | "completed"
+  | "cancelled"
+  | "past_editable_window";
+
+/**
+ * Q-TEN04 — synchronous command pattern envelope returned by the
+ * `POST /api/tenant/bookings/commands/*` endpoints. `status: "accepted"`
+ * means the command was received but external confirmation is pending
+ * (e.g. tenant governance approval workflow); `status: "completed"` means
+ * the command resolved in-line.
+ */
+export interface TenantBookingCommandResult {
+  commandId: string;
+  command: "create_booking" | "update_booking" | "cancel_booking";
+  status: "accepted" | "completed";
+  pendingReasonCode?: TenantBookingCommandPendingReason | null;
+  bookingId: string;
+  booking: BookingRecord;
+}
+
+/**
+ * Q-TEN04 — reason a command sits in `accepted+pending` state. The only
+ * Phase 1 source of pending is the tenant approval workflow.
+ */
+export type TenantBookingCommandPendingReason = "approval_required";
 
 export interface DispatchCandidate {
   vehicleId: string;

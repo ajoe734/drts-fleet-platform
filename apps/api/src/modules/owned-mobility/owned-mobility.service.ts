@@ -53,10 +53,14 @@ import type {
   RedispatchOrderCommand,
   ReservationHoldStatus,
   ResolveExceptionHoldCommand,
+  ResourceActionDescriptor,
   TenantApprovalEvaluationInputSnapshot,
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
+  TenantBookingCommandPendingReason,
+  TenantBookingCommandResult,
+  TenantBookingReadOnlyReasonCode,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
@@ -4747,8 +4751,162 @@ export class OwnedMobilityService implements OnModuleInit {
       approvalRequestIds: [...order.approvalRequestIds],
       complianceGates,
       orderStatus: order.status,
+      ...this.computeBookingActionability(order),
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
+    };
+  }
+
+  /**
+   * Q-TEN05 — derive `editableUntil` + `readOnlyReasonCode` +
+   * `availableActions` from order state. Centralised so list/detail/command
+   * responses agree.
+   */
+  private computeBookingActionability(order: OwnedOrderRecord): {
+    editableUntil: string | null;
+    readOnlyReasonCode: TenantBookingReadOnlyReasonCode | null;
+    availableActions: ResourceActionDescriptor[];
+  } {
+    const editableUntil = order.modifiableUntil ?? null;
+    const cancelableUntil = order.cancelableUntil ?? null;
+    const nowMs = Date.now();
+
+    const editableExpired =
+      editableUntil !== null &&
+      Number.isFinite(new Date(editableUntil).getTime()) &&
+      nowMs > new Date(editableUntil).getTime();
+    const cancelableExpired =
+      cancelableUntil !== null &&
+      Number.isFinite(new Date(cancelableUntil).getTime()) &&
+      nowMs > new Date(cancelableUntil).getTime();
+
+    const readOnlyReasonCode: TenantBookingReadOnlyReasonCode | null =
+      order.status === "cancelled"
+        ? "cancelled"
+        : order.status === "completed"
+          ? "completed"
+          : editableExpired
+            ? "past_editable_window"
+            : null;
+
+    const isTerminal =
+      order.status === "cancelled" || order.status === "completed";
+
+    const updateAction: ResourceActionDescriptor = {
+      action: "update_booking",
+      enabled: !isTerminal && !editableExpired,
+      riskLevel: "medium",
+      ...(isTerminal
+        ? { disabledReasonCode: readOnlyReasonCode ?? "terminal_state" }
+        : editableExpired
+          ? { disabledReasonCode: "past_editable_window" }
+          : {}),
+    };
+
+    const cancelAction: ResourceActionDescriptor = {
+      action: "cancel_booking",
+      enabled: !isTerminal && !cancelableExpired,
+      riskLevel: "high",
+      requiresReason: true,
+      ...(isTerminal
+        ? { disabledReasonCode: readOnlyReasonCode ?? "terminal_state" }
+        : cancelableExpired
+          ? { disabledReasonCode: "past_cancelable_window" }
+          : {}),
+    };
+
+    return {
+      editableUntil,
+      readOnlyReasonCode,
+      availableActions: [updateAction, cancelAction],
+    };
+  }
+
+  /**
+   * Q-TEN04 — synchronous command pattern wrapper around
+   * `createTenantBooking`. Returns `accepted` when the booking is waiting
+   * on an external dependency (currently: tenant approval workflow); else
+   * `completed`.
+   */
+  createTenantBookingCommand(
+    command: CreateTenantBookingCommand,
+    tenantId: string,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): MaybePromise<TenantBookingCommandResult> {
+    return this.afterMaybePromise(
+      this.createTenantBooking(command, tenantId, identity, requestId),
+      (result) =>
+        this.buildBookingCommandResult(
+          "create_booking",
+          tenantId,
+          result.bookingId,
+        ),
+    );
+  }
+
+  /**
+   * Q-TEN04 — synchronous command pattern wrapper around
+   * `updateTenantBooking`.
+   */
+  updateTenantBookingCommand(
+    tenantId: string,
+    bookingId: string,
+    command: UpdateTenantBookingCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): MaybePromise<TenantBookingCommandResult> {
+    return this.afterMaybePromise(
+      this.updateTenantBooking(
+        tenantId,
+        bookingId,
+        command,
+        identity,
+        requestId,
+      ),
+      () => this.buildBookingCommandResult("update_booking", tenantId, bookingId),
+    );
+  }
+
+  /**
+   * Q-TEN04 — synchronous command pattern wrapper around
+   * `cancelTenantBooking`. Cancel is always synchronous (`completed`)
+   * because the order moves to `cancelled` in-line.
+   */
+  cancelTenantBookingCommand(
+    tenantId: string,
+    bookingId: string,
+    command: CancelOwnedOrderCommand,
+    requestId?: string,
+  ): TenantBookingCommandResult {
+    this.cancelTenantBooking(tenantId, bookingId, command, requestId);
+    return this.buildBookingCommandResult(
+      "cancel_booking",
+      tenantId,
+      bookingId,
+    );
+  }
+
+  private buildBookingCommandResult(
+    command: TenantBookingCommandResult["command"],
+    tenantId: string,
+    bookingId: string,
+  ): TenantBookingCommandResult {
+    const booking = this.mapOrderToBooking(
+      this.requireBookingOrder(bookingId, tenantId),
+    );
+    const pendingReasonCode: TenantBookingCommandPendingReason | null =
+      command !== "cancel_booking" && booking.approvalState === "pending"
+        ? "approval_required"
+        : null;
+
+    return {
+      commandId: randomUUID(),
+      command,
+      status: pendingReasonCode ? "accepted" : "completed",
+      pendingReasonCode,
+      bookingId,
+      booking,
     };
   }
 
