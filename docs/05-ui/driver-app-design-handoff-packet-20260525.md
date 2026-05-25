@@ -11,6 +11,9 @@
 - [`system-design-answers-all-apps-20260524.md`](./system-design-answers-all-apps-20260524.md) — **authority**
 - [`ops-console-design-handoff-packet-20260525.md`](./ops-console-design-handoff-packet-20260525.md), [`platform-admin-design-handoff-packet-20260525.md`](./platform-admin-design-handoff-packet-20260525.md), [`tenant-console-design-handoff-packet-20260525.md`](./tenant-console-design-handoff-packet-20260525.md) — companion packets
 
+> **🎨 2026-05-25 update — visual design has landed.**
+> The visual design team produced [`drts-design-canvas/`](./drts-design-canvas/) v0.6 against this packet + the system design answers. The visual specification for Driver App screens is now [`drts-design-canvas/Driver App.html`](./drts-design-canvas/Driver%20App.html) (light-blue accent, 10 routes on both 412×892 and 360×780 device frames, hero accept/race forwarded trip flow, 8 trip states including manual-fallback, 4 reauth mechanisms, persistent SOS ack banner, press-and-hold 2s SOS submit, `driver_not_eligible` distinct empty state). The driver app uses an **independent design system** ([`drts-design-canvas/driver-tokens.jsx`](./drts-design-canvas/driver-tokens.jsx), [`driver-primitives.jsx`](./drts-design-canvas/driver-primitives.jsx)) — it cannot share `@drts/ui-web` per answers Q-X04. Many of the §7 purely-visual open questions below are now answered by the canvas — see §7 inline annotations. The implementation lane that picks up `apps/driver-app` should treat the canvas as authority for visual decisions, and this packet as authority for behavior / data / API contracts.
+
 ---
 
 ## 0. How to read this document
@@ -668,7 +671,9 @@ Methods marked TBD need to be added to a driver-side API client (note: driver ap
 
 ## 7. Purely visual open questions
 
-§3 covers cross-cutting; most decisions baked in. Remaining are mobile-specific visual / interaction choices.
+> **🎨 2026-05-25 status:** the visual design team has answered most of these in [`drts-design-canvas/Driver App.html`](./drts-design-canvas/Driver%20App.html) (v0.6, light-blue accent, dual device frames 412×892 + 360×780). The implementer should consult the canvas first. Note the driver app uses an **independent design system** ([`driver-tokens.jsx`](./drts-design-canvas/driver-tokens.jsx), [`driver-primitives.jsx`](./drts-design-canvas/driver-primitives.jsx)) — visual implementations cannot share `@drts/ui-web` per answers Q-X04. Canvas wins for visual; this packet wins for behavior/data/API.
+
+§3 covers cross-cutting; most decisions baked in. Remaining below are mobile-specific visual / interaction choices — most now answered.
 
 ### 7.1 Cross-cutting (mobile-adapted from web packets)
 
