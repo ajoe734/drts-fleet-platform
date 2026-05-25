@@ -15,7 +15,8 @@ export type TripExperienceState =
   | "forwarded_completed"
   | "forwarded_lost"
   | "forwarded_cancelled"
-  | "sync_failed";
+  | "sync_failed"
+  | "manual_fallback";
 
 export interface TripPrimaryActionDescriptor {
   action: TripPrimaryActionKey;
@@ -30,7 +31,8 @@ type ForwardedBlockingTripState =
   | "forwarded_completed"
   | "forwarded_lost"
   | "forwarded_cancelled"
-  | "sync_failed";
+  | "sync_failed"
+  | "manual_fallback";
 
 const TRIP_PRIMARY_ACTIONS: Record<
   TripPrimaryActionKey,
@@ -100,7 +102,7 @@ function getForwardedRuntimeStatus(
     }
   ).manualFallback?.required;
   if (manualFallbackRequired === true) {
-    return "sync_failed";
+    return "manual_fallback";
   }
 
   const syncIssue =
@@ -140,6 +142,8 @@ export function getTripExperienceState(
       return "forwarded_lost";
     case "cancelled_by_platform":
       return "forwarded_cancelled";
+    case "manual_fallback":
+      return "manual_fallback";
     case "sync_failed":
       return "sync_failed";
   }

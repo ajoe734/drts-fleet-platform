@@ -43,6 +43,7 @@ export const driverForwardedTaskStatusLabels = {
   cancelled: "平台取消",
   cancelled_by_platform: "平台取消",
   sync_failed: "同步異常",
+  manual_fallback: "人工協調中",
 } as const;
 
 export const driverJobFilterOptions = [
