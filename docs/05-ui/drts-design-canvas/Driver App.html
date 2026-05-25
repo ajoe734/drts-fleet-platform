@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Driver App · DRTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#0F1B2D"/>
+  <rect x="32" y="14" width="36" height="72" rx="6" fill="#FFFFFF" stroke="#0F4C75" stroke-width="2"/>
+  <rect x="36" y="22" width="28" height="4" rx="2" fill="#0F4C75"/>
+  <rect x="36" y="30" width="20" height="3" rx="1.5" fill="#94A3B8"/>
+  <rect x="36" y="38" width="28" height="20" rx="3" fill="#E8F0FE"/>
+  <circle cx="50" cy="78" r="4" fill="#0F4C75"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="driver-tokens.jsx"></script>
+<script type="text/babel" src="driver-primitives.jsx"></script>
+<script type="text/babel" src="driver-screens-1.jsx"></script>
+<script type="text/babel" src="driver-screens-2.jsx"></script>
+<script type="text/babel" src="driver-screens-3.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": false,
+  "device": "large"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const t = buildDrvTheme(tw.dark);
+  const dim = tw.device === 'narrow' ? { w: 360, h: 800 } : { w: 412, h: 915 };
+
+  // wrap a screen in phone bezel + status bar + tab bar + home indicator
+  const Phone = ({ title, zh, en, tab = 'home', tabHidden, sosActive, children }) => (
+    <PhoneBezel device={tw.device} dark={tw.dark}>
+      <DrvStatusBar theme={t} />
+      {title || zh ? (
+        <DrvAppBar theme={t} title={title} zh={zh} en={en} shift={sosActive ? 'sos' : 'on'} />
+      ) : null}
+      {children}
+      <DrvTabBar theme={t} active={tab} hidden={tabHidden} />
+      <DrvHomeIndicator theme={t} />
+    </PhoneBezel>
+  );
+
+  // for trip/incident which provide their own app bar inside
+  const PhoneRaw = ({ tab = 'home', tabHidden, children }) => (
+    <PhoneBezel device={tw.device} dark={tw.dark}>
+      <DrvStatusBar theme={t} />
+      {children}
+      <DrvTabBar theme={t} active={tab} hidden={tabHidden} />
+      <DrvHomeIndicator theme={t} />
+    </PhoneBezel>
+  );
+
+  const W = dim.w + 32, H = dim.h + 32;
+  const pad = (kid) => <div style={{ width: W, height: H, padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F0EEE9' }}>{kid}</div>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Driver App" subtitle="Driver mobile · packet DRV-DH-PKT-002 · React Native (Expo) · zh-TW · raw_code 雙語" accent="#0F4C75">
+
+        <DCSection id="onboarding" title="01 · Provisioning + Cockpit (spec §5.2 / §5.3)" subtitle="not_provisioned 阻擋 tab bar 進入；workspace = next-best-action cockpit">
+          <DCArtboard id="onboarding" label="裝置啟用 / not_provisioned" width={W} height={H}>
+            {pad(<PhoneRaw tabHidden><DRV_Onboarding theme={t} /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="cockpit-trip" label="工作台 · on_shift_with_trip (next-best-action dominant)" width={W} height={H}>
+            {pad(<Phone tab="home"><DRV_Workspace theme={t} state="on_shift_with_trip" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="cockpit-reauth" label="工作台 · 平台需重新授權" width={W} height={H}>
+            {pad(<Phone tab="home"><DRV_Workspace theme={t} state="on_shift_reauth" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="cockpit-sos" label="工作台 · SOS ack persistent (Q-DRV12)" width={W} height={H}>
+            {pad(<Phone tab="home" sosActive><DRV_Workspace theme={t} state="on_shift_with_trip" sosActive /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="cockpit-off" label="工作台 · off_shift" width={W} height={H}>
+            {pad(<Phone tab="home"><DRV_Workspace theme={t} state="off_shift" /></Phone>)}
+          </DCArtboard>
+          <DCArtboard id="cockpit-urgent" label="工作台 · 待處理任務" width={W} height={H}>
+            {pad(<Phone tab="home"><DRV_Workspace theme={t} state="on_shift_urgent_task" /></Phone>)}
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="jobs" title="02 · Unified Task Inbox (spec §5.4)" subtitle="owned vs forwarded 視覺區隔；capability flags 驅動 accept/reject (Q-DRV01)">
+          <DCArtboard id="jobs" label="任務 · 全部 · mirror_only / lost_race / sync_failed" width={W} height={H}>
+            {pad(<Phone tab="jobs"><DRV_Jobs theme={t} filter="all" /></Phone>)}
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="trip" title="03 · Trip · 一次一個 primary action (spec §5.5 binding rule)" subtitle="owned + 5 forwarded states + manual_fallback (Q-DRV02/03/04)">
+          <DCArtboard id="trip-owned" label="行程 · owned_active" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip"><DRV_Trip theme={t} state="owned_active" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="trip-offered" label="行程 · forwarded_offered · 30s race" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip"><DRV_Trip theme={t} state="forwarded_offered" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="trip-pending" label="行程 · accept_pending (Q-DRV02 safe copy)" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip"><DRV_Trip theme={t} state="forwarded_accept_pending" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="trip-confirmed" label="行程 · forwarded_confirmed" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip"><DRV_Trip theme={t} state="forwarded_confirmed" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="trip-lost" label="行程 · lost_race (terminal · Q-DRV03)" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip"><DRV_Trip theme={t} state="forwarded_lost_race" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="trip-cancelled" label="行程 · cancelled_by_platform (Q-DRV03)" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip"><DRV_Trip theme={t} state="forwarded_cancelled" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="trip-syncfail" label="行程 · sync_failed · ops 處理" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip"><DRV_Trip theme={t} state="sync_failed" /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="trip-fallback" label="行程 · manual_fallback · DriverOpsInstruction (Q-DRV04)" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip"><DRV_Trip theme={t} state="manual_fallback" /></PhoneRaw>)}
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="platforms" title="04 · Platform Presence (spec §5.6 + Q-DRV05/07)" subtitle="4 個 reauth 機制 · eligibility 顯示原因">
+          <DCArtboard id="platforms" label="平台連線 · 4 mechanisms · eligibility reasons" width={W} height={H}>
+            {pad(<Phone tab="platform"><DRV_Platform theme={t} /></Phone>)}
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="incident" title="05 · SOS · press-and-hold 2s (Q-DRV11/12)" subtitle="不可被前端優化成單擊送出">
+          <DCArtboard id="incident-tap" label="SOS sheet · 剛開啟 (progress=0)" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip" tabHidden><DRV_Incident theme={t} progress={0} /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="incident-hold" label="SOS sheet · press-and-hold 55%" width={W} height={H}>
+            {pad(<PhoneRaw tab="trip" tabHidden><DRV_Incident theme={t} progress={0.55} /></PhoneRaw>)}
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="earnings-shift" title="06 · Earnings + Shift">
+          <DCArtboard id="earnings" label="收入 · 平台分項 · authority labeled" width={W} height={H}>
+            {pad(<PhoneRaw tab="settings"><DRV_Earnings theme={t} /></PhoneRaw>)}
+          </DCArtboard>
+          <DCArtboard id="shift" label="班次 · 上班中 · odometer over-threshold (Q-DRV09)" width={W} height={H}>
+            {pad(<PhoneRaw tab="home"><DRV_Shift theme={t} state="on" /></PhoneRaw>)}
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="settings" title="07 · Settings (spec §5.10 + Q-DRV05/13/14)">
+          <DCArtboard id="settings" label="設定 · 4 reauth mechs · auto-accept per-platform · max radius km" width={W} height={H}>
+            {pad(<Phone tab="settings"><DRV_Settings theme={t} /></Phone>)}
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="narrow" title="08 · 窄機支援 360×800" subtitle="同設計系統在 Android 入門機">
+          <DCArtboard id="narrow-cockpit" label="窄機 · workspace cockpit" width={360 + 32} height={800 + 32}>
+            <div style={{ width: 360 + 32, height: 800 + 32, padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F0EEE9' }}>
+              <PhoneBezel device="narrow" dark={tw.dark}>
+                <DrvStatusBar theme={t} />
+                <DRV_Workspace theme={t} state="on_shift_with_trip" />
+                <DrvTabBar theme={t} active="home" />
+                <DrvHomeIndicator theme={t} />
+              </PhoneBezel>
+            </div>
+          </DCArtboard>
+          <DCArtboard id="narrow-trip" label="窄機 · forwarded_offered" width={360 + 32} height={800 + 32}>
+            <div style={{ width: 360 + 32, height: 800 + 32, padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F0EEE9' }}>
+              <PhoneBezel device="narrow" dark={tw.dark}>
+                <DrvStatusBar theme={t} />
+                <DRV_Trip theme={t} state="forwarded_offered" />
+                <DrvTabBar theme={t} active="trip" />
+                <DrvHomeIndicator theme={t} />
+              </PhoneBezel>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Theme">
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <TweakRadio label="裝置" value={tw.device} onChange={v => setTweak('device', v)} options={[{ value: 'large', label: 'Large 412' }, { value: 'narrow', label: 'Narrow 360' }]} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

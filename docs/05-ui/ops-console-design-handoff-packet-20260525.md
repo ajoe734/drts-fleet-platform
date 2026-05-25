@@ -10,6 +10,9 @@
 - [`system-design-questions-all-apps-20260524.md`](./system-design-questions-all-apps-20260524.md) — questions raised to 系統設計規劃領域
 - [`system-design-answers-all-apps-20260524.md`](./system-design-answers-all-apps-20260524.md) — answers received; **decisions in that document are the authority** and override anything ambiguous here
 
+> **🎨 2026-05-25 update — visual design has landed.**
+> The visual design team produced [`drts-design-canvas/`](./drts-design-canvas/) v0.6 against this packet + the system design answers. The visual specification for Ops Console screens is now [`drts-design-canvas/Ops Console.html`](./drts-design-canvas/Ops%20Console.html) (coral accent, 20 routes incl. 3 new detail routes and the 6 first-class dispatch sub-boards). Many of the §7 purely-visual open questions below are now answered by the canvas — see §7 inline annotations. The implementation lane that picks up `apps/ops-console-web` should treat the canvas as authority for visual decisions, and this packet as authority for behavior / data / API contracts.
+
 ---
 
 ## 0. How to read this document
@@ -914,7 +917,9 @@ Methods marked TBD need to be added to `packages/api-client/src/index.ts` as par
 
 ## 7. Purely visual open questions
 
-Most cross-cutting and structural decisions are now baked into §3 and §5 from the answers document. The remaining questions are visual / interaction choices that belong to the design team's authority.
+> **🎨 2026-05-25 status:** the visual design team has answered most of these in [`drts-design-canvas/Ops Console.html`](./drts-design-canvas/Ops%20Console.html) (v0.6). The implementer should consult the canvas first; remaining "still open" items are ones the canvas explicitly did not address (e.g. items requiring product / system decisions, items deferred to Phase 2, or items the design team flagged as needing operator validation). Treat any apparent mismatch between this packet's items and the canvas as **canvas wins for visual; this packet wins for behavior/data/API**.
+
+Most cross-cutting and structural decisions are now baked into §3 and §5 from the answers document. The remaining questions below are visual / interaction choices that belonged to the design team's authority — most have been answered.
 
 ### 7.1 Cross-cutting (apply across many screens)
 

@@ -12,6 +12,9 @@
 - [`ops-console-design-handoff-packet-20260525.md`](./ops-console-design-handoff-packet-20260525.md) — established shape
 - [`platform-admin-design-handoff-packet-20260525.md`](./platform-admin-design-handoff-packet-20260525.md) — companion
 
+> **🎨 2026-05-25 update — visual design has landed.**
+> The visual design team produced [`drts-design-canvas/`](./drts-design-canvas/) v0.6 against this packet + the system design answers. The visual specification for Tenant Console screens is now [`drts-design-canvas/Tenant Console.html`](./drts-design-canvas/Tenant%20Console.html) (teal accent, 20 routes including the 9 NEW routes per Q-TEN02, command-pattern `accepted+pending` state, cross-actor audit, aggregated integration-governance, YAMATO fixture data). Partner Booking Mode visuals are archived in [`drts-design-canvas/archive/`](./drts-design-canvas/archive/) per Q-TEN03 — they get a fresh packet + design when `apps/partner-booking-web` is in scope. Many of the §7 purely-visual open questions below are now answered by the canvas — see §7 inline annotations. The implementation lane that picks up `apps/tenant-console-web` should treat the canvas as authority for visual decisions, and this packet as authority for behavior / data / API contracts.
+
 ---
 
 ## 0. How to read this document
@@ -800,7 +803,9 @@ Methods marked TBD need to be added to `packages/api-client/src/index.ts`. The a
 
 ## 7. Purely visual open questions
 
-§3 covers cross-cutting; most decisions baked in. Remaining are visual / interaction / IA choices.
+> **🎨 2026-05-25 status:** the visual design team has answered most of these in [`drts-design-canvas/Tenant Console.html`](./drts-design-canvas/Tenant%20Console.html) (v0.6, teal accent, YAMATO fixture). The implementer should consult the canvas first; remaining "still open" items are ones the canvas explicitly did not address. Canvas wins for visual; this packet wins for behavior/data/API.
+
+§3 covers cross-cutting; most decisions baked in. Remaining below are visual / interaction / IA choices — most now answered.
 
 ### 7.1 Cross-cutting (shared with ops-console and platform-admin packets)
 

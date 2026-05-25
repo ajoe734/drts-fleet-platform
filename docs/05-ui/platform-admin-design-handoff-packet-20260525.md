@@ -11,6 +11,9 @@
 - [`system-design-answers-all-apps-20260524.md`](./system-design-answers-all-apps-20260524.md) — **authority**
 - [`ops-console-design-handoff-packet-20260525.md`](./ops-console-design-handoff-packet-20260525.md) — companion packet; §3 operating context is shared (with admin-specific tier)
 
+> **🎨 2026-05-25 update — visual design has landed.**
+> The visual design team produced [`drts-design-canvas/`](./drts-design-canvas/) v0.6 against this packet + the system design answers. The visual specification for Platform Admin screens is now [`drts-design-canvas/Platform Admin.html`](./drts-design-canvas/Platform%20Admin.html) (indigo accent, 18 routes including the new reimbursement state-machine queue, multi-tab fleet/pricing/notices, legal-hold + deletion-exception badges, and the plaintext-once secret modal). Many of the §7 purely-visual open questions below are now answered by the canvas — see §7 inline annotations. The implementation lane that picks up `apps/platform-admin-web` should treat the canvas as authority for visual decisions, and this packet as authority for behavior / data / API contracts.
+
 ---
 
 ## 0. How to read this document
@@ -884,7 +887,9 @@ Methods marked TBD need to be added to `packages/api-client/src/index.ts` as par
 
 ## 7. Purely visual open questions
 
-§3 covers cross-cutting; most decisions baked in. Remaining are visual / interaction choices.
+> **🎨 2026-05-25 status:** the visual design team has answered most of these in [`drts-design-canvas/Platform Admin.html`](./drts-design-canvas/Platform%20Admin.html) (v0.6, indigo accent). The implementer should consult the canvas first; remaining "still open" items are ones the canvas explicitly did not address. Canvas wins for visual; this packet wins for behavior/data/API.
+
+§3 covers cross-cutting; most decisions baked in. Remaining below are visual / interaction choices — most now answered.
 
 ### 7.1 Cross-cutting (these are shared with ops-console packet §7.1 and apply here too)
 
