@@ -16,11 +16,11 @@ graph TD
 ```
 
 ## Acceptance Checklist
-- [ ] Backend endpoints for `DriverOpsInstruction` implemented
-- [ ] Driver-side push notification integration verified
-- [ ] Driver inbox integration verified
-- [ ] `UI-BE-003` dependencies validated
-- [ ] Vitest coverage for `expiresAt` handling verified
+- [x] Backend endpoints for `DriverOpsInstruction` implemented
+- [x] Driver-side push notification integration verified
+- [x] Driver inbox integration verified
+- [x] `UI-BE-003` dependencies validated
+- [x] Vitest coverage for `expiresAt` handling verified
 
 ## Support Artifacts
 - No canonical truth changes.
