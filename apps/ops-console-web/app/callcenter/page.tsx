@@ -355,103 +355,120 @@ function classifyEmptyReason(
 function buildWorkspaceAction(
   hasActiveSession: boolean,
 ): ResourceActionDescriptor {
+  const disabledReasonCode = hasActiveSession
+    ? "active_session_exists"
+    : undefined;
+
   return {
     action: "open_call_session",
     enabled: !hasActiveSession,
-    disabledReasonCode: hasActiveSession ? "active_session_exists" : undefined,
     riskLevel: "low",
+    ...(disabledReasonCode ? { disabledReasonCode } : {}),
   };
 }
 
 function buildSessionActions(
   session: CallSessionRecord,
-  locale: Locale,
 ): ResourceActionDescriptor[] {
   const isClosed = session.status === "closed";
   const hasLinkedOrder = Boolean(session.linkedOrderId);
   const hasComplaint = Boolean(session.linkedCaseNo);
   const hasPendingCallback = session.callbackTask?.status === "pending";
 
+  const createDescriptor = (
+    action: string,
+    enabled: boolean,
+    riskLevel: ResourceActionDescriptor["riskLevel"],
+    disabledReasonCode?: string,
+    requiresReason = false,
+  ): ResourceActionDescriptor => ({
+    action,
+    enabled,
+    riskLevel,
+    ...(disabledReasonCode ? { disabledReasonCode } : {}),
+    ...(requiresReason ? { requiresReason: true } : {}),
+  });
+
   return [
-    {
-      action: "announce_identity",
-      enabled: !isClosed && !session.agentIdentityAnnounced,
-      disabledReasonCode: isClosed
+    createDescriptor(
+      "announce_identity",
+      !isClosed && !session.agentIdentityAnnounced,
+      "low",
+      isClosed
         ? "session_closed"
         : session.agentIdentityAnnounced
           ? "identity_already_announced"
           : undefined,
-      riskLevel: "low",
-    },
-    {
-      action: "close_session",
-      enabled: !isClosed,
-      disabledReasonCode: isClosed ? "session_closed" : undefined,
-      riskLevel: "low",
-    },
-    {
-      action: "quote_eta",
-      enabled: !isClosed,
-      disabledReasonCode: isClosed ? "session_closed" : undefined,
-      riskLevel: "low",
-    },
-    {
-      action: "create_callback",
-      enabled: !isClosed,
-      disabledReasonCode: isClosed ? "session_closed" : undefined,
-      riskLevel: "low",
-    },
-    {
-      action: "complete_callback",
-      enabled: !isClosed && hasPendingCallback,
-      disabledReasonCode: isClosed
+    ),
+    createDescriptor(
+      "close_session",
+      !isClosed,
+      "low",
+      isClosed ? "session_closed" : undefined,
+    ),
+    createDescriptor(
+      "quote_eta",
+      !isClosed,
+      "low",
+      isClosed ? "session_closed" : undefined,
+    ),
+    createDescriptor(
+      "create_callback",
+      !isClosed,
+      "low",
+      isClosed ? "session_closed" : undefined,
+    ),
+    createDescriptor(
+      "complete_callback",
+      !isClosed && hasPendingCallback,
+      "low",
+      isClosed
         ? "session_closed"
         : hasPendingCallback
           ? undefined
           : "callback_missing",
-      riskLevel: "low",
-    },
-    {
-      action: "create_phone_booking",
-      enabled: !isClosed && !hasLinkedOrder && !hasComplaint,
-      disabledReasonCode: isClosed
+    ),
+    createDescriptor(
+      "create_phone_booking",
+      !isClosed && !hasLinkedOrder && !hasComplaint,
+      "medium",
+      isClosed
         ? "session_closed"
         : hasLinkedOrder
           ? "linked_order_exists"
           : hasComplaint
             ? "complaint_exists"
             : undefined,
-      riskLevel: "medium",
-    },
-    {
-      action: "link_existing_order",
-      enabled: !isClosed && !hasLinkedOrder && !hasComplaint,
-      disabledReasonCode: isClosed
+    ),
+    createDescriptor(
+      "link_existing_order",
+      !isClosed && !hasLinkedOrder && !hasComplaint,
+      "low",
+      isClosed
         ? "session_closed"
         : hasLinkedOrder
           ? "linked_order_exists"
           : hasComplaint
             ? "complaint_exists"
             : undefined,
-      riskLevel: "low",
-    },
-    {
-      action: "transfer_to_complaint",
-      enabled: !isClosed && !hasComplaint,
-      disabledReasonCode: isClosed
+    ),
+    createDescriptor(
+      "transfer_to_complaint",
+      !isClosed && !hasComplaint,
+      "medium",
+      isClosed
         ? "session_closed"
         : hasComplaint
           ? "complaint_exists"
           : undefined,
-      riskLevel: "medium",
-    },
-    {
-      action: "attach_recording",
-      enabled: !isClosed,
-      disabledReasonCode: isClosed ? "session_closed" : undefined,
-      requiresReason: locale === "en" ? true : true,
-      riskLevel: "high",
-    },
+    ),
+    createDescriptor(
+      "attach_recording",
+      !isClosed,
+      "high",
+      isClosed ? "session_closed" : undefined,
+      true,
+    ),
   ];
 }
 
@@ -489,7 +506,7 @@ function buildSessionResource(
 ): SessionResource {
   return {
     ...session,
-    availableActions: buildSessionActions(session, locale),
+    availableActions: buildSessionActions(session),
     deepLinks: buildSessionLinks(session),
   };
 }
@@ -685,9 +702,6 @@ export default function CallcenterPage() {
   const pendingCallbacks = filteredCallbackQueue.filter(
     (callback) => callback.status === "pending",
   );
-  const overdueCallbacks = pendingCallbacks.filter(
-    (callback) => new Date(callback.dueAt).getTime() < Date.now(),
-  ).length;
   const hasFilteredEmpty =
     deferredQuery.length > 0 &&
     filteredSessions.length === 0 &&
