@@ -4,6 +4,23 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import {
   buildCanvasTheme,
+  CANVAS_DARK_NAVY_PALETTE,
+  CANVAS_DENSITY,
+  CANVAS_EMPTY_REASONS,
+  CANVAS_LIGHT_PALETTE,
+  CANVAS_REFRESH_TIERS,
+  CANVAS_RISK_LEVELS,
+  CANVAS_SURFACE_ACCENTS,
+  CANVAS_TYPE,
+  type CanvasDataFreshness,
+  type CanvasDensity,
+  type CanvasEmptyReason,
+  type CanvasHealthStatus,
+  type CanvasMode,
+  type CanvasRealm,
+  type CanvasRefreshTier,
+  type CanvasRiskLevel,
+  type CanvasSurface,
   type CanvasTheme,
   type CanvasTone,
 } from "../canvas-tokens";
@@ -14,11 +31,20 @@ export {
   buildCanvasTheme,
   CANVAS_DARK_NAVY_PALETTE,
   CANVAS_DENSITY,
+  CANVAS_EMPTY_REASONS,
   CANVAS_LIGHT_PALETTE,
+  CANVAS_REFRESH_TIERS,
+  CANVAS_RISK_LEVELS,
   CANVAS_SURFACE_ACCENTS,
   CANVAS_TYPE,
+  type CanvasDataFreshness,
   type CanvasDensity,
+  type CanvasEmptyReason,
+  type CanvasHealthStatus,
   type CanvasMode,
+  type CanvasRealm,
+  type CanvasRefreshTier,
+  type CanvasRiskLevel,
   type CanvasSurface,
   type CanvasTheme,
   type CanvasTone,
@@ -46,6 +72,17 @@ function px(value?: string | number) {
 
 function toneStyles(theme: CanvasTheme, tone: CanvasTone) {
   switch (tone) {
+    case "admin":
+    case "platform":
+      return theme.realm.platform;
+    case "ops":
+      return theme.realm.ops;
+    case "tenant":
+      return theme.realm.tenant;
+    case "system":
+      return theme.realm.system;
+    case "driver":
+      return theme.realm.driver;
     case "success":
       return {
         fg: theme.success,
@@ -114,7 +151,52 @@ export interface ShellProps {
   searchPlaceholder?: string;
   searchWidth?: number;
   avatarLabel?: ReactNode;
+  tenant?: ReactNode;
+  actor?: CanvasIdentityActor;
+  health?: CanvasHealthSnapshot;
+  refreshTier?: CanvasRefreshTier;
+  dataFreshness?: CanvasDataFreshness;
+  healthBanner?: ReactNode;
   style?: CSSProperties;
+}
+
+export interface CanvasIdentityActor {
+  name?: ReactNode;
+  display?: ReactNode;
+  role?: ReactNode;
+}
+
+export interface CanvasDegradedService {
+  service: ReactNode;
+  impact?: ReactNode;
+}
+
+export interface CanvasHealthSnapshot {
+  status?: CanvasHealthStatus;
+  lastCheckedAt?: ReactNode;
+  degradedServices?: readonly CanvasDegradedService[];
+}
+
+export interface CanvasResourceLink {
+  label: ReactNode;
+  href?: string;
+  openMode?: "new_tab" | "same_tab";
+  crossApp?: boolean;
+}
+
+export interface CanvasActionDescriptor {
+  action?: string;
+  enabled: boolean;
+  disabledReasonCode?: string;
+  requiresReason?: boolean;
+  riskLevel?: CanvasRiskLevel;
+}
+
+export interface CanvasPageTab {
+  id: string;
+  label: ReactNode;
+  badge?: ReactNode;
+  tone?: CanvasTone;
 }
 
 function isItemActive(
@@ -254,6 +336,350 @@ function Kbd({ theme, children }: { theme: CanvasTheme; children: ReactNode }) {
   );
 }
 
+function iconButtonStyle(theme: CanvasTheme): CSSProperties {
+  return {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    background: "transparent",
+    border: "1px solid transparent",
+    color: theme.textMuted,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+  };
+}
+
+function resolveSurfaceLabel(surface: CanvasSurface) {
+  switch (surface) {
+    case "admin":
+    case "platform":
+      return "PLATFORM";
+    case "ops":
+      return "OPS";
+    case "tenant":
+      return "TENANT";
+    case "driver":
+      return "DRIVER";
+    case "partner":
+      return "PARTNER";
+    default:
+      return String(surface).toUpperCase();
+  }
+}
+
+function resolveEnvColor(theme: CanvasTheme, env: string) {
+  switch (env) {
+    case "production":
+      return theme.success;
+    case "sandbox":
+      return theme.warn;
+    case "staging":
+      return theme.info;
+    default:
+      return theme.textMuted;
+  }
+}
+
+export interface RefreshTierBadgeProps {
+  theme?: CanvasTheme;
+  tier?: CanvasRefreshTier;
+  freshness?: CanvasDataFreshness;
+}
+
+export function RefreshTierBadge({
+  theme: providedTheme,
+  tier = "medium_slow",
+  freshness = "fresh",
+}: RefreshTierBadgeProps) {
+  const theme = resolveTheme(providedTheme);
+  const tierMeta = CANVAS_REFRESH_TIERS[tier];
+  const freshnessTone =
+    freshness === "degraded"
+      ? toneStyles(theme, "danger")
+      : freshness === "stale"
+        ? toneStyles(theme, "warn")
+        : freshness === "unknown"
+          ? toneStyles(theme, "neutral")
+          : toneStyles(theme, "success");
+
+  return (
+    <div
+      title={`${tierMeta.label} · ${tierMeta.note}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 8px",
+        borderRadius: 6,
+        background: freshnessTone.bg,
+        border: `1px solid ${freshnessTone.bd}`,
+        fontSize: 10.5,
+        fontWeight: 600,
+        color: freshnessTone.fg,
+        fontFamily: theme.monoFamily,
+      }}
+    >
+      <span
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: 3,
+          background: freshnessTone.fg,
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ letterSpacing: 0.4 }}>{tierMeta.code}</span>
+      <span>{tierMeta.ms === null ? "MANUAL" : `${tierMeta.ms / 1000}s`}</span>
+      {freshness !== "fresh" ? (
+        <span>· {freshness === "degraded" ? "降級" : freshness}</span>
+      ) : null}
+    </div>
+  );
+}
+
+export interface IdentityChipProps {
+  theme?: CanvasTheme;
+  env?: string | undefined;
+  tenant?: ReactNode | undefined;
+  actor?: CanvasIdentityActor | undefined;
+  avatarLabel?: ReactNode | undefined;
+}
+
+export function IdentityChip({
+  theme: providedTheme,
+  env = "production",
+  tenant,
+  actor,
+  avatarLabel = "YL",
+}: IdentityChipProps) {
+  const theme = resolveTheme(providedTheme);
+  const envColor = resolveEnvColor(theme, env);
+  const actorMark = actor?.name ?? avatarLabel;
+  const actorDisplay = actor?.display ?? "林宜君";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "stretch",
+        gap: 1,
+        background: theme.surfaceLo,
+        border: `1px solid ${theme.border}`,
+        borderRadius: 7,
+        overflow: "hidden",
+        height: 28,
+      }}
+    >
+      <div
+        style={{
+          padding: "0 8px",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          background: theme.accentBg,
+          color: theme.accent,
+          fontSize: 10.5,
+          fontWeight: 700,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+        }}
+      >
+        <span
+          style={{
+            width: 4,
+            height: 4,
+            borderRadius: 2,
+            background: theme.accent,
+          }}
+        />
+        {resolveSurfaceLabel(theme.surfaceKey)}
+      </div>
+      <div
+        style={{
+          padding: "0 8px",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          color: envColor,
+          fontSize: 10.5,
+          fontWeight: 700,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          fontFamily: theme.monoFamily,
+        }}
+      >
+        <span
+          style={{
+            width: 4,
+            height: 4,
+            borderRadius: 2,
+            background: envColor,
+          }}
+        />
+        {env}
+      </div>
+      {tenant ? (
+        <div
+          style={{
+            padding: "0 8px",
+            display: "flex",
+            alignItems: "center",
+            borderLeft: `1px solid ${theme.border}`,
+            color: theme.textMuted,
+            fontSize: 11,
+            fontWeight: 600,
+            fontFamily: theme.monoFamily,
+          }}
+        >
+          {tenant}
+        </div>
+      ) : null}
+      <div
+        style={{
+          padding: "0 8px 0 6px",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          borderLeft: `1px solid ${theme.border}`,
+        }}
+      >
+        <div
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: 9,
+            background: theme.accentBg,
+            color: theme.accent,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 9.5,
+            fontWeight: 700,
+            border: `1px solid ${theme.accentBorder}`,
+          }}
+        >
+          {actorMark}
+        </div>
+        <span
+          style={{
+            fontSize: 11.5,
+            color: theme.text,
+            fontWeight: 500,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {actorDisplay}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export interface HealthFooterProps {
+  theme?: CanvasTheme;
+  health?: CanvasHealthSnapshot | undefined;
+  versionLabel?: ReactNode | undefined;
+}
+
+export function HealthFooter({
+  theme: providedTheme,
+  health,
+  versionLabel,
+}: HealthFooterProps) {
+  const theme = resolveTheme(providedTheme);
+  const status = health?.status ?? "healthy";
+  const tone =
+    status === "down"
+      ? toneStyles(theme, "danger")
+      : status === "degraded"
+        ? toneStyles(theme, "warn")
+        : toneStyles(theme, "success");
+  const label =
+    status === "down"
+      ? "API down"
+      : status === "degraded"
+        ? "API 降級"
+        : "API healthy";
+  const en =
+    status === "down"
+      ? "down"
+      : status === "degraded"
+        ? "degraded"
+        : "healthy";
+
+  return (
+    <div
+      style={{
+        padding: "8px 10px 10px",
+        borderTop: `1px solid ${theme.border}`,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "5px 8px",
+          borderRadius: 6,
+          background: tone.bg,
+          fontSize: 11,
+          fontWeight: 600,
+          color: tone.fg,
+        }}
+      >
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            background: tone.fg,
+            flexShrink: 0,
+          }}
+        />
+        <span style={{ flex: 1 }}>{label}</span>
+        <span style={{ fontFamily: theme.monoFamily, opacity: 0.7 }}>{en}</span>
+      </div>
+      <div
+        style={{
+          fontSize: 10,
+          color: theme.textDim,
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          padding: "0 2px",
+        }}
+      >
+        <span>last checked</span>
+        <span style={{ fontFamily: theme.monoFamily }}>
+          {health?.lastCheckedAt ?? "2s"} ago
+        </span>
+      </div>
+      {health?.degradedServices?.length ? (
+        <div style={{ fontSize: 10, color: theme.warn, padding: "0 2px" }}>
+          {health.degradedServices.length} 個依賴降級
+        </div>
+      ) : null}
+      {versionLabel ? (
+        <div
+          style={{
+            fontSize: 10,
+            color: theme.textDim,
+            fontFamily: theme.monoFamily,
+            padding: "0 2px",
+          }}
+        >
+          {versionLabel}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function Shell({
   theme: providedTheme,
   nav,
@@ -273,6 +699,12 @@ export function Shell({
   searchPlaceholder,
   searchWidth = 220,
   avatarLabel = "YL",
+  tenant,
+  actor,
+  health,
+  refreshTier = "medium_slow",
+  dataFreshness = "fresh",
+  healthBanner,
   style,
 }: ShellProps) {
   const theme = resolveTheme(providedTheme);
@@ -407,44 +839,11 @@ export function Shell({
         </nav>
 
         {!hideEnv ? (
-          <div
-            style={{
-              padding: "8px 12px 10px",
-              borderTop: `1px solid ${theme.border}`,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              color: theme.textMuted,
-              fontSize: 11,
-            }}
-          >
-            <div
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                background:
-                  env === "production"
-                    ? theme.success
-                    : env === "sandbox"
-                      ? theme.warn
-                      : theme.info,
-              }}
-            />
-            <span
-              style={{
-                fontFamily: theme.monoFamily,
-                textTransform: "uppercase",
-                letterSpacing: 0.4,
-                fontSize: 10,
-              }}
-            >
-              {env}
-            </span>
-            <span style={{ marginLeft: "auto", color: theme.textDim }}>
-              {resolvedVersionLabel}
-            </span>
-          </div>
+          <HealthFooter
+            theme={theme}
+            health={health}
+            versionLabel={resolvedVersionLabel}
+          />
         ) : null}
       </aside>
 
@@ -505,46 +904,27 @@ export function Shell({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <RefreshTierBadge
+            theme={theme}
+            tier={refreshTier}
+            freshness={dataFreshness}
+          />
           <SearchBox
             theme={theme}
             width={searchWidth}
             placeholder={searchPlaceholder ?? "搜尋訂單、租戶、司機…"}
           />
           <Kbd theme={theme}>⌘K</Kbd>
-          <button
-            type="button"
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              background: "transparent",
-              border: "1px solid transparent",
-              color: theme.textMuted,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 0,
-            }}
-          >
+          <button type="button" style={iconButtonStyle(theme)}>
             <CanvasIcon name="bell" size={15} />
           </button>
-          <div
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: 13,
-              background: theme.accentBg,
-              color: theme.accent,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 11,
-              fontWeight: 700,
-              border: `1px solid ${theme.accentBorder}`,
-            }}
-          >
-            {avatarLabel}
-          </div>
+          <IdentityChip
+            theme={theme}
+            env={env}
+            tenant={tenant}
+            actor={actor}
+            avatarLabel={avatarLabel}
+          />
           {topRight}
         </div>
       </header>
@@ -558,6 +938,7 @@ export function Shell({
           color: theme.text,
         }}
       >
+        {healthBanner}
         {children}
         {footer}
       </main>
@@ -570,8 +951,9 @@ export interface PageHeaderProps {
   title: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
-  tabs?: ReactNode[];
-  activeTab?: ReactNode;
+  tabs?: Array<ReactNode | CanvasPageTab>;
+  activeTab?: ReactNode | string;
+  meta?: ReactNode;
   sticky?: boolean;
   style?: CSSProperties;
 }
@@ -583,6 +965,7 @@ export function PageHeader({
   actions,
   tabs,
   activeTab,
+  meta,
   sticky = true,
   style,
 }: PageHeaderProps) {
@@ -633,6 +1016,19 @@ export function PageHeader({
               {subtitle}
             </p>
           ) : null}
+          {meta ? (
+            <div
+              style={{
+                marginTop: 8,
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              {meta}
+            </div>
+          ) : null}
         </div>
         {actions ? (
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
@@ -641,12 +1037,34 @@ export function PageHeader({
         ) : null}
       </div>
       {tabs ? (
-        <div style={{ display: "flex", gap: 0, marginTop: 14, marginLeft: -4 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 0,
+            marginTop: 14,
+            marginLeft: -4,
+            flexWrap: "wrap",
+          }}
+        >
           {tabs.map((tab, index) => {
-            const selected = tab === activeTab;
+            const structured =
+              typeof tab === "object" &&
+              tab !== null &&
+              "id" in tab &&
+              "label" in tab
+                ? (tab as CanvasPageTab)
+                : null;
+            const selected = structured
+              ? structured.id === activeTab
+              : tab === activeTab;
+            const badgeTone = structured?.tone
+              ? toneStyles(theme, structured.tone)
+              : null;
+            const tabLabel = structured ? structured.label : (tab as ReactNode);
+
             return (
               <div
-                key={`tab-${index}`}
+                key={structured?.id ?? `tab-${index}`}
                 style={{
                   padding: "8px 12px",
                   fontSize: 12.5,
@@ -657,9 +1075,28 @@ export function PageHeader({
                   }`,
                   marginBottom: -1,
                   cursor: "default",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
                 }}
               >
-                {tab}
+                {tabLabel}
+                {structured?.badge !== undefined ? (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "0 6px",
+                      borderRadius: 10,
+                      lineHeight: "16px",
+                      background: badgeTone?.bg ?? theme.neutralBg,
+                      color: badgeTone?.fg ?? theme.textMuted,
+                      border: `1px solid ${badgeTone?.bd ?? theme.neutralBorder}`,
+                    }}
+                  >
+                    {structured.badge}
+                  </span>
+                ) : null}
               </div>
             );
           })}
@@ -678,7 +1115,8 @@ export interface BtnProps {
   danger?: boolean;
   disabled?: boolean;
   onClick?: () => void;
-  style?: CSSProperties;
+  title?: string | undefined;
+  style?: CSSProperties | undefined;
 }
 
 export function Btn({
@@ -690,6 +1128,7 @@ export function Btn({
   danger = false,
   disabled = false,
   onClick,
+  title,
   style,
 }: BtnProps) {
   const theme = resolveTheme(providedTheme);
@@ -725,6 +1164,7 @@ export function Btn({
   return (
     <button
       type="button"
+      title={title}
       disabled={disabled}
       onClick={onClick}
       style={{
@@ -1331,6 +1771,857 @@ export function Select({ theme: providedTheme, value, ph }: SelectProps) {
       </span>
       <CanvasIcon name="chevD" size={12} style={{ color: theme.textDim }} />
     </div>
+  );
+}
+
+export interface BiLabelProps {
+  theme?: CanvasTheme;
+  zh: ReactNode;
+  en?: ReactNode;
+  mono?: boolean;
+  size?: number;
+  opacity?: number;
+  gap?: number;
+}
+
+export function BiLabel({
+  theme: providedTheme,
+  zh,
+  en,
+  mono = false,
+  size = 12,
+  opacity = 0.55,
+  gap = 6,
+}: BiLabelProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        gap,
+        fontSize: size,
+        lineHeight: 1.3,
+      }}
+    >
+      <span style={{ color: theme.text, fontWeight: 500 }}>{zh}</span>
+      {en ? (
+        <span
+          style={{
+            opacity,
+            fontFamily: mono ? theme.monoFamily : theme.monoFamily,
+            fontSize: size - 1,
+            color: theme.textMuted,
+          }}
+        >
+          · {en}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+export function Code({
+  theme: providedTheme,
+  children,
+}: {
+  theme?: CanvasTheme;
+  children: ReactNode;
+}) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <pre
+      style={{
+        margin: 0,
+        padding: "10px 12px",
+        borderRadius: 8,
+        background: theme.surfaceLo,
+        border: `1px solid ${theme.border}`,
+        color: theme.text,
+        fontFamily: theme.monoFamily,
+        fontSize: 11.5,
+        lineHeight: 1.55,
+        overflowX: "auto",
+        whiteSpace: "pre",
+      }}
+    >
+      {children}
+    </pre>
+  );
+}
+
+export interface CheckboxProps {
+  theme?: CanvasTheme;
+  checked?: boolean;
+  label?: ReactNode;
+}
+
+export function Checkbox({
+  theme: providedTheme,
+  checked = false,
+  label,
+}: CheckboxProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+      <span
+        style={{
+          width: 14,
+          height: 14,
+          borderRadius: 4,
+          flexShrink: 0,
+          background: checked ? theme.accent : theme.bgRaised,
+          border: `1px solid ${checked ? theme.accent : theme.borderStrong}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {checked ? (
+          <CanvasIcon name="check" size={10} style={{ color: "#fff" }} />
+        ) : null}
+      </span>
+      {label ? <span style={{ fontSize: 12, color: theme.text }}>{label}</span> : null}
+    </span>
+  );
+}
+
+export interface ToggleProps {
+  theme?: CanvasTheme;
+  checked?: boolean;
+  label?: ReactNode;
+}
+
+export function Toggle({
+  theme: providedTheme,
+  checked = false,
+  label,
+}: ToggleProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <span
+        style={{
+          width: 28,
+          height: 16,
+          borderRadius: 8,
+          position: "relative",
+          background: checked ? theme.accent : theme.borderStrong,
+        }}
+      >
+        <span
+          style={{
+            position: "absolute",
+            top: 2,
+            left: checked ? 14 : 2,
+            width: 12,
+            height: 12,
+            borderRadius: 6,
+            background: "#fff",
+            boxShadow: "0 1px 2px rgba(0,0,0,.2)",
+          }}
+        />
+      </span>
+      {label ? <span style={{ fontSize: 12, color: theme.text }}>{label}</span> : null}
+    </div>
+  );
+}
+
+export interface EmptyStateProps {
+  theme?: CanvasTheme;
+  reason?: CanvasEmptyReason;
+  messageOverride?: ReactNode;
+  nextAction?: ReactNode;
+  compact?: boolean;
+}
+
+export function EmptyState({
+  theme: providedTheme,
+  reason = "no_data",
+  messageOverride,
+  nextAction,
+  compact = false,
+}: EmptyStateProps) {
+  const theme = resolveTheme(providedTheme);
+  const meta = CANVAS_EMPTY_REASONS[reason];
+  const iconTone =
+    reason === "fetch_failed"
+      ? toneStyles(theme, "danger")
+      : reason === "not_provisioned"
+        ? toneStyles(theme, "info")
+        : reason === "permission_denied" ||
+            reason === "external_unavailable" ||
+            reason === "driver_not_eligible"
+          ? toneStyles(theme, "warn")
+          : toneStyles(theme, "neutral");
+  const iconName =
+    reason === "fetch_failed"
+      ? "danger"
+      : reason === "not_provisioned"
+        ? "info"
+        : reason === "permission_denied" || reason === "driver_not_eligible"
+          ? "lock"
+          : reason === "external_unavailable"
+            ? "warn"
+            : reason === "filtered_empty"
+              ? "filter"
+              : "check";
+  const spacing = compact
+    ? { padding: 16, icon: 24, gap: 10, body: 12, title: 13 }
+    : { padding: 36, icon: 36, gap: 14, body: 13, title: 15 };
+
+  return (
+    <div
+      style={{
+        padding: `${spacing.padding}px 16px`,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: spacing.gap,
+        textAlign: "center",
+        background: iconTone.bg,
+        border: `1px dashed ${iconTone.bd}`,
+        borderRadius: 10,
+      }}
+    >
+      <div
+        style={{
+          width: spacing.icon + 16,
+          height: spacing.icon + 16,
+          borderRadius: (spacing.icon + 16) / 2,
+          background: theme.surface,
+          color: iconTone.fg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          border: `1px solid ${iconTone.bd}`,
+        }}
+      >
+        <CanvasIcon name={iconName} size={spacing.icon} stroke={1.4} />
+      </div>
+      <div>
+        <div
+          style={{
+            fontSize: spacing.title,
+            fontWeight: 600,
+            color: theme.text,
+            display: "flex",
+            alignItems: "baseline",
+            gap: 6,
+            justifyContent: "center",
+          }}
+        >
+          <span>{meta.label}</span>
+          <span
+            style={{
+              fontFamily: theme.monoFamily,
+              fontSize: spacing.title - 3,
+              color: theme.textDim,
+              fontWeight: 500,
+            }}
+          >
+            · {reason}
+          </span>
+        </div>
+        <div
+          style={{
+            fontSize: spacing.body,
+            color: theme.textMuted,
+            marginTop: 4,
+            maxWidth: 380,
+            lineHeight: 1.5,
+          }}
+        >
+          {messageOverride ?? meta.hint}
+        </div>
+      </div>
+      {nextAction ? nextAction : null}
+    </div>
+  );
+}
+
+export interface ModalProps {
+  theme?: CanvasTheme;
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  footer?: ReactNode;
+  children: ReactNode;
+  width?: number | string;
+  accent?: string;
+}
+
+export function Modal({
+  theme: providedTheme,
+  title,
+  subtitle,
+  footer,
+  children,
+  width = 520,
+  accent,
+}: ModalProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <div
+      style={{
+        padding: 24,
+        background: "rgba(10,14,22,.52)",
+        borderRadius: 20,
+        display: "flex",
+        justifyContent: "center",
+      }}
+    >
+      <section
+        style={{
+          width: px(width),
+          maxWidth: "100%",
+          background: theme.surface,
+          border: `1px solid ${theme.border}`,
+          borderTop: `3px solid ${accent ?? theme.accent}`,
+          borderRadius: 14,
+          boxShadow: theme.shadow,
+          overflow: "hidden",
+        }}
+      >
+        <header
+          style={{
+            padding: "16px 18px 14px",
+            borderBottom: `1px solid ${theme.border}`,
+            display: "grid",
+            gap: 4,
+          }}
+        >
+          {title ? (
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: theme.text,
+                lineHeight: 1.35,
+              }}
+            >
+              {title}
+            </div>
+          ) : null}
+          {subtitle ? (
+            <div
+              style={{
+                fontSize: 10.5,
+                color: theme.textDim,
+                fontFamily: theme.monoFamily,
+              }}
+            >
+              {subtitle}
+            </div>
+          ) : null}
+        </header>
+        <div style={{ padding: 18 }}>{children}</div>
+        {footer ? (
+          <footer
+            style={{
+              padding: "0 18px 18px",
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: 8,
+            }}
+          >
+            {footer}
+          </footer>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+export interface ActionButtonProps {
+  theme?: CanvasTheme;
+  descriptor?: CanvasActionDescriptor | null;
+  label: ReactNode;
+  en?: ReactNode;
+  icon?: CanvasIconName | ReactNode;
+  size?: "xs" | "sm" | "md";
+  style?: CSSProperties;
+  children?: ReactNode;
+}
+
+export function ActionButton({
+  theme: providedTheme,
+  descriptor,
+  label,
+  en,
+  icon,
+  size = "sm",
+  style,
+  children,
+}: ActionButtonProps) {
+  const theme = resolveTheme(providedTheme);
+
+  if (!descriptor) {
+    return null;
+  }
+
+  const riskLevel = descriptor.riskLevel ?? "low";
+  const variant =
+    riskLevel === "high"
+      ? "primary"
+      : riskLevel === "medium"
+        ? "primary"
+        : "secondary";
+  const title = !descriptor.enabled
+    ? `${descriptor.disabledReasonCode ?? "disabled"}${
+        descriptor.requiresReason ? " · 需原因" : ""
+      }`
+    : descriptor.requiresReason
+      ? "需填寫原因"
+      : undefined;
+
+  return (
+    <Btn
+      theme={theme}
+      variant={variant}
+      size={size}
+      icon={icon}
+      disabled={!descriptor.enabled}
+      danger={riskLevel === "high"}
+      title={title}
+      style={style}
+    >
+      {children ?? (
+        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+          <span>{label}</span>
+          {en ? (
+            <span
+              style={{
+                fontSize: 10,
+                opacity: 0.7,
+                fontFamily: theme.monoFamily,
+              }}
+            >
+              · {en}
+            </span>
+          ) : null}
+          {descriptor.requiresReason && descriptor.enabled ? (
+            <span
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: 3,
+                background: "currentColor",
+                opacity: 0.6,
+                marginLeft: 2,
+              }}
+            />
+          ) : null}
+        </span>
+      )}
+    </Btn>
+  );
+}
+
+export interface ConfirmModalProps {
+  theme?: CanvasTheme;
+  risk?: CanvasRiskLevel;
+  title: ReactNode;
+  body: ReactNode;
+  confirmLabel?: ReactNode;
+  cancelLabel?: ReactNode;
+  reason?: ReactNode;
+  reasonField?: ReactNode;
+}
+
+export function ConfirmModal({
+  theme: providedTheme,
+  risk = "medium",
+  title,
+  body,
+  confirmLabel = "確認",
+  cancelLabel = "取消",
+  reason,
+  reasonField,
+}: ConfirmModalProps) {
+  const theme = resolveTheme(providedTheme);
+  const riskMeta = CANVAS_RISK_LEVELS[risk];
+  const riskTone = toneStyles(theme, riskMeta.tone);
+
+  return (
+    <Modal
+      theme={theme}
+      accent={riskTone.fg}
+      title={
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 11,
+              background: riskTone.bg,
+              color: riskTone.fg,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <CanvasIcon
+              name={riskMeta.icon as CanvasIconName}
+              size={13}
+            />
+          </span>
+          {title}
+        </span>
+      }
+      subtitle={`${riskMeta.label.toUpperCase()} · ${risk} · ${riskMeta.pattern}`}
+      footer={
+        <>
+          <Btn theme={theme} variant="secondary">
+            {cancelLabel}
+          </Btn>
+          <Btn
+            theme={theme}
+            variant="primary"
+            danger={risk === "high"}
+            disabled={risk === "high" && !reason}
+          >
+            {confirmLabel}
+          </Btn>
+        </>
+      }
+    >
+      <div
+        style={{
+          fontSize: 13,
+          color: theme.text,
+          lineHeight: 1.55,
+          marginBottom: 14,
+        }}
+      >
+        {body}
+      </div>
+      {risk === "high" ? (
+        <Field
+          theme={theme}
+          label="原因 · reason"
+          required
+          hint="此操作為高風險，原因將寫入稽核紀錄並可被後續調閱。"
+        >
+          <div
+            style={{
+              width: "100%",
+              minHeight: 70,
+              padding: 10,
+              borderRadius: 7,
+              border: `1px solid ${reason ? theme.border : theme.danger}`,
+              background: theme.bgRaised,
+              color: theme.text,
+              fontFamily: theme.fontFamily,
+              fontSize: 13,
+              boxSizing: "border-box",
+            }}
+          >
+            {reason ?? reasonField ?? "請說明操作原因…"}
+          </div>
+        </Field>
+      ) : null}
+      {risk === "medium" ? (
+        <div
+          style={{
+            fontSize: 11.5,
+            color: theme.textMuted,
+            padding: "8px 10px",
+            background: theme.surfaceLo,
+            borderRadius: 6,
+          }}
+        >
+          <CanvasIcon
+            name="info"
+            size={12}
+            style={{ verticalAlign: -2, marginRight: 4 }}
+          />
+          此操作將記錄至稽核紀錄。
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+export interface ActionReceiptProps {
+  theme?: CanvasTheme;
+  status?: "completed" | "accepted" | "failed";
+  title: ReactNode;
+  message?: ReactNode;
+  auditId?: ReactNode;
+  auditLink?: CanvasResourceLink;
+  resourceLink?: CanvasResourceLink;
+  dismissible?: boolean;
+}
+
+export function ActionReceipt({
+  theme: providedTheme,
+  status = "completed",
+  title,
+  message,
+  auditId,
+  auditLink,
+  resourceLink,
+  dismissible = true,
+}: ActionReceiptProps) {
+  const theme = resolveTheme(providedTheme);
+  const tone =
+    status === "failed"
+      ? toneStyles(theme, "danger")
+      : status === "accepted"
+        ? toneStyles(theme, "info")
+        : toneStyles(theme, "success");
+  const label =
+    status === "failed" ? "失敗" : status === "accepted" ? "已受理" : "已完成";
+  const icon = status === "failed" ? "danger" : status === "accepted" ? "clock" : "check";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 12,
+        padding: "12px 14px",
+        background: theme.surface,
+        border: `1px solid ${theme.border}`,
+        borderLeft: `4px solid ${tone.fg}`,
+        borderRadius: 8,
+        boxShadow: theme.shadow,
+        width: 380,
+        fontSize: 12.5,
+      }}
+    >
+      <div
+        style={{
+          width: 26,
+          height: 26,
+          borderRadius: 13,
+          flexShrink: 0,
+          background: tone.bg,
+          color: tone.fg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <CanvasIcon name={icon} size={14} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{ fontWeight: 600, color: theme.text }}>{title}</span>
+          <Pill
+            theme={theme}
+            tone={
+              status === "failed"
+                ? "danger"
+                : status === "accepted"
+                  ? "info"
+                  : "success"
+            }
+          >
+            {label}
+          </Pill>
+        </div>
+        {message ? (
+          <div style={{ marginTop: 4, color: theme.textMuted, lineHeight: 1.45 }}>
+            {message}
+          </div>
+        ) : null}
+        {auditId ? (
+          <div
+            style={{
+              marginTop: 8,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11,
+            }}
+          >
+            <span style={{ color: theme.textDim }}>audit</span>
+            <span style={{ fontFamily: theme.monoFamily, color: theme.text }}>
+              {auditId}
+            </span>
+            {auditLink ? (
+              <span
+                style={{
+                  color: theme.accent,
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                }}
+              >
+                {auditLink.label}
+                {auditLink.crossApp || auditLink.openMode === "new_tab" ? (
+                  <CanvasIcon name="ext" size={10} />
+                ) : null}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {resourceLink ? (
+          <div style={{ marginTop: 6, fontSize: 11 }}>
+            <span
+              style={{
+                color: theme.accent,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+              }}
+            >
+              {resourceLink.label}
+              {resourceLink.openMode === "new_tab" ? (
+                <CanvasIcon name="ext" size={10} />
+              ) : null}
+            </span>
+          </div>
+        ) : null}
+      </div>
+      {dismissible ? (
+        <CanvasIcon
+          name="x"
+          size={13}
+          style={{ color: theme.textDim, marginTop: 2 }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+export interface StaleBannerProps {
+  theme?: CanvasTheme;
+  dataFreshness?: Exclude<CanvasDataFreshness, "fresh">;
+  generatedAt?: ReactNode;
+  tier?: CanvasRefreshTier;
+}
+
+export function StaleBanner({
+  theme: providedTheme,
+  dataFreshness = "stale",
+  generatedAt = "2 min 前",
+  tier = "medium_slow",
+}: StaleBannerProps) {
+  const theme = resolveTheme(providedTheme);
+  const tierMeta = CANVAS_REFRESH_TIERS[tier];
+
+  return (
+    <Banner
+      theme={theme}
+      tone={dataFreshness === "degraded" ? "danger" : "warn"}
+      icon="clock"
+      title={
+        <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span>{dataFreshness === "degraded" ? "資料來源降級" : "資料已過時"}</span>
+          <span
+            style={{
+              fontFamily: theme.monoFamily,
+              fontSize: 10.5,
+              opacity: 0.6,
+            }}
+          >
+            · dataFreshness={dataFreshness}
+          </span>
+        </span>
+      }
+      body={`目前顯示的內容於 ${generatedAt} 從後端產生 (refresh tier ${tierMeta.code} · ${tierMeta.label})；請手動 refresh 或等候下次自動 poll。`}
+      actions={
+        <Btn theme={theme} size="xs" icon="refresh" variant="secondary">
+          立即重整
+        </Btn>
+      }
+    />
+  );
+}
+
+export interface HealthBannerProps {
+  theme?: CanvasTheme;
+  status?: Exclude<CanvasHealthStatus, "healthy">;
+  degradedServices?: readonly CanvasDegradedService[];
+}
+
+export function HealthBanner({
+  theme: providedTheme,
+  status = "degraded",
+  degradedServices = [],
+}: HealthBannerProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <div style={{ padding: "12px 24px 0" }}>
+      <Banner
+        theme={theme}
+        tone={status === "down" ? "danger" : "warn"}
+        icon="warn"
+        title={
+          <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+            <span>{status === "down" ? "頁面依賴 service 不可用" : "頁面依賴 service 降級中"}</span>
+            <span
+              style={{
+                fontFamily: theme.monoFamily,
+                fontSize: 10.5,
+                opacity: 0.7,
+              }}
+            >
+              · UiHealthEnvelope.status={status}
+            </span>
+          </span>
+        }
+        body={
+          degradedServices.length > 0
+            ? degradedServices
+                .map((service) =>
+                  service.impact
+                    ? `${service.service} (${service.impact})`
+                    : String(service.service),
+                )
+                .join(" · ")
+            : "部分顯示資料可能不完整；下方仍可瀏覽，但 mutation 可能失敗。"
+        }
+      />
+    </div>
+  );
+}
+
+export interface ActorRealmChipProps {
+  theme?: CanvasTheme;
+  realm?: CanvasRealm;
+  actor?: ReactNode;
+}
+
+export function ActorRealmChip({
+  theme: providedTheme,
+  realm = "tenant",
+  actor,
+}: ActorRealmChipProps) {
+  const theme = resolveTheme(providedTheme);
+  const labels: Record<CanvasRealm, string> = {
+    platform: "平台",
+    ops: "營運",
+    tenant: "租戶",
+    system: "系統",
+    driver: "司機",
+  };
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <Pill theme={theme} tone={realm}>
+        {labels[realm]}
+        <span
+          style={{
+            marginLeft: 4,
+            opacity: 0.7,
+            fontFamily: theme.monoFamily,
+            fontSize: 9.5,
+          }}
+        >
+          {realm}
+        </span>
+      </Pill>
+      {actor ? <span style={{ fontSize: 12, color: theme.text }}>{actor}</span> : null}
+    </span>
   );
 }
 
