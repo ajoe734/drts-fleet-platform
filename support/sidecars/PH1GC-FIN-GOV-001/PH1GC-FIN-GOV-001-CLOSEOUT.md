@@ -2,12 +2,12 @@
 
 Task ID: `PH1GC-FIN-GOV-001`
 Owner: `Codex2`
-Reviewer: `Gemini2`
+Reviewer: `Codex`
 Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `in_progress`
-Machine-truth status on `2026-05-24`: owner reassigned from `Codex` to `Codex2`; repo-local artifact alignment is complete, but acceptance remains blocked under the same task id
-Current anchor after closeout truth-sync reconciliation: `c894e406` (`wip(PH1GC-FIN-GOV-001): anchor closeout sidecar sync`)
+Machine-truth status on `2026-05-25`: task remains with `Codex2` in `in_progress`; repo-local artifact alignment is complete, but acceptance remains blocked under the same task id
+Current anchor after closeout truth-sync reconciliation: `b375e615` (`wip(PH1GC-FIN-GOV-001): anchor closeout head refresh`)
 Files changed:
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
@@ -58,17 +58,17 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - Acceptance items 3, 4, and 6 remain satisfied on this branch via the spec/UAT/E2E/closeout evidence chain.
 - Acceptance item 5 is still unsatisfied: the governed staging rerun needed for `PASS (live staging evidence)` is still blocked by staging auth, and `origin/dev` release-truth is internally inconsistent about whether that uplift has already happened.
 
-## 2026-05-24 Revalidation
+## 2026-05-25 Revalidation
 
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `git diff --check origin/dev...HEAD` passed.
-- `git rev-parse HEAD` = `c894e4069c6abbf72dddf4f6f90aea8b8dff3823`.
-- `git push -u origin codex2/ph1gc-fin-gov-001` succeeded after the anchor commit.
+- `git rev-parse HEAD` = `b375e6154544a78f3e4d3d025b82edb23e2e7a0c`.
+- `git push -u origin codex2/ph1gc-fin-gov-001` remains up to date at the current anchor.
 
 ## Blocker
 
-Fresh 2026-05-24 validation still shows:
+Fresh 2026-05-25 validation still shows:
 
 - the prior owner-lane live probes still end at staging IAP/IAM/WIF auth failure, so no new reviewer-readable governed staging artifact can be collected from this workspace
 - `WF-FIN-GOV-001` therefore still cannot honestly claim `PASS (live staging evidence)` without a fresh green `STRICT_VERIFICATION_BODY=1` governed rerun plus reviewer-readable invoice/report artifacts
