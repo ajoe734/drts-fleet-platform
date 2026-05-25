@@ -152,6 +152,14 @@ export class DriverInstructionService implements OnModuleInit {
       );
     }
 
+    if (existing.acknowledgedAt !== null) {
+      return {
+        instructionId: existing.instructionId,
+        taskId: existing.taskId,
+        acknowledgedAt: existing.acknowledgedAt,
+      };
+    }
+
     if (this.isExpired(existing, Date.now())) {
       throw new ApiRequestError(
         410,
@@ -162,14 +170,6 @@ export class DriverInstructionService implements OnModuleInit {
           expiresAt: existing.expiresAt,
         },
       );
-    }
-
-    if (existing.acknowledgedAt !== null) {
-      return {
-        instructionId: existing.instructionId,
-        taskId: existing.taskId,
-        acknowledgedAt: existing.acknowledgedAt,
-      };
     }
 
     const acknowledgedAt = new Date().toISOString();
