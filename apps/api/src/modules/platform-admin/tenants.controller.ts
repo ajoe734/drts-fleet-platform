@@ -5,11 +5,13 @@ import type {
   CreatePlatformTenantCommand,
   InviteTenantRoleCommand,
   SetPlatformTenantRolloutStageCommand,
+  TenantRolloutStateMachineRecord,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import type { UpdateTenantRolloutGateStatusCommand } from "../tenant-rollout/tenant-rollout.types";
 import { TenantsService } from "./tenants.service";
 import type { TenantSummary } from "./tenants.service";
 
@@ -50,6 +52,16 @@ export class TenantsController {
     return toApiSuccessEnvelope(this.tenants.get(tenantId), requestId);
   }
 
+  @Get("tenants/:tenantId/rollout-state")
+  getTenantRolloutState(
+    @Param("tenantId") tenantId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const state: TenantRolloutStateMachineRecord =
+      this.tenants.getRolloutStateMachine(tenantId);
+    return toApiSuccessEnvelope(state, requestId);
+  }
+
   @Post("tenants/:tenantId/onboarding")
   updateOnboarding(
     @Param("tenantId") tenantId: string,
@@ -67,6 +79,20 @@ export class TenantsController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const updated = this.tenants.setRolloutStage(tenantId, body, requestId);
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("tenants/:tenantId/rollout-state/gate")
+  setRolloutGateStatus(
+    @Param("tenantId") tenantId: string,
+    @Body() body: UpdateTenantRolloutGateStatusCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = this.tenants.setRolloutGateStatus(
+      tenantId,
+      body.gateStatus,
+      requestId,
+    );
     return toApiSuccessEnvelope(updated, requestId);
   }
 

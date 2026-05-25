@@ -4680,6 +4680,25 @@ export interface PlatformTenantRolloutState {
   notes: string | null;
 }
 
+export type TenantRolloutStage = PlatformTenantRolloutStage | "rollback_hold";
+export type TenantRolloutGateStatus = PlatformTenantGateStatus;
+
+export interface TenantRolloutStateMachineRecord {
+  tenantId: string;
+  stage: TenantRolloutStage;
+  gateStatus: TenantRolloutGateStatus;
+  cutoverOwnerUserId: string | null;
+  cutoverOwnerDisplayName: string | null;
+  rollbackOwnerUserId: string | null;
+  rollbackOwnerDisplayName: string | null;
+  rollbackPrepared: boolean;
+  enteredStageAt: string;
+  enteredGateAt: string;
+  lastUpdatedBy: string;
+  lastUpdatedAt: string;
+  availableActions: ResourceActionDescriptor[];
+}
+
 export interface PlatformAdminTenantRecord {
   id: string;
   code: string;
