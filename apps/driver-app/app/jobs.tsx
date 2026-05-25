@@ -835,14 +835,7 @@ function getActionDescriptor(
   return buildActionDescriptors(task).find((item) => item.action === action);
 }
 
-function inferEmptyReason(
-  tasks: UnifiedDriverTaskView[],
-  selectedFilter: TaskFilterValue,
-): EmptyReason {
-  if (selectedFilter !== "all") {
-    return "filtered_empty";
-  }
-
+function inferEmptyReason(tasks: UnifiedDriverTaskView[]): EmptyReason {
   if (tasks.some((task) => hasSyncIssue(task))) {
     return "external_unavailable";
   }
@@ -854,13 +847,11 @@ function resolveDisplayedEmptyReason(
   envelope: TaskInboxEnvelope,
   selectedFilter: TaskFilterValue,
 ): EmptyReason {
-  if (selectedFilter !== "all") {
+  if (selectedFilter !== "all" && envelope.items.length > 0) {
     return "filtered_empty";
   }
 
-  return (
-    envelope.empty?.reason ?? inferEmptyReason(envelope.items, selectedFilter)
-  );
+  return envelope.empty?.reason ?? inferEmptyReason(envelope.items);
 }
 
 function formatRefreshTierLabel(tier: TaskInboxEnvelope["refreshTier"]) {
@@ -884,10 +875,7 @@ function buildRefreshMetadata(
   };
 }
 
-function parseTaskEnvelope(
-  payload: unknown,
-  selectedFilter: TaskFilterValue,
-): TaskInboxEnvelope | null {
+function parseTaskEnvelope(payload: unknown): TaskInboxEnvelope | null {
   if (!payload || typeof payload !== "object") {
     return null;
   }
@@ -920,7 +908,7 @@ function parseTaskEnvelope(
       ? (record.empty as EmptyStateEnvelope)
       : items.length === 0
         ? {
-            reason: inferEmptyReason(items, selectedFilter),
+            reason: inferEmptyReason(items),
             messageCode: "driver.jobs.empty",
           }
         : null;
@@ -1309,7 +1297,7 @@ export default function JobsScreen() {
     router.push("/settings");
   };
 
-  const loadTasks = async (nextFilter: TaskFilterValue) => {
+  const loadTasks = async () => {
     const client = getDriverClient();
 
     try {
@@ -1318,7 +1306,7 @@ export default function JobsScreen() {
 
       try {
         const payload = await client.get<unknown>("/api/driver/task-views");
-        nextEnvelope = parseTaskEnvelope(payload, nextFilter);
+        nextEnvelope = parseTaskEnvelope(payload);
       } catch {
         nextEnvelope = null;
       }
@@ -1333,7 +1321,7 @@ export default function JobsScreen() {
             empty:
               fetchedTasks.length === 0
                 ? {
-                    reason: inferEmptyReason(fetchedTasks, nextFilter),
+                    reason: inferEmptyReason(fetchedTasks),
                     messageCode: "driver.jobs.empty",
                   }
                 : null,
@@ -1349,7 +1337,7 @@ export default function JobsScreen() {
             empty:
               fallbackTasks.length === 0
                 ? {
-                    reason: inferEmptyReason(fallbackTasks, nextFilter),
+                    reason: inferEmptyReason(fallbackTasks),
                     messageCode: "driver.jobs.empty",
                   }
                 : null,
@@ -1407,7 +1395,7 @@ export default function JobsScreen() {
       .then(async (enabled) => {
         setTasksEnabled(enabled);
         if (enabled) {
-          await loadTasks(selectedFilter);
+          await loadTasks();
         } else {
           setEnvelope((current) => ({
             ...current,
@@ -1419,7 +1407,7 @@ export default function JobsScreen() {
           }));
         }
       })
-      .catch(() => loadTasks(selectedFilter))
+      .catch(() => loadTasks())
       .finally(() => setLoading(false));
   }, []);
 
@@ -1429,7 +1417,7 @@ export default function JobsScreen() {
     }
 
     const timer = setInterval(() => {
-      void loadTasks(selectedFilter);
+      void loadTasks();
     }, POLL_INTERVAL_MS);
 
     return () => clearInterval(timer);
@@ -1453,7 +1441,7 @@ export default function JobsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadTasks(selectedFilter);
+    await loadTasks();
     setRefreshing(false);
   };
 
@@ -1481,7 +1469,7 @@ export default function JobsScreen() {
         title: summary.title,
         body: result.driverMessage?.trim() || undefined,
       });
-      await loadTasks(selectedFilter);
+      await loadTasks();
     } catch (actionError) {
       if (getDriverIdentityIssue()) {
         router.replace("/onboarding");
