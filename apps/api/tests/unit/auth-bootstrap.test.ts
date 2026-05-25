@@ -163,6 +163,17 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("resolves platform search routes to platform-scoped foundation read access", () => {
+    const policy = resolveRouteAuthPolicy("GET", "/api/platform/search");
+
+    expect(policy).toEqual({
+      routeKey: "platform:search",
+      requiredScopes: ["foundation:read"],
+      allowedRealms: ["system", "platform"],
+      description: "Platform cross-entity search",
+    });
+  });
+
   it("resolves partner eligibility routes to partner-scoped access", () => {
     const policy = resolveRouteAuthPolicy(
       "POST",
@@ -344,6 +355,31 @@ describe("bootstrap auth guard", () => {
       expect(apiError.getResponse()).toMatchObject({
         error: {
           code: "AUTH_REALM_DENIED",
+        },
+      });
+    }
+  });
+
+  it("rejects anonymous access to platform search", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {},
+      method: "GET",
+      originalUrl: "/api/platform/search?q=acme",
+    };
+
+    expect(() =>
+      guard.canActivate(createExecutionContext(request)),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      guard.canActivate(createExecutionContext(request));
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(401);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "AUTH_REQUIRED",
         },
       });
     }
