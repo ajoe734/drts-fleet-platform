@@ -50,6 +50,7 @@ export type RolloutStageTransitionInput = RolloutTransitionMetadata & {
 export type RolloutGateTransitionInput = RolloutTransitionMetadata & {
   gateStatus: PlatformTenantGateStatus;
   stage?: TenantRolloutStage;
+  notes?: string | null;
 };
 
 const ACTION_CATALOG: Readonly<Record<RolloutAction, RolloutActionCatalogEntry>> =
@@ -327,6 +328,10 @@ export function transitionTenantRolloutGate(
     next.stage = "rollback_hold";
   }
 
+  if (input.notes !== undefined) {
+    next.notes = input.notes?.trim() ? input.notes.trim() : null;
+  }
+
   next.enteredGateAt = input.occurredAt;
   next.lastUpdatedBy = resolveActorLabel(input.actorLabel, input.actorId);
   return next;
@@ -349,16 +354,13 @@ export function transitionTenantRolloutStage(
   }
 
   if (input.stage === "sandbox") {
-    next.sandboxStatus = "approved";
     next.enteredGateAt = input.occurredAt;
   } else if (input.stage === "pilot") {
     next.sandboxStatus = "approved";
-    next.pilotStatus = "approved";
     next.enteredGateAt = input.occurredAt;
   } else if (input.stage === "production") {
     next.sandboxStatus = "approved";
     next.pilotStatus = "approved";
-    next.productionStatus = "approved";
     next.enteredGateAt = input.occurredAt;
   } else {
     next.productionStatus = "blocked";

@@ -134,6 +134,7 @@ describe("tenant rollout state machine", () => {
       createTenantRolloutState("2026-05-25T10:00:00.000Z"),
       {
         gateStatus: "approved",
+        notes: "Sandbox verification complete.",
         occurredAt: "2026-05-25T10:05:00.000Z",
         actorLabel: "QA reviewer",
       },
@@ -142,9 +143,10 @@ describe("tenant rollout state machine", () => {
     expect(updated.sandboxStatus).toBe("approved");
     expect(updated.enteredGateAt).toBe("2026-05-25T10:05:00.000Z");
     expect(updated.lastUpdatedBy).toBe("QA reviewer");
+    expect(updated.notes).toBe("Sandbox verification complete.");
   });
 
-  it("transitions stage metadata and approves prerequisite gates", () => {
+  it("transitions stage metadata without auto-approving the target gate", () => {
     const updated = transitionTenantRolloutStage(
       createTenantRolloutState("2026-05-25T10:00:00.000Z"),
       {
@@ -159,7 +161,7 @@ describe("tenant rollout state machine", () => {
       stage: "production",
       sandboxStatus: "approved",
       pilotStatus: "approved",
-      productionStatus: "approved",
+      productionStatus: "pending",
       lastPromotedAt: "2026-05-25T11:00:00.000Z",
       enteredStageAt: "2026-05-25T11:00:00.000Z",
       enteredGateAt: "2026-05-25T11:00:00.000Z",

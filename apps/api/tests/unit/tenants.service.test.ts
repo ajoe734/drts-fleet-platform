@@ -16,6 +16,16 @@ function expectApiError(fn: () => unknown, errorCode: string) {
   }
 }
 
+function getApiError(fn: () => unknown) {
+  try {
+    fn();
+    throw new Error("Expected ApiRequestError");
+  } catch (e) {
+    expect(e).toBeInstanceOf(ApiRequestError);
+    return e as ApiRequestError;
+  }
+}
+
 function createService() {
   const auditNotificationService = {
     recordAuditLog: vi.fn(),
@@ -147,6 +157,7 @@ describe("TenantsService", () => {
     const pilot = service.setRolloutStage(created.id, {
       stage: "pilot",
     });
+    service.setRolloutGateStatus(created.id, "approved");
 
     // set production prerequisites before promoting
     for (const role of created.bootstrapDefaults.roleDefaults) {
@@ -171,13 +182,13 @@ describe("TenantsService", () => {
     expect(pilot.rollout).toMatchObject({
       stage: "pilot",
       sandboxStatus: "approved",
-      pilotStatus: "approved",
+      pilotStatus: "pending",
     });
     expect(production.rollout).toMatchObject({
       stage: "production",
       sandboxStatus: "approved",
       pilotStatus: "approved",
-      productionStatus: "approved",
+      productionStatus: "pending",
       enteredStageAt: expect.any(String),
       enteredGateAt: expect.any(String),
       lastUpdatedBy: "platform_admin",
@@ -212,6 +223,7 @@ describe("TenantsService", () => {
     });
     // promote to pilot first (sets pilot approved)
     service.setRolloutStage(created.id, { stage: "pilot" });
+    service.setRolloutGateStatus(created.id, "approved");
 
     expectApiError(
       () => service.setRolloutStage(created.id, { stage: "production" }),
@@ -232,6 +244,7 @@ describe("TenantsService", () => {
       },
     });
     service.setRolloutStage(created.id, { stage: "pilot" });
+    service.setRolloutGateStatus(created.id, "approved");
 
     // acknowledge required roles
     for (const role of created.bootstrapDefaults.roleDefaults) {
@@ -248,14 +261,29 @@ describe("TenantsService", () => {
   });
 
   it("blocks promotion when tenant is in rollback_hold", () => {
-    const { service } = createService();
+    const { service, auditNotificationService } = createService();
     const created = service.create({ name: "Hold Test", code: "hold_test" });
 
     service.setRollbackHold(created.id);
 
-    expectApiError(
-      () => service.setRolloutStage(created.id, { stage: "pilot" }),
-      "TENANT_IN_ROLLBACK_HOLD",
+    const error = getApiError(() =>
+      service.setRolloutStage(created.id, { stage: "pilot" }),
+    );
+    const response = error.getResponse() as {
+      error: { code: string; details?: { reasonCode?: string } };
+    };
+    expect(response.error.code).toBe("TENANT_PROMOTION_GATE_BLOCKED");
+    expect(response.error.details?.reasonCode).toBe(
+      "production_rollback_hold_active",
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "reject_platform_tenant_rollout_transition",
+        newValuesSummary: expect.objectContaining({
+          attemptedStage: "pilot",
+          reasonCode: "production_rollback_hold_active",
+        }),
+      }),
     );
   });
 
@@ -273,10 +301,15 @@ describe("TenantsService", () => {
       gateStatus: "ready",
     });
 
-    const updated = service.setRolloutGateStatus(created.id, "approved");
+    const updated = service.setRolloutGateStatus(
+      created.id,
+      "approved",
+      "Sandbox sign-off complete.",
+    );
     const state = service.getRolloutStateMachine(created.id);
 
     expect(updated.rollout.sandboxStatus).toBe("approved");
+    expect(updated.rollout.notes).toBe("Sandbox sign-off complete.");
     expect(state).toMatchObject({
       tenantId: created.id,
       stage: "sandbox",
@@ -297,6 +330,7 @@ describe("TenantsService", () => {
         newValuesSummary: expect.objectContaining({
           stage: "sandbox",
           sandboxStatus: "approved",
+          reason: "Sandbox sign-off complete.",
         }),
       }),
     );
@@ -366,7 +400,10 @@ describe("TenantsService", () => {
     const { service, auditNotificationService } = createService();
     const created = service.create({ name: "Hold Corp", code: "hold_corp" });
 
-    const held = service.setRollbackHold(created.id);
+    const held = service.setRollbackHold(
+      created.id,
+      "Incident escalated during cutover.",
+    );
 
     expect(held.status).toBe("rollback_hold");
     expect(held.rollout).toMatchObject({
@@ -374,6 +411,7 @@ describe("TenantsService", () => {
       productionStatus: "blocked",
       enteredGateAt: expect.any(String),
       lastUpdatedBy: "platform_admin",
+      notes: "Incident escalated during cutover.",
     });
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -389,6 +427,47 @@ describe("TenantsService", () => {
           rollout: expect.objectContaining({
             stage: "rollback_hold",
             productionStatus: "blocked",
+            reason: "Incident escalated during cutover.",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("resolves rollback hold back to active production with audit trail", () => {
+    const { service, auditNotificationService } = createService();
+    const created = service.create({ name: "Recover Corp", code: "recover" });
+
+    service.updateOnboarding(created.id, {
+      rollout: {
+        sandboxStatus: "approved",
+        pilotStatus: "approved",
+        productionStatus: "blocked",
+      },
+    });
+    service.setRollbackHold(created.id, "Rollback started.");
+
+    const resolved = service.resolveRollbackHold(
+      created.id,
+      "Recovery verified and monitoring enabled.",
+    );
+
+    expect(resolved.status).toBe("active");
+    expect(resolved.rollout).toMatchObject({
+      stage: "production",
+      productionStatus: "blocked",
+      notes: "Recovery verified and monitoring enabled.",
+      lastUpdatedBy: "platform_admin",
+    });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "resolve_tenant_rollback_hold",
+        newValuesSummary: expect.objectContaining({
+          status: "active",
+          rollout: expect.objectContaining({
+            stage: "production",
+            productionStatus: "blocked",
+            reason: "Recovery verified and monitoring enabled.",
           }),
         }),
       }),
@@ -430,11 +509,12 @@ describe("TenantsService", () => {
 
     // promote through stages
     service.setRolloutStage(created.id, { stage: "pilot" });
+    service.setRolloutGateStatus(created.id, "approved");
     const production = service.setRolloutStage(created.id, {
       stage: "production",
     });
 
     expect(production.rollout.stage).toBe("production");
-    expect(production.rollout.productionStatus).toBe("approved");
+    expect(production.rollout.productionStatus).toBe("pending");
   });
 });
