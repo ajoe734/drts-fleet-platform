@@ -19,6 +19,11 @@ export interface PlatformEarningsAggregateItem {
   netAmount: MoneyAmount;
 }
 
+export interface PlatformEarningsPeriodWindow {
+  startDate: string;
+  endDate: string;
+}
+
 @Injectable()
 export class PlatformEarningsRepository {
   private readonly logger = new Logger(PlatformEarningsRepository.name);
@@ -31,9 +36,17 @@ export class PlatformEarningsRepository {
 
   async aggregateByDriver(
     driverId: string,
+    periodWindow?: PlatformEarningsPeriodWindow,
   ): Promise<PlatformEarningsAggregateItem[]> {
     if (!this.isEnabled()) return [];
     try {
+      const params = [driverId];
+      const periodClause = periodWindow
+        ? " AND period_date BETWEEN $2::date AND $3::date"
+        : "";
+      if (periodWindow) {
+        params.push(periodWindow.startDate, periodWindow.endDate);
+      }
       const result = await this.db!.query<PlatformEarningsAggregateRow>(
         `SELECT platform_code,
                 COALESCE(currency_code, 'TWD') AS currency_code,
@@ -43,9 +56,10 @@ export class PlatformEarningsRepository {
                 SUM(net_minor)     AS net_minor
          FROM ops.phase1_platform_earnings_ledger
          WHERE driver_id = $1
+         ${periodClause}
          GROUP BY platform_code, currency_code
          ORDER BY platform_code`,
-        [driverId],
+        params,
       );
 
       return result.rows.map((row) => ({

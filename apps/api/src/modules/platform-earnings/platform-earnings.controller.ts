@@ -1,5 +1,6 @@
-import { Controller, Get, Headers } from "@nestjs/common";
+import { Controller, Get, Headers, Query } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
+import type { DriverEarningsPeriod } from "@drts/contracts";
 // Note: Using structural typing to avoid hard dependency on contracts build during typecheck.
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
@@ -39,5 +40,18 @@ export class PlatformEarningsController {
     const driverId = this.resolveDriverId(identity);
     const breakdown = await this.service.byPlatform(driverId);
     return toApiSuccessEnvelope(breakdown, requestId);
+  }
+
+  @Get("dashboard")
+  @RequireRealms("driver", "platform", "ops")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getDashboard(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Query("period") period?: DriverEarningsPeriod,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity);
+    const dashboard = await this.service.dashboard(driverId, period ?? "today");
+    return toApiSuccessEnvelope(dashboard, requestId);
   }
 }

@@ -66,6 +66,8 @@ import type {
   DriverArrivedPickupCommand,
   DriverDeviceProvisioningSession,
   DriverEtaResponse,
+  DriverEarningsDashboard,
+  DriverEarningsPeriod,
   DriverLocationSnapshot,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
@@ -1244,6 +1246,15 @@ export class ApiClient {
       ? `/api/platform-earnings/by-platform?period=${encodeURIComponent(period)}`
       : "/api/platform-earnings/by-platform";
     return this.get<PlatformEarningsByPlatformResponse>(url);
+  }
+
+  async getDriverEarningsDashboard(
+    period?: DriverEarningsPeriod,
+  ): Promise<DriverEarningsDashboard> {
+    const url = period
+      ? `/api/platform-earnings/dashboard?period=${encodeURIComponent(period)}`
+      : "/api/platform-earnings/dashboard";
+    return this.get<DriverEarningsDashboard>(url);
   }
 
   // ── Reporting & Filing ──
