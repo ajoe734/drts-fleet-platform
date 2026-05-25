@@ -4,24 +4,24 @@ import { buildHealthPayload } from "../../../../apps/api/src/health/health.contr
 describe("buildHealthPayload", () => {
   it("should return healthy status when no dependencies", () => {
     const payload = buildHealthPayload([]);
-    expect(payload.status).toBe("ok");
+    expect(payload.status).toBe("healthy");
     expect(payload.degradedServices).toHaveLength(0);
   });
 
   it("should return degraded status when dependencies have low severity", () => {
     const payload = buildHealthPayload([
       { name: "db", severity: "low", message: "latency" },
-    ]);
+    ] as any);
     expect(payload.status).toBe("degraded");
     expect(payload.degradedServices).toHaveLength(1);
-    expect(payload.degradedServices[0]!.name).toBe("db");
+    expect(payload.degradedServices[0]!.service).toBe("db");
   });
 
   it("should return down status when dependencies have critical severity", () => {
     const payload = buildHealthPayload([
       { name: "redis", severity: "critical", message: "down" },
-    ]);
+    ] as any);
     expect(payload.status).toBe("down");
-    expect(payload.degradedServices[0]!.name).toBe("redis");
+    expect(payload.degradedServices[0]!.service).toBe("redis");
   });
 });
