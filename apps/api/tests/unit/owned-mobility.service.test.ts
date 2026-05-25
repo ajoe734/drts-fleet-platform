@@ -2962,4 +2962,115 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     expect(updatedOrder.dispatchAttemptCount).toBe(1);
     expect(updatedOrder.lastDispatchFailureReason).toBe("driver_rejected");
   });
+
+  it("returns an explicit no_data empty-state envelope for an empty owned queue", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    expect(service.listOrdersReadModel()).toEqual({
+      items: [],
+      refresh: {
+        generatedAt: expect.any(String),
+        staleAfterMs: 5000,
+        dataFreshness: "fresh",
+        source: "live",
+      },
+      emptyState: {
+        reason: "no_data",
+        messageCode: "dispatch.owned_queue.empty.no_data",
+      },
+    });
+  });
+
+  it("exposes queue-row availableActions for ready-to-dispatch owned orders", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Queue Rider", phone: "0912345678" },
+    });
+
+    expect(service.listOrdersReadModel()).toEqual({
+      items: [
+        expect.objectContaining({
+          orderId: order.orderId,
+          availableActions: [
+            {
+              action: "assign",
+              enabled: true,
+              riskLevel: "medium",
+            },
+            {
+              action: "redispatch",
+              enabled: true,
+              riskLevel: "medium",
+            },
+            {
+              action: "fare_override",
+              enabled: true,
+              riskLevel: "high",
+              requiresReason: true,
+            },
+          ],
+        }),
+      ],
+      refresh: {
+        generatedAt: expect.any(String),
+        staleAfterMs: 5000,
+        dataFreshness: "fresh",
+        source: "live",
+      },
+    });
+  });
+
+  it("switches owned queue-row availableActions when an order enters the no-supply flow", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Queue Rider", phone: "0912345678" },
+    });
+
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    expect(service.listOrdersReadModel()).toEqual({
+      items: [
+        expect.objectContaining({
+          orderId: order.orderId,
+          status: "delayed_queue",
+          availableActions: [
+            {
+              action: "extend",
+              enabled: true,
+              riskLevel: "medium",
+            },
+            {
+              action: "manual",
+              enabled: true,
+              riskLevel: "medium",
+            },
+            {
+              action: "cancel",
+              enabled: true,
+              riskLevel: "high",
+              requiresReason: true,
+            },
+          ],
+        }),
+      ],
+      refresh: {
+        generatedAt: expect.any(String),
+        staleAfterMs: 5000,
+        dataFreshness: "fresh",
+        source: "live",
+      },
+    });
+  });
 });

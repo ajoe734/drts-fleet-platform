@@ -32,6 +32,62 @@ function opsIdentity(): BootstrapRequestIdentity {
 }
 
 describe("ForwarderController", () => {
+  it("wraps forwarded queue read models in the standard success envelope", () => {
+    const forwarderService = {
+      listOrdersReadModel: vi.fn(() => ({
+        items: [
+          {
+            mirrorOrderId: "FWD-queue-001",
+            availableActions: [
+              {
+                action: "reconcile",
+                enabled: true,
+                riskLevel: "medium",
+              },
+            ],
+          },
+        ],
+        refresh: {
+          generatedAt: "2026-05-25T11:20:00.000Z",
+          staleAfterMs: 5000,
+          dataFreshness: "fresh",
+          source: "live",
+        },
+      })),
+    };
+    const controller = new ForwarderController(forwarderService as never);
+
+    const response = controller.listForwardedOrders("req-forwarded-list-001");
+
+    expect(forwarderService.listOrdersReadModel).toHaveBeenCalledWith();
+    expect(response).toEqual({
+      data: {
+        items: [
+          {
+            mirrorOrderId: "FWD-queue-001",
+            availableActions: [
+              {
+                action: "reconcile",
+                enabled: true,
+                riskLevel: "medium",
+              },
+            ],
+          },
+        ],
+        refresh: {
+          generatedAt: "2026-05-25T11:20:00.000Z",
+          staleAfterMs: 5000,
+          dataFreshness: "fresh",
+          source: "live",
+        },
+      },
+      meta: {
+        requestId: "req-forwarded-list-001",
+        timestamp: expect.any(String),
+      },
+    });
+  });
+
   it("wraps Grab Taiwan webhook ingestion in the standard success envelope", async () => {
     const forwarderService = {
       ingestGrabTaiwanWebhook: vi.fn(async () => ({

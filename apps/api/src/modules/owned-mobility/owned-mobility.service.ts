@@ -57,6 +57,7 @@ import type {
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
+  ResourceActionDescriptor,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
@@ -68,6 +69,11 @@ import {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
+import {
+  buildEmptyStateEnvelope,
+  buildUiReadModelList,
+  type UiReadModelList,
+} from "../../common/ui-read-model";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { CallcenterService } from "../callcenter/callcenter.service";
 import {
@@ -157,6 +163,7 @@ const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
   amountMinor: 150000,
 };
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
+const DISPATCH_READ_MODEL_STALE_AFTER_MS = 5_000;
 
 @Injectable()
 export class OwnedMobilityService implements OnModuleInit {
@@ -875,6 +882,17 @@ export class OwnedMobilityService implements OnModuleInit {
 
   listOrders() {
     return this.orders.map((order) => this.cloneOrder(order));
+  }
+
+  listOrdersReadModel(): UiReadModelList<OwnedOrderRecord> {
+    const items = this.listOrders();
+    return buildUiReadModelList(items, {
+      staleAfterMs: DISPATCH_READ_MODEL_STALE_AFTER_MS,
+      emptyState: buildEmptyStateEnvelope(
+        "no_data",
+        "dispatch.owned_queue.empty.no_data",
+      ),
+    });
   }
 
   getOrder(orderId: string) {
@@ -5496,7 +5514,7 @@ export class OwnedMobilityService implements OnModuleInit {
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {
     const complianceGates = this.listComplianceGatesForOrder(order);
     const queueState = this.resolveDispatchQueueState(order, complianceGates);
-    return {
+    const clonedOrder = {
       ...order,
       pickup: { ...order.pickup },
       dropoff: { ...order.dropoff },
@@ -5527,6 +5545,161 @@ export class OwnedMobilityService implements OnModuleInit {
         ? { ...order.dispatchTimeout }
         : null,
     };
+    return {
+      ...clonedOrder,
+      availableActions: this.buildOwnedOrderAvailableActions(
+        clonedOrder,
+        queueState,
+      ),
+    };
+  }
+
+  private buildOwnedOrderAvailableActions(
+    order: OwnedOrderRecord,
+    queueState: {
+      queueFamily: DispatchQueueFamily | null;
+      queueEntryReason: DispatchQueueEntryReason | null;
+    },
+  ): ResourceActionDescriptor[] {
+    const actions: ResourceActionDescriptor[] = [];
+    const approvalBlocked = ["pending", "blocked", "rejected"].includes(
+      order.approvalState,
+    );
+    const cancelable = this.isOrderCancelableForReadModel(order);
+    const activeTripStates = [
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+    ];
+
+    const pushAction = (
+      action: string,
+      enabled: boolean,
+      riskLevel: ResourceActionDescriptor["riskLevel"],
+      options?: {
+        disabledReasonCode?: string;
+        requiresReason?: boolean;
+      },
+    ) => {
+      actions.push({
+        action,
+        enabled,
+        riskLevel,
+        ...(options?.disabledReasonCode
+          ? { disabledReasonCode: options.disabledReasonCode }
+          : {}),
+        ...(options?.requiresReason ? { requiresReason: true } : {}),
+      });
+    };
+
+    if (
+      queueState.queueFamily === "exception_hold_queue" ||
+      order.status === "exception_hold"
+    ) {
+      pushAction("resolve_hold", true, "medium");
+      pushAction("escalate", true, "high", { requiresReason: true });
+      pushAction("redispatch", false, "medium", {
+        disabledReasonCode: "exception_hold",
+      });
+      return actions;
+    }
+
+    if (
+      order.status === "no_supply" ||
+      order.status === "delayed_queue" ||
+      queueState.queueEntryReason === "no_supply_delayed_retry" ||
+      queueState.queueEntryReason === "no_supply_escalated_to_ops"
+    ) {
+      pushAction("extend", true, "medium");
+      pushAction("manual", true, "medium");
+      pushAction("cancel", true, "high", { requiresReason: true });
+      return actions;
+    }
+
+    if (activeTripStates.includes(order.status)) {
+      const releaseEnabled = ["assigned", "driver_accepted"].includes(
+        order.status,
+      );
+      const redispatchEnabled = !["on_trip", "proof_pending"].includes(
+        order.status,
+      );
+
+      pushAction("release", releaseEnabled, "medium", {
+        disabledReasonCode: releaseEnabled ? undefined : "trip_started",
+      });
+      pushAction("redispatch", redispatchEnabled, "medium", {
+        disabledReasonCode: redispatchEnabled ? undefined : "on_trip",
+      });
+      pushAction("cancel", cancelable, "high", {
+        disabledReasonCode: cancelable ? undefined : "order_not_cancelable",
+        requiresReason: true,
+      });
+      return actions;
+    }
+
+    if (
+      [
+        "realtime_ready_queue",
+        "reservation_confirmation_queue",
+        "recording_gate_queue",
+        "redispatch_priority_queue",
+      ].includes(queueState.queueFamily ?? "") ||
+      ["created", "ready_for_dispatch", "redispatch_required"].includes(
+        order.status,
+      )
+    ) {
+      pushAction("assign", !approvalBlocked, "medium", {
+        disabledReasonCode: approvalBlocked ? "approval_pending" : undefined,
+      });
+      pushAction("redispatch", !approvalBlocked, "medium", {
+        disabledReasonCode: approvalBlocked ? "approval_pending" : undefined,
+      });
+      pushAction("fare_override", true, "high", {
+        requiresReason: true,
+      });
+      if (approvalBlocked && order.approvalRequestIds.length > 0) {
+        pushAction("review_approval", true, "medium");
+      }
+      return actions;
+    }
+
+    if (approvalBlocked && order.approvalRequestIds.length > 0) {
+      pushAction("review_approval", true, "medium");
+    }
+    if (cancelable) {
+      pushAction("cancel", true, "high", { requiresReason: true });
+    }
+
+    return actions;
+  }
+
+  private isOrderCancelableForReadModel(order: OwnedOrderRecord) {
+    if (order.status === "cancelled") {
+      return false;
+    }
+
+    if (order.dispatchSemantics === "reservation") {
+      if (!order.cancelableUntil) {
+        return true;
+      }
+      return new Date().getTime() <= new Date(order.cancelableUntil).getTime();
+    }
+
+    return [
+      "created",
+      "recording_pending",
+      "ready_for_dispatch",
+      "assigned",
+      "driver_accepted",
+      "dispatch_failed",
+      "dispatch_timeout",
+      "no_supply",
+      "delayed_queue",
+      "redispatch_required",
+    ].includes(order.status);
   }
 
   private resolveDispatchQueueState(
