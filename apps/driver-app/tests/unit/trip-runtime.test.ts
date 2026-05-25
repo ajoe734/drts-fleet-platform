@@ -133,6 +133,21 @@ describe("getTripExperienceStateFromView", () => {
       ),
     ).toBe("manual_fallback");
   });
+
+  it("keeps forwarded mirror fallback data out of manual fallback when the ops flag is absent", () => {
+    expect(
+      getTripExperienceStateFromView(
+        makeTaskView({
+          orderDomain: "forwarded",
+          sourcePlatform: "grab_taiwan",
+          driverActionState: "in_progress",
+          localStatus: "accepted",
+          syncIssueSummary:
+            "來源平台原生狀態暫不可用，目前先以本地鏡像資料呈現；若內容異常請聯繫派車台。",
+        }),
+      ),
+    ).toBe("forwarded_confirmed");
+  });
 });
 
 describe("trip action selection", () => {

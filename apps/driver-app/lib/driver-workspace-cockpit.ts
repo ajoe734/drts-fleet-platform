@@ -96,7 +96,9 @@ export function buildFallbackUnifiedDriverTaskView(
     fareAuthority: forwarded ? "external_platform" : "drts",
     settlementAuthority: forwarded ? "external_platform" : "drts",
     driverPayoutAuthority: forwarded ? "external_platform" : "drts",
-    requiresManualFallback: forwarded,
+    // Legacy fallback only means native platform detail is unavailable.
+    // Do not present it as an ops-issued manual fallback instruction.
+    requiresManualFallback: false,
     requiresReauth: false,
     syncIssueSummary: forwarded
       ? "來源平台原生狀態暫不可用，目前先以本地鏡像資料呈現；若內容異常請聯繫派車台。"

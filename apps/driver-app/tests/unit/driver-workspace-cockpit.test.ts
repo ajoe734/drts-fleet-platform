@@ -6,7 +6,7 @@ import {
 } from "../../lib/driver-workspace-cockpit";
 
 describe("buildFallbackUnifiedDriverTaskView", () => {
-  it("maps forwarded legacy tasks to read-only mirrored task views", () => {
+  it("maps forwarded legacy tasks to mirrored task views without forcing manual fallback", () => {
     const taskView = buildFallbackUnifiedDriverTaskView({
       taskId: "task-forwarded-001",
       orderId: "order-001",
@@ -32,7 +32,7 @@ describe("buildFallbackUnifiedDriverTaskView", () => {
     expect(taskView.orderDomain).toBe("forwarded");
     expect(taskView.platformDisplayName).toBe("Grab");
     expect(taskView.fareAuthority).toBe("external_platform");
-    expect(taskView.requiresManualFallback).toBe(true);
+    expect(taskView.requiresManualFallback).toBe(false);
     expect(taskView.driverActionState).toBe("in_progress");
   });
 });
