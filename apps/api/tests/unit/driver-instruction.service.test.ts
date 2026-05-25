@@ -210,4 +210,39 @@ describe("DriverInstructionService", () => {
       Date.now = originalDateNow;
     }
   });
+
+  it("keeps acknowledge idempotent after the instruction later expires", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new DriverInstructionService(auditNotificationService);
+
+    const now = Date.now();
+    const instruction = service.createInstruction(
+      {
+        driverId: "drv-demo-001",
+        taskId: "task-001",
+        message: "Acknowledge before expiry.",
+        expiresAt: new Date(now + 10).toISOString(),
+      },
+      OPS_IDENTITY,
+    );
+
+    const firstAck = service.acknowledgeInstruction(
+      instruction.instructionId,
+      DRIVER_IDENTITY,
+    );
+
+    const originalDateNow = Date.now;
+    Date.now = () => now + 1000;
+
+    try {
+      expect(
+        service.acknowledgeInstruction(
+          instruction.instructionId,
+          DRIVER_IDENTITY,
+        ),
+      ).toEqual(firstAck);
+    } finally {
+      Date.now = originalDateNow;
+    }
+  });
 });
