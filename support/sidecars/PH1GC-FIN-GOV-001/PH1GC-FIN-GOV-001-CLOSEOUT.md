@@ -6,8 +6,8 @@ Reviewer: `Codex`
 Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `in_progress`
-Machine-truth status on `2026-05-25`: canonical `ai-status.json` now contains standalone task `PH1GC-FIN-GOV-001` again under `Codex2` / `in_progress`. The downstream repo-local deliverables remain represented by `WF-FIN-GOV-001-MATRIX`, `FIN-GOV-UAT-001`, and `WF-FIN-GOV-001-E2E`, all `done`; this sidecar stays `in_progress` because only the live-uplift acceptance item remains blocked.
-Current anchor after closeout truth-sync reconciliation: `6245e4cf` (`wip(PH1GC-FIN-GOV-001): anchor sidecar truth alignment`)
+Machine-truth status on `2026-05-25`: canonical `ai-status.json` contains standalone task `PH1GC-FIN-GOV-001` under `Codex2` / `in_progress`. The downstream repo-local deliverables remain represented by `WF-FIN-GOV-001-MATRIX`, `FIN-GOV-UAT-001`, and `WF-FIN-GOV-001-E2E`, all `done`; this sidecar stays `in_progress` because only the live-uplift acceptance item remains blocked.
+Current anchor after 2026-05-25 closeout revalidation: `cf5544eb` (`wip(PH1GC-FIN-GOV-001): anchor closeout sidecar current head`)
 Files changed:
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
@@ -31,7 +31,7 @@ Workflow family affected:
 Gate read before:
 - `PASS (static evidence)`
 Gate read after:
-- this branch keeps `WF-FIN-GOV-001` at `PASS (static evidence)` with an explicit non-claim for live uplift; `origin/dev` currently contains conflicting release-truth statements (`phase1-release-truth-sync-20260519.md` says row 14 is `PASS (live staging evidence)`, while `origin-dev-blueprint-alignment-audit-20260519.md` and the live-evidence sidecar still document missing live proof)
+- this branch keeps `WF-FIN-GOV-001` at `PASS (static evidence)` with an explicit non-claim for live uplift; `docs/03-runbooks/phase1-release-truth-sync-20260519.md`, `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`, `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`, and `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md` are now aligned on that conservative read
 Remaining non-claim:
 - No claim that `WF-FIN-GOV-001` is already `PASS (live staging evidence)`
 - No claim that every governance verification-body field is populated on the current reachable staging runtime
@@ -56,14 +56,14 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 
 - Acceptance items 1 and 2 are satisfied on `origin/dev`; both the spec and UAT docs are visible there.
 - Acceptance items 3, 4, and 6 remain satisfied on this branch via the spec/UAT/E2E/closeout evidence chain.
-- Acceptance item 5 is still unsatisfied: the governed staging rerun needed for `PASS (live staging evidence)` is still blocked by staging auth, and `origin/dev` release-truth is internally inconsistent about whether that uplift has already happened.
+- Acceptance item 5 is still unsatisfied: the governed staging rerun needed for `PASS (live staging evidence)` is still blocked by staging auth, so the branch and machine-truth artifacts intentionally keep the gate at `PASS (static evidence)`.
 
 ## 2026-05-25 Revalidation
 
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `git diff --check origin/dev...HEAD` passed.
-- `git rev-parse HEAD` = `6245e4cf0adee9ba17c5ff4656694968485bd998`.
+- `git rev-parse HEAD` = `cf5544eb2c6af6f4c064ad5b674ab6e98d180f2f`.
 - `git push -u origin codex2/ph1gc-fin-gov-001` remains up to date at the current anchor.
 
 ## Blocker
