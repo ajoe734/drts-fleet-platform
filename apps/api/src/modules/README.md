@@ -17,6 +17,7 @@ Planned module map:
 11. `billing-settlement`
 12. `reporting-filing`
 13. `audit-notification`
+14. `notification`
 
 Current rule:
 

@@ -499,6 +499,14 @@ export class BillingSettlementService implements OnModuleInit {
       message: `Invoice ${invoiceId} was generated for ${command.periodStart} to ${command.periodEnd}.`,
       status: "unread",
     });
+    this.auditNotificationService.emitUserNotification({
+      recipientRealm: "tenant",
+      tenantId: command.tenantId,
+      severity: "info",
+      eventType: "invoice.ready",
+      title: "Invoice ready",
+      message: `Invoice ${invoiceId} is ready for ${command.periodStart} to ${command.periodEnd}.`,
+    });
     this.recordAudit(
       {
         actorId: null,

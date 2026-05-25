@@ -4931,6 +4931,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         ].join(" "),
         status: "unread",
       });
+      this.auditNotificationService.emitUserNotification({
+        recipientRealm: "tenant",
+        tenantId: endpoint.tenantId,
+        severity: "warning",
+        eventType: "webhook.delivery_failed",
+        title: "Webhook delivery failed",
+        message: [
+          `Endpoint ${endpoint.webhookId} (${endpoint.url})`,
+          `failed ${result.attempt} attempts for ${delivery.eventType}`,
+          `and was disabled pending revalidation.`,
+        ].join(" "),
+      });
       this.recordTenantAudit({
         actorId: null,
         actorType: "system",
