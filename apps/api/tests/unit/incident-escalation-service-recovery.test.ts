@@ -276,6 +276,56 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
       ).toBe(true);
     });
 
+    it("does not allow extend to reactivate suppression after lifecycle lift", () => {
+      const { incidentService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Resolved suppression",
+        description: "Lifecycle must win over extension.",
+        category: "safety",
+        severity: "high",
+        reportedBy: "ops-user-001",
+      });
+
+      const originalExpiresAt = incident.driverMatchingSuppression!.expiresAt;
+      const extendedExpiresAt = new Date(
+        new Date(originalExpiresAt).getTime() + 2 * 60 * 60 * 1000,
+      ).toISOString();
+
+      expect(() =>
+        incidentService.updateIncident(
+          incident.incidentId,
+          {
+            status: "resolved",
+            matchingSuppression: {
+              action: "extend",
+              expiresAt: extendedExpiresAt,
+            },
+          },
+          undefined,
+          {
+            authMode: "bootstrap_headers",
+            actorType: "ops_user",
+            actorId: "ops-manager-001",
+            realm: "ops",
+            tenantId: null,
+            roleFamilies: ["ops"],
+            roles: ["ops_manager"],
+            scopes: [],
+            requestId: null,
+          },
+        ),
+      ).toThrowError(ApiRequestError);
+
+      const updated = incidentService.getIncident(incident.incidentId);
+      expect(updated.status).toBe("open");
+      expect(updated.driverMatchingSuppression!.active).toBe(true);
+      expect(updated.driverMatchingSuppression!.liftedAt).toBeNull();
+      expect(updated.driverMatchingSuppression!.expiresAt).toBe(
+        originalExpiresAt,
+      );
+    });
+
     it("builds incident list/detail read models with refresh, health, and available actions", () => {
       const { incidentService, auditNotificationService } = createServices();
 
@@ -324,9 +374,9 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
       expect(
         detail.auditLogs.some((log) => log.resourceId === incident.incidentId),
       ).toBe(true);
-      expect(auditNotificationService.getAuditLogsSnapshot().length).toBeGreaterThan(
-        0,
-      );
+      expect(
+        auditNotificationService.getAuditLogsSnapshot().length,
+      ).toBeGreaterThan(0);
     });
   });
 
