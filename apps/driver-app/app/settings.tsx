@@ -65,7 +65,6 @@ import {
 
 const THEME = driverCanvasTheme;
 const SETTINGS_REFRESH_TIER: RefreshTier = "manual";
-const DRIVER_CROSS_APP_LINKS: CrossAppResourceLink[] = [];
 
 type PlatformAuthMechanism =
   | "external_browser_oauth"
@@ -96,12 +95,12 @@ type BindingActionDescriptor = ResourceActionDescriptor & {
 type PlatformBindingRow = {
   platformCode: PlatformCode;
   displayName: string;
-  record: PlatformPresenceRecord | null;
+  record: RuntimePlatformPresenceRecord | null;
   adapterStatus: PlatformPresenceAdapterStatusRecord | null;
   assessment: PlatformHealthAssessment | null;
   authMechanism: PlatformAuthMechanism;
-  driverSelfServiceBinding: boolean;
-  autoAcceptAllowed: boolean;
+  driverSelfServiceBinding: boolean | null;
+  autoAcceptAllowed: boolean | null;
   availableActions: BindingActionDescriptor[];
   accountDisplay: string;
   statusLabel: string;
@@ -111,6 +110,48 @@ type PlatformBindingRow = {
   requiresAttention: boolean;
   isBound: boolean;
   isEligible: boolean;
+};
+
+type RuntimePlatformPresenceRecord = PlatformPresenceRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  authMechanism?: PlatformAuthMechanism;
+  driverSelfServiceBinding?: boolean;
+  autoAcceptAllowed?: boolean;
+};
+
+type RuntimePlatformPresenceSummary = PlatformPresenceSummary & {
+  crossAppLinks?: CrossAppResourceLink[];
+};
+
+const BINDING_ACTION_UI: Record<
+  string,
+  Pick<BindingActionDescriptor, "key" | "label" | "icon">
+> = {
+  bind_platform_account: {
+    key: "bind",
+    label: "綁定",
+    icon: "add-circle-outline",
+  },
+  unbind_platform_account: {
+    key: "unbind",
+    label: "解除綁定",
+    icon: "unlink-outline",
+  },
+  reauth_platform_account: {
+    key: "reauth",
+    label: "重新授權",
+    icon: "refresh-outline",
+  },
+  contact_ops_for_reauth: {
+    key: "contact_ops",
+    label: "聯絡派車台",
+    icon: "call-outline",
+  },
+  view_platform_presence: {
+    key: "open_presence",
+    label: "平台狀態",
+    icon: "open-outline",
+  },
 };
 
 function toErrorMessage(error: unknown): string {
@@ -247,6 +288,31 @@ function getDisabledReasonLabel(code?: string): string {
   }
 }
 
+function getBindingActions(
+  availableActions: ResourceActionDescriptor[] | undefined,
+): BindingActionDescriptor[] {
+  if (!availableActions?.length) {
+    return [];
+  }
+
+  return availableActions.flatMap((action) => {
+    const ui = BINDING_ACTION_UI[action.action];
+    if (!ui) {
+      return [];
+    }
+    return [{ ...action, ...ui }];
+  });
+}
+
+function getBooleanFlag(
+  value: boolean | null | undefined,
+): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return null;
+}
+
 function getPresenceStatusCopy(
   record: PlatformPresenceRecord | null,
   assessment: PlatformHealthAssessment | null,
@@ -301,78 +367,11 @@ function getPresenceStatusCopy(
   };
 }
 
-function buildBindingActions(
-  row: Omit<PlatformBindingRow, "availableActions">,
-): BindingActionDescriptor[] {
-  const actions: BindingActionDescriptor[] = [
-    {
-      key: "open_presence",
-      action: "view_platform_presence",
-      label: "平台狀態",
-      icon: "open-outline",
-      enabled: true,
-      riskLevel: "low",
-    },
-  ];
-
-  if (!row.isBound) {
-    actions.unshift({
-      key: "bind",
-      action: "bind_platform_account",
-      label: "綁定",
-      icon: "add-circle-outline",
-      enabled: row.driverSelfServiceBinding,
-      disabledReasonCode: row.driverSelfServiceBinding
-        ? undefined
-        : "driver_self_service_binding_disabled",
-      riskLevel: "medium",
-    });
-    return actions;
-  }
-
-  if (row.record?.reauthRequired) {
-    if (row.authMechanism === "ops_managed") {
-      actions.unshift({
-        key: "contact_ops",
-        action: "contact_ops_for_reauth",
-        label: "聯絡派車台",
-        icon: "call-outline",
-        enabled: true,
-        riskLevel: "medium",
-      });
-    } else {
-      actions.unshift({
-        key: "reauth",
-        action: "reauth_platform_account",
-        label: "重新授權",
-        icon: getMechanismIcon(row.authMechanism),
-        enabled: true,
-        riskLevel: "medium",
-      });
-    }
-  }
-
-  actions.push({
-    key: "unbind",
-    action: "unbind_platform_account",
-    label: "解除綁定",
-    icon: "unlink-outline",
-    enabled: row.driverSelfServiceBinding,
-    disabledReasonCode: row.driverSelfServiceBinding
-      ? undefined
-      : "driver_self_service_binding_disabled",
-    requiresReason: true,
-    riskLevel: "high",
-  });
-
-  return actions;
-}
-
 function derivePlatformRows(
-  summary: PlatformPresenceSummary | null,
+  summary: RuntimePlatformPresenceSummary | null,
 ): PlatformBindingRow[] {
   const adapterMap = new Map<PlatformCode, PlatformPresenceAdapterStatusRecord>();
-  const presenceMap = new Map<PlatformCode, PlatformPresenceRecord>();
+  const presenceMap = new Map<PlatformCode, RuntimePlatformPresenceRecord>();
 
   summary?.adapterStatuses?.forEach((status) => {
     adapterMap.set(status.platformCode, status);
@@ -387,12 +386,14 @@ function derivePlatformRows(
     const assessment = record
       ? assessPlatformHealth(record, adapterStatus)
       : null;
-    const authMechanism = getAuthMechanism(platformCode);
-    const driverSelfServiceBinding =
-      platformCode !== "indriver" && platformCode !== "forwarder_sandbox";
-    const autoAcceptAllowed = platformCode === "forwarder_sandbox";
+    const availableActions = getBindingActions(record?.availableActions);
+    const authMechanism = record?.authMechanism ?? getAuthMechanism(platformCode);
+    const driverSelfServiceBinding = getBooleanFlag(
+      record?.driverSelfServiceBinding,
+    );
+    const autoAcceptAllowed = getBooleanFlag(record?.autoAcceptAllowed);
     const statusCopy = getPresenceStatusCopy(record, assessment);
-    const rowBase = {
+    return {
       platformCode,
       displayName: PLATFORM_CODE_REGISTRY[platformCode].displayName,
       record,
@@ -419,11 +420,7 @@ function derivePlatformRows(
         assessment?.statusTone === "danger",
       isBound: Boolean(record?.accountId),
       isEligible: record?.eligibility !== "ineligible",
-    };
-
-    return {
-      ...rowBase,
-      availableActions: buildBindingActions(rowBase),
+      availableActions,
     };
   }).sort((left, right) => {
     const attentionDelta =
@@ -588,10 +585,12 @@ function BindingEmptyState({
   reason,
   onRetry,
   onOpenPresence,
+  onClearFilter,
 }: {
   reason: EmptyReason;
   onRetry: () => void;
   onOpenPresence: () => void;
+  onClearFilter: () => void;
 }) {
   const config = {
     no_data: {
@@ -647,8 +646,8 @@ function BindingEmptyState({
       icon: "funnel-outline" as const,
       title: "這個篩選條件沒有結果",
       body: "目前沒有符合篩選條件的平台，可以切回全部平台檢視。",
-      actionLabel: "重新整理",
-      action: onRetry,
+      actionLabel: "查看全部",
+      action: onClearFilter,
     },
   }[reason];
 
@@ -733,7 +732,7 @@ export default function SettingsScreen() {
     DEFAULT_PROFILE_VALUES,
   );
   const [presenceSummary, setPresenceSummary] =
-    useState<PlatformPresenceSummary | null>(null);
+    useState<RuntimePlatformPresenceSummary | null>(null);
   const [bindingFilter, setBindingFilter] = useState<BindingFilter>("all");
   const [busyPlatform, setBusyPlatform] = useState<PlatformCode | null>(null);
   const [unbindPlatform, setUnbindPlatform] = useState<PlatformCode | null>(null);
@@ -811,7 +810,7 @@ export default function SettingsScreen() {
 
     if (presenceResult.status === "fulfilled") {
       hadSuccess = true;
-      setPresenceSummary(presenceResult.value as PlatformPresenceSummary);
+      setPresenceSummary(presenceResult.value as RuntimePlatformPresenceSummary);
       setPresenceError(null);
     } else {
       const message = toErrorMessage(presenceResult.reason);
@@ -886,7 +885,12 @@ export default function SettingsScreen() {
       case "attention":
         return platformRows.filter((row) => row.requiresAttention);
       case "available":
-        return platformRows.filter((row) => !row.isBound && row.driverSelfServiceBinding);
+        return platformRows.filter((row) =>
+          row.availableActions.some(
+            (action) =>
+              action.action === "bind_platform_account" && action.enabled,
+          ),
+        );
       default:
         return platformRows;
     }
@@ -907,8 +911,16 @@ export default function SettingsScreen() {
     (row) => row.requiresAttention,
   ).length;
   const selfBindableCount = platformRows.filter(
-    (row) => !row.isBound && row.driverSelfServiceBinding,
+    (row) =>
+      row.availableActions.some(
+        (action) =>
+          action.action === "bind_platform_account" && action.enabled,
+      ),
   ).length;
+  const autoAcceptPlatforms = platformRows.filter(
+    (row) => row.autoAcceptAllowed === true,
+  );
+  const crossAppLinks = presenceSummary?.crossAppLinks ?? [];
   const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
   const identitySummary = [
     driverId ? `ID ${driverId}` : null,
@@ -1211,8 +1223,8 @@ export default function SettingsScreen() {
           theme={THEME}
           label="可自助綁定"
           value={String(selfBindableCount)}
-          sub="driverSelfServiceBinding"
-          hint={`cross-app: ${DRIVER_CROSS_APP_LINKS.length}`}
+          sub="bind action enabled"
+          hint={`cross-app: ${crossAppLinks.length}`}
         />
       </View>
 
@@ -1255,7 +1267,11 @@ export default function SettingsScreen() {
         tone="info"
         icon={<Ionicons name="git-branch-outline" size={18} color={THEME.info} />}
         title="Deep Link 邊界"
-        body="Driver App Phase 1 不提供跨 App deep link。平台相關操作只會留在本 App，必要時導向平台頁或提示聯絡派車台。"
+        body={
+          crossAppLinks.length === 0
+            ? "Driver App Phase 1 不提供跨 App deep link。平台相關操作只會留在本 App，必要時導向平台頁或提示聯絡派車台。"
+            : `runtime 提供 ${crossAppLinks.length} 個跨 App deep link；目前設定頁僅顯示數量並維持本 App 導覽。`
+        }
       />
 
       <Card
@@ -1393,20 +1409,34 @@ export default function SettingsScreen() {
 
         <View style={styles.preferenceRow}>
           <View style={styles.preferenceCopy}>
-            <Text style={styles.preferenceLabel}>自動接單 · 自營</Text>
+            <Text style={styles.preferenceLabel}>自動接單 · 平台別</Text>
             <Text style={styles.preferenceHint}>
-              Phase 1 不允許全域 auto-accept，只允許自營策略切換
+              Phase 1 不允許全域 auto-accept，只能由支援平台提供各自切換
             </Text>
           </View>
-          <Switch
-            value={settingsValues.autoAcceptEnabled}
-            onValueChange={(value) =>
-              updateSettings({ autoAcceptEnabled: value })
-            }
-            disabled={!settingsLoaded || saving}
-            trackColor={{ false: THEME.borderStrong, true: THEME.accentHi }}
-            thumbColor={settingsValues.autoAcceptEnabled ? THEME.accent : "#fff"}
-          />
+        </View>
+        <View style={styles.autoAcceptList}>
+          {autoAcceptPlatforms.length > 0 ? (
+            autoAcceptPlatforms.map((row) => (
+              <View key={`auto-accept-${row.platformCode}`} style={styles.autoAcceptRow}>
+                <View style={styles.autoAcceptCopy}>
+                  <Text style={styles.autoAcceptTitle}>{row.displayName}</Text>
+                  <Text style={styles.autoAcceptHint}>
+                    {row.record?.accountId
+                      ? "平台支援 auto-accept；待 runtime preference contract 提供實際切換狀態。"
+                      : "平台支援 auto-accept；需先完成綁定後才可設定。"}
+                  </Text>
+                </View>
+                <Pill theme={THEME} tone={row.record?.accountId ? "info" : "neutral"}>
+                  {row.record?.accountId ? "supported" : "bind first"}
+                </Pill>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.preferenceHint}>
+              目前 runtime 未標示任何 `autoAcceptAllowed=true` 的平台。
+            </Text>
+          )}
         </View>
       </Card>
 
@@ -1449,6 +1479,7 @@ export default function SettingsScreen() {
             reason={bindingEmptyReason}
             onRetry={() => void handleRefresh()}
             onOpenPresence={() => router.push("/platform-presence")}
+            onClearFilter={() => setBindingFilter("all")}
           />
         ) : (
           <View style={styles.bindingList}>
@@ -1484,9 +1515,11 @@ export default function SettingsScreen() {
                         </Text>
                         <Text style={styles.bindingDivider}>·</Text>
                         <Text style={styles.bindingMechanismText}>
-                          {row.driverSelfServiceBinding
-                            ? "driverSelfServiceBinding=true"
-                            : "driverSelfServiceBinding=false"}
+                          {row.driverSelfServiceBinding == null
+                            ? "driverSelfServiceBinding=runtime-missing"
+                            : row.driverSelfServiceBinding
+                              ? "driverSelfServiceBinding=true"
+                              : "driverSelfServiceBinding=false"}
                         </Text>
                       </View>
                       <Text style={styles.bindingHint}>{row.hint}</Text>
@@ -1506,16 +1539,22 @@ export default function SettingsScreen() {
                     </View>
                   </View>
 
-                  <View style={styles.bindingActionsRow}>
-                    {row.availableActions.map((action) => (
-                      <BindingActionButton
-                        key={`${row.platformCode}-${action.key}`}
-                        action={action}
-                        busy={isBusy && action.key !== "unbind"}
-                        onPress={() => void handlePlatformAction(row, action)}
-                      />
-                    ))}
-                  </View>
+                  {row.availableActions.length > 0 ? (
+                    <View style={styles.bindingActionsRow}>
+                      {row.availableActions.map((action) => (
+                        <BindingActionButton
+                          key={`${row.platformCode}-${action.key}`}
+                          action={action}
+                          busy={isBusy && action.key !== "unbind"}
+                          onPress={() => void handlePlatformAction(row, action)}
+                        />
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={styles.bindingNoActions}>
+                      runtime 未提供 `availableActions`，此卡片目前只顯示狀態，不自行推導 CTA。
+                    </Text>
+                  )}
 
                   {isPendingUnbind ? (
                     <View style={styles.unbindBox}>
@@ -1721,6 +1760,31 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 11,
   },
+  autoAcceptList: {
+    gap: 8,
+  },
+  autoAcceptRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingTop: 2,
+  },
+  autoAcceptCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  autoAcceptTitle: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  autoAcceptHint: {
+    color: THEME.textDim,
+    fontFamily: THEME.fontFamily,
+    fontSize: 11,
+  },
   segmentWrap: {
     flexDirection: "row",
     gap: 8,
@@ -1858,6 +1922,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  bindingNoActions: {
+    color: THEME.textDim,
+    fontFamily: THEME.fontFamily,
+    fontSize: 11,
   },
   bindingActionWrap: {
     gap: 4,
