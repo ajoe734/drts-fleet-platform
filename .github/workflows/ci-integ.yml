@@ -18,6 +18,11 @@ on:
         description: 'Branch or commit SHA to run against'
         required: false
         default: 'dev'
+      direct_api_origin:
+        description: 'Optional direct Cloud Run API origin override (preferred over repo variable for one-off staging E2E-010 reruns)'
+        required: false
+        default: ''
+        type: string
       run_staging_e2e_010:
         description: 'Also run protected staging E2E-010 with WIF/IAP auth'
         required: false
@@ -127,7 +132,8 @@ jobs:
       DEV_WIF_PROVIDER_VALUE: ${{ secrets.DEV_WIF_PROVIDER }}
       SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
       CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
-      DIRECT_API_ORIGIN: ${{ vars.STAGING_DIRECT_API_ORIGIN || '' }}
+      DIRECT_API_ORIGIN_INPUT: ${{ inputs.direct_api_origin || '' }}
+      DIRECT_API_ORIGIN_VAR: ${{ vars.STAGING_DIRECT_API_ORIGIN || '' }}
       IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
     steps:
       - uses: actions/checkout@v4
@@ -186,22 +192,28 @@ jobs:
           set -euo pipefail
 
           api_service="${API_SERVICE:-drts-api}"
-          direct_override="${DIRECT_API_ORIGIN:-}"
+          direct_input="${DIRECT_API_ORIGIN_INPUT:-}"
+          direct_var="${DIRECT_API_ORIGIN_VAR:-}"
           stderr_path="${RUNNER_TEMP}/e2e-010-direct-api-resolve.stderr.txt"
 
           echo "service=${api_service}" >> "$GITHUB_OUTPUT"
           echo "stderr_path=${stderr_path}" >> "$GITHUB_OUTPUT"
 
-          if [[ -n "${direct_override}" ]]; then
-            api_url="${direct_override}"
-            echo "source=override" >> "$GITHUB_OUTPUT"
+          if [[ -n "${direct_input}" ]]; then
+            api_url="${direct_input}"
+            echo "source=dispatch_input" >> "$GITHUB_OUTPUT"
+            echo "url=${api_url}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Using workflow_dispatch input direct_api_origin for direct Cloud Run API origin: ${api_url}"
+          elif [[ -n "${direct_var}" ]]; then
+            api_url="${direct_var}"
+            echo "source=repo_variable" >> "$GITHUB_OUTPUT"
             echo "url=${api_url}" >> "$GITHUB_OUTPUT"
             echo "::notice::Using vars.STAGING_DIRECT_API_ORIGIN override for direct Cloud Run API origin: ${api_url}"
           elif ! command -v gcloud >/dev/null 2>&1; then
             : >"${stderr_path}"
             {
               echo "gcloud is unavailable on this runner."
-              echo "Provide vars.STAGING_DIRECT_API_ORIGIN to enable the direct Cloud Run fallback without Cloud Run describe access."
+              echo "Provide workflow_dispatch input direct_api_origin or vars.STAGING_DIRECT_API_ORIGIN to enable the direct Cloud Run fallback without Cloud Run describe access."
             } >"${stderr_path}"
             echo "source=unavailable" >> "$GITHUB_OUTPUT"
             echo "url=" >> "$GITHUB_OUTPUT"
