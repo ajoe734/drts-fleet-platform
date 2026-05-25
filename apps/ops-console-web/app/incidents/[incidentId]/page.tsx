@@ -19,11 +19,9 @@ import {
   CanvasField as Field,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasShell as Shell,
   CanvasIcon,
   Timeline,
   buildCanvasTheme,
-  type CanvasShellNavItem,
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -219,100 +217,6 @@ function getTenantLabel(order: OwnedOrderRecord | null) {
     order.partnerId ??
     order.orderSource
   );
-}
-
-function buildShellNav(locale: Locale): CanvasShellNavItem[] {
-  return [
-    {
-      divider: locale === "en" ? "Workspaces" : "工作面",
-    },
-    {
-      key: "dashboard",
-      href: "/dashboard",
-      icon: "dashboard",
-      label: t("nav.dashboard", locale),
-    },
-    {
-      divider: locale === "en" ? "Live Ops" : "即時派遣",
-    },
-    {
-      key: "dispatch",
-      href: "/dispatch",
-      icon: "dispatch",
-      label: t("nav.dispatch", locale),
-      matchPaths: ["/dispatch"],
-    },
-    {
-      key: "callcenter",
-      href: "/callcenter",
-      icon: "callcenter",
-      label: t("nav.callcenter", locale),
-    },
-    {
-      divider: locale === "en" ? "Casework" : "案件處理",
-    },
-    {
-      key: "complaints",
-      href: "/complaints",
-      icon: "complaints",
-      label: t("nav.complaints", locale),
-    },
-    {
-      key: "incidents",
-      href: "/incidents",
-      icon: "incidents",
-      label: t("nav.incidents", locale),
-      matchPaths: ["/incidents"],
-    },
-    {
-      divider: locale === "en" ? "Monitoring" : "營運監控",
-    },
-    {
-      key: "reports",
-      href: "/reports",
-      icon: "reports",
-      label: t("nav.reports", locale),
-    },
-    {
-      key: "revenue",
-      href: "/revenue",
-      icon: "revenue",
-      label: t("nav.revenue", locale),
-    },
-    {
-      key: "attendance",
-      href: "/attendance",
-      icon: "attendance",
-      label: t("nav.attendance", locale),
-    },
-    {
-      divider: locale === "en" ? "Registry" : "主資料",
-    },
-    {
-      key: "drivers",
-      href: "/drivers",
-      icon: "fleet",
-      label: t("nav.drivers", locale),
-    },
-    {
-      key: "vehicles",
-      href: "/vehicles",
-      icon: "vehicles",
-      label: t("nav.vehicles", locale),
-    },
-    {
-      key: "contracts",
-      href: "/contracts",
-      icon: "contracts",
-      label: t("nav.contracts", locale),
-    },
-    {
-      key: "feature-flags",
-      href: "/feature-flags",
-      icon: "flags",
-      label: t("nav.featureFlags", locale),
-    },
-  ];
 }
 
 function buildRelatedLink(
@@ -607,32 +511,8 @@ export default async function IncidentDetailPage({
     .join(" · ");
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 40,
-        background: theme.bg,
-      }}
-    >
-      <Shell
-        theme={theme}
-        nav={buildShellNav(locale)}
-        active="incidents"
-        currentPath={`/incidents/${incident.incidentId}`}
-        breadcrumb={[t("nav.incidents", locale), incident.incidentId]}
-        searchPlaceholder={
-          locale === "en"
-            ? "Search order, tenant, or driver..."
-            : "搜尋訂單、租戶或司機..."
-        }
-        brandLabel={t("app.name", locale)}
-        brandSubLabel={t("app.sub", locale)}
-        env={locale === "en" ? "staging" : "測試"}
-        versionLabel="OC"
-        avatarLabel="OC"
-      >
-        <PageHeader
+    <>
+      <PageHeader
           theme={theme}
           title={`${incident.incidentId} · ${incident.title}`}
           subtitle={[
@@ -815,7 +695,6 @@ export default async function IncidentDetailPage({
             </div>
           </div>
         </div>
-      </Shell>
-    </div>
+    </>
   );
 }

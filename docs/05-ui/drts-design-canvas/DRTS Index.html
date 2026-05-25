@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>DRTS · Design Index</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --bg: #0B1018; --ink: #fff; --muted: rgba(255,255,255,.62); --line: rgba(255,255,255,.08); --card: #141B2B; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  * { box-sizing: border-box; }
+  a { text-decoration: none; color: inherit; }
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 56px 32px 96px; }
+  .eyebrow { font-size: 11px; letter-spacing: .2em; color: var(--muted); font-weight: 600; text-transform: uppercase; }
+  .eyebrow code { font-family: "JetBrains Mono", monospace; background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 4px; font-size: 10.5px; }
+  h1 { font-size: 52px; line-height: 1.04; letter-spacing: -.025em; margin: 12px 0 18px; font-weight: 700; max-width: 920px; text-wrap: balance; }
+  .lede { font-size: 17px; color: var(--muted); max-width: 760px; line-height: 1.55; margin-bottom: 40px; }
+  .lede b { color: #fff; font-weight: 600; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 12px 28px; padding: 16px 20px; background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 14px; margin-bottom: 48px; font-size: 13px; }
+  .meta-row b { color: #fff; font-weight: 600; margin-right: 6px; font-family: "JetBrains Mono", monospace; }
+  .meta-row span { color: var(--muted); }
+  .section-h { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 48px 0 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 12px; }
+  .section-h em { font-style: normal; color: rgba(255,255,255,.3); font-family: "JetBrains Mono", monospace; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  .card { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 26px; position: relative; overflow: hidden; transition: transform .18s ease, border-color .18s ease; }
+  .card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,.2); }
+  .card .accent-strip { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); }
+  .card .num { font-size: 11px; font-family: "JetBrains Mono", monospace; color: var(--muted); margin-bottom: 14px; letter-spacing: .06em; }
+  .card h2 { font-size: 22px; font-weight: 700; margin: 0 0 6px; letter-spacing: -.01em; }
+  .card .tag { font-size: 11.5px; color: var(--accent); font-family: "JetBrains Mono", monospace; font-weight: 600; margin-bottom: 12px; }
+  .card p { font-size: 13.5px; color: var(--muted); line-height: 1.65; margin: 0 0 16px; max-width: 50ch; }
+  .card ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .card li { font-size: 11px; padding: 4px 8px; background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 5px; color: rgba(255,255,255,.7); font-family: "JetBrains Mono", monospace; }
+  .card .arrow { position: absolute; right: 22px; top: 24px; color: rgba(255,255,255,.3); transition: color .18s, transform .18s; }
+  .card:hover .arrow { color: var(--accent); transform: translate(2px, -2px); }
+  .twocol { grid-column: span 2; }
+  .single { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 880px) { .grid, .single { grid-template-columns: 1fr; } .twocol { grid-column: span 1; } h1 { font-size: 36px; } }
+  .footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 24px; font-size: 12px; color: var(--muted); }
+  .footer code { font-family: "JetBrains Mono", monospace; color: rgba(255,255,255,.85); }
+  .note { color: var(--muted); font-size: 12.5px; padding: 14px 16px; background: rgba(180,83,9,.08); border: 1px solid rgba(180,83,9,.3); border-radius: 10px; margin: 12px 0; }
+  .note b { color: #FCD34D; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">DRTS · Design Index · v0.6 (rebuilt 2026-05-25 against authority docs)</div>
+  <h1>多功能小客車計程車服務系統 — UI Design Index</h1>
+  <p class="lede">針對 <code>docs/05-ui/system-design-answers-all-apps-20260524.md</code> 與 4 份 packet 重建的視覺方案。完整覆蓋 4 個 surface · <b>75+ 畫面</b> · authority-aware 共享層 (availableActions / 6 EmptyReason / risk-classified confirmation / refresh tier / cross-actor audit / plaintext-once secret)。</p>
+
+  <div class="meta-row">
+    <span><b>狀態：</b>提案 / 可審視 (rebuild)</span>
+    <span><b>布局：</b>1440 × 900 桌面 + 412 × 915 / 360 × 800 行動</span>
+    <span><b>語系：</b>繁體中文 · raw_code 雙語並排</span>
+    <span><b>主題：</b>淺 / 深色 · compact / comfy 密度</span>
+    <span><b>字型：</b>Inter + Noto Sans TC + JetBrains Mono</span>
+  </div>
+
+  <!-- ──────────────────────────────────────────────── -->
+  <div class="section-h"><em>01</em> 駕駛工作面 · Operator-side (mobile)</div>
+  <div class="grid">
+    <a class="card twocol" href="Driver App.html" style="--accent: #7BC0FF;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">01 · DRIVER APP · packet DRV-DH-PKT-002</div>
+      <h2>Driver App</h2>
+      <div class="tag">10 routes · Android narrow + large · React Native (Expo)</div>
+      <p>從裝置啟用、cockpit、unified task inbox、trip (8 種狀態含 manual_fallback)、platform presence (4 reauth 機制 + eligibility)、earnings/shift/SOS 到 settings — 全部依 packet § 5 重建。</p>
+      <ul>
+        <li>one-primary-action /trip</li>
+        <li>capability flags CTA</li>
+        <li>press-and-hold 2s SOS</li>
+        <li>persistent SOS ack banner</li>
+        <li>4 reauth mechanisms</li>
+        <li>driver_not_eligible empty</li>
+        <li>zh-TW · raw_code 雙語</li>
+      </ul>
+    </a>
+  </div>
+
+  <!-- ──────────────────────────────────────────────── -->
+  <div class="section-h"><em>02</em> 內部控制台 · Internal consoles (desktop)</div>
+  <div class="grid">
+    <a class="card" href="Platform Admin.html" style="--accent: #A5B4FC;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">02 · PLATFORM ADMIN · packet ADM-DH-PKT-002</div>
+      <h2>平台治理控制平面</h2>
+      <div class="tag">indigo · 18 routes</div>
+      <p>租戶生命週期、合作夥伴 entry、車隊與法遵 (含 exclusivity + offboarding state machine)、計價發布、reimbursement 6 狀態 state machine、稽核 + legal hold + deletion exception。</p>
+      <ul>
+        <li>reimbursement state machine</li>
+        <li>audit legal hold</li>
+        <li>plaintext-once secret</li>
+        <li>multi-tab fleet/pricing/notices</li>
+        <li>feature-flags WRITE</li>
+      </ul>
+    </a>
+
+    <a class="card" href="Ops Console.html" style="--accent: #FCA5A5;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">03 · OPS CONSOLE · packet OPS-DH-PKT-002</div>
+      <h2>即時營運工作台</h2>
+      <div class="tag">coral · 20 routes</div>
+      <p>派遣 6 個 first-class 子看板 (Ready/Assigned/Exception/NoSupply/Governance/Forwarded)、客服中心一個 active session、客訴 + 事故 + SOS coordination、跨租戶審批佇列。</p>
+      <ul>
+        <li>multi-board /dispatch</li>
+        <li>one-session callcenter</li>
+        <li>3 個新 detail route</li>
+        <li>cross-tenant /approval-requests</li>
+        <li>backend-computed SLA</li>
+      </ul>
+    </a>
+
+    <a class="card" href="Tenant Console.html" style="--accent: #5EEAD4;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">04 · TENANT CONSOLE · packet TEN-DH-PKT-002</div>
+      <h2>租戶自助與整合管理</h2>
+      <div class="tag">teal · 20 routes (9 NEW) · YAMATO 範例</div>
+      <p>叫車管理 (含 accepted_pending command 狀態)、乘客 / 地址 / 成本中心、審批規則 dry-run、對帳單、整合就緒度 (aggregated endpoint)、API 金鑰 plaintext-once、webhook 真實 engine 或 not_provisioned、cross-actor 稽核。</p>
+      <ul>
+        <li>command pattern</li>
+        <li>cross-actor audit</li>
+        <li>aggregated readiness</li>
+        <li>soft deactivate</li>
+        <li>9 NEW routes</li>
+      </ul>
+    </a>
+
+    <a class="card" href="archive/README.md" style="--accent: #FCD34D;">
+      <div class="accent-strip"></div>
+      <div class="num">05 · PARTNER BOOKING (deferred)</div>
+      <h2>合作夥伴叫車漏斗</h2>
+      <div class="tag">amber · 已歸檔 · Q-TEN03</div>
+      <p>已從 tenant-console 拆出至 <code>apps/partner-booking-web</code>。等該 app 進入規劃時會寫新的 packet 並重做設計。舊 funnel (CTBC World Elite) 保留為 reference materials。</p>
+      <ul><li>archive/Partner Booking.html</li><li>archive/README.md</li></ul>
+    </a>
+  </div>
+
+  <div class="note">
+    <b>Phase 1 邊界：</b> WebSocket / unified shell / global cross-app search / 完整 partner booking app / AV runtime UI 均不在 Phase 1 — 已在 answers §9 列為 deferred。
+  </div>
+
+  <!-- ──────────────────────────────────────────────── -->
+  <div class="section-h"><em>03</em> Authority-aware 共享層 · Shared layer</div>
+  <div class="grid single">
+    <div class="card" style="--accent: #94A3B8; cursor: default;">
+      <div class="accent-strip"></div>
+      <div class="num">CHROME · Q-X11 / Q-X12</div>
+      <h2>Identity chip + API health footer</h2>
+      <p>Header chip <code>realm / env / tenant / actor</code> · sidebar 底部 <code>UiHealthEnvelope</code> 狀態 + lastCheckedAt · 頁面層級 degraded banner (Health-critical 才出現)。</p>
+    </div>
+    <div class="card" style="--accent: #94A3B8; cursor: default;">
+      <div class="accent-strip"></div>
+      <div class="num">ACTIONS · Q-X13 / Q-X09 / Q-X10</div>
+      <h2>availableActions + risk-classified confirm</h2>
+      <p>CTA enabled / disabled+reason / hidden — 全部由 backend descriptor 決定。low = toast / medium = modal / high = modal + reason · audit receipt 含 audit_id 與 cross-app deep link。</p>
+    </div>
+    <div class="card" style="--accent: #94A3B8; cursor: default;">
+      <div class="accent-strip"></div>
+      <div class="num">STATES · Q-X15 / Q-X01 / Q-X02</div>
+      <h2>6 EmptyReason · refresh tier · stale banner</h2>
+      <p>no_data / not_provisioned / fetch_failed / permission_denied / external_unavailable / filtered_empty 各自獨立 treatment · 7 refresh tier (T0–T6) 視覺化 · dataFreshness !== fresh 主動提示。</p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>DRTS Design · 提案 v0.6 · rebuilt against authority</span>
+    <code>4 surfaces · 75+ screens · 1 shared system</code>
+    <code>zh-TW · raw_code 雙語</code>
+    <span>所有 console 可 Tweaks 切換 dark / density</span>
+  </div>
+</div>
+</body>
+</html>
