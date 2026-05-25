@@ -11,7 +11,10 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
-import type { UpdateTenantRolloutGateStatusCommand } from "../tenant-rollout/tenant-rollout.types";
+import type {
+  TenantRolloutReasonCommand,
+  UpdateTenantRolloutGateStatusCommand,
+} from "../tenant-rollout/tenant-rollout.types";
 import { TenantsService } from "./tenants.service";
 import type { TenantSummary } from "./tenants.service";
 
@@ -91,6 +94,7 @@ export class TenantsController {
     const updated = this.tenants.setRolloutGateStatus(
       tenantId,
       body.gateStatus,
+      body.reason,
       requestId,
     );
     return toApiSuccessEnvelope(updated, requestId);
@@ -119,9 +123,28 @@ export class TenantsController {
   @Post("tenants/:tenantId/rollback-hold")
   rollbackHold(
     @Param("tenantId") tenantId: string,
+    @Body() body: TenantRolloutReasonCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setRollbackHold(tenantId, requestId);
+    const updated = this.tenants.setRollbackHold(
+      tenantId,
+      body?.reason,
+      requestId,
+    );
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("tenants/:tenantId/rollback-hold/resolve")
+  resolveRollbackHold(
+    @Param("tenantId") tenantId: string,
+    @Body() body: TenantRolloutReasonCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = this.tenants.resolveRollbackHold(
+      tenantId,
+      body?.reason,
+      requestId,
+    );
     return toApiSuccessEnvelope(updated, requestId);
   }
 

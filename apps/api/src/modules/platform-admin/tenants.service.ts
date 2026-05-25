@@ -553,16 +553,19 @@ export class TenantsService implements OnModuleInit {
   setRolloutGateStatus(
     tenantId: string,
     gateStatus: PlatformTenantGateStatus,
+    reason?: string | null,
     requestId?: string,
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const now = new Date().toISOString();
     const oldRollout = buildTenantRolloutAuditSummary(tenant.rollout);
+    const normalizedReason = this.normalizeNullableText(reason);
 
     tenant.rollout = transitionTenantRolloutGate(tenant.rollout, {
       gateStatus: this.normalizeGateStatus(gateStatus),
       occurredAt: now,
       actorLabel: "platform_admin",
+      notes: normalizedReason ?? undefined,
     });
     tenant.updatedAt = now;
 
@@ -580,7 +583,10 @@ export class TenantsService implements OnModuleInit {
         resourceType: "platform_tenant",
         resourceId: tenant.id,
         oldValuesSummary: oldRollout,
-        newValuesSummary: buildTenantRolloutAuditSummary(tenant.rollout),
+        newValuesSummary: {
+          ...buildTenantRolloutAuditSummary(tenant.rollout),
+          ...(normalizedReason ? { reason: normalizedReason } : {}),
+        },
       },
       requestId,
     );
@@ -588,14 +594,20 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  setRollbackHold(tenantId: string, requestId?: string): TenantSummary {
+  setRollbackHold(
+    tenantId: string,
+    reason?: string | null,
+    requestId?: string,
+  ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const oldStatus = tenant.status;
     const now = new Date().toISOString();
     const oldRollout = buildTenantRolloutAuditSummary(tenant.rollout);
+    const normalizedReason = this.normalizeNullableText(reason);
 
     tenant.status = "rollback_hold";
     tenant.rollout = transitionTenantRollbackHold(tenant.rollout, {
+      notes: normalizedReason ?? tenant.rollout.notes,
       occurredAt: now,
       actorLabel: "platform_admin",
     });
@@ -621,7 +633,70 @@ export class TenantsService implements OnModuleInit {
         },
         newValuesSummary: {
           status: "rollback_hold",
-          rollout: buildTenantRolloutAuditSummary(tenant.rollout),
+          rollout: {
+            ...buildTenantRolloutAuditSummary(tenant.rollout),
+            ...(normalizedReason ? { reason: normalizedReason } : {}),
+          },
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneTenant(tenant);
+  }
+
+  resolveRollbackHold(
+    tenantId: string,
+    reason?: string | null,
+    requestId?: string,
+  ): TenantSummary {
+    const tenant = this.requireTenant(tenantId);
+    if (tenant.status !== "rollback_hold") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_NOT_IN_ROLLBACK_HOLD",
+        "Tenant is not currently in rollback hold.",
+        { tenantId, status: tenant.status },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const oldStatus = tenant.status;
+    const oldRollout = buildTenantRolloutAuditSummary(tenant.rollout);
+    const normalizedReason = this.normalizeNullableText(reason);
+
+    tenant.status = "active";
+    tenant.rollout = transitionTenantRolloutStage(tenant.rollout, {
+      stage: "production",
+      notes: normalizedReason ?? tenant.rollout.notes,
+      occurredAt: now,
+      actorLabel: "platform_admin",
+    });
+    tenant.updatedAt = now;
+
+    this.persistChanges(
+      { platformTenants: [this.cloneTenant(tenant)] },
+      "resolve tenant rollback hold",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "resolve_tenant_rollback_hold",
+        resourceType: "platform_tenant",
+        resourceId: tenant.id,
+        oldValuesSummary: {
+          status: oldStatus,
+          rollout: oldRollout,
+        },
+        newValuesSummary: {
+          status: tenant.status,
+          rollout: {
+            ...buildTenantRolloutAuditSummary(tenant.rollout),
+            ...(normalizedReason ? { reason: normalizedReason } : {}),
+          },
         },
       },
       requestId,
@@ -638,8 +713,39 @@ export class TenantsService implements OnModuleInit {
     const tenant = this.requireTenant(tenantId);
     const oldRollout = buildTenantRolloutAuditSummary(tenant.rollout);
     const nextStage = this.normalizeRolloutStage(command.stage);
-
-    this.enforcePromotionGates(tenant, nextStage);
+    const promotionBlock = this.getPromotionBlock(tenant, nextStage);
+    if (promotionBlock) {
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "platform-admin",
+          actionName: "reject_platform_tenant_rollout_transition",
+          resourceType: "platform_tenant",
+          resourceId: tenant.id,
+          oldValuesSummary: oldRollout,
+          newValuesSummary: {
+            ...oldRollout,
+            attemptedStage: nextStage,
+            reasonCode: promotionBlock.reasonCode,
+            missing: promotionBlock.missing,
+          },
+        },
+        requestId,
+      );
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_PROMOTION_GATE_BLOCKED",
+        promotionBlock.message,
+        {
+          tenantId: tenant.id,
+          nextStage,
+          missing: promotionBlock.missing,
+          reasonCode: promotionBlock.reasonCode,
+        },
+      );
+    }
 
     tenant.updatedAt = new Date().toISOString();
     tenant.rollout = transitionTenantRolloutStage(tenant.rollout, {
@@ -705,17 +811,17 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  private enforcePromotionGates(
+  private getPromotionBlock(
     tenant: PlatformAdminTenantRecord,
     nextStage: PlatformTenantRolloutStage,
   ) {
     if (tenant.status === "rollback_hold") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "TENANT_IN_ROLLBACK_HOLD",
-        "Tenant is in rollback hold. Resolve the hold before promoting.",
-        { tenantId: tenant.id, status: tenant.status },
-      );
+      return {
+        reasonCode: "production_rollback_hold_active",
+        missing: ["rollback hold must be resolved"],
+        message:
+          "Cannot promote while rollback hold is active. Resolve the hold before promoting.",
+      };
     }
 
     const missing: string[] = [];
@@ -751,13 +857,14 @@ export class TenantsService implements OnModuleInit {
     }
 
     if (missing.length > 0) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "TENANT_PROMOTION_GATE_BLOCKED",
-        `Cannot promote to ${nextStage}: ${missing.join("; ")}.`,
-        { tenantId: tenant.id, nextStage, missing },
-      );
+      return {
+        reasonCode: "tenant_rollout_gate_not_satisfied",
+        missing,
+        message: `Cannot promote to ${nextStage}: ${missing.join("; ")}.`,
+      };
     }
+
+    return null;
   }
 
   private requireTenant(tenantId: string): PlatformAdminTenantRecord {
