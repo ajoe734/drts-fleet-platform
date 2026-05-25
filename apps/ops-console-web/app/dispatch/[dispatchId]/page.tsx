@@ -42,6 +42,7 @@ type DispatchDetailPageProps = {
   params: Promise<{
     dispatchId: string;
   }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 type RuntimeDecorated<T> = T & {
@@ -79,6 +80,13 @@ type TimelineEntry = {
   actor?: string | null;
 };
 
+type ActionRenderContext = {
+  baseHref: string;
+  scope: "candidate" | "dispatch" | "forwarded" | "empty_state";
+  resourceId?: string;
+  resourceLabel?: string;
+};
+
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: true,
@@ -114,6 +122,16 @@ const surfaceStackStyle = {
   gap: 16,
   alignContent: "start" as const,
 };
+
+const APP_ORIGIN_BY_TARGET: Record<CrossAppResourceLink["targetApp"], string> =
+  {
+    "ops-console":
+      process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003",
+    "platform-admin":
+      process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002",
+    "tenant-console":
+      process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3004",
+  };
 
 async function resolveOrFallback<T>(
   loader: () => Promise<T>,
@@ -692,37 +710,129 @@ function getTimelineTone(eventType: string): CanvasTone {
   return "info";
 }
 
-function actionTone(action: ResourceActionDescriptor): CanvasTone {
+function actionVariant(action: ResourceActionDescriptor) {
   if (!action.enabled) {
-    return "neutral";
+    return "ghost" as const;
   }
   if (action.riskLevel === "high") {
-    return "danger";
+    return "primary" as const;
   }
-  if (action.riskLevel === "medium") {
-    return "warn";
-  }
-  return "info";
+  return "secondary" as const;
 }
 
-function buildActionChip(
+function actionMetaLabel(locale: Locale, action: ResourceActionDescriptor) {
+  const risk = action.riskLevel.toUpperCase();
+  if (action.requiresReason) {
+    return locale === "zh" ? `${risk} · 需要原因` : `${risk} · reason`;
+  }
+  return risk;
+}
+
+function actionStyle(action: ResourceActionDescriptor) {
+  const variant = actionVariant(action);
+  const baseStyle = actionLinkStyle(variant);
+
+  if (!action.enabled) {
+    return {
+      ...baseStyle,
+      opacity: 0.52,
+      cursor: "not-allowed",
+    } as const;
+  }
+
+  if (action.riskLevel === "medium") {
+    return {
+      ...baseStyle,
+      border: `1px solid ${theme.warn}`,
+      color: theme.warn,
+    } as const;
+  }
+
+  return baseStyle;
+}
+
+function readSearchParam(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+
+  if (Array.isArray(value)) {
+    return value.find(
+      (candidate) => typeof candidate === "string" && candidate.trim(),
+    );
+  }
+
+  return undefined;
+}
+
+function buildActionHref(
+  context: ActionRenderContext,
+  action: ResourceActionDescriptor,
+) {
+  const params = new URLSearchParams();
+  params.set("action", action.action);
+  params.set("scope", context.scope);
+  if (context.resourceId) {
+    params.set("resourceId", context.resourceId);
+  }
+  if (context.resourceLabel) {
+    params.set("resourceLabel", context.resourceLabel);
+  }
+  return `${context.baseHref}?${params.toString()}`;
+}
+
+function renderActionAffordance(
   locale: Locale,
   action: ResourceActionDescriptor,
   key: string,
+  context?: ActionRenderContext,
 ) {
+  const content = (
+    <>
+      <span>{formatCode(locale, action.action)}</span>
+      <span style={{ fontSize: "10px", opacity: 0.82 }}>
+        {actionMetaLabel(locale, action)}
+      </span>
+    </>
+  );
+
+  const title =
+    !action.enabled && action.disabledReasonCode
+      ? formatCode(locale, action.disabledReasonCode)
+      : undefined;
+
+  if (action.enabled && context) {
+    return (
+      <Link
+        key={key}
+        href={buildActionHref(context, action)}
+        style={{
+          ...actionStyle(action),
+          flexDirection: "column",
+          alignItems: "flex-start",
+          lineHeight: 1.15,
+        }}
+        title={title}
+      >
+        {content}
+      </Link>
+    );
+  }
+
   return (
     <span
       key={key}
-      title={
-        !action.enabled && action.disabledReasonCode
-          ? formatCode(locale, action.disabledReasonCode)
-          : undefined
-      }
-      style={{ display: "inline-flex" }}
+      title={title}
+      style={{
+        ...actionStyle(action),
+        flexDirection: "column",
+        alignItems: "flex-start",
+        lineHeight: 1.15,
+      }}
     >
-      <Pill theme={theme} tone={actionTone(action)} dot={action.enabled}>
-        {`${formatCode(locale, action.action)}${action.requiresReason ? " · reason" : ""}`}
-      </Pill>
+      {content}
     </span>
   );
 }
@@ -731,6 +841,7 @@ function renderActionSection(
   locale: Locale,
   actions: ResourceActionDescriptor[],
   emptyCopy: string,
+  context?: ActionRenderContext,
 ) {
   if (actions.length === 0) {
     return (
@@ -745,9 +856,67 @@ function renderActionSection(
   return (
     <div style={actionRowStyle}>
       {actions.map((action, index) =>
-        buildActionChip(locale, action, `${action.action}-${index}`),
+        renderActionAffordance(
+          locale,
+          action,
+          `${action.action}-${index}`,
+          context,
+        ),
       )}
     </div>
+  );
+}
+
+function renderActionFocusBanner(
+  locale: Locale,
+  href: string,
+  action: ResourceActionDescriptor | null,
+  scope: string | undefined,
+  resourceLabel: string | undefined,
+) {
+  if (!action) {
+    return null;
+  }
+
+  return (
+    <Banner
+      theme={theme}
+      tone={
+        action.riskLevel === "high"
+          ? "danger"
+          : action.riskLevel === "medium"
+            ? "warn"
+            : "info"
+      }
+      icon={action.riskLevel === "high" ? "warn" : "clock"}
+      title={
+        locale === "zh"
+          ? `Action focus · ${formatCode(locale, action.action)}`
+          : `Action focus · ${formatCode(locale, action.action)}`
+      }
+      body={[
+        resourceLabel ? `${resourceLabel}` : null,
+        scope ? `scope=${scope}` : null,
+        actionMetaLabel(locale, action),
+        action.requiresReason
+          ? locale === "zh"
+            ? "依 spec 需 reason + audit receipt。"
+            : "Spec requires reason + audit receipt."
+          : locale === "zh"
+            ? "依 spec 執行後需提供 audit receipt。"
+            : "Spec requires an audit receipt after execution.",
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+      actions={
+        <div style={actionRowStyle}>
+          <Link href={href} style={actionLinkStyle("ghost")}>
+            <CanvasIcon name="arrow" size={12} />
+            <span>{locale === "zh" ? "清除 focus" : "Clear focus"}</span>
+          </Link>
+        </div>
+      }
+    />
   );
 }
 
@@ -845,6 +1014,27 @@ function renderRefreshBanner(
   );
 }
 
+function normalizeRoutePath(route: string) {
+  if (/^https?:\/\//.test(route)) {
+    return route;
+  }
+
+  return route.startsWith("/") ? route : `/${route}`;
+}
+
+function resolveCrossAppHref(link: CrossAppResourceLink) {
+  const route = normalizeRoutePath(link.route);
+  if (/^https?:\/\//.test(route)) {
+    return route;
+  }
+
+  if (link.targetApp === "ops-console") {
+    return route;
+  }
+
+  return new URL(route, APP_ORIGIN_BY_TARGET[link.targetApp]).toString();
+}
+
 function buildCrossAppLink(
   route: string,
   label: string,
@@ -862,11 +1052,12 @@ function buildCrossAppLink(
 }
 
 function renderCrossAppLink(link: CrossAppResourceLink) {
+  const href = resolveCrossAppHref(link);
   return (
     <a
-      href={link.route}
+      href={href}
       target={link.openMode === "new_tab" ? "_blank" : undefined}
-      rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
+      rel={link.openMode === "new_tab" ? "noreferrer noopener" : undefined}
       style={actionLinkStyle()}
     >
       <CanvasIcon name="ext" size={12} />
@@ -877,9 +1068,12 @@ function renderCrossAppLink(link: CrossAppResourceLink) {
 
 export default async function DispatchDetailPage({
   params,
+  searchParams,
 }: DispatchDetailPageProps) {
-  const [{ dispatchId }, locale, client] = await Promise.all([
+  const [{ dispatchId }, query, locale, client] = await Promise.all([
     params,
+    searchParams ??
+      Promise.resolve({} as Record<string, string | string[] | undefined>),
     getServerLocale(),
     getServerOpsClient(),
   ]);
@@ -941,6 +1135,10 @@ export default async function DispatchDetailPage({
   }
 
   const href = `/dispatch/${encodeURIComponent(dispatchId)}`;
+  const focusedActionId = readSearchParam(query.action);
+  const focusedScope = readSearchParam(query.scope);
+  const focusedResourceId = readSearchParam(query.resourceId);
+  const focusedResourceLabel = readSearchParam(query.resourceLabel);
   const jobsByOrderId = new Map(dispatchJobs.map((job) => [job.orderId, job]));
   const driverById = new Map(
     drivers.map((driver) => [driver.driverId, driver]),
@@ -1040,6 +1238,12 @@ export default async function DispatchDetailPage({
             locale === "zh"
               ? "此候選沒有可執行 action。"
               : "No actions are available for this candidate.",
+            {
+              baseHref: href,
+              scope: "candidate",
+              resourceId: candidate.driverId,
+              resourceLabel: driver?.name ?? candidate.driverId,
+            },
           ),
         };
       },
@@ -1248,6 +1452,15 @@ export default async function DispatchDetailPage({
           : "—",
       },
     ];
+    const focusActions = [
+      ...orderActions,
+      ...(emptyState?.nextAction ? [emptyState.nextAction] : []),
+      ...candidateEnvelope.items.flatMap((candidate) =>
+        readAvailableActions(candidate),
+      ),
+    ];
+    const focusedAction =
+      focusActions.find((action) => action.action === focusedActionId) ?? null;
 
     return (
       <>
@@ -1301,6 +1514,15 @@ export default async function DispatchDetailPage({
             locale === "zh"
               ? "工作項目主資料 freshness"
               : "Work item metadata freshness",
+          )}
+          {renderActionFocusBanner(
+            locale,
+            href,
+            focusedAction,
+            focusedScope,
+            focusedResourceLabel ??
+              focusedResourceId ??
+              (ownedRecord.orderNo || ownedRecord.orderId),
           )}
 
           <div
@@ -1368,10 +1590,17 @@ export default async function DispatchDetailPage({
                     actions={
                       emptyState?.nextAction ? (
                         <div style={actionRowStyle}>
-                          {buildActionChip(
+                          {renderActionAffordance(
                             locale,
                             emptyState.nextAction,
                             "empty-next",
+                            {
+                              baseHref: href,
+                              scope: "empty_state",
+                              resourceId: ownedRecord.orderId,
+                              resourceLabel:
+                                ownedRecord.orderNo || ownedRecord.orderId,
+                            },
                           )}
                         </div>
                       ) : undefined
@@ -1468,6 +1697,12 @@ export default async function DispatchDetailPage({
                   locale === "zh"
                     ? "此 work item 目前沒有 backend 暴露的 action descriptor。"
                     : "This work item currently has no backend-exposed action descriptors.",
+                  {
+                    baseHref: href,
+                    scope: "dispatch",
+                    resourceId: ownedRecord.orderId,
+                    resourceLabel: ownedRecord.orderNo || ownedRecord.orderId,
+                  },
                 )}
                 <div style={{ height: 12 }} />
                 <Field
@@ -1636,6 +1871,9 @@ export default async function DispatchDetailPage({
       forwardedOrder.reconciliationJob?.reconciliationJobId ??
       forwardedOrder.mirrorOrderId,
   );
+  const focusedForwardedAction =
+    forwardedActions.find((action) => action.action === focusedActionId) ??
+    null;
 
   const forwardedSummaryItems = [
     {
@@ -1775,6 +2013,15 @@ export default async function DispatchDetailPage({
           locale === "zh"
             ? "鏡像訂單主資料 freshness"
             : "Mirror-order metadata freshness",
+        )}
+        {renderActionFocusBanner(
+          locale,
+          href,
+          focusedForwardedAction,
+          focusedScope,
+          focusedResourceLabel ??
+            focusedResourceId ??
+            forwardedOrder.externalOrderId,
         )}
 
         {adapterHealth && adapterHealth.status !== "healthy" ? (
@@ -1984,6 +2231,14 @@ export default async function DispatchDetailPage({
                 locale === "zh"
                   ? "此 forwarded work item 目前沒有 backend action descriptor。"
                   : "This forwarded work item currently has no backend action descriptors.",
+                {
+                  baseHref: href,
+                  scope: "forwarded",
+                  resourceId: forwardedOrder.mirrorOrderId,
+                  resourceLabel:
+                    forwardedOrder.externalOrderId ||
+                    forwardedOrder.mirrorOrderId,
+                },
               )}
             </Card>
 
