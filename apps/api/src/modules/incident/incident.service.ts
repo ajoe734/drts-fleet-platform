@@ -257,15 +257,18 @@ export class IncidentService implements OnModuleInit {
   ) {
     const incident = this.require(incidentId);
 
-    const updated = { ...incident, updatedAt: new Date().toISOString() };
-    const timeline = this.getTimeline(incidentId);
+    const updated = {
+      ...this.clone(incident),
+      updatedAt: new Date().toISOString(),
+    };
+    const stagedTimeline = this.getTimeline(incidentId);
     const pendingTimelineEntries: IncidentTimelineEntry[] = [];
 
     if (command.status !== undefined) {
       this.assertValidStatus(command.status);
       updated.status = command.status;
       this.appendTimelineEntryTo(
-        timeline,
+        stagedTimeline,
         pendingTimelineEntries,
         incidentId,
         TIMELINE_ACTIONS.statusChanged,
@@ -280,7 +283,7 @@ export class IncidentService implements OnModuleInit {
           identity,
           "system",
           true,
-          timeline,
+          stagedTimeline,
           pendingTimelineEntries,
         );
       }
@@ -289,7 +292,7 @@ export class IncidentService implements OnModuleInit {
     if (command.assignedTo !== undefined) {
       updated.assignedTo = command.assignedTo;
       this.appendTimelineEntryTo(
-        timeline,
+        stagedTimeline,
         pendingTimelineEntries,
         incidentId,
         TIMELINE_ACTIONS.assigned,
@@ -305,7 +308,7 @@ export class IncidentService implements OnModuleInit {
       updated.severity = command.severity;
       if (oldSeverity !== command.severity) {
         this.appendTimelineEntryTo(
-          timeline,
+          stagedTimeline,
           pendingTimelineEntries,
           incidentId,
           TIMELINE_ACTIONS.severityEscalated,
@@ -332,7 +335,7 @@ export class IncidentService implements OnModuleInit {
       }
       updated.escalationTarget = command.escalationTarget;
       this.appendTimelineEntryTo(
-        timeline,
+        stagedTimeline,
         pendingTimelineEntries,
         incidentId,
         TIMELINE_ACTIONS.escalationTargetSet,
@@ -355,23 +358,23 @@ export class IncidentService implements OnModuleInit {
         identity,
         "ops_user",
         false,
-        timeline,
+        stagedTimeline,
         pendingTimelineEntries,
       );
     }
 
     this.replace(updated);
-    this.timelines.set(incidentId, timeline);
-    this.persist(
-      {
-        incidents: [updated],
-        timelines:
-          pendingTimelineEntries.length > 0
-            ? pendingTimelineEntries
-            : undefined,
-      },
-      "update_incident",
-    );
+    this.timelines.set(incidentId, stagedTimeline);
+    const persistenceChanges: {
+      incidents: IncidentRecord[];
+      timelines?: IncidentTimelineEntry[];
+    } = {
+      incidents: [updated],
+    };
+    if (pendingTimelineEntries.length > 0) {
+      persistenceChanges.timelines = pendingTimelineEntries;
+    }
+    this.persist(persistenceChanges, "update_incident");
     this.recordAudit(
       {
         actorId: null,
