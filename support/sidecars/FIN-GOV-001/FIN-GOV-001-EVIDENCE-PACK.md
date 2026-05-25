@@ -5,7 +5,7 @@
 **Current reviewer:** `Codex2`
 **Collected:** `2026-05-19 (UTC)`
 **Latest refresh:** `2026-05-25 (PH1GC-FIN-GOV-001 / Codex)`
-**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-25 governed staging rerun (run 26382603169 on current pushed head 45ad7d22, staging job 77654656937) is still blocked after exhausting repo-local bearer fallbacks, but it materially narrowed the direct-origin branch. The new workflow_dispatch input path was exercised successfully: GitHub Actions accepted `direct_api_origin=https://drts-api-kdhu6wzufa-uc.a.run.app`, skipped Cloud Run discovery, minted the dev direct token, and reached the direct host, which now returns HTML 404 Page not found for `/api/health` instead of failing earlier on `gcloud run services describe`. The remaining bearer failures are unchanged: auth_token -> IAP 401 Invalid IAP credentials, staging deployer access/id token -> iam.serviceAccounts.getAccessToken / getOpenIdToken denied, shared fallback -> invalid_target, dev fallback IAP -> 403 Access denied. WF-FIN-GOV-001 therefore remains PASS (static evidence) only. A 2026-05-25 GitHub Actions inventory still shows no successful workflow_dispatch staging rerun for any PH1GC-FIN-GOV-001 branch family; the newest successful CI run is still push run 26380270976 on dev (2026-05-25T02:36Z), and it did not execute staging-e2e-010.`
+**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-25 governed staging rerun (run 26382603169 on current pushed head 45ad7d22, staging job 77654656937) is still blocked after exhausting repo-local bearer fallbacks, but it materially narrowed the direct-origin branch. The new workflow_dispatch input path was exercised successfully: GitHub Actions accepted `direct_api_origin=https://drts-api-kdhu6wzufa-uc.a.run.app`, skipped Cloud Run discovery, minted the dev direct token, and reached the direct host, which now returns HTML 404 Page not found for `/api/health` instead of failing earlier on `gcloud run services describe`. Source review on the same branch confirms the API serves both `/health` and `/api/health`, so this 404 is not explained by a stale health-path assumption. The remaining bearer failures are unchanged: auth_token -> IAP 401 Invalid IAP credentials, staging deployer access/id token -> iam.serviceAccounts.getAccessToken / getOpenIdToken denied, shared fallback -> invalid_target, dev fallback IAP -> 403 Access denied. WF-FIN-GOV-001 therefore remains PASS (static evidence) only. A refreshed 2026-05-25 GitHub Actions inventory still shows no successful workflow_dispatch staging rerun for any PH1GC-FIN-GOV-001 branch family; the newest successful CI run is now push run 26383499009 on dev (created 2026-05-25T04:38Z, updated 2026-05-25T04:40Z), and it still did not execute staging-e2e-010.`
 
 ---
 
@@ -107,10 +107,11 @@ Additional 2026-05-25 control-plane finding:
 
 - `docs/03-runbooks/phase1-release-truth-sync-20260519.md` on `origin/dev`
   now states `WF-FIN-GOV-001 ↔ matrix row 14  (gate read: PASS (live staging
-  evidence))`, but the GitHub Actions inventory as of `2026-05-25T02:38Z`
-  still shows no successful `workflow_dispatch` rerun for any
-  `codex/ph1gc-fin-gov-001*` branch. The newest successful CI run is dev push
-  run `26380270976`, and it still did not launch `staging-e2e-010`. Treat
+  evidence))`, but the refreshed GitHub Actions inventory still shows no
+  successful `workflow_dispatch` rerun for any
+  `codex/ph1gc-fin-gov-001*` branch. The newest successful CI run is now dev
+  push run `26383499009` (created `2026-05-25T04:38Z`, updated
+  `2026-05-25T04:40Z`), and it still did not launch `staging-e2e-010`. Treat
   that release-truth-sync line as a stale over-claim until a green governed
   staging rerun exists and the release-gate matrix is updated from the same
   evidence.
@@ -207,6 +208,10 @@ Interpretation:
 
 - the historical Cloud Run origin documented in older evidence packs is no
   longer a usable direct fallback for this session
+- source review on `2026-05-25` confirms the API explicitly serves both
+  `/health` and `/api/health` (`apps/api/src/main.ts`,
+  `apps/api/src/health/health.controller.ts`), so the `404 Page not found`
+  response is not a route-prefix mismatch
 - the live collection path is effectively gated on the protected staging host
   plus valid bearer credentials
 
@@ -289,7 +294,7 @@ Observed results:
 - a fresh 2026-05-25 rerun on the actual current pushed head, `26379690350` on `origin/codex/ph1gc-fin-gov-001-rebased-20260524@f9f2a0c8` (staging job `77646459820`), reconfirmed the same external gate after the actions-inventory truth-sync anchor. Full-run conclusion again stayed `failure`; the job still produced only three probe artifacts (`e2e-010-iap-health-auth-token-body.txt`, `e2e-010-dev-id-token-health-body.txt`, `e2e-010-direct-api-resolve.stderr.txt`); `Resolve direct Cloud Run API origin` again warned that `gcloud run services describe drts-api` could not mint the required access token; the GitHub `auth_token` probe again returned `HTTP 401 Invalid IAP credentials: Unable to parse JWT`; `google-github-actions/auth@v2 token_format=access_token` again failed with `403 Permission 'iam.serviceAccounts.getAccessToken' denied`; `Mint primary IAP verification token` again failed with `403 Permission 'iam.serviceAccounts.getOpenIdToken' denied`; the shared fallback provider again failed with `invalid_target`; the dev fallback again reached IAP only to get `DRTS Fleet Platform: Access denied. For user github-actions-deployer@drts-dev-bobo-20260503.iam.gserviceaccount.com.`; and `DIRECT_API_ORIGIN` still remained empty in the fail-step env. `Syntax check E2E-010` and `Run E2E-010 against staging` were skipped again because `Fail when no staging bearer path works` still tripped before the shell could start.
 - a fresh 2026-05-25 rerun on the new current pushed head, `26382603169` on `origin/codex/ph1gc-fin-gov-001-rebased-20260525@45ad7d22` (staging job `77654656937`), exercised the new workflow_dispatch input override path directly. `Resolve direct Cloud Run API origin` used `direct_api_origin=https://drts-api-kdhu6wzufa-uc.a.run.app` instead of attempting `gcloud run services describe`; `Mint dev fallback direct Cloud Run token` and `Probe direct Cloud Run health with dev fallback token` both ran; and the downloaded `e2e-010-dev-direct-api-health-body.txt` now captures an HTML `404 Page not found` body from the historical `run.app` host. The rest of the blocker remained unchanged: `e2e-010-iap-health-auth-token-body.txt` still says `Invalid IAP credentials: Unable to parse JWT`; `e2e-010-dev-id-token-health-body.txt` still says `DRTS Fleet Platform: Access denied. For user github-actions-deployer@drts-dev-bobo-20260503.iam.gserviceaccount.com.`; the staging deployer access-token and ID-token paths still annotated `iam.serviceAccounts.getAccessToken` / `iam.serviceAccounts.getOpenIdToken` denial; the shared fallback provider still annotated `invalid_target`; and `Syntax check E2E-010` / `Run E2E-010 against staging` were still skipped because `Fail when no staging bearer path works` tripped first. This proves the direct-override wiring now works, and narrows the remaining direct branch to current URL freshness / invoker reachability rather than Cloud Run discovery.
 - the latest governed staging rerun is `26382603169` on `origin/codex/ph1gc-fin-gov-001-rebased-20260525@45ad7d22` (staging job `77654656937`). This rerun proves the blocker remains reproduced on the actual latest pushed head while also proving that the workflow_dispatch `direct_api_origin` override is live and reaches the historical `run.app` host.
-- a fresh `gh run list --limit 15` inventory captured at `2026-05-25T02:38Z` confirmed the same truth from the control-plane side: there is still no successful `workflow_dispatch` rerun for any `codex/ph1gc-fin-gov-001*` branch, and the newest successful CI run in the surrounding window is dev push run `26380270976`, which still ran only the standard lint/unit/typecheck/build/integration/orchestrator jobs without a `staging-e2e-010` job.
+- a refreshed `gh run list --workflow ci-integ.yml --limit 15` inventory captured after the next `dev` success confirms the same truth from the control-plane side: there is still no successful `workflow_dispatch` rerun for any `codex/ph1gc-fin-gov-001*` branch, and the newest successful CI run is now dev push run `26383499009` (created `2026-05-25T04:38Z`, updated `2026-05-25T04:40Z`), which still ran only the standard lint/unit/typecheck/build/integration/orchestrator jobs without a `staging-e2e-010` job.
 - no E2E console/evidence artifacts were produced because the workflow still failed before the shell could start
 
 Interpretation:
