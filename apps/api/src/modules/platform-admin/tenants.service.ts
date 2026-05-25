@@ -35,6 +35,11 @@ import {
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
+  createTenantRolloutState,
+  transitionTenantRolloutGate,
+  transitionTenantRolloutStage,
+} from "../tenant-rollout/tenant-rollout-state-machine";
+import {
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
 } from "./platform-admin.repository";
@@ -185,7 +190,7 @@ export class TenantsService implements OnModuleInit {
         input.integrationMode,
         input.sandboxBaseUrl,
       ),
-      rollout: this.createRolloutState(),
+      rollout: this.createRolloutState(now),
       createdAt: now,
       updatedAt: now,
     };
@@ -228,6 +233,7 @@ export class TenantsService implements OnModuleInit {
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const before = this.cloneTenant(tenant);
+    const now = new Date().toISOString();
 
     if (typeof command.name === "string") {
       tenant.name = this.requireNonBlank(command.name, "name");
@@ -351,20 +357,33 @@ export class TenantsService implements OnModuleInit {
     }
 
     if (command.rollout) {
+      if (command.rollout.sandboxStatus !== undefined) {
+        tenant.rollout = transitionTenantRolloutGate(tenant.rollout, {
+          gateStatus: this.normalizeGateStatus(command.rollout.sandboxStatus),
+          stage: "sandbox",
+          occurredAt: now,
+          actorLabel: "platform_admin",
+        });
+      }
+      if (command.rollout.pilotStatus !== undefined) {
+        tenant.rollout = transitionTenantRolloutGate(tenant.rollout, {
+          gateStatus: this.normalizeGateStatus(command.rollout.pilotStatus),
+          stage: "pilot",
+          occurredAt: now,
+          actorLabel: "platform_admin",
+        });
+      }
+      if (command.rollout.productionStatus !== undefined) {
+        tenant.rollout = transitionTenantRolloutGate(tenant.rollout, {
+          gateStatus: this.normalizeGateStatus(command.rollout.productionStatus),
+          stage: "production",
+          occurredAt: now,
+          actorLabel: "platform_admin",
+        });
+      }
+
       tenant.rollout = {
         ...tenant.rollout,
-        sandboxStatus:
-          command.rollout.sandboxStatus !== undefined
-            ? this.normalizeGateStatus(command.rollout.sandboxStatus)
-            : tenant.rollout.sandboxStatus,
-        pilotStatus:
-          command.rollout.pilotStatus !== undefined
-            ? this.normalizeGateStatus(command.rollout.pilotStatus)
-            : tenant.rollout.pilotStatus,
-        productionStatus:
-          command.rollout.productionStatus !== undefined
-            ? this.normalizeGateStatus(command.rollout.productionStatus)
-            : tenant.rollout.productionStatus,
         cutoverOwner:
           command.rollout.cutoverOwner !== undefined
             ? this.normalizeNullableText(command.rollout.cutoverOwner)
@@ -381,6 +400,8 @@ export class TenantsService implements OnModuleInit {
           command.rollout.lastPromotedAt !== undefined
             ? this.normalizeNullableText(command.rollout.lastPromotedAt)
             : tenant.rollout.lastPromotedAt,
+        lastUpdatedBy:
+          "platform_admin",
         notes:
           command.rollout.notes !== undefined
             ? this.normalizeNullableText(command.rollout.notes)
@@ -388,7 +409,7 @@ export class TenantsService implements OnModuleInit {
       };
     }
 
-    tenant.updatedAt = new Date().toISOString();
+    tenant.updatedAt = now;
     this.persistChanges(
       {
         platformTenants: [this.cloneTenant(tenant)],
@@ -527,7 +548,11 @@ export class TenantsService implements OnModuleInit {
     const now = new Date().toISOString();
 
     tenant.status = "rollback_hold";
-    tenant.rollout.productionStatus = "blocked";
+    tenant.rollout = transitionTenantRolloutGate(tenant.rollout, {
+      gateStatus: "blocked",
+      occurredAt: now,
+      actorLabel: "platform_admin",
+    });
     tenant.updatedAt = now;
 
     this.logger.log(`Tenant ${tenantId} placed in rollback_hold`);
@@ -567,27 +592,13 @@ export class TenantsService implements OnModuleInit {
 
     this.enforcePromotionGates(tenant, nextStage);
 
-    tenant.rollout.stage = nextStage;
-    tenant.rollout.lastPromotedAt = new Date().toISOString();
-    tenant.rollout.notes = this.coalesceNullableText(
-      command.notes,
-      tenant.rollout.notes,
-    );
-
-    if (nextStage === "sandbox") {
-      tenant.rollout.sandboxStatus = "approved";
-    }
-    if (nextStage === "pilot") {
-      tenant.rollout.sandboxStatus = "approved";
-      tenant.rollout.pilotStatus = "approved";
-    }
-    if (nextStage === "production") {
-      tenant.rollout.sandboxStatus = "approved";
-      tenant.rollout.pilotStatus = "approved";
-      tenant.rollout.productionStatus = "approved";
-    }
-
     tenant.updatedAt = new Date().toISOString();
+    tenant.rollout = transitionTenantRolloutStage(tenant.rollout, {
+      stage: nextStage,
+      notes: this.coalesceNullableText(command.notes, tenant.rollout.notes),
+      occurredAt: tenant.updatedAt,
+      actorLabel: "platform_admin",
+    });
     this.persistChanges(
       {
         platformTenants: [this.cloneTenant(tenant)],
@@ -745,6 +756,9 @@ export class TenantsService implements OnModuleInit {
         rollbackOwner: "Platform Operations",
         rollbackPrepared: true,
         lastPromotedAt: DEMO_CREATED_AT,
+        enteredStageAt: DEMO_CREATED_AT,
+        enteredGateAt: DEMO_CREATED_AT,
+        lastUpdatedBy: "platform_admin",
         notes:
           "Demo tenant already completed sandbox, pilot, and production promotion.",
       },
@@ -795,19 +809,8 @@ export class TenantsService implements OnModuleInit {
     };
   }
 
-  private createRolloutState(): PlatformTenantRolloutState {
-    return {
-      stage: "sandbox",
-      sandboxStatus: "ready",
-      pilotStatus: "pending",
-      productionStatus: "pending",
-      cutoverOwner: null,
-      rollbackOwner: null,
-      rollbackPrepared: false,
-      lastPromotedAt: null,
-      notes:
-        "Start in sandbox. Promote only after bootstrap defaults, billing baseline, notifications, and integration package are verified.",
-    };
+  private createRolloutState(now: string): PlatformTenantRolloutState {
+    return createTenantRolloutState(now);
   }
 
   private assertCodeAvailable(code: string) {

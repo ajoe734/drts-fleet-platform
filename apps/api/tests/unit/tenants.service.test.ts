@@ -77,6 +77,9 @@ describe("TenantsService", () => {
       pilotStatus: "pending",
       productionStatus: "pending",
       rollbackPrepared: false,
+      enteredStageAt: expect.any(String),
+      enteredGateAt: expect.any(String),
+      lastUpdatedBy: "platform_admin",
     });
     expect(platformAdminRepository.persistChanges).toHaveBeenCalledWith({
       platformTenants: [expect.objectContaining({ id: created.id })],
@@ -175,6 +178,9 @@ describe("TenantsService", () => {
       sandboxStatus: "approved",
       pilotStatus: "approved",
       productionStatus: "approved",
+      enteredStageAt: expect.any(String),
+      enteredGateAt: expect.any(String),
+      lastUpdatedBy: "platform_admin",
       notes: "Production cutover completed.",
     });
     expect(production.rollout.lastPromotedAt).toEqual(expect.any(String));
@@ -321,6 +327,8 @@ describe("TenantsService", () => {
 
     expect(held.status).toBe("rollback_hold");
     expect(held.rollout.productionStatus).toBe("blocked");
+    expect(held.rollout.enteredGateAt).toEqual(expect.any(String));
+    expect(held.rollout.lastUpdatedBy).toBe("platform_admin");
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ actionName: "set_tenant_rollback_hold" }),
     );
