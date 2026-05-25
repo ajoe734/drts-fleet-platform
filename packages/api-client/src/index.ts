@@ -26,8 +26,10 @@ import type {
   ClockOutCommand,
   CloseCallSessionCommand,
   ComplaintCaseRecord,
+  ComplaintCaseDetailReadModel,
+  ComplaintCaseListReadModel,
   ComplaintExportViewRecord,
-  ComplaintTimelineEntry,
+  ComplaintTimelineReadModel,
   CompleteCallbackTaskCommand,
   CreateDriverMasterCommand,
   CreateEvidenceDeletionExceptionCommand,
@@ -972,24 +974,24 @@ export class ApiClient {
 
   // ── Complaint ──
 
-  async listComplaints(): Promise<ComplaintCaseRecord[]> {
-    return this.getList<ComplaintCaseRecord>("/api/complaints");
+  async listComplaints(): Promise<ComplaintCaseListReadModel> {
+    return this.get<ComplaintCaseListReadModel>("/api/complaints");
   }
 
   async createComplaint(command: CreateComplaintCaseCommand) {
     return this.post<ComplaintCaseRecord>("/api/complaints", { body: command });
   }
 
-  async getComplaint(caseNo: string) {
-    return this.getItem<ComplaintCaseRecord>(
+  async getComplaint(caseNo: string): Promise<ComplaintCaseDetailReadModel> {
+    return this.get<ComplaintCaseDetailReadModel>(
       `/api/complaints/${encodeURIComponent(caseNo)}`,
     );
   }
 
   async getComplaintTimeline(
     caseNo: string,
-  ): Promise<ComplaintTimelineEntry[]> {
-    return this.getList<ComplaintTimelineEntry>(
+  ): Promise<ComplaintTimelineReadModel> {
+    return this.get<ComplaintTimelineReadModel>(
       `/api/complaints/${encodeURIComponent(caseNo)}/timeline`,
     );
   }

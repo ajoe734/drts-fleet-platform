@@ -5,10 +5,12 @@ import { useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@drts/ui-web";
 import type {
+  ComplaintCaseListReadModel,
   ComplaintCaseRecord,
   ComplaintCategory,
   ComplaintExportViewRecord,
   ComplaintResolutionCode,
+  ComplaintTimelineReadModel,
   ComplaintTimelineEntry,
   ComplaintCaseStatus,
   CreateComplaintCaseCommand,
@@ -118,6 +120,10 @@ export default function ComplaintsPage() {
     error instanceof Error ? error.message : t("common.unknown");
   const [records, setRecords] = useState<ComplaintCaseRecord[]>([]);
   const [timeline, setTimeline] = useState<ComplaintTimelineEntry[]>([]);
+  const [complaintListReadModel, setComplaintListReadModel] =
+    useState<ComplaintCaseListReadModel | null>(null);
+  const [complaintTimelineReadModel, setComplaintTimelineReadModel] =
+    useState<ComplaintTimelineReadModel | null>(null);
   const [exportView, setExportView] =
     useState<ComplaintExportViewRecord | null>(null);
   const [selectedCaseNo, setSelectedCaseNo] = useState<string | null>(null);
@@ -182,6 +188,7 @@ export default function ComplaintsPage() {
   useEffect(() => {
     if (!selectedCaseNo) {
       setTimeline([]);
+      setComplaintTimelineReadModel(null);
       setExportView(null);
       return;
     }
@@ -198,7 +205,8 @@ export default function ComplaintsPage() {
         if (cancelled) {
           return;
         }
-        setTimeline(nextTimeline);
+        setComplaintTimelineReadModel(nextTimeline);
+        setTimeline(nextTimeline.items);
         setExportView(nextExportView);
       } catch (nextError) {
         if (!cancelled) {
@@ -215,10 +223,11 @@ export default function ComplaintsPage() {
   async function loadRecords(preferredCaseNo?: string) {
     setLoading(true);
     try {
-      const nextRecords = await getOpsClient().listComplaints();
-      setRecords(nextRecords);
+      const nextReadModel = await getOpsClient().listComplaints();
+      setComplaintListReadModel(nextReadModel);
+      setRecords(nextReadModel.items);
       const nextSelected = resolveSelectedComplaintCaseNo(
-        nextRecords,
+        nextReadModel.items,
         preferredCaseNo ?? caseNoFromQuery ?? selectedCaseNo,
       );
       setSelectedCaseNo(nextSelected);
@@ -286,6 +295,18 @@ export default function ComplaintsPage() {
   const unassignedCases = records.filter(
     (record) => isComplaintActive(record.status) && !record.assigneeId,
   ).length;
+  const listEmptyStateMessage =
+    complaintListReadModel?.emptyState?.reason === "no_data"
+      ? locale === "en"
+        ? "No complaint data is available yet."
+        : "目前尚無客訴資料。"
+      : null;
+  const timelineEmptyStateMessage =
+    complaintTimelineReadModel?.emptyState?.reason === "no_data"
+      ? locale === "en"
+        ? "No timeline entries have been recorded for this complaint yet."
+        : "此客訴目前尚無 timeline 紀錄。"
+      : null;
   const workspaceHeadline = selectedRecord
     ? locale === "en"
       ? `${selectedRecord.caseNo} is active in the complaints workspace.`
@@ -656,55 +677,68 @@ export default function ComplaintsPage() {
                 </p>
               </div>
               <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>{t("complaints.col.case")}</th>
-                      <th>{t("complaints.col.category")}</th>
-                      <th>{t("complaints.col.status")}</th>
-                      <th>{t("complaints.col.assignee")}</th>
-                      <th>{t("complaints.col.order")}</th>
-                      <th>{t("complaints.col.hotline")}</th>
-                      <th>SLA</th>
-                      <th>{t("complaints.col.created")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRecords.map((record) => (
-                      <tr
-                        key={record.caseNo}
-                        className={
-                          record.caseNo === selectedCaseNo ? "selected-row" : ""
-                        }
-                        onClick={() => setSelectedCaseNo(record.caseNo)}
-                      >
-                        <td>{record.caseNo}</td>
-                        <td>{formatOpsCodeLabel(locale, record.category)}</td>
-                        <td>
-                          <div>{formatOpsCodeLabel(locale, record.status)}</div>
-                          <div className="table-subcopy">
-                            {formatOpsCodeLabel(locale, record.severity)}
-                          </div>
-                        </td>
-                        <td>{record.assigneeId ?? "-"}</td>
-                        <td>{record.relatedOrderId ?? "-"}</td>
-                        <td>{record.relatedCallId ?? "-"}</td>
-                        <td>
-                          {record.slaBreach ? (
-                            <span className="sla-badge">
-                              {locale === "en" ? "BREACH" : "違規"}
-                            </span>
-                          ) : (
-                            <span className="table-subcopy">
-                              {formatRelativeSla(record.slaDueAt, locale)}
-                            </span>
-                          )}
-                        </td>
-                        <td>{formatDateTime(record.createdAt)}</td>
+                {filteredRecords.length === 0 ? (
+                  <p className="empty-state">
+                    {listEmptyStateMessage ??
+                      (locale === "en"
+                        ? "No complaints match the current filters."
+                        : "目前沒有符合篩選條件的客訴案件。")}
+                  </p>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{t("complaints.col.case")}</th>
+                        <th>{t("complaints.col.category")}</th>
+                        <th>{t("complaints.col.status")}</th>
+                        <th>{t("complaints.col.assignee")}</th>
+                        <th>{t("complaints.col.order")}</th>
+                        <th>{t("complaints.col.hotline")}</th>
+                        <th>SLA</th>
+                        <th>{t("complaints.col.created")}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {filteredRecords.map((record) => (
+                        <tr
+                          key={record.caseNo}
+                          className={
+                            record.caseNo === selectedCaseNo
+                              ? "selected-row"
+                              : ""
+                          }
+                          onClick={() => setSelectedCaseNo(record.caseNo)}
+                        >
+                          <td>{record.caseNo}</td>
+                          <td>{formatOpsCodeLabel(locale, record.category)}</td>
+                          <td>
+                            <div>
+                              {formatOpsCodeLabel(locale, record.status)}
+                            </div>
+                            <div className="table-subcopy">
+                              {formatOpsCodeLabel(locale, record.severity)}
+                            </div>
+                          </td>
+                          <td>{record.assigneeId ?? "-"}</td>
+                          <td>{record.relatedOrderId ?? "-"}</td>
+                          <td>{record.relatedCallId ?? "-"}</td>
+                          <td>
+                            {record.slaBreach ? (
+                              <span className="sla-badge">
+                                {locale === "en" ? "BREACH" : "違規"}
+                              </span>
+                            ) : (
+                              <span className="table-subcopy">
+                                {formatRelativeSla(record.slaDueAt, locale)}
+                              </span>
+                            )}
+                          </td>
+                          <td>{formatDateTime(record.createdAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </section>
 
@@ -1128,7 +1162,8 @@ export default function ComplaintsPage() {
                         ))
                       ) : (
                         <p className="empty-state">
-                          {t("complaints.timelineEmpty")}
+                          {timelineEmptyStateMessage ??
+                            t("complaints.timelineEmpty")}
                         </p>
                       )}
                     </div>
