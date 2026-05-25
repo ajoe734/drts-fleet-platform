@@ -126,9 +126,7 @@ export class OwnedMobilityController {
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listOrders(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      {
-        items: this.ownedMobilityService.listOrders(),
-      },
+      this.ownedMobilityService.listOrdersReadModel(),
       requestId,
     );
   }

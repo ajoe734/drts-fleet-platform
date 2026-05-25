@@ -83,9 +83,7 @@ export class ForwarderController {
   @Get("forwarder/orders")
   listForwardedOrders(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      {
-        items: this.forwarderService.listOrders(),
-      },
+      this.forwarderService.listOrdersReadModel(),
       requestId,
     );
   }
