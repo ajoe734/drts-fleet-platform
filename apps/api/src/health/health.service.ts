@@ -5,6 +5,23 @@ import type {
   UiHealthDegradedService,
 } from "@drts/contracts";
 
+export function buildHealthPayload(
+  degradedServices: UiHealthDegradedService[],
+): UiHealthEnvelope {
+  const status: "healthy" | "degraded" | "down" =
+    degradedServices.length === 0
+      ? "healthy"
+      : degradedServices.some((d) => d.severity === "critical")
+        ? "down"
+        : "degraded";
+
+  return {
+    status,
+    lastCheckedAt: new Date().toISOString(),
+    degradedServices,
+  };
+}
+
 @Injectable()
 export class HealthService {
   private readonly logger = new Logger(HealthService.name);
@@ -25,22 +42,8 @@ export class HealthService {
           severity: "critical",
         });
       }
-    } else {
-      // If DB is disabled, is it healthy?
-      // Assuming it's optional for now, but if required, it should be critical.
     }
 
-    const status: "healthy" | "degraded" | "down" =
-      degradedServices.length === 0
-        ? "healthy"
-        : degradedServices.some((d) => d.severity === "critical")
-          ? "down"
-          : "degraded";
-
-    return {
-      status,
-      lastCheckedAt: new Date().toISOString(),
-      degradedServices,
-    };
+    return buildHealthPayload(degradedServices);
   }
 }
