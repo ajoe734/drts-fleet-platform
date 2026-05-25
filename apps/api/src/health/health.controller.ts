@@ -1,6 +1,10 @@
 import { Controller, Get } from "@nestjs/common";
 import { SkipThrottle } from "@nestjs/throttler";
-import type { UiHealthEnvelope, DegradedService } from "@drts/shared-types";
+import type {
+  UiHealthEnvelope,
+  UiHealthDegradedService,
+} from "@drts/contracts";
+import type { DegradedService } from "@drts/shared-types";
 
 import { RATE_LIMIT_SKIP_DEFAULT } from "../common/throttling/rate-limit.constants";
 
@@ -14,13 +18,16 @@ export function buildHealthPayload(
         ? "down"
         : "degraded";
 
+  const degradedServices: UiHealthDegradedService[] = dependencies.map((d) => ({
+    service: d.name,
+    impact: d.message,
+    severity: d.severity === "critical" ? "critical" : "warning",
+  }));
+
   return {
-    service: "api",
     status,
-    mode: "phase1_foundation",
-    execution_mode: "supervisor_managed_execution",
     lastCheckedAt: new Date().toISOString(),
-    degradedServices: dependencies,
+    degradedServices,
   };
 }
 

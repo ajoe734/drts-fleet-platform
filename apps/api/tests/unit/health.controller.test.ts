@@ -4,7 +4,7 @@ import { buildHealthPayload } from "../../src/health/health.controller";
 describe("HealthController - buildHealthPayload", () => {
   it("should return healthy status when no dependencies provided", () => {
     const payload = buildHealthPayload([]);
-    expect(payload.status).toBe("ok");
+    expect(payload.status).toBe("healthy");
     expect(payload.degradedServices).toHaveLength(0);
   });
 
@@ -14,7 +14,7 @@ describe("HealthController - buildHealthPayload", () => {
     ]);
     expect(payload.status).toBe("degraded");
     expect(payload.degradedServices).toHaveLength(1);
-    expect(payload.degradedServices[0].severity).toBe("low");
+    expect(payload.degradedServices[0].severity).toBe("warning");
   });
 
   it("should return down status when critical severity dependency provided", () => {
