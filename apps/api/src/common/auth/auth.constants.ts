@@ -100,6 +100,8 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   tenant_admin: [
     "identity:read",
     "audit:read",
+    "notifications:read",
+    "notifications:write",
     "tenant:read",
     "tenant:write",
     "tenant:webhooks:read",
@@ -139,7 +141,14 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "forwarder:read",
     "forwarder:write",
   ],
-  driver_user: ["owned:read", "driver:read", "driver:write", "dispatch:read"],
+  driver_user: [
+    "owned:read",
+    "driver:read",
+    "driver:write",
+    "dispatch:read",
+    "notifications:read",
+    "notifications:write",
+  ],
   partner_api_key: [
     "partner:entries:read",
     "partner:eligibility:read",
@@ -152,6 +161,8 @@ export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =
     tenant_admin: [
       "identity:read",
       "audit:read",
+      "notifications:read",
+      "notifications:write",
       "tenant:read",
       "tenant:write",
       "tenant:webhooks:read",
@@ -166,6 +177,8 @@ export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =
     tenant_ops_admin: [
       "identity:read",
       "audit:read",
+      "notifications:read",
+      "notifications:write",
       "tenant:read",
       "tenant:write",
       "tenant:webhooks:read",
@@ -179,6 +192,8 @@ export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =
     tenant_finance_admin: [
       "identity:read",
       "audit:read",
+      "notifications:read",
+      "notifications:write",
       "tenant:read",
       "tenant:webhooks:read",
       "tenant:sla:read",
@@ -190,6 +205,7 @@ export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =
     tenant_viewer: [
       "identity:read",
       "audit:read",
+      "notifications:read",
       "tenant:read",
       "tenant:webhooks:read",
       "tenant:sla:read",
