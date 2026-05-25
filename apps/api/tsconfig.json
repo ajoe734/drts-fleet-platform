@@ -4,9 +4,10 @@
     "baseUrl": "../../",
     "outDir": "dist",
     "paths": {
-      "@drts/contracts": ["packages/contracts/dist/index.d.ts"]
+      "@drts/contracts": ["packages/contracts/dist/index.d.ts"],
+      "@drts/shared-types": ["packages/shared-types/src/index.ts"]
     },
-    "rootDir": "src"
+    "rootDir": "../../"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules"]

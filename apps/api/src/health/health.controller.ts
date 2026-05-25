@@ -9,7 +9,7 @@ export function buildHealthPayload(
 ): UiHealthEnvelope {
   const status =
     dependencies.length === 0
-      ? "ok"
+      ? "healthy"
       : dependencies.some((d) => d.severity === "critical")
         ? "down"
         : "degraded";
@@ -19,7 +19,7 @@ export function buildHealthPayload(
     status,
     mode: "phase1_foundation",
     execution_mode: "supervisor_managed_execution",
-    timestamp: new Date().toISOString(),
+    lastCheckedAt: new Date().toISOString(),
     degradedServices: dependencies,
   };
 }
