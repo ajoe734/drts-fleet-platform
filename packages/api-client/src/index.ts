@@ -17,7 +17,6 @@ import type {
   AssignReconciliationIssueCommand,
   AssignComplaintCaseCommand,
   AttachCallRecordingCommand,
-  ActionReceipt,
   ApiSuccessEnvelope,
   AttendanceRecord,
   BookingRecord,
@@ -250,6 +249,12 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   body?: unknown;
   signal?: AbortSignal;
+}
+
+export interface AcknowledgeDriverOpsInstructionResult {
+  instructionId: string;
+  taskId: string;
+  acknowledgedAt: string;
 }
 
 interface ListEnvelope<T> {
@@ -805,8 +810,8 @@ export class ApiClient {
 
   async acknowledgeOpsInstruction(
     instructionId: string,
-  ): Promise<ActionReceipt> {
-    return this.post<ActionReceipt>(
+  ): Promise<AcknowledgeDriverOpsInstructionResult> {
+    return this.post<AcknowledgeDriverOpsInstructionResult>(
       `/api/driver/ops-instructions/${encodeURIComponent(instructionId)}/acknowledge`,
       {},
     );
