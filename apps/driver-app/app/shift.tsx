@@ -61,11 +61,7 @@ const CROSS_APP_BASE_URLS = {
     process.env.EXPO_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3004",
 } as const;
 
-type ShiftActionName =
-  | "refresh"
-  | "clock_in"
-  | "clock_out"
-  | "open_platform_presence";
+type ShiftActionName = "refresh" | "clock_in" | "clock_out";
 
 type InlineEmptyStateConfig = {
   reason: EmptyReason;
@@ -84,7 +80,8 @@ type ShiftScreenResource = {
   fullScreenEmptyState: EmptyStateEnvelope | null;
   inlineEmptyStates: EmptyStateEnvelope[];
   refreshMetadata: UiRefreshMetadata;
-  platformPresenceLink: CrossAppResourceLink;
+  platformCenterRoute: "/platform-presence";
+  opsReviewLink: CrossAppResourceLink;
 };
 
 function getOdometerValidationMessage(
@@ -320,7 +317,7 @@ function getEmptyStateConfig(
   state: EmptyStateEnvelope,
   actions: ResourceActionDescriptor[],
   router: ReturnType<typeof useRouter>,
-  openPlatformPresence: () => void,
+  openPlatformCenter: () => void,
 ): InlineEmptyStateConfig {
   const refreshAction = getActionByName(actions, "refresh");
 
@@ -362,7 +359,7 @@ function getEmptyStateConfig(
         icon: "ban-outline",
         variant: "warning",
         actionTitle: "查看平台狀態",
-        onAction: openPlatformPresence,
+        onAction: openPlatformCenter,
       };
     case "external_unavailable":
       return {
@@ -372,7 +369,7 @@ function getEmptyStateConfig(
         icon: "warning-outline",
         variant: "danger",
         actionTitle: "查看平台狀態",
-        onAction: openPlatformPresence,
+        onAction: openPlatformCenter,
       };
     case "filtered_empty":
       return {
@@ -382,7 +379,7 @@ function getEmptyStateConfig(
         icon: "swap-horizontal-outline",
         variant: "warning",
         actionTitle: "查看平台狀態",
-        onAction: openPlatformPresence,
+        onAction: openPlatformCenter,
       };
     case "no_data":
     default:
@@ -706,11 +703,6 @@ export default function ShiftScreen() {
       disabledReasonCode: loading ? "shift_snapshot_loading" : undefined,
       riskLevel: "low",
     },
-    {
-      action: "open_platform_presence",
-      enabled: true,
-      riskLevel: "low",
-    },
     activeShift
       ? {
           action: "clock_out",
@@ -802,21 +794,24 @@ export default function ShiftScreen() {
     fullScreenEmptyState,
     inlineEmptyStates,
     refreshMetadata,
-    platformPresenceLink: {
-      targetApp: "platform-admin",
-      route: "/drivers/platform-presence",
-      resourceType: "driver-platform-presence",
-      resourceId: getDriverId(),
+    platformCenterRoute: "/platform-presence",
+    opsReviewLink: {
+      targetApp: "ops-console",
+      route: "/attendance",
+      resourceType: "shift",
+      resourceId: activeShift?.shiftId ?? getDriverId(),
       openMode: "new_tab",
-      label: "平台中心",
+      label: "Ops Console 出勤複核",
     },
   };
-  const platformPresenceDestinationLabel = getCrossAppTargetLabel(
-    shiftResource.platformPresenceLink,
+  const opsReviewDestinationLabel = getCrossAppTargetLabel(
+    shiftResource.opsReviewLink,
   );
-  const platformPresenceHref = buildCrossAppHref(
-    shiftResource.platformPresenceLink,
-  );
+  const opsReviewHref = buildCrossAppHref(shiftResource.opsReviewLink);
+
+  const openPlatformCenter = () => {
+    router.push(shiftResource.platformCenterRoute);
+  };
 
   const openCrossAppLink = async (link: CrossAppResourceLink) => {
     try {
@@ -903,7 +898,7 @@ export default function ShiftScreen() {
       Alert.alert(
         "已下班",
         requiresHighRiskReason
-          ? `班次已結束，異常里程說明已隨下線資料送出，待營運於 ${platformPresenceDestinationLabel} 複核。`
+          ? `班次已結束，異常里程說明已隨下線資料送出，待營運於 ${opsReviewDestinationLabel} 複核。`
           : "班次已結束，平台可接單狀態會依設定自動下線。",
       );
       setLocation("");
@@ -924,11 +919,6 @@ export default function ShiftScreen() {
 
     if (action.action === "refresh") {
       void loadShiftSnapshot({ manual: true });
-      return;
-    }
-
-    if (action.action === "open_platform_presence") {
-      void openCrossAppLink(shiftResource.platformPresenceLink);
       return;
     }
 
@@ -992,7 +982,7 @@ export default function ShiftScreen() {
       shiftResource.availableActions,
       router,
       () => {
-        void openCrossAppLink(shiftResource.platformPresenceLink);
+        openPlatformCenter();
       },
     );
     return (
@@ -1158,7 +1148,7 @@ export default function ShiftScreen() {
               shiftResource.availableActions,
               router,
               () => {
-                void openCrossAppLink(shiftResource.platformPresenceLink);
+                openPlatformCenter();
               },
             )}
           />
@@ -1290,7 +1280,7 @@ export default function ShiftScreen() {
           subtitle={
             availabilityItems.length > 0
               ? `${onlinePlatforms} 個平台上線中，${readyPlatforms} 個平台目前可接單。`
-              : `Shift page 只提示平台可接單 readiness；詳細操作請前往 ${platformPresenceDestinationLabel} 的平台中心。`
+              : "Shift page 只提示平台可接單 readiness；詳細操作請前往平台中心。"
           }
         >
           {presenceError ? <ErrorBanner message={presenceError} /> : null}
@@ -1391,9 +1381,9 @@ export default function ShiftScreen() {
               title="尚無平台可接單狀態"
               description="目前沒有可顯示的平台 presence 資料，可前往平台狀態頁確認綁定與上線狀態。"
               icon="swap-horizontal-outline"
-              actionTitle={shiftResource.platformPresenceLink.label}
+              actionTitle="查看平台中心"
               onAction={() => {
-                void openCrossAppLink(shiftResource.platformPresenceLink);
+                openPlatformCenter();
               }}
               style={styles.inlineEmptyState}
             />
@@ -1403,7 +1393,7 @@ export default function ShiftScreen() {
         <AuthorityBanner
           title="班次 guardrails"
           authorityLabel="visual 依 canvas，行為依 packet §5.6 / Q-DRV08 / Q-DRV09"
-          description={`這頁只做 shift / attendance 呈現與操作；平台上下線、adapter 健康與跨系統複核仍遵守既有 authority boundary，詳細平台操作會導向 ${platformPresenceDestinationLabel}。`}
+          description={`這頁只做 shift / attendance 呈現與操作；平台上下線仍在 app 內平台中心處理，高風險里程複核才會交接到 ${opsReviewDestinationLabel}。`}
           tone="owned"
           icon="shield-checkmark"
         />
@@ -1428,20 +1418,20 @@ export default function ShiftScreen() {
           <Text style={styles.sheetBody}>
             本次班次里程差異 {odometerDelta?.toLocaleString("zh-TW")} km，
             已超過 {MAX_SHIFT_ODOMETER_DELTA_KM} km 預設門檻。確認送出後， 這筆
-            clock-out 會連同複核說明交接到 {platformPresenceDestinationLabel}
-            的司機平台狀態頁，供營運追蹤處理。
+            clock-out 會連同複核說明交接到 {opsReviewDestinationLabel}，
+            供營運追蹤處理。
           </Text>
 
           <View style={styles.sheetSummaryCard}>
             <Text style={styles.sheetSummaryLabel}>ops-review handoff</Text>
             <Text style={styles.sheetSummaryValue}>
-              {platformPresenceDestinationLabel}
+              {opsReviewDestinationLabel}
             </Text>
             <Text style={styles.sheetSummaryMeta}>
-              {shiftResource.platformPresenceLink.route}
+              {shiftResource.opsReviewLink.route}
             </Text>
             <Text style={styles.sheetSummaryMeta} numberOfLines={1}>
-              {platformPresenceHref}
+              {opsReviewHref}
             </Text>
           </View>
 
@@ -1452,9 +1442,17 @@ export default function ShiftScreen() {
 
           <View style={styles.sheetActionColumn}>
             <ActionButton
-              title="查看平台中心"
+              title="打開複核看板"
               onPress={() => {
-                void openCrossAppLink(shiftResource.platformPresenceLink);
+                void openCrossAppLink(shiftResource.opsReviewLink);
+              }}
+              variant="secondary"
+              icon="open-outline"
+            />
+            <ActionButton
+              title="打開平台中心"
+              onPress={() => {
+                openPlatformCenter();
               }}
               variant="secondary"
               icon="open-outline"
@@ -1488,11 +1486,8 @@ export default function ShiftScreen() {
             : "上班後才會建立 active shift，並切換工作台可接單語意。")
         }
         secondaryAction={{
-          title: `前往${shiftResource.platformPresenceLink.label}`,
-          onPress: () =>
-            runResourceAction(
-              getActionByName(availableActions, "open_platform_presence"),
-            ),
+          title: "前往平台中心",
+          onPress: openPlatformCenter,
           variant: "secondary",
           icon: "swap-horizontal-outline",
         }}
