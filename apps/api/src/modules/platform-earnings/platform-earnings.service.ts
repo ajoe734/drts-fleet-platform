@@ -345,7 +345,9 @@ export class PlatformEarningsService {
     totalNet: MoneyAmount;
     notes: string[];
   }> {
-    const { items } = await this.byPlatform(driverId, period);
+    const { items } = period
+      ? await this.byPlatform(driverId, period)
+      : await this.byPlatform(driverId);
     const currency = items[0]?.grossEarning?.currency ?? DEFAULT_CURRENCY;
 
     const sum = (
