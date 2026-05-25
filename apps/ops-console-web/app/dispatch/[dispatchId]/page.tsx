@@ -80,6 +80,13 @@ type TimelineEntry = {
   actor?: string | null;
 };
 
+type EmptyStateVisual = {
+  tone: Exclude<CanvasTone, "neutral">;
+  title: string;
+  body: string;
+  icon: "warn" | "clock" | "ext" | "check";
+};
+
 type ActionRenderContext = {
   baseHref: string;
   scope: "candidate" | "dispatch" | "forwarded" | "empty_state";
@@ -751,6 +758,104 @@ function actionStyle(action: ResourceActionDescriptor) {
   return baseStyle;
 }
 
+function actionPriority(action: ResourceActionDescriptor) {
+  const enabledRank = action.enabled ? 0 : 10;
+  const riskRank =
+    action.riskLevel === "high" ? 0 : action.riskLevel === "medium" ? 1 : 2;
+  const namedRank = [
+    "assign",
+    "release",
+    "redispatch",
+    "fare_override",
+    "resolve_no_supply",
+    "escalate_to_incident",
+    "trigger_reconciliation_completion",
+    "engage_manual_fallback",
+    "force_refresh",
+    "broadcast_to_eligible_drivers",
+    "report_sync_failure",
+  ].indexOf(action.action);
+
+  return enabledRank * 100 + riskRank * 10 + (namedRank === -1 ? 9 : namedRank);
+}
+
+function selectHeroActions(actions: ResourceActionDescriptor[], limit = 3) {
+  return [...actions]
+    .sort((left, right) => {
+      const leftPriority = actionPriority(left);
+      const rightPriority = actionPriority(right);
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority;
+      }
+      return left.action.localeCompare(right.action);
+    })
+    .slice(0, limit);
+}
+
+function renderStateMachine(
+  locale: Locale,
+  states: string[],
+  currentState: string,
+) {
+  const currentIndex = Math.max(
+    states.findIndex((state) => state === currentState),
+    0,
+  );
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${states.length}, minmax(0, 1fr))`,
+        gap: 8,
+      }}
+    >
+      {states.map((state, index) => {
+        const tone: CanvasTone =
+          index < currentIndex
+            ? "success"
+            : index === currentIndex
+              ? "accent"
+              : "neutral";
+        return (
+          <div
+            key={state}
+            style={{
+              display: "grid",
+              gap: 6,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: `1px solid ${tone === "accent" ? theme.accent : theme.border}`,
+              background:
+                tone === "accent"
+                  ? "rgba(133, 212, 255, 0.12)"
+                  : tone === "success"
+                    ? "rgba(76, 175, 80, 0.08)"
+                    : theme.surfaceLo,
+            }}
+          >
+            <span
+              style={{
+                color: tone === "accent" ? theme.accent : theme.textDim,
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+              }}
+            >
+              {index + 1}
+            </span>
+            <span
+              style={{ color: theme.text, fontSize: 12.5, fontWeight: 600 }}
+            >
+              {formatCode(locale, state)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function readSearchParam(
   value: string | string[] | undefined,
 ): string | undefined {
@@ -923,12 +1028,13 @@ function renderActionFocusBanner(
 function buildEmptyStateContent(
   locale: Locale,
   emptyState: EmptyStateEnvelope | null,
-) {
+): EmptyStateVisual {
   const reason = emptyState?.reason ?? "no_data";
   switch (reason) {
     case "not_provisioned":
       return {
         tone: "info" as const,
+        icon: "clock" as const,
         title:
           locale === "zh"
             ? "此工作區尚未啟用"
@@ -941,6 +1047,7 @@ function buildEmptyStateContent(
     case "fetch_failed":
       return {
         tone: "danger" as const,
+        icon: "warn" as const,
         title: locale === "zh" ? "資料讀取失敗" : "Data fetch failed",
         body:
           locale === "zh"
@@ -950,6 +1057,7 @@ function buildEmptyStateContent(
     case "permission_denied":
       return {
         tone: "warn" as const,
+        icon: "ext" as const,
         title: locale === "zh" ? "權限不足" : "Permission denied",
         body:
           locale === "zh"
@@ -959,6 +1067,7 @@ function buildEmptyStateContent(
     case "external_unavailable":
       return {
         tone: "danger" as const,
+        icon: "ext" as const,
         title:
           locale === "zh"
             ? "外部依賴不可用"
@@ -971,6 +1080,7 @@ function buildEmptyStateContent(
     case "filtered_empty":
       return {
         tone: "info" as const,
+        icon: "check" as const,
         title: locale === "zh" ? "篩選後無結果" : "No results after filtering",
         body:
           locale === "zh"
@@ -981,6 +1091,7 @@ function buildEmptyStateContent(
     default:
       return {
         tone: "info" as const,
+        icon: "warn" as const,
         title: locale === "zh" ? "目前沒有候選司機" : "No candidates right now",
         body:
           locale === "zh"
@@ -1059,6 +1170,7 @@ function renderCrossAppLink(link: CrossAppResourceLink) {
       target={link.openMode === "new_tab" ? "_blank" : undefined}
       rel={link.openMode === "new_tab" ? "noreferrer noopener" : undefined}
       style={actionLinkStyle()}
+      title={link.openMode === "new_tab" ? "Opens in a new tab" : undefined}
     >
       <CanvasIcon name="ext" size={12} />
       <span>{link.label}</span>
@@ -1295,6 +1407,7 @@ export default async function DispatchDetailPage({
           ];
 
     const orderActions = readAvailableActions(ownedRecord);
+    const heroActions = selectHeroActions(orderActions);
     const emptyState = readEmptyState(candidateEnvelope);
     const emptyContent = buildEmptyStateContent(locale, emptyState);
 
@@ -1452,6 +1565,45 @@ export default async function DispatchDetailPage({
           : "—",
       },
     ];
+    const commsItems = [
+      {
+        k: locale === "zh" ? "Call session" : "Call session",
+        v: ownedRecord.callId ? (
+          <Link
+            href="/callcenter"
+            style={{ color: theme.text, textDecoration: "none" }}
+          >
+            {ownedRecord.callId}
+          </Link>
+        ) : (
+          "—"
+        ),
+        mono: true,
+      },
+      {
+        k: locale === "zh" ? "Recording" : "Recording",
+        v: ownedRecord.recordingId ?? "—",
+        mono: true,
+      },
+      {
+        k: locale === "zh" ? "Booking" : "Booking",
+        v: ownedRecord.bookingId ?? "—",
+        mono: true,
+      },
+      {
+        k: locale === "zh" ? "Approval state" : "Approval state",
+        v: (
+          <Pill
+            theme={theme}
+            tone={
+              ownedRecord.approvalRequestIds.length > 0 ? "warn" : "success"
+            }
+          >
+            {formatCode(locale, ownedRecord.approvalState)}
+          </Pill>
+        ),
+      },
+    ];
     const focusActions = [
       ...orderActions,
       ...(emptyState?.nextAction ? [emptyState.nextAction] : []),
@@ -1492,15 +1644,14 @@ export default async function DispatchDetailPage({
                   </span>
                 </Link>
               ) : null}
-              <Link
-                href={`/incidents?sourceOrderId=${encodeURIComponent(ownedRecord.orderId)}`}
-                style={actionLinkStyle("primary")}
-              >
-                <CanvasIcon name="warn" size={12} />
-                <span>
-                  {locale === "zh" ? "升級 incident" : "Escalate incident"}
-                </span>
-              </Link>
+              {heroActions.map((action, index) =>
+                renderActionAffordance(locale, action, `hero-${index}`, {
+                  baseHref: href,
+                  scope: "dispatch",
+                  resourceId: ownedRecord.orderId,
+                  resourceLabel: ownedRecord.orderNo || ownedRecord.orderId,
+                }),
+              )}
             </div>
           }
         />
@@ -1549,6 +1700,24 @@ export default async function DispatchDetailPage({
 
               <Card
                 theme={theme}
+                title={locale === "zh" ? "State machine" : "State machine"}
+              >
+                {renderStateMachine(
+                  locale,
+                  [
+                    "ready_for_dispatch",
+                    "queued",
+                    "broadcasting",
+                    "assigned",
+                    "on_trip",
+                    "completed",
+                  ],
+                  stateCode,
+                )}
+              </Card>
+
+              <Card
+                theme={theme}
                 title={
                   locale === "zh"
                     ? "候選司機與分派動作"
@@ -1584,7 +1753,7 @@ export default async function DispatchDetailPage({
                   <Banner
                     theme={theme}
                     tone={emptyContent.tone}
-                    icon="warn"
+                    icon={emptyContent.icon}
                     title={emptyContent.title}
                     body={emptyContent.body}
                     actions={
@@ -1750,6 +1919,17 @@ export default async function DispatchDetailPage({
               <Card
                 theme={theme}
                 title={
+                  locale === "zh"
+                    ? "Linked recordings / callbacks"
+                    : "Linked recordings / callbacks"
+                }
+              >
+                <DL theme={theme} cols={1} items={commsItems} />
+              </Card>
+
+              <Card
+                theme={theme}
+                title={
                   locale === "zh" ? "目前 driver task" : "Current driver task"
                 }
               >
@@ -1843,6 +2023,7 @@ export default async function DispatchDetailPage({
         task.sourcePlatform === forwardedOrder.platformCode,
     ) ?? null;
   const forwardedActions = readAvailableActions(forwardedOrder);
+  const forwardedHeroActions = selectHeroActions(forwardedActions);
   const mainRefresh = readRefreshMetadata(forwardedOrdersEnvelope);
   const routeLocked =
     readForwardedBoolean(forwardedOrder, ["routeLocked"]) ??
@@ -1998,6 +2179,21 @@ export default async function DispatchDetailPage({
                   : "Back to forwarded board"}
               </span>
             </Link>
+            {forwardedHeroActions.map((action, index) =>
+              renderActionAffordance(
+                locale,
+                action,
+                `forwarded-hero-${index}`,
+                {
+                  baseHref: href,
+                  scope: "forwarded",
+                  resourceId: forwardedOrder.mirrorOrderId,
+                  resourceLabel:
+                    forwardedOrder.externalOrderId ||
+                    forwardedOrder.mirrorOrderId,
+                },
+              ),
+            )}
             {renderCrossAppLink(externalSyncLink)}
             {renderCrossAppLink(reconciliationLink)}
           </div>
@@ -2040,6 +2236,22 @@ export default async function DispatchDetailPage({
           />
         ) : null}
 
+        <Banner
+          theme={theme}
+          tone="info"
+          icon="ext"
+          title={
+            locale === "zh"
+              ? "此訂單為 forwarded mirror"
+              : "This order is a forwarded mirror"
+          }
+          body={
+            locale === "zh"
+              ? "不可假裝為 owned；本地只顯示 sync / fallback / reconciliation 狀態，跨 app mutation 需走 owner surface。"
+              : "Do not treat this as an owned order; this surface only reflects sync, fallback, and reconciliation state while owner mutations stay in the owning app."
+          }
+        />
+
         <div
           style={{
             display: "grid",
@@ -2062,6 +2274,23 @@ export default async function DispatchDetailPage({
               }
             >
               <DL theme={theme} cols={3} items={forwardedSummaryItems} />
+            </Card>
+
+            <Card
+              theme={theme}
+              title={locale === "zh" ? "State machine" : "State machine"}
+            >
+              {renderStateMachine(
+                locale,
+                [
+                  "received",
+                  "broadcasted",
+                  "accept_pending",
+                  "confirmed_by_platform",
+                  "completed_synced",
+                ],
+                forwardedOrder.status,
+              )}
             </Card>
 
             <Card
