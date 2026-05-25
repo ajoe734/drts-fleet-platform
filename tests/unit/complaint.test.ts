@@ -29,7 +29,8 @@ describe("complaint service", () => {
 
     expect(complaintCase.caseNo).toMatch(/^C-\d{8}-\d{6}$/);
     expect(complaintCase.status).toBe("new");
-    expect(complaintCase.slaBreach).toBe(false);
+    expect(complaintCase.slaStatus).toBe("within_sla");
+    expect(complaintCase.slaBreachedAt).toBeNull();
     expect(complaintCase.slaDueAt).toBeDefined();
     expect(complaintService.listComplaintCases()).toHaveLength(1);
     expect(complaintService.getComplaintCase(complaintCase.caseNo).caseNo).toBe(
@@ -82,7 +83,8 @@ describe("complaint service", () => {
     expect(reopenedCase.status).toBe("reopened");
 
     expect(reopenedCase.reopenCount).toBe(1);
-    expect(reopenedCase.slaBreach).toBe(false);
+    expect(reopenedCase.slaStatus).toBe("within_sla");
+    expect(reopenedCase.slaBreachedAt).toBeNull();
 
     const timeline = complaintService.getComplaintTimeline(
       complaintCase.caseNo,
@@ -174,7 +176,8 @@ describe("complaint service", () => {
     );
 
     expect(updatedCase.status).toBe(beforeStatus);
-    expect(updatedCase.slaBreach).toBe(true);
+    expect(updatedCase.slaStatus).toBe("breached");
+    expect(updatedCase.slaBreachedAt).toBeTruthy();
     expect(complaintService.getComplaintCase(complaintCase.caseNo).status).toBe(
       beforeStatus,
     );
@@ -210,8 +213,9 @@ describe("complaint service", () => {
             description: "先前已建立的案件",
             assigneeId: null,
             status: "new",
-            slaDueAt: "2026-04-12T00:00:00Z",
-            slaBreach: false,
+            slaDueAt: "2099-04-12T00:00:00Z",
+            slaStatus: "within_sla",
+            slaBreachedAt: null,
             reopenCount: 0,
             resolutionCode: null,
             closingNote: null,
@@ -247,7 +251,8 @@ describe("complaint service", () => {
         complaintCases: [
           expect.objectContaining({
             caseNo: "C-20260410-000041",
-            slaBreach: true,
+            slaStatus: "breached",
+            slaBreachedAt: expect.any(String),
           }),
         ],
         complaintTimelines: [

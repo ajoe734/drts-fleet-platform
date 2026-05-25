@@ -26,7 +26,10 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
-import { ComplaintRepository } from "./complaint.repository";
+import {
+  ComplaintRepository,
+  type PersistedComplaintCaseRecord,
+} from "./complaint.repository";
 
 const COMPLAINT_CATEGORY_VALUES = [
   "late_arrival",
@@ -74,7 +77,7 @@ const TIMELINE_ACTIONS = {
 export class ComplaintService implements OnModuleInit {
   private caseSequence = 1;
 
-  private complaintCases: ComplaintCaseRecord[] = [];
+  private complaintCases: PersistedComplaintCaseRecord[] = [];
 
   private complaintTimelines = new Map<string, ComplaintTimelineEntry[]>();
 
@@ -118,7 +121,7 @@ export class ComplaintService implements OnModuleInit {
     const now = new Date();
     const createdAt = now.toISOString();
     const caseNo = this.nextCaseNo(now);
-    const complaintCase: ComplaintCaseRecord = {
+    const complaintCase: PersistedComplaintCaseRecord = {
       caseNo,
       caseSource: command.caseSource,
       relatedOrderId: command.relatedOrderId ?? null,
@@ -132,7 +135,6 @@ export class ComplaintService implements OnModuleInit {
       slaStatus: "within_sla",
       slaDueAt: this.calculateSlaDueAt(command.category, command.severity, now),
       slaBreachedAt: null,
-      slaBreach: false,
       reopenCount: 0,
       resolutionCode: null,
       closingNote: null,
@@ -462,7 +464,6 @@ export class ComplaintService implements OnModuleInit {
       status: "reopened" as ComplaintCaseStatus,
       slaDueAt: newSlaDueAt,
       slaBreachedAt: null,
-      slaBreach: false,
       reopenCount: (complaintCase.reopenCount ?? 0) + 1,
       updatedAt: now.toISOString(),
     };
@@ -500,7 +501,7 @@ export class ComplaintService implements OnModuleInit {
           reason: command.reason,
           reopenCount: updated.reopenCount,
           slaDueAt: newSlaDueAt,
-          slaBreach: false,
+          slaStatus: "within_sla",
         },
       },
       requestId,
@@ -511,14 +512,14 @@ export class ComplaintService implements OnModuleInit {
 
   markComplaintSlaBreach(caseNo: string, requestId?: string) {
     const complaintCase = this.requireComplaintCase(caseNo);
-    if (complaintCase.slaBreach) {
+    if (this.computeSlaStatus(complaintCase) === "breached") {
       return this.cloneComplaintCase(complaintCase);
     }
 
+    const breachedAt = complaintCase.slaBreachedAt ?? new Date().toISOString();
     const updated = {
       ...complaintCase,
-      slaBreachedAt: complaintCase.slaBreachedAt ?? new Date().toISOString(),
-      slaBreach: true,
+      slaBreachedAt: breachedAt,
       updatedAt: new Date().toISOString(),
     };
     this.replaceComplaintCase(updated);
@@ -552,8 +553,9 @@ export class ComplaintService implements OnModuleInit {
         resourceId: caseNo,
         newValuesSummary: {
           status: updated.status,
-          slaBreach: true,
+          slaStatus: "breached",
           slaDueAt: complaintCase.slaDueAt,
+          slaBreachedAt: breachedAt,
         },
       },
       requestId,
@@ -690,7 +692,7 @@ export class ComplaintService implements OnModuleInit {
     const now = new Date();
     const results: ComplaintCaseRecord[] = [];
     for (const complaintCase of this.complaintCases) {
-      if (complaintCase.slaBreach) {
+      if (this.computeSlaStatus(complaintCase, now) === "breached") {
         continue;
       }
       if (
@@ -763,7 +765,7 @@ export class ComplaintService implements OnModuleInit {
   }
 
   private deriveNextCaseSequence(
-    complaintCases: readonly ComplaintCaseRecord[],
+    complaintCases: readonly PersistedComplaintCaseRecord[],
   ) {
     const maxSequence = complaintCases.reduce((currentMax, complaintCase) => {
       const rawSequence = complaintCase.caseNo.split("-").at(-1) ?? "0";
@@ -806,7 +808,7 @@ export class ComplaintService implements OnModuleInit {
   }
 
   private assertCaseOpenForAction(
-    complaintCase: ComplaintCaseRecord,
+    complaintCase: PersistedComplaintCaseRecord,
     action: "assign" | "note",
   ) {
     if (
@@ -825,7 +827,7 @@ export class ComplaintService implements OnModuleInit {
     }
   }
 
-  private replaceComplaintCase(updated: ComplaintCaseRecord) {
+  private replaceComplaintCase(updated: PersistedComplaintCaseRecord) {
     this.complaintCases = this.complaintCases.map((complaintCase) =>
       complaintCase.caseNo === updated.caseNo ? updated : complaintCase,
     );
@@ -858,24 +860,31 @@ export class ComplaintService implements OnModuleInit {
     };
   }
 
-  private cloneComplaintCase(complaintCase: ComplaintCaseRecord) {
+  private cloneComplaintCase(
+    complaintCase: PersistedComplaintCaseRecord,
+  ): ComplaintCaseRecord {
+    const record = { ...complaintCase };
+    delete record.slaBreach;
     const slaStatus = this.computeSlaStatus(complaintCase);
     const slaBreachedAt =
       complaintCase.slaBreachedAt ??
       (slaStatus === "breached" ? complaintCase.slaDueAt : null);
 
     return {
-      ...complaintCase,
+      ...record,
       slaStatus,
       slaBreachedAt,
-      slaBreach: complaintCase.slaBreach || slaStatus === "breached",
     };
   }
 
   private computeSlaStatus(
-    complaintCase: ComplaintCaseRecord,
+    complaintCase: PersistedComplaintCaseRecord,
     now = new Date(),
   ): ComplaintSlaStatus {
+    if (complaintCase.slaBreachedAt) {
+      return "breached";
+    }
+
     const dueAtMs = new Date(complaintCase.slaDueAt).getTime();
     const evaluationTime =
       complaintCase.status === "resolved" || complaintCase.status === "closed"
@@ -926,7 +935,7 @@ export class ComplaintService implements OnModuleInit {
 
   private persistChanges(
     changes: {
-      complaintCases?: readonly ComplaintCaseRecord[];
+      complaintCases?: readonly PersistedComplaintCaseRecord[];
       complaintTimelines?: readonly ComplaintTimelineEntry[];
     },
     context: string,
@@ -936,7 +945,7 @@ export class ComplaintService implements OnModuleInit {
     }
 
     const persistPayload: {
-      complaintCases?: ComplaintCaseRecord[];
+      complaintCases?: PersistedComplaintCaseRecord[];
       complaintTimelines?: ComplaintTimelineEntry[];
     } = {};
 

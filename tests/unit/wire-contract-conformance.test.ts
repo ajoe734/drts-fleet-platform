@@ -374,8 +374,9 @@ describe("Phase 1 record wire shapes via deepToSnakeCase", () => {
       description: "乘客認為費用不正確",
       assigneeId: null,
       status: "new",
+      slaStatus: "within_sla",
       slaDueAt: "2026-04-13T09:00:00Z",
-      slaBreach: false,
+      slaBreachedAt: null,
       resolutionCode: null,
       closingNote: null,
       createdAt: "2026-04-11T09:00:00Z",
@@ -387,8 +388,9 @@ describe("Phase 1 record wire shapes via deepToSnakeCase", () => {
     expect(wire["case_source"]).toBe("phone");
     expect(wire["related_order_id"]).toBe("ORD-001");
     expect(wire["related_call_id"]).toBe("CALL-001");
+    expect(wire["sla_status"]).toBe("within_sla");
     expect(wire["sla_due_at"]).toBe("2026-04-13T09:00:00Z");
-    expect(wire["sla_breach"]).toBe(false);
+    expect(wire["sla_breached_at"]).toBeNull();
     expect(wire["resolution_code"]).toBeNull();
     expect(wire["closing_note"]).toBeNull();
   });

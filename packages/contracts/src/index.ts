@@ -3316,7 +3316,6 @@ export interface ComplaintCaseRecord {
   slaStatus: ComplaintSlaStatus;
   slaDueAt: string;
   slaBreachedAt: string | null;
-  slaBreach: boolean;
   reopenCount: number;
   resolutionCode: ComplaintResolutionCode | null;
   closingNote: string | null;
