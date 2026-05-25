@@ -4611,6 +4611,14 @@ export interface PlatformTenantQuotaSummary {
   monthlyApiCalls: number;
 }
 
+export const TENANT_ROLLOUT_STAGES = [
+  "sandbox",
+  "pilot",
+  "production",
+  "rollback_hold",
+] as const;
+export type TenantRolloutStage = (typeof TENANT_ROLLOUT_STAGES)[number];
+
 export const PLATFORM_TENANT_ROLLOUT_STAGES = [
   "sandbox",
   "pilot",
@@ -4666,7 +4674,7 @@ export interface PlatformTenantIntegrationPackage {
 }
 
 export interface PlatformTenantRolloutState {
-  stage: PlatformTenantRolloutStage;
+  stage: TenantRolloutStage;
   sandboxStatus: PlatformTenantGateStatus;
   pilotStatus: PlatformTenantGateStatus;
   productionStatus: PlatformTenantGateStatus;
@@ -4679,8 +4687,6 @@ export interface PlatformTenantRolloutState {
   lastUpdatedBy: string | null;
   notes: string | null;
 }
-
-export type TenantRolloutStage = PlatformTenantRolloutStage | "rollback_hold";
 export type TenantRolloutGateStatus = PlatformTenantGateStatus;
 
 export interface TenantRolloutStateMachineRecord {

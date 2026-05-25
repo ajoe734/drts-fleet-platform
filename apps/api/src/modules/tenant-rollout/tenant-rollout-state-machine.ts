@@ -2,7 +2,6 @@ import type {
   PlatformAdminTenantRecord,
   PlatformTenantGateStatus,
   PlatformTenantRolloutState,
-  PlatformTenantRolloutStage,
   ResourceActionDescriptor,
   TenantRolloutGateStatus,
   TenantRolloutStage,
@@ -43,14 +42,14 @@ type RolloutTransitionMetadata = {
   occurredAt: string;
 };
 
-type RolloutStageTransitionInput = RolloutTransitionMetadata & {
-  stage: PlatformTenantRolloutStage;
+export type RolloutStageTransitionInput = RolloutTransitionMetadata & {
+  stage: TenantRolloutStage;
   notes?: string | null;
 };
 
-type RolloutGateTransitionInput = RolloutTransitionMetadata & {
+export type RolloutGateTransitionInput = RolloutTransitionMetadata & {
   gateStatus: PlatformTenantGateStatus;
-  stage?: PlatformTenantRolloutStage;
+  stage?: TenantRolloutStage;
 };
 
 const ACTION_CATALOG: Readonly<Record<RolloutAction, RolloutActionCatalogEntry>> =
@@ -112,7 +111,7 @@ function assertGateStatus(status: string): TenantRolloutGateStatus {
 
 function currentGateStatusForStage(
   rollout: PlatformTenantRolloutState,
-  stage: Exclude<TenantRolloutStage, "rollback_hold">,
+  stage: TenantRolloutStage,
 ) {
   if (stage === "sandbox") {
     return rollout.sandboxStatus;
@@ -121,6 +120,25 @@ function currentGateStatusForStage(
     return rollout.pilotStatus;
   }
   return rollout.productionStatus;
+}
+
+export function buildTenantRolloutAuditSummary(
+  rollout: PlatformTenantRolloutState,
+) {
+  return {
+    stage: rollout.stage,
+    sandboxStatus: rollout.sandboxStatus,
+    pilotStatus: rollout.pilotStatus,
+    productionStatus: rollout.productionStatus,
+    cutoverOwner: rollout.cutoverOwner,
+    rollbackOwner: rollout.rollbackOwner,
+    rollbackPrepared: rollout.rollbackPrepared,
+    lastPromotedAt: rollout.lastPromotedAt,
+    enteredStageAt: rollout.enteredStageAt,
+    enteredGateAt: rollout.enteredGateAt,
+    lastUpdatedBy: rollout.lastUpdatedBy,
+    notes: rollout.notes,
+  } satisfies Record<string, unknown>;
 }
 
 function cloneActions(
@@ -259,10 +277,9 @@ export function toTenantRolloutStateMachineRecord(
     "id" | "status" | "createdAt" | "updatedAt" | "rollout"
   >,
 ): TenantRolloutStateMachineRecord {
-  const stage =
-    tenant.status === "rollback_hold"
-      ? "rollback_hold"
-      : assertStage(tenant.rollout.stage);
+  const stage = assertStage(
+    tenant.status === "rollback_hold" ? "rollback_hold" : tenant.rollout.stage,
+  );
   const gateStatus =
     stage === "rollback_hold"
       ? "blocked"
@@ -306,6 +323,10 @@ export function transitionTenantRolloutGate(
     next.productionStatus = input.gateStatus;
   }
 
+  if (stage === "rollback_hold") {
+    next.stage = "rollback_hold";
+  }
+
   next.enteredGateAt = input.occurredAt;
   next.lastUpdatedBy = resolveActorLabel(input.actorLabel, input.actorId);
   return next;
@@ -334,14 +355,27 @@ export function transitionTenantRolloutStage(
     next.sandboxStatus = "approved";
     next.pilotStatus = "approved";
     next.enteredGateAt = input.occurredAt;
-  } else {
+  } else if (input.stage === "production") {
     next.sandboxStatus = "approved";
     next.pilotStatus = "approved";
     next.productionStatus = "approved";
     next.enteredGateAt = input.occurredAt;
+  } else {
+    next.productionStatus = "blocked";
+    next.enteredGateAt = input.occurredAt;
   }
 
   return next;
+}
+
+export function transitionTenantRollbackHold(
+  rollout: PlatformTenantRolloutState,
+  input: Omit<RolloutStageTransitionInput, "stage">,
+) {
+  return transitionTenantRolloutStage(rollout, {
+    ...input,
+    stage: "rollback_hold",
+  });
 }
 
 export function listTenantRolloutAvailableActions(input: {
