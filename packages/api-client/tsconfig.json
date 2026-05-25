@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
@@ -8,6 +9,9 @@
     "sourceMap": true,
     "strict": true,
     "exactOptionalPropertyTypes": false,
+    "paths": {
+      "@drts/contracts": ["../contracts/dist/index.d.ts"]
+    },
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",

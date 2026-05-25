@@ -17,6 +17,7 @@ import type {
   AssignReconciliationIssueCommand,
   AssignComplaintCaseCommand,
   AttachCallRecordingCommand,
+  ActionReceipt,
   ApiSuccessEnvelope,
   AttendanceRecord,
   BookingRecord,
@@ -67,6 +68,7 @@ import type {
   DriverDeviceProvisioningSession,
   DriverEtaResponse,
   DriverLocationSnapshot,
+  DriverOpsInstruction,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
   DriverLocationHeartbeatCommand,
@@ -787,6 +789,27 @@ export class ApiClient {
       ? `/api/driver/task-views/${taskId}?${query}`
       : `/api/driver/task-views/${taskId}`;
     return this.get<UnifiedDriverTaskView>(url);
+  }
+
+  async listOpsInstructions(filters?: {
+    taskId?: string;
+  }): Promise<DriverOpsInstruction[]> {
+    const params = new URLSearchParams();
+    if (filters?.taskId) params.set("taskId", filters.taskId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/ops-instructions?${query}`
+      : "/api/driver/ops-instructions";
+    return this.getList<DriverOpsInstruction>(url);
+  }
+
+  async acknowledgeOpsInstruction(
+    instructionId: string,
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
+      `/api/driver/ops-instructions/${encodeURIComponent(instructionId)}/acknowledge`,
+      {},
+    );
   }
 
   async acceptForwardedOrder(
