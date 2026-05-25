@@ -1,5 +1,12 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  DriverMatchingSuppression,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiHealthEnvelope,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4247,12 +4254,18 @@ export const INCIDENT_ESCALATION_TARGETS = [
 export type IncidentEscalationTarget =
   (typeof INCIDENT_ESCALATION_TARGETS)[number];
 
+export interface IncidentMatchingSuppressionCommand {
+  action: "extend" | "lift";
+  expiresAt?: string;
+}
+
 export interface UpdateIncidentCommand {
   status?: IncidentStatus;
   assignedTo?: string;
   resolutionNote?: string;
   escalationTarget?: IncidentEscalationTarget | null;
   severity?: IncidentSeverity;
+  matchingSuppression?: IncidentMatchingSuppressionCommand;
 }
 
 export interface CreateIncidentFromDispatchExceptionCommand {
@@ -4305,8 +4318,28 @@ export interface IncidentRecord {
   location: string | null;
   resolutionNote: string | null;
   serviceRecoveryActions: ServiceRecoveryActionRecord[];
+  driverMatchingSuppression?: DriverMatchingSuppression | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface IncidentReadModel extends IncidentRecord {
+  driverMatchingSuppression: DriverMatchingSuppression | null;
+  availableActions: ResourceActionDescriptor[];
+}
+
+export interface IncidentListReadModel extends ApiListData<IncidentReadModel> {
+  refresh: UiRefreshMetadata;
+  health: UiHealthEnvelope;
+  emptyState?: EmptyStateEnvelope;
+}
+
+export interface IncidentDetailReadModel extends IncidentReadModel {
+  timeline: IncidentTimelineEntry[];
+  serviceRecoveryActions: ServiceRecoveryActionRecord[];
+  auditLogs: AuditLogRecord[];
+  refresh: UiRefreshMetadata;
+  health: UiHealthEnvelope;
 }
 
 export interface IncidentTimelineEntry {

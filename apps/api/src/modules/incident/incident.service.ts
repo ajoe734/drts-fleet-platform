@@ -4,17 +4,23 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  DriverMatchingSuppression,
   CreateIncidentCommand,
   CreateIncidentFromDispatchExceptionCommand,
+  IncidentDetailReadModel,
+  IncidentListReadModel,
+  IncidentMatchingSuppressionCommand,
   IncidentRecord,
   IncidentStatus,
   IncidentTimelineEntry,
+  ResourceActionDescriptor,
   RecordServiceRecoveryActionCommand,
   ServiceRecoveryActionRecord,
   UpdateIncidentCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IncidentRepository } from "./incident.repository";
 
@@ -67,7 +73,13 @@ const TIMELINE_ACTIONS = {
   severityEscalated: "severity_escalated",
   dispatchExceptionHandoff: "dispatch_exception_handoff",
   serviceRecoveryAction: "service_recovery_action",
+  matchingSuppressionCreated: "matching_suppression_created",
+  matchingSuppressionExtended: "matching_suppression_extended",
+  matchingSuppressionLifted: "matching_suppression_lifted",
 } as const;
+
+const INCIDENT_REFRESH_STALE_AFTER_MS = 15_000;
+const DEFAULT_SUPPRESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class IncidentService implements OnModuleInit {
@@ -88,6 +100,7 @@ export class IncidentService implements OnModuleInit {
       if (state.incidents.length === 0 && state.timelines.length === 0) return;
       this.incidents = state.incidents.map((i) => this.clone(i));
       this.timelines = this.buildTimelineMap(state.timelines);
+      this.recoveryActions = this.buildRecoveryActionMap(state.incidents);
       this.incidentSequence = this.deriveNextSequence(state.incidents);
     } catch (error) {
       this.incidentRepository.reportPersistenceFailure(error, "module init");
@@ -122,22 +135,35 @@ export class IncidentService implements OnModuleInit {
       location: command.location ?? null,
       resolutionNote: null,
       serviceRecoveryActions: [],
+      driverMatchingSuppression: this.createDefaultMatchingSuppression(
+        incidentId,
+        now,
+      ),
       createdAt: now,
       updatedAt: now,
     };
 
-    const timelineEntry = this.createTimelineEntry(
-      incidentId,
-      TIMELINE_ACTIONS.created,
-      `Incident reported by ${command.reportedBy}.`,
-      "system",
-      now,
-    );
+    const timelineEntry = [
+      this.createTimelineEntry(
+        incidentId,
+        TIMELINE_ACTIONS.created,
+        `Incident reported by ${command.reportedBy}.`,
+        "system",
+        now,
+      ),
+      this.createTimelineEntry(
+        incidentId,
+        TIMELINE_ACTIONS.matchingSuppressionCreated,
+        `Driver matching suppressed until ${incident.driverMatchingSuppression!.expiresAt}.`,
+        "system",
+        now,
+      ),
+    ];
 
     this.incidents = [incident, ...this.incidents];
-    this.timelines.set(incidentId, [timelineEntry]);
+    this.timelines.set(incidentId, timelineEntry);
     this.persist(
-      { incidents: [incident], timelines: [timelineEntry] },
+      { incidents: [incident], timelines: timelineEntry },
       "create_incident",
     );
     this.recordAudit(
@@ -168,14 +194,65 @@ export class IncidentService implements OnModuleInit {
     return this.incidents.map((i) => this.clone(i));
   }
 
+  listIncidentReadModel(
+    identity?: BootstrapRequestIdentity | null,
+  ): IncidentListReadModel {
+    const items = this.incidents.map((incident) =>
+      this.toIncidentReadModel(incident, identity),
+    );
+    const generatedAt = new Date().toISOString();
+
+    return {
+      items,
+      pageInfo: {
+        page: 1,
+        pageSize: items.length > 0 ? items.length : 20,
+        totalItems: items.length,
+        totalPages: items.length > 0 ? 1 : 0,
+      },
+      refresh: this.buildRefreshMetadata(generatedAt),
+      health: this.buildHealthEnvelope(generatedAt),
+      emptyState:
+        items.length === 0
+          ? {
+              reason: "no_data",
+              messageCode: "incident.empty.no_data",
+            }
+          : undefined,
+    };
+  }
+
   getIncident(incidentId: string) {
     return this.clone(this.require(incidentId));
+  }
+
+  getIncidentDetail(
+    incidentId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): IncidentDetailReadModel {
+    const incident = this.require(incidentId);
+    const generatedAt = new Date().toISOString();
+
+    return {
+      ...this.toIncidentReadModel(incident, identity),
+      timeline: this.getTimeline(incidentId),
+      serviceRecoveryActions: this.getServiceRecoveryActions(incidentId),
+      auditLogs: this.auditNotificationService
+        .getAuditLogsSnapshot()
+        .filter(
+          (log) =>
+            log.resourceType === "incident" && log.resourceId === incidentId,
+        ),
+      refresh: this.buildRefreshMetadata(generatedAt),
+      health: this.buildHealthEnvelope(generatedAt),
+    };
   }
 
   updateIncident(
     incidentId: string,
     command: UpdateIncidentCommand,
     requestId?: string,
+    identity?: BootstrapRequestIdentity | null,
   ) {
     const incident = this.require(incidentId);
 
@@ -190,6 +267,15 @@ export class IncidentService implements OnModuleInit {
         `Status changed to ${command.status}.`,
         "ops_user",
       );
+      if (command.status === "resolved" || command.status === "closed") {
+        this.applyMatchingSuppressionCommand(
+          updated,
+          { action: "lift" },
+          identity,
+          "system",
+          true,
+        );
+      }
     }
 
     if (command.assignedTo !== undefined) {
@@ -245,6 +331,14 @@ export class IncidentService implements OnModuleInit {
       updated.resolutionNote = command.resolutionNote;
     }
 
+    if (command.matchingSuppression) {
+      this.applyMatchingSuppressionCommand(
+        updated,
+        command.matchingSuppression,
+        identity,
+      );
+    }
+
     this.replace(updated);
     this.persist({ incidents: [updated] }, "update_incident");
     this.recordAudit(
@@ -260,6 +354,7 @@ export class IncidentService implements OnModuleInit {
           status: updated.status,
           assignedTo: updated.assignedTo,
           resolutionNote: updated.resolutionNote,
+          driverMatchingSuppression: updated.driverMatchingSuppression,
         },
       },
       requestId,
@@ -377,22 +472,35 @@ export class IncidentService implements OnModuleInit {
       location: null,
       resolutionNote: null,
       serviceRecoveryActions: [],
+      driverMatchingSuppression: this.createDefaultMatchingSuppression(
+        incidentId,
+        now,
+      ),
       createdAt: now,
       updatedAt: now,
     };
 
-    const timelineEntry = this.createTimelineEntry(
-      incidentId,
-      TIMELINE_ACTIONS.dispatchExceptionHandoff,
-      `Incident created from dispatch exception on order ${command.orderId} (reason: ${command.exceptionReasonCode}).`,
-      command.reportedBy,
-      now,
-    );
+    const timelineEntry = [
+      this.createTimelineEntry(
+        incidentId,
+        TIMELINE_ACTIONS.dispatchExceptionHandoff,
+        `Incident created from dispatch exception on order ${command.orderId} (reason: ${command.exceptionReasonCode}).`,
+        command.reportedBy,
+        now,
+      ),
+      this.createTimelineEntry(
+        incidentId,
+        TIMELINE_ACTIONS.matchingSuppressionCreated,
+        `Driver matching suppressed until ${incident.driverMatchingSuppression!.expiresAt}.`,
+        "system",
+        now,
+      ),
+    ];
 
     this.incidents = [incident, ...this.incidents];
-    this.timelines.set(incidentId, [timelineEntry]);
+    this.timelines.set(incidentId, timelineEntry);
     this.persist(
-      { incidents: [incident], timelines: [timelineEntry] },
+      { incidents: [incident], timelines: timelineEntry },
       "create_from_dispatch_exception",
     );
     this.recordAudit(
@@ -534,6 +642,17 @@ export class IncidentService implements OnModuleInit {
     return map;
   }
 
+  private buildRecoveryActionMap(incidents: readonly IncidentRecord[]) {
+    const map = new Map<string, ServiceRecoveryActionRecord[]>();
+    for (const incident of incidents) {
+      map.set(
+        incident.incidentId,
+        incident.serviceRecoveryActions.map((action) => ({ ...action })),
+      );
+    }
+    return map;
+  }
+
   private createTimelineEntry(
     incidentId: string,
     action: string,
@@ -570,7 +689,198 @@ export class IncidentService implements OnModuleInit {
   }
 
   private clone(incident: IncidentRecord) {
-    return { ...incident };
+    return {
+      ...incident,
+      serviceRecoveryActions: incident.serviceRecoveryActions.map((a) => ({
+        ...a,
+      })),
+      driverMatchingSuppression: incident.driverMatchingSuppression
+        ? { ...incident.driverMatchingSuppression }
+        : null,
+    };
+  }
+
+  private createDefaultMatchingSuppression(
+    incidentId: string,
+    now: string,
+  ): DriverMatchingSuppression {
+    return {
+      active: true,
+      reasonCode: "incident",
+      sourceIncidentId: incidentId,
+      expiresAt: new Date(
+        new Date(now).getTime() + DEFAULT_SUPPRESSION_TTL_MS,
+      ).toISOString(),
+      liftedAt: null,
+    };
+  }
+
+  private applyMatchingSuppressionCommand(
+    incident: IncidentRecord,
+    command: IncidentMatchingSuppressionCommand,
+    identity?: BootstrapRequestIdentity | null,
+    actor = "ops_user",
+    allowSystemLift = false,
+  ) {
+    const suppression =
+      incident.driverMatchingSuppression ??
+      this.createDefaultMatchingSuppression(incident.incidentId, incident.createdAt);
+    const now = incident.updatedAt;
+
+    if (command.action === "extend") {
+      if (!this.isOpsManager(identity)) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "INCIDENT_MATCHING_SUPPRESSION_EXTENSION_FORBIDDEN",
+          "Only ops_manager can extend incident matching suppression.",
+        );
+      }
+      if (!command.expiresAt?.trim()) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          "expiresAt is required when extending matching suppression.",
+          { field: "matchingSuppression.expiresAt" },
+        );
+      }
+      const expiresAt = this.parseIsoTimestamp(
+        command.expiresAt,
+        "matchingSuppression.expiresAt",
+      );
+      const currentExpiresAt = this.parseIsoTimestamp(
+        suppression.expiresAt,
+        "driverMatchingSuppression.expiresAt",
+      );
+      if (expiresAt <= currentExpiresAt) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          "Extended matching suppression must expire after the current expiry.",
+          {
+            currentExpiresAt: suppression.expiresAt,
+            requestedExpiresAt: command.expiresAt,
+          },
+        );
+      }
+      incident.driverMatchingSuppression = {
+        ...suppression,
+        active: true,
+        expiresAt: expiresAt.toISOString(),
+        liftedAt: null,
+      };
+      this.appendTimelineEntry(
+        incident.incidentId,
+        TIMELINE_ACTIONS.matchingSuppressionExtended,
+        `Driver matching suppression extended until ${incident.driverMatchingSuppression.expiresAt}.`,
+        identity?.actorId ?? actor,
+        now,
+      );
+      return;
+    }
+
+    if (incident.driverMatchingSuppression?.liftedAt) {
+      return;
+    }
+
+    incident.driverMatchingSuppression = {
+      ...suppression,
+      active: false,
+      liftedAt: now,
+    };
+    this.appendTimelineEntry(
+      incident.incidentId,
+      TIMELINE_ACTIONS.matchingSuppressionLifted,
+      allowSystemLift
+        ? "Driver matching suppression lifted automatically by incident lifecycle."
+        : "Driver matching suppression lifted manually.",
+      identity?.actorId ?? actor,
+      now,
+    );
+  }
+
+  private parseIsoTimestamp(value: string, fieldName: string) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `${fieldName} must be a valid ISO-8601 timestamp.`,
+        { field: fieldName, value },
+      );
+    }
+    return parsed;
+  }
+
+  private isOpsManager(identity?: BootstrapRequestIdentity | null) {
+    return Boolean(identity?.roles?.includes("ops_manager"));
+  }
+
+  private toIncidentReadModel(
+    incident: IncidentRecord,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    return {
+      ...this.clone(incident),
+      driverMatchingSuppression:
+        incident.driverMatchingSuppression
+          ? { ...incident.driverMatchingSuppression }
+          : null,
+      availableActions: this.buildAvailableActions(incident, identity),
+    };
+  }
+
+  private buildAvailableActions(
+    incident: IncidentRecord,
+    identity?: BootstrapRequestIdentity | null,
+  ): ResourceActionDescriptor[] {
+    const actions: ResourceActionDescriptor[] = [];
+    const suppression = incident.driverMatchingSuppression;
+
+    if (suppression?.active) {
+      actions.push({
+        action: "lift_matching_suppression",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      });
+      actions.push({
+        action: "extend_matching_suppression",
+        enabled: this.isOpsManager(identity),
+        disabledReasonCode: this.isOpsManager(identity)
+          ? undefined
+          : "ops_manager_required",
+        requiresReason: true,
+        riskLevel: "high",
+      });
+    }
+
+    if (incident.status !== "resolved" && incident.status !== "closed") {
+      actions.push({
+        action: "resolve_incident",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "medium",
+      });
+    }
+
+    return actions;
+  }
+
+  private buildRefreshMetadata(generatedAt: string) {
+    return {
+      generatedAt,
+      staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+      dataFreshness: "fresh" as const,
+      source: "live" as const,
+    };
+  }
+
+  private buildHealthEnvelope(lastCheckedAt: string) {
+    return {
+      status: "healthy" as const,
+      degradedServices: [],
+      lastCheckedAt,
+    };
   }
 
   private persist(

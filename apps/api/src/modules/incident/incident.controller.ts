@@ -21,6 +21,8 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { CurrentIdentity } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ComplaintService } from "../complaint/complaint.service";
 import { IncidentService } from "./incident.service";
 
@@ -43,9 +45,12 @@ export class IncidentController {
   }
 
   @Get()
-  listIncidents(@Headers("x-request-id") requestId?: string) {
+  listIncidents(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     return toApiSuccessEnvelope(
-      { items: this.incidentService.listIncidents() },
+      this.incidentService.listIncidentReadModel(identity),
       requestId,
     );
   }
@@ -53,10 +58,11 @@ export class IncidentController {
   @Get(":incidentId")
   getIncident(
     @Param("incidentId") incidentId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.getIncident(incidentId),
+      this.incidentService.getIncidentDetail(incidentId, identity),
       requestId,
     );
   }
@@ -65,10 +71,16 @@ export class IncidentController {
   updateIncident(
     @Param("incidentId") incidentId: string,
     @Body() command: UpdateIncidentCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.updateIncident(incidentId, command, requestId),
+      this.incidentService.updateIncident(
+        incidentId,
+        command,
+        requestId,
+        identity,
+      ),
       requestId,
     );
   }
