@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { Injectable } from "@nestjs/common";
+import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   CrossAppResourceLink,
@@ -9,6 +9,7 @@ import type {
   UiSeverity,
   UserNotificationRecord,
 } from "@drts/contracts";
+import { NotificationRepository } from "./notification.repository";
 
 const BROADCAST_RECIPIENT_ACTOR_ID = "*";
 
@@ -42,7 +43,7 @@ function cloneNotification(
 }
 
 @Injectable()
-export class NotificationService {
+export class NotificationService implements OnModuleInit {
   private notifications: UserNotificationRecord[] = [
     {
       notificationId: "user-notif-platform-001",
@@ -98,6 +99,34 @@ export class NotificationService {
     },
   ];
 
+  constructor(
+    @Optional()
+    private readonly notificationRepository?: NotificationRepository,
+  ) {}
+
+  async onModuleInit() {
+    if (!this.notificationRepository) {
+      return;
+    }
+
+    try {
+      const persistedState = await this.notificationRepository.loadState();
+      if (persistedState.notifications.length === 0) {
+        this.persistChanges(this.notifications, "module init bootstrap");
+        return;
+      }
+
+      this.notifications = persistedState.notifications.map((notification) =>
+        cloneNotification(notification),
+      );
+    } catch (error) {
+      this.notificationRepository.reportPersistenceFailure(
+        error,
+        "module init",
+      );
+    }
+  }
+
   listNotifications(identity: NotificationIdentity | null | undefined) {
     if (!identity || !this.isUserRealm(identity.realm)) {
       return [];
@@ -126,6 +155,7 @@ export class NotificationService {
       createdAt: input.createdAt ?? new Date().toISOString(),
     };
     this.notifications = [notification, ...this.notifications];
+    this.persistChanges([notification], "emit");
     return cloneNotification(notification);
   }
 
@@ -165,6 +195,17 @@ export class NotificationService {
         readAt,
       };
     });
+
+    if (updated > 0) {
+      this.persistChanges(
+        this.notifications.filter(
+          (notification) =>
+            requestedIds.has(notification.notificationId) &&
+            notification.readAt === readAt,
+        ),
+        "mark notifications read",
+      );
+    }
 
     return { updated };
   }
@@ -212,5 +253,20 @@ export class NotificationService {
       realm === "tenant" ||
       realm === "driver"
     );
+  }
+
+  private persistChanges(
+    notifications: readonly UserNotificationRecord[],
+    context: string,
+  ) {
+    if (!this.notificationRepository || notifications.length === 0) {
+      return;
+    }
+
+    void this.notificationRepository
+      .persistChanges({ notifications })
+      .catch((error: unknown) => {
+        this.notificationRepository?.reportPersistenceFailure(error, context);
+      });
   }
 }

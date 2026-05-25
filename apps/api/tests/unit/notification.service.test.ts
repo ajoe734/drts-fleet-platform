@@ -105,4 +105,53 @@ describe("NotificationService", () => {
         ?.readAt,
     ).toBeNull();
   });
+
+  it("rehydrates persisted inbox state and persists writes when a repository is provided", async () => {
+    const notificationRepository = {
+      loadState: async () => ({
+        notifications: [
+          {
+            notificationId: "user-notif-persisted-001",
+            recipientActorId: "tenant-user-demo-001",
+            recipientRealm: "tenant" as const,
+            tenantId: "tenant-demo-001",
+            severity: "info" as const,
+            eventType: "booking.confirmed",
+            title: "Persisted booking confirmed",
+            message: "Booking persisted-001 is confirmed.",
+            resourceLink: null,
+            readAt: null,
+            createdAt: "2026-05-25T02:00:00.000Z",
+          },
+        ],
+      }),
+      persistChanges: async () => undefined,
+      reportPersistenceFailure: () => undefined,
+    };
+    const service = new NotificationService(notificationRepository as never);
+
+    await service.onModuleInit();
+
+    expect(service.listNotifications(TENANT_IDENTITY)).toEqual([
+      expect.objectContaining({
+        notificationId: "user-notif-persisted-001",
+        eventType: "booking.confirmed",
+      }),
+    ]);
+
+    service.emit({
+      recipientActorId: "tenant-user-demo-001",
+      recipientRealm: "tenant",
+      tenantId: "tenant-demo-001",
+      severity: "warning",
+      eventType: "quota.threshold_warning",
+      title: "Quota warning",
+      message: "Usage exceeded 90%.",
+      createdAt: "2026-05-25T02:05:00.000Z",
+    });
+
+    expect(service.listNotifications(TENANT_IDENTITY)[0]?.eventType).toBe(
+      "quota.threshold_warning",
+    );
+  });
 });

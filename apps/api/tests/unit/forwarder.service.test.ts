@@ -107,6 +107,7 @@ function createService(options?: {
   };
   const auditNotificationService = {
     recordAuditLog: vi.fn(),
+    emitUserNotification: vi.fn(),
   };
   const adapter = options?.adapter ?? createAdapter();
   const ownedMobilityService = options?.ownedMobilityService;
@@ -527,6 +528,13 @@ describe("ForwarderService", () => {
       expect.objectContaining({
         moduleName: "forwarder",
         actionName: "mark_forwarder_sync_failed",
+      }),
+    );
+    expect(auditNotificationService.emitUserNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientActorId: "driver-002",
+        recipientRealm: "driver",
+        eventType: "driver.platform.sync_failed",
       }),
     );
   });

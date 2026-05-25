@@ -4,6 +4,14 @@ import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { IncidentService } from "../../src/modules/incident/incident.service";
 
+const OPS_IDENTITY = {
+  actorId: "ops-user-001",
+  actorType: "ops_user" as const,
+  realm: "ops" as const,
+  scopes: ["notifications:read"],
+  tenantId: null,
+};
+
 function createServices() {
   const auditNotificationService = new AuditNotificationService();
   const incidentService = new IncidentService(auditNotificationService);
@@ -181,6 +189,24 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
   });
 
   describe("severity escalation", () => {
+    it("emits a Q-X06 ops inbox notification for critical incidents", () => {
+      const { incidentService, auditNotificationService } = createServices();
+
+      incidentService.createIncident({
+        title: "Critical battery fire",
+        description: "Vehicle fire escalation.",
+        category: "safety",
+        severity: "critical",
+        reportedBy: "ops-user-001",
+      });
+
+      expect(
+        auditNotificationService
+          .listUserNotifications(OPS_IDENTITY)
+          .map((notification) => notification.eventType),
+      ).toContain("incident.critical.created");
+    });
+
     it("tracks severity changes in the timeline", () => {
       const { incidentService } = createServices();
 

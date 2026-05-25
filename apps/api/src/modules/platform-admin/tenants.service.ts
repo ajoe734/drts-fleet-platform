@@ -268,7 +268,6 @@ export class TenantsService implements OnModuleInit {
       },
       requestId,
     );
-
     return this.cloneTenant(tenant);
   }
 
@@ -417,7 +416,6 @@ export class TenantsService implements OnModuleInit {
       },
       requestId,
     );
-
     return this.cloneTenant(tenant);
   }
 
@@ -465,7 +463,6 @@ export class TenantsService implements OnModuleInit {
       },
       requestId,
     );
-
     return this.cloneTenant(tenant);
   }
 
@@ -552,6 +549,13 @@ export class TenantsService implements OnModuleInit {
       },
       requestId,
     );
+    this.auditNotificationService.emitUserNotification({
+      recipientRealm: "platform",
+      severity: "critical",
+      eventType: "tenant.rollback_hold.enabled",
+      title: "Tenant rollback hold enabled",
+      message: `Tenant ${tenant.name} (${tenant.id}) was placed in rollback hold.`,
+    });
 
     return this.cloneTenant(tenant);
   }

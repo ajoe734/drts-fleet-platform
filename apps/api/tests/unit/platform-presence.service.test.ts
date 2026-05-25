@@ -54,4 +54,37 @@ describe("PlatformPresenceService", () => {
       }),
     ]);
   });
+
+  it("emits driver.platform.reauth_required when the token is near expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-08T05:00:00Z"));
+      const auditNotificationService = {
+        emitUserNotification: vi.fn(),
+      };
+      const service = new PlatformPresenceService(
+        undefined,
+        undefined,
+        auditNotificationService as never,
+      );
+
+      await service.setOnline(
+        "driver-reauth-001",
+        "grab_taiwan",
+        "2026-05-10T05:00:00Z",
+      );
+
+      expect(
+        auditNotificationService.emitUserNotification,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientActorId: "driver-reauth-001",
+          recipientRealm: "driver",
+          eventType: "driver.platform.reauth_required",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
