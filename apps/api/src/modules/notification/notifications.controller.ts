@@ -60,20 +60,4 @@ export class NotificationsController {
       requestId,
     );
   }
-
-  @Post("read")
-  @RequireScopes("notifications:write")
-  markNotificationsReadLegacy(
-    @Body() command: MarkNotificationsReadCommand,
-    @CurrentIdentity() identity: IdentityContext | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      this.notificationService.markNotificationsRead(
-        command.notificationIds,
-        identity,
-      ),
-      requestId,
-    );
-  }
 }

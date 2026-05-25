@@ -1147,6 +1147,17 @@ export class ForwarderService implements OnModuleInit {
       },
       requestId,
     );
+
+    if (acceptedDriverId) {
+      this.auditNotificationService.emitUserNotification({
+        recipientActorId: acceptedDriverId,
+        recipientRealm: "driver",
+        severity: "critical",
+        eventType: "driver.platform.sync_failed",
+        title: "Platform sync failed",
+        message: `Forwarded order ${forwardedOrder.mirrorOrderId} needs manual follow-up because ${forwardedOrder.platformCode} sync failed.`,
+      });
+    }
   }
 
   private updateAdapterHealth(
