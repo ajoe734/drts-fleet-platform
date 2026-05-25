@@ -1,17 +1,19 @@
 # PH1GC-FIN-GOV-001 Sidecar Review Packet
 
 > **Parent Task:** `PH1GC-FIN-GOV-001` — Phase 1 gap closure: governance-aware billing/reporting spec + UAT
-> **Parent Owner:** `Codex2` (per `ai-status.json`; effective owner-lane handoff to `Claude2` on `claude2/ph1gc-fin-gov-001` per merge `b9b7c1f0`)
-> **Parent Reviewer:** `Codex`
-> **Parent Status:** `review_approved` (per `ai-status.json` snapshot at `2026-05-22T06:38:54Z`; owner finalize still pending the `claude2/ph1gc-fin-gov-001` merge into `origin/dev`)
+> **Parent Owner:** `Codex` (per `ai-status.json` after the `2026-05-25T16:52:51Z` reopen; effective owner branch `origin/codex/ph1gc-fin-gov-001` HEAD `91b8b723` "wip(PH1GC-FIN-GOV-001): anchor 2026-05-25 blocker truth refresh", `2026-05-25T15:19:15Z`)
+> **Parent Reviewer:** `Codex2`
+> **Parent Status:** `in_progress` (post-reopen at `2026-05-25T16:52:51Z`; the parent `next` field cites revalidation of draft PR #290 against canonical root and the staging IAP/WIF blocker)
 > **Sidecar Owner:** `Claude`
-> **Sidecar Reviewer:** `Claude2`
+> **Sidecar Reviewer:** `Codex` (rebalanced at `2026-05-25T17:00:23Z`)
 > **Helper Kind:** `review_packet`
 > **Mutates Canonical:** `false`
-> **Created:** `2026-05-25T16:55Z`
+> **Created:** `2026-05-25T16:55Z`; refreshed `2026-05-25T17:30Z`
 > **Branch:** `claude/ph1gc-fin-gov-001-sidecar-review` (base `dev` @ `5e76ec58`)
 
-This packet is a **support artifact only**. It does not modify L1/L2 canonical truth, core service contracts, runtime implementations, or the parent task's machine-truth state. It summarizes the existing PH1GC-FIN-GOV-001 evidence on `origin/dev` and on the still-unmerged `claude2/ph1gc-fin-gov-001` branch so the parent owner / `Claude2` can decide closeout disposition without re-reading every artifact.
+This packet is a **support artifact only**. It does not modify L1/L2 canonical truth, core service contracts, runtime implementations, or the parent task's machine-truth state. It summarizes the existing PH1GC-FIN-GOV-001 evidence on `origin/dev` and on the still-unmerged owner branch `origin/codex/ph1gc-fin-gov-001` so the parent owner (`Codex`) and the parent reviewer (`Codex2`) can decide the next disposition without re-reading every artifact.
+
+The packet was reopened by the sidecar reviewer because the previous revision named the parent owner / reviewer / status incorrectly and pointed at a stale predecessor owner branch (`claude2/ph1gc-fin-gov-001`, merge `b9b7c1f0`). The owner-lane has since moved to `Codex` and the live owner-branch direction is the newer `codex/ph1gc-fin-gov-001` HEAD `91b8b723` work. This refresh re-cites against that branch.
 
 ---
 
@@ -35,7 +37,7 @@ This packet is a **support artifact only**. It does not modify L1/L2 canonical t
 
 ## 2. Evidence Inventory On `origin/dev` (HEAD `5e76ec58`)
 
-This is what a reviewer reading the canonical trunk can verify today, without merging anything new.
+This is what a reviewer reading the canonical trunk can verify today, without merging anything new. All file existence / content claims below were verified directly against `origin/dev` after `git fetch origin` during this refresh.
 
 ### 2.1 Spec
 
@@ -55,7 +57,7 @@ This is what a reviewer reading the canonical trunk can verify today, without me
 - File: `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` (152 lines).
 - Landed in the same `PH1GC-DOC-BATCH-1` (PR #237).
 - §1 preconditions are explicit; §2 lists six happy-path scenarios (`UAT-FIN-GOV-001` to `UAT-FIN-GOV-006`); §3 lists seven negative-path scenarios (`UAT-FIN-GOV-007` to `UAT-FIN-GOV-013`).
-- `UAT-FIN-GOV-001` enumerates the 13-field assertion explicitly: `costCenterCode`, `costCenterName`, `ownerUserId`, `ownerName`, `approvalEvaluationId`, `approvalRequestId`, `approvalState`, `quotaPeriodKey`, `quotaUsageDelta`, `auditId`, `partnerProgramCode`, `platformEarningsRef`, `legacy_unmapped`. (UAT lists 13 attribution checks against the verification body; `eligibilityVerificationId` is covered in `UAT-FIN-GOV-005` which exercises the partner-channel path.)
+- `UAT-FIN-GOV-001` (trunk line 37) enumerates the 13-field assertion explicitly: `costCenterCode`, `costCenterName`, `ownerUserId`, `ownerName`, `approvalEvaluationId`, `approvalRequestId`, `approvalState`, `quotaPeriodKey`, `quotaUsageDelta`, `auditId`, `partnerProgramCode`, `platformEarningsRef`, `legacy_unmapped`. (UAT lists 13 attribution checks against the verification body; `eligibilityVerificationId` is covered in `UAT-FIN-GOV-005` which exercises the partner-channel path.)
 - §4 spells out the gate-read uplift acceptance criteria: all happy-path + negative-path scenarios pass on staging, `E2E-010` runs to completion against staging, closeout follows directive §7.
 
 ### 2.3 E2E
@@ -76,75 +78,110 @@ This is what a reviewer reading the canonical trunk can verify today, without me
   - Line 29: `| E2E-010 | tests/e2e/E2E-010-governance-aware-billing-reporting.sh | WF-FIN-GOV-001 |`.
   - Line 40: "`WF-FIN-001` retains baseline-finance scope. `WF-FIN-GOV-001` is the new governance-aware-finance family. Do not collapse them."
   - Line 44 includes `WF-FIN-GOV-001` in the canonical family list.
-  - **Row 14 itself is not present in the matrix table on `origin/dev`.** The table currently ends at row 13 (`WF-FIN-001`) before the table cuts off and the next sections begin (see §3.1 below for the implication).
-- `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` §2.14 has a placeholder `WF-FIN-GOV-001` heading; the actual closure / anchor / gap text refresh lives on `claude2/ph1gc-fin-gov-001` (see §2.5).
+  - **Row 14 itself is not present in the matrix table on `origin/dev`.** The table ends at row 13 (`WF-FIN-001`); see §3.1 below for the implication.
+- `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` §2.14 has a placeholder `WF-FIN-GOV-001` heading; the actual closure / anchor / gap text refresh lives on the owner branch (see §2.5).
 
-### 2.5 Branch-only delta on `claude2/ph1gc-fin-gov-001` (commit `b9b7c1f0`, not yet on `origin/dev`)
+### 2.5 Branch-only deltas on `origin/codex/ph1gc-fin-gov-001` (HEAD `91b8b723`, `2026-05-25T15:19:15Z`, not on `origin/dev`)
 
-These additive matrix / audit / sidecar files exist on the owner branch but have **not** been merged to trunk:
+`git diff --stat origin/dev...origin/codex/ph1gc-fin-gov-001` returns 13 changed files and ~1700 net added lines (verified during this refresh). The owner-branch deltas that matter for the acceptance audit:
 
-- `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md` — directive §7-format closeout, written in non-claim posture; acceptance §3 mapping is per-item.
-- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` — proposed row 14 for `WF-FIN-GOV-001` at `PASS (static evidence)` with explicit "live staging uplift blocked" note that cites the IAP/ingress blocker in `FIN-GOV-001-EVIDENCE-PACK.md` §4.
-- `docs/03-runbooks/phase1-release-truth-sync-20260519.md` — proposed downgrade of the stale `PASS (live staging evidence)` line on dev (which does not match the actual evidence) and replacement of the `TBD via PH1GC-FIN-GOV-001` placeholder with concrete file references.
-- `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` §2.14 — refreshed closure / anchor / gap text.
-- `tests/e2e/README.md` and `tests/e2e/run-e2e.sh` — `E2E-010` row + `--suite 010` runner usage.
+- `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` (+61 lines): expanded §3 with the explicit reconciliation against the directive §H bullet list; new §6 split between **§6.1 hard-fail contract regressions** (always enforced) and **§6.2 13-field verification-body recording** (`<value>` or `NOT_POPULATED` per field); new **`STRICT_VERIFICATION_BODY=1` uplift gate-keeper** at line 175 documenting the strict-mode invocation that must come back green before the matrix row may be uplifted to `PASS (live staging evidence)`.
+- `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` (+48 lines): scenario-side wording aligned with the spec §6 split.
+- `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (+1324 lines): material rewrite. Adds `VB_FIELD_NAMES` table-driven verification-body recording, a per-field `<value>` / `NOT_POPULATED` snapshot, and a `STRICT_VERIFICATION_BODY=1` gate-keeper mode that hard-fails on any `NOT_POPULATED` field. The default-mode invocation records and exits 0; the strict-mode invocation is what the matrix uplift is gated on.
+- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` (+1 line): adds matrix **row 14** for `WF-FIN-GOV-001` at `PASS (static evidence)` with an explicit uplift gate-keeper note that cites `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md` §4 (IAP credential / ingress gate).
+- `docs/03-runbooks/phase1-release-truth-sync-20260519.md` (+7 lines): downgrades the line-86 gate-read from `PASS (live staging evidence)` to `PASS (static evidence); live staging uplift still blocked pending a green STRICT_VERIFICATION_BODY=1 run of E2E-010 against a fresh governed staging rerun — IAP credential/ingress gate documented in support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md §4`. Also replaces the `TBD via PH1GC-FIN-GOV-001` placeholder at the old line 108 with the concrete file list (spec, UAT, E2E, FIN-GOV-001 evidence pack).
+- `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` (+31 lines): refreshes the §2.14 closure / anchor / gap text.
+- `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md` (+195 lines, new file): directive §7-format closeout. §2 acceptance status table maps every AC to the corresponding posture, including the explicit two-tier E2E contract (`always-record` vs `STRICT_VERIFICATION_BODY=1`). §3 is the directive §7 non-claim posture (no live-staging claim, no all-fields-populated claim, IAP blocker still open). §4 records local-verification commands only. §5 documents the staging IAP/WIF blocker. §0 standard header lists the executed local commands (CI workflow dispatches, run inspections, IAP curl probes).
+- `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md` (+246 lines): refresh of the predecessor evidence pack.
+- `tests/e2e/README.md` (+2 lines) and `tests/e2e/run-e2e.sh` (+1 line): `--suite 010` runner row.
+- `docs/04-uat/fbp-014a-e2e-matrix.md` (+104 lines, new file): E2E matrix reference cited from the closeout.
+- `.github/workflows/ci-integ.yml` (+386 lines, new file) and `.github/workflows/deploy-staging.yml` (+4 / −0): CI plumbing that drives the staging-rerun attempts cited in the closeout.
 
-The owner-branch closeout (§5 of the closeout sidecar) documents local verification only: `bash -n` on the E2E shell, `./tests/e2e/run-e2e.sh --suite 010 --dry-run`, and `grep` confirmation of the `REQUIRED_KEYS` loop. No live staging run; live execution remains blocked by the `FIN-GOV-001` evidence-pack §4 IAP credential gate.
+The owner-branch closeout (§4 of the closeout sidecar) explicitly records only **local** verification: `bash -n` on the E2E shell (both modes), `bash tests/e2e/run-e2e.sh --suite 010 --dry-run`, and YAML parse on the new CI workflow. No green staging run from this workspace; live execution remains blocked by the `FIN-GOV-001` evidence-pack §4 IAP credential gate, which the closeout §5 documents and the closeout §0 header's command list confirms (the run-inspection commands enumerate the failed/abandoned staging dispatches).
+
+A predecessor owner branch `origin/claude2/ph1gc-fin-gov-001` (HEAD `b9b7c1f0`, `2026-05-25` replay-merge) exists from before the owner-lane reassignment; it carries an earlier and narrower variant of the same content (no `STRICT_VERIFICATION_BODY=1` gate-keeper, no `VB_FIELD_NAMES` rewrite of E2E). It is not the live owner-branch direction and is mentioned here only to disambiguate previous packet revisions.
 
 ---
 
 ## 3. Acceptance Audit
 
+Two scopes for each item: (a) what a reviewer reading only `origin/dev` HEAD `5e76ec58` can verify, and (b) what the owner-branch refinement on `origin/codex/ph1gc-fin-gov-001` adds on top. The parent task is `in_progress`, so neither scope is final until owner finalize.
+
 ### AC-1 — Spec visible on `origin/dev`
 
-**Evidence:** `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` is on `origin/dev` at HEAD `5e76ec58` (149 lines, content as inventoried in §2.1). Landed by `PH1GC-DOC-BATCH-1` (commit `6607dea8`, PR #237).
+**Trunk evidence:** `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` exists on `origin/dev` at HEAD `5e76ec58` (blob `a977200d`, 149 lines, content per §2.1). Landed by `PH1GC-DOC-BATCH-1` (commit `6607dea8`, PR #237).
 
-**Verdict:** ✅ PASS.
+**Owner-branch refinement:** owner branch adds 61 lines (notably the §6 split into §6.1 hard-fail contract and §6.2 13-field recording, plus the `STRICT_VERIFICATION_BODY=1` gate-keeper at line 175). This refinement is not yet on trunk.
+
+**Verdict:** ✅ PASS on the literal AC text (file is visible on dev). ⚠ Owner finalize will substantively re-version the spec via the codex-branch +61 delta; the parent task is `in_progress` precisely because the refined spec has not yet landed.
 
 ### AC-2 — UAT visible on `origin/dev`
 
-**Evidence:** `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` is on `origin/dev` at HEAD `5e76ec58` (152 lines, content as inventoried in §2.2). Same `PH1GC-DOC-BATCH-1` landing.
+**Trunk evidence:** `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` exists on `origin/dev` at HEAD `5e76ec58` (blob `31999fc2`, 152 lines, content per §2.2). Same `PH1GC-DOC-BATCH-1` landing.
 
-**Verdict:** ✅ PASS.
+**Owner-branch refinement:** owner branch adds 48 lines aligning the UAT scenario wording with the spec §6 split.
+
+**Verdict:** ✅ PASS on the literal AC text (file is visible on dev). ⚠ Owner finalize will re-version via the +48 delta.
 
 ### AC-3 — UAT covers all 13 verification-body fields
 
-**Evidence:** `UAT-FIN-GOV-001` (UAT §2 happy-path) asserts the 13-field shape on the billing record (verbatim names in §2.2 above). Additional UAT scenarios (`UAT-FIN-GOV-002` to `UAT-FIN-GOV-006`) exercise the variant pathways that set or null specific fields (manual approval, escalation, quota, partner channel, forwarder). UAT-FIN-GOV-005 specifically exercises `eligibilityVerificationId`. Negative-path scenarios (`UAT-FIN-GOV-007` to `UAT-FIN-GOV-013`) cover quota ceiling, rejection, RBAC, cross-tenant, `legacy_unmapped` integrity, post-export immutability, and token-masking integrity.
+**Trunk evidence:** `UAT-FIN-GOV-001` on trunk (line 37) asserts the 13-field shape on the billing record verbatim (names in §2.2 above). Variant scenarios `UAT-FIN-GOV-002`..`UAT-FIN-GOV-006` exercise the conditional-pathway populations (manual approval, escalation, quota, partner channel, forwarder); `UAT-FIN-GOV-005` specifically exercises `eligibilityVerificationId`. Negative-path scenarios `UAT-FIN-GOV-007`..`UAT-FIN-GOV-013` cover quota ceiling, rejection, RBAC, cross-tenant, `legacy_unmapped` integrity, post-export immutability, and token-masking integrity.
 
-**Verdict:** ✅ PASS — the UAT enumerates the 13 fields in `UAT-FIN-GOV-001` and the variant scenarios exercise the conditional paths.
+**Owner-branch refinement:** the UAT-side language is realigned to the spec §6.2 "13-field recording" framing; field set is unchanged.
+
+**Verdict:** ✅ PASS on the literal AC text (the 13 fields are enumerated in `UAT-FIN-GOV-001` on trunk and the variant scenarios cover the conditional paths). The owner-branch refinement clarifies but does not extend the field set.
 
 ### AC-4 — `PH1GC-E2E-010` asserts every field in the verification body
 
-**Evidence:** `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` lines 250–278 declare the 13 `REQUIRED_KEYS` and the `jq has("<key>")` loop with `exit 1` on any missing key (cited verbatim in §2.3 above). Names match the spec §3 verification body exactly. The script also hard-fails on missing seed (line 73 and equivalent guards), so a silent pass is not possible.
+**Trunk evidence:** `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` lines 250–278 on trunk declare the 13 `REQUIRED_KEYS` and the `jq has("<key>")` loop with `exit 1` on any missing key (verbatim in §2.3 above). Names match the spec §3 verification body exactly. The script also hard-fails on missing seed (line 73 and equivalent guards), so a silent pass is not possible. The literal AC text — "script asserts every field in the verification body" — is satisfied on trunk.
 
-**Verdict:** ✅ PASS — the hard-fail loop covers every directive §H field.
+**Owner-branch refinement:** the owner branch replaces the trunk REQUIRED_KEYS approach with a `VB_FIELD_NAMES` table and a two-tier contract:
+- **Default mode** — records every verification-body field as `<value>` or `NOT_POPULATED` and exits 0. This is for repo-local / static-evidence runs.
+- **`STRICT_VERIFICATION_BODY=1` mode** — hard-fails if any field remains `NOT_POPULATED`. This is the gate-keeper for an uplift to `PASS (live staging evidence)`.
+
+The owner-branch contract is a strict superset of the trunk hard-fail loop — the strict mode equivalent of the trunk REQUIRED_KEYS+has() loop is preserved, while the default mode is more permissive (records rather than hard-fails). A reviewer reading only trunk sees the stricter behaviour; a reviewer reading only the owner branch sees the gate-keeper concept that mediates the matrix uplift.
+
+**Verdict:** ✅ PASS on the literal AC text. The owner-branch refinement reframes the assertion semantics (default-mode recording vs strict-mode hard-fail) but the contract that "every field is asserted" is preserved end-to-end. The reviewer should agree the strict-mode gate-keeper does not weaken AC-4.
 
 ### AC-5 — Gate-read update for `WF-FIN-GOV-001` = `PASS (live staging evidence)` drives matrix change
 
-**Evidence:**
+**Trunk evidence (no change since previous revision):**
 
-- `docs/03-runbooks/phase1-release-truth-sync-20260519.md` line 86 currently reads `WF-FIN-GOV-001 ↔ matrix row 14 (gate read: PASS (live staging evidence))` on `origin/dev`.
-- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` on `origin/dev` does **not** yet contain row 14 in the matrix table. The matrix table appears to end at `WF-FIN-001` (row 13). The release-truth-sync gate-read string therefore references a row the canonical matrix has not yet emitted.
-- `FIN-GOV-001-EVIDENCE-PACK.md` §4 documents the live rerun blocker (IAP credential / ingress gate) that prevents production of fresh `PASS (live staging evidence)` proof from this workspace.
-- The `claude2/ph1gc-fin-gov-001` branch closeout (§4) proposes downgrading the gate-read line to `PASS (static evidence)` with an explicit "live staging uplift blocked" note, and adding the matrix row 14 with the same conservative posture. That branch has not been merged.
+- `docs/03-runbooks/phase1-release-truth-sync-20260519.md` line 86 still reads `WF-FIN-GOV-001 ↔ matrix row 14 (gate read: PASS (live staging evidence))` on `origin/dev`.
+- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` on `origin/dev` still does **not** contain row 14 in the matrix table. The matrix table on trunk ends at row 13 (`WF-FIN-001`).
+- `FIN-GOV-001-EVIDENCE-PACK.md` §4 still documents the live-rerun blocker (IAP credential / ingress gate). No green staging rerun exists on this workspace.
 
-**Verdict:** ⚠️ PARTIAL — there are two reviewer-visible mismatches:
+**Owner-branch refinement:** the owner branch (`origin/codex/ph1gc-fin-gov-001` HEAD `91b8b723`):
 
-- **Mismatch A (on dev):** the release-truth-sync line claims `PASS (live staging evidence)` for `WF-FIN-GOV-001` matrix row 14, but no such row exists in the canonical matrix, and the predecessor evidence pack confirms the live rerun is blocked. The claim is currently unsupported.
-- **Mismatch B (between branches):** the proposed correction (downgrade to `PASS (static evidence)` + add row 14 + cite the blocker) lives only on `claude2/ph1gc-fin-gov-001` and has not landed on `origin/dev`.
+- Adds matrix row 14 for `WF-FIN-GOV-001` at `PASS (static evidence)` with an explicit uplift gate-keeper note that cites the `STRICT_VERIFICATION_BODY=1` requirement and `FIN-GOV-001-EVIDENCE-PACK.md` §4.
+- Downgrades the release-truth-sync line 86 from `PASS (live staging evidence)` to `PASS (static evidence); live staging uplift still blocked pending a green STRICT_VERIFICATION_BODY=1 run of E2E-010 against a fresh governed staging rerun — IAP credential/ingress gate documented in support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md §4`.
+- Replaces the `TBD via PH1GC-FIN-GOV-001` placeholder at line 108 with the concrete file list.
 
-The parent owner / reviewer should decide whether to:
-1. Merge the `claude2/ph1gc-fin-gov-001` correction so the matrix and gate-read align with the actual evidence (`PASS (static evidence)` with blocker note); or
-2. Land a separate uplift PR after a live-staging rerun produces the missing evidence; or
-3. Re-open `PH1GC-FIN-GOV-001` to remove the stale `PASS (live staging evidence)` string until item 1 or item 2 lands.
+**Verdict:** ⚠ PARTIAL — two reviewer-visible mismatches:
 
-The current acceptance-item wording ("Gate-read update… drives matrix change") is satisfied **only** if option 1 lands (i.e. the matrix row is added and the gate-read is honest). Until then, this acceptance item is not safely closed by trunk-only evidence.
+- **Mismatch A (on dev):** the release-truth-sync line claims `PASS (live staging evidence)` for `WF-FIN-GOV-001` matrix row 14, but no such row exists in the canonical matrix on dev, and the predecessor evidence pack confirms the live rerun is blocked. The claim is currently unsupported on trunk.
+- **Mismatch B (between branches):** the proposed correction (downgrade to `PASS (static evidence)` + add row 14 + cite the strict-mode gate-keeper + cite the IAP blocker) lives on `origin/codex/ph1gc-fin-gov-001` and has not been merged to dev.
+
+The acceptance-item wording — "Gate-read update… drives matrix change" — is satisfied only when the row 14 + downgrade reach trunk. There are three reasonable owner / reviewer dispositions for the parent finalize:
+
+1. Merge the owner branch correction so the matrix row exists and the gate-read is honest (`PASS (static evidence)` with the uplift gate-keeper note); or
+2. Defer the matrix change to a follow-up task after a green `STRICT_VERIFICATION_BODY=1` staging rerun produces the missing evidence; or
+3. Re-open / rescope `PH1GC-FIN-GOV-001` to remove the stale `PASS (live staging evidence)` string until option 1 or option 2 lands.
+
+The parent reviewer `Codex2` is the authority on which path closes AC-5. This sidecar does not pre-empt that disposition.
 
 ### AC-6 — Closeout report follows directive §7 format
 
-**Evidence:** `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md` on `claude2/ph1gc-fin-gov-001` (commit `b9b7c1f0`) §3 enumerates each of the seven directive §7 non-claim rules and binds each to the corresponding posture in the delivery. The closeout does not claim live staging evidence; it does not claim every governance field is populated end-to-end; it does not claim the upstream IAP blocker is resolved.
+**Trunk evidence:** no closeout sidecar for `PH1GC-FIN-GOV-001` exists on `origin/dev`. A reviewer reading only trunk cannot find one.
 
-**Verdict:** ✅ PASS (format), ⚠️ PARTIAL (visibility) — the closeout follows the directive §7 format faithfully but exists only on `claude2/ph1gc-fin-gov-001` and has not been merged to `origin/dev`. A reviewer reading only `origin/dev` cannot find it.
+**Owner-branch refinement:** `support/sidecars/PH1GC-FIN-GOV-001/PH1GC-FIN-GOV-001-CLOSEOUT.md` exists on `origin/codex/ph1gc-fin-gov-001` (blob `75752a99`, 195 lines). The closeout:
+
+- Carries a directive §7 non-claim posture (§3): does **not** claim live-staging evidence, does **not** claim every verification-body field is populated, does **not** claim the IAP blocker is resolved.
+- Records the two-tier E2E contract explicitly (§2 acceptance status table): always-record default mode plus `STRICT_VERIFICATION_BODY=1` strict mode.
+- Records local verification only (§4): `bash -n` on the E2E shell in both modes, dry-run via `tests/e2e/run-e2e.sh --suite 010 --dry-run`, YAML parse of the new CI workflow.
+- Documents the remaining staging blocker (§5) and lists the executed CI-dispatch / run-inspection / IAP-probe commands (§0 header).
+
+**Verdict:** ✅ PASS (format) on the owner branch; ⚠ PARTIAL (visibility) on trunk — the closeout is faithful to directive §7 but lives only on `origin/codex/ph1gc-fin-gov-001` and is not visible on `origin/dev`.
 
 ---
 
@@ -155,80 +192,87 @@ The current acceptance-item wording ("Gate-read update… drives matrix change")
 **Location:** `docs/03-runbooks/phase1-release-truth-sync-20260519.md` line 86.
 
 **Problem:** the string claims live-staging proof for a row that:
-- has no matching row in the canonical matrix,
-- has a predecessor evidence pack (`FIN-GOV-001-EVIDENCE-PACK.md` §4) that explicitly documents the live rerun is blocked.
 
-A reviewer who only reads trunk would conclude `WF-FIN-GOV-001` is gated live, which is not supported by any reviewable artifact on trunk.
+- has no matching row in the canonical matrix on `origin/dev`,
+- has a predecessor evidence pack (`FIN-GOV-001-EVIDENCE-PACK.md` §4) that explicitly documents the live rerun is blocked by an IAP credential / ingress gate,
+- has no green `STRICT_VERIFICATION_BODY=1` staging rerun on record (the closeout §0 header on the owner branch enumerates the dispatched runs and explicitly does not claim a green strict run).
 
-**Recommendation:** merge the `claude2/ph1gc-fin-gov-001` correction (or a slimmed equivalent), or open a follow-up to downgrade the string.
+A reviewer reading only trunk would conclude `WF-FIN-GOV-001` is gated live, which is not supported by any reviewable artifact.
+
+**Recommendation:** merge the owner-branch correction (or a slimmed equivalent), or open a follow-up task to downgrade the string ahead of any release announcement.
 
 ### R-2 — Missing matrix row 14
 
 **Location:** `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`.
 
-**Problem:** the gate-read line refers to "matrix row 14" but the matrix table on trunk ends at row 13 (`WF-FIN-001`). The release-truth-sync line therefore cites a row that does not exist on the canonical matrix.
+**Problem:** the release-truth-sync gate-read line refers to "matrix row 14" but the matrix table on trunk ends at row 13 (`WF-FIN-001`). The release-truth-sync line therefore cites a row that does not exist on the canonical matrix.
 
-**Recommendation:** land the row 14 addition (proposed shape on `claude2/ph1gc-fin-gov-001`: `PASS (static evidence)` + "live staging uplift blocked" note + citation to `FIN-GOV-001-EVIDENCE-PACK.md` §4).
+**Recommendation:** land the owner-branch row 14 addition (`PASS (static evidence)` + uplift gate-keeper note citing `STRICT_VERIFICATION_BODY=1` and `FIN-GOV-001-EVIDENCE-PACK.md` §4).
 
 ### R-3 — Branch fragmentation between `PH1GC-FIN-GOV-001`-related branches
 
-There are now four sets of branches that mention `PH1GC-FIN-GOV-001`:
+There are now multiple sets of branches that mention `PH1GC-FIN-GOV-001`:
 
-- `claude/ph1gc-fin-gov-001` (this review's sibling).
-- `claude2/ph1gc-fin-gov-001` (owner branch carrying the closeout + matrix delta).
-- `codex/ph1gc-fin-gov-001` (and three rebased copies).
-- `codex2/ph1gc-fin-gov-001` (and a sidecar-acceptance branch).
+- `claude/ph1gc-fin-gov-001` (a sibling claude lane branch, separate from this sidecar's `claude/ph1gc-fin-gov-001-sidecar-review`).
+- `claude2/ph1gc-fin-gov-001` (prior owner-lane branch carrying the earlier replay merge `b9b7c1f0`).
+- `codex/ph1gc-fin-gov-001` (**current owner branch**, HEAD `91b8b723`).
+- Several rebased copies under `codex/ph1gc-fin-gov-001-rebased-*` (cited in the closeout §0 header for staging-dispatch attempts).
+- `codex2/ph1gc-fin-gov-001` (HEAD `4e3b4e19`).
+- Helper branches for `*-unblock-history-repair`, `*-unblock-manual-unblock`, `*-sidecar-acceptance`, `*-sidecar-review`.
 
-The historical churn was documented in `PH1GC-FIN-GOV-001-UNBLOCK-HISTORY-REPAIR` (PR #244). The owner-lane resume on 2026-05-25 (merge commit `b9b7c1f0`) is the current canonical owner branch. A reviewer should make sure no follow-up PR accidentally lands content from an older branch that conflicts with the `claude2/ph1gc-fin-gov-001` direction.
+The historical churn was documented in `PH1GC-FIN-GOV-001-UNBLOCK-HISTORY-REPAIR` (PR #244). After the 2026-05-25 owner-lane reassignment to `Codex`, the canonical owner branch is `codex/ph1gc-fin-gov-001`. A reviewer should make sure no follow-up PR accidentally lands content from one of the older branches that conflicts with the current owner-branch direction.
 
-### R-4 — Parent task `review_approved` but trunk state incomplete
+### R-4 — Parent task is `in_progress`, not `review_approved`
 
-`ai-status.json` records `PH1GC-FIN-GOV-001` as `review_approved` (since `2026-05-22T06:38:54Z`), but the matrix-row / closeout-sidecar / runner-doc deliverables that actually satisfy acceptance items 5 and 6 live on `claude2/ph1gc-fin-gov-001` and have not landed on `origin/dev`. The `next` field on the parent task says "Owner finalize via docs/ph1gc-doc-batch-1-20260522 (PR #237); awaiting merge to dev" — but the `claude2/ph1gc-fin-gov-001` work is a different, later branch (post-merge `b9b7c1f0`) that was not anticipated by that `next` text.
+`ai-status.json` now records `PH1GC-FIN-GOV-001` as `in_progress` (after the `2026-05-25T16:52:51Z` reopen), with owner `Codex` and reviewer `Codex2`. The parent `next` field cites revalidation of draft PR #290 against canonical root and the staging IAP/WIF blocker.
 
-**Recommendation:** before the parent owner moves `PH1GC-FIN-GOV-001` to `done`, they need to either:
-- merge `claude2/ph1gc-fin-gov-001` to dev (with a commit message that names this task) and provide `COMMIT_HASH` / `COMMIT_SUBJECT` / `PUSH_REMOTE` / `PUSH_BRANCH`; or
-- explicitly drop acceptance items 5/6 to a follow-up task and document that decision; or
-- mark the task `blocker` until the gate-read evidence catches up.
+What the parent owner (`Codex`) and parent reviewer (`Codex2`) need to decide before the parent task can move forward:
 
-This is the disposition the parent reviewer (`Codex`) needs to make. This sidecar does not pre-empt it.
+- Whether to land the owner-branch delta (matrix row 14, release-truth-sync downgrade, closeout sidecar, refined spec/UAT/E2E) onto dev — and if so, whether via PR #290 or a fresh PR.
+- Whether the trunk's current `PASS (live staging evidence)` string at line 86 can stay during the in-progress window or must be downgraded first.
+- Whether AC-5 closes via option 1 / 2 / 3 in §3 above.
+- Whether to register a follow-up task for the live-staging uplift (a `STRICT_VERIFICATION_BODY=1` green run is the upstream condition) — see Q-2.
+
+This sidecar does not pre-empt that disposition. It only confirms the evidence base on both surfaces is faithful to what is on disk.
 
 ### Q-1 — Should this packet stay sidecar-only, or feed a small trunk PR?
 
-The matrix row 14 + release-truth-sync downgrade + closeout sidecar are objectively additive corrections that align trunk with the actual evidence. The orchestrator can keep them on `claude2/ph1gc-fin-gov-001` until the parent owner ships, or it can land them via a slim trunk PR independent of this sidecar review. This sidecar takes no action on that decision; it documents the gap.
+The matrix row 14 + release-truth-sync downgrade + closeout sidecar are objectively additive corrections that align trunk with the actual evidence. The parent owner can keep them on `codex/ph1gc-fin-gov-001` until the parent ships, or land them via a slim trunk PR independent of the broader spec/UAT/E2E re-versioning. This sidecar takes no action on that decision; it documents the gap.
 
 ### Q-2 — Should `WF-FIN-GOV-001` live-staging uplift get its own follow-up task?
 
-The closeout on `claude2/ph1gc-fin-gov-001` §7.1 argues this artifact-scope task is the wrong owner for the live-staging uplift (which depends on an external IAP credential gate). A successor task to `PH1GC-E2E-010` (currently `Codex`) is the suggested home. If the reviewer agrees, registering that follow-up task before closing `PH1GC-FIN-GOV-001` keeps the gate-uplift work tracked in machine truth.
+The owner-branch closeout (§5) argues this artifact-scope task is the wrong owner for the live-staging uplift, which depends on an external IAP credential gate. A successor task to `PH1GC-E2E-010` is the suggested home; the upstream condition is a green `STRICT_VERIFICATION_BODY=1` staging rerun. If the parent reviewer (`Codex2`) agrees, registering that follow-up task before closing `PH1GC-FIN-GOV-001` keeps the gate-uplift work tracked in machine truth.
 
 ---
 
 ## 5. What This Packet Does NOT Do
 
 - It does **not** modify any L1/L2 product truth.
-- It does **not** touch `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`, `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`, `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`, the matrix file, the release-truth-sync file, the alignment audit, or any closeout sidecar.
-- It does **not** change `ai-status.json` for the parent task (`PH1GC-FIN-GOV-001` stays `review_approved` until its owner finalizes).
+- It does **not** touch `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`, `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`, `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`, the matrix file, the release-truth-sync file, the alignment audit, or any closeout sidecar on any branch.
+- It does **not** change `ai-status.json` for the parent task (`PH1GC-FIN-GOV-001` stays `in_progress` until its owner finalizes).
 - It does **not** claim `WF-FIN-GOV-001` has live-staging proof.
-- It does **not** speak for the parent reviewer (`Codex`); the parent disposition stays where it sits.
+- It does **not** speak for the parent reviewer (`Codex2`); the parent disposition stays where it sits.
+- It does **not** decide whether the owner-branch delta should land via PR #290 or a fresh PR.
 
 ---
 
-## 6. Recommended Reviewer Disposition (For `Claude2`)
+## 6. Recommended Reviewer Disposition (For `Codex`)
 
-Once `Claude2` (sidecar reviewer) reads this packet, the reviewer disposition is:
+Once `Codex` (sidecar reviewer) reads this refresh, the reviewer disposition is:
 
-- **APPROVE** if the inventory and acceptance audit faithfully reflect trunk and `claude2/ph1gc-fin-gov-001`, and the risks/open-questions are reasonable to surface to the parent owner.
-- **REOPEN** if any cited file path / line number is wrong, or if a cited claim (e.g. "row 14 is not on trunk", "REQUIRED_KEYS has 13 entries") does not match the actual file content.
-- **BLOCKER** if the reviewer believes this sidecar is misnaming the actual parent disposition or is creating new canonical claims it should not.
+- **APPROVE** if (a) the trunk and owner-branch citations match what is on disk after `git fetch origin`, (b) the AC-1..AC-4 verdicts correctly distinguish "literal trunk text PASS" from "owner-branch refinement pending", (c) AC-5 is correctly held at PARTIAL with both mismatches surfaced, (d) the parent owner / reviewer attribution in the header reflects the post-2026-05-25T16:52:51Z reopen.
+- **REOPEN** if any cited file path / line number / blob hash is wrong, or a cited claim (e.g. "row 14 is not on trunk", "`REQUIRED_KEYS` has 13 entries", "owner-branch HEAD is `91b8b723`") does not match the actual file content. (The previous review reopen was on stale metadata; this refresh aims to clear that.)
+- **BLOCKER** if the reviewer believes this sidecar is misnaming the actual parent disposition, mis-attributing the owner branch, or creating new canonical claims it should not.
 
-This sidecar is `NO_COMMIT_REQUIRED=1`-eligible per `AI_COLLABORATION_GUIDE.md` §5: it is a support-only review packet, no canonical implementation slice. (The owner may still anchor-commit a wip(...) snapshot of this file; the parent task does not require a canonical commit from this sidecar.)
+This sidecar is `NO_COMMIT_REQUIRED=1`-eligible per `AI_COLLABORATION_GUIDE.md` §5: it is a support-only review packet, no canonical implementation slice. The owner anchors a `wip(...)` commit of this file per the worker-anchor-commit protocol; the parent task does not require a canonical commit from this sidecar.
 
 ---
 
 ## 7. Handoff
 
-- **Owner (`Claude`) handoff message draft:** "Sidecar review packet drafted. Inventory verified against `origin/dev` HEAD `5e76ec58` and `claude2/ph1gc-fin-gov-001` merge `b9b7c1f0`. AC-1..AC-4 PASS; AC-5 PARTIAL (stale gate-read on trunk + missing matrix row); AC-6 PASS (format) / PARTIAL (visibility). Two trunk mismatches and two open questions surfaced for the parent owner. No canonical files modified."
-- **Reviewer (`Claude2`):** please verify the cited file paths, line numbers, and `REQUIRED_KEYS` enumeration. If accurate, approve and route back to the parent owner so they can decide on the matrix-row landing and the live-staging uplift owner.
+- **Owner (`Claude`) handoff message draft:** "Sidecar review packet refreshed against current machine truth. Header now reflects parent owner `Codex`, parent reviewer `Codex2`, parent status `in_progress`, sidecar reviewer `Codex`. Evidence inventory re-cited against `origin/dev` HEAD `5e76ec58` and current owner branch `origin/codex/ph1gc-fin-gov-001` HEAD `91b8b723`. AC-1..AC-4 verdicts split into literal-trunk-PASS vs owner-branch-refinement-pending; AC-5 PARTIAL (stale gate-read on trunk + missing matrix row, both addressed on owner branch); AC-6 PASS (format) / PARTIAL (visibility). Two trunk mismatches and two open questions surfaced for `Codex2` to consider during the parent in-progress window. No canonical files modified by this sidecar."
+- **Reviewer (`Codex`):** please verify the cited file paths, line numbers, blob hashes, branch HEADs, and `REQUIRED_KEYS` / `VB_FIELD_NAMES` enumerations. If accurate, approve and route back to the parent owner (`Codex`) so they can decide on the matrix-row landing, the spec/UAT/E2E re-versioning, and the live-staging uplift owner.
 
 ---
 
-_Sidecar review packet complete. Ready for `Claude2` review; parent task owner decides whether to absorb the surfaced risks/questions into the mainline closeout._
+_Sidecar review packet refreshed. Ready for `Codex` review; parent task owner (`Codex`) and parent reviewer (`Codex2`) decide whether to absorb the surfaced risks/questions into the mainline closeout._
