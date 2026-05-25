@@ -1,23 +1,17 @@
 import { Controller, Get } from "@nestjs/common";
 import { SkipThrottle } from "@nestjs/throttler";
+import type { UiHealthEnvelope } from "@drts/contracts";
 
 import { RATE_LIMIT_SKIP_DEFAULT } from "../common/throttling/rate-limit.constants";
-
-export function buildHealthPayload() {
-  return {
-    service: "api",
-    status: "ok",
-    mode: "phase1_foundation",
-    execution_mode: "supervisor_managed_execution",
-    timestamp: new Date().toISOString(),
-  };
-}
+import { HealthService } from "./health.service";
 
 @Controller("health")
 @SkipThrottle(RATE_LIMIT_SKIP_DEFAULT)
 export class HealthController {
+  constructor(private readonly healthService: HealthService) {}
+
   @Get()
-  getHealth() {
-    return buildHealthPayload();
+  getHealth(): UiHealthEnvelope {
+    return this.healthService.getHealthEnvelope();
   }
 }

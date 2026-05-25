@@ -3,7 +3,7 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
-import { buildHealthPayload } from "./health/health.controller";
+import { HealthService } from "./health/health.service";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -13,6 +13,8 @@ async function bootstrap() {
     exclude: ["health"],
   });
 
+  const healthService = app.get(HealthService);
+
   app
     .getHttpAdapter()
     .getInstance()
@@ -20,9 +22,11 @@ async function bootstrap() {
       "/api/health",
       (
         _req: unknown,
-        res: { json: (body: ReturnType<typeof buildHealthPayload>) => void },
+        res: {
+          json: (body: ReturnType<HealthService["getHealthEnvelope"]>) => void;
+        },
       ) => {
-        res.json(buildHealthPayload());
+        res.json(healthService.getHealthEnvelope());
       },
     );
 
