@@ -4,8 +4,10 @@ import {
   Injectable,
   NestInterceptor,
 } from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
 import { Observable } from "rxjs";
 import { map } from "rxjs/operators";
+import { SKIP_SNAKE_CASE_KEY } from "./skip-snake-case.decorator";
 
 /**
  * Convert a single camelCase key to snake_case.
@@ -56,10 +58,16 @@ export function deepToSnakeCase(value: unknown): unknown {
  */
 @Injectable()
 export class SnakeCaseInterceptor implements NestInterceptor {
-  intercept(
-    _context: ExecutionContext,
-    next: CallHandler,
-  ): Observable<unknown> {
+  constructor(private reflector: Reflector) {}
+
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const skip = this.reflector.get<boolean>(
+      SKIP_SNAKE_CASE_KEY,
+      context.getHandler(),
+    );
+    if (skip) {
+      return next.handle();
+    }
     return next.handle().pipe(map(deepToSnakeCase));
   }
 }

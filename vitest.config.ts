@@ -18,6 +18,7 @@ export default defineConfig({
       "tests/unit/**/*.test.ts",
       "tests/integration/**/*.test.ts",
       "tests/load/**/*.test.ts",
+      "apps/api/src/**/*.test.ts",
     ],
   },
 });
