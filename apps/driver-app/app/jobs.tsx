@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Animated,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,11 +8,15 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import type {
   DriverTaskAction,
   DriverTaskRecord,
+  EmptyReason,
+  EmptyStateEnvelope,
   OwnedOrderRecord,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
   UnifiedDriverTaskView,
 } from "@drts/contracts";
 
@@ -55,8 +57,6 @@ type TaskFilterValue =
   | "platform_closed"
   | "sync_issue";
 
-type LayoutVariant = "A" | "B";
-
 type NoticeTone = "success" | "warn" | "danger" | "info";
 
 type InlineNotice = {
@@ -64,8 +64,6 @@ type InlineNotice = {
   title: string;
   body?: string;
 };
-
-type SwipeActionDirection = "accept" | "reject";
 
 type TaskVisualState =
   | "needs_action"
@@ -87,11 +85,17 @@ type TaskAuthorityDescriptor = {
   icon: keyof typeof Ionicons.glyphMap;
 };
 
+type TaskInboxEnvelope = {
+  items: UnifiedDriverTaskView[];
+  refresh: UiRefreshMetadata;
+  refreshTier: "medium";
+  empty: EmptyStateEnvelope | null;
+};
+
 const THEME = driverCanvasTheme;
 const FILTER_OPTIONS = driverJobFilterOptions;
 const ACTION_LABELS: Record<DriverTaskAction, string> = driverTaskActionLabels;
-const SWIPE_LIMIT = 124;
-const SWIPE_TRIGGER = 78;
+const POLL_INTERVAL_MS = 15_000;
 
 function humanizeCode(value: string) {
   return value
@@ -167,6 +171,14 @@ function isPlatformClosed(task: UnifiedDriverTaskView) {
   );
 }
 
+function isNeedsActionTask(task: UnifiedDriverTaskView) {
+  return (
+    hasSyncIssue(task) ||
+    task.driverActionState === "action_required" ||
+    task.driverActionState === "awaiting_platform"
+  );
+}
+
 function matchesFilter(task: UnifiedDriverTaskView, filter: TaskFilterValue) {
   if (filter === "all") {
     return true;
@@ -187,30 +199,22 @@ function matchesFilter(task: UnifiedDriverTaskView, filter: TaskFilterValue) {
   return task.driverActionState === "in_progress";
 }
 
-function isNeedsActionTask(task: UnifiedDriverTaskView) {
-  return (
-    hasSyncIssue(task) ||
-    task.driverActionState === "action_required" ||
-    task.driverActionState === "awaiting_platform"
-  );
-}
-
 function getActionPriority(task: UnifiedDriverTaskView) {
   switch (task.driverActionState) {
-    case "in_progress":
-      return 0;
     case "action_required":
-      return 1;
+      return 0;
     case "awaiting_platform":
+      return 1;
+    case "in_progress":
       return 2;
-    case "completed":
-      return 3;
-    case "read_only":
-      return 4;
     case "blocked":
-      return hasSyncIssue(task) ? 5 : 4;
-    default:
+      return hasSyncIssue(task) ? 3 : 4;
+    case "completed":
+      return 5;
+    case "read_only":
       return 6;
+    default:
+      return 7;
   }
 }
 
@@ -233,7 +237,7 @@ function compareTasks(a: UnifiedDriverTaskView, b: UnifiedDriverTaskView) {
   return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
 }
 
-function formatTimestamp(value: string | null) {
+function formatTimestamp(value: string | null | undefined) {
   if (!value) {
     return null;
   }
@@ -243,7 +247,12 @@ function formatTimestamp(value: string | null) {
     return value;
   }
 
-  return parsed.toISOString().replace("T", " ").slice(0, 16);
+  return parsed.toLocaleString("zh-TW", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatRelativeDeadline(value: string | null) {
@@ -273,38 +282,6 @@ function formatRelativeDeadline(value: string | null) {
 
   const hours = Math.ceil(minutes / 60);
   return `${hours} 小時內處理`;
-}
-
-function buildAllowedActionSummary(task: UnifiedDriverTaskView) {
-  if (hasSyncIssue(task)) {
-    return task.requiresReauth
-      ? "需重新登入或補授權後再同步"
-      : "需派車台介入同步";
-  }
-
-  if (task.allowedActions.length > 0) {
-    return task.allowedActions
-      .map((action) => ACTION_LABELS[action])
-      .join(" / ");
-  }
-
-  if (isPlatformClosed(task)) {
-    return "來源平台已結案，僅供查閱";
-  }
-
-  if (task.driverActionState === "awaiting_platform") {
-    return "等待來源平台確認接單";
-  }
-
-  if (task.driverActionState === "in_progress") {
-    return "請前往行程作業查看下一步";
-  }
-
-  if (task.driverActionState === "completed") {
-    return "任務已完成";
-  }
-
-  return task.blockingReason?.trim() || "目前無可執行操作";
 }
 
 function buildFallbackUnifiedTaskView(
@@ -433,22 +410,36 @@ function getTaskPillTone(task: UnifiedDriverTaskView) {
   }
 }
 
-function isEmphasizedStatus(task: UnifiedDriverTaskView) {
-  return (
-    !hasSyncIssue(task) &&
-    !isPlatformClosed(task) &&
-    task.driverActionState !== "completed"
-  );
-}
+function buildAllowedActionSummary(task: UnifiedDriverTaskView) {
+  if (hasSyncIssue(task)) {
+    return task.requiresReauth
+      ? "需重新登入或補授權後再同步"
+      : "需派車台介入同步";
+  }
 
-function canSwipeForwardedTask(task: UnifiedDriverTaskView) {
-  return (
-    !isOwnedTask(task) &&
-    !hasSyncIssue(task) &&
-    task.driverActionState === "action_required" &&
-    task.allowedActions.includes("accept") &&
-    task.allowedActions.includes("reject")
-  );
+  if (task.allowedActions.length > 0) {
+    return task.allowedActions
+      .map((action: DriverTaskAction) => ACTION_LABELS[action])
+      .join(" / ");
+  }
+
+  if (isPlatformClosed(task)) {
+    return "來源平台已結案，僅供查閱";
+  }
+
+  if (task.driverActionState === "awaiting_platform") {
+    return "等待來源平台確認接單";
+  }
+
+  if (task.driverActionState === "in_progress") {
+    return "請前往行程作業查看下一步";
+  }
+
+  if (task.driverActionState === "completed") {
+    return "任務已完成";
+  }
+
+  return task.blockingReason?.trim() || "目前無可執行操作";
 }
 
 function buildTaskTitle(task: UnifiedDriverTaskView) {
@@ -487,12 +478,6 @@ function buildTaskSubtitle(task: UnifiedDriverTaskView) {
     if (points.length > 1) {
       return `${points[0]} · ${points[1]}`;
     }
-    if (points.length === 1) {
-      const singlePoint = points[0];
-      return singlePoint === buildTaskTitle(task)
-        ? buildAllowedActionSummary(task)
-        : singlePoint;
-    }
   }
 
   return buildAllowedActionSummary(task);
@@ -502,100 +487,6 @@ function buildCardMeta(task: UnifiedDriverTaskView) {
   return [task.orderId, formatTimestamp(task.updatedAt)]
     .filter((value): value is string => Boolean(value))
     .join(" · ");
-}
-
-function buildDenseStatusText(task: UnifiedDriverTaskView) {
-  if (hasSyncIssue(task)) {
-    return "同步異常";
-  }
-
-  if (isPlatformClosed(task)) {
-    const nativeStatus = normalizeStateCode(task.nativeStatus);
-    if (nativeStatus === "lost_race" || nativeStatus === "taken") {
-      return "已失去";
-    }
-    if (
-      nativeStatus === "cancelled" ||
-      nativeStatus === "cancelled_by_platform"
-    ) {
-      return "平台取消";
-    }
-    return "平台結案";
-  }
-
-  switch (task.driverActionState) {
-    case "action_required": {
-      const deadlineLabel = formatRelativeDeadline(task.deadlineAt);
-      if (!isOwnedTask(task)) {
-        return deadlineLabel ? `可接 · ${deadlineLabel}` : "可接單";
-      }
-      return "待司機處理";
-    }
-    case "awaiting_platform":
-      return "等候確認";
-    case "in_progress":
-      return "進行中";
-    case "completed":
-      return "已完成";
-    case "blocked":
-      return "需派車台處理";
-    case "read_only":
-      return "唯讀鏡像";
-    default:
-      return formatActionStateLabel(task.driverActionState);
-  }
-}
-
-function buildCardStatusLabel(task: UnifiedDriverTaskView) {
-  if (hasSyncIssue(task)) {
-    return "同步異常";
-  }
-
-  if (isPlatformClosed(task)) {
-    return formatStatusLabel(task.nativeStatus);
-  }
-
-  if (!isOwnedTask(task) && task.nativeStatus) {
-    return formatStatusLabel(task.nativeStatus);
-  }
-
-  switch (task.driverActionState) {
-    case "action_required":
-      return isOwnedTask(task) ? "待司機處理" : "可接單";
-    case "awaiting_platform":
-      return "等待平台確認";
-    case "in_progress":
-      return "進行中";
-    case "completed":
-      return "已完成";
-    case "blocked":
-      return "需派車台處理";
-    case "read_only":
-      return "唯讀鏡像";
-    default:
-      return formatActionStateLabel(task.driverActionState);
-  }
-}
-
-function getDenseStatusColor(task: UnifiedDriverTaskView) {
-  if (hasSyncIssue(task)) {
-    return THEME.danger;
-  }
-  if (isPlatformClosed(task)) {
-    return THEME.textDim;
-  }
-  switch (task.driverActionState) {
-    case "action_required":
-      return isOwnedTask(task) ? THEME.warn : THEME.accent;
-    case "awaiting_platform":
-      return THEME.warn;
-    case "in_progress":
-      return THEME.success;
-    case "completed":
-      return THEME.textDim;
-    default:
-      return THEME.textMuted;
-  }
 }
 
 function buildTypeLabel(order: OwnedOrderRecord | null) {
@@ -614,8 +505,6 @@ function getTaskPlatformCode(task: UnifiedDriverTaskView) {
   switch (task.sourcePlatform) {
     case "uber":
       return "UB";
-    case "grab":
-      return "GR";
     case "line-taxi":
       return "LT";
     case "grab_taiwan":
@@ -794,7 +683,7 @@ function buildTaskAuthorityDescriptor(
 
 function describeForwardedActionOutcome(
   outcome: string,
-  action: SwipeActionDirection,
+  action: "accept" | "reject",
 ): InlineNotice {
   switch (outcome) {
     case "accept_pending":
@@ -861,255 +750,447 @@ function noticeToneToIcon(tone: NoticeTone) {
   }
 }
 
-function LayoutToggle({
-  layout,
-  onRefresh,
-  refreshing,
-  onToggle,
-}: {
-  layout: LayoutVariant;
-  onRefresh: () => void;
-  refreshing: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <View style={styles.headerActions}>
-      <Btn
-        variant="ghost"
-        size="sm"
-        icon={
-          <Ionicons name="refresh-outline" size={14} color={THEME.textMuted} />
-        }
-        onPress={onRefresh}
-        disabled={refreshing}
-      >
-        同步
-      </Btn>
-      <Btn
-        variant="secondary"
-        size="sm"
-        icon={
-          <Ionicons
-            name={layout === "A" ? "reorder-three-outline" : "grid-outline"}
-            size={14}
-            color={THEME.text}
-          />
-        }
-        onPress={onToggle}
-      >
-        {layout === "A" ? "佇列" : "卡片"}
-      </Btn>
-    </View>
-  );
+function formatDisabledReasonCode(reason: string | undefined) {
+  if (!reason) {
+    return "目前暫不開放此操作";
+  }
+
+  switch (reason) {
+    case "platform_accept_not_supported":
+      return "此平台不支援司機端接單 relay";
+    case "platform_reject_not_supported":
+      return "此平台不支援司機端婉拒 relay";
+    case "platform_reauth_required":
+      return "平台需要重新授權後才能回覆";
+    case "platform_sync_issue":
+      return "平台同步異常，請依派車台指示處理";
+    case "platform_mirror_only":
+      return "此訂單目前僅提供鏡像查閱";
+    default:
+      return humanizeCode(reason);
+  }
 }
 
-function DriverBottomTabs({
-  active,
-  jobsBadge,
-  onNavigate,
+function buildActionDescriptors(
+  task: UnifiedDriverTaskView,
+): ResourceActionDescriptor[] {
+  const descriptors: ResourceActionDescriptor[] = task.allowedActions.map(
+    (action: DriverTaskAction) => ({
+      action,
+      enabled: true,
+      riskLevel: action === "accept" || action === "reject" ? "medium" : "low",
+    }),
+  );
+
+  if (!isOwnedTask(task) && task.driverActionState === "action_required") {
+    const hasAccept = descriptors.some((item) => item.action === "accept");
+    const hasReject = descriptors.some((item) => item.action === "reject");
+    const disabledReasonCode = task.requiresReauth
+      ? "platform_reauth_required"
+      : hasSyncIssue(task)
+        ? "platform_sync_issue"
+        : "platform_mirror_only";
+
+    if (!hasAccept) {
+      descriptors.push({
+        action: "accept",
+        enabled: false,
+        disabledReasonCode:
+          disabledReasonCode === "platform_mirror_only"
+            ? "platform_accept_not_supported"
+            : disabledReasonCode,
+        riskLevel: "medium",
+      });
+    }
+    if (!hasReject) {
+      descriptors.push({
+        action: "reject",
+        enabled: false,
+        disabledReasonCode:
+          disabledReasonCode === "platform_mirror_only"
+            ? "platform_reject_not_supported"
+            : disabledReasonCode,
+        riskLevel: "medium",
+      });
+    }
+  }
+
+  return descriptors;
+}
+
+function getActionDescriptor(
+  task: UnifiedDriverTaskView,
+  action: DriverTaskAction,
+) {
+  return buildActionDescriptors(task).find((item) => item.action === action);
+}
+
+function inferEmptyReason(
+  tasks: UnifiedDriverTaskView[],
+  selectedFilter: TaskFilterValue,
+): EmptyReason {
+  if (selectedFilter !== "all") {
+    return "filtered_empty";
+  }
+
+  if (tasks.some((task) => hasSyncIssue(task))) {
+    return "external_unavailable";
+  }
+
+  return "no_data";
+}
+
+function buildRefreshMetadata(
+  generatedAt: string,
+  fallbackMode: boolean,
+): UiRefreshMetadata {
+  return {
+    generatedAt,
+    staleAfterMs: POLL_INTERVAL_MS,
+    dataFreshness: fallbackMode ? "degraded" : "fresh",
+    source: fallbackMode ? "cache" : "live",
+  };
+}
+
+function parseTaskEnvelope(
+  payload: unknown,
+  selectedFilter: TaskFilterValue,
+): TaskInboxEnvelope | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const items = Array.isArray(record.items)
+    ? (record.items as UnifiedDriverTaskView[])
+    : null;
+  if (!items) {
+    return null;
+  }
+
+  const generatedAt =
+    typeof record.generatedAt === "string"
+      ? record.generatedAt
+      : typeof (record.refresh as Record<string, unknown> | undefined)
+            ?.generatedAt === "string"
+        ? ((record.refresh as Record<string, unknown>).generatedAt as string)
+        : new Date().toISOString();
+
+  const refresh = {
+    ...buildRefreshMetadata(generatedAt, false),
+    ...(record.refresh && typeof record.refresh === "object"
+      ? (record.refresh as Partial<UiRefreshMetadata>)
+      : null),
+  };
+
+  const empty =
+    record.empty && typeof record.empty === "object"
+      ? (record.empty as EmptyStateEnvelope)
+      : items.length === 0
+        ? {
+            reason: inferEmptyReason(items, selectedFilter),
+            messageCode: "driver.jobs.empty",
+          }
+        : null;
+
+  return {
+    items,
+    refresh,
+    refreshTier: "medium",
+    empty,
+  };
+}
+
+function getRefreshState(refresh: UiRefreshMetadata) {
+  if (refresh.dataFreshness === "degraded") {
+    return "degraded";
+  }
+  if (refresh.dataFreshness === "unknown") {
+    return "unknown";
+  }
+
+  const generatedAt = Date.parse(refresh.generatedAt);
+  if (Number.isNaN(generatedAt)) {
+    return "unknown";
+  }
+
+  if (Date.now() - generatedAt > refresh.staleAfterMs) {
+    return "stale";
+  }
+
+  return refresh.dataFreshness;
+}
+
+function EmptyStateCard({
+  reason,
+  onRetry,
+  onOpenPlatform,
+  onOpenTrip,
 }: {
-  active: "jobs" | "home" | "trip" | "platform" | "settings";
-  jobsBadge: number;
-  onNavigate: (route: string) => void;
+  reason: EmptyReason;
+  onRetry: () => void;
+  onOpenPlatform: () => void;
+  onOpenTrip: () => void;
 }) {
-  const items = [
-    { id: "home", label: "工作台", icon: "home-outline", route: "/" },
-    { id: "jobs", label: "任務", icon: "list-outline", route: "/jobs" },
-    { id: "trip", label: "行程", icon: "car-outline", route: "/trip" },
+  const config: Record<
+    EmptyReason,
     {
-      id: "platform",
-      label: "平台",
-      icon: "layers-outline",
-      route: "/platform-presence",
-      dot: true,
+      icon: keyof typeof Ionicons.glyphMap;
+      tone: "info" | "warn" | "danger";
+      title: string;
+      body: string;
+      action: {
+        label: string;
+        onPress: () => void;
+      };
+    }
+  > = {
+    no_data: {
+      icon: "moon-outline" as const,
+      tone: "info" as const,
+      title: "目前沒有任務",
+      body: "現在沒有待處理或進行中的任務。保持在線，新的派單會透過 push 與收件匣同步進來。",
+      action: {
+        label: "重新整理",
+        onPress: onRetry,
+      },
     },
-    {
-      id: "settings",
-      label: "設定",
-      icon: "person-outline",
-      route: "/settings",
+    filtered_empty: {
+      icon: "funnel-outline" as const,
+      tone: "info" as const,
+      title: "此篩選下沒有任務",
+      body: "目前沒有符合這個條件的任務。可切回其他分類，或等待下一次自動同步。",
+      action: {
+        label: "重新整理",
+        onPress: onRetry,
+      },
     },
-  ] as const;
+    fetch_failed: {
+      icon: "cloud-offline-outline" as const,
+      tone: "danger" as const,
+      title: "任務收件匣載入失敗",
+      body: "目前無法取得最新任務。請重新整理；若持續失敗，請聯繫派車台確認平台狀態。",
+      action: {
+        label: "重新整理",
+        onPress: onRetry,
+      },
+    },
+    not_provisioned: {
+      icon: "construct-outline" as const,
+      tone: "warn" as const,
+      title: "任務功能尚未啟用",
+      body: "這台裝置或你的司機帳號尚未完成任務功能配置，暫時無法使用 unified inbox。",
+      action: {
+        label: "開啟行程",
+        onPress: onOpenTrip,
+      },
+    },
+    permission_denied: {
+      icon: "lock-closed-outline" as const,
+      tone: "danger" as const,
+      title: "目前沒有權限查看任務",
+      body: "帳號沒有存取這個收件匣所需的權限。請聯絡平台管理員或派車台確認司機配置。",
+      action: {
+        label: "重新整理",
+        onPress: onRetry,
+      },
+    },
+    external_unavailable: {
+      icon: "alert-circle-outline" as const,
+      tone: "warn" as const,
+      title: "外部平台暫時不可用",
+      body: "平台或同步適配器目前異常。你仍會看到安全鏡像，但後續動作需依派車台指示處理。",
+      action: {
+        label: "平台狀態",
+        onPress: onOpenPlatform,
+      },
+    },
+    driver_not_eligible: {
+      icon: "ban-outline" as const,
+      tone: "warn" as const,
+      title: "你目前不符合接單資格",
+      body: "目前沒有任何平台或服務桶可派單給你。請先檢查平台資格、授權或上線狀態。",
+      action: {
+        label: "檢查平台",
+        onPress: onOpenPlatform,
+      },
+    },
+  };
+
+  const current = config[reason];
 
   return (
-    <View style={styles.bottomTabs}>
-      {items.map((item) => {
-        const selected = item.id === active;
-        const hasDot = "dot" in item && Boolean(item.dot);
-        return (
-          <Pressable
-            key={item.id}
-            accessibilityRole="button"
-            onPress={() => onNavigate(item.route)}
-            style={styles.bottomTabItem}
-          >
-            <View style={styles.bottomTabIconWrap}>
-              <Ionicons
-                name={item.icon}
-                size={22}
-                color={selected ? THEME.accent : THEME.textDim}
-              />
-              {item.id === "jobs" && jobsBadge > 0 ? (
-                <View style={styles.bottomTabBadge}>
-                  <Text style={styles.bottomTabBadgeText}>{jobsBadge}</Text>
-                </View>
-              ) : null}
-              {hasDot ? <View style={styles.bottomTabDot} /> : null}
-            </View>
-            <Text
-              style={[
-                styles.bottomTabLabel,
-                selected && styles.bottomTabLabelActive,
-              ]}
-            >
-              {item.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
+    <Card style={styles.emptyCard}>
+      <View style={styles.emptyIconWrap}>
+        <Ionicons
+          name={current.icon}
+          size={22}
+          color={
+            current.tone === "danger"
+              ? THEME.danger
+              : current.tone === "warn"
+                ? THEME.warn
+                : THEME.info
+          }
+        />
+      </View>
+      <Text style={styles.emptyTitle}>{current.title}</Text>
+      <Text style={styles.emptyBody}>{current.body}</Text>
+      <Btn variant="primary" size="sm" onPress={current.action.onPress}>
+        {current.action.label}
+      </Btn>
+    </Card>
   );
 }
 
 function TaskCard({
   task,
   order,
+  highlighted,
+  busy,
   onOpen,
   onAccept,
-  accepting,
+  onReject,
 }: {
   task: UnifiedDriverTaskView;
   order: OwnedOrderRecord | null;
+  highlighted: boolean;
+  busy: boolean;
   onOpen: () => void;
   onAccept: () => void;
-  accepting: boolean;
+  onReject: () => void;
 }) {
   const forwarded = !isOwnedTask(task);
-  const platformClosed = isPlatformClosed(task);
   const syncIssue = hasSyncIssue(task);
-  const visualState = getTaskVisualState(task);
+  const platformClosed = isPlatformClosed(task);
   const authority = buildTaskAuthorityDescriptor(task);
-  const dimmed = visualState === "completed" || platformClosed;
+  const acceptAction = getActionDescriptor(task, "accept");
+  const rejectAction = getActionDescriptor(task, "reject");
   const fareLabel = order?.quotedFare ? formatMoney(order.quotedFare) : null;
   const deadlineLabel = formatRelativeDeadline(task.deadlineAt);
   const typeLabel = buildTypeLabel(order);
-  const showPrimaryAction = canSwipeForwardedTask(task);
-  const showOpenAction =
-    !showPrimaryAction &&
-    !syncIssue &&
-    !platformClosed &&
-    (visualState === "needs_action" ||
-      visualState === "in_progress" ||
-      visualState === "confirmed");
-  const actionLabel = showPrimaryAction
-    ? "接受平台訂單"
-    : showOpenAction
-      ? driverStrings.jobs.openCurrentTrip
-      : null;
-  const nextStepText = buildAllowedActionSummary(task);
-  const showFooter = Boolean(fareLabel || deadlineLabel || actionLabel);
+  const disabledHint =
+    formatDisabledReasonCode(acceptAction?.disabledReasonCode) ||
+    task.blockingReason ||
+    null;
 
   return (
     <Card
       style={[
         styles.taskCard,
-        forwarded && !dimmed ? styles.taskCardForwarded : null,
-        dimmed ? styles.taskCardDimmed : null,
+        forwarded ? styles.taskCardForwarded : styles.taskCardOwned,
         syncIssue ? styles.taskCardSync : null,
+        highlighted ? styles.taskCardHighlighted : null,
+        platformClosed ? styles.taskCardClosed : null,
       ]}
-      padding={14}
+      padding={16}
     >
-      <View>
-        <Pressable accessibilityRole="button" onPress={onOpen}>
-          <View style={styles.cardTopRow}>
-            <View style={styles.cardTopLead}>
-              <PlatformBadge
-                code={getTaskPlatformCode(task)}
-                name={getTaskPlatformName(task)}
-                forwarded={forwarded}
-                size="sm"
-              />
-              {isEmphasizedStatus(task) ? (
-                <Pill tone={getTaskPillTone(task)} dot>
-                  {buildCardStatusLabel(task)}
-                </Pill>
-              ) : (
-                <Text style={styles.cardInlineStatus}>
-                  {buildCardStatusLabel(task)}
-                </Text>
-              )}
-            </View>
-            <Text style={styles.cardTaskCode}>{task.taskId}</Text>
-          </View>
-
-          <View style={styles.cardCopy}>
-            <Text style={styles.cardTitle} numberOfLines={2}>
-              {buildTaskTitle(task)}
-            </Text>
-            <Text style={styles.cardSubtitle} numberOfLines={2}>
-              {buildTaskSubtitle(task)}
-            </Text>
-            <Text style={styles.cardMeta} numberOfLines={1}>
-              {buildCardMeta(task)}
-            </Text>
-          </View>
-
-          <View style={styles.cardPillRow}>
-            <Pill tone="neutral">{typeLabel}</Pill>
-            {task.routeLocked ? <Pill tone="warn">路線鎖定</Pill> : null}
-            {order?.fixedPrice ? <Pill tone="info">固定車資</Pill> : null}
-          </View>
-
-          <View style={styles.cardAuthorityWrap}>
-            <AuthorityBanner
-              title={authority.title}
-              authorityLabel={authority.authorityLabel}
-              description={authority.description}
-              tone={authority.tone}
-              icon={authority.icon}
+      <Pressable onPress={onOpen}>
+        <View style={styles.cardTopRow}>
+          <View style={styles.cardTopLead}>
+            <PlatformBadge
+              code={getTaskPlatformCode(task)}
+              name={getTaskPlatformName(task)}
+              forwarded={forwarded}
+              size="sm"
             />
+            <Pill tone={getTaskPillTone(task)} dot>
+              {syncIssue
+                ? "同步異常"
+                : task.nativeStatus
+                  ? formatStatusLabel(task.nativeStatus)
+                  : formatActionStateLabel(task.driverActionState)}
+            </Pill>
           </View>
+          <Text style={styles.cardTaskCode}>{task.taskId}</Text>
+        </View>
 
-          <Text
-            style={[styles.cardHint, syncIssue ? styles.cardHintDanger : null]}
-            numberOfLines={2}
-          >
-            下一步 · {nextStepText}
-          </Text>
-        </Pressable>
+        <View style={styles.cardCopy}>
+          <Text style={styles.cardTitle}>{buildTaskTitle(task)}</Text>
+          <Text style={styles.cardSubtitle}>{buildTaskSubtitle(task)}</Text>
+          <Text style={styles.cardMeta}>{buildCardMeta(task)}</Text>
+        </View>
 
-        {showFooter ? (
-          <View style={styles.cardFooterRow}>
-            <View style={styles.cardFooterStats}>
-              {fareLabel ? (
-                <Text style={styles.cardFare}>{fareLabel}</Text>
-              ) : null}
-              {deadlineLabel ? (
-                <View style={styles.deadlineRow}>
-                  <Ionicons
-                    name="time-outline"
-                    size={12}
-                    color={syncIssue ? THEME.danger : THEME.warn}
-                  />
-                  <Text
-                    style={[
-                      styles.deadlineText,
-                      syncIssue ? styles.deadlineDanger : null,
-                    ]}
-                  >
-                    {deadlineLabel}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-            {actionLabel ? (
+        <View style={styles.cardPillRow}>
+          <Pill tone={forwarded ? "accent" : "info"}>
+            {forwarded ? "Forwarded" : "Owned"}
+          </Pill>
+          <Pill tone="neutral">{typeLabel}</Pill>
+          {task.routeLocked ? <Pill tone="warn">路線鎖定</Pill> : null}
+          {order?.fixedPrice ? <Pill tone="info">固定車資</Pill> : null}
+        </View>
+
+        <View style={styles.cardSummaryGrid}>
+          <View style={styles.summaryChip}>
+            <Text style={styles.summaryChipLabel}>狀態</Text>
+            <Text style={styles.summaryChipValue}>
+              {formatActionStateLabel(task.driverActionState)}
+            </Text>
+          </View>
+          <View style={styles.summaryChip}>
+            <Text style={styles.summaryChipLabel}>原生狀態</Text>
+            <Text style={styles.summaryChipValue}>
+              {task.nativeStatus
+                ? formatStatusLabel(task.nativeStatus)
+                : "DRTS 主控"}
+            </Text>
+          </View>
+          <View style={styles.summaryChip}>
+            <Text style={styles.summaryChipLabel}>車資</Text>
+            <Text style={styles.summaryChipValue}>{fareLabel ?? "待同步"}</Text>
+          </View>
+          <View style={styles.summaryChip}>
+            <Text style={styles.summaryChipLabel}>時效</Text>
+            <Text style={styles.summaryChipValue}>
+              {deadlineLabel ?? "一般"}
+            </Text>
+          </View>
+        </View>
+
+        <AuthorityBanner
+          title={authority.title}
+          authorityLabel={authority.authorityLabel}
+          description={authority.description}
+          tone={authority.tone}
+          icon={authority.icon}
+          style={styles.authorityCard}
+        />
+
+        <Text style={styles.cardHint}>
+          下一步 · {buildAllowedActionSummary(task)}
+        </Text>
+        {disabledHint &&
+        forwarded &&
+        (acceptAction?.enabled === false || rejectAction?.enabled === false) ? (
+          <Text style={styles.cardDisabledReason}>{disabledHint}</Text>
+        ) : null}
+      </Pressable>
+
+      <View style={styles.cardFooter}>
+        <Btn variant="secondary" size="sm" onPress={onOpen}>
+          {driverStrings.jobs.openCurrentTrip}
+        </Btn>
+
+        {forwarded ? (
+          <View style={styles.forwardedActionRow}>
+            {rejectAction ? (
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={busy || !rejectAction.enabled}
+                onPress={onReject}
+              >
+                {busy ? "提交中…" : "婉拒"}
+              </Btn>
+            ) : null}
+            {acceptAction ? (
               <Btn
                 variant="primary"
                 size="sm"
-                disabled={accepting}
-                onPress={showPrimaryAction ? onAccept : onOpen}
+                disabled={busy || !acceptAction.enabled}
+                onPress={onAccept}
               >
-                {accepting ? "提交中…" : actionLabel}
+                {busy ? "提交中…" : "接受"}
               </Btn>
             ) : null}
           </View>
@@ -1119,224 +1200,118 @@ function TaskCard({
   );
 }
 
-function DenseTaskRow({
-  task,
-  order,
-  busy,
-  onOpen,
-  onAccept,
-  onReject,
-}: {
-  task: UnifiedDriverTaskView;
-  order: OwnedOrderRecord | null;
-  busy: boolean;
-  onOpen: () => void;
-  onAccept: () => void;
-  onReject: () => void;
-}) {
-  const actionable = canSwipeForwardedTask(task);
-  const translateX = useRef(new Animated.Value(0)).current;
-  const dimmed =
-    task.driverActionState === "completed" || isPlatformClosed(task);
-  const forwarded = !isOwnedTask(task);
-  const fareLabel = order?.quotedFare ? formatMoney(order.quotedFare) : null;
-  const deadlineLabel = formatRelativeDeadline(task.deadlineAt);
-
-  const resetSwipe = () => {
-    Animated.spring(translateX, {
-      toValue: 0,
-      useNativeDriver: true,
-      tension: 140,
-      friction: 14,
-    }).start();
-  };
-
-  const triggerAction = (direction: SwipeActionDirection) => {
-    Animated.sequence([
-      Animated.timing(translateX, {
-        toValue: direction === "accept" ? SWIPE_LIMIT : -SWIPE_LIMIT,
-        duration: 110,
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 130,
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      if (!finished) {
-        return;
-      }
-      if (direction === "accept") {
-        onAccept();
-      } else {
-        onReject();
-      }
-    });
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) =>
-        actionable &&
-        !busy &&
-        Math.abs(gestureState.dx) > 6 &&
-        Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
-      onPanResponderGrant: () => {
-        translateX.stopAnimation();
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const clamped = Math.max(
-          -SWIPE_LIMIT,
-          Math.min(SWIPE_LIMIT, gestureState.dx),
-        );
-        translateX.setValue(clamped);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx >= SWIPE_TRIGGER) {
-          triggerAction("accept");
-          return;
-        }
-        if (gestureState.dx <= -SWIPE_TRIGGER) {
-          triggerAction("reject");
-          return;
-        }
-        resetSwipe();
-      },
-      onPanResponderTerminate: resetSwipe,
-      onPanResponderTerminationRequest: () => true,
-    }),
-  ).current;
-
-  return (
-    <View style={[styles.denseRowWrap, dimmed ? styles.taskCardDimmed : null]}>
-      {actionable ? (
-        <View style={styles.swipeActionLayer}>
-          <View style={[styles.swipeActionPanel, styles.swipeActionAccept]}>
-            <Ionicons name="checkmark" size={18} color="#FFFFFF" />
-            <Text style={styles.swipeActionLabel}>接受</Text>
-          </View>
-          <View style={[styles.swipeActionPanel, styles.swipeActionReject]}>
-            <Ionicons name="close" size={18} color="#FFFFFF" />
-            <Text style={styles.swipeActionLabel}>婉拒</Text>
-          </View>
-        </View>
-      ) : null}
-
-      <Animated.View
-        style={[
-          styles.denseRowSurface,
-          { transform: [{ translateX }] },
-          forwarded ? styles.denseRowForwarded : null,
-          hasSyncIssue(task) ? styles.taskCardSync : null,
-        ]}
-        {...(actionable ? panResponder.panHandlers : {})}
-      >
-        <Pressable
-          accessibilityRole="button"
-          disabled={busy}
-          onPress={onOpen}
-          style={({ pressed }) => [
-            styles.denseRowPressable,
-            pressed && !busy ? styles.denseRowPressed : null,
-          ]}
-        >
-          <View
-            style={[
-              styles.denseAccentBar,
-              forwarded ? styles.denseAccentForwarded : styles.denseAccentOwned,
-            ]}
-          />
-          <View style={styles.denseCopy}>
-            <View style={styles.denseMetaRow}>
-              <Text
-                style={[
-                  styles.densePlatformCode,
-                  forwarded
-                    ? styles.densePlatformCodeForwarded
-                    : styles.densePlatformCodeOwned,
-                ]}
-              >
-                {getTaskPlatformCode(task)}
-              </Text>
-              <View style={styles.denseMetaDot} />
-              <Text style={styles.denseTaskCode}>{task.taskId}</Text>
-            </View>
-            <Text style={styles.denseTitle} numberOfLines={1}>
-              {buildTaskTitle(task)}
-            </Text>
-            <Text
-              style={[
-                styles.denseStatusText,
-                { color: getDenseStatusColor(task) },
-              ]}
-              numberOfLines={1}
-            >
-              {busy ? "正在提交平台回覆…" : buildDenseStatusText(task)}
-            </Text>
-            {actionable && !busy ? (
-              <Text style={styles.denseSwipeHint}>右滑接受 · 左滑婉拒</Text>
-            ) : null}
-          </View>
-          <View style={styles.denseAside}>
-            {fareLabel ? (
-              <Text style={styles.denseFare}>{fareLabel}</Text>
-            ) : null}
-            {deadlineLabel ? (
-              <Text
-                style={[
-                  styles.denseDeadline,
-                  hasSyncIssue(task) ? styles.deadlineDanger : null,
-                ]}
-              >
-                {deadlineLabel}
-              </Text>
-            ) : null}
-          </View>
-        </Pressable>
-      </Animated.View>
-    </View>
-  );
-}
-
 export default function JobsScreen() {
-  const [tasks, setTasks] = useState<UnifiedDriverTaskView[]>([]);
+  const router = useRouter();
+  const params = useLocalSearchParams<{ taskId?: string | string[] }>();
+  const highlightedTaskId = Array.isArray(params.taskId)
+    ? params.taskId[0]
+    : params.taskId;
+
+  const [selectedFilter, setSelectedFilter] = useState<TaskFilterValue>("all");
+  const [tasksEnabled, setTasksEnabled] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [fallbackMode, setFallbackMode] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [activeNotice, setActiveNotice] = useState<InlineNotice | null>(null);
+  const [submittingTaskId, setSubmittingTaskId] = useState<string | null>(null);
   const [orderMap, setOrderMap] = useState<Record<string, OwnedOrderRecord>>(
     {},
   );
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [tasksEnabled, setTasksEnabled] = useState(true);
-  const [fallbackMode, setFallbackMode] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<TaskFilterValue>("all");
-  const [layoutVariant, setLayoutVariant] = useState<LayoutVariant>("A");
-  const [activeNotice, setActiveNotice] = useState<InlineNotice | null>(null);
-  const [submittingTaskId, setSubmittingTaskId] = useState<string | null>(null);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const router = useRouter();
+  const [envelope, setEnvelope] = useState<TaskInboxEnvelope>({
+    items: [],
+    refresh: buildRefreshMetadata(new Date().toISOString(), false),
+    refreshTier: "medium",
+    empty: null,
+  });
 
-  const loadTasks = async () => {
+  const filteredTasks = useMemo(
+    () =>
+      [
+        ...envelope.items.filter((task) => matchesFilter(task, selectedFilter)),
+      ].sort(compareTasks),
+    [envelope.items, selectedFilter],
+  );
+
+  const summary = useMemo(() => {
+    const tasks = envelope.items;
+    return {
+      total: tasks.length,
+      needsAction: tasks.filter(isNeedsActionTask).length,
+      external: tasks.filter((task) => !isOwnedTask(task)).length,
+      syncIssue: tasks.filter(hasSyncIssue).length,
+    };
+  }, [envelope.items]);
+
+  const refreshState = getRefreshState(envelope.refresh);
+
+  const openTrip = (taskId?: string) => {
+    const route = taskId
+      ? (`/trip?taskId=${encodeURIComponent(taskId)}` as const)
+      : "/trip";
+    router.push(route);
+  };
+
+  const openPlatformPresence = () => {
+    router.push("/platform-presence");
+  };
+
+  const loadTasks = async (nextFilter: TaskFilterValue) => {
     const client = getDriverClient();
 
     try {
-      let fetchedTasks: UnifiedDriverTaskView[] = [];
+      let nextEnvelope: TaskInboxEnvelope | null = null;
       let degraded = false;
 
       try {
-        fetchedTasks = await client.listUnifiedDriverTasks();
+        const payload = await client.get<unknown>("/api/driver/task-views");
+        nextEnvelope = parseTaskEnvelope(payload, nextFilter);
       } catch {
-        const legacyTasks = await client.listDriverTasks();
-        fetchedTasks = legacyTasks.map(buildFallbackUnifiedTaskView);
-        degraded = true;
+        nextEnvelope = null;
       }
 
-      setTasks(fetchedTasks);
-      setFallbackMode(degraded);
+      if (!nextEnvelope) {
+        try {
+          const fetchedTasks = await client.listUnifiedDriverTasks();
+          nextEnvelope = {
+            items: fetchedTasks,
+            refresh: buildRefreshMetadata(new Date().toISOString(), false),
+            refreshTier: "medium",
+            empty:
+              fetchedTasks.length === 0
+                ? {
+                    reason: inferEmptyReason(fetchedTasks, nextFilter),
+                    messageCode: "driver.jobs.empty",
+                  }
+                : null,
+          };
+        } catch {
+          const legacyTasks = await client.listDriverTasks();
+          const fallbackTasks = legacyTasks.map(buildFallbackUnifiedTaskView);
+          degraded = true;
+          nextEnvelope = {
+            items: fallbackTasks,
+            refresh: buildRefreshMetadata(new Date().toISOString(), true),
+            refreshTier: "medium",
+            empty:
+              fallbackTasks.length === 0
+                ? {
+                    reason: inferEmptyReason(fallbackTasks, nextFilter),
+                    messageCode: "driver.jobs.empty",
+                  }
+                : null,
+          };
+        }
+      }
 
       const uniqueOrderIds = [
-        ...new Set(fetchedTasks.map((task) => task.orderId).filter(Boolean)),
+        ...new Set(
+          nextEnvelope.items
+            .map((task) => (isOwnedTask(task) ? task.orderId : null))
+            .filter((value): value is string => Boolean(value)),
+        ),
       ];
+
       const orderResults = await Promise.all(
         uniqueOrderIds.map(async (orderId) => {
           try {
@@ -1355,12 +1330,19 @@ export default function JobsScreen() {
         }
       });
 
+      setEnvelope(nextEnvelope);
       setOrderMap(nextOrderMap);
+      setFallbackMode(degraded || nextEnvelope.refresh.source !== "live");
       setError(null);
-      setLastSyncedAt(new Date().toISOString());
     } catch (nextError: unknown) {
-      setFallbackMode(false);
       setError(getErrorMessage(nextError) || "任務清單載入失敗。");
+      setEnvelope((current) => ({
+        ...current,
+        empty: {
+          reason: "fetch_failed",
+          messageCode: "driver.jobs.fetch_failed",
+        },
+      }));
     }
   };
 
@@ -1369,34 +1351,63 @@ export default function JobsScreen() {
 
     client
       .isFeatureEnabled("driver-app.tasks")
-      .then((enabled) => {
+      .then(async (enabled) => {
         setTasksEnabled(enabled);
         if (enabled) {
-          return loadTasks();
+          await loadTasks(selectedFilter);
+        } else {
+          setEnvelope((current) => ({
+            ...current,
+            items: [],
+            empty: {
+              reason: "not_provisioned",
+              messageCode: "driver.jobs.not_provisioned",
+            },
+          }));
         }
-        return undefined;
       })
-      .catch(() => loadTasks())
+      .catch(() => loadTasks(selectedFilter))
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!tasksEnabled) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      void loadTasks(selectedFilter);
+    }, POLL_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+  }, [selectedFilter, tasksEnabled]);
+
+  useEffect(() => {
+    if (!loading) {
+      setEnvelope((current) => ({
+        ...current,
+        empty:
+          filteredTasks.length === 0
+            ? {
+                reason:
+                  current.empty?.reason ??
+                  inferEmptyReason(current.items, selectedFilter),
+                messageCode: current.empty?.messageCode ?? "driver.jobs.empty",
+              }
+            : null,
+      }));
+    }
+  }, [filteredTasks.length, loading, selectedFilter]);
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadTasks();
+    await loadTasks(selectedFilter);
     setRefreshing(false);
   };
 
-  const assignedCount = tasks.length;
-  const forwardedCount = tasks.filter((task) => !isOwnedTask(task)).length;
-  const needsActionCount = tasks.filter(isNeedsActionTask).length;
-  const syncIssueCount = tasks.filter(hasSyncIssue).length;
-  const filteredTasks = [
-    ...tasks.filter((task) => matchesFilter(task, selectedFilter)),
-  ].sort(compareTasks);
-
-  async function handleSwipeAction(
+  async function handleForwardedAction(
     task: UnifiedDriverTaskView,
-    action: SwipeActionDirection,
+    action: "accept" | "reject",
   ) {
     if (submittingTaskId) {
       return;
@@ -1418,7 +1429,7 @@ export default function JobsScreen() {
         title: summary.title,
         body: result.driverMessage?.trim() || undefined,
       });
-      await loadTasks();
+      await loadTasks(selectedFilter);
     } catch (actionError) {
       if (getDriverIdentityIssue()) {
         router.replace("/onboarding");
@@ -1435,11 +1446,7 @@ export default function JobsScreen() {
     }
   }
 
-  function openTripWorkspace() {
-    router.push("/trip");
-  }
-
-  function renderNoticeBanner() {
+  function renderTopBanner() {
     if (error) {
       return (
         <Banner
@@ -1498,8 +1505,32 @@ export default function JobsScreen() {
               color={THEME.warn}
             />
           }
-          title="目前使用本地鏡像備援"
-          body="已退回舊任務 API；forwarded 任務仍會顯示，但平台原生狀態與同步摘要可能延後。"
+          title="目前顯示安全鏡像資料"
+          body="已退回舊任務 API 或快取來源。forwarded 平台狀態可能較慢，請以派車台同步資訊為準。"
+        />
+      );
+    }
+
+    if (refreshState !== "fresh") {
+      return (
+        <Banner
+          tone={refreshState === "stale" ? "warn" : "info"}
+          icon={
+            <Ionicons
+              name="time-outline"
+              size={15}
+              color={refreshState === "stale" ? THEME.warn : THEME.info}
+            />
+          }
+          title={
+            refreshState === "stale" ? "任務資料可能已過期" : "任務資料等待同步"
+          }
+          body={`最近快照 ${formatTimestamp(envelope.refresh.generatedAt) ?? "未知"} · refresh tier T3 / 15s`}
+          actions={
+            <Btn variant="secondary" size="xs" onPress={() => void onRefresh()}>
+              立即同步
+            </Btn>
+          }
         />
       );
     }
@@ -1507,183 +1538,142 @@ export default function JobsScreen() {
     return null;
   }
 
-  function renderContent() {
-    if (loading) {
-      return (
+  return (
+    <Shell contentContainerStyle={styles.shellContent}>
+      <PageHeader
+        title={driverStrings.jobs.title}
+        subtitle="Unified task inbox"
+        actions={
+          <Btn
+            variant="ghost"
+            size="sm"
+            icon={
+              refreshing ? (
+                <ActivityIndicator size="small" color={THEME.textMuted} />
+              ) : (
+                <Ionicons
+                  name="refresh-outline"
+                  size={14}
+                  color={THEME.textMuted}
+                />
+              )
+            }
+            onPress={() => void onRefresh()}
+            disabled={refreshing}
+          >
+            同步
+          </Btn>
+        }
+      />
+
+      {renderTopBanner()}
+
+      <Card style={styles.heroCard}>
+        <View style={styles.heroHeader}>
+          <View style={styles.heroTitleWrap}>
+            <Text style={styles.heroEyebrow}>T3 任務收件匣</Text>
+            <Text style={styles.heroTitle}>跨自營與外部平台的下一步</Text>
+            <Text style={styles.heroBody}>
+              needs-action 會優先排序。來源平台任務保留 authority
+              banner，接受/婉拒完全由 availableActions 決定。
+            </Text>
+          </View>
+          <View style={styles.heroPillCol}>
+            <Pill tone="accent">15s Poll</Pill>
+            <Pill tone={refreshState === "fresh" ? "success" : "warn"}>
+              {refreshState === "fresh" ? "Fresh" : "Stale"}
+            </Pill>
+          </View>
+        </View>
+
+        <View style={styles.kpiRow}>
+          <KPI label={driverStrings.jobs.kpis.total} value={summary.total} />
+          <KPI
+            label={driverStrings.jobs.kpis.needsAction}
+            value={summary.needsAction}
+            deltaTone="neutral"
+          />
+          <KPI
+            label={driverStrings.jobs.kpis.external}
+            value={summary.external}
+          />
+          <KPI label="同步異常" value={summary.syncIssue} />
+        </View>
+
+        <View style={styles.heroMetaRow}>
+          <Text style={styles.heroMetaText}>
+            最近快照 {formatTimestamp(envelope.refresh.generatedAt) ?? "尚無"}
+          </Text>
+          <Text style={styles.heroMetaDivider}>·</Text>
+          <Text style={styles.heroMetaText}>
+            source {envelope.refresh.source}
+          </Text>
+        </View>
+      </Card>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterRow}
+        contentContainerStyle={styles.filterRowContent}
+      >
+        {FILTER_OPTIONS.map((option) => {
+          const selected = option.value === selectedFilter;
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => setSelectedFilter(option.value)}
+              style={[
+                styles.filterChip,
+                selected ? styles.filterChipSelected : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  selected ? styles.filterChipTextSelected : null,
+                ]}
+              >
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      {loading ? (
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color={THEME.accent} />
           <Text style={styles.loadingLabel}>載入任務中…</Text>
         </View>
-      );
-    }
-
-    if (!tasksEnabled) {
-      return (
-        <Card style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>任務清單暫停提供</Text>
-          <Text style={styles.emptyBody}>
-            此功能目前未啟用，請稍後再試或改從行程作業查看目前任務。
-          </Text>
-          <View style={styles.emptyActionRow}>
-            <Btn variant="primary" size="sm" onPress={openTripWorkspace}>
-              {driverStrings.jobs.openTripWorkspace}
-            </Btn>
-          </View>
-        </Card>
-      );
-    }
-
-    if (layoutVariant === "A") {
-      return (
-        <>
-          <View style={styles.kpiRow}>
-            <KPI label={driverStrings.jobs.kpis.total} value={assignedCount} />
-            <KPI
-              label={driverStrings.jobs.kpis.needsAction}
-              value={needsActionCount}
-              deltaTone="neutral"
-            />
-            <KPI
-              label={driverStrings.jobs.kpis.external}
-              value={forwardedCount}
-            />
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.filterRow}
-            contentContainerStyle={styles.filterRowContent}
-          >
-            {FILTER_OPTIONS.map((option) => {
-              const selected = option.value === selectedFilter;
-
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => setSelectedFilter(option.value)}
-                  style={[
-                    styles.filterPillWrap,
-                    selected ? styles.filterPillWrapSelected : null,
-                  ]}
-                >
-                  <Pill tone={selected ? "accent" : "neutral"}>
-                    {option.label}
-                  </Pill>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <View style={styles.taskStack}>
-            {filteredTasks.length === 0 ? (
-              <Card style={styles.emptyCard}>
-                <Text style={styles.emptyTitle}>此篩選條件下沒有任務</Text>
-                <Text style={styles.emptyBody}>
-                  請切換其他篩選條件，或重新整理任務清單。
-                </Text>
-              </Card>
-            ) : (
-              filteredTasks.map((task) => (
-                <TaskCard
-                  key={task.taskId}
-                  task={task}
-                  order={orderMap[task.orderId] ?? null}
-                  accepting={submittingTaskId === task.taskId}
-                  onAccept={() => void handleSwipeAction(task, "accept")}
-                  onOpen={openTripWorkspace}
-                />
-              ))
-            )}
-          </View>
-        </>
-      );
-    }
-
-    return (
-      <>
-        <View style={styles.variantSummaryRow}>
-          <Text style={styles.variantSummaryText}>
-            {filteredTasks.length} 筆任務
-          </Text>
-          <Text style={styles.variantSummaryWarn}>
-            {needsActionCount} 需動作
-          </Text>
-          <View style={styles.variantSummarySpacer} />
-          <Text style={styles.variantSummaryMeta}>排序：時效 ▾</Text>
-        </View>
-
-        <Card style={styles.denseListCard} padding={0}>
-          {filteredTasks.length === 0 ? (
-            <View style={styles.emptyDenseState}>
-              <Text style={styles.emptyTitle}>此篩選條件下沒有任務</Text>
-              <Text style={styles.emptyBody}>
-                請切換其他篩選條件或重新整理。
-              </Text>
-            </View>
-          ) : (
-            filteredTasks.map((task) => (
-              <DenseTaskRow
-                key={task.taskId}
-                task={task}
-                order={orderMap[task.orderId] ?? null}
-                busy={submittingTaskId === task.taskId}
-                onOpen={openTripWorkspace}
-                onAccept={() => void handleSwipeAction(task, "accept")}
-                onReject={() => void handleSwipeAction(task, "reject")}
-              />
-            ))
-          )}
-        </Card>
-      </>
-    );
-  }
-
-  return (
-    <Shell
-      contentContainerStyle={styles.shellContent}
-      footer={
-        <DriverBottomTabs
-          active="jobs"
-          jobsBadge={needsActionCount}
-          onNavigate={(route) => router.push(route)}
+      ) : !tasksEnabled || filteredTasks.length === 0 ? (
+        <EmptyStateCard
+          reason={envelope.empty?.reason ?? "no_data"}
+          onRetry={() => void onRefresh()}
+          onOpenPlatform={openPlatformPresence}
+          onOpenTrip={() => openTrip()}
         />
-      }
-    >
-      <PageHeader
-        title={layoutVariant === "A" ? driverStrings.jobs.title : "任務佇列"}
-        subtitle={
-          layoutVariant === "B"
-            ? lastSyncedAt
-              ? `最近同步 ${formatTimestamp(lastSyncedAt)}`
-              : "高密度任務佇列"
-            : undefined
-        }
-        actions={
-          <LayoutToggle
-            layout={layoutVariant}
-            onRefresh={() => void onRefresh()}
-            refreshing={refreshing}
-            onToggle={() =>
-              setLayoutVariant((current) => (current === "A" ? "B" : "A"))
-            }
-          />
-        }
-      />
+      ) : (
+        <View style={styles.taskStack}>
+          {filteredTasks.map((task) => (
+            <TaskCard
+              key={task.taskId}
+              task={task}
+              order={orderMap[task.orderId] ?? null}
+              highlighted={highlightedTaskId === task.taskId}
+              busy={submittingTaskId === task.taskId}
+              onOpen={() => openTrip(task.taskId)}
+              onAccept={() => void handleForwardedAction(task, "accept")}
+              onReject={() => void handleForwardedAction(task, "reject")}
+            />
+          ))}
+        </View>
+      )}
 
-      {renderNoticeBanner()}
-      {renderContent()}
-
-      {layoutVariant === "B" && selectedFilter !== "all" ? (
-        <Text style={styles.activeFilterHint}>
-          目前篩選：
-          {FILTER_OPTIONS.find((item) => item.value === selectedFilter)?.label}
-        </Text>
-      ) : null}
-
-      {syncIssueCount > 0 && !error ? (
+      {summary.syncIssue > 0 && !error ? (
         <Text style={styles.footerHint}>
-          同步/授權異常 {syncIssueCount} 筆，請依卡片指示聯繫派車台或重新登入。
+          同步/授權異常 {summary.syncIssue}{" "}
+          筆，請依卡片指示聯繫派車台或前往平台頁面重新授權。
         </Text>
       ) : null}
     </Shell>
@@ -1693,11 +1683,6 @@ export default function JobsScreen() {
 const styles = StyleSheet.create({
   shellContent: {
     gap: 12,
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
   },
   loadingState: {
     minHeight: 360,
@@ -1711,43 +1696,120 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     color: THEME.textMuted,
   },
+  heroCard: {
+    borderRadius: 20,
+    backgroundColor: "#EAF6FF",
+    borderColor: "#CFE7FA",
+  },
+  heroHeader: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  heroTitleWrap: {
+    flex: 1,
+    gap: 4,
+  },
+  heroEyebrow: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    color: "#2B6B94",
+  },
+  heroTitle: {
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: "700",
+    color: THEME.text,
+  },
+  heroBody: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: THEME.textMuted,
+  },
+  heroPillCol: {
+    gap: 6,
+    alignItems: "flex-end",
+  },
   kpiRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
+    marginTop: 14,
+  },
+  heroMetaRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    alignItems: "center",
+  },
+  heroMetaText: {
+    fontSize: 11.5,
+    lineHeight: 15,
+    color: "#476A83",
+    fontFamily: THEME.monoFamily,
+  },
+  heroMetaDivider: {
+    fontSize: 11.5,
+    lineHeight: 15,
+    color: "#7E9CB0",
   },
   filterRow: {
     marginHorizontal: -2,
   },
   filterRowContent: {
     flexDirection: "row",
-    gap: 6,
-    paddingBottom: 4,
+    gap: 8,
+    paddingBottom: 2,
   },
-  filterPillWrap: {
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 999,
+    backgroundColor: THEME.surface,
+    borderWidth: 1,
+    borderColor: THEME.border,
   },
-  filterPillWrapSelected: {
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    elevation: 2,
+  filterChipSelected: {
+    backgroundColor: THEME.accent,
+    borderColor: THEME.accent,
+  },
+  filterChipText: {
+    fontSize: 12.5,
+    lineHeight: 16,
+    fontWeight: "600",
+    color: THEME.textMuted,
+  },
+  filterChipTextSelected: {
+    color: "#FFFFFF",
   },
   taskStack: {
-    gap: 10,
+    gap: 12,
   },
   taskCard: {
-    borderRadius: 14,
+    borderRadius: 18,
+  },
+  taskCardOwned: {
+    borderColor: "#CDE4F7",
   },
   taskCardForwarded: {
-    borderLeftWidth: 3,
-    borderLeftColor: THEME.accent,
-  },
-  taskCardDimmed: {
-    opacity: 0.72,
+    borderColor: "#ADD7F6",
+    backgroundColor: "#F4FAFF",
   },
   taskCardSync: {
-    borderColor: THEME.warnBorder,
+    borderColor: THEME.warn,
+  },
+  taskCardHighlighted: {
+    shadowColor: "#2C87C5",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  taskCardClosed: {
+    opacity: 0.75,
   },
   cardTopRow: {
     flexDirection: "row",
@@ -1762,12 +1824,6 @@ const styles = StyleSheet.create({
     gap: 8,
     flex: 1,
   },
-  cardInlineStatus: {
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: "500",
-    color: THEME.textMuted,
-  },
   cardTaskCode: {
     fontSize: 11,
     lineHeight: 14,
@@ -1776,13 +1832,13 @@ const styles = StyleSheet.create({
     color: THEME.textDim,
   },
   cardCopy: {
-    marginTop: 8,
-    gap: 3,
+    marginTop: 10,
+    gap: 4,
   },
   cardTitle: {
-    fontSize: 16,
-    lineHeight: 21,
-    fontWeight: "600",
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "700",
     color: THEME.text,
   },
   cardSubtitle: {
@@ -1800,49 +1856,38 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-    marginTop: 10,
-  },
-  cardAuthorityWrap: {
-    marginTop: 10,
-  },
-  cardFooterRow: {
     marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: THEME.border,
-    borderStyle: "dashed",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
   },
-  cardFooterStats: {
+  cardSummaryGrid: {
+    marginTop: 12,
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
     flexWrap: "wrap",
-    flex: 1,
+    gap: 8,
   },
-  cardFare: {
-    fontSize: 13,
-    lineHeight: 16,
+  summaryChip: {
+    minWidth: "47%",
+    flexGrow: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFFA8",
+    borderWidth: 1,
+    borderColor: "#D8E7F5",
+    gap: 2,
+  },
+  summaryChipLabel: {
+    fontSize: 10.5,
+    lineHeight: 13,
     fontWeight: "700",
-    color: THEME.text,
-    fontFamily: THEME.monoFamily,
+    color: THEME.textDim,
   },
-  deadlineRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  deadlineText: {
-    fontSize: 11.5,
+  summaryChipValue: {
+    fontSize: 12,
     lineHeight: 16,
-    fontWeight: "500",
-    color: THEME.warn,
+    color: THEME.text,
   },
-  deadlineDanger: {
-    color: THEME.danger,
+  authorityCard: {
+    marginTop: 12,
   },
   cardHint: {
     marginTop: 10,
@@ -1850,253 +1895,61 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: THEME.textMuted,
   },
-  cardHintDanger: {
-    color: THEME.danger,
-  },
-  variantSummaryRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 2,
-  },
-  variantSummaryText: {
-    fontSize: 12,
-    lineHeight: 16,
-    color: THEME.textMuted,
-  },
-  variantSummaryWarn: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "600",
-    color: THEME.warn,
-  },
-  variantSummarySpacer: {
-    flex: 1,
-  },
-  variantSummaryMeta: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "600",
-    color: THEME.accent,
-  },
-  denseListCard: {
-    overflow: "hidden",
-  },
-  denseRowWrap: {
-    overflow: "hidden",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: THEME.border,
-  },
-  swipeActionLayer: {
-    ...StyleSheet.absoluteFillObject,
-    flexDirection: "row",
-  },
-  swipeActionPanel: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  swipeActionAccept: {
-    backgroundColor: THEME.success,
-  },
-  swipeActionReject: {
-    backgroundColor: THEME.danger,
-  },
-  swipeActionLabel: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  denseRowSurface: {
-    backgroundColor: THEME.surface,
-  },
-  denseRowForwarded: {
-    borderLeftWidth: 2,
-    borderLeftColor: THEME.accent,
-  },
-  denseRowPressable: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  denseRowPressed: {
-    backgroundColor: THEME.rowHover,
-  },
-  denseAccentBar: {
-    width: 4,
-    alignSelf: "stretch",
-    borderRadius: 3,
-  },
-  denseAccentOwned: {
-    backgroundColor: THEME.info,
-  },
-  denseAccentForwarded: {
-    backgroundColor: THEME.accent,
-  },
-  denseCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  denseMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 3,
-  },
-  densePlatformCode: {
-    fontSize: 10,
-    lineHeight: 12,
-    fontWeight: "700",
-    fontFamily: THEME.monoFamily,
-    letterSpacing: 0.4,
-  },
-  densePlatformCodeOwned: {
-    color: THEME.info,
-  },
-  densePlatformCodeForwarded: {
-    color: THEME.accent,
-  },
-  denseMetaDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: THEME.borderStrong,
-  },
-  denseTaskCode: {
-    fontSize: 10,
-    lineHeight: 12,
-    color: THEME.textDim,
-    fontFamily: THEME.monoFamily,
-  },
-  denseTitle: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600",
-    color: THEME.text,
-  },
-  denseStatusText: {
-    marginTop: 2,
+  cardDisabledReason: {
+    marginTop: 6,
     fontSize: 11.5,
-    lineHeight: 15,
-    fontWeight: "500",
-  },
-  denseSwipeHint: {
-    marginTop: 3,
-    fontSize: 10.5,
-    lineHeight: 14,
-    color: THEME.textDim,
-  },
-  denseAside: {
-    alignItems: "flex-end",
-    minWidth: 72,
-    gap: 3,
-  },
-  denseFare: {
-    fontSize: 13,
     lineHeight: 16,
-    fontWeight: "700",
-    color: THEME.text,
-    fontFamily: THEME.monoFamily,
-  },
-  denseDeadline: {
-    fontSize: 10.5,
-    lineHeight: 14,
-    fontWeight: "600",
     color: THEME.warn,
-    textAlign: "right",
+  },
+  cardFooter: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: THEME.border,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  forwardedActionRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
   },
   emptyCard: {
-    paddingVertical: 18,
+    minHeight: 260,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    borderRadius: 18,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+  },
+  emptyIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: THEME.surface,
   },
   emptyTitle: {
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 18,
+    lineHeight: 22,
     fontWeight: "700",
     color: THEME.text,
+    textAlign: "center",
   },
   emptyBody: {
-    marginTop: 6,
-    fontSize: 12.5,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 19,
     color: THEME.textMuted,
-  },
-  emptyActionRow: {
-    marginTop: 14,
-    flexDirection: "row",
-  },
-  emptyDenseState: {
-    paddingHorizontal: 14,
-    paddingVertical: 18,
-  },
-  activeFilterHint: {
-    fontSize: 11.5,
-    lineHeight: 16,
-    color: THEME.textDim,
+    textAlign: "center",
   },
   footerHint: {
     fontSize: 11.5,
-    lineHeight: 16,
+    lineHeight: 17,
     color: THEME.textDim,
-  },
-  bottomTabs: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    backgroundColor: THEME.bgRaised,
-    borderTopWidth: 1,
-    borderTopColor: THEME.border,
-    paddingTop: 6,
-    paddingBottom: 8,
-    paddingHorizontal: 4,
-  },
-  bottomTabItem: {
-    flex: 1,
-    alignItems: "center",
-    gap: 3,
-    paddingVertical: 6,
-  },
-  bottomTabIconWrap: {
-    position: "relative",
-  },
-  bottomTabBadge: {
-    position: "absolute",
-    top: -4,
-    right: -8,
-    minWidth: 16,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 8,
-    backgroundColor: THEME.danger,
-    alignItems: "center",
-  },
-  bottomTabBadgeText: {
-    fontSize: 10,
-    lineHeight: 10,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  bottomTabDot: {
-    position: "absolute",
-    top: -2,
-    right: -2,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: THEME.success,
-    borderWidth: 1,
-    borderColor: THEME.bgRaised,
-  },
-  bottomTabLabel: {
-    fontSize: 10.5,
-    lineHeight: 13,
-    fontWeight: "500",
-    color: THEME.textDim,
-  },
-  bottomTabLabelActive: {
-    fontWeight: "700",
-    color: THEME.accent,
+    paddingBottom: 6,
   },
 });
