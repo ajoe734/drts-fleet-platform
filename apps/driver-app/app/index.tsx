@@ -9,6 +9,8 @@ import {
   View,
 } from "react-native";
 import {
+  type MarkNotificationsReadCommand,
+  type NotificationRecord,
   PLATFORM_CODE_REGISTRY,
   type EmptyReason,
   type OwnedOrderRecord,
@@ -69,6 +71,8 @@ type WorkspaceLoadResult = {
   activeShift: ShiftRecord | null;
   shiftFeatureEnabled: boolean;
   shiftLoadError: boolean;
+  notifications: NotificationRecord[];
+  notificationLoadError: string | null;
   loadedAt: string | null;
 };
 
@@ -113,6 +117,28 @@ type UrgentItem = {
   iconName: keyof typeof Ionicons.glyphMap;
 };
 
+type ActiveTripCardModel = {
+  title: string;
+  routeSummary: string;
+  meta: string;
+  fareLabel: string;
+  platformLabel: string;
+  primaryLabel: string;
+  secondaryLabel: string;
+};
+
+type NotificationCardModel = {
+  notificationId: string;
+  title: string;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
+  tone: Exclude<CanvasTone, "neutral">;
+  route: WorkspaceRoute;
+  iconName: keyof typeof Ionicons.glyphMap;
+  persistent: boolean;
+};
+
 type PlatformWorkspaceRow = {
   key: string;
   name: string;
@@ -143,6 +169,8 @@ const INITIAL_WORKSPACE: WorkspaceLoadResult = {
   activeShift: null,
   shiftFeatureEnabled: true,
   shiftLoadError: false,
+  notifications: [],
+  notificationLoadError: null,
   loadedAt: null,
 };
 
@@ -168,6 +196,82 @@ function classifyErrorReason(message: string | null): EmptyReason {
   }
 
   return "fetch_failed";
+}
+
+function isSosNotification(notification: NotificationRecord) {
+  const haystack = `${notification.title} ${notification.message}`
+    .trim()
+    .toLowerCase();
+  return (
+    haystack.includes("sos") ||
+    haystack.includes("緊急") ||
+    haystack.includes("incident")
+  );
+}
+
+function getNotificationRoute(
+  notification: NotificationRecord,
+): WorkspaceRoute {
+  const haystack = `${notification.title} ${notification.message}`
+    .trim()
+    .toLowerCase();
+  if (isSosNotification(notification)) {
+    return "/incident";
+  }
+
+  if (haystack.includes("授權") || haystack.includes("reauth")) {
+    return "/platform-presence";
+  }
+
+  if (
+    haystack.includes("任務") ||
+    haystack.includes("task") ||
+    haystack.includes("平台")
+  ) {
+    return "/jobs";
+  }
+
+  return "/incident";
+}
+
+function getNotificationTone(
+  notification: NotificationRecord,
+): Exclude<CanvasTone, "neutral"> {
+  const haystack = `${notification.title} ${notification.message}`
+    .trim()
+    .toLowerCase();
+  if (isSosNotification(notification)) {
+    return "danger";
+  }
+
+  if (
+    haystack.includes("失敗") ||
+    haystack.includes("異常") ||
+    haystack.includes("warning")
+  ) {
+    return "warn";
+  }
+
+  return "info";
+}
+
+function getNotificationIconName(
+  notification: NotificationRecord,
+): keyof typeof Ionicons.glyphMap {
+  if (isSosNotification(notification)) {
+    return "warning-outline";
+  }
+
+  const route = getNotificationRoute(notification);
+  if (route === "/platform-presence") {
+    return "lock-closed-outline";
+  }
+
+  if (route === "/jobs") {
+    return "notifications-outline";
+  }
+
+  return "chatbox-ellipses-outline";
 }
 
 function formatClockLabel(value: string | null | undefined) {
@@ -350,11 +454,12 @@ async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
     }
   };
 
-  const [tasksResult, platformResult, shiftFlagResult] =
+  const [tasksResult, platformResult, shiftFlagResult, notificationsResult] =
     await Promise.allSettled([
       loadTaskViews(),
       client.getPlatformPresence(),
       client.isFeatureEnabled("driver-app.shift"),
+      client.listNotifications(),
     ]);
 
   const next: WorkspaceLoadResult = {
@@ -405,6 +510,15 @@ async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
     next.platformLoadError = toErrorMessage(
       platformResult.reason,
       "平台就緒狀態暫時無法同步。",
+    );
+  }
+
+  if (notificationsResult.status === "fulfilled") {
+    next.notifications = notificationsResult.value;
+  } else {
+    next.notificationLoadError = toErrorMessage(
+      notificationsResult.reason,
+      "通知收件匣暫時無法同步。",
     );
   }
 
@@ -590,18 +704,94 @@ function FocusEmptyStateCard({
   state: EmptyStateModel;
   onPress: () => void;
 }) {
+  const palette =
+    state.tone === "danger"
+      ? {
+          icon: THEME.danger,
+          bg: THEME.dangerBg,
+          border: THEME.dangerBorder,
+        }
+      : state.tone === "warn"
+        ? {
+            icon: THEME.warn,
+            bg: THEME.warnBg,
+            border: THEME.warnBorder,
+          }
+        : state.tone === "info"
+          ? {
+              icon: THEME.info,
+              bg: THEME.infoBg,
+              border: THEME.infoBorder,
+            }
+          : {
+              icon: THEME.accent,
+              bg: THEME.accentBg,
+              border: THEME.accentBorder,
+            };
+  const iconName =
+    state.reason === "permission_denied"
+      ? "shield-outline"
+      : state.reason === "fetch_failed"
+        ? "cloud-offline-outline"
+        : state.reason === "external_unavailable"
+          ? "warning-outline"
+          : state.reason === "driver_not_eligible"
+            ? "ban-outline"
+            : state.reason === "not_provisioned"
+              ? "link-outline"
+              : state.reason === "filtered_empty"
+                ? "sparkles-outline"
+                : "moon-outline";
+  const eyebrow =
+    state.reason === "driver_not_eligible"
+      ? "Eligibility blocked"
+      : state.reason === "external_unavailable"
+        ? "Adapter degraded"
+        : state.reason === "permission_denied"
+          ? "Access check required"
+          : state.reason === "fetch_failed"
+            ? "Needs refresh"
+            : state.reason === "not_provisioned"
+              ? "Setup required"
+              : state.reason === "filtered_empty"
+                ? "Urgent lane cleared"
+                : "Quiet lane";
+
   return (
-    <Banner
+    <Card
       theme={THEME}
-      tone={state.tone}
-      title={`${state.title} · ${state.reason}`}
-      body={state.body}
-      actions={
+      padding={14}
+      style={[
+        styles.emptyStateCard,
+        { backgroundColor: palette.bg, borderColor: palette.border },
+      ]}
+    >
+      <View style={styles.emptyStateHeader}>
+        <View
+          style={[
+            styles.emptyStateIconWrap,
+            { backgroundColor: `${palette.icon}22` },
+          ]}
+        >
+          <Ionicons name={iconName} size={18} color={palette.icon} />
+        </View>
+        <View style={styles.emptyStateCopy}>
+          <Text style={[styles.emptyStateEyebrow, { color: palette.icon }]}>
+            {eyebrow}
+          </Text>
+          <Text style={styles.emptyStateTitle}>{state.title}</Text>
+          <Text style={styles.emptyStateBody}>{state.body}</Text>
+        </View>
+      </View>
+      <View style={styles.emptyStateFooter}>
+        <Pill theme={THEME} tone={state.tone} dot>
+          {state.reason}
+        </Pill>
         <Btn theme={THEME} variant="secondary" size="sm" onPress={onPress}>
           {state.actionLabel}
         </Btn>
-      }
-    />
+      </View>
+    </Card>
   );
 }
 
@@ -806,6 +996,193 @@ function DeepLinkTile({
   );
 }
 
+function ActiveTripSummaryCard({
+  model,
+  onPrimaryPress,
+  onSecondaryPress,
+}: {
+  model: ActiveTripCardModel;
+  onPrimaryPress: () => void;
+  onSecondaryPress: () => void;
+}) {
+  return (
+    <Card theme={THEME} padding={14} style={styles.activeTripCard}>
+      <View style={styles.sectionHeader}>
+        <View>
+          <Text style={styles.sectionEyebrow}>Active trip summary</Text>
+          <Text style={styles.sectionTitle}>{model.title}</Text>
+        </View>
+        <Pill theme={THEME} tone="accent" dot>
+          {model.platformLabel}
+        </Pill>
+      </View>
+      <Text style={styles.sectionBody}>{model.routeSummary}</Text>
+      <View style={styles.activeTripMetaRow}>
+        <Pill theme={THEME} tone="info">
+          {model.fareLabel}
+        </Pill>
+        <Text style={styles.platformRowMeta}>{model.meta}</Text>
+      </View>
+      <View style={styles.activeTripActionRow}>
+        <Btn theme={THEME} variant="primary" size="sm" onPress={onPrimaryPress}>
+          {model.primaryLabel}
+        </Btn>
+        <Btn
+          theme={THEME}
+          variant="secondary"
+          size="sm"
+          onPress={onSecondaryPress}
+        >
+          {model.secondaryLabel}
+        </Btn>
+      </View>
+    </Card>
+  );
+}
+
+function NotificationInboxCard({
+  items,
+  expanded,
+  loading,
+  error,
+  onToggle,
+  onOpen,
+  onMarkRead,
+  onMarkAllRead,
+}: {
+  items: NotificationCardModel[];
+  expanded: boolean;
+  loading: boolean;
+  error: string | null;
+  onToggle: () => void;
+  onOpen: (route: WorkspaceRoute) => void;
+  onMarkRead: (notificationId: string) => void;
+  onMarkAllRead: () => void;
+}) {
+  const unreadCount = items.filter((item) => item.readAt === null).length;
+
+  return (
+    <View style={styles.sectionBlock}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onToggle}
+        style={({ pressed }) => [pressed ? styles.tilePressed : null]}
+      >
+        <Card theme={THEME} padding={14}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.sectionEyebrow}>Notifications / inbox</Text>
+              <Text style={styles.sectionTitle}>
+                {unreadCount > 0 ? `${unreadCount} 則待讀通知` : "通知已清空"}
+              </Text>
+            </View>
+            <Pill theme={THEME} tone={unreadCount > 0 ? "warn" : "neutral"} dot>
+              {expanded ? "收合" : "展開"}
+            </Pill>
+          </View>
+          <Text style={styles.sectionBody}>
+            {error ??
+              "依 packet，driver app 在 cockpit 內提供 backend inbox + native push 的收合式通知面板。"}
+          </Text>
+        </Card>
+      </Pressable>
+
+      {expanded ? (
+        <Card theme={THEME} padding={14}>
+          <View style={styles.notificationActionRow}>
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              disabled={loading || unreadCount === 0}
+              onPress={onMarkAllRead}
+            >
+              全部標記已讀
+            </Btn>
+          </View>
+          <View style={styles.notificationList}>
+            {items.length === 0 ? (
+              <Text style={styles.sectionBody}>
+                目前沒有後端通知。新的 push / inbox 事件會在這裡保留已讀路徑。
+              </Text>
+            ) : (
+              items.map((item) => (
+                <View key={item.notificationId} style={styles.notificationRow}>
+                  <View style={styles.notificationLead}>
+                    <View
+                      style={[
+                        styles.notificationIconWrap,
+                        {
+                          backgroundColor:
+                            item.tone === "danger"
+                              ? THEME.dangerBg
+                              : item.tone === "warn"
+                                ? THEME.warnBg
+                                : THEME.infoBg,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={item.iconName}
+                        size={16}
+                        color={
+                          item.tone === "danger"
+                            ? THEME.danger
+                            : item.tone === "warn"
+                              ? THEME.warn
+                              : THEME.info
+                        }
+                      />
+                    </View>
+                    <View style={styles.notificationCopy}>
+                      <View style={styles.notificationHeadline}>
+                        <Text style={styles.notificationTitle}>
+                          {item.title}
+                        </Text>
+                        <Pill
+                          theme={THEME}
+                          tone={item.readAt === null ? item.tone : "neutral"}
+                          dot
+                        >
+                          {item.readAt === null ? "未讀" : "已讀"}
+                        </Pill>
+                      </View>
+                      <Text style={styles.notificationBody}>{item.body}</Text>
+                      <Text style={styles.platformRowMeta}>
+                        {formatCompactDateTime(item.createdAt)}
+                        {item.persistent ? " · persistent banner" : ""}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.notificationButtons}>
+                    <Btn
+                      theme={THEME}
+                      variant="ghost"
+                      size="xs"
+                      onPress={() => onOpen(item.route)}
+                    >
+                      開啟
+                    </Btn>
+                    <Btn
+                      theme={THEME}
+                      variant="secondary"
+                      size="xs"
+                      disabled={loading || item.readAt !== null}
+                      onPress={() => onMarkRead(item.notificationId)}
+                    >
+                      已讀
+                    </Btn>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        </Card>
+      ) : null}
+    </View>
+  );
+}
+
 export default function WorkspaceIndex() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -816,6 +1193,11 @@ export default function WorkspaceIndex() {
   const [loading, setLoading] = useState(false);
   const [refreshSeed, setRefreshSeed] = useState(0);
   const [nowSeed, setNowSeed] = useState(Date.now());
+  const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
+  const [markingNotificationsRead, setMarkingNotificationsRead] =
+    useState(false);
+  const [dismissedSosNotificationIds, setDismissedSosNotificationIds] =
+    useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -900,6 +1282,7 @@ export default function WorkspaceIndex() {
   }, [provisioned, ready, refreshSeed]);
 
   const navigate = (route: WorkspaceRoute) => () => router.push(route);
+  const navigateTo = (route: WorkspaceRoute) => router.push(route);
 
   const isDriverOnShift = workspace.activeShift !== null;
   const taskSummary = useMemo(
@@ -1227,6 +1610,42 @@ export default function WorkspaceIndex() {
     workspace.shiftLoadError,
   ]);
 
+  const notificationItems = useMemo<NotificationCardModel[]>(
+    () =>
+      workspace.notifications
+        .map((notification) => ({
+          notificationId: notification.notificationId,
+          title: notification.title,
+          body: notification.message,
+          createdAt: notification.createdAt,
+          readAt: notification.readAt,
+          tone: getNotificationTone(notification),
+          route: getNotificationRoute(notification),
+          iconName: getNotificationIconName(notification),
+          persistent: isSosNotification(notification),
+        }))
+        .sort((left, right) => {
+          const unreadWeight = left.readAt === null ? -1 : 1;
+          const rightUnreadWeight = right.readAt === null ? -1 : 1;
+          return (
+            unreadWeight - rightUnreadWeight ||
+            Date.parse(right.createdAt) - Date.parse(left.createdAt)
+          );
+        })
+        .slice(0, 5),
+    [workspace.notifications],
+  );
+
+  const persistentSosNotification = useMemo(
+    () =>
+      notificationItems.find(
+        (item) =>
+          item.persistent &&
+          !dismissedSosNotificationIds.includes(item.notificationId),
+      ) ?? null,
+    [dismissedSosNotificationIds, notificationItems],
+  );
+
   const heroAction = useMemo<HeroActionModel>(() => {
     if (reauthPlatforms.length > 0) {
       const platform = reauthPlatforms[0];
@@ -1358,6 +1777,24 @@ export default function WorkspaceIndex() {
     workspace.shiftLoadError,
   ]);
 
+  const activeTripCard = useMemo<ActiveTripCardModel | null>(() => {
+    if (!taskSummary.activeTripTask) {
+      return null;
+    }
+
+    const task = taskSummary.activeTripTask;
+    const quotedFare = workspace.orderMap[task.orderId]?.quotedFare ?? null;
+    return {
+      title: formatTaskHeadline(task),
+      routeSummary: formatTaskRouteSummary(task),
+      meta: `${task.taskId} · 最後同步 ${formatCompactDateTime(task.updatedAt)}`,
+      fareLabel: quotedFare ? formatMoney(quotedFare) : "車資待確認",
+      platformLabel: task.platformDisplayName || task.sourcePlatform,
+      primaryLabel: "返回行程",
+      secondaryLabel: "任務詳情",
+    };
+  }, [taskSummary.activeTripTask, workspace.orderMap]);
+
   const deepLinks = useMemo<DeepLinkTileModel[]>(
     () => [
       {
@@ -1441,9 +1878,42 @@ export default function WorkspaceIndex() {
   ]);
 
   const notificationCount =
+    notificationItems.filter((item) => item.readAt === null).length +
     urgentItems.length +
     (focusEmptyState?.reason === "driver_not_eligible" ? 1 : 0) +
     (identityIssue ? 1 : 0);
+
+  const markNotificationsRead = async (notificationIds: string[]) => {
+    const ids = notificationIds.filter(Boolean);
+    if (ids.length === 0) {
+      return;
+    }
+
+    setMarkingNotificationsRead(true);
+    try {
+      const client = getDriverClient();
+      const command: MarkNotificationsReadCommand = {
+        notificationIds: ids,
+      };
+      await client.post("/api/notifications/read", { body: command });
+      const readAt = new Date().toISOString();
+      setWorkspace((current) => ({
+        ...current,
+        notifications: current.notifications.map((notification) =>
+          ids.includes(notification.notificationId)
+            ? { ...notification, status: "read", readAt }
+            : notification,
+        ),
+      }));
+    } catch (error) {
+      setWorkspace((current) => ({
+        ...current,
+        notificationLoadError: toErrorMessage(error, "通知已讀同步失敗。"),
+      }));
+    } finally {
+      setMarkingNotificationsRead(false);
+    }
+  };
 
   if (!ready) {
     return <LoadingState label="正在檢查裝置配置…" />;
@@ -1504,7 +1974,7 @@ export default function WorkspaceIndex() {
               iconName="notifications-outline"
               label="查看通知與緊急事件"
               withDot={notificationCount > 0}
-              onPress={navigate("/incident")}
+              onPress={() => setNotificationPanelOpen((current) => !current)}
             />
             <HeaderActionButton
               iconName="warning-outline"
@@ -1543,11 +2013,53 @@ export default function WorkspaceIndex() {
         />
       ) : null}
 
+      {persistentSosNotification ? (
+        <Banner
+          theme={THEME}
+          tone="danger"
+          title={persistentSosNotification.title}
+          body={persistentSosNotification.body}
+          actions={
+            <View style={styles.bannerActionRow}>
+              <Btn
+                theme={THEME}
+                variant="secondary"
+                size="sm"
+                onPress={() => navigateTo(persistentSosNotification.route)}
+              >
+                查看 SOS
+              </Btn>
+              <Btn
+                theme={THEME}
+                variant="ghost"
+                size="sm"
+                onPress={() =>
+                  setDismissedSosNotificationIds((current) => [
+                    ...current,
+                    persistentSosNotification.notificationId,
+                  ])
+                }
+              >
+                關閉
+              </Btn>
+            </View>
+          }
+        />
+      ) : null}
+
       <HeroActionCard
         model={heroAction}
         onPrimaryPress={navigate(heroAction.primaryRoute)}
         onSecondaryPress={navigate(heroAction.secondaryRoute)}
       />
+
+      {activeTripCard ? (
+        <ActiveTripSummaryCard
+          model={activeTripCard}
+          onPrimaryPress={navigate("/trip")}
+          onSecondaryPress={navigate("/jobs")}
+        />
+      ) : null}
 
       <View style={styles.kpiRow}>
         <View style={styles.kpiCell}>
@@ -1592,6 +2104,25 @@ export default function WorkspaceIndex() {
           onPress={navigate(item.route)}
         />
       ))}
+
+      <NotificationInboxCard
+        items={notificationItems}
+        expanded={notificationPanelOpen}
+        loading={markingNotificationsRead}
+        error={workspace.notificationLoadError}
+        onToggle={() => setNotificationPanelOpen((current) => !current)}
+        onOpen={(route) => navigateTo(route)}
+        onMarkRead={(notificationId) =>
+          void markNotificationsRead([notificationId])
+        }
+        onMarkAllRead={() =>
+          void markNotificationsRead(
+            notificationItems
+              .filter((item) => item.readAt === null)
+              .map((item) => item.notificationId),
+          )
+        }
+      />
 
       <PlatformHealthCard
         rows={platformRows}
@@ -1845,12 +2376,60 @@ const styles = StyleSheet.create({
   heroSecondaryButton: {
     flex: 1,
   },
+  bannerActionRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
   kpiRow: {
     flexDirection: "row",
     gap: 10,
   },
   kpiCell: {
     flex: 1,
+  },
+  emptyStateCard: {
+    overflow: "hidden",
+  },
+  emptyStateHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  emptyStateIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyStateCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  emptyStateEyebrow: {
+    fontFamily: THEME.monoFamily,
+    fontSize: 10.5,
+    fontWeight: "700",
+  },
+  emptyStateTitle: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  emptyStateBody: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  emptyStateFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginTop: 14,
   },
   urgentCard: {
     overflow: "hidden",
@@ -1908,6 +2487,73 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 12.5,
     lineHeight: 18,
+  },
+  activeTripCard: {
+    gap: 10,
+  },
+  activeTripMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  activeTripActionRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  notificationActionRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginBottom: 12,
+  },
+  notificationList: {
+    gap: 10,
+  },
+  notificationRow: {
+    gap: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: THEME.border,
+  },
+  notificationLead: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  notificationIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notificationCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  notificationHeadline: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  notificationTitle: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 13,
+    fontWeight: "700",
+    flex: 1,
+  },
+  notificationBody: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  notificationButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 8,
   },
   platformSummaryRow: {
     flexDirection: "row",
