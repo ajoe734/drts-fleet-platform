@@ -4570,6 +4570,9 @@ export interface PlatformTenantRolloutState {
   rollbackOwner: string | null;
   rollbackPrepared: boolean;
   lastPromotedAt: string | null;
+  enteredStageAt: string | null;
+  enteredGateAt: string | null;
+  lastUpdatedBy: string | null;
   notes: string | null;
 }
 
@@ -4631,7 +4634,12 @@ export interface UpdatePlatformTenantOnboardingCommand {
   notificationSubscriptions?: TenantNotificationSubscription[];
   webhookEvents?: string[];
   integrationPackage?: Partial<PlatformTenantIntegrationPackage>;
-  rollout?: Partial<Omit<PlatformTenantRolloutState, "stage">>;
+  rollout?: Partial<
+    Omit<
+      PlatformTenantRolloutState,
+      "stage" | "enteredStageAt" | "enteredGateAt" | "lastUpdatedBy"
+    >
+  >;
 }
 
 export interface SetPlatformTenantRolloutStageCommand {
