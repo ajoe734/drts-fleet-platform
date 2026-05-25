@@ -47,12 +47,34 @@ function isComplaintActive(status: ComplaintCaseStatus) {
   );
 }
 
+function isComplaintBreached(record: ComplaintCaseRecord) {
+  return record.slaStatus === "breached";
+}
+
+function isComplaintWarning(record: ComplaintCaseRecord) {
+  return record.slaStatus === "warning";
+}
+
+function getComplaintSlaLabel(
+  record: ComplaintCaseRecord,
+  locale: "en" | "zh",
+) {
+  if (record.slaStatus === "breached") {
+    return locale === "en" ? "SLA breach" : "SLA 違規";
+  }
+  if (record.slaStatus === "warning") {
+    return locale === "en" ? "SLA warning" : "SLA 警示";
+  }
+  return locale === "en" ? "Within SLA" : "SLA 內";
+}
+
 function compareComplaintPriority(
   a: ComplaintCaseRecord,
   b: ComplaintCaseRecord,
 ) {
-  if (a.slaBreach !== b.slaBreach) {
-    return a.slaBreach ? -1 : 1;
+  if (a.slaStatus !== b.slaStatus) {
+    const rank = { breached: 0, warning: 1, within_sla: 2 } as const;
+    return rank[a.slaStatus] - rank[b.slaStatus];
   }
 
   if (a.relatedIncidentId !== b.relatedIncidentId) {
@@ -90,10 +112,10 @@ function formatRelativeSla(value: string, locale: "en" | "zh") {
 }
 
 function getComplaintQueueTone(record: ComplaintCaseRecord) {
-  if (record.slaBreach) {
+  if (isComplaintBreached(record)) {
     return "queue-badge badge-danger";
   }
-  if (record.severity === "high") {
+  if (isComplaintWarning(record) || record.severity === "high") {
     return "queue-badge badge-warning";
   }
   return "queue-badge";
@@ -281,7 +303,7 @@ export default function ComplaintsPage() {
     isComplaintActive(record.status),
   ).length;
   const hotlineLinked = records.filter((record) => record.relatedCallId).length;
-  const slaBreached = records.filter((record) => record.slaBreach).length;
+  const slaBreached = records.filter(isComplaintBreached).length;
   const readyForAudit = records.filter(
     (record) => record.status === "closed",
   ).length;
@@ -289,7 +311,7 @@ export default function ComplaintsPage() {
     .filter(
       (record) =>
         !record.relatedIncidentId &&
-        (record.slaBreach || record.severity === "high"),
+        (isComplaintBreached(record) || record.severity === "high"),
     )
     .sort(compareComplaintPriority);
   const unassignedCases = records.filter(
@@ -449,10 +471,8 @@ export default function ComplaintsPage() {
                   <div className="queue-card-head">
                     <strong>{record.caseNo}</strong>
                     <span className={getComplaintQueueTone(record)}>
-                      {record.slaBreach
-                        ? locale === "en"
-                          ? "SLA breach"
-                          : "SLA 違規"
+                      {isComplaintBreached(record)
+                        ? getComplaintSlaLabel(record, locale)
                         : formatOpsCodeLabel(locale, record.severity)}
                     </span>
                   </div>
@@ -723,9 +743,15 @@ export default function ComplaintsPage() {
                           <td>{record.relatedOrderId ?? "-"}</td>
                           <td>{record.relatedCallId ?? "-"}</td>
                           <td>
-                            {record.slaBreach ? (
+                            {record.slaStatus !== "within_sla" ? (
                               <span className="sla-badge">
-                                {locale === "en" ? "BREACH" : "違規"}
+                                {record.slaStatus === "breached"
+                                  ? locale === "en"
+                                    ? "BREACH"
+                                    : "違規"
+                                  : locale === "en"
+                                    ? "WARNING"
+                                    : "警示"}
                               </span>
                             ) : (
                               <span className="table-subcopy">
@@ -757,18 +783,16 @@ export default function ComplaintsPage() {
                   <section className="detail-card">
                     <div className="detail-status-row">
                       <span className={getComplaintQueueTone(selectedRecord)}>
-                        {selectedRecord.slaBreach
-                          ? locale === "en"
-                            ? "SLA breach"
-                            : "SLA 違規"
+                        {isComplaintBreached(selectedRecord)
+                          ? getComplaintSlaLabel(selectedRecord, locale)
                           : formatOpsCodeLabel(locale, selectedRecord.severity)}
                       </span>
                       {!selectedRecord.relatedIncidentId &&
-                        (selectedRecord.slaBreach ||
+                        (isComplaintBreached(selectedRecord) ||
                           selectedRecord.severity === "high") && (
                           <Link
                             className="inline-link quick-link"
-                            href={`/incidents?create=1&complaintCaseNo=${encodeURIComponent(selectedRecord.caseNo)}&title=${encodeURIComponent(selectedRecord.caseNo)}&description=${encodeURIComponent(selectedRecord.description)}&severity=${encodeURIComponent(selectedRecord.slaBreach ? "high" : "medium")}${selectedRecord.relatedOrderId ? `&relatedOrderId=${encodeURIComponent(selectedRecord.relatedOrderId)}` : ""}`}
+                            href={`/incidents?create=1&complaintCaseNo=${encodeURIComponent(selectedRecord.caseNo)}&title=${encodeURIComponent(selectedRecord.caseNo)}&description=${encodeURIComponent(selectedRecord.description)}&severity=${encodeURIComponent(isComplaintBreached(selectedRecord) ? "high" : "medium")}${selectedRecord.relatedOrderId ? `&relatedOrderId=${encodeURIComponent(selectedRecord.relatedOrderId)}` : ""}`}
                           >
                             {locale === "en"
                               ? "Prepare incident handoff"
@@ -797,14 +821,19 @@ export default function ComplaintsPage() {
                             t("complaints.unassigned")}
                         </strong>
                         <small>
-                          {t("complaints.detail.slaBreach", {
-                            value: selectedRecord.slaBreach
-                              ? t("common.yes")
-                              : t("common.no"),
+                          {t("complaints.detail.slaStatus", {
+                            value: formatOpsCodeLabel(
+                              locale,
+                              selectedRecord.slaStatus,
+                            ),
                           })}
                         </small>
-                        {selectedRecord.slaBreach && (
-                          <span className="sla-badge">SLA BREACH</span>
+                        {selectedRecord.slaStatus !== "within_sla" && (
+                          <span className="sla-badge">
+                            {selectedRecord.slaStatus === "breached"
+                              ? "SLA BREACH"
+                              : "SLA WARNING"}
+                          </span>
                         )}
                       </div>
                       <div>
@@ -854,7 +883,7 @@ export default function ComplaintsPage() {
                     </div>
                     <p className="description">{selectedRecord.description}</p>
                     <div className="action-row">
-                      {!selectedRecord.slaBreach && (
+                      {!isComplaintBreached(selectedRecord) && (
                         <button
                           className="btn"
                           type="button"

@@ -153,8 +153,8 @@ describe("Complaint reopen with SLA recalculation", () => {
 
       complaintService.markComplaintSlaBreach(complaint.caseNo);
       expect(
-        complaintService.getComplaintCase(complaint.caseNo).slaBreach,
-      ).toBe(true);
+        complaintService.getComplaintCase(complaint.caseNo).slaStatus,
+      ).toBe("breached");
 
       vi.setSystemTime(new Date("2026-05-13T12:30:00.000Z"));
 
@@ -165,7 +165,8 @@ describe("Complaint reopen with SLA recalculation", () => {
       expect(reopened.caseNo).toBe(complaint.caseNo);
       expect(reopened.status).toBe("reopened");
       expect(reopened.reopenCount).toBe(1);
-      expect(reopened.slaBreach).toBe(false);
+      expect(reopened.slaStatus).toBe("within_sla");
+      expect(reopened.slaBreachedAt).toBeNull();
       expect(reopened.slaDueAt).not.toBe(originalSlaDueAt);
 
       const timeline = complaintService.getComplaintTimeline(complaint.caseNo);
@@ -247,7 +248,7 @@ describe("SLA breach evaluation sweep", () => {
     // c1 was already breached so won't be double-processed
     // c2 has 72h SLA, so it should NOT be breached yet
     const c2After = complaintService.getComplaintCase(c2.caseNo);
-    expect(c2After.slaBreach).toBe(false);
+    expect(c2After.slaStatus).toBe("within_sla");
   });
 
   it("does not breach resolved or closed cases", () => {
@@ -318,7 +319,6 @@ describe("Complaint SLA read model status", () => {
 
       expect(complaint.slaStatus).toBe("within_sla");
       expect(complaint.slaBreachedAt).toBeNull();
-      expect(complaint.slaBreach).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -344,7 +344,6 @@ describe("Complaint SLA read model status", () => {
       );
       expect(warningComplaint.slaStatus).toBe("warning");
       expect(warningComplaint.slaBreachedAt).toBeNull();
-      expect(warningComplaint.slaBreach).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -370,7 +369,6 @@ describe("Complaint SLA read model status", () => {
       );
       expect(breachedComplaint.slaStatus).toBe("breached");
       expect(breachedComplaint.slaBreachedAt).toBe(complaint.slaDueAt);
-      expect(breachedComplaint.slaBreach).toBe(true);
     } finally {
       vi.useRealTimers();
     }

@@ -11,13 +11,17 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+export type PersistedComplaintCaseRecord = ComplaintCaseRecord & {
+  slaBreach?: boolean;
+};
+
 type ComplaintState = {
-  complaintCases: ComplaintCaseRecord[];
+  complaintCases: PersistedComplaintCaseRecord[];
   complaintTimelines: ComplaintTimelineEntry[];
 };
 
 type PersistComplaintChanges = {
-  complaintCases?: readonly ComplaintCaseRecord[];
+  complaintCases?: readonly PersistedComplaintCaseRecord[];
   complaintTimelines?: readonly ComplaintTimelineEntry[];
 };
 
@@ -58,7 +62,7 @@ export class ComplaintRepository {
 
     return {
       complaintCases: complaintCasesResult.rows.map((row) =>
-        this.parseRecord<ComplaintCaseRecord>(
+        this.parseRecord<PersistedComplaintCaseRecord>(
           row.record,
           "crm.phase1_complaint_cases",
         ),
