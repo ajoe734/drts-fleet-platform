@@ -153,5 +153,13 @@ describe("tenant rollout state machine", () => {
         (action) => action.action === "resolve_rollback_hold",
       ),
     ).toMatchObject({ enabled: true });
+    expect(
+      record.availableActions.find(
+        (action) => action.action === "enter_rollback_hold",
+      ),
+    ).toMatchObject({
+      enabled: false,
+      disabledReasonCode: "tenant_already_in_rollback_hold",
+    });
   });
 });

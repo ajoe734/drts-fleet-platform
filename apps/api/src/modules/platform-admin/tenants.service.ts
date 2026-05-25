@@ -36,6 +36,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   createTenantRolloutState,
+  toTenantRolloutStateMachineRecord,
   transitionTenantRolloutGate,
   transitionTenantRolloutStage,
 } from "../tenant-rollout/tenant-rollout-state-machine";
@@ -162,6 +163,10 @@ export class TenantsService implements OnModuleInit {
 
   get(tenantId: string): TenantSummary {
     return this.cloneTenant(this.requireTenant(tenantId));
+  }
+
+  getRolloutStateMachine(tenantId: string) {
+    return toTenantRolloutStateMachineRecord(this.requireTenant(tenantId));
   }
 
   create(
@@ -535,6 +540,44 @@ export class TenantsService implements OnModuleInit {
         resourceType: "platform_tenant",
         resourceId: tenant.id,
         newValuesSummary: { roleCode, acknowledgedAt: now },
+      },
+      requestId,
+    );
+
+    return this.cloneTenant(tenant);
+  }
+
+  setRolloutGateStatus(
+    tenantId: string,
+    gateStatus: PlatformTenantGateStatus,
+    requestId?: string,
+  ): TenantSummary {
+    const tenant = this.requireTenant(tenantId);
+    const now = new Date().toISOString();
+    const oldRollout = { ...tenant.rollout };
+
+    tenant.rollout = transitionTenantRolloutGate(tenant.rollout, {
+      gateStatus: this.normalizeGateStatus(gateStatus),
+      occurredAt: now,
+      actorLabel: "platform_admin",
+    });
+    tenant.updatedAt = now;
+
+    this.persistChanges(
+      { platformTenants: [this.cloneTenant(tenant)] },
+      "set tenant rollout gate",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "update_platform_tenant_rollout_gate",
+        resourceType: "platform_tenant",
+        resourceId: tenant.id,
+        oldValuesSummary: { ...oldRollout },
+        newValuesSummary: { ...tenant.rollout },
       },
       requestId,
     );

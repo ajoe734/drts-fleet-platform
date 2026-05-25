@@ -210,9 +210,9 @@ function actionSetFor(
   actions.push(
     createAction(
       "enter_rollback_hold",
-      stage === "production" || stage === "rollback_hold",
-      stage === "production" || stage === "rollback_hold"
-        ? undefined
+      stage === "production",
+      stage === "rollback_hold"
+        ? "tenant_already_in_rollback_hold"
         : "rollback_hold_requires_production_cutover",
     ),
     createAction(
