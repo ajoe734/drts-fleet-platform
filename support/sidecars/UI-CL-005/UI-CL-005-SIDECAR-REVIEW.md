@@ -4,10 +4,10 @@
 **Parent Task:** `UI-CL-005`  
 **Helper Kind:** `review_packet`  
 **Current Sidecar Owner:** `Codex`  
-**Assigned Reviewer:** `Claude2`  
+**Assigned Reviewer:** `Codex2`  
 **Parent Owner / Reviewer:** `Codex` / `Codex2`  
-**Last Revised:** `2026-05-25T19:49:00Z (UTC)`  
-**Machine-Truth Snapshot:** parent `UI-CL-005` is `done` after closeout commit `5ea5112f` on `origin/codex/ui-cl-005`; dependency `UI-BE-008` is `done` after backend closeout commit `357e1351` on `origin/codex/ui-be-008`; this sidecar is support-only and should move to reviewer `Claude2`.
+**Last Revised:** `2026-05-25T20:06:50Z (UTC)`  
+**Machine-Truth Snapshot:** parent `UI-CL-005` is `done` after closeout commit `5ea5112f` on `origin/codex/ui-cl-005`; dependency `UI-BE-008` is `done` after backend closeout commit `357e1351` on `origin/codex/ui-be-008`; this sidecar is support-only and should move to reviewer `Codex2` after the `2026-05-25T19:55:22Z` reviewer reassignment.
 
 ---
 
@@ -35,7 +35,7 @@
   - subject: `UI-CL-005: finalize approved driver ops instruction client closeout`
   - final note: closeout completed after rerunning `pnpm --filter @drts/api-client typecheck`, `pnpm --filter @drts/ui-tokens build`, and `pnpm --filter @drts/driver-app typecheck`
 - this sidecar `UI-CL-005-SIDECAR-REVIEW` is `in_progress`
-  - owner / reviewer: `Codex` / `Claude2`
+  - owner / reviewer: `Codex` / `Codex2`
   - acceptance is support-only:
     - `Create support artifacts only`
     - `Do not edit canonical truth`
@@ -162,8 +162,11 @@ The sidecar itself also has a small routing history worth preserving:
 - `2026-05-25T19:33:09Z`: that worker exited before terminal status
 - `2026-05-25T19:36:33Z`: orchestrator reassigned `UI-CL-005-SIDECAR-REVIEW` to `Codex` with reviewer `Claude2`
 - `2026-05-25T19:48:05Z`: `Codex` recorded progress to continue the support-only packet
+- `2026-05-25T19:52:32Z`: `Codex` handed the completed packet to `Claude2`
+- `2026-05-25T19:55:22Z`: orchestrator rebalanced the reviewer from `Claude2` to `Codex2` because `Claude2` was unavailable or occupied
+- `2026-05-25T19:58:54Z`: `Codex2` reopened the sidecar because the packet still named `Claude2` in the reviewer/handoff sections after the reassignment
 
-This routing trail does not affect the parent delivery truth; it only explains why this sidecar now sits with `Codex` / `Claude2`.
+This routing trail does not affect the parent delivery truth; it only explains why this sidecar now sits with `Codex` / `Codex2` after the earlier `Claude2` draft + handoff attempt.
 
 ---
 
@@ -186,7 +189,7 @@ This routing trail does not affect the parent delivery truth; it only explains w
 
 ---
 
-## 8. Reviewer Hotspots (`Claude2`)
+## 8. Reviewer Hotspots (`Codex2`)
 
 Reviewer should confirm:
 
@@ -228,7 +231,7 @@ Suggested reopen wording:
 
 ### AC-S3 — `Hand off the packet to the assigned reviewer`
 
-- [ ] owner hands the packet to `Claude2`
+- [ ] owner hands the packet to `Codex2`
 - [ ] reviewer either approves or reopens
 - [ ] owner closes the support-only task after reviewer decision
 
@@ -239,19 +242,19 @@ Suggested reopen wording:
 Owner handoff to reviewer:
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff UI-CL-005-SIDECAR-REVIEW Claude2 "UI-CL-005 review packet is ready at support/sidecars/UI-CL-005/UI-CL-005-SIDECAR-REVIEW.md. It freezes the support-only evidence chain for the driver ops instruction client slice: UI-BE-008 closed backend read/ack on commit 357e1351, UI-CL-005 first landed the client methods in d44ac042, Codex2 reopened twice on the acknowledge contract mismatch, fix commit a77c1be2 aligned the client to AcknowledgeDriverOpsInstructionResult, and the parent was then approved and finalized to done with closeout commit 5ea5112f after focused verification reruns."
+AI_NAME=Codex scripts/ai-status.sh handoff UI-CL-005-SIDECAR-REVIEW Codex2 "UI-CL-005 review packet is ready at support/sidecars/UI-CL-005/UI-CL-005-SIDECAR-REVIEW.md. It freezes the support-only evidence chain for the driver ops instruction client slice: UI-BE-008 closed backend read/ack on commit 357e1351, UI-CL-005 first landed the client methods in d44ac042, Codex2 reopened twice on the acknowledge contract mismatch, fix commit a77c1be2 aligned the client to AcknowledgeDriverOpsInstructionResult, and the parent was then approved and finalized to done with closeout commit 5ea5112f after focused verification reruns. This refresh also updates the reviewer-routing trail after the 2026-05-25T19:55:22Z reassignment from Claude2 to Codex2."
 ```
 
 Reviewer approval:
 
 ```bash
-AI_NAME=Claude2 scripts/ai-status.sh approve UI-CL-005-SIDECAR-REVIEW "Review approved. The packet accurately freezes the UI-BE-008 dependency contract, the two UI-CL-005 reopen findings, the a77c1be2 client alignment fix, and the parent closeout evidence without changing canonical truth."
+AI_NAME=Codex2 scripts/ai-status.sh approve UI-CL-005-SIDECAR-REVIEW "Review approved. The packet accurately freezes the UI-BE-008 dependency contract, the two UI-CL-005 reopen findings, the a77c1be2 client alignment fix, the 2026-05-25T19:55:22Z reviewer reassignment, and the parent closeout evidence without changing canonical truth."
 ```
 
 Reviewer reopen:
 
 ```bash
-AI_NAME=Claude2 scripts/ai-status.sh reopen UI-CL-005-SIDECAR-REVIEW "packet needs refresh: [parent status mismatch / dependency contract wording inaccurate / review timeline incomplete / support-scope violation]"
+AI_NAME=Codex2 scripts/ai-status.sh reopen UI-CL-005-SIDECAR-REVIEW "packet needs refresh: [parent status mismatch / dependency contract wording inaccurate / reviewer routing drift / review timeline incomplete / support-scope violation]"
 ```
 
 Owner support-only closeout after approval:
@@ -263,4 +266,4 @@ AI_NAME=Codex NO_COMMIT_REQUIRED=1 scripts/ai-status.sh done UI-CL-005-SIDECAR-R
 ---
 
 Prepared by: `Codex`  
-For reviewer: `Claude2`
+For reviewer: `Codex2`
