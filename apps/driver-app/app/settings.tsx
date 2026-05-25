@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import type {
+  ActionReceipt,
   CrossAppResourceLink,
   DriverProfileRecord,
   DriverSettings,
@@ -90,6 +91,14 @@ type BindingActionDescriptor = ResourceActionDescriptor & {
   label: string;
   key: BindingActionKey;
   icon: keyof typeof Ionicons.glyphMap;
+};
+
+type PendingBindingAction = {
+  platformCode: PlatformCode;
+  action: BindingActionDescriptor;
+  reason: string;
+  manualAccountId: string;
+  manualTokenExpiresAt: string;
 };
 
 type PlatformBindingRow = {
@@ -202,15 +211,35 @@ function maskAccountId(value: string | null): string {
 function describeSaveState(state: SaveState) {
   switch (state) {
     case "saving":
-      return { label: "儲存中", tone: "info" as const, subtitle: "正在提交變更" };
+      return {
+        label: "儲存中",
+        tone: "info" as const,
+        subtitle: "正在提交變更",
+      };
     case "dirty":
-      return { label: "尚有未儲存變更", tone: "warn" as const, subtitle: "請確認後送出" };
+      return {
+        label: "尚有未儲存變更",
+        tone: "warn" as const,
+        subtitle: "請確認後送出",
+      };
     case "saved":
-      return { label: "已儲存", tone: "success" as const, subtitle: "設定已同步" };
+      return {
+        label: "已儲存",
+        tone: "success" as const,
+        subtitle: "設定已同步",
+      };
     case "error":
-      return { label: "儲存失敗", tone: "danger" as const, subtitle: "請稍後重試" };
+      return {
+        label: "儲存失敗",
+        tone: "danger" as const,
+        subtitle: "請稍後重試",
+      };
     default:
-      return { label: "未變更", tone: "neutral" as const, subtitle: "目前為最新設定" };
+      return {
+        label: "未變更",
+        tone: "neutral" as const,
+        subtitle: "目前為最新設定",
+      };
   }
 }
 
@@ -283,8 +312,66 @@ function getDisabledReasonLabel(code?: string): string {
       return "需聯絡派車台協助重新授權";
     case "not_bound":
       return "尚未綁定平台帳號";
+    case "reauth_required":
+      return "需先完成重新授權";
+    case "adapter_down":
+      return "平台轉接服務目前不可用";
     default:
       return "目前不可執行";
+  }
+}
+
+function getRiskLabel(
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+): string {
+  switch (riskLevel) {
+    case "high":
+      return "high risk";
+    case "medium":
+      return "medium risk";
+    case "low":
+    default:
+      return "low risk";
+  }
+}
+
+function getActionDialogTitle(
+  row: PlatformBindingRow,
+  action: BindingActionDescriptor,
+): string {
+  switch (action.key) {
+    case "bind":
+      return `綁定 ${row.displayName}`;
+    case "reauth":
+      return `${row.displayName} 重新授權`;
+    case "unbind":
+      return `解除 ${row.displayName} 綁定`;
+    case "contact_ops":
+      return `聯絡派車台處理 ${row.displayName}`;
+    case "open_presence":
+    default:
+      return `${row.displayName} 平台狀態`;
+  }
+}
+
+function getActionDialogBody(
+  row: PlatformBindingRow,
+  action: BindingActionDescriptor,
+): string {
+  if (action.key === "unbind") {
+    return "這是高風險操作，解除綁定後平台將不再向此司機派送工作。";
+  }
+
+  switch (row.authMechanism) {
+    case "external_browser_oauth":
+      return "此平台使用外部瀏覽器 OAuth。確認後會提示你切換到外部授權流程，完成後再回到 App 重新整理狀態。";
+    case "native_app_deeplink":
+      return "此平台使用原生 App deep link。確認後會提示你切換到平台 App 完成驗證，再回來同步狀態。";
+    case "manual_credential":
+      return "此平台需要手動輸入帳號識別與憑證資訊。送出後會保留目前頁面狀態，等待平台同步。";
+    case "ops_managed":
+    default:
+      return "此平台採 ops-managed 機制，司機端不能自行完成授權，需通知派車台協助處理。";
   }
 }
 
@@ -304,9 +391,7 @@ function getBindingActions(
   });
 }
 
-function getBooleanFlag(
-  value: boolean | null | undefined,
-): boolean | null {
+function getBooleanFlag(value: boolean | null | undefined): boolean | null {
   if (typeof value === "boolean") {
     return value;
   }
@@ -370,7 +455,10 @@ function getPresenceStatusCopy(
 function derivePlatformRows(
   summary: RuntimePlatformPresenceSummary | null,
 ): PlatformBindingRow[] {
-  const adapterMap = new Map<PlatformCode, PlatformPresenceAdapterStatusRecord>();
+  const adapterMap = new Map<
+    PlatformCode,
+    PlatformPresenceAdapterStatusRecord
+  >();
   const presenceMap = new Map<PlatformCode, RuntimePlatformPresenceRecord>();
 
   summary?.adapterStatuses?.forEach((status) => {
@@ -387,7 +475,8 @@ function derivePlatformRows(
       ? assessPlatformHealth(record, adapterStatus)
       : null;
     const availableActions = getBindingActions(record?.availableActions);
-    const authMechanism = record?.authMechanism ?? getAuthMechanism(platformCode);
+    const authMechanism =
+      record?.authMechanism ?? getAuthMechanism(platformCode);
     const driverSelfServiceBinding = getBooleanFlag(
       record?.driverSelfServiceBinding,
     );
@@ -574,7 +663,12 @@ function FilterChip({
         selected ? styles.filterChipSelected : styles.filterChipIdle,
       ]}
     >
-      <Text style={[styles.filterChipLabel, selected && styles.filterChipLabelSelected]}>
+      <Text
+        style={[
+          styles.filterChipLabel,
+          selected && styles.filterChipLabelSelected,
+        ]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -659,7 +753,12 @@ function BindingEmptyState({
       title={config.title}
       body={config.body}
       actions={
-        <Btn theme={THEME} variant="secondary" size="sm" onPress={config.action}>
+        <Btn
+          theme={THEME}
+          variant="secondary"
+          size="sm"
+          onPress={config.action}
+        >
           {config.actionLabel}
         </Btn>
       }
@@ -677,11 +776,11 @@ function BindingActionButton({
   busy: boolean;
 }) {
   const variant =
-    action.key === "unbind"
-      ? "ghost"
-      : action.key === "reauth" || action.key === "contact_ops"
-        ? "secondary"
-        : "primary";
+    action.riskLevel === "medium"
+      ? "primary"
+      : action.key === "unbind"
+        ? "ghost"
+        : "secondary";
 
   return (
     <View style={styles.bindingActionWrap}>
@@ -690,10 +789,14 @@ function BindingActionButton({
         variant={variant}
         size="sm"
         onPress={onPress}
+        danger={action.riskLevel === "high"}
         disabled={!action.enabled || busy}
       >
         {busy ? "處理中…" : action.label}
       </Btn>
+      {action.enabled && action.requiresReason ? (
+        <Text style={styles.bindingDisabledReason}>需填寫原因</Text>
+      ) : null}
       {!action.enabled && action.disabledReasonCode ? (
         <Text style={styles.bindingDisabledReason}>
           {getDisabledReasonLabel(action.disabledReasonCode)}
@@ -715,7 +818,9 @@ export default function SettingsScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [presenceError, setPresenceError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [lastResult, setLastResult] = useState<"success" | "error" | null>(null);
+  const [lastResult, setLastResult] = useState<"success" | "error" | null>(
+    null,
+  );
 
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
@@ -735,13 +840,18 @@ export default function SettingsScreen() {
     useState<RuntimePlatformPresenceSummary | null>(null);
   const [bindingFilter, setBindingFilter] = useState<BindingFilter>("all");
   const [busyPlatform, setBusyPlatform] = useState<PlatformCode | null>(null);
-  const [unbindPlatform, setUnbindPlatform] = useState<PlatformCode | null>(null);
-  const [unbindReason, setUnbindReason] = useState("");
+  const [pendingBindingAction, setPendingBindingAction] =
+    useState<PendingBindingAction | null>(null);
+  const [actionReceipt, setActionReceipt] = useState<ActionReceipt | null>(
+    null,
+  );
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const hasFocusedOnceRef = useRef(false);
 
   const settingsErrors = validateSettingsValues(settingsValues);
-  const profileErrors = profileLoaded ? validateProfileValues(profileValues) : {};
+  const profileErrors = profileLoaded
+    ? validateProfileValues(profileValues)
+    : {};
 
   const settingsDirty =
     settingsLoaded && !settingsValuesEqual(initialSettings, settingsValues);
@@ -784,7 +894,9 @@ export default function SettingsScreen() {
 
     if (settingsResult.status === "fulfilled") {
       hadSuccess = true;
-      const next = settingsValuesFromRecord(settingsResult.value as DriverSettings);
+      const next = settingsValuesFromRecord(
+        settingsResult.value as DriverSettings,
+      );
       if (allowFormReset) {
         setSettingsValues(next);
         setInitialSettings(next);
@@ -810,7 +922,9 @@ export default function SettingsScreen() {
 
     if (presenceResult.status === "fulfilled") {
       hadSuccess = true;
-      setPresenceSummary(presenceResult.value as RuntimePlatformPresenceSummary);
+      setPresenceSummary(
+        presenceResult.value as RuntimePlatformPresenceSummary,
+      );
       setPresenceError(null);
     } else {
       const message = toErrorMessage(presenceResult.reason);
@@ -850,12 +964,11 @@ export default function SettingsScreen() {
       return;
     }
 
-    void loadAll()
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
+    void loadAll().finally(() => {
+      if (active) {
+        setLoading(false);
+      }
+    });
 
     return () => {
       active = false;
@@ -903,19 +1016,27 @@ export default function SettingsScreen() {
     presenceError,
     summary: presenceSummary,
   });
+  const pendingActionRow = useMemo(
+    () =>
+      pendingBindingAction
+        ? (platformRows.find(
+            (row) => row.platformCode === pendingBindingAction.platformCode,
+          ) ?? null)
+        : null,
+    [pendingBindingAction, platformRows],
+  );
 
   const readyPlatformCount = platformRows.filter(
-    (row) => row.record?.status === "online" && row.assessment?.canReceiveOrders,
+    (row) =>
+      row.record?.status === "online" && row.assessment?.canReceiveOrders,
   ).length;
   const attentionPlatformCount = platformRows.filter(
     (row) => row.requiresAttention,
   ).length;
-  const selfBindableCount = platformRows.filter(
-    (row) =>
-      row.availableActions.some(
-        (action) =>
-          action.action === "bind_platform_account" && action.enabled,
-      ),
+  const selfBindableCount = platformRows.filter((row) =>
+    row.availableActions.some(
+      (action) => action.action === "bind_platform_account" && action.enabled,
+    ),
   ).length;
   const autoAcceptPlatforms = platformRows.filter(
     (row) => row.autoAcceptAllowed === true,
@@ -952,13 +1073,33 @@ export default function SettingsScreen() {
 
   const handleRefresh = async () => {
     if (dirty || saving) {
-      Alert.alert("請先處理未儲存變更", "設定頁為手動刷新模式，未儲存變更時不會覆蓋表單內容。");
+      Alert.alert(
+        "請先處理未儲存變更",
+        "設定頁為手動刷新模式，未儲存變更時不會覆蓋表單內容。",
+      );
       return;
     }
 
     setRefreshing(true);
     await loadAll({ silent: false, allowFormReset: true });
     setRefreshing(false);
+  };
+
+  const buildActionReceipt = (
+    row: PlatformBindingRow,
+    action: BindingActionDescriptor,
+    status: ActionReceipt["status"],
+    message: string,
+  ): ActionReceipt => {
+    const timestamp = Date.now();
+    return {
+      actionId: `${action.action}-${row.platformCode}-${timestamp}`,
+      auditId: `drv-${row.platformCode}-${timestamp}`,
+      resourceType: "platform_binding",
+      resourceId: row.platformCode,
+      status,
+      message,
+    };
   };
 
   const performSave = async () => {
@@ -1020,7 +1161,10 @@ export default function SettingsScreen() {
           : `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`;
       setLastResult("error");
       setSaveError(failureMessage);
-      Alert.alert(saved.length === 0 ? "儲存失敗" : "部分儲存成功", failureMessage);
+      Alert.alert(
+        saved.length === 0 ? "儲存失敗" : "部分儲存成功",
+        failureMessage,
+      );
     } finally {
       setSaving(false);
     }
@@ -1049,64 +1193,91 @@ export default function SettingsScreen() {
       return;
     }
 
-    if (action.key === "contact_ops") {
-      Alert.alert(
-        "聯絡派車台",
-        `${row.displayName} 使用 ops-managed 重新授權機制，請通知派車台或平台管理員協助處理。`,
-      );
+    setPendingBindingAction({
+      platformCode: row.platformCode,
+      action,
+      reason: "",
+      manualAccountId: row.record?.accountId ?? "",
+      manualTokenExpiresAt: row.record?.tokenExpiresAt ?? "",
+    });
+  };
+
+  const submitPendingBindingAction = async () => {
+    if (!pendingBindingAction || busyPlatform) {
+      return;
+    }
+
+    const row = pendingActionRow;
+    if (!row) {
+      setPendingBindingAction(null);
+      return;
+    }
+
+    const { action } = pendingBindingAction;
+    const reason = pendingBindingAction.reason.trim();
+    const manualAccountId = pendingBindingAction.manualAccountId.trim();
+    const manualTokenExpiresAt =
+      pendingBindingAction.manualTokenExpiresAt.trim();
+
+    if (action.requiresReason && !reason) {
+      return;
+    }
+
+    if (
+      row.authMechanism === "manual_credential" &&
+      (action.key === "bind" || action.key === "reauth") &&
+      !manualAccountId
+    ) {
       return;
     }
 
     const client = getDriverClient();
     setBusyPlatform(row.platformCode);
     try {
-      if (action.key === "bind") {
-        await client.setPlatformOnline({
-          platformCode: row.platformCode,
-          tokenExpiresAt: null,
-        });
-        Alert.alert(
-          "已送出綁定",
-          `請依 ${getMechanismLabel(row.authMechanism)} 完成 ${row.displayName} 綁定流程。`,
-        );
-      } else if (action.key === "reauth") {
-        await client.setPlatformOnline({
-          platformCode: row.platformCode,
-          tokenExpiresAt: null,
-        });
-        Alert.alert(
-          "已送出重新授權",
-          `${row.displayName} 已重啟驗證流程，請完成 ${getMechanismLabel(row.authMechanism)}。`,
+      if (action.key === "contact_ops") {
+        setActionReceipt(
+          buildActionReceipt(
+            row,
+            action,
+            "accepted",
+            `已記錄 ${row.displayName} 的派車台處理請求，請聯絡 ops 協助重新授權或帳號維護。`,
+          ),
         );
       } else if (action.key === "unbind") {
-        setUnbindPlatform(row.platformCode);
-        setBusyPlatform(null);
-        return;
+        await client.setPlatformOffline({ platformCode: row.platformCode });
+        setActionReceipt(
+          buildActionReceipt(
+            row,
+            action,
+            "completed",
+            `已解除 ${row.displayName} 綁定。原因：${reason}`,
+          ),
+        );
+      } else if (row.authMechanism === "manual_credential") {
+        await client.setPlatformOnline({
+          platformCode: row.platformCode,
+          tokenExpiresAt: manualTokenExpiresAt || null,
+        });
+        setActionReceipt(
+          buildActionReceipt(
+            row,
+            action,
+            "completed",
+            `${row.displayName} 已送出手動帳密資料，帳號識別 ${maskAccountId(manualAccountId)}，請等待平台同步。`,
+          ),
+        );
+      } else {
+        const message =
+          row.authMechanism === "external_browser_oauth"
+            ? `請使用外部瀏覽器完成 ${row.displayName} OAuth 授權，回到 App 後手動重新整理狀態。`
+            : `請切換到 ${row.displayName} 原生 App 完成 deep link 驗證，再回到 Driver App 重新整理。`;
+        setActionReceipt(buildActionReceipt(row, action, "accepted", message));
       }
 
       await loadAll({ silent: true, allowFormReset: false });
+      setPendingBindingAction(null);
     } catch (error) {
       Alert.alert(`${action.label}失敗`, toErrorMessage(error));
-    } finally {
-      setBusyPlatform(null);
-    }
-  };
-
-  const confirmUnbind = async (platformCode: PlatformCode) => {
-    if (!unbindReason.trim()) {
-      return;
-    }
-
-    setBusyPlatform(platformCode);
-    try {
-      const client = getDriverClient();
-      await client.setPlatformOffline({ platformCode });
-      setUnbindPlatform(null);
-      setUnbindReason("");
-      await loadAll({ silent: true, allowFormReset: false });
-      Alert.alert("已解除綁定", "平台帳號已改為離線並解除綁定。");
-    } catch (error) {
-      Alert.alert("解除綁定失敗", toErrorMessage(error));
     } finally {
       setBusyPlatform(null);
     }
@@ -1129,19 +1300,22 @@ export default function SettingsScreen() {
   if (!isProvisioned) {
     return (
       <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
-        <PageHeader
-          theme={THEME}
-          title="設定"
-          subtitle="裝置尚未完成配置"
-        />
+        <PageHeader theme={THEME} title="設定" subtitle="裝置尚未完成配置" />
         <Banner
           theme={THEME}
           tone="warn"
-          icon={<Ionicons name="lock-closed-outline" size={18} color={THEME.warn} />}
+          icon={
+            <Ionicons name="lock-closed-outline" size={18} color={THEME.warn} />
+          }
           title="尚未完成裝置配置"
           body="此裝置尚未分配司機身份，無法管理設定與平台綁定。"
           actions={
-            <Btn theme={THEME} variant="primary" size="sm" onPress={() => router.push("/onboarding")}>
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              onPress={() => router.push("/onboarding")}
+            >
               前往配置裝置
             </Btn>
           }
@@ -1195,8 +1369,12 @@ export default function SettingsScreen() {
               </Text>
               <Text style={styles.identityId}>· {driverId || "未指派"}</Text>
             </View>
-            <Text style={styles.identityMeta}>{identitySummary || "尚未填寫聯絡資料"}</Text>
-            <Text style={styles.identityMeta}>緊急聯絡人：{emergencySummary}</Text>
+            <Text style={styles.identityMeta}>
+              {identitySummary || "尚未填寫聯絡資料"}
+            </Text>
+            <Text style={styles.identityMeta}>
+              緊急聯絡人：{emergencySummary}
+            </Text>
           </View>
           <Pill theme={THEME} tone={saveDescriptor.tone}>
             {saveDescriptor.label}
@@ -1232,7 +1410,9 @@ export default function SettingsScreen() {
         <Banner
           theme={THEME}
           tone="warn"
-          icon={<Ionicons name="warning-outline" size={18} color={THEME.warn} />}
+          icon={
+            <Ionicons name="warning-outline" size={18} color={THEME.warn} />
+          }
           title="部分資料暫時不可用"
           body={loadError}
         />
@@ -1241,9 +1421,46 @@ export default function SettingsScreen() {
         <Banner
           theme={THEME}
           tone="danger"
-          icon={<Ionicons name="alert-circle-outline" size={18} color={THEME.danger} />}
+          icon={
+            <Ionicons
+              name="alert-circle-outline"
+              size={18}
+              color={THEME.danger}
+            />
+          }
           title="儲存未完成"
           body={saveError}
+        />
+      ) : null}
+      {actionReceipt ? (
+        <Banner
+          theme={THEME}
+          tone={actionReceipt.status === "failed" ? "danger" : "info"}
+          icon={
+            <Ionicons
+              name={
+                actionReceipt.status === "completed"
+                  ? "checkmark-circle-outline"
+                  : "receipt-outline"
+              }
+              size={18}
+              color={
+                actionReceipt.status === "completed" ? THEME.info : THEME.text
+              }
+            />
+          }
+          title="動作回條"
+          body={`${actionReceipt.message} · auditId ${actionReceipt.auditId}`}
+          actions={
+            <Btn
+              theme={THEME}
+              variant="ghost"
+              size="sm"
+              onPress={() => setActionReceipt(null)}
+            >
+              關閉
+            </Btn>
+          }
         />
       ) : null}
       {hasValidation ? (
@@ -1265,12 +1482,18 @@ export default function SettingsScreen() {
       <Banner
         theme={THEME}
         tone="info"
-        icon={<Ionicons name="git-branch-outline" size={18} color={THEME.info} />}
+        icon={
+          <Ionicons name="git-branch-outline" size={18} color={THEME.info} />
+        }
         title="Deep Link 邊界"
         body={
           crossAppLinks.length === 0
             ? "Driver App Phase 1 不提供跨 App deep link。平台相關操作只會留在本 App，必要時導向平台頁或提示聯絡派車台。"
-            : `runtime 提供 ${crossAppLinks.length} 個跨 App deep link；目前設定頁僅顯示數量並維持本 App 導覽。`
+            : `runtime 提供 ${crossAppLinks.length} 個 cross-app reference：${crossAppLinks
+                .map((link) => `${link.label}→${link.targetApp}`)
+                .join(
+                  "、",
+                )}。依 packet 邊界，設定頁只顯示參考，不直接跳離 Driver App。`
         }
       />
 
@@ -1352,7 +1575,9 @@ export default function SettingsScreen() {
         <View style={styles.preferenceRow}>
           <View style={styles.preferenceCopy}>
             <Text style={styles.preferenceLabel}>語言</Text>
-            <Text style={styles.preferenceHint}>zh-TW 為主要語系，支援 English</Text>
+            <Text style={styles.preferenceHint}>
+              zh-TW 為主要語系，支援 English
+            </Text>
           </View>
           <View style={styles.segmentWrap}>
             {["zh-TW", "en"].map((language) => (
@@ -1394,7 +1619,9 @@ export default function SettingsScreen() {
         <View style={styles.preferenceRow}>
           <View style={styles.preferenceCopy}>
             <Text style={styles.preferenceLabel}>通知</Text>
-            <Text style={styles.preferenceHint}>依系統 push 權限與事件類型同步</Text>
+            <Text style={styles.preferenceHint}>
+              依系統 push 權限與事件類型同步
+            </Text>
           </View>
           <Switch
             value={settingsValues.notificationsEnabled}
@@ -1403,7 +1630,9 @@ export default function SettingsScreen() {
             }
             disabled={!settingsLoaded || saving}
             trackColor={{ false: THEME.borderStrong, true: THEME.accentHi }}
-            thumbColor={settingsValues.notificationsEnabled ? THEME.accent : "#fff"}
+            thumbColor={
+              settingsValues.notificationsEnabled ? THEME.accent : "#fff"
+            }
           />
         </View>
 
@@ -1418,7 +1647,10 @@ export default function SettingsScreen() {
         <View style={styles.autoAcceptList}>
           {autoAcceptPlatforms.length > 0 ? (
             autoAcceptPlatforms.map((row) => (
-              <View key={`auto-accept-${row.platformCode}`} style={styles.autoAcceptRow}>
+              <View
+                key={`auto-accept-${row.platformCode}`}
+                style={styles.autoAcceptRow}
+              >
                 <View style={styles.autoAcceptCopy}>
                   <Text style={styles.autoAcceptTitle}>{row.displayName}</Text>
                   <Text style={styles.autoAcceptHint}>
@@ -1427,7 +1659,10 @@ export default function SettingsScreen() {
                       : "平台支援 auto-accept；需先完成綁定後才可設定。"}
                   </Text>
                 </View>
-                <Pill theme={THEME} tone={row.record?.accountId ? "info" : "neutral"}>
+                <Pill
+                  theme={THEME}
+                  tone={row.record?.accountId ? "info" : "neutral"}
+                >
                   {row.record?.accountId ? "supported" : "bind first"}
                 </Pill>
               </View>
@@ -1456,6 +1691,119 @@ export default function SettingsScreen() {
         }
         padding={16}
       >
+        {pendingBindingAction ? (
+          <View style={styles.bindingDraftCard}>
+            <View style={styles.bindingDraftHeader}>
+              <View style={styles.bindingDraftCopy}>
+                <Text style={styles.bindingDraftTitle}>
+                  {pendingActionRow
+                    ? getActionDialogTitle(
+                        pendingActionRow,
+                        pendingBindingAction.action,
+                      )
+                    : "確認平台操作"}
+                </Text>
+                <Text style={styles.bindingDraftBody}>
+                  {pendingActionRow
+                    ? getActionDialogBody(
+                        pendingActionRow,
+                        pendingBindingAction.action,
+                      )
+                    : "請確認此動作。"}
+                </Text>
+              </View>
+              <Pill
+                theme={THEME}
+                tone={
+                  pendingBindingAction.action.riskLevel === "high"
+                    ? "danger"
+                    : pendingBindingAction.action.riskLevel === "medium"
+                      ? "warn"
+                      : "info"
+                }
+              >
+                {getRiskLabel(pendingBindingAction.action.riskLevel)}
+              </Pill>
+            </View>
+
+            {pendingBindingAction.action.requiresReason ? (
+              <InfoField
+                label="原因"
+                value={pendingBindingAction.reason}
+                onChangeText={(value) =>
+                  setPendingBindingAction((prev) =>
+                    prev ? { ...prev, reason: value } : prev,
+                  )
+                }
+                placeholder="請填寫此次操作原因"
+                editable={busyPlatform !== pendingBindingAction.platformCode}
+              />
+            ) : null}
+
+            {pendingActionRow?.authMechanism === "manual_credential" &&
+            (pendingBindingAction.action.key === "bind" ||
+              pendingBindingAction.action.key === "reauth") ? (
+              <View style={styles.bindingDraftFields}>
+                <InfoField
+                  label="平台帳號識別"
+                  value={pendingBindingAction.manualAccountId}
+                  onChangeText={(value) =>
+                    setPendingBindingAction((prev) =>
+                      prev ? { ...prev, manualAccountId: value } : prev,
+                    )
+                  }
+                  placeholder="輸入平台帳號、手機或 driver id"
+                  editable={busyPlatform !== pendingBindingAction.platformCode}
+                />
+                <InfoField
+                  label="憑證到期時間（選填）"
+                  value={pendingBindingAction.manualTokenExpiresAt}
+                  onChangeText={(value) =>
+                    setPendingBindingAction((prev) =>
+                      prev ? { ...prev, manualTokenExpiresAt: value } : prev,
+                    )
+                  }
+                  placeholder="例如 2026-05-31T08:30:00Z"
+                  autoCapitalize="none"
+                  editable={busyPlatform !== pendingBindingAction.platformCode}
+                />
+              </View>
+            ) : null}
+
+            <View style={styles.bindingDraftActions}>
+              <Btn
+                theme={THEME}
+                variant="ghost"
+                size="sm"
+                onPress={() => setPendingBindingAction(null)}
+                disabled={busyPlatform === pendingBindingAction.platformCode}
+              >
+                取消
+              </Btn>
+              <Btn
+                theme={THEME}
+                variant="primary"
+                size="sm"
+                danger={pendingBindingAction.action.riskLevel === "high"}
+                onPress={() => void submitPendingBindingAction()}
+                disabled={
+                  busyPlatform === pendingBindingAction.platformCode ||
+                  (pendingBindingAction.action.requiresReason &&
+                    !pendingBindingAction.reason.trim()) ||
+                  (pendingActionRow?.authMechanism === "manual_credential" &&
+                    (pendingBindingAction.action.key === "bind" ||
+                      pendingBindingAction.action.key === "reauth") &&
+                    !pendingBindingAction.manualAccountId.trim())
+                }
+              >
+                {busyPlatform === pendingBindingAction.platformCode
+                  ? "送出中…"
+                  : "確認執行"}
+              </Btn>
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.filterRow}>
           <FilterChip
             selected={bindingFilter === "all"}
@@ -1485,7 +1833,6 @@ export default function SettingsScreen() {
           <View style={styles.bindingList}>
             {visiblePlatformRows.map((row) => {
               const isBusy = busyPlatform === row.platformCode;
-              const isPendingUnbind = unbindPlatform === row.platformCode;
               return (
                 <View key={row.platformCode} style={styles.bindingCard}>
                   <View style={styles.bindingTop}>
@@ -1496,7 +1843,9 @@ export default function SettingsScreen() {
                     </View>
                     <View style={styles.bindingMain}>
                       <View style={styles.bindingTitleRow}>
-                        <Text style={styles.bindingTitle}>{row.displayName}</Text>
+                        <Text style={styles.bindingTitle}>
+                          {row.displayName}
+                        </Text>
                         <Pill theme={THEME} tone={row.statusTone}>
                           {row.statusLabel}
                         </Pill>
@@ -1545,51 +1894,17 @@ export default function SettingsScreen() {
                         <BindingActionButton
                           key={`${row.platformCode}-${action.key}`}
                           action={action}
-                          busy={isBusy && action.key !== "unbind"}
+                          busy={isBusy}
                           onPress={() => void handlePlatformAction(row, action)}
                         />
                       ))}
                     </View>
                   ) : (
                     <Text style={styles.bindingNoActions}>
-                      runtime 未提供 `availableActions`，此卡片目前只顯示狀態，不自行推導 CTA。
+                      runtime 未提供
+                      `availableActions`，此卡片目前只顯示狀態，不自行推導 CTA。
                     </Text>
                   )}
-
-                  {isPendingUnbind ? (
-                    <View style={styles.unbindBox}>
-                      <Text style={styles.unbindTitle}>解除綁定原因</Text>
-                      <TextInput
-                        style={styles.unbindInput}
-                        value={unbindReason}
-                        onChangeText={setUnbindReason}
-                        placeholder="例如：暫停跑此平台 / 帳號異常"
-                        placeholderTextColor={THEME.textDim}
-                      />
-                      <View style={styles.unbindActions}>
-                        <Btn
-                          theme={THEME}
-                          variant="ghost"
-                          size="sm"
-                          onPress={() => {
-                            setUnbindPlatform(null);
-                            setUnbindReason("");
-                          }}
-                        >
-                          取消
-                        </Btn>
-                        <Btn
-                          theme={THEME}
-                          variant="primary"
-                          size="sm"
-                          onPress={() => void confirmUnbind(row.platformCode)}
-                          disabled={!unbindReason.trim() || busyPlatform === row.platformCode}
-                        >
-                          {busyPlatform === row.platformCode ? "送出中…" : "確認解除"}
-                        </Btn>
-                      </View>
-                    </View>
-                  ) : null}
                 </View>
               );
             })}
@@ -1936,33 +2251,41 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 10,
   },
-  unbindBox: {
+  bindingDraftCard: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: THEME.warnBorder,
-    backgroundColor: THEME.warnBg,
-    padding: 10,
-    gap: 8,
+    borderColor: THEME.accentBorder,
+    backgroundColor: THEME.accentBg,
+    padding: 12,
+    gap: 10,
+    marginBottom: 12,
   },
-  unbindTitle: {
-    color: THEME.warn,
-    fontFamily: THEME.fontFamily,
-    fontSize: 12,
-    fontWeight: "700",
+  bindingDraftHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
   },
-  unbindInput: {
-    minHeight: 40,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: THEME.warnBorder,
-    backgroundColor: THEME.surface,
+  bindingDraftCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  bindingDraftTitle: {
     color: THEME.text,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
     fontFamily: THEME.fontFamily,
     fontSize: 13,
+    fontWeight: "700",
   },
-  unbindActions: {
+  bindingDraftBody: {
+    color: THEME.textMuted,
+    fontFamily: THEME.fontFamily,
+    fontSize: 11,
+    lineHeight: 17,
+  },
+  bindingDraftFields: {
+    gap: 2,
+  },
+  bindingDraftActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
     gap: 8,

@@ -171,7 +171,6 @@ export function buildSettingsCommand(
   return {
     language: values.language.trim(),
     notificationsEnabled: values.notificationsEnabled,
-    autoAcceptEnabled: values.autoAcceptEnabled,
     maxAcceptRadius: radius ? Number(radius) : null,
   };
 }
