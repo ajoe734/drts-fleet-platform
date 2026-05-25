@@ -35,8 +35,10 @@ import {
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
+  buildTenantRolloutAuditSummary,
   createTenantRolloutState,
   toTenantRolloutStateMachineRecord,
+  transitionTenantRollbackHold,
   transitionTenantRolloutGate,
   transitionTenantRolloutStage,
 } from "../tenant-rollout/tenant-rollout-state-machine";
@@ -290,6 +292,7 @@ export class TenantsService implements OnModuleInit {
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const before = this.cloneTenant(tenant);
+    const now = new Date().toISOString();
 
     if (command.billingBaseline) {
       tenant.bootstrapDefaults.billingBaseline = {
@@ -554,7 +557,7 @@ export class TenantsService implements OnModuleInit {
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const now = new Date().toISOString();
-    const oldRollout = { ...tenant.rollout };
+    const oldRollout = buildTenantRolloutAuditSummary(tenant.rollout);
 
     tenant.rollout = transitionTenantRolloutGate(tenant.rollout, {
       gateStatus: this.normalizeGateStatus(gateStatus),
@@ -576,8 +579,8 @@ export class TenantsService implements OnModuleInit {
         actionName: "update_platform_tenant_rollout_gate",
         resourceType: "platform_tenant",
         resourceId: tenant.id,
-        oldValuesSummary: { ...oldRollout },
-        newValuesSummary: { ...tenant.rollout },
+        oldValuesSummary: oldRollout,
+        newValuesSummary: buildTenantRolloutAuditSummary(tenant.rollout),
       },
       requestId,
     );
@@ -589,10 +592,10 @@ export class TenantsService implements OnModuleInit {
     const tenant = this.requireTenant(tenantId);
     const oldStatus = tenant.status;
     const now = new Date().toISOString();
+    const oldRollout = buildTenantRolloutAuditSummary(tenant.rollout);
 
     tenant.status = "rollback_hold";
-    tenant.rollout = transitionTenantRolloutGate(tenant.rollout, {
-      gateStatus: "blocked",
+    tenant.rollout = transitionTenantRollbackHold(tenant.rollout, {
       occurredAt: now,
       actorLabel: "platform_admin",
     });
@@ -612,10 +615,13 @@ export class TenantsService implements OnModuleInit {
         actionName: "set_tenant_rollback_hold",
         resourceType: "platform_tenant",
         resourceId: tenant.id,
-        oldValuesSummary: { status: oldStatus },
+        oldValuesSummary: {
+          status: oldStatus,
+          rollout: oldRollout,
+        },
         newValuesSummary: {
           status: "rollback_hold",
-          productionStatus: "blocked",
+          rollout: buildTenantRolloutAuditSummary(tenant.rollout),
         },
       },
       requestId,
@@ -630,7 +636,7 @@ export class TenantsService implements OnModuleInit {
     requestId?: string,
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
-    const oldRollout = { ...tenant.rollout };
+    const oldRollout = buildTenantRolloutAuditSummary(tenant.rollout);
     const nextStage = this.normalizeRolloutStage(command.stage);
 
     this.enforcePromotionGates(tenant, nextStage);
@@ -657,8 +663,8 @@ export class TenantsService implements OnModuleInit {
         actionName: "update_platform_tenant_rollout",
         resourceType: "platform_tenant",
         resourceId: tenant.id,
-        oldValuesSummary: { ...oldRollout },
-        newValuesSummary: { ...tenant.rollout },
+        oldValuesSummary: oldRollout,
+        newValuesSummary: buildTenantRolloutAuditSummary(tenant.rollout),
       },
       requestId,
     );

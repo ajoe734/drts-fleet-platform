@@ -290,6 +290,14 @@ describe("TenantsService", () => {
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
         actionName: "update_platform_tenant_rollout_gate",
+        oldValuesSummary: expect.objectContaining({
+          stage: "sandbox",
+          sandboxStatus: "ready",
+        }),
+        newValuesSummary: expect.objectContaining({
+          stage: "sandbox",
+          sandboxStatus: "approved",
+        }),
       }),
     );
   });
@@ -361,11 +369,29 @@ describe("TenantsService", () => {
     const held = service.setRollbackHold(created.id);
 
     expect(held.status).toBe("rollback_hold");
-    expect(held.rollout.productionStatus).toBe("blocked");
-    expect(held.rollout.enteredGateAt).toEqual(expect.any(String));
-    expect(held.rollout.lastUpdatedBy).toBe("platform_admin");
+    expect(held.rollout).toMatchObject({
+      stage: "rollback_hold",
+      productionStatus: "blocked",
+      enteredGateAt: expect.any(String),
+      lastUpdatedBy: "platform_admin",
+    });
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
-      expect.objectContaining({ actionName: "set_tenant_rollback_hold" }),
+      expect.objectContaining({
+        actionName: "set_tenant_rollback_hold",
+        oldValuesSummary: expect.objectContaining({
+          status: "active",
+          rollout: expect.objectContaining({
+            stage: "sandbox",
+          }),
+        }),
+        newValuesSummary: expect.objectContaining({
+          status: "rollback_hold",
+          rollout: expect.objectContaining({
+            stage: "rollback_hold",
+            productionStatus: "blocked",
+          }),
+        }),
+      }),
     );
   });
 

@@ -6,9 +6,11 @@ import type {
 } from "@drts/contracts";
 
 import {
+  buildTenantRolloutAuditSummary,
   createTenantRolloutState,
   listTenantRolloutAvailableActions,
   toTenantRolloutStateMachineRecord,
+  transitionTenantRollbackHold,
   transitionTenantRolloutGate,
   transitionTenantRolloutStage,
 } from "../../src/modules/tenant-rollout/tenant-rollout-state-machine";
@@ -27,6 +29,16 @@ const GATE_STATUSES: TenantRolloutGateStatus[] = [
 ];
 
 describe("tenant rollout state machine", () => {
+  const getAction = (
+    stage: TenantRolloutStage,
+    gateStatus: TenantRolloutGateStatus,
+    actionName: string,
+  ) =>
+    listTenantRolloutAvailableActions({
+      stage,
+      gateStatus,
+    }).find((action) => action.action === actionName);
+
   it("creates bootstrap rollout storage with timestamps and actor", () => {
     const created = createTenantRolloutState(
       "2026-05-25T10:00:00.000Z",
@@ -47,10 +59,7 @@ describe("tenant rollout state machine", () => {
   it("covers availableActions for all 4 stages x 4 gate states", () => {
     for (const stage of STAGES) {
       for (const gateStatus of GATE_STATUSES) {
-        const actions = listTenantRolloutAvailableActions({
-          stage,
-          gateStatus,
-        });
+        const actions = listTenantRolloutAvailableActions({ stage, gateStatus });
 
         expect(actions.length).toBeGreaterThanOrEqual(6);
         expect(actions).toEqual(
@@ -63,27 +72,61 @@ describe("tenant rollout state machine", () => {
             expect.objectContaining({ action: "resolve_rollback_hold" }),
           ]),
         );
+        expect(
+          actions.find((action) => action.action === "mark_gate_pending"),
+        ).toMatchObject({
+          enabled: stage !== "rollback_hold" && gateStatus !== "pending",
+        });
+        expect(
+          actions.find((action) => action.action === "mark_gate_ready"),
+        ).toMatchObject({
+          enabled: stage !== "rollback_hold" && gateStatus !== "ready",
+        });
+        expect(actions.find((action) => action.action === "approve_gate")).toMatchObject(
+          {
+            enabled: stage !== "rollback_hold" && gateStatus !== "approved",
+          },
+        );
+        expect(actions.find((action) => action.action === "block_gate")).toMatchObject(
+          {
+            enabled: stage !== "rollback_hold" && gateStatus !== "blocked",
+          },
+        );
       }
     }
   });
 
   it("enables promotion only when the current gate is approved", () => {
     expect(
-      listTenantRolloutAvailableActions({
-        stage: "sandbox",
-        gateStatus: "approved",
-      }).find((action) => action.action === "promote_to_pilot"),
+      getAction("sandbox", "approved", "promote_to_pilot"),
     ).toMatchObject({ enabled: true });
 
-    expect(
-      listTenantRolloutAvailableActions({
-        stage: "pilot",
-        gateStatus: "ready",
-      }).find((action) => action.action === "promote_to_production"),
-    ).toMatchObject({
+    expect(getAction("sandbox", "ready", "promote_to_pilot")).toMatchObject({
+      enabled: false,
+      disabledReasonCode: "sandbox_gate_not_approved",
+    });
+    expect(getAction("pilot", "approved", "promote_to_production")).toMatchObject(
+      {
+        enabled: true,
+      },
+    );
+    expect(getAction("pilot", "ready", "promote_to_production")).toMatchObject({
       enabled: false,
       disabledReasonCode: "pilot_gate_not_approved",
     });
+  });
+
+  it("only allows rollback hold actions in the intended stages", () => {
+    expect(getAction("production", "approved", "enter_rollback_hold")).toMatchObject(
+      { enabled: true },
+    );
+    expect(getAction("pilot", "approved", "enter_rollback_hold")).toMatchObject({
+      enabled: false,
+      disabledReasonCode: "rollback_hold_requires_production_cutover",
+    });
+    expect(
+      getAction("rollback_hold", "blocked", "resolve_rollback_hold"),
+    ).toMatchObject({ enabled: true });
   });
 
   it("transitions gate metadata for the active stage", () => {
@@ -125,6 +168,26 @@ describe("tenant rollout state machine", () => {
     });
   });
 
+  it("transitions rollback hold stage into blocked production state", () => {
+    const updated = transitionTenantRollbackHold(
+      createTenantRolloutState("2026-05-25T10:00:00.000Z"),
+      {
+        notes: "Rollback triggered after incident escalation.",
+        occurredAt: "2026-05-25T11:00:00.000Z",
+        actorLabel: "ops lead",
+      },
+    );
+
+    expect(updated).toMatchObject({
+      stage: "rollback_hold",
+      productionStatus: "blocked",
+      enteredStageAt: "2026-05-25T11:00:00.000Z",
+      enteredGateAt: "2026-05-25T11:00:00.000Z",
+      notes: "Rollback triggered after incident escalation.",
+      lastUpdatedBy: "ops lead",
+    });
+  });
+
   it("derives rollback hold read model with blocked gate and actions", () => {
     const record = toTenantRolloutStateMachineRecord({
       id: "tenant-acme",
@@ -160,6 +223,20 @@ describe("tenant rollout state machine", () => {
     ).toMatchObject({
       enabled: false,
       disabledReasonCode: "tenant_already_in_rollback_hold",
+    });
+  });
+
+  it("builds audit summaries from rollout storage state", () => {
+    expect(
+      buildTenantRolloutAuditSummary({
+        ...createTenantRolloutState("2026-05-25T10:00:00.000Z"),
+        stage: "rollback_hold",
+        productionStatus: "blocked",
+      }),
+    ).toMatchObject({
+      stage: "rollback_hold",
+      productionStatus: "blocked",
+      rollbackPrepared: false,
     });
   });
 });
