@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { FeatureFlagsService } from "../../src/modules/feature-flags/feature-flags.service";
 import { BankCardInlineEligibilityAdapter } from "../../src/modules/tenant-partner/bank-card-inline-eligibility.adapter";
+import { ReportingFilingService } from "../../src/modules/reporting-filing/reporting-filing.service";
 import {
   PartnerEligibilityAdapterError,
   type PartnerEligibilityAdapterInterface,
@@ -2150,6 +2152,160 @@ describe("TenantPartnerService approval rules", () => {
     );
     expect(allExpressions.join("\n")).toContain(
       "tenant_governance_cost_center_validation_reject_total",
+    );
+  });
+
+  it("builds an aggregated readiness summary across the tenant integration subsystems", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const reportingFilingService = new ReportingFilingService(
+      auditNotificationService,
+    );
+    const featureFlagsService = new FeatureFlagsService();
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      undefined,
+      [],
+      [new BankCardInlineEligibilityAdapter()],
+      reportingFilingService,
+      featureFlagsService,
+    );
+
+    const readiness = await service.getIntegrationReadinessSummary(
+      "tenant-demo-001",
+    );
+
+    expect(readiness.tenantId).toBe("tenant-demo-001");
+    expect(readiness.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          subSystem: "api_keys",
+          status: "ready",
+        }),
+        expect.objectContaining({
+          subSystem: "webhooks",
+          status: "not_provisioned",
+        }),
+        expect.objectContaining({
+          subSystem: "notifications",
+          status: "partial",
+        }),
+        expect.objectContaining({
+          subSystem: "partner_entries",
+          status: "blocked",
+        }),
+      ]),
+    );
+  });
+
+  it("marks reports ready once a tenant-scoped artifact is available", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const reportingFilingService = new ReportingFilingService(
+      auditNotificationService,
+    );
+    const featureFlagsService = new FeatureFlagsService();
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      undefined,
+      [],
+      [new BankCardInlineEligibilityAdapter()],
+      reportingFilingService,
+      featureFlagsService,
+    );
+
+    reportingFilingService.createReportJob(
+      {
+        jobType: "dispatch_recording_index",
+        format: "csv",
+      },
+      "req-readiness-report-001",
+      "tenant-demo-001",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const readiness = await service.getIntegrationReadinessSummary(
+      "tenant-demo-001",
+    );
+
+    expect(readiness.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          subSystem: "reports",
+          status: "ready",
+        }),
+      ]),
+    );
+  });
+
+  it("marks modules partial when only some tenant portal flags are enabled", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const reportingFilingService = new ReportingFilingService(
+      auditNotificationService,
+    );
+    const featureFlagsService = new FeatureFlagsService();
+    await featureFlagsService.updateFlag("tenant-portal.billing", false);
+    await featureFlagsService.updateFlag("tenant-portal.webhooks", false);
+
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      undefined,
+      [],
+      [new BankCardInlineEligibilityAdapter()],
+      reportingFilingService,
+      featureFlagsService,
+    );
+
+    const readiness = await service.getIntegrationReadinessSummary(
+      "tenant-demo-001",
+    );
+
+    expect(readiness.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          subSystem: "modules",
+          status: "partial",
+        }),
+      ]),
+    );
+  });
+
+  it("marks SLA blocked when thresholds are invalid", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const reportingFilingService = new ReportingFilingService(
+      auditNotificationService,
+    );
+    const featureFlagsService = new FeatureFlagsService();
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      undefined,
+      [],
+      [new BankCardInlineEligibilityAdapter()],
+      reportingFilingService,
+      featureFlagsService,
+    );
+
+    await service.updateSlaProfile(
+      "tenant-demo-001",
+      {
+        waitThresholdMin: 0,
+      },
+      "req-readiness-sla-001",
+    );
+
+    const readiness = await service.getIntegrationReadinessSummary(
+      "tenant-demo-001",
+    );
+
+    expect(readiness.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          subSystem: "sla",
+          status: "blocked",
+        }),
+      ]),
     );
   });
 });

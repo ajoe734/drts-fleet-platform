@@ -47,6 +47,7 @@ import type {
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
   TenantIntegrationGovernancePackage,
+  TenantIntegrationReadinessSummary,
   TenantPartnerSummary,
   TenantQuotaLedgerEntry,
   TenantQuotaSummary,
@@ -982,6 +983,19 @@ export class TenantPartnerController {
   ) {
     const item: TenantIntegrationGovernancePackage =
       this.tenantPartnerService.getIntegrationGovernancePackage(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(item, requestId);
+  }
+
+  @Get("tenant/integration-governance/readiness")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getTenantIntegrationReadinessSummary(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const item: TenantIntegrationReadinessSummary =
+      await this.tenantPartnerService.getIntegrationReadinessSummary(
         this.requireTenantId(tenantId),
       );
     return toApiSuccessEnvelope(item, requestId);

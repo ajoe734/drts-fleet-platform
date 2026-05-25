@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from "@nestjs/common";
+import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
@@ -9,7 +9,11 @@ import { ReportingFilingRepository } from "./reporting-filing.repository";
 import { ReportingFilingService } from "./reporting-filing.service";
 
 @Module({
-  imports: [DatabaseModule, AuditNotificationModule, OwnedMobilityModule],
+  imports: [
+    DatabaseModule,
+    AuditNotificationModule,
+    forwardRef(() => OwnedMobilityModule),
+  ],
   controllers: [ReportingFilingController],
   providers: [ReportingFilingService, ReportingFilingRepository],
   exports: [ReportingFilingService],

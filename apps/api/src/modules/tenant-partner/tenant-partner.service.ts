@@ -79,6 +79,8 @@ import type {
   TenantPassengerQualityIssue,
   TenantPassengerRecord,
   TenantIntegrationGovernancePackage,
+  TenantIntegrationReadinessItem,
+  TenantIntegrationReadinessSummary,
   TenantQuotaLedgerEntry,
   TenantQuotaLimit,
   TenantQuotaPolicyRecord,
@@ -92,6 +94,7 @@ import type {
   TenantWebhookGovernancePolicy,
   TenantWebhookRuntimeMetadata,
   TenantWebhookSecretRotationRecord,
+  ResourceActionDescriptor,
   UpdatePartnerChannelEntryCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateTenantNotificationsCommand,
@@ -125,6 +128,8 @@ import {
   type ApprovalNotificationRecipient,
 } from "../audit-notification/audit-notification.service";
 import type { ApprovalNotificationTemplateKey } from "../audit-notification/templates/approval-notification.templates";
+import { FeatureFlagsService } from "../feature-flags/feature-flags.service";
+import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
 import {
   BANK_CARD_INLINE_ELIGIBILITY_ADAPTER_CODE,
   BankCardInlineEligibilityAdapter,
@@ -172,6 +177,18 @@ import {
 import { evaluateTenantApprovalRules } from "./tenant-approval-rule-evaluator";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
+const API_KEY_EXPIRING_SOON_DAYS = 14;
+const TENANT_MODULE_FLAG_KEYS = [
+  "tenant-portal.booking",
+  "tenant-portal.billing",
+  "tenant-portal.reports",
+  "tenant-portal.webhooks",
+] as const;
+const BASELINE_NOTIFICATION_KEYS = [
+  "reservation.failed:ops_console",
+  "tenant.sla.threshold_breached:webhook",
+  "tenant.webhook.delivery_failed:ops_console",
+] as const;
 
 type WebhookSecretRotationRecord = TenantWebhookSecretRotationRecord;
 
@@ -789,6 +806,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       new BankCardInlineEligibilityAdapter(),
       new ReferenceTokenEligibilityAdapter(),
     ],
+    @Optional()
+    private readonly reportingFilingService?: ReportingFilingService,
+    @Optional()
+    private readonly featureFlagsService?: FeatureFlagsService,
   ) {
     this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
       (seed) => createBootstrapPartnerIngressCredential(seed),
@@ -1059,6 +1080,26 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       baselineNotificationSubscriptions:
         this.createDefaultNotificationPreferences(tenantId).subscriptions,
       onboardingChecklist: [...TENANT_INTEGRATION_HANDOFF_CHECKLIST],
+    };
+  }
+
+  async getIntegrationReadinessSummary(
+    tenantId: string,
+  ): Promise<TenantIntegrationReadinessSummary> {
+    const now = new Date();
+
+    return {
+      tenantId,
+      items: [
+        this.buildApiKeyReadinessItem(tenantId, now),
+        this.buildWebhookReadinessItem(tenantId),
+        this.buildNotificationReadinessItem(tenantId),
+        this.buildSlaReadinessItem(tenantId),
+        await this.buildReportsReadinessItem(tenantId),
+        await this.buildModulesReadinessItem(tenantId),
+        this.buildPartnerEntriesReadinessItem(tenantId),
+      ],
+      computedAt: now.toISOString(),
     };
   }
 
@@ -5329,6 +5370,380 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       revalidationRequiredOnSecretRotation: true,
       deliveryFailureNotificationChannel: "ops_notice",
       retryPolicy: this.cloneWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
+    };
+  }
+
+  private buildApiKeyReadinessItem(
+    tenantId: string,
+    now: Date,
+  ): TenantIntegrationReadinessItem {
+    const activeKeys = this.apiKeys.filter(
+      (apiKey) => apiKey.tenantId === tenantId && apiKey.revokedAt === null,
+    );
+    if (activeKeys.length === 0) {
+      return {
+        subSystem: "api_keys",
+        status: "not_provisioned",
+        detail: "No tenant API key has been issued.",
+        nextAction: this.createNextAction("issue_api_key"),
+      };
+    }
+
+    const validKeys = activeKeys.filter(
+      (apiKey) => Date.parse(apiKey.expiresAt) > now.getTime(),
+    );
+    if (validKeys.length === 0) {
+      return {
+        subSystem: "api_keys",
+        status: "blocked",
+        detail: "Issued API keys are expired and need rotation.",
+        nextAction: this.createNextAction("rotate_api_key"),
+      };
+    }
+
+    const expiringSoonCount = validKeys.filter((apiKey) => {
+      const expiresAtMs = Date.parse(apiKey.expiresAt);
+      return (
+        expiresAtMs - now.getTime() <=
+        API_KEY_EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000
+      );
+    }).length;
+    const requiredScopes = new Set(["tenant:write", "reports:read"]);
+    const coveredScopes = new Set(validKeys.flatMap((apiKey) => apiKey.scopes));
+    const missingScopes = [...requiredScopes].filter(
+      (scope) => !coveredScopes.has(scope),
+    );
+
+    if (expiringSoonCount > 0 || missingScopes.length > 0) {
+      const details: string[] = [];
+      if (missingScopes.length > 0) {
+        details.push(`missing scopes: ${missingScopes.join(", ")}`);
+      }
+      if (expiringSoonCount > 0) {
+        details.push(`${expiringSoonCount} key expiring within 14 days`);
+      }
+      return {
+        subSystem: "api_keys",
+        status: "partial",
+        detail: details.join("; "),
+        nextAction: this.createNextAction("issue_api_key"),
+      };
+    }
+
+    return {
+      subSystem: "api_keys",
+      status: "ready",
+      detail: `${validKeys.length} active key configured.`,
+    };
+  }
+
+  private buildWebhookReadinessItem(
+    tenantId: string,
+  ): TenantIntegrationReadinessItem {
+    const endpoints = this.webhookEndpoints.filter(
+      (endpoint) => endpoint.tenantId === tenantId,
+    );
+    if (endpoints.length === 0) {
+      return {
+        subSystem: "webhooks",
+        status: "not_provisioned",
+        detail: "No webhook endpoint configured.",
+        nextAction: this.createNextAction("create_webhook"),
+      };
+    }
+
+    const activeEndpoints = endpoints.filter(
+      (endpoint) => endpoint.status === "active",
+    );
+    const disabledEndpoints = endpoints.filter(
+      (endpoint) => endpoint.status === "disabled",
+    );
+    const failingEndpoints = endpoints.filter(
+      (endpoint) =>
+        endpoint.runtimeMetadata.disableReason === "delivery_failed" ||
+        endpoint.runtimeMetadata.failedDeliveryCount > 0,
+    );
+
+    if (activeEndpoints.length === 0 && disabledEndpoints.length > 0) {
+      return {
+        subSystem: "webhooks",
+        status: "blocked",
+        detail: "Webhook endpoints are disabled and cannot receive events.",
+        nextAction: this.createNextAction("create_webhook"),
+      };
+    }
+
+    if (
+      activeEndpoints.length === 0 ||
+      failingEndpoints.length > 0 ||
+      endpoints.some((endpoint) => endpoint.status === "test_pending")
+    ) {
+      return {
+        subSystem: "webhooks",
+        status: "partial",
+        detail:
+          activeEndpoints.length === 0
+            ? "Webhook endpoints still need validation."
+            : "Webhook delivery health needs attention.",
+        nextAction: this.createNextAction("create_webhook"),
+      };
+    }
+
+    return {
+      subSystem: "webhooks",
+      status: "ready",
+      detail: `${activeEndpoints.length} active webhook endpoint configured.`,
+    };
+  }
+
+  private buildNotificationReadinessItem(
+    tenantId: string,
+  ): TenantIntegrationReadinessItem {
+    const preferences = this.getNotificationPreferences(tenantId);
+    const enabledSubscriptions = preferences.subscriptions.filter(
+      (subscription) => subscription.enabled,
+    );
+    if (enabledSubscriptions.length === 0) {
+      return {
+        subSystem: "notifications",
+        status: "not_provisioned",
+        detail: "Notification routing has not been configured.",
+        nextAction: this.createNextAction("configure_notifications"),
+      };
+    }
+
+    const enabledKeys = new Set(
+      enabledSubscriptions.map(
+        (subscription) => `${subscription.eventType}:${subscription.channel}`,
+      ),
+    );
+    const missingBaselineCount = BASELINE_NOTIFICATION_KEYS.filter(
+      (key) => !enabledKeys.has(key),
+    ).length;
+    const hasEnabledWebhookSubscription = enabledSubscriptions.some(
+      (subscription) => subscription.channel === "webhook",
+    );
+    const hasActiveWebhookEndpoint = this.webhookEndpoints.some(
+      (endpoint) =>
+        endpoint.tenantId === tenantId && endpoint.status === "active",
+    );
+
+    if (
+      hasEnabledWebhookSubscription &&
+      !hasActiveWebhookEndpoint &&
+      enabledSubscriptions.every((subscription) => subscription.channel === "webhook")
+    ) {
+      return {
+        subSystem: "notifications",
+        status: "blocked",
+        detail:
+          "Webhook-only notification routing is configured without an active endpoint.",
+        nextAction: this.createNextAction("create_webhook"),
+      };
+    }
+
+    if (
+      missingBaselineCount > 0 ||
+      (hasEnabledWebhookSubscription && !hasActiveWebhookEndpoint)
+    ) {
+      return {
+        subSystem: "notifications",
+        status: "partial",
+        detail:
+          missingBaselineCount > 0
+            ? `${missingBaselineCount} baseline notification route missing.`
+            : "Webhook notification routing is pending an active endpoint.",
+        nextAction: this.createNextAction("configure_notifications"),
+      };
+    }
+
+    return {
+      subSystem: "notifications",
+      status: "ready",
+      detail: `${enabledSubscriptions.length} notification routes enabled.`,
+    };
+  }
+
+  private buildSlaReadinessItem(
+    tenantId: string,
+  ): TenantIntegrationReadinessItem {
+    const profile = this.getSlaProfile(tenantId);
+    const thresholds = [
+      profile.waitThresholdMin,
+      profile.arrivalThresholdMin,
+      profile.completionThresholdMin,
+    ];
+    if (thresholds.some((value) => value <= 0)) {
+      return {
+        subSystem: "sla",
+        status: "blocked",
+        detail: "SLA thresholds must all be greater than zero.",
+        nextAction: this.createNextAction("configure_sla"),
+      };
+    }
+
+    return {
+      subSystem: "sla",
+      status: "ready",
+      detail: "SLA thresholds are configured.",
+    };
+  }
+
+  private async buildReportsReadinessItem(
+    tenantId: string,
+  ): Promise<TenantIntegrationReadinessItem> {
+    if (!this.reportingFilingService) {
+      return {
+        subSystem: "reports",
+        status: "not_provisioned",
+        detail: "Reporting service is unavailable in this runtime.",
+        nextAction: this.createNextAction("open_reports"),
+      };
+    }
+
+    const jobs = this.reportingFilingService.listReportJobs(
+      undefined,
+      null,
+      tenantId,
+    );
+    if (jobs.length === 0) {
+      return {
+        subSystem: "reports",
+        status: "not_provisioned",
+        detail: "No tenant-scoped report job has been generated yet.",
+        nextAction: this.createNextAction("open_reports"),
+      };
+    }
+
+    const completedJobs = jobs.filter(
+      (job) => job.status === "completed" && job.artifact,
+    );
+    if (completedJobs.length > 0) {
+      return {
+        subSystem: "reports",
+        status: "ready",
+        detail: `${completedJobs.length} report artifact available.`,
+      };
+    }
+
+    if (jobs.some((job) => job.status === "failed" || job.status === "expired")) {
+      return {
+        subSystem: "reports",
+        status: "blocked",
+        detail: "Latest report attempts failed or expired.",
+        nextAction: this.createNextAction("open_reports"),
+      };
+    }
+
+    return {
+      subSystem: "reports",
+      status: "partial",
+      detail: "Report jobs are queued or running but no artifact is ready yet.",
+      nextAction: this.createNextAction("open_reports"),
+    };
+  }
+
+  private async buildModulesReadinessItem(
+    tenantId: string,
+  ): Promise<TenantIntegrationReadinessItem> {
+    if (!this.featureFlagsService) {
+      return {
+        subSystem: "modules",
+        status: "not_provisioned",
+        detail: "Tenant module flags are unavailable in this runtime.",
+      };
+    }
+
+    const flags = await this.featureFlagsService.getAll(tenantId);
+    const enabledCount = TENANT_MODULE_FLAG_KEYS.filter((key) =>
+      flags.some((flag) => flag.key === key && flag.enabled),
+    ).length;
+
+    if (enabledCount === 0) {
+      return {
+        subSystem: "modules",
+        status: "not_provisioned",
+        detail: "No tenant portal modules are enabled.",
+      };
+    }
+
+    if (enabledCount < TENANT_MODULE_FLAG_KEYS.length) {
+      return {
+        subSystem: "modules",
+        status: "partial",
+        detail: `${enabledCount}/${TENANT_MODULE_FLAG_KEYS.length} tenant modules enabled.`,
+      };
+    }
+
+    return {
+      subSystem: "modules",
+      status: "ready",
+      detail: "All tenant integration modules are enabled.",
+    };
+  }
+
+  private buildPartnerEntriesReadinessItem(
+    tenantId: string,
+  ): TenantIntegrationReadinessItem {
+    const entries = this.partnerEntries.filter(
+      (entry) => entry.tenantId === tenantId,
+    );
+    if (entries.length === 0) {
+      return {
+        subSystem: "partner_entries",
+        status: "not_provisioned",
+        detail: "No partner entry is mapped to this tenant.",
+      };
+    }
+
+    const activeEntries = entries.filter(
+      (entry) => entry.activeFlag && entry.status === "active",
+    );
+    if (activeEntries.length === 0) {
+      return {
+        subSystem: "partner_entries",
+        status: "blocked",
+        detail: "Partner entries exist but none are active.",
+      };
+    }
+
+    const activeCredentialSlugs = new Set(
+      this.partnerIngressCredentials
+        .filter((credential) => credential.revokedAt === null)
+        .map((credential) => credential.entrySlug),
+    );
+    const coveredEntries = activeEntries.filter((entry) =>
+      activeCredentialSlugs.has(entry.entrySlug),
+    );
+
+    if (coveredEntries.length === 0) {
+      return {
+        subSystem: "partner_entries",
+        status: "blocked",
+        detail: "Partner entries are missing active ingress credentials.",
+      };
+    }
+
+    if (coveredEntries.length < activeEntries.length) {
+      return {
+        subSystem: "partner_entries",
+        status: "partial",
+        detail: `${coveredEntries.length}/${activeEntries.length} active partner entries have ingress credentials.`,
+      };
+    }
+
+    return {
+      subSystem: "partner_entries",
+      status: "ready",
+      detail: `${coveredEntries.length} partner entries are ready.`,
+    };
+  }
+
+  private createNextAction(action: string): ResourceActionDescriptor {
+    return {
+      action,
+      enabled: true,
+      riskLevel: "medium",
     };
   }
 
