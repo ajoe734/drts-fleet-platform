@@ -17,7 +17,6 @@ import type {
   AssignReconciliationIssueCommand,
   AssignComplaintCaseCommand,
   AttachCallRecordingCommand,
-  ApiSuccessEnvelope,
   AttendanceRecord,
   BookingRecord,
   CallbackTaskRecord,
@@ -196,6 +195,8 @@ import type {
   TenantWebhookEndpoint,
   TransferCallToComplaintCommand,
   TransferCallToIncidentCommand,
+  UiHealthEnvelope,
+  UiRefreshMetadata,
   EscalateComplaintToIncidentCommand,
   LinkComplaintToIncidentCommand,
   SubmitExclusivityReviewCommand,
@@ -253,6 +254,44 @@ export interface RequestOptions {
 interface ListEnvelope<T> {
   items: T[];
 }
+
+/**
+ * Full envelope returned by `ApiClient.unwrap<T>`. UI surfaces use it to
+ * render the staleness indicator (`refresh`) and the chrome health banner
+ * (`health`) without inventing their own heuristic per page.
+ *
+ * Per Q-X01 / Q-X12 the backend should populate both fields; the client
+ * substitutes safe defaults when an endpoint has not been upgraded yet so
+ * callers can rely on a stable, non-optional shape.
+ */
+export interface UnwrappedResponse<T> {
+  data: T;
+  refresh: UiRefreshMetadata;
+  health: UiHealthEnvelope;
+}
+
+interface UiResponseEnvelope<T> {
+  data: T;
+  meta?: {
+    requestId?: string;
+    timestamp?: string;
+  };
+  refresh?: UiRefreshMetadata;
+  health?: UiHealthEnvelope;
+}
+
+const DEFAULT_REFRESH_METADATA: UiRefreshMetadata = {
+  generatedAt: new Date(0).toISOString(),
+  staleAfterMs: 0,
+  dataFreshness: "unknown",
+  source: "live",
+};
+
+const DEFAULT_HEALTH_ENVELOPE: UiHealthEnvelope = {
+  status: "healthy",
+  degradedServices: [],
+  lastCheckedAt: new Date(0).toISOString(),
+};
 
 function snakeToCamelCase(key: string): string {
   return key.replace(/_([a-z])/g, (_match, letter: string) =>
@@ -345,6 +384,25 @@ export class ApiClient {
     return this.request<T>("DELETE", path, options);
   }
 
+  /**
+   * Generic full-envelope request. Returns the `data` payload alongside the
+   * `UiRefreshMetadata` and `UiHealthEnvelope` (Q-X01 / Q-X12). When an
+   * endpoint has not been upgraded to emit the runtime envelopes yet, the
+   * client substitutes safe defaults so callers always see the same shape.
+   *
+   * Use this when a UI surface needs staleness or chrome health signals
+   * tied to the response; the data-only `get`/`post`/etc helpers remain the
+   * shorter call site for everything else and adopt the unwrapped form
+   * incrementally.
+   */
+  async unwrap<T>(
+    method: string,
+    path: string,
+    options?: RequestOptions,
+  ): Promise<UnwrappedResponse<T>> {
+    return this.rawRequest<T>(method, path, options);
+  }
+
   private async getList<T>(
     path: string,
     options?: RequestOptions,
@@ -358,6 +416,15 @@ export class ApiClient {
     path: string,
     options?: RequestOptions,
   ): Promise<T> {
+    const { data } = await this.rawRequest<T>(method, path, options);
+    return data;
+  }
+
+  private async rawRequest<T>(
+    method: string,
+    path: string,
+    options?: RequestOptions,
+  ): Promise<UnwrappedResponse<T>> {
     const requestPath = this.pathTransform ? this.pathTransform(path) : path;
     const url = `${this.baseUrl}${requestPath}`;
     const controller = new AbortController();
@@ -395,8 +462,15 @@ export class ApiClient {
         throw new Error(`API error ${response.status}: ${errorText}`);
       }
 
-      const envelope: ApiSuccessEnvelope<T> = await response.json();
-      return deepToCamelCase(envelope.data) as T;
+      const envelope = (await response.json()) as UiResponseEnvelope<T>;
+      const data = deepToCamelCase(envelope.data) as T;
+      const refresh = envelope.refresh
+        ? (deepToCamelCase(envelope.refresh) as UiRefreshMetadata)
+        : DEFAULT_REFRESH_METADATA;
+      const health = envelope.health
+        ? (deepToCamelCase(envelope.health) as UiHealthEnvelope)
+        : DEFAULT_HEALTH_ENVELOPE;
+      return { data, refresh, health };
     } finally {
       clearTimeout(timeoutId);
     }
