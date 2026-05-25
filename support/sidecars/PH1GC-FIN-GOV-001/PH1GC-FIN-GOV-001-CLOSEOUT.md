@@ -6,8 +6,8 @@ Reviewer: `Codex`
 Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `in_progress`
-Machine-truth status on `2026-05-25`: task remains with `Codex2` in `in_progress`; repo-local artifact alignment is complete, but acceptance remains blocked under the same task id
-Current anchor after closeout truth-sync reconciliation: `b375e615` (`wip(PH1GC-FIN-GOV-001): anchor closeout head refresh`)
+Machine-truth status on `2026-05-25`: task was restored to canonical `ai-status.json` at `2026-05-25T11:52:25Z`; it remains with `Codex2` in `in_progress` because repo-local artifact alignment is complete but live-uplift acceptance is still blocked
+Current anchor after closeout truth-sync reconciliation: `f48caa5c` (`wip(PH1GC-FIN-GOV-001): anchor closeout reviewer and head alignment`)
 Files changed:
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
@@ -63,7 +63,7 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `git diff --check origin/dev...HEAD` passed.
-- `git rev-parse HEAD` = `b375e6154544a78f3e4d3d025b82edb23e2e7a0c`.
+- `git rev-parse HEAD` = `f48caa5ce842342c86adad0c126fa72bfbca31c4`.
 - `git push -u origin codex2/ph1gc-fin-gov-001` remains up to date at the current anchor.
 
 ## Blocker
