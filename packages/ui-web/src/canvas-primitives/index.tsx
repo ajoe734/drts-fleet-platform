@@ -4,19 +4,12 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import {
   buildCanvasTheme,
-  CANVAS_DARK_NAVY_PALETTE,
-  CANVAS_DENSITY,
   CANVAS_EMPTY_REASONS,
-  CANVAS_LIGHT_PALETTE,
   CANVAS_REFRESH_TIERS,
   CANVAS_RISK_LEVELS,
-  CANVAS_SURFACE_ACCENTS,
-  CANVAS_TYPE,
   type CanvasDataFreshness,
-  type CanvasDensity,
   type CanvasEmptyReason,
   type CanvasHealthStatus,
-  type CanvasMode,
   type CanvasRealm,
   type CanvasRefreshTier,
   type CanvasRiskLevel,
@@ -68,6 +61,20 @@ function px(value?: string | number) {
     return undefined;
   }
   return typeof value === "number" ? `${value}px` : value;
+}
+
+function hasMeaningfulNode(value?: ReactNode) {
+  if (value === undefined || value === null || value === false) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  return true;
+}
+
+function isLiteralReasonField(value?: ReactNode): value is string | number {
+  return typeof value === "string" || typeof value === "number";
 }
 
 function toneStyles(theme: CanvasTheme, tone: CanvasTone) {
@@ -314,6 +321,54 @@ function SearchBox({
       <CanvasIcon name="search" size={13} />
       <span style={{ fontSize: 12, color: theme.textDim }}>{placeholder}</span>
     </div>
+  );
+}
+
+function renderCanvasResourceLink(
+  theme: CanvasTheme,
+  link: CanvasResourceLink,
+  options?: {
+    fontWeight?: number;
+  },
+) {
+  const fontWeight = options?.fontWeight ?? 500;
+  const showExternalIcon = link.crossApp || link.openMode === "new_tab";
+  const style: CSSProperties = {
+    color: theme.accent,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 3,
+    textDecoration: "none",
+    fontWeight,
+  };
+  const content = (
+    <>
+      {link.label}
+      {showExternalIcon ? <CanvasIcon name="ext" size={10} /> : null}
+    </>
+  );
+
+  if (!link.href) {
+    return <span style={style}>{content}</span>;
+  }
+
+  if (link.openMode !== "new_tab" && link.href.startsWith("/")) {
+    return (
+      <Link href={link.href} style={style}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <a
+      href={link.href}
+      target={link.openMode === "new_tab" ? "_blank" : undefined}
+      rel={link.openMode === "new_tab" ? "noopener noreferrer" : undefined}
+      style={style}
+    >
+      {content}
+    </a>
   );
 }
 
@@ -603,11 +658,7 @@ export function HealthFooter({
         ? "API 降級"
         : "API healthy";
   const en =
-    status === "down"
-      ? "down"
-      : status === "degraded"
-        ? "degraded"
-        : "healthy";
+    status === "down" ? "down" : status === "degraded" ? "degraded" : "healthy";
 
   return (
     <div
@@ -1884,7 +1935,9 @@ export function Checkbox({
           <CanvasIcon name="check" size={10} style={{ color: "#fff" }} />
         ) : null}
       </span>
-      {label ? <span style={{ fontSize: 12, color: theme.text }}>{label}</span> : null}
+      {label ? (
+        <span style={{ fontSize: 12, color: theme.text }}>{label}</span>
+      ) : null}
     </span>
   );
 }
@@ -1926,7 +1979,9 @@ export function Toggle({
           }}
         />
       </span>
-      {label ? <span style={{ fontSize: 12, color: theme.text }}>{label}</span> : null}
+      {label ? (
+        <span style={{ fontSize: 12, color: theme.text }}>{label}</span>
+      ) : null}
     </div>
   );
 }
@@ -2191,7 +2246,9 @@ export function ActionButton({
       style={style}
     >
       {children ?? (
-        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+        <span
+          style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}
+        >
           <span>{label}</span>
           {en ? (
             <span
@@ -2231,6 +2288,7 @@ export interface ConfirmModalProps {
   cancelLabel?: ReactNode;
   reason?: ReactNode;
   reasonField?: ReactNode;
+  reasonProvided?: boolean;
 }
 
 export function ConfirmModal({
@@ -2242,10 +2300,22 @@ export function ConfirmModal({
   cancelLabel = "取消",
   reason,
   reasonField,
+  reasonProvided,
 }: ConfirmModalProps) {
   const theme = resolveTheme(providedTheme);
   const riskMeta = CANVAS_RISK_LEVELS[risk];
   const riskTone = toneStyles(theme, riskMeta.tone);
+  const resolvedReasonProvided = reasonProvided ?? hasMeaningfulNode(reason);
+  const reasonPlaceholder = isLiteralReasonField(reasonField)
+    ? reasonField
+    : undefined;
+  const customReasonField =
+    reasonField !== undefined &&
+    reasonField !== null &&
+    reasonField !== false &&
+    !isLiteralReasonField(reasonField)
+      ? reasonField
+      : null;
 
   return (
     <Modal
@@ -2265,10 +2335,7 @@ export function ConfirmModal({
               justifyContent: "center",
             }}
           >
-            <CanvasIcon
-              name={riskMeta.icon as CanvasIconName}
-              size={13}
-            />
+            <CanvasIcon name={riskMeta.icon as CanvasIconName} size={13} />
           </span>
           {title}
         </span>
@@ -2283,7 +2350,7 @@ export function ConfirmModal({
             theme={theme}
             variant="primary"
             danger={risk === "high"}
-            disabled={risk === "high" && !reason}
+            disabled={risk === "high" && !resolvedReasonProvided}
           >
             {confirmLabel}
           </Btn>
@@ -2307,22 +2374,24 @@ export function ConfirmModal({
           required
           hint="此操作為高風險，原因將寫入稽核紀錄並可被後續調閱。"
         >
-          <div
-            style={{
-              width: "100%",
-              minHeight: 70,
-              padding: 10,
-              borderRadius: 7,
-              border: `1px solid ${reason ? theme.border : theme.danger}`,
-              background: theme.bgRaised,
-              color: theme.text,
-              fontFamily: theme.fontFamily,
-              fontSize: 13,
-              boxSizing: "border-box",
-            }}
-          >
-            {reason ?? reasonField ?? "請說明操作原因…"}
-          </div>
+          {customReasonField ?? (
+            <div
+              style={{
+                width: "100%",
+                minHeight: 70,
+                padding: 10,
+                borderRadius: 7,
+                border: `1px solid ${resolvedReasonProvided ? theme.border : theme.danger}`,
+                background: theme.bgRaised,
+                color: theme.text,
+                fontFamily: theme.fontFamily,
+                fontSize: 13,
+                boxSizing: "border-box",
+              }}
+            >
+              {reason ?? reasonPlaceholder ?? "請說明操作原因…"}
+            </div>
+          )}
         </Field>
       ) : null}
       {risk === "medium" ? (
@@ -2377,7 +2446,8 @@ export function ActionReceipt({
         : toneStyles(theme, "success");
   const label =
     status === "failed" ? "失敗" : status === "accepted" ? "已受理" : "已完成";
-  const icon = status === "failed" ? "danger" : status === "accepted" ? "clock" : "check";
+  const icon =
+    status === "failed" ? "danger" : status === "accepted" ? "clock" : "check";
 
   return (
     <div
@@ -2426,7 +2496,9 @@ export function ActionReceipt({
           </Pill>
         </div>
         {message ? (
-          <div style={{ marginTop: 4, color: theme.textMuted, lineHeight: 1.45 }}>
+          <div
+            style={{ marginTop: 4, color: theme.textMuted, lineHeight: 1.45 }}
+          >
             {message}
           </div>
         ) : null}
@@ -2444,39 +2516,14 @@ export function ActionReceipt({
             <span style={{ fontFamily: theme.monoFamily, color: theme.text }}>
               {auditId}
             </span>
-            {auditLink ? (
-              <span
-                style={{
-                  color: theme.accent,
-                  fontWeight: 600,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 3,
-                }}
-              >
-                {auditLink.label}
-                {auditLink.crossApp || auditLink.openMode === "new_tab" ? (
-                  <CanvasIcon name="ext" size={10} />
-                ) : null}
-              </span>
-            ) : null}
+            {auditLink
+              ? renderCanvasResourceLink(theme, auditLink, { fontWeight: 600 })
+              : null}
           </div>
         ) : null}
         {resourceLink ? (
           <div style={{ marginTop: 6, fontSize: 11 }}>
-            <span
-              style={{
-                color: theme.accent,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 3,
-              }}
-            >
-              {resourceLink.label}
-              {resourceLink.openMode === "new_tab" ? (
-                <CanvasIcon name="ext" size={10} />
-              ) : null}
-            </span>
+            {renderCanvasResourceLink(theme, resourceLink)}
           </div>
         ) : null}
       </div>
@@ -2514,7 +2561,9 @@ export function StaleBanner({
       icon="clock"
       title={
         <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-          <span>{dataFreshness === "degraded" ? "資料來源降級" : "資料已過時"}</span>
+          <span>
+            {dataFreshness === "degraded" ? "資料來源降級" : "資料已過時"}
+          </span>
           <span
             style={{
               fontFamily: theme.monoFamily,
@@ -2557,7 +2606,11 @@ export function HealthBanner({
         icon="warn"
         title={
           <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <span>{status === "down" ? "頁面依賴 service 不可用" : "頁面依賴 service 降級中"}</span>
+            <span>
+              {status === "down"
+                ? "頁面依賴 service 不可用"
+                : "頁面依賴 service 降級中"}
+            </span>
             <span
               style={{
                 fontFamily: theme.monoFamily,
@@ -2620,7 +2673,9 @@ export function ActorRealmChip({
           {realm}
         </span>
       </Pill>
-      {actor ? <span style={{ fontSize: 12, color: theme.text }}>{actor}</span> : null}
+      {actor ? (
+        <span style={{ fontSize: 12, color: theme.text }}>{actor}</span>
+      ) : null}
     </span>
   );
 }

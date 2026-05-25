@@ -39,9 +39,28 @@ const tenantTheme = buildCanvasTheme({
 
 const nav: CanvasShellNavItem[] = [
   { divider: "Workspace" },
-  { key: "dashboard", href: "/dashboard", label: "Dashboard", icon: "dashboard" },
-  { key: "dispatch", href: "/dispatch", label: "Dispatch", icon: "dispatch", badge: 8, badgeTone: "accent" },
-  { key: "complaints", href: "/complaints", label: "Complaints", icon: "complaints", badge: 2, badgeTone: "warn" },
+  {
+    key: "dashboard",
+    href: "/dashboard",
+    label: "Dashboard",
+    icon: "dashboard",
+  },
+  {
+    key: "dispatch",
+    href: "/dispatch",
+    label: "Dispatch",
+    icon: "dispatch",
+    badge: 8,
+    badgeTone: "accent",
+  },
+  {
+    key: "complaints",
+    href: "/complaints",
+    label: "Complaints",
+    icon: "complaints",
+    badge: 2,
+    badgeTone: "warn",
+  },
   { divider: "Registry" },
   { key: "drivers", href: "/drivers", label: "Drivers", icon: "users" },
   { key: "vehicles", href: "/vehicles", label: "Vehicles", icon: "vehicles" },
@@ -107,7 +126,9 @@ function OpsCanvasShowcase() {
           health={{
             status: "degraded",
             lastCheckedAt: "12s",
-            degradedServices: [{ service: "adapter_registry", impact: "sync lag" }],
+            degradedServices: [
+              { service: "adapter_registry", impact: "sync lag" },
+            ],
           }}
           refreshTier="medium"
           dataFreshness="stale"
@@ -164,7 +185,11 @@ function OpsCanvasShowcase() {
               gap: 16,
             }}
           >
-            <CanvasStaleBanner theme={opsTheme} tier="medium" dataFreshness="stale" />
+            <CanvasStaleBanner
+              theme={opsTheme}
+              tier="medium"
+              dataFreshness="stale"
+            />
 
             <div
               style={{
@@ -173,10 +198,32 @@ function OpsCanvasShowcase() {
                 gap: 10,
               }}
             >
-              <CanvasKPI theme={opsTheme} label="Queued work" value="124" delta="+6" deltaTone="up" />
-              <CanvasKPI theme={opsTheme} label="Critical alerts" value="02" delta="-1" deltaTone="down" />
-              <CanvasKPI theme={opsTheme} label="Dispatch SLA" value="96.3%" hint="generatedAt=15:25Z" />
-              <CanvasKPI theme={opsTheme} label="Forwarded lag" value="18s" sub="adapter_registry" />
+              <CanvasKPI
+                theme={opsTheme}
+                label="Queued work"
+                value="124"
+                delta="+6"
+                deltaTone="up"
+              />
+              <CanvasKPI
+                theme={opsTheme}
+                label="Critical alerts"
+                value="02"
+                delta="-1"
+                deltaTone="down"
+              />
+              <CanvasKPI
+                theme={opsTheme}
+                label="Dispatch SLA"
+                value="96.3%"
+                hint="generatedAt=15:25Z"
+              />
+              <CanvasKPI
+                theme={opsTheme}
+                label="Forwarded lag"
+                value="18s"
+                sub="adapter_registry"
+              />
             </div>
 
             <div
@@ -222,7 +269,12 @@ function OpsCanvasShowcase() {
                     theme={opsTheme}
                     reason="external_unavailable"
                     nextAction={
-                      <CanvasBtn theme={opsTheme} size="sm" icon="ext" variant="primary">
+                      <CanvasBtn
+                        theme={opsTheme}
+                        size="sm"
+                        icon="ext"
+                        variant="primary"
+                      >
                         Open adapter registry
                       </CanvasBtn>
                     }
@@ -235,8 +287,17 @@ function OpsCanvasShowcase() {
                   title="Dispatch override published"
                   message="Manual fare override receipt includes audit linkage and cross-app deep link affordances."
                   auditId="aud_20260525_8821"
-                  auditLink={{ label: "View audit", openMode: "new_tab", crossApp: true }}
-                  resourceLink={{ label: "Open reconciliation", openMode: "new_tab" }}
+                  auditLink={{
+                    label: "View audit",
+                    href: "/audit?auditId=aud_20260525_8821",
+                    openMode: "new_tab",
+                    crossApp: true,
+                  }}
+                  resourceLink={{
+                    label: "Open reconciliation",
+                    href: "/reconciliation/orders/OWN-240525-018",
+                    openMode: "new_tab",
+                  }}
                 />
               </div>
             </div>
