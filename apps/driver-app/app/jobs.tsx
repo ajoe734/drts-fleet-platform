@@ -496,6 +496,21 @@ function buildCardMeta(task: UnifiedDriverTaskView) {
     .join(" · ");
 }
 
+function buildFilterCountMap(tasks: UnifiedDriverTaskView[]) {
+  return {
+    all: tasks.length,
+    needs_action: tasks.filter((task) => matchesFilter(task, "needs_action"))
+      .length,
+    in_progress: tasks.filter((task) => matchesFilter(task, "in_progress"))
+      .length,
+    platform_closed: tasks.filter((task) =>
+      matchesFilter(task, "platform_closed"),
+    ).length,
+    sync_issue: tasks.filter((task) => matchesFilter(task, "sync_issue"))
+      .length,
+  } satisfies Record<TaskFilterValue, number>;
+}
+
 function buildTypeLabel(order: OwnedOrderRecord | null) {
   return formatDriverTaskTypeLabel({
     serviceBucket: order?.serviceBucket ?? null,
@@ -1127,6 +1142,7 @@ function TaskCard({
     formatDisabledReasonCode(acceptAction?.disabledReasonCode) ||
     task.blockingReason ||
     null;
+  const orderDomainLabel = forwarded ? "Forwarded" : "Owned";
 
   return (
     <Card
@@ -1166,12 +1182,13 @@ function TaskCard({
         </View>
 
         <View style={styles.cardPillRow}>
-          <Pill tone={forwarded ? "accent" : "info"}>
-            {forwarded ? "Forwarded" : "Owned"}
-          </Pill>
+          <Pill tone={forwarded ? "accent" : "info"}>{orderDomainLabel}</Pill>
+          <Pill tone="neutral">{task.orderId}</Pill>
           <Pill tone="neutral">{typeLabel}</Pill>
           {task.routeLocked ? <Pill tone="warn">路線鎖定</Pill> : null}
-          {order?.fixedPrice ? <Pill tone="info">固定車資</Pill> : null}
+          {order?.fixedPrice || task.fareAuthority !== "drts" ? (
+            <Pill tone="info">固定車資</Pill>
+          ) : null}
         </View>
 
         <View style={styles.cardSummaryGrid}>
@@ -1297,6 +1314,10 @@ export default function JobsScreen() {
       syncIssue: tasks.filter(hasSyncIssue).length,
     };
   }, [envelope.items]);
+  const filterCounts = useMemo(
+    () => buildFilterCountMap(envelope.items),
+    [envelope.items],
+  );
 
   const refreshState = getRefreshState(envelope.refresh);
   const displayedEmptyState = useMemo(() => {
@@ -1456,6 +1477,23 @@ export default function JobsScreen() {
     return () => clearInterval(timer);
   }, [selectedFilter, tasksEnabled]);
 
+  useEffect(() => {
+    if (!highlightedTaskId || selectedFilter === "all") {
+      return;
+    }
+
+    const highlightedTaskExists = envelope.items.some(
+      (task) => task.taskId === highlightedTaskId,
+    );
+    const highlightedTaskVisible = filteredTasks.some(
+      (task) => task.taskId === highlightedTaskId,
+    );
+
+    if (highlightedTaskExists && !highlightedTaskVisible) {
+      setSelectedFilter("all");
+    }
+  }, [envelope.items, filteredTasks, highlightedTaskId, selectedFilter]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadTasks();
@@ -1599,7 +1637,7 @@ export default function JobsScreen() {
     <Shell contentContainerStyle={styles.shellContent}>
       <PageHeader
         title={driverStrings.jobs.title}
-        subtitle="Unified task inbox"
+        subtitle={driverStrings.jobs.subtitle}
         actions={
           <Btn
             variant="ghost"
@@ -1626,13 +1664,12 @@ export default function JobsScreen() {
       {renderTopBanner()}
 
       <Card style={styles.heroCard}>
-        <View style={styles.heroHeader}>
-          <View style={styles.heroTitleWrap}>
-            <Text style={styles.heroEyebrow}>T3 任務收件匣</Text>
-            <Text style={styles.heroTitle}>跨自營與外部平台的下一步</Text>
-            <Text style={styles.heroBody}>
-              needs-action 會優先排序。來源平台任務保留 authority
-              banner，接受/婉拒完全由 availableActions 決定。
+        <View style={styles.listHeaderRow}>
+          <View style={styles.listHeaderCopy}>
+            <Text style={styles.listHeaderTitle}>任務</Text>
+            <Text style={styles.listHeaderMeta}>
+              {summary.total} tasks · refresh tier{" "}
+              {formatRefreshTierLabel(envelope.refreshTier)}
             </Text>
           </View>
           <View style={styles.heroPillCol}>
@@ -1665,6 +1702,14 @@ export default function JobsScreen() {
           <Text style={styles.heroMetaText}>
             source {envelope.refresh.source}
           </Text>
+          {highlightedTaskId ? (
+            <>
+              <Text style={styles.heroMetaDivider}>·</Text>
+              <Text style={styles.heroMetaText}>
+                push focus {highlightedTaskId}
+              </Text>
+            </>
+          ) : null}
         </View>
       </Card>
 
@@ -1676,6 +1721,7 @@ export default function JobsScreen() {
       >
         {FILTER_OPTIONS.map((option) => {
           const selected = option.value === selectedFilter;
+          const count = filterCounts[option.value];
           return (
             <Pressable
               key={option.value}
@@ -1693,6 +1739,23 @@ export default function JobsScreen() {
               >
                 {option.label}
               </Text>
+              {count > 0 ? (
+                <View
+                  style={[
+                    styles.filterChipBadge,
+                    selected ? styles.filterChipBadgeSelected : null,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipBadgeText,
+                      selected ? styles.filterChipBadgeTextSelected : null,
+                    ]}
+                  >
+                    {count}
+                  </Text>
+                </View>
+              ) : null}
             </Pressable>
           );
         })}
@@ -1760,32 +1823,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#EAF6FF",
     borderColor: "#CFE7FA",
   },
-  heroHeader: {
+  listHeaderRow: {
     flexDirection: "row",
     gap: 12,
     alignItems: "flex-start",
+    justifyContent: "space-between",
   },
-  heroTitleWrap: {
+  listHeaderCopy: {
     flex: 1,
     gap: 4,
   },
-  heroEyebrow: {
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: "700",
-    letterSpacing: 0.6,
-    color: "#2B6B94",
-  },
-  heroTitle: {
-    fontSize: 20,
-    lineHeight: 24,
+  listHeaderTitle: {
+    fontSize: 22,
+    lineHeight: 27,
     fontWeight: "700",
     color: THEME.text,
   },
-  heroBody: {
-    fontSize: 12.5,
-    lineHeight: 18,
-    color: THEME.textMuted,
+  listHeaderMeta: {
+    fontSize: 11.5,
+    lineHeight: 15,
+    color: "#476A83",
+    fontFamily: THEME.monoFamily,
   },
   heroPillCol: {
     gap: 6,
@@ -1824,6 +1882,9 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
   },
   filterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 999,
@@ -1843,6 +1904,27 @@ const styles = StyleSheet.create({
   },
   filterChipTextSelected: {
     color: "#FFFFFF",
+  },
+  filterChipBadge: {
+    minWidth: 20,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 999,
+    backgroundColor: THEME.danger,
+    alignItems: "center",
+  },
+  filterChipBadgeSelected: {
+    backgroundColor: "#FFFFFF",
+  },
+  filterChipBadgeText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    fontFamily: THEME.monoFamily,
+  },
+  filterChipBadgeTextSelected: {
+    color: THEME.text,
   },
   taskStack: {
     gap: 12,
