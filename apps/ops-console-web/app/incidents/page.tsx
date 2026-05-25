@@ -38,6 +38,7 @@ import {
   CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasIcon,
+  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
@@ -97,6 +98,7 @@ type IncidentTableRow = Record<string, unknown> & {
   categoryCell: ReactElement;
   severityCell: ReactElement;
   statusCell: ReactElement;
+  coordinationCell: ReactElement;
   linksCell: ReactElement;
   reportedBy: string;
   occurredCell: ReactElement;
@@ -261,6 +263,108 @@ function getActionDescriptor(
   return null;
 }
 
+function getActionTitle(
+  action: ResourceActionDescriptor | null | undefined,
+  locale: "en" | "zh",
+) {
+  if (!action) {
+    return undefined;
+  }
+
+  const parts: string[] = [];
+  if (!action.enabled && action.disabledReasonCode) {
+    parts.push(action.disabledReasonCode);
+  }
+  if (action.requiresReason) {
+    parts.push(locale === "en" ? "reason required" : "需填寫原因");
+  }
+  if (action.riskLevel) {
+    parts.push(
+      locale === "en"
+        ? `${action.riskLevel} risk`
+        : `${action.riskLevel === "high" ? "高" : action.riskLevel === "medium" ? "中" : "低"}風險`,
+    );
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+function getActionVariant(action: ResourceActionDescriptor | null | undefined) {
+  if (action?.riskLevel === "medium") {
+    return "primary" as const;
+  }
+  return "secondary" as const;
+}
+
+function isDangerAction(action: ResourceActionDescriptor | null | undefined) {
+  return action?.riskLevel === "high";
+}
+
+function getRefreshTone(
+  refresh: UiRefreshMetadata,
+): "info" | "warn" | "danger" {
+  if (refresh.dataFreshness === "degraded") {
+    return "danger";
+  }
+  if (
+    refresh.dataFreshness === "stale" ||
+    refresh.dataFreshness === "unknown"
+  ) {
+    return "warn";
+  }
+  return "info";
+}
+
+function formatRefreshTier(tier: RefreshTier, locale: "en" | "zh") {
+  const labels: Record<RefreshTier, string> = {
+    urgent: locale === "en" ? "T0 urgent" : "T0 緊急",
+    fast: locale === "en" ? "T1 fast" : "T1 快速",
+    dispatch: locale === "en" ? "T2 dispatch" : "T2 派遣",
+    medium: locale === "en" ? "T3 medium" : "T3 中頻",
+    medium_slow: locale === "en" ? "T4 medium-slow" : "T4 中低頻",
+    slow: locale === "en" ? "T5 slow" : "T5 低頻",
+    manual: locale === "en" ? "T6 manual" : "T6 手動",
+  };
+
+  return labels[tier];
+}
+
+function formatRefreshBadge(
+  refresh: UiRefreshMetadata,
+  refreshTier: RefreshTier,
+  locale: "en" | "zh",
+) {
+  const freshness =
+    refresh.dataFreshness === "fresh"
+      ? locale === "en"
+        ? "fresh"
+        : "新鮮"
+      : refresh.dataFreshness === "stale"
+        ? locale === "en"
+          ? "stale"
+          : "資料偏舊"
+        : refresh.dataFreshness === "degraded"
+          ? locale === "en"
+            ? "degraded"
+            : "降級"
+          : locale === "en"
+            ? "unknown"
+            : "未知";
+
+  return `${formatRefreshTier(refreshTier, locale)} · ${freshness}`;
+}
+
+function formatRefreshHint(
+  refresh: UiRefreshMetadata,
+  refreshTier: RefreshTier,
+  locale: "en" | "zh",
+) {
+  const staleAfterSec = Math.round(refresh.staleAfterMs / 1000);
+  return locale === "en"
+    ? `${formatRefreshTier(refreshTier, locale)} · source ${refresh.source} · stale after ${staleAfterSec}s`
+    : `${formatRefreshTier(refreshTier, locale)} · 來源 ${refresh.source} · ${staleAfterSec} 秒後視為舊資料`;
+}
+
 function isPriorityIncident(record: IncidentRecordRuntime) {
   const open = record.status === "open" || record.status === "investigating";
   if (!open) {
@@ -312,6 +416,27 @@ function renderEmptyState(
 ) {
   const copy = getEmptyStateCopy(emptyState.reason, locale);
   const tone = copy.tone;
+  const nextAction = emptyState.nextAction;
+  const nextActionLabel =
+    nextAction?.action === "refresh"
+      ? locale === "en"
+        ? "Refresh"
+        : "重新整理"
+      : nextAction?.action === "create_incident" ||
+          nextAction?.action === "create" ||
+          nextAction?.action === "createIncident"
+        ? locale === "en"
+          ? "Create incident"
+          : "建立事故"
+        : null;
+  const nextActionHandler =
+    nextAction?.action === "refresh"
+      ? onRefresh
+      : nextAction?.action === "create_incident" ||
+          nextAction?.action === "create" ||
+          nextAction?.action === "createIncident"
+        ? onCreate
+        : null;
 
   return (
     <Card
@@ -335,6 +460,20 @@ function renderEmptyState(
             <Btn theme={theme} variant="primary" icon="plus" onClick={onCreate}>
               {locale === "en" ? "Create incident" : "建立事故"}
             </Btn>
+          ) : null}
+          {nextActionLabel && nextActionHandler ? (
+            <span title={getActionTitle(nextAction, locale)}>
+              <Btn
+                theme={theme}
+                variant={getActionVariant(nextAction)}
+                danger={isDangerAction(nextAction)}
+                icon={nextAction?.action === "refresh" ? "more" : "plus"}
+                disabled={nextAction?.enabled === false}
+                onClick={nextActionHandler}
+              >
+                {nextActionLabel}
+              </Btn>
+            </span>
           ) : null}
         </>
       }
@@ -482,6 +621,7 @@ export default function IncidentsPage() {
   const [refresh, setRefresh] = useState<UiRefreshMetadata>(
     buildDefaultRefresh(),
   );
+  const [refreshTier, setRefreshTier] = useState<RefreshTier>(REFRESH_TIER);
   const [emptyState, setEmptyState] = useState<EmptyStateEnvelope | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -573,6 +713,7 @@ export default function IncidentsPage() {
         normalizedEnvelope?.availableActions ?? buildDefaultPageActions(),
       );
       setRefresh(normalizedEnvelope?.refresh ?? buildDefaultRefresh());
+      setRefreshTier(normalizedEnvelope?.refreshTier ?? REFRESH_TIER);
       setEmptyState(
         normalizedItems.length === 0
           ? (normalizedEnvelope?.emptyState ??
@@ -589,6 +730,7 @@ export default function IncidentsPage() {
         dataFreshness: "degraded",
         source: "cache",
       });
+      setRefreshTier(REFRESH_TIER);
       if (records.length === 0) {
         setEmptyState(buildFallbackEmptyState(classifyErrorReason(message)));
       }
@@ -719,6 +861,31 @@ export default function IncidentsPage() {
       ),
       severityCell: renderSeverityBadge(record.severity, locale),
       statusCell: renderStatusBadge(record.status, locale),
+      coordinationCell: (
+        <div style={{ display: "grid", gap: 4, minWidth: 200 }}>
+          <span style={{ color: theme.text }}>
+            {record.assignedTo
+              ? locale === "en"
+                ? `owner · ${record.assignedTo}`
+                : `負責人 · ${record.assignedTo}`
+              : locale === "en"
+                ? "owner · unassigned"
+                : "負責人 · 未指派"}
+          </span>
+          <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+            {locale === "en"
+              ? `recovery · ${record.serviceRecoveryActions.length} actions`
+              : `recovery · ${record.serviceRecoveryActions.length} 筆`}
+          </span>
+          {record.escalationTarget ? (
+            <Pill theme={theme} tone="warn">
+              {locale === "en"
+                ? `target · ${formatOpsCodeLabel(locale, record.escalationTarget)}`
+                : `目標 · ${formatOpsCodeLabel(locale, record.escalationTarget)}`}
+            </Pill>
+          ) : null}
+        </div>
+      ),
       linksCell: (
         <div style={{ display: "grid", gap: 4, minWidth: 220 }}>
           {record.relatedOrderId ? (
@@ -731,7 +898,7 @@ export default function IncidentsPage() {
           ) : null}
           {record.relatedVehicleId ? (
             <Link
-              href={`/vehicles?vehicleId=${encodeURIComponent(record.relatedVehicleId)}`}
+              href={`/vehicles/${encodeURIComponent(record.relatedVehicleId)}`}
               style={{ color: theme.text, textDecoration: "none" }}
             >
               vehicle · {record.relatedVehicleId}
@@ -787,24 +954,23 @@ export default function IncidentsPage() {
     { h: "CAT", k: "categoryCell", w: 120, r: (row) => row.categoryCell },
     { h: "SEV", k: "severityCell", w: 100, r: (row) => row.severityCell },
     { h: "STATUS", k: "statusCell", w: 110, r: (row) => row.statusCell },
+    {
+      h: "COORDINATION",
+      k: "coordinationCell",
+      w: 210,
+      r: (row) => row.coordinationCell,
+    },
     { h: "RELATED", k: "linksCell", w: 250, r: (row) => row.linksCell },
     { h: "REPORTED BY", k: "reportedBy", w: 120, mono: true },
     { h: "OCCURRED", k: "occurredCell", w: 145, r: (row) => row.occurredCell },
     { h: "AGE", k: "ageCell", w: 90, r: (row) => row.ageCell },
   ];
-
-  const refreshLabel =
-    refresh.dataFreshness === "fresh"
-      ? locale === "en"
-        ? "T3 · fresh"
-        : "T3 · 新鮮"
-      : refresh.dataFreshness === "stale"
-        ? locale === "en"
-          ? "T3 · stale"
-          : "T3 · 資料偏舊"
-        : locale === "en"
-          ? "T3 · degraded"
-          : "T3 · 降級";
+  const refreshLabel = formatRefreshBadge(refresh, refreshTier, locale);
+  const hasAllClearState =
+    !loading &&
+    !effectiveEmptyState &&
+    priorityQueue.length === 0 &&
+    records.length > 0;
 
   return (
     <div
@@ -844,30 +1010,33 @@ export default function IncidentsPage() {
         }
         actions={
           <>
-            <Pill
-              theme={theme}
-              tone={refresh.dataFreshness === "fresh" ? "info" : "warn"}
-            >
+            <Pill theme={theme} tone={getRefreshTone(refresh)}>
               {refreshLabel}
             </Pill>
-            <Btn
-              theme={theme}
-              variant="secondary"
-              icon="more"
-              disabled={refreshAction?.enabled === false}
-              onClick={() => void loadRecords(true)}
-            >
-              {locale === "en" ? "Refresh" : "重新整理"}
-            </Btn>
-            <Btn
-              theme={theme}
-              variant="primary"
-              icon="plus"
-              disabled={createAction?.enabled === false}
-              onClick={() => setShowCreate(true)}
-            >
-              {locale === "en" ? "Create incident" : "建立事故"}
-            </Btn>
+            <span title={getActionTitle(refreshAction, locale)}>
+              <Btn
+                theme={theme}
+                variant={getActionVariant(refreshAction)}
+                danger={isDangerAction(refreshAction)}
+                icon="more"
+                disabled={refreshAction?.enabled === false}
+                onClick={() => void loadRecords(true)}
+              >
+                {locale === "en" ? "Refresh" : "重新整理"}
+              </Btn>
+            </span>
+            <span title={getActionTitle(createAction, locale)}>
+              <Btn
+                theme={theme}
+                variant={getActionVariant(createAction)}
+                danger={isDangerAction(createAction)}
+                icon="plus"
+                disabled={createAction?.enabled === false}
+                onClick={() => setShowCreate(true)}
+              >
+                {locale === "en" ? "Create incident" : "建立事故"}
+              </Btn>
+            </span>
           </>
         }
       />
@@ -921,6 +1090,36 @@ export default function IncidentsPage() {
                 : "最新刷新回傳錯誤"
             }
             body={error}
+          />
+        ) : null}
+
+        {refresh.dataFreshness !== "fresh" ? (
+          <Banner
+            theme={theme}
+            tone={getRefreshTone(refresh)}
+            icon={refresh.dataFreshness === "degraded" ? "warn" : "info"}
+            title={
+              locale === "en"
+                ? "Live snapshot is not fully fresh"
+                : "目前快照不是最新狀態"
+            }
+            body={formatRefreshHint(refresh, refreshTier, locale)}
+            actions={
+              refreshAction ? (
+                <span title={getActionTitle(refreshAction, locale)}>
+                  <Btn
+                    theme={theme}
+                    variant={getActionVariant(refreshAction)}
+                    danger={isDangerAction(refreshAction)}
+                    icon="more"
+                    disabled={refreshAction.enabled === false}
+                    onClick={() => void loadRecords(true)}
+                  >
+                    {locale === "en" ? "Refresh now" : "立即刷新"}
+                  </Btn>
+                </span>
+              ) : undefined
+            }
           />
         ) : null}
 
@@ -982,18 +1181,14 @@ export default function IncidentsPage() {
                   : "order / vehicle / driver / complaint",
             },
           ].map((item) => (
-            <Card
+            <KPI
               key={item.title}
               theme={theme}
-              title={item.title}
-              subtitle={item.subtitle}
-            >
-              <div
-                style={{ fontSize: 30, fontWeight: 800, letterSpacing: -0.6 }}
-              >
-                {item.value}
-              </div>
-            </Card>
+              label={item.title}
+              value={item.value}
+              sub={item.subtitle}
+              hint={locale === "en" ? "workspace strip" : "workspace strip"}
+            />
           ))}
         </div>
 
@@ -1030,18 +1225,14 @@ export default function IncidentsPage() {
                   : "30 天內 resolved / closed",
             },
           ].map((item) => (
-            <Card
+            <KPI
               key={item.title}
               theme={theme}
-              title={item.title}
-              subtitle={item.subtitle}
-            >
-              <div
-                style={{ fontSize: 26, fontWeight: 750, letterSpacing: -0.4 }}
-              >
-                {item.value}
-              </div>
-            </Card>
+              label={item.title}
+              value={item.value}
+              sub={item.subtitle}
+              hint={locale === "en" ? "kpi strip" : "kpi strip"}
+            />
           ))}
         </div>
 
@@ -1089,6 +1280,23 @@ export default function IncidentsPage() {
               : "重大嚴重度 + SOS 訊號，獨立於完整列表之外。"
           }
         >
+          {hasAllClearState ? (
+            <Banner
+              theme={theme}
+              tone="success"
+              icon="check"
+              title={
+                locale === "en"
+                  ? "No major incidents are active"
+                  : "目前沒有重大事故進行中"
+              }
+              body={
+                locale === "en"
+                  ? "All active incidents are below the major / SOS threshold. Continue monitoring the full list for owner and recovery gaps."
+                  : "目前所有進行中事故都低於重大 / SOS 門檻，請持續從完整列表追蹤 owner 與 recovery 缺口。"
+              }
+            />
+          ) : null}
           {priorityQueue.length === 0 ? (
             <div
               style={{
@@ -1186,8 +1394,8 @@ export default function IncidentsPage() {
           title={locale === "en" ? "Full list" : "完整列表"}
           subtitle={
             locale === "en"
-              ? `Refresh tier ${REFRESH_TIER} · last snapshot ${formatDateTime(refresh.generatedAt, locale)} UTC`
-              : `Refresh tier ${REFRESH_TIER} · 最近快照 ${formatDateTime(refresh.generatedAt, locale)} UTC`
+              ? `${formatRefreshTier(refreshTier, locale)} · source ${refresh.source} · last snapshot ${formatDateTime(refresh.generatedAt, locale)} UTC`
+              : `${formatRefreshTier(refreshTier, locale)} · 來源 ${refresh.source} · 最近快照 ${formatDateTime(refresh.generatedAt, locale)} UTC`
           }
         >
           <div
@@ -1265,7 +1473,12 @@ export default function IncidentsPage() {
             <Btn
               theme={theme}
               variant="ghost"
-              onClick={() => setStatusFilter("all")}
+              onClick={() => {
+                setQuery("");
+                setStatusFilter("all");
+                setSeverityFilter("all");
+                setCategoryFilter("all");
+              }}
             >
               {locale === "en" ? "Reset" : "重設"}
             </Btn>
