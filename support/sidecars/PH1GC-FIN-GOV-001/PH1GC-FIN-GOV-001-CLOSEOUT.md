@@ -6,8 +6,8 @@ Reviewer: `Codex`
 Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `in_progress`
-Machine-truth status on `2026-05-25`: canonical `ai-status.json` contains standalone task `PH1GC-FIN-GOV-001` under `Codex2` / `in_progress`. The downstream repo-local deliverables remain represented by `WF-FIN-GOV-001-MATRIX`, `FIN-GOV-UAT-001`, and `WF-FIN-GOV-001-E2E`, all `done`; this sidecar stays `in_progress` because only the live-uplift acceptance item remains blocked.
-Current anchor after 2026-05-25 closeout revalidation: `cf5544eb` (`wip(PH1GC-FIN-GOV-001): anchor closeout sidecar current head`)
+Machine-truth status on `2026-05-25`: canonical `ai-status.json` now contains standalone task `PH1GC-FIN-GOV-001` under `Codex2` / `in_progress` with `last_update=2026-05-25T14:06:14Z`. The downstream repo-local deliverables remain represented by `WF-FIN-GOV-001-MATRIX`, `FIN-GOV-UAT-001`, and `WF-FIN-GOV-001-E2E`, all `done`; this sidecar stays `in_progress` because only the live-uplift acceptance item remains blocked.
+Current anchor after 2026-05-25 status refresh: `715d6051` (`wip(PH1GC-FIN-GOV-001): anchor closeout sidecar status refresh`)
 Files changed:
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
@@ -63,7 +63,7 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
 - `git diff --check origin/dev...HEAD` passed.
-- `git rev-parse HEAD` = `cf5544eb2c6af6f4c064ad5b674ab6e98d180f2f`.
+- `git rev-parse HEAD` = `715d6051322a7f95c77c3a0aef6d8a11488658a5`.
 - `git push -u origin codex2/ph1gc-fin-gov-001` remains up to date at the current anchor.
 
 ## Blocker
