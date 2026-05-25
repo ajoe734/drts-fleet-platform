@@ -92,6 +92,21 @@ type ActionRenderContext = {
   scope: "candidate" | "dispatch" | "forwarded" | "empty_state";
   resourceId?: string;
   resourceLabel?: string;
+  driverHref?: string;
+  incidentHref?: string;
+  approvalHref?: string;
+  adapterHref?: string;
+  reconciliationHref?: string;
+  refreshHref?: string;
+  candidatesHref?: string;
+  currentTaskHref?: string;
+  eligibleDriversHref?: string;
+};
+
+type ActionDestination = {
+  href: string;
+  openMode: "same_tab" | "new_tab";
+  label: string;
 };
 
 const theme = buildCanvasTheme({
@@ -888,18 +903,165 @@ function buildActionHref(
   return `${context.baseHref}?${params.toString()}`;
 }
 
+function withFragment(href: string, fragment: string) {
+  const normalized = fragment.startsWith("#") ? fragment : `#${fragment}`;
+  return href.includes("#") ? href : `${href}${normalized}`;
+}
+
+function buildActionDestination(
+  locale: Locale,
+  context: ActionRenderContext,
+  action: ResourceActionDescriptor,
+): ActionDestination {
+  const focusHref = buildActionHref(context, action);
+  const normalizedAction = action.action.toLowerCase();
+
+  if (
+    normalizedAction.includes("incident") ||
+    normalizedAction.includes("sync_failure")
+  ) {
+    return {
+      href:
+        context.incidentHref ?? withFragment(focusHref, "available-actions"),
+      openMode: "same_tab",
+      label: locale === "zh" ? "前往事故流程" : "Open incident flow",
+    };
+  }
+
+  if (
+    normalizedAction.includes("override") ||
+    normalizedAction.includes("approval")
+  ) {
+    return {
+      href: context.approvalHref ?? withFragment(focusHref, "compliance-hold"),
+      openMode: "same_tab",
+      label: locale === "zh" ? "前往審批佇列" : "Open approval queue",
+    };
+  }
+
+  if (
+    normalizedAction.includes("reconciliation") ||
+    normalizedAction.includes("manual_fallback")
+  ) {
+    return {
+      href:
+        context.reconciliationHref ??
+        context.adapterHref ??
+        withFragment(focusHref, "adapter-cross-app"),
+      openMode:
+        context.reconciliationHref || context.adapterHref
+          ? "new_tab"
+          : "same_tab",
+      label: locale === "zh" ? "前往 owner surface" : "Open owner surface",
+    };
+  }
+
+  if (
+    normalizedAction.includes("adapter") ||
+    normalizedAction.includes("platform")
+  ) {
+    return {
+      href: context.adapterHref ?? withFragment(focusHref, "adapter-cross-app"),
+      openMode: context.adapterHref ? "new_tab" : "same_tab",
+      label: locale === "zh" ? "檢視 adapter owner" : "Inspect adapter owner",
+    };
+  }
+
+  if (normalizedAction.includes("force_refresh")) {
+    return {
+      href: context.refreshHref ?? withFragment(focusHref, "refresh-tier"),
+      openMode: "same_tab",
+      label: locale === "zh" ? "刷新層級" : "Refresh tier",
+    };
+  }
+
+  if (normalizedAction.includes("broadcast")) {
+    return {
+      href:
+        context.eligibleDriversHref ??
+        context.candidatesHref ??
+        withFragment(focusHref, "eligible-drivers"),
+      openMode: "same_tab",
+      label:
+        locale === "zh" ? "前往候選 / 廣播區" : "Open candidate broadcast area",
+    };
+  }
+
+  if (normalizedAction.includes("assign")) {
+    return {
+      href:
+        context.driverHref ??
+        context.candidatesHref ??
+        withFragment(focusHref, "candidates"),
+      openMode: "same_tab",
+      label:
+        context.driverHref && context.scope === "candidate"
+          ? locale === "zh"
+            ? "前往司機詳情"
+            : "Open driver detail"
+          : locale === "zh"
+            ? "前往候選區"
+            : "Open candidates area",
+    };
+  }
+
+  if (normalizedAction.includes("release")) {
+    return {
+      href:
+        context.currentTaskHref ??
+        withFragment(focusHref, "current-driver-task"),
+      openMode: "same_tab",
+      label:
+        locale === "zh" ? "前往當前 driver task" : "Open current driver task",
+    };
+  }
+
+  if (
+    normalizedAction.includes("cancel") ||
+    normalizedAction.includes("redispatch") ||
+    normalizedAction.includes("resolve") ||
+    normalizedAction.includes("hold")
+  ) {
+    return {
+      href: withFragment(focusHref, "available-actions"),
+      openMode: "same_tab",
+      label: locale === "zh" ? "前往 action panel" : "Open action panel",
+    };
+  }
+
+  return {
+    href: withFragment(focusHref, "available-actions"),
+    openMode: "same_tab",
+    label: locale === "zh" ? "前往工作區動作" : "Open workspace action",
+  };
+}
+
 function renderActionAffordance(
   locale: Locale,
   action: ResourceActionDescriptor,
   key: string,
   context?: ActionRenderContext,
 ) {
+  const destination =
+    action.enabled && context
+      ? buildActionDestination(locale, context, action)
+      : null;
   const content = (
     <>
       <span>{formatCode(locale, action.action)}</span>
       <span style={{ fontSize: "10px", opacity: 0.82 }}>
         {actionMetaLabel(locale, action)}
       </span>
+      {destination ? (
+        <span style={{ fontSize: "10px", opacity: 0.68 }}>
+          {destination.label}
+          {destination.openMode === "new_tab"
+            ? locale === "zh"
+              ? " · 新分頁"
+              : " · new tab"
+            : ""}
+        </span>
+      ) : null}
     </>
   );
 
@@ -908,19 +1070,31 @@ function renderActionAffordance(
       ? formatCode(locale, action.disabledReasonCode)
       : undefined;
 
-  if (action.enabled && context) {
+  if (destination) {
+    const commonStyle = {
+      ...actionStyle(action),
+      flexDirection: "column" as const,
+      alignItems: "flex-start" as const,
+      lineHeight: 1.15,
+    };
+
+    if (destination.openMode === "new_tab") {
+      return (
+        <a
+          key={key}
+          href={destination.href}
+          target="_blank"
+          rel="noreferrer noopener"
+          style={commonStyle}
+          title={title}
+        >
+          {content}
+        </a>
+      );
+    }
+
     return (
-      <Link
-        key={key}
-        href={buildActionHref(context, action)}
-        style={{
-          ...actionStyle(action),
-          flexDirection: "column",
-          alignItems: "flex-start",
-          lineHeight: 1.15,
-        }}
-        title={title}
-      >
+      <Link key={key} href={destination.href} style={commonStyle} title={title}>
         {content}
       </Link>
     );
@@ -1287,6 +1461,16 @@ export default async function DispatchDetailPage({
       driverTasks.filter((task) => task.orderId === ownedRecord.orderId),
     );
     const stateCode = getOwnedStateCode(ownedRecord, dispatchJob);
+    const incidentHref = `/incidents?create=1&relatedOrderId=${encodeURIComponent(
+      ownedRecord.orderId,
+    )}&title=${encodeURIComponent(
+      ownedRecord.orderNo || ownedRecord.orderId,
+    )}&description=${encodeURIComponent(
+      `${ownedRecord.orderId} · ${getAddressLabel(ownedRecord.pickup)} → ${getAddressLabel(ownedRecord.dropoff)}`,
+    )}`;
+    const approvalHref = `/approval-requests?tenantId=${encodeURIComponent(
+      ownedRecord.tenantId ?? "",
+    )}`;
     const candidateRows: CandidateRow[] = candidateEnvelope.items.map(
       (candidate, index) => {
         const driver = driverById.get(candidate.driverId) ?? null;
@@ -1355,6 +1539,11 @@ export default async function DispatchDetailPage({
               scope: "candidate",
               resourceId: candidate.driverId,
               resourceLabel: driver?.name ?? candidate.driverId,
+              driverHref: `/drivers/${encodeURIComponent(candidate.driverId)}`,
+              candidatesHref: withFragment(href, "candidates"),
+              currentTaskHref: withFragment(href, "current-driver-task"),
+              incidentHref,
+              approvalHref,
             },
           ),
         };
@@ -1650,6 +1839,11 @@ export default async function DispatchDetailPage({
                   scope: "dispatch",
                   resourceId: ownedRecord.orderId,
                   resourceLabel: ownedRecord.orderNo || ownedRecord.orderId,
+                  candidatesHref: withFragment(href, "candidates"),
+                  currentTaskHref: withFragment(href, "current-driver-task"),
+                  incidentHref,
+                  approvalHref,
+                  refreshHref: withFragment(href, "refresh-tier"),
                 }),
               )}
             </div>
@@ -1657,15 +1851,17 @@ export default async function DispatchDetailPage({
         />
 
         <div style={pageBodyStyle}>
-          {renderRefreshBanner(
-            locale,
-            readRefreshMetadata(ownedOrdersEnvelope),
-            "T2 Dispatch / 5s",
-            href,
-            locale === "zh"
-              ? "工作項目主資料 freshness"
-              : "Work item metadata freshness",
-          )}
+          <div id="refresh-tier">
+            {renderRefreshBanner(
+              locale,
+              readRefreshMetadata(ownedOrdersEnvelope),
+              "T2 Dispatch / 5s",
+              href,
+              locale === "zh"
+                ? "工作項目主資料 freshness"
+                : "Work item metadata freshness",
+            )}
+          </div>
           {renderActionFocusBanner(
             locale,
             href,
@@ -1716,67 +1912,75 @@ export default async function DispatchDetailPage({
                 )}
               </Card>
 
-              <Card
-                theme={theme}
-                title={
-                  locale === "zh"
-                    ? "候選司機與分派動作"
-                    : "Candidates and assignment actions"
-                }
-                actions={
-                  <div style={actionRowStyle}>
-                    <Pill
+              <div id="candidates">
+                <Card
+                  theme={theme}
+                  title={
+                    locale === "zh"
+                      ? "候選司機與分派動作"
+                      : "Candidates and assignment actions"
+                  }
+                  actions={
+                    <div style={actionRowStyle}>
+                      <Pill
+                        theme={theme}
+                        tone={refreshTone(
+                          readRefreshMetadata(candidateEnvelope)?.dataFreshness,
+                        )}
+                      >
+                        {candidateEnvelope.items.length}{" "}
+                        {locale === "zh" ? "candidate" : "candidate"}
+                      </Pill>
+                      <Link href={href} style={actionLinkStyle("ghost")}>
+                        <CanvasIcon name="clock" size={12} />
+                        <span>
+                          {locale === "zh" ? "刷新候選" : "Refresh candidates"}
+                        </span>
+                      </Link>
+                    </div>
+                  }
+                >
+                  {candidateRows.length > 0 ? (
+                    <Table
                       theme={theme}
-                      tone={refreshTone(
-                        readRefreshMetadata(candidateEnvelope)?.dataFreshness,
-                      )}
-                    >
-                      {candidateEnvelope.items.length}{" "}
-                      {locale === "zh" ? "candidate" : "candidate"}
-                    </Pill>
-                    <Link href={href} style={actionLinkStyle("ghost")}>
-                      <CanvasIcon name="clock" size={12} />
-                      <span>
-                        {locale === "zh" ? "刷新候選" : "Refresh candidates"}
-                      </span>
-                    </Link>
-                  </div>
-                }
-              >
-                {candidateRows.length > 0 ? (
-                  <Table
-                    theme={theme}
-                    columns={candidateColumns}
-                    rows={candidateRows}
-                  />
-                ) : (
-                  <Banner
-                    theme={theme}
-                    tone={emptyContent.tone}
-                    icon={emptyContent.icon}
-                    title={emptyContent.title}
-                    body={emptyContent.body}
-                    actions={
-                      emptyState?.nextAction ? (
-                        <div style={actionRowStyle}>
-                          {renderActionAffordance(
-                            locale,
-                            emptyState.nextAction,
-                            "empty-next",
-                            {
-                              baseHref: href,
-                              scope: "empty_state",
-                              resourceId: ownedRecord.orderId,
-                              resourceLabel:
-                                ownedRecord.orderNo || ownedRecord.orderId,
-                            },
-                          )}
-                        </div>
-                      ) : undefined
-                    }
-                  />
-                )}
-              </Card>
+                      columns={candidateColumns}
+                      rows={candidateRows}
+                    />
+                  ) : (
+                    <Banner
+                      theme={theme}
+                      tone={emptyContent.tone}
+                      icon={emptyContent.icon}
+                      title={emptyContent.title}
+                      body={emptyContent.body}
+                      actions={
+                        emptyState?.nextAction ? (
+                          <div style={actionRowStyle}>
+                            {renderActionAffordance(
+                              locale,
+                              emptyState.nextAction,
+                              "empty-next",
+                              {
+                                baseHref: href,
+                                scope: "empty_state",
+                                resourceId: ownedRecord.orderId,
+                                resourceLabel:
+                                  ownedRecord.orderNo || ownedRecord.orderId,
+                                incidentHref,
+                                approvalHref,
+                                candidatesHref: withFragment(
+                                  href,
+                                  "candidates",
+                                ),
+                              },
+                            )}
+                          </div>
+                        ) : undefined
+                      }
+                    />
+                  )}
+                </Card>
+              </div>
 
               <Card
                 theme={theme}
@@ -1854,67 +2058,79 @@ export default async function DispatchDetailPage({
             </div>
 
             <div style={surfaceStackStyle}>
-              <Card
-                theme={theme}
-                title={
-                  locale === "zh" ? "availableActions" : "availableActions"
-                }
-              >
-                {renderActionSection(
-                  locale,
-                  orderActions,
-                  locale === "zh"
-                    ? "此 work item 目前沒有 backend 暴露的 action descriptor。"
-                    : "This work item currently has no backend-exposed action descriptors.",
-                  {
-                    baseHref: href,
-                    scope: "dispatch",
-                    resourceId: ownedRecord.orderId,
-                    resourceLabel: ownedRecord.orderNo || ownedRecord.orderId,
-                  },
-                )}
-                <div style={{ height: 12 }} />
-                <Field
+              <div id="available-actions">
+                <Card
                   theme={theme}
-                  label={locale === "zh" ? "Risk pattern" : "Risk pattern"}
+                  title={
+                    locale === "zh" ? "availableActions" : "availableActions"
+                  }
                 >
-                  <div
-                    style={{
-                      display: "grid",
-                      gap: 4,
-                      color: theme.textMuted,
-                      fontSize: "12px",
-                    }}
+                  {renderActionSection(
+                    locale,
+                    orderActions,
+                    locale === "zh"
+                      ? "此 work item 目前沒有 backend 暴露的 action descriptor。"
+                      : "This work item currently has no backend-exposed action descriptors.",
+                    {
+                      baseHref: href,
+                      scope: "dispatch",
+                      resourceId: ownedRecord.orderId,
+                      resourceLabel: ownedRecord.orderNo || ownedRecord.orderId,
+                      candidatesHref: withFragment(href, "candidates"),
+                      currentTaskHref: withFragment(
+                        href,
+                        "current-driver-task",
+                      ),
+                      incidentHref,
+                      approvalHref,
+                      refreshHref: withFragment(href, "refresh-tier"),
+                    },
+                  )}
+                  <div style={{ height: 12 }} />
+                  <Field
+                    theme={theme}
+                    label={locale === "zh" ? "Risk pattern" : "Risk pattern"}
                   >
-                    <span>
-                      {locale === "zh"
-                        ? "low: direct + toast"
-                        : "low: direct + toast"}
-                    </span>
-                    <span>
-                      {locale === "zh"
-                        ? "medium: confirm modal"
-                        : "medium: confirm modal"}
-                    </span>
-                    <span>
-                      {locale === "zh"
-                        ? "high: confirm + required reason"
-                        : "high: confirm + required reason"}
-                    </span>
-                  </div>
-                </Field>
-              </Card>
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: 4,
+                        color: theme.textMuted,
+                        fontSize: "12px",
+                      }}
+                    >
+                      <span>
+                        {locale === "zh"
+                          ? "low: direct + toast"
+                          : "low: direct + toast"}
+                      </span>
+                      <span>
+                        {locale === "zh"
+                          ? "medium: confirm modal"
+                          : "medium: confirm modal"}
+                      </span>
+                      <span>
+                        {locale === "zh"
+                          ? "high: confirm + required reason"
+                          : "high: confirm + required reason"}
+                      </span>
+                    </div>
+                  </Field>
+                </Card>
+              </div>
 
-              <Card
-                theme={theme}
-                title={
-                  locale === "zh" ? "Compliance / hold" : "Compliance / hold"
-                }
-              >
-                <DL theme={theme} cols={1} items={gateItems} />
-                <div style={{ height: 14 }} />
-                <DL theme={theme} cols={1} items={exceptionItems} />
-              </Card>
+              <div id="compliance-hold">
+                <Card
+                  theme={theme}
+                  title={
+                    locale === "zh" ? "Compliance / hold" : "Compliance / hold"
+                  }
+                >
+                  <DL theme={theme} cols={1} items={gateItems} />
+                  <div style={{ height: 14 }} />
+                  <DL theme={theme} cols={1} items={exceptionItems} />
+                </Card>
+              </div>
 
               <Card
                 theme={theme}
@@ -1927,76 +2143,81 @@ export default async function DispatchDetailPage({
                 <DL theme={theme} cols={1} items={commsItems} />
               </Card>
 
-              <Card
-                theme={theme}
-                title={
-                  locale === "zh" ? "目前 driver task" : "Current driver task"
-                }
-              >
-                <DL
+              <div id="current-driver-task">
+                <Card
                   theme={theme}
-                  cols={1}
-                  items={[
-                    {
-                      k: locale === "zh" ? "Task" : "Task",
-                      v: currentTask?.taskId ?? "—",
-                      mono: true,
-                    },
-                    {
-                      k: locale === "zh" ? "Driver" : "Driver",
-                      v: currentTask ? (
-                        <Link
-                          href={`/drivers/${encodeURIComponent(currentTask.driverId)}`}
-                          style={{ color: theme.text, textDecoration: "none" }}
-                        >
-                          {driverById.get(currentTask.driverId)?.name ??
-                            currentTask.driverId}
-                        </Link>
-                      ) : (
-                        "—"
-                      ),
-                    },
-                    {
-                      k: locale === "zh" ? "狀態" : "Status",
-                      v: currentTask ? (
-                        <Pill
-                          theme={theme}
-                          tone={getStateTone(currentTask.status)}
-                        >
-                          {formatCode(locale, currentTask.status)}
-                        </Pill>
-                      ) : (
-                        "—"
-                      ),
-                    },
-                    {
-                      k: locale === "zh" ? "Route" : "Route",
-                      v:
-                        currentTask && currentTask.waypoints.length > 0
-                          ? currentTask.waypoints
-                              .map(
-                                (
-                                  waypoint: DriverTaskRecord["waypoints"][number],
-                                ) => waypoint.label,
-                              )
-                              .join(" → ")
+                  title={
+                    locale === "zh" ? "目前 driver task" : "Current driver task"
+                  }
+                >
+                  <DL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      {
+                        k: locale === "zh" ? "Task" : "Task",
+                        v: currentTask?.taskId ?? "—",
+                        mono: true,
+                      },
+                      {
+                        k: locale === "zh" ? "Driver" : "Driver",
+                        v: currentTask ? (
+                          <Link
+                            href={`/drivers/${encodeURIComponent(currentTask.driverId)}`}
+                            style={{
+                              color: theme.text,
+                              textDecoration: "none",
+                            }}
+                          >
+                            {driverById.get(currentTask.driverId)?.name ??
+                              currentTask.driverId}
+                          </Link>
+                        ) : (
+                          "—"
+                        ),
+                      },
+                      {
+                        k: locale === "zh" ? "狀態" : "Status",
+                        v: currentTask ? (
+                          <Pill
+                            theme={theme}
+                            tone={getStateTone(currentTask.status)}
+                          >
+                            {formatCode(locale, currentTask.status)}
+                          </Pill>
+                        ) : (
+                          "—"
+                        ),
+                      },
+                      {
+                        k: locale === "zh" ? "Route" : "Route",
+                        v:
+                          currentTask && currentTask.waypoints.length > 0
+                            ? currentTask.waypoints
+                                .map(
+                                  (
+                                    waypoint: DriverTaskRecord["waypoints"][number],
+                                  ) => waypoint.label,
+                                )
+                                .join(" → ")
+                            : locale === "zh"
+                              ? "尚未建立"
+                              : "Not established",
+                      },
+                      {
+                        k: locale === "zh" ? "Proof" : "Proof",
+                        v: currentTask?.proof
+                          ? locale === "zh"
+                            ? "已上傳"
+                            : "Uploaded"
                           : locale === "zh"
-                            ? "尚未建立"
-                            : "Not established",
-                    },
-                    {
-                      k: locale === "zh" ? "Proof" : "Proof",
-                      v: currentTask?.proof
-                        ? locale === "zh"
-                          ? "已上傳"
-                          : "Uploaded"
-                        : locale === "zh"
-                          ? "待補"
-                          : "Pending",
-                    },
-                  ]}
-                />
-              </Card>
+                            ? "待補"
+                            : "Pending",
+                      },
+                    ]}
+                  />
+                </Card>
+              </div>
             </div>
           </div>
         </div>
@@ -2055,6 +2276,13 @@ export default async function DispatchDetailPage({
   const focusedForwardedAction =
     forwardedActions.find((action) => action.action === focusedActionId) ??
     null;
+  const forwardedIncidentHref = `/incidents?create=1&relatedOrderId=${encodeURIComponent(
+    forwardedOrder.mirrorOrderId,
+  )}&title=${encodeURIComponent(
+    forwardedOrder.externalOrderId || forwardedOrder.mirrorOrderId,
+  )}&description=${encodeURIComponent(
+    `${forwardedOrder.platformCode} · ${forwardedOrder.status}`,
+  )}`;
 
   const forwardedSummaryItems = [
     {
@@ -2191,6 +2419,11 @@ export default async function DispatchDetailPage({
                   resourceLabel:
                     forwardedOrder.externalOrderId ||
                     forwardedOrder.mirrorOrderId,
+                  adapterHref: resolveCrossAppHref(externalSyncLink),
+                  reconciliationHref: resolveCrossAppHref(reconciliationLink),
+                  incidentHref: forwardedIncidentHref,
+                  refreshHref: withFragment(href, "refresh-tier"),
+                  eligibleDriversHref: withFragment(href, "eligible-drivers"),
                 },
               ),
             )}
@@ -2201,15 +2434,17 @@ export default async function DispatchDetailPage({
       />
 
       <div style={pageBodyStyle}>
-        {renderRefreshBanner(
-          locale,
-          mainRefresh,
-          "T2 Dispatch / 5s",
-          href,
-          locale === "zh"
-            ? "鏡像訂單主資料 freshness"
-            : "Mirror-order metadata freshness",
-        )}
+        <div id="refresh-tier">
+          {renderRefreshBanner(
+            locale,
+            mainRefresh,
+            "T2 Dispatch / 5s",
+            href,
+            locale === "zh"
+              ? "鏡像訂單主資料 freshness"
+              : "Mirror-order metadata freshness",
+          )}
+        </div>
         {renderActionFocusBanner(
           locale,
           href,
@@ -2293,72 +2528,77 @@ export default async function DispatchDetailPage({
               )}
             </Card>
 
-            <Card
-              theme={theme}
-              title={
-                locale === "zh"
-                  ? "適格司機 / platform handling"
-                  : "Eligible drivers / platform handling"
-              }
-              actions={
-                <Pill theme={theme} tone="info">
-                  {forwardedOrder.candidateDriverIds.length}{" "}
-                  {locale === "zh" ? "drivers" : "drivers"}
-                </Pill>
-              }
-            >
-              {forwardedOrder.candidateDriverIds.length > 0 ? (
-                <DL
-                  theme={theme}
-                  cols={1}
-                  items={forwardedOrder.candidateDriverIds.map(
-                    (driverId: string, index: number) => ({
-                      k: `${index + 1}. ${driverId}`,
-                      v: (
-                        <div style={{ display: "grid", gap: 4 }}>
-                          <Link
-                            href={`/drivers/${encodeURIComponent(driverId)}`}
-                            style={{
-                              color: theme.text,
-                              textDecoration: "none",
-                            }}
-                          >
-                            {driverById.get(driverId)?.name ?? driverId}
-                          </Link>
-                          <span
-                            style={{ color: theme.textMuted, fontSize: "12px" }}
-                          >
-                            {acceptedDriver?.driverId === driverId
-                              ? locale === "zh"
-                                ? "目前 accepted driver"
-                                : "Current accepted driver"
-                              : locale === "zh"
-                                ? "廣播候選"
-                                : "Broadcast candidate"}
-                          </span>
-                        </div>
-                      ),
-                    }),
-                  )}
-                />
-              ) : (
-                <Banner
-                  theme={theme}
-                  tone="info"
-                  icon="warn"
-                  title={
-                    locale === "zh"
-                      ? "目前沒有候選司機廣播名單"
-                      : "No broadcast candidates right now"
-                  }
-                  body={
-                    locale === "zh"
-                      ? "forwarded payload 沒有提供 candidateDriverIds，需依 availableActions / adapter 狀態決策。"
-                      : "The forwarded payload does not currently provide candidateDriverIds; use availableActions and adapter health for the next decision."
-                  }
-                />
-              )}
-            </Card>
+            <div id="eligible-drivers">
+              <Card
+                theme={theme}
+                title={
+                  locale === "zh"
+                    ? "適格司機 / platform handling"
+                    : "Eligible drivers / platform handling"
+                }
+                actions={
+                  <Pill theme={theme} tone="info">
+                    {forwardedOrder.candidateDriverIds.length}{" "}
+                    {locale === "zh" ? "drivers" : "drivers"}
+                  </Pill>
+                }
+              >
+                {forwardedOrder.candidateDriverIds.length > 0 ? (
+                  <DL
+                    theme={theme}
+                    cols={1}
+                    items={forwardedOrder.candidateDriverIds.map(
+                      (driverId: string, index: number) => ({
+                        k: `${index + 1}. ${driverId}`,
+                        v: (
+                          <div style={{ display: "grid", gap: 4 }}>
+                            <Link
+                              href={`/drivers/${encodeURIComponent(driverId)}`}
+                              style={{
+                                color: theme.text,
+                                textDecoration: "none",
+                              }}
+                            >
+                              {driverById.get(driverId)?.name ?? driverId}
+                            </Link>
+                            <span
+                              style={{
+                                color: theme.textMuted,
+                                fontSize: "12px",
+                              }}
+                            >
+                              {acceptedDriver?.driverId === driverId
+                                ? locale === "zh"
+                                  ? "目前 accepted driver"
+                                  : "Current accepted driver"
+                                : locale === "zh"
+                                  ? "廣播候選"
+                                  : "Broadcast candidate"}
+                            </span>
+                          </div>
+                        ),
+                      }),
+                    )}
+                  />
+                ) : (
+                  <Banner
+                    theme={theme}
+                    tone="info"
+                    icon="warn"
+                    title={
+                      locale === "zh"
+                        ? "目前沒有候選司機廣播名單"
+                        : "No broadcast candidates right now"
+                    }
+                    body={
+                      locale === "zh"
+                        ? "forwarded payload 沒有提供 candidateDriverIds，需依 availableActions / adapter 狀態決策。"
+                        : "The forwarded payload does not currently provide candidateDriverIds; use availableActions and adapter health for the next decision."
+                    }
+                  />
+                )}
+              </Card>
+            </div>
 
             <Card
               theme={theme}
@@ -2450,73 +2690,91 @@ export default async function DispatchDetailPage({
           </div>
 
           <div style={surfaceStackStyle}>
-            <Card
-              theme={theme}
-              title={locale === "zh" ? "availableActions" : "availableActions"}
-            >
-              {renderActionSection(
-                locale,
-                forwardedActions,
-                locale === "zh"
-                  ? "此 forwarded work item 目前沒有 backend action descriptor。"
-                  : "This forwarded work item currently has no backend action descriptors.",
-                {
-                  baseHref: href,
-                  scope: "forwarded",
-                  resourceId: forwardedOrder.mirrorOrderId,
-                  resourceLabel:
-                    forwardedOrder.externalOrderId ||
-                    forwardedOrder.mirrorOrderId,
-                },
-              )}
-            </Card>
-
-            <Card
-              theme={theme}
-              title={
-                locale === "zh" ? "Adapter / cross-app" : "Adapter / cross-app"
-              }
-            >
-              <DL
+            <div id="available-actions">
+              <Card
                 theme={theme}
-                cols={1}
-                items={[
+                title={
+                  locale === "zh" ? "availableActions" : "availableActions"
+                }
+              >
+                {renderActionSection(
+                  locale,
+                  forwardedActions,
+                  locale === "zh"
+                    ? "此 forwarded work item 目前沒有 backend action descriptor。"
+                    : "This forwarded work item currently has no backend action descriptors.",
                   {
-                    k: locale === "zh" ? "Adapter health" : "Adapter health",
-                    v: adapterHealth ? (
-                      <Pill
-                        theme={theme}
-                        tone={getAdapterTone(adapterHealth.status)}
-                        dot={adapterHealth.status !== "healthy"}
-                      >
-                        {adapterHealth.status}
-                      </Pill>
-                    ) : (
-                      "—"
-                    ),
+                    baseHref: href,
+                    scope: "forwarded",
+                    resourceId: forwardedOrder.mirrorOrderId,
+                    resourceLabel:
+                      forwardedOrder.externalOrderId ||
+                      forwardedOrder.mirrorOrderId,
+                    adapterHref: resolveCrossAppHref(externalSyncLink),
+                    reconciliationHref: resolveCrossAppHref(reconciliationLink),
+                    incidentHref: forwardedIncidentHref,
+                    refreshHref: withFragment(href, "refresh-tier"),
+                    eligibleDriversHref: withFragment(href, "eligible-drivers"),
                   },
-                  {
-                    k: locale === "zh" ? "Last checked" : "Last checked",
-                    v: adapterHealth
-                      ? formatLongDateTime(locale, adapterHealth.lastCheckedAt)
-                      : "—",
-                    mono: true,
-                  },
-                  {
-                    k:
-                      locale === "zh" ? "Mirror owner app" : "Mirror owner app",
-                    v: renderCrossAppLink(externalSyncLink),
-                  },
-                  {
-                    k:
-                      locale === "zh"
-                        ? "Reconciliation owner"
-                        : "Reconciliation owner",
-                    v: renderCrossAppLink(reconciliationLink),
-                  },
-                ]}
-              />
-            </Card>
+                )}
+              </Card>
+            </div>
+
+            <div id="adapter-cross-app">
+              <Card
+                theme={theme}
+                title={
+                  locale === "zh"
+                    ? "Adapter / cross-app"
+                    : "Adapter / cross-app"
+                }
+              >
+                <DL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      k: locale === "zh" ? "Adapter health" : "Adapter health",
+                      v: adapterHealth ? (
+                        <Pill
+                          theme={theme}
+                          tone={getAdapterTone(adapterHealth.status)}
+                          dot={adapterHealth.status !== "healthy"}
+                        >
+                          {adapterHealth.status}
+                        </Pill>
+                      ) : (
+                        "—"
+                      ),
+                    },
+                    {
+                      k: locale === "zh" ? "Last checked" : "Last checked",
+                      v: adapterHealth
+                        ? formatLongDateTime(
+                            locale,
+                            adapterHealth.lastCheckedAt,
+                          )
+                        : "—",
+                      mono: true,
+                    },
+                    {
+                      k:
+                        locale === "zh"
+                          ? "Mirror owner app"
+                          : "Mirror owner app",
+                      v: renderCrossAppLink(externalSyncLink),
+                    },
+                    {
+                      k:
+                        locale === "zh"
+                          ? "Reconciliation owner"
+                          : "Reconciliation owner",
+                      v: renderCrossAppLink(reconciliationLink),
+                    },
+                  ]}
+                />
+              </Card>
+            </div>
 
             <Card
               theme={theme}
