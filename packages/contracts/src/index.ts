@@ -805,6 +805,19 @@ export interface MarkNotificationsReadCommand {
   notificationIds: string[];
 }
 
+export interface CreateDriverOpsInstructionCommand {
+  driverId: string;
+  taskId: string;
+  message: string;
+  expiresAt?: string | null;
+}
+
+export interface AcknowledgeDriverOpsInstructionResult {
+  instructionId: string;
+  taskId: string;
+  acknowledgedAt: string;
+}
+
 export interface TenantNotificationSubscription {
   eventType: string;
   channel: "email" | "webhook" | "ops_console";

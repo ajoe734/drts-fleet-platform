@@ -229,6 +229,28 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("ops/driver-instructions")) {
+    return {
+      routeKey: `ops:driver-instructions:${upperMethod}`,
+      requiredScopes: methodScope(
+        "dispatch:read",
+        "dispatch:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Ops-issued driver instructions",
+    };
+  }
+
+  if (routePath.startsWith("driver/ops-instructions")) {
+    return {
+      routeKey: `driver:ops-instructions:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver ops instruction inbox",
+    };
+  }
+
   if (
     routePath === "driver/profile" ||
     routePath.startsWith("driver/profile/")
