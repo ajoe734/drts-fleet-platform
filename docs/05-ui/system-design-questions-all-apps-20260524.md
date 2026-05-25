@@ -465,14 +465,39 @@ These are all downstream of the answers in §2 and §3.
 
 ---
 
-## 7. Appendix — Resolved (to be filled by system design team)
+## 7. Appendix — Resolved
 
-> Move questions here when the answer is "current implementation is correct" or "no change needed", with a one-line rationale.
+**Status (2026-05-25):** All 75 questions answered by 系統設計規劃領域 in the companion document:
 
-(empty)
+→ [`system-design-answers-all-apps-20260524.md`](./system-design-answers-all-apps-20260524.md)
 
-## 8. Appendix — Deferred (to be filled by system design team)
+Answer routing:
 
-> Move questions here when the answer is "decide later", with target phase / quarter / wave.
+- Q-X01 – Q-X17 cross-cutting: see answers §1
+- Q-OPS01 – Q-OPS14 ops-console: see answers §2
+- Q-ADM01 – Q-ADM17 platform-admin: see answers §3
+- Q-TEN01 – Q-TEN13 tenant-console: see answers §4 (Q-TEN01 resolved: `apps/tenant-console-web` is the canonical app)
+- Q-DRV01 – Q-DRV14 driver-app: see answers §5
 
-(empty)
+Downstream commitments enumerated in the answers document:
+
+- §6: 10 architecture / product docs to amend or create (owned by system design team)
+- §7: 12 functional contracts to add / amend in `packages/contracts/src/` (owned by engineering)
+- §8: 4 visual-design hand-off packets unblocked (owned by Claude — in progress)
+
+## 8. Appendix — Deferred
+
+See [`system-design-answers-all-apps-20260524.md` §9](./system-design-answers-all-apps-20260524.md). Items deferred to Phase 2:
+
+```text
+WebSocket live streaming
+Unified admin shell / module federation
+Full global search across all apps
+Sequential ordered_chain approval execution beyond P1 downgrade
+Auto-timeout approval cron beyond manual escalation / stub
+Cost center hierarchy / inherited quota
+Quarterly / yearly quota periods
+Time-of-day / holiday approval conditions
+Full consumer passenger app
+Full self-driving runtime / AV operations UI
+```
