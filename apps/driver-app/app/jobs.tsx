@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -851,6 +852,48 @@ function getActionDescriptor(
   return buildActionDescriptors(task).find((item) => item.action === action);
 }
 
+function buildDisabledActionHints(task: UnifiedDriverTaskView) {
+  return buildActionDescriptors(task)
+    .filter(
+      (
+        descriptor,
+      ): descriptor is ResourceActionDescriptor & {
+        action: "accept" | "reject";
+      } =>
+        (descriptor.action === "accept" || descriptor.action === "reject") &&
+        descriptor.enabled === false,
+    )
+    .map((descriptor) => ({
+      action: descriptor.action,
+      message: `${ACTION_LABELS[descriptor.action]}：${formatDisabledReasonCode(
+        descriptor.disabledReasonCode,
+      )}`,
+    }));
+}
+
+function buildForwardedActionConfirmationCopy(
+  task: UnifiedDriverTaskView,
+  action: "accept" | "reject",
+) {
+  const platformName = getTaskPlatformName(task);
+
+  if (action === "accept") {
+    return {
+      title: "確認接受轉派任務",
+      message: `接受後會立即將回覆 relay 到 ${platformName}。是否接受任務 ${task.taskId}？`,
+      confirmLabel: "確認接受",
+      destructive: false,
+    };
+  }
+
+  return {
+    title: "確認婉拒轉派任務",
+    message: `送出後會立即將婉拒結果 relay 到 ${platformName}。是否婉拒任務 ${task.taskId}？`,
+    confirmLabel: "確認婉拒",
+    destructive: true,
+  };
+}
+
 function inferEmptyReason(tasks: UnifiedDriverTaskView[]): EmptyReason {
   if (tasks.some((task) => hasSyncIssue(task))) {
     return "external_unavailable";
@@ -1135,13 +1178,10 @@ function TaskCard({
   const authority = buildTaskAuthorityDescriptor(task);
   const acceptAction = getActionDescriptor(task, "accept");
   const rejectAction = getActionDescriptor(task, "reject");
+  const disabledActionHints = forwarded ? buildDisabledActionHints(task) : [];
   const fareLabel = order?.quotedFare ? formatMoney(order.quotedFare) : null;
   const deadlineLabel = formatRelativeDeadline(task.deadlineAt);
   const typeLabel = buildTypeLabel(order);
-  const disabledHint =
-    formatDisabledReasonCode(acceptAction?.disabledReasonCode) ||
-    task.blockingReason ||
-    null;
   const orderDomainLabel = forwarded ? "Forwarded" : "Owned";
 
   return (
@@ -1230,10 +1270,13 @@ function TaskCard({
         <Text style={styles.cardHint}>
           下一步 · {buildAllowedActionSummary(task)}
         </Text>
-        {disabledHint &&
-        forwarded &&
-        (acceptAction?.enabled === false || rejectAction?.enabled === false) ? (
-          <Text style={styles.cardDisabledReason}>{disabledHint}</Text>
+        {disabledActionHints.map((hint) => (
+          <Text key={hint.action} style={styles.cardDisabledReason}>
+            {hint.message}
+          </Text>
+        ))}
+        {!disabledActionHints.length && task.blockingReason ? (
+          <Text style={styles.cardDisabledReason}>{task.blockingReason}</Text>
         ) : null}
       </Pressable>
 
@@ -1541,6 +1584,36 @@ export default function JobsScreen() {
     }
   }
 
+  function confirmForwardedAction(
+    task: UnifiedDriverTaskView,
+    action: "accept" | "reject",
+  ) {
+    const descriptor = getActionDescriptor(task, action);
+    if (descriptor?.enabled === false) {
+      return;
+    }
+
+    if (!descriptor || descriptor.riskLevel !== "medium") {
+      void handleForwardedAction(task, action);
+      return;
+    }
+
+    const copy = buildForwardedActionConfirmationCopy(task, action);
+    Alert.alert(copy.title, copy.message, [
+      {
+        text: "取消",
+        style: "cancel",
+      },
+      {
+        text: copy.confirmLabel,
+        style: copy.destructive ? "destructive" : "default",
+        onPress: () => {
+          void handleForwardedAction(task, action);
+        },
+      },
+    ]);
+  }
+
   function renderTopBanner() {
     if (error) {
       return (
@@ -1785,8 +1858,8 @@ export default function JobsScreen() {
               highlighted={highlightedTaskId === task.taskId}
               busy={submittingTaskId === task.taskId}
               onOpen={() => openTrip(task.taskId)}
-              onAccept={() => void handleForwardedAction(task, "accept")}
-              onReject={() => void handleForwardedAction(task, "reject")}
+              onAccept={() => confirmForwardedAction(task, "accept")}
+              onReject={() => confirmForwardedAction(task, "reject")}
             />
           ))}
         </View>
