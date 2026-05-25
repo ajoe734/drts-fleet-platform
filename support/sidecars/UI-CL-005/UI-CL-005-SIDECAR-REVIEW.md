@@ -6,8 +6,8 @@
 **Current Sidecar Owner:** `Codex`  
 **Assigned Reviewer:** `Codex2`  
 **Parent Owner / Reviewer:** `Codex` / `Codex2`  
-**Last Revised:** `2026-05-25T20:06:50Z (UTC)`  
-**Machine-Truth Snapshot:** parent `UI-CL-005` is `done` after closeout commit `5ea5112f` on `origin/codex/ui-cl-005`; dependency `UI-BE-008` is `done` after backend closeout commit `357e1351` on `origin/codex/ui-be-008`; this sidecar is support-only and should move to reviewer `Codex2` after the `2026-05-25T19:55:22Z` reviewer reassignment.
+**Last Revised:** `2026-05-25T20:18:11Z (UTC)`  
+**Machine-Truth Snapshot:** parent `UI-CL-005` is `done` after closeout commit `5ea5112f` on `origin/codex/ui-cl-005`; dependency `UI-BE-008` is `done` after backend closeout commit `357e1351` on `origin/codex/ui-be-008`; this sidecar reached `review_approved` at `2026-05-25T20:13:26Z` after the `2026-05-25T19:55:22Z` reviewer reassignment to `Codex2`, and now only awaits owner closeout on `codex/ui-cl-005-sidecar-review`.
 
 ---
 
@@ -34,8 +34,11 @@
   - closeout commit: `5ea5112f69c045668c1ad808403bb9c5d02a68ac`
   - subject: `UI-CL-005: finalize approved driver ops instruction client closeout`
   - final note: closeout completed after rerunning `pnpm --filter @drts/api-client typecheck`, `pnpm --filter @drts/ui-tokens build`, and `pnpm --filter @drts/driver-app typecheck`
-- this sidecar `UI-CL-005-SIDECAR-REVIEW` is `in_progress`
+- this sidecar `UI-CL-005-SIDECAR-REVIEW` is `review_approved`
   - owner / reviewer: `Codex` / `Codex2`
+  - approval timestamp: `2026-05-25T20:13:26Z`
+  - approval note: review packet correctly freezes the `UI-BE-008 -> UI-CL-005` contract evidence chain, both reopen checkpoints, the `a77c1be2` contract fix, the `5ea5112f` parent closeout, and the `Codex2` reviewer reassignment without changing canonical truth
+  - closeout pending: owner still needs the final task-scoped commit, normal push, and `done` status update
   - acceptance is support-only:
     - `Create support artifacts only`
     - `Do not edit canonical truth`
@@ -44,7 +47,7 @@
 Practical meaning:
 
 - reviewer 不需要重新判定 parent 是否 still open; `UI-CL-005` 已在 machine truth 正式 `done`
-- reviewer 應確認這份 packet 有沒有準確凍結 `d44ac042 -> a77c1be2 -> review_approved -> 5ea5112f` 的 evidence chain
+- reviewer 已完成核准；owner closeout 只需要保留這份 packet 對 `d44ac042 -> a77c1be2 -> review_approved -> 5ea5112f` evidence chain 的準確凍結
 - dependency `UI-BE-008` 已先落地，因此本 sidecar 的重點是 client 是否正確對齊 backend 契約，而不是重新 review backend module
 
 ---
@@ -165,8 +168,10 @@ The sidecar itself also has a small routing history worth preserving:
 - `2026-05-25T19:52:32Z`: `Codex` handed the completed packet to `Claude2`
 - `2026-05-25T19:55:22Z`: orchestrator rebalanced the reviewer from `Claude2` to `Codex2` because `Claude2` was unavailable or occupied
 - `2026-05-25T19:58:54Z`: `Codex2` reopened the sidecar because the packet still named `Claude2` in the reviewer/handoff sections after the reassignment
+- `2026-05-25T20:09:00Z`: `Codex` re-handed the refreshed packet to `Codex2` after commit `24a1963b` corrected the reviewer-routing drift
+- `2026-05-25T20:13:26Z`: `Codex2` approved the refreshed packet and confirmed the support-only evidence freeze matches machine truth
 
-This routing trail does not affect the parent delivery truth; it only explains why this sidecar now sits with `Codex` / `Codex2` after the earlier `Claude2` draft + handoff attempt.
+This routing trail does not affect the parent delivery truth; it only explains why this sidecar now sits with `Codex` / `Codex2` after the earlier `Claude2` draft + handoff attempt and why only owner closeout remains.
 
 ---
 
@@ -186,6 +191,8 @@ This routing trail does not affect the parent delivery truth; it only explains w
 | E-10 | Contract-fix commit | `git show a77c1be2 -- packages/api-client/src/index.ts` |
 | E-11 | Final client branch surface | `origin/codex/ui-cl-005:packages/api-client/src/index.ts` |
 | E-12 | Backend controller anchor | `origin/codex/ui-be-008:apps/api/src/modules/driver-instruction/driver-instruction.controller.ts` |
+| E-13 | Sidecar re-handoff after reviewer-routing refresh | `ai-activity-log.jsonl` entry at `2026-05-25T20:09:00Z` |
+| E-14 | Sidecar review approval | `ai-activity-log.jsonl` entry at `2026-05-25T20:13:26Z` |
 
 ---
 
@@ -231,8 +238,8 @@ Suggested reopen wording:
 
 ### AC-S3 — `Hand off the packet to the assigned reviewer`
 
-- [ ] owner hands the packet to `Codex2`
-- [ ] reviewer either approves or reopens
+- [x] owner hands the packet to `Codex2`
+- [x] reviewer approves the refreshed packet at `2026-05-25T20:13:26Z`
 - [ ] owner closes the support-only task after reviewer decision
 
 ---
@@ -260,7 +267,15 @@ AI_NAME=Codex2 scripts/ai-status.sh reopen UI-CL-005-SIDECAR-REVIEW "packet need
 Owner support-only closeout after approval:
 
 ```bash
-AI_NAME=Codex NO_COMMIT_REQUIRED=1 scripts/ai-status.sh done UI-CL-005-SIDECAR-REVIEW "Completed the support-only review packet for UI-CL-005 after reviewer approval. The packet freezes the UI-BE-008 dependency linkage, the UI-CL-005 reopen-to-fix timeline, and the parent closeout evidence without altering canonical truth."
+git status --short
+git add support/sidecars/UI-CL-005/UI-CL-005-SIDECAR-REVIEW.md
+git commit -m "UI-CL-005-SIDECAR-REVIEW: finalize approved review packet closeout" \
+  -m "LLM-Agent: Codex" \
+  -m "Task-ID: UI-CL-005-SIDECAR-REVIEW" \
+  -m "Reviewer: Codex2" \
+  -m "Verification: reviewed ai-status.json state for UI-CL-005-SIDECAR-REVIEW, checked ai-activity-log.jsonl entries at 2026-05-25T20:09:00Z and 2026-05-25T20:13:26Z, and inspected the focused support/sidecars/UI-CL-005/UI-CL-005-SIDECAR-REVIEW.md diff"
+git push
+AI_NAME=Codex COMMIT_HASH=<new_sha> COMMIT_SUBJECT="UI-CL-005-SIDECAR-REVIEW: finalize approved review packet closeout" PUSH_REMOTE=origin PUSH_BRANCH=codex/ui-cl-005-sidecar-review scripts/ai-status.sh done UI-CL-005-SIDECAR-REVIEW "Completed the support-only review packet for UI-CL-005 after reviewer approval. The packet freezes the UI-BE-008 dependency linkage, the UI-CL-005 reopen-to-fix timeline, the 2026-05-25T19:55:22Z reviewer reassignment, and the parent closeout evidence without altering canonical truth."
 ```
 
 ---
