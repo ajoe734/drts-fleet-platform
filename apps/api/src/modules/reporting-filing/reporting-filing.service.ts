@@ -18,6 +18,7 @@ import type {
   ReportJobRecord,
   SettlementMatrixRecord,
 } from "@drts/contracts";
+import { REPORT_JOB_TYPES } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import {
@@ -105,6 +106,14 @@ type StoredFilingPackage = FilingPackageRecord & {
 
 type OrderFeedProvider = () => OwnedOrderRecord[];
 
+export type TenantReportReadinessSnapshot = {
+  availableJobTypes: string[];
+  jobCount: number;
+  activeArtifactCount: number;
+  failedJobCount: number;
+  runningJobCount: number;
+};
+
 @Injectable()
 export class ReportingFilingService implements OnModuleInit {
   private reportJobs: StoredReportJob[] = [];
@@ -175,6 +184,30 @@ export class ReportingFilingService implements OnModuleInit {
 
   registerOrderFeedProvider(provider: OrderFeedProvider) {
     this.orderFeedProvider = provider;
+  }
+
+  getTenantReportReadinessSnapshot(
+    tenantId: string,
+  ): TenantReportReadinessSnapshot {
+    const now = Date.now();
+    const tenantJobs = this.reportJobs.filter(
+      (job) => this.getReportJobTenantScopeId(job) === tenantId,
+    );
+
+    return {
+      availableJobTypes: [...REPORT_JOB_TYPES],
+      jobCount: tenantJobs.length,
+      activeArtifactCount: tenantJobs.filter(
+        (job) =>
+          job.artifact !== null &&
+          new Date(job.artifact.expiresAt).getTime() > now,
+      ).length,
+      failedJobCount: tenantJobs.filter((job) => job.status === "failed")
+        .length,
+      runningJobCount: tenantJobs.filter(
+        (job) => job.status === "queued" || job.status === "running",
+      ).length,
+    };
   }
 
   createReportJob(

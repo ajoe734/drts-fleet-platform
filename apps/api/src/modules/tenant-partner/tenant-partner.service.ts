@@ -63,6 +63,7 @@ import type {
   TenantBookingApprovalRequestRecord,
   TenantApprovalEvaluationResult,
   TenantApprovalRuleRecord,
+  TenantApiKeyRecord,
   TenantApiKeyGovernancePolicy,
   TenantApiKeyIssued,
   OwnedOrderRecord,
@@ -217,6 +218,17 @@ type PartnerIngressCredentialBootstrap = {
   entrySlug: string;
   keyId: string;
   envVarName: string;
+};
+
+export type TenantPartnerIntegrationReadinessSnapshot = {
+  hasNotificationPreferences: boolean;
+  notificationPreferences: TenantNotificationPreferences | null;
+  hasSlaProfile: boolean;
+  slaProfile: TenantSlaProfile | null;
+  apiKeys: TenantApiKeyRecord[];
+  webhookEndpoints: TenantWebhookEndpoint[];
+  partnerEntries: PartnerChannelEntryRecord[];
+  activePartnerCredentialCounts: Record<string, number>;
 };
 
 type PartnerIngressResolution = {
@@ -1045,6 +1057,38 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.cloneNotificationPreferences(
       this.getOrCreateNotificationPreferences(tenantId),
     );
+  }
+
+  getTenantIntegrationReadinessSnapshot(
+    tenantId: string,
+  ): TenantPartnerIntegrationReadinessSnapshot {
+    const notificationPreferences = this.notificationPreferences.get(tenantId);
+    const slaProfile = this.slaProfiles.get(tenantId);
+    const partnerEntries = this.partnerEntries
+      .filter((entry) => entry.tenantId === tenantId)
+      .map((entry) => this.clonePartnerEntry(entry));
+
+    return {
+      hasNotificationPreferences: Boolean(notificationPreferences),
+      notificationPreferences: notificationPreferences
+        ? this.cloneNotificationPreferences(notificationPreferences)
+        : null,
+      hasSlaProfile: Boolean(slaProfile),
+      slaProfile: slaProfile ? this.cloneSlaProfile(slaProfile) : null,
+      apiKeys: this.listApiKeys(tenantId),
+      webhookEndpoints: this.listWebhookEndpoints(tenantId),
+      partnerEntries,
+      activePartnerCredentialCounts: Object.fromEntries(
+        partnerEntries.map((entry) => [
+          entry.entrySlug,
+          this.partnerIngressCredentials.filter(
+            (credential) =>
+              credential.entrySlug === entry.entrySlug &&
+              credential.revokedAt === null,
+          ).length,
+        ]),
+      ),
+    };
   }
 
   getIntegrationGovernancePackage(

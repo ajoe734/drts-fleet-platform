@@ -155,6 +155,11 @@ export class TenantsService implements OnModuleInit {
     );
   }
 
+  find(tenantId: string): TenantSummary | null {
+    const tenant = this.tenants.get(tenantId);
+    return tenant ? this.cloneTenant(tenant) : null;
+  }
+
   get(tenantId: string): TenantSummary {
     return this.cloneTenant(this.requireTenant(tenantId));
   }
