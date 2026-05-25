@@ -207,6 +207,22 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "ops/search") {
+    return {
+      routeKey: `ops:search:${upperMethod}`,
+      requiredScopes: [
+        "owned:read",
+        "dispatch:read",
+        "regulatory:read",
+        "complaints:read",
+        "incident:read",
+        "forwarder:read",
+      ],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops console cross-entity search",
+    };
+  }
+
   if (
     routePath === "ops/dispatch-events" ||
     routePath === "driver/task-events" ||
