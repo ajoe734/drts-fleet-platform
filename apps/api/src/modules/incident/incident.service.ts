@@ -732,6 +732,13 @@ export class IncidentService implements OnModuleInit {
     const now = incident.updatedAt;
 
     if (command.action === "extend") {
+      if (incident.driverMatchingSuppression?.liftedAt) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "INCIDENT_MATCHING_SUPPRESSION_ALREADY_LIFTED",
+          "Lifted incident matching suppression cannot be extended.",
+        );
+      }
       if (!this.isOpsManager(identity)) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
