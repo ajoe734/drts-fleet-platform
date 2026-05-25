@@ -1,10 +1,12 @@
 "use client";
 
-import Link from "next/link";
-import React, { useEffect, useState, useTransition, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
+import React, { useEffect, useMemo, useState, useTransition } from "react";
 import { PageHeader } from "@drts/ui-web";
 import type {
   CreateReportJobCommand,
+  CrossAppResourceLink,
+  EmptyReason,
   FilingPackageDetailRecord,
   FilingPackageListRecord,
   FilingPackageType,
@@ -12,6 +14,8 @@ import type {
   ReportJobRecord,
   ReportJobType,
   ReportOutputFormat,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   FILING_PACKAGE_TYPES,
@@ -21,7 +25,73 @@ import {
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
+
+type ReportAction = ResourceActionDescriptor & {
+  href?: string;
+  openMode?: CrossAppResourceLink["openMode"];
+  label?: string;
+};
+
+type RuntimeReportJob = ReportJobRecord & {
+  availableActions?: ReportAction[];
+  completedAt?: string | null;
+  submittedBy?: string | null;
+  parametersSummary?: string | null;
+  failureReason?: string | null;
+  refreshMetadata?: UiRefreshMetadata;
+};
+
+type RuntimeReportJobDetail = ReportJobDetailRecord & {
+  availableActions?: ReportAction[];
+  completedAt?: string | null;
+  submittedBy?: string | null;
+  parametersSummary?: string | null;
+  failureReason?: string | null;
+  refreshMetadata?: UiRefreshMetadata;
+};
+
+type RuntimeFilingPackage = FilingPackageListRecord & {
+  availableActions?: ReportAction[];
+  scopeSummary?: string | null;
+  expiresAt?: string | null;
+  failureReason?: string | null;
+  refreshMetadata?: UiRefreshMetadata;
+};
+
+type RuntimeFilingPackageDetail = FilingPackageDetailRecord & {
+  availableActions?: ReportAction[];
+  scopeSummary?: string | null;
+  expiresAt?: string | null;
+  failureReason?: string | null;
+  refreshMetadata?: UiRefreshMetadata;
+};
+
+type ComposerMode = "report" | "package" | null;
+type ActiveTab = "jobs" | "packages";
+type Selection =
+  | { kind: "job"; id: string }
+  | { kind: "package"; id: string }
+  | null;
+
+type PendingAction =
+  | {
+      kind: "job";
+      action: ReportAction;
+      record: RuntimeReportJob | RuntimeReportJobDetail;
+    }
+  | {
+      kind: "package";
+      action: ReportAction;
+      record: RuntimeFilingPackage | RuntimeFilingPackageDetail;
+    };
+
+type EmptyStateDefinition = {
+  title: string;
+  body: string;
+  accent: string;
+  suggestion: string;
+};
 
 type JobPresetMetadata = {
   label: string;
@@ -97,6 +167,10 @@ const JOB_PRESETS = REPORT_JOB_TYPES.map((value) => ({
   category: REGULATORY_JOB_TYPE_SET.has(value) ? "Regulatory" : "Operational",
 }));
 
+function copyText(locale: "en" | "zh", en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
 function defaultClosedMonth() {
   const now = new Date();
   const year = now.getUTCFullYear();
@@ -111,22 +185,75 @@ function formatDateTime(value: string | null | undefined) {
   if (!value) {
     return "—";
   }
-
   return new Date(value).toLocaleString();
 }
 
-function shortHash(value: string | null | undefined) {
+function formatDateTimeShort(value: string | null | undefined) {
   if (!value) {
     return "—";
   }
-
-  return `${value.slice(0, 12)}...`;
+  const date = new Date(value);
+  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 
-function jobCategory(jobType: string) {
-  return REGULATORY_JOB_TYPE_SET.has(jobType as ReportJobType)
-    ? "Regulatory"
-    : "Operational";
+function formatRelativeMinutes(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+  const ms = new Date(value).getTime() - Date.now();
+  if (Number.isNaN(ms)) {
+    return "—";
+  }
+  const minutes = Math.round(ms / 60000);
+  if (minutes <= 0) {
+    return "expired";
+  }
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function summarizeFilters(filters: Record<string, unknown>) {
+  const entries = Object.entries(filters).filter(([, value]) => {
+    if (value == null) return false;
+    if (typeof value === "string") return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") return Object.keys(value).length > 0;
+    return true;
+  });
+
+  if (entries.length === 0) {
+    return "Default scope";
+  }
+
+  return entries
+    .slice(0, 3)
+    .map(([key, value]) => `${key}: ${formatFilterValue(value)}`)
+    .join(" · ");
+}
+
+function formatFilterValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => formatFilterValue(item)).join(", ");
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, nested]) => `${key}=${formatFilterValue(nested)}`)
+      .join(", ");
+  }
+  return "—";
 }
 
 function expiresSoon(value: string | null | undefined, hours = 12) {
@@ -136,26 +263,255 @@ function expiresSoon(value: string | null | undefined, hours = 12) {
   return expiresAt - Date.now() <= hours * 60 * 60 * 1000;
 }
 
-function copyText(locale: "en" | "zh", en: string, zh: string) {
-  return locale === "zh" ? zh : en;
+function isExpired(value: string | null | undefined) {
+  if (!value) return false;
+  const expiresAt = new Date(value).getTime();
+  if (Number.isNaN(expiresAt)) return false;
+  return expiresAt <= Date.now();
+}
+
+function jobCategory(jobType: string) {
+  return REGULATORY_JOB_TYPE_SET.has(jobType as ReportJobType)
+    ? "Regulatory"
+    : "Operational";
+}
+
+function getRefreshMetadata(records: Array<{ refreshMetadata?: UiRefreshMetadata }>) {
+  const first = records.find((record) => record.refreshMetadata)?.refreshMetadata;
+  if (first) {
+    return first;
+  }
+  const generatedAt = new Date().toISOString();
+  return {
+    generatedAt,
+    staleAfterMs: 5 * 60 * 1000,
+    dataFreshness: "fresh",
+    source: "live",
+  } satisfies UiRefreshMetadata;
+}
+
+function fallbackJobActions(job: RuntimeReportJob | RuntimeReportJobDetail): ReportAction[] {
+  const actions: ReportAction[] = [];
+  if (job.artifact?.downloadUrl) {
+    const expired = isExpired(job.artifact.expiresAt);
+    actions.push({
+      action: "download_artifact",
+      enabled: !expired,
+      ...(expired ? { disabledReasonCode: "artifact_expired" } : {}),
+      riskLevel: "low",
+      href: job.artifact.downloadUrl,
+      openMode: "new_tab",
+    });
+  }
+  if (job.status === "failed") {
+    actions.push({
+      action: "rerun_failed_job",
+      enabled: true,
+      riskLevel: "medium",
+    });
+  }
+  actions.push({
+    action: "inspect_detail",
+    enabled: true,
+    riskLevel: "low",
+  });
+  return actions;
+}
+
+function fallbackPackageActions(
+  filingPackage: RuntimeFilingPackage | RuntimeFilingPackageDetail,
+): ReportAction[] {
+  const actions: ReportAction[] = [];
+  if ("downloadMetadata" in filingPackage && filingPackage.downloadMetadata) {
+    const zipExpired = isExpired(filingPackage.downloadMetadata.zip.expiresAt);
+    const pdfExpired = isExpired(filingPackage.downloadMetadata.pdf.expiresAt);
+    actions.push({
+      action: "download_zip",
+      enabled: !zipExpired,
+      ...(zipExpired ? { disabledReasonCode: "artifact_expired" } : {}),
+      riskLevel: "low",
+      href: filingPackage.downloadMetadata.zip.downloadUrl,
+      openMode: "new_tab",
+    });
+    actions.push({
+      action: "download_pdf",
+      enabled: !pdfExpired,
+      ...(pdfExpired ? { disabledReasonCode: "artifact_expired" } : {}),
+      riskLevel: "low",
+      href: filingPackage.downloadMetadata.pdf.downloadUrl,
+      openMode: "new_tab",
+    });
+  } else if (filingPackage.artifactZipUrl) {
+    actions.push({
+      action: "download_zip",
+      enabled: true,
+      riskLevel: "low",
+      href: filingPackage.artifactZipUrl,
+      openMode: "new_tab",
+    });
+  }
+  actions.push({
+    action: "inspect_detail",
+    enabled: true,
+    riskLevel: "low",
+  });
+  return actions;
+}
+
+function labelForAction(action: string, locale: "en" | "zh") {
+  switch (action) {
+    case "download_artifact":
+      return copyText(locale, "Download", "下載");
+    case "download_zip":
+      return copyText(locale, "ZIP", "ZIP");
+    case "download_pdf":
+      return copyText(locale, "PDF", "PDF");
+    case "rerun_failed_job":
+      return copyText(locale, "Re-run", "重跑");
+    case "inspect_detail":
+      return copyText(locale, "Inspect", "檢視");
+    default:
+      return formatOpsCodeLabel(locale, action);
+  }
+}
+
+function pillToneForStatus(status: string) {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "running":
+      return "info";
+    case "queued":
+      return "pending";
+    case "failed":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
+function getEmptyStateDefinition(
+  reason: EmptyReason,
+  locale: "en" | "zh",
+): EmptyStateDefinition {
+  const definitions: Record<EmptyReason, EmptyStateDefinition> = {
+    no_data: {
+      title: copyText(locale, "Nothing has been run yet", "目前尚未執行任何工作"),
+      body: copyText(
+        locale,
+        "No report jobs or filing packages are available for this scope yet.",
+        "此範圍尚無報表工作或申報套件。",
+      ),
+      accent: "#f59e0b",
+      suggestion: copyText(
+        locale,
+        "Kick off a new report or filing package from the composer.",
+        "可從上方建立新的報表工作或申報套件。",
+      ),
+    },
+    not_provisioned: {
+      title: copyText(locale, "Reporting is not provisioned", "報表能力尚未開通"),
+      body: copyText(
+        locale,
+        "This tenant or role does not have report generation provisioned yet.",
+        "此租戶或角色尚未開通報表產生能力。",
+      ),
+      accent: "#f97316",
+      suggestion: copyText(
+        locale,
+        "Use the cross-app setup workflow before returning here.",
+        "請先完成跨系統開通流程，再返回此頁。",
+      ),
+    },
+    fetch_failed: {
+      title: copyText(locale, "The snapshot could not be loaded", "快照載入失敗"),
+      body: copyText(
+        locale,
+        "The backend returned an error while loading report state.",
+        "後端在載入報表狀態時回傳錯誤。",
+      ),
+      accent: "#ef4444",
+      suggestion: copyText(
+        locale,
+        "Review the error banner, then retry with manual refresh.",
+        "請先查看錯誤訊息，再手動重新整理。",
+      ),
+    },
+    permission_denied: {
+      title: copyText(locale, "You do not have access", "你沒有此頁資料存取權"),
+      body: copyText(
+        locale,
+        "The current actor can open Reports but cannot read this dataset.",
+        "目前身分可進入 Reports，但無法讀取這組資料。",
+      ),
+      accent: "#dc2626",
+      suggestion: copyText(
+        locale,
+        "Escalate access or switch to a scope with reporting read permission.",
+        "請申請權限或切換到有讀取能力的範圍。",
+      ),
+    },
+    external_unavailable: {
+      title: copyText(locale, "An external dependency is unavailable", "外部依賴目前不可用"),
+      body: copyText(
+        locale,
+        "The reporting adapter is degraded or down, so artifacts cannot be issued.",
+        "報表相關外部服務降級或中斷，暫時無法發行成品。",
+      ),
+      accent: "#b45309",
+      suggestion: copyText(
+        locale,
+        "Wait for service recovery and refresh this page manually.",
+        "請等待服務恢復後再手動刷新。",
+      ),
+    },
+    filtered_empty: {
+      title: copyText(locale, "Filters are too narrow", "篩選條件過窄"),
+      body: copyText(
+        locale,
+        "The current tab has data, but nothing matches the active search or status filter.",
+        "目前頁籤有資料，但沒有任何項目符合搜尋或狀態篩選。",
+      ),
+      accent: "#0f766e",
+      suggestion: copyText(
+        locale,
+        "Clear one or more filters to recover the working set.",
+        "請放寬條件以恢復工作集。",
+      ),
+    },
+    driver_not_eligible: {
+      title: copyText(locale, "Driver eligibility does not apply here", "此頁不使用司機資格空態"),
+      body: copyText(
+        locale,
+        "This empty reason belongs to driver-app flows and is not expected on Reports.",
+        "此空態屬於 driver-app 流程，Reports 頁理論上不會使用。",
+      ),
+      accent: "#475569",
+      suggestion: copyText(
+        locale,
+        "Use one of the reporting-specific empty reasons instead.",
+        "請改用報表頁專屬的 empty reason。",
+      ),
+    },
+  };
+  return definitions[reason] ?? definitions.no_data;
 }
 
 export default function ReportsPage() {
   const { t, locale } = useTranslation();
-  const [jobs, setJobs] = useState<ReportJobRecord[]>([]);
-  const [packages, setPackages] = useState<FilingPackageListRecord[]>([]);
-  const [jobDetail, setJobDetail] = useState<ReportJobDetailRecord | null>(
-    null,
-  );
+  const searchParams = useSearchParams();
+  const [jobs, setJobs] = useState<RuntimeReportJob[]>([]);
+  const [packages, setPackages] = useState<RuntimeFilingPackage[]>([]);
+  const [jobDetail, setJobDetail] = useState<RuntimeReportJobDetail | null>(null);
   const [packageDetail, setPackageDetail] =
-    useState<FilingPackageDetailRecord | null>(null);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(
-    null,
-  );
+    useState<RuntimeFilingPackageDetail | null>(null);
+  const [selection, setSelection] = useState<Selection>(null);
+  const [activeTab, setActiveTab] = useState<ActiveTab>("jobs");
+  const [composerMode, setComposerMode] = useState<ComposerMode>(null);
   const [detailLoadingKey, setDetailLoadingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [jobType, setJobType] = useState<ReportJobType>(REPORT_JOB_TYPES[0]!);
   const [format, setFormat] = useState<ReportOutputFormat>("xlsx");
@@ -165,10 +521,32 @@ export default function ReportsPage() {
     useState<FilingPackageType>("monthly_report");
   const [packageMonth, setPackageMonth] = useState(defaultClosedMonth());
   const [packageScope, setPackageScope] = useState("ops-console");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [reasonText, setReasonText] = useState("");
 
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    if (selection) {
+      return;
+    }
+    if (jobs.length > 0) {
+      setSelection({ kind: "job", id: jobs[0]!.jobId });
+      setActiveTab("jobs");
+      void inspectReportJob(jobs[0]!.jobId);
+      return;
+    }
+    if (packages.length > 0) {
+      setSelection({ kind: "package", id: packages[0]!.packageId });
+      setActiveTab("packages");
+      void inspectFilingPackage(packages[0]!.packageId);
+    }
+  }, [jobs, packages, selection]);
 
   async function loadData() {
     setLoading(true);
@@ -178,63 +556,42 @@ export default function ReportsPage() {
         client.listReportJobs(),
         client.listFilingPackages(),
       ]);
-      setJobs(reportJobs);
-      setPackages(filingPackages);
+      setJobs(reportJobs as RuntimeReportJob[]);
+      setPackages(filingPackages as RuntimeFilingPackage[]);
+      setLastLoadedAt(new Date().toISOString());
       setError(null);
-
-      if (
-        selectedJobId &&
-        !reportJobs.some((job) => job.jobId === selectedJobId)
-      ) {
-        setSelectedJobId(null);
-        setJobDetail(null);
-      }
-      if (
-        selectedPackageId &&
-        !filingPackages.some((pkg) => pkg.packageId === selectedPackageId)
-      ) {
-        setSelectedPackageId(null);
-        setPackageDetail(null);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("common.unknown"));
     } finally {
       setLoading(false);
     }
   }
 
-  // FilingPackageListRecord does not carry scope metadata, so summarize by package type.
-  const packageTypeCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    packages.forEach((pkg) => {
-      counts[pkg.packageType] = (counts[pkg.packageType] || 0) + 1;
-    });
-    return counts;
-  }, [packages]);
-
   async function inspectReportJob(jobId: string) {
+    setSelection({ kind: "job", id: jobId });
+    setActiveTab("jobs");
     setDetailLoadingKey(`job:${jobId}`);
     setError(null);
     try {
       const detail = await getOpsClient().getReportJob(jobId);
-      setSelectedJobId(jobId);
-      setJobDetail(detail);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setJobDetail(detail as RuntimeReportJobDetail);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("common.unknown"));
     } finally {
       setDetailLoadingKey(null);
     }
   }
 
   async function inspectFilingPackage(packageId: string) {
+    setSelection({ kind: "package", id: packageId });
+    setActiveTab("packages");
     setDetailLoadingKey(`package:${packageId}`);
     setError(null);
     try {
       const detail = await getOpsClient().getFilingPackage(packageId);
-      setSelectedPackageId(packageId);
-      setPackageDetail(detail);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setPackageDetail(detail as RuntimeFilingPackageDetail);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("common.unknown"));
     } finally {
       setDetailLoadingKey(null);
     }
@@ -258,10 +615,18 @@ export default function ReportsPage() {
             format,
             ...(Object.keys(filters).length > 0 ? { filters } : {}),
           });
+          setNotice(
+            copyText(
+              locale,
+              `Report job ${accepted.jobId} queued.`,
+              `報表工作 ${accepted.jobId} 已排入佇列。`,
+            ),
+          );
+          setComposerMode(null);
           await loadData();
           await inspectReportJob(accepted.jobId);
-        } catch (e) {
-          setError(e instanceof Error ? e.message : t("common.unknown"));
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : t("common.unknown"));
         }
       })();
     });
@@ -278,1207 +643,1811 @@ export default function ReportsPage() {
             period: packageMonth.trim() ? { month: packageMonth.trim() } : {},
             scope: packageScope.trim() ? { channel: packageScope.trim() } : {},
           });
+          setNotice(
+            copyText(
+              locale,
+              `Filing package ${accepted.packageId} queued.`,
+              `申報套件 ${accepted.packageId} 已排入佇列。`,
+            ),
+          );
+          setComposerMode(null);
           await loadData();
           await inspectFilingPackage(accepted.packageId);
-        } catch (e) {
-          setError(e instanceof Error ? e.message : t("common.unknown"));
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : t("common.unknown"));
         }
       })();
     });
   }
 
-  const queuedReports = jobs.filter((job) => job.status === "queued").length;
-  const completedReports = jobs.filter(
-    (job) => job.status === "completed",
-  ).length;
-  const readyArtifacts = jobs.filter((job) => job.artifact).length;
-  const completedPackages = packages.filter(
-    (pkg) => pkg.status === "completed",
-  ).length;
-  const failedReports = jobs.filter((job) => job.status === "failed").length;
-  const runningReports = jobs.filter((job) => job.status === "running").length;
-  const regulatoryJobs = jobs.filter((job) =>
-    REGULATORY_JOB_TYPE_SET.has(job.jobType as ReportJobType),
-  ).length;
-  const expiringArtifacts = jobs.filter((job) =>
-    expiresSoon(job.artifact?.expiresAt),
-  ).length;
-  const immutablePackages = packages.filter(
-    (pkg) => pkg.immutable ?? true,
-  ).length;
+  async function executePendingAction() {
+    if (!pendingAction) {
+      return;
+    }
+    const action = pendingAction.action;
+    if (action.requiresReason && !reasonText.trim()) {
+      return;
+    }
+
+    setPendingAction(null);
+    setReasonText("");
+
+    if (action.href) {
+      window.open(
+        action.href,
+        action.openMode === "same_tab" ? "_self" : "_blank",
+        "noopener,noreferrer",
+      );
+      return;
+    }
+
+    if (
+      pendingAction.kind === "job" &&
+      action.action === "rerun_failed_job" &&
+      "jobType" in pendingAction.record
+    ) {
+      startTransition(() => {
+        void (async () => {
+          try {
+            const record = pendingAction.record;
+            const accepted = await getOpsClient().createReportJob({
+              jobType: record.jobType as ReportJobType,
+              format: record.format,
+              filters: record.filters,
+            });
+            setNotice(
+              copyText(
+                locale,
+                `Replacement job ${accepted.jobId} queued.`,
+                `替代工作 ${accepted.jobId} 已排入佇列。`,
+              ),
+            );
+            await loadData();
+            await inspectReportJob(accepted.jobId);
+          } catch (cause) {
+            setError(
+              cause instanceof Error ? cause.message : t("common.unknown"),
+            );
+          }
+        })();
+      });
+      return;
+    }
+
+    setNotice(
+      copyText(
+        locale,
+        `No handler is wired for ${action.action} yet.`,
+        `${action.action} 目前尚未接上處理器。`,
+      ),
+    );
+  }
+
+  function requestAction(
+    kind: PendingAction["kind"],
+    action: ReportAction,
+    record:
+      | RuntimeReportJob
+      | RuntimeReportJobDetail
+      | RuntimeFilingPackage
+      | RuntimeFilingPackageDetail,
+  ) {
+    if (!action.enabled) {
+      setNotice(
+        copyText(
+          locale,
+          `Action unavailable: ${action.disabledReasonCode ?? action.action}`,
+          `操作不可用：${action.disabledReasonCode ?? action.action}`,
+        ),
+      );
+      return;
+    }
+
+    if (action.riskLevel === "low" && !action.requiresReason) {
+      void executeActionImmediately(kind, action, record);
+      return;
+    }
+
+    setPendingAction({
+      kind,
+      action,
+      record: record as never,
+    });
+  }
+
+  async function executeActionImmediately(
+    kind: PendingAction["kind"],
+    action: ReportAction,
+    record:
+      | RuntimeReportJob
+      | RuntimeReportJobDetail
+      | RuntimeFilingPackage
+      | RuntimeFilingPackageDetail,
+  ) {
+    if (action.href) {
+      window.open(
+        action.href,
+        action.openMode === "same_tab" ? "_self" : "_blank",
+        "noopener,noreferrer",
+      );
+      return;
+    }
+
+    if (kind === "job" && action.action === "inspect_detail") {
+      await inspectReportJob((record as RuntimeReportJob).jobId);
+      return;
+    }
+
+    if (kind === "package" && action.action === "inspect_detail") {
+      await inspectFilingPackage((record as RuntimeFilingPackage).packageId);
+      return;
+    }
+
+    if (kind === "job" && action.action === "rerun_failed_job") {
+      setPendingAction({
+        kind,
+        action,
+        record: record as RuntimeReportJob,
+      });
+      return;
+    }
+
+    setNotice(
+      copyText(
+        locale,
+        `No handler is wired for ${action.action} yet.`,
+        `${action.action} 目前尚未接上處理器。`,
+      ),
+    );
+  }
+
   const activePresetCategory = jobCategory(jobType);
+  const refreshMetadata = getRefreshMetadata([...jobs, ...packages]);
+  const effectiveGeneratedAt = lastLoadedAt ?? refreshMetadata.generatedAt;
+  const freshnessAgeMs = effectiveGeneratedAt
+    ? Date.now() - new Date(effectiveGeneratedAt).getTime()
+    : 0;
+  const effectiveFreshness =
+    freshnessAgeMs > refreshMetadata.staleAfterMs
+      ? "stale"
+      : refreshMetadata.dataFreshness;
+
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredJobs = useMemo(() => {
+    return jobs.filter((job) => {
+      const matchesStatus =
+        statusFilter === "all" ? true : job.status === statusFilter;
+      const matchesSearch =
+        normalizedSearch.length === 0
+          ? true
+          : [
+              job.jobId,
+              job.jobType,
+              summarizeFilters(job.filters),
+              job.submittedBy ?? "",
+            ]
+              .join(" ")
+              .toLowerCase()
+              .includes(normalizedSearch);
+      return matchesStatus && matchesSearch;
+    });
+  }, [jobs, normalizedSearch, statusFilter]);
+
+  const filteredPackages = useMemo(() => {
+    return packages.filter((filingPackage) => {
+      const matchesStatus =
+        statusFilter === "all" ? true : filingPackage.status === statusFilter;
+      const matchesSearch =
+        normalizedSearch.length === 0
+          ? true
+          : [
+              filingPackage.packageId,
+              filingPackage.packageType,
+              filingPackage.scopeSummary ?? "",
+            ]
+              .join(" ")
+              .toLowerCase()
+              .includes(normalizedSearch);
+      return matchesStatus && matchesSearch;
+    });
+  }, [packages, normalizedSearch, statusFilter]);
+
+  const urlEmptyReason = searchParams.get("emptyReason") as EmptyReason | null;
+  const activeEmptyReason = (() => {
+    if (urlEmptyReason) {
+      return urlEmptyReason;
+    }
+    if (error) {
+      if (/403|permission|forbidden/i.test(error)) {
+        return "permission_denied";
+      }
+      if (/adapter|external|unavailable|timeout|degraded|down/i.test(error)) {
+        return "external_unavailable";
+      }
+      return "fetch_failed";
+    }
+    if (activeTab === "jobs" && jobs.length > 0 && filteredJobs.length === 0) {
+      return "filtered_empty";
+    }
+    if (
+      activeTab === "packages" &&
+      packages.length > 0 &&
+      filteredPackages.length === 0
+    ) {
+      return "filtered_empty";
+    }
+    return "no_data";
+  })();
+
+  const emptyStateDefinition = getEmptyStateDefinition(activeEmptyReason, locale);
+
+  const selectedJob =
+    selection?.kind === "job"
+      ? jobs.find((job) => job.jobId === selection.id) ?? null
+      : null;
+  const selectedPackage =
+    selection?.kind === "package"
+      ? packages.find((filingPackage) => filingPackage.packageId === selection.id) ??
+        null
+      : null;
+
+  const selectedJobActions = jobDetail
+    ? jobDetail.availableActions ?? fallbackJobActions(jobDetail)
+    : selectedJob
+      ? selectedJob.availableActions ?? fallbackJobActions(selectedJob)
+      : [];
+
+  const selectedPackageActions = packageDetail
+    ? packageDetail.availableActions ?? fallbackPackageActions(packageDetail)
+    : selectedPackage
+      ? selectedPackage.availableActions ?? fallbackPackageActions(selectedPackage)
+      : [];
+
+  const metrics = [
+    {
+      label: copyText(locale, "Queued / running", "排隊 / 執行中"),
+      value: jobs.filter((job) => job.status !== "completed" && job.status !== "failed")
+        .length,
+      note: copyText(
+        locale,
+        "Background work still consuming capacity",
+        "仍在背景消耗處理容量",
+      ),
+    },
+    {
+      label: copyText(locale, "Ready artifacts", "可下載成品"),
+      value:
+        jobs.filter((job) => job.artifact).length +
+        packages.filter((filingPackage) => filingPackage.artifactZipUrl).length,
+      note: copyText(
+        locale,
+        "Signed outputs issued and ready for handoff",
+        "已發行簽名成品，可交付下載",
+      ),
+    },
+    {
+      label: copyText(locale, "Expiring soon", "即將到期"),
+      value:
+        jobs.filter((job) => expiresSoon(job.artifact?.expiresAt)).length +
+        packages.filter((filingPackage) => expiresSoon(filingPackage.expiresAt)).length,
+      note: copyText(
+        locale,
+        "Links within the next 12 hours need operator attention",
+        "12 小時內到期的連結需要操作員處理",
+      ),
+    },
+    {
+      label: copyText(locale, "Filing packages", "申報套件"),
+      value: packages.length,
+      note: copyText(
+        locale,
+        "Immutable bundles for compliance and audit exchange",
+        "面向合規與稽核交換的不可變套件",
+      ),
+    },
+  ];
 
   return (
     <>
-      <PageHeader title={t("reports.title")} subtitle={t("reports.subtitle")} />
-      <div>
-        {error && (
-          <div className="error-banner">
-            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
-          </div>
+      <PageHeader
+        title={copyText(locale, "Reports", "報表")}
+        subtitle={copyText(
+          locale,
+          "report jobs · filing packages · signed artifact short-lived URLs",
+          "report jobs · filing packages · signed artifact 短效 URL",
         )}
-
-        <section className="summary-grid">
-          {[
-            {
-              label: t("reports.queuedJobs"),
-              value: queuedReports,
-              note: t("reports.queuedJobsSub"),
-            },
-            {
-              label: t("reports.completedReports"),
-              value: completedReports,
-              note: t("reports.completedReportsSub"),
-            },
-            {
-              label: t("reports.regulatoryJobs"),
-              value: regulatoryJobs,
-              note: t("reports.regulatoryJobsSub"),
-            },
-            {
-              label: t("reports.artifactsReady"),
-              value: readyArtifacts + completedPackages,
-              note: t("reports.artifactsReadySub"),
-            },
-            {
-              label: copyText(locale, "Expiring access", "即將過期的存取"),
-              value: expiringArtifacts,
-              note: copyText(
-                locale,
-                "Signed URLs expiring within 12 hours",
-                "12 小時內到期的簽名網址",
-              ),
-            },
-          ].map((card) => (
-            <div key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
+      />
+      <div className="reports-page">
+        <section className="hero-shell">
+          <div className="hero-top">
+            <div>
+              <p className="hero-brow">
+                {copyText(locale, "Monitoring", "營運監控")}
+              </p>
+              <h1>{copyText(locale, "Reporting workspace", "報表工作台")}</h1>
+              <p className="hero-copy">
+                {copyText(
+                  locale,
+                  "Kick off report jobs, issue filing packages, watch signed artifact expiry, and only refresh when you need a new snapshot.",
+                  "在同一工作台建立報表、發行申報套件、追蹤簽名成品到期時間，並以手動 refresh 控制快照更新。",
+                )}
+              </p>
             </div>
-          ))}
+            <div className="hero-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => void loadData()}
+                disabled={loading || pending}
+              >
+                {copyText(locale, "Refresh snapshot", "刷新快照")}
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() =>
+                  setComposerMode((current) =>
+                    current === "report" ? null : "report",
+                  )
+                }
+              >
+                {copyText(locale, "Create report job", "建立報表工作")}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() =>
+                  setComposerMode((current) =>
+                    current === "package" ? null : "package",
+                  )
+                }
+              >
+                {copyText(locale, "Generate filing package", "產生申報套件")}
+              </button>
+            </div>
+          </div>
+
+          <div className="hero-meta">
+            <div className={`freshness-banner freshness-${effectiveFreshness}`}>
+              <div>
+                <span className="meta-label">T6</span>
+                <strong>{copyText(locale, "Manual refresh", "手動刷新")}</strong>
+              </div>
+              <div className="freshness-copy">
+                <span>
+                  {copyText(locale, "Generated", "產生時間")}{" "}
+                  {formatDateTimeShort(effectiveGeneratedAt)}
+                </span>
+                <span>
+                  {copyText(locale, "Source", "來源")} {refreshMetadata.source}
+                </span>
+                <span>
+                  {effectiveFreshness === "stale"
+                    ? copyText(
+                        locale,
+                        "Snapshot may be stale. Refresh before download handoff.",
+                        "快照可能已過時。交付下載前請先刷新。",
+                      )
+                    : copyText(
+                        locale,
+                        "Snapshot still within the manual freshness window.",
+                        "快照仍在手動刷新可接受的新鮮度範圍內。",
+                      )}
+                </span>
+              </div>
+            </div>
+
+            <div className="tab-strip">
+              <button
+                type="button"
+                className={activeTab === "jobs" ? "tab active" : "tab"}
+                onClick={() => setActiveTab("jobs")}
+              >
+                Report jobs
+                <span>{jobs.length}</span>
+              </button>
+              <button
+                type="button"
+                className={activeTab === "packages" ? "tab active" : "tab"}
+                onClick={() => setActiveTab("packages")}
+              >
+                Filing packages
+                <span>{packages.length}</span>
+              </button>
+            </div>
+          </div>
         </section>
 
-        {Object.keys(packageTypeCounts).length > 0 && (
-          <section className="summary-grid">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Filing Packages by Type</p>
-                <h3>Filing Packages by Type</h3>
+        {(error || notice) && (
+          <section className="message-stack">
+            {error && (
+              <div className="error-banner">
+                <strong>{copyText(locale, "Backend message", "後端訊息")}</strong>
+                <span>{error}</span>
               </div>
-            </div>
-            {Object.entries(packageTypeCounts).map(([packageType, count]) => (
-              <div key={packageType} className="summary-card">
-                <span>{formatOpsCodeLabel(locale, packageType)}</span>
-                <strong>{count}</strong>
-                <small>Filing Packages</small>
+            )}
+            {notice && (
+              <div className="notice-banner">
+                <strong>{copyText(locale, "Operator receipt", "操作回執")}</strong>
+                <span>{notice}</span>
               </div>
-            ))}
+            )}
           </section>
         )}
 
-        <section className="detail-grid">
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copyText(locale, "Queue posture", "佇列狀態")}
-                </p>
-                <h3>
-                  {copyText(locale, "Report job supervision", "報表工作監控")}
-                </h3>
-              </div>
-            </div>
-            <div className="detail-card-grid">
-              {[
-                {
-                  label: copyText(locale, "Queued", "排隊中"),
-                  value: queuedReports,
-                  note: copyText(
-                    locale,
-                    "Waiting for worker pickup",
-                    "等待背景工作者接手",
-                  ),
-                },
-                {
-                  label: copyText(locale, "Running", "執行中"),
-                  value: runningReports,
-                  note: copyText(
-                    locale,
-                    "Background execution in progress",
-                    "背景執行中",
-                  ),
-                },
-                {
-                  label: copyText(locale, "Failed", "失敗"),
-                  value: failedReports,
-                  note: copyText(
-                    locale,
-                    "Needs operator review or rerun",
-                    "需要人工檢視或重新執行",
-                  ),
-                },
-              ].map((item) => (
-                <div key={item.label} className="detail-card">
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                  <small>{item.note}</small>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copyText(locale, "Access rules", "存取規則")}
-                </p>
-                <h3>
-                  {copyText(
-                    locale,
-                    "Artifact and filing controls",
-                    "產物與申報控制",
-                  )}
-                </h3>
-              </div>
-            </div>
-            <div className="detail-card-grid">
-              {[
-                {
-                  label: copyText(locale, "Immutable packages", "不可變申報包"),
-                  value: immutablePackages,
-                  note: copyText(
-                    locale,
-                    "Filing bundles stay append-only once generated",
-                    "申報包生成後維持不可變",
-                  ),
-                },
-                {
-                  label: copyText(locale, "Regulatory jobs", "監管類工作"),
-                  value: regulatoryJobs,
-                  note: copyText(
-                    locale,
-                    "Compliance-facing outputs under signed access",
-                    "面向合規的產物走簽名下載",
-                  ),
-                },
-                {
-                  label: copyText(locale, "Expiring URLs", "即將過期的網址"),
-                  value: expiringArtifacts,
-                  note: copyText(
-                    locale,
-                    "Refresh signed links before download handoff",
-                    "交付下載前請更新簽名連結",
-                  ),
-                },
-              ].map((item) => (
-                <div key={item.label} className="detail-card">
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                  <small>{item.note}</small>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="form-stack">
-          <form className="panel" onSubmit={handleReportSubmit}>
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("reports.createReportEyebrow")}</p>
-                <h3>{t("reports.backgroundExport")}</h3>
-              </div>
-              <span className="pill">
-                {t(`reports.category.${activePresetCategory.toLowerCase()}`)}
-              </span>
-            </div>
-            <div className="form-grid">
-              <label>
-                {t("reports.form.type")}
-                <select
-                  value={jobType}
-                  onChange={(event) =>
-                    setJobType(event.target.value as ReportJobType)
-                  }
-                >
-                  {JOB_PRESETS.map((preset) => (
-                    <option key={preset.value} value={preset.value}>
-                      {t(`reports.type.${preset.value}`)}
-                    </option>
-                  ))}
-                </select>
-                <small>
-                  {t(`reports.type.${jobType}.desc`)}{" "}
-                  {t("reports.categoryLabel", {
-                    value: t(
-                      `reports.category.${activePresetCategory.toLowerCase()}`,
-                    ),
-                  })}
-                </small>
-              </label>
-              <label>
-                {t("reports.form.format")}
-                <select
-                  value={format}
-                  onChange={(event) =>
-                    setFormat(event.target.value as ReportOutputFormat)
-                  }
-                >
-                  {REPORT_OUTPUT_FORMATS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t("reports.form.periodTag")}
-                <input
-                  value={periodLabel}
-                  onChange={(event) => setPeriodLabel(event.target.value)}
-                  placeholder={getOpsLabel(locale, "reportsPeriodExample")}
-                />
-              </label>
-              <label>
-                {t("reports.form.vehicleId")}
-                <input
-                  value={vehicleId}
-                  onChange={(event) => setVehicleId(event.target.value)}
-                  placeholder={t("reports.form.vehicleId")}
-                />
-              </label>
-            </div>
-            <div className="form-actions">
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={pending}
-              >
-                {pending
-                  ? t("reports.form.submitting")
-                  : t("reports.form.createJob")}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => void loadData()}
-              >
-                {t("common.refresh")}
-              </button>
-            </div>
-          </form>
-
-          <form className="panel" onSubmit={handlePackageSubmit}>
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("reports.generateFiling")}</p>
-                <h3>{t("reports.immutableFiling")}</h3>
-              </div>
-              <span className="pill">{t("reports.complianceBundle")}</span>
-            </div>
-            <div className="form-grid">
-              <label>
-                {t("reports.form.packageType")}
-                <select
-                  value={packageType}
-                  onChange={(event) =>
-                    setPackageType(event.target.value as FilingPackageType)
-                  }
-                >
-                  {FILING_PACKAGE_TYPES.map((value) => (
-                    <option key={value} value={value}>
-                      {formatOpsCodeLabel(locale, value)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t("reports.form.filingMonth")}
-                <input
-                  value={packageMonth}
-                  onChange={(event) => setPackageMonth(event.target.value)}
-                  placeholder={getOpsLabel(locale, "reportsClosedMonthExample")}
-                />
-              </label>
-              <label>
-                {t("reports.form.scopeChannel")}
-                <input
-                  value={packageScope}
-                  onChange={(event) => setPackageScope(event.target.value)}
-                  placeholder={getOpsLabel(locale, "reportsRequestedByExample")}
-                />
-              </label>
-            </div>
-            <div className="form-actions">
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={pending}
-              >
-                {pending
-                  ? t("reports.form.submitting")
-                  : t("reports.form.generatePackage")}
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <section className="detail-grid">
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("reports.reportDetailEyebrow")}</p>
-                <h3>
-                  {jobDetail
-                    ? t(`reports.type.${jobDetail.jobType}`)
-                    : t("reports.selectReportJob")}
-                </h3>
-              </div>
-            </div>
-            {selectedJobId && detailLoadingKey === `job:${selectedJobId}` ? (
-              <p>{t("reports.loadingReportDetail")}</p>
-            ) : jobDetail ? (
-              <>
-                <div className="detail-stats">
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.status")}</span>
-                    <strong>
-                      {formatOpsCodeLabel(locale, jobDetail.status)}
-                    </strong>
-                    <small>
-                      {t(
-                        `reports.category.${jobCategory(jobDetail.jobType).toLowerCase()}`,
-                      )}
-                    </small>
+        {composerMode && (
+          <section className="composer-panel">
+            {composerMode === "report" ? (
+              <form className="composer-form" onSubmit={handleReportSubmit}>
+                <div className="composer-head">
+                  <div>
+                    <p>{copyText(locale, "Create report", "建立報表")}</p>
+                    <h2>{copyText(locale, "Background export job", "背景匯出工作")}</h2>
                   </div>
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.format")}</span>
-                    <strong>{jobDetail.format}</strong>
-                    <small>{jobDetail.jobId}</small>
-                  </div>
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.created")}</span>
-                    <strong>{formatDateTime(jobDetail.createdAt)}</strong>
-                    <small>
-                      {t("reports.detail.updated", {
-                        value: formatDateTime(jobDetail.updatedAt),
-                      })}
-                    </small>
-                  </div>
+                  <span className="composer-chip">
+                    {t(`reports.category.${activePresetCategory.toLowerCase()}`)}
+                  </span>
                 </div>
-
-                <div className="detail-section">
-                  <h4>{t("reports.detail.filters")}</h4>
-                  {Object.keys(jobDetail.filters).length > 0 ? (
-                    <pre className="filters-preview">
-                      {JSON.stringify(jobDetail.filters, null, 2)}
-                    </pre>
-                  ) : (
-                    <p className="cell-subcopy">
-                      {t("reports.detail.noFilters")}
-                    </p>
-                  )}
-                </div>
-
-                <div className="detail-section">
-                  <h4>{t("reports.detail.signedArtifact")}</h4>
-                  {jobDetail.artifact ? (
-                    <div className="detail-card-grid">
-                      <div className="detail-card">
-                        <span>{t("reports.detail.manifest")}</span>
-                        <strong>
-                          {shortHash(jobDetail.artifact.manifestHash)}
-                        </strong>
-                        <small>
-                          {jobDetail.artifact.downloadMetadata.keyId}
-                        </small>
-                      </div>
-                      <div className="detail-card">
-                        <span>{t("reports.detail.expires")}</span>
-                        <strong>
-                          {formatDateTime(
-                            jobDetail.artifact.downloadMetadata.expiresAt,
-                          )}
-                        </strong>
-                        <small>{t("reports.detail.backendSignedUrl")}</small>
-                      </div>
-                      <div className="detail-card">
-                        <span>{t("reports.download")}</span>
-                        <a
-                          className="inline-link"
-                          href={jobDetail.artifact.downloadMetadata.downloadUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {t("reports.detail.openSignedArtifact")}
-                        </a>
-                        <small>
-                          {formatOpsCodeLabel(
-                            locale,
-                            jobDetail.artifact.artifactType,
-                          )}
-                        </small>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="cell-subcopy">
-                      {t("reports.detail.artifactPending")}
-                    </p>
-                  )}
-                </div>
-
-                {jobDetail.rows && jobDetail.rows.length > 0 ? (
-                  <div className="detail-section">
-                    <h4>{t("reports.detail.dispatchRows")}</h4>
-                    <table className="table compact-table">
-                      <thead>
-                        <tr>
-                          <th>{t("reports.col.order")}</th>
-                          <th>{t("reports.col.call")}</th>
-                          <th>{t("reports.col.recording")}</th>
-                          <th>{t("reports.col.missing")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {jobDetail.rows.map((row) => (
-                          <tr key={row.orderId}>
-                            <td>
-                              <div className="cell-title">{row.orderNo}</div>
-                              <div className="cell-subcopy">{row.orderId}</div>
-                            </td>
-                            <td>{row.callId ?? "—"}</td>
-                            <td>{row.recordingId ?? "—"}</td>
-                            <td>
-                              {row.missingRecording
-                                ? t("common.yes")
-                                : t("common.no")}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null}
-
-                {jobDetail.partnerRevenueRows &&
-                jobDetail.partnerRevenueRows.length > 0 ? (
-                  <div className="detail-section">
-                    <h4>{t("reports.detail.partnerRevenueRows")}</h4>
-                    <table className="table compact-table">
-                      <thead>
-                        <tr>
-                          <th>{t("reports.col.order")}</th>
-                          <th>{t("reports.col.partner")}</th>
-                          <th>{t("reports.col.eligibility")}</th>
-                          <th>{t("reports.col.benefit")}</th>
-                          <th>{t("reports.col.amount")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {jobDetail.partnerRevenueRows.map((row) => (
-                          <tr key={row.orderId}>
-                            <td>
-                              <div className="cell-title">{row.orderNo}</div>
-                              <div className="cell-subcopy">
-                                {row.businessDispatchSubtype}
-                              </div>
-                            </td>
-                            <td>
-                              <div className="cell-title">{row.partnerId}</div>
-                              <div className="cell-subcopy">
-                                {row.partnerEntrySlug}
-                              </div>
-                            </td>
-                            <td>
-                              <div className="cell-title">
-                                {row.eligibilityVerificationId ?? "—"}
-                              </div>
-                              <div className="cell-subcopy">
-                                {row.issuerAuthorizationRef ?? "—"}
-                              </div>
-                            </td>
-                            <td>
-                              <div className="cell-title">
-                                {row.benefitReference ?? "—"}
-                              </div>
-                              <div className="cell-subcopy">
-                                {row.partnerProgramId ?? "—"}
-                              </div>
-                            </td>
-                            <td>
-                              {row.amount.currency}{" "}
-                              {(row.amount.amountMinor / 100).toFixed(0)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <p className="cell-subcopy">
-                {t("reports.detail.selectReportDetail")}
-              </p>
-            )}
-          </div>
-
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("reports.packageDetailEyebrow")}</p>
-                <h3>
-                  {packageDetail
-                    ? t("reports.packageManifest", {
-                        type: formatOpsCodeLabel(
-                          locale,
-                          packageDetail.packageType,
-                        ),
-                      })
-                    : t("reports.selectFilingPackage")}
-                </h3>
-              </div>
-            </div>
-            {selectedPackageId &&
-            detailLoadingKey === `package:${selectedPackageId}` ? (
-              <p>{t("reports.loadingPackageDetail")}</p>
-            ) : packageDetail ? (
-              <>
-                <div className="detail-stats">
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.status")}</span>
-                    <strong>
-                      {formatOpsCodeLabel(locale, packageDetail.status)}
-                    </strong>
-                    <small>
-                      {formatOpsCodeLabel(
+                <div className="composer-grid">
+                  <label>
+                    {copyText(locale, "Report type", "報表類型")}
+                    <select
+                      value={jobType}
+                      onChange={(event) =>
+                        setJobType(event.target.value as ReportJobType)
+                      }
+                    >
+                      {JOB_PRESETS.map((preset) => (
+                        <option key={preset.value} value={preset.value}>
+                          {formatOpsCodeLabel(locale, preset.value)}
+                        </option>
+                      ))}
+                    </select>
+                    <small>{t(`reports.type.${jobType}.desc`)}</small>
+                  </label>
+                  <label>
+                    {copyText(locale, "Format", "格式")}
+                    <select
+                      value={format}
+                      onChange={(event) =>
+                        setFormat(event.target.value as ReportOutputFormat)
+                      }
+                    >
+                      {REPORT_OUTPUT_FORMATS.map((outputFormat) => (
+                        <option key={outputFormat} value={outputFormat}>
+                          {outputFormat.toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    {copyText(locale, "Period or tag", "期間 / 標籤")}
+                    <input
+                      value={periodLabel}
+                      onChange={(event) => setPeriodLabel(event.target.value)}
+                      placeholder={copyText(
                         locale,
-                        packageDetail.immutable ? "immutable" : "mutable",
+                        "2026-04 or mtd",
+                        "2026-04 或 mtd",
                       )}
-                    </small>
-                  </div>
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.generated")}</span>
-                    <strong>{formatDateTime(packageDetail.generatedAt)}</strong>
-                    <small>{packageDetail.packageId}</small>
-                  </div>
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.checksum")}</span>
-                    <strong>
-                      {shortHash(packageDetail.manifest?.checksum)}
-                    </strong>
-                    <small>
-                      {t("reports.detail.packageItems", {
-                        count: packageDetail.items.length,
-                      })}
-                    </small>
-                  </div>
+                    />
+                  </label>
+                  <label>
+                    {copyText(locale, "Vehicle id", "車輛編號")}
+                    <input
+                      value={vehicleId}
+                      onChange={(event) => setVehicleId(event.target.value)}
+                      placeholder={copyText(locale, "Optional", "選填")}
+                    />
+                  </label>
                 </div>
+                <div className="composer-submit">
+                  <button type="submit" className="primary-button" disabled={pending}>
+                    {pending
+                      ? copyText(locale, "Submitting…", "提交中…")
+                      : copyText(locale, "Queue report job", "送出報表工作")}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form className="composer-form" onSubmit={handlePackageSubmit}>
+                <div className="composer-head">
+                  <div>
+                    <p>{copyText(locale, "Create filing", "建立申報")}</p>
+                    <h2>{copyText(locale, "Immutable filing package", "不可變申報套件")}</h2>
+                  </div>
+                  <span className="composer-chip">
+                    {copyText(locale, "Low-risk action", "低風險操作")}
+                  </span>
+                </div>
+                <div className="composer-grid">
+                  <label>
+                    {copyText(locale, "Package type", "套件類型")}
+                    <select
+                      value={packageType}
+                      onChange={(event) =>
+                        setPackageType(event.target.value as FilingPackageType)
+                      }
+                    >
+                      {FILING_PACKAGE_TYPES.map((value) => (
+                        <option key={value} value={value}>
+                          {formatOpsCodeLabel(locale, value)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    {copyText(locale, "Closed month", "結帳月份")}
+                    <input
+                      value={packageMonth}
+                      onChange={(event) => setPackageMonth(event.target.value)}
+                      placeholder="2026-04"
+                    />
+                  </label>
+                  <label>
+                    {copyText(locale, "Scope channel", "範圍頻道")}
+                    <input
+                      value={packageScope}
+                      onChange={(event) => setPackageScope(event.target.value)}
+                      placeholder="ops-console"
+                    />
+                  </label>
+                </div>
+                <div className="composer-submit">
+                  <button type="submit" className="primary-button" disabled={pending}>
+                    {pending
+                      ? copyText(locale, "Submitting…", "提交中…")
+                      : copyText(locale, "Queue filing package", "送出申報套件")}
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
+        )}
 
-                <div className="detail-section">
-                  <h4>{t("reports.detail.signedDownloads")}</h4>
-                  {packageDetail.downloadMetadata ? (
-                    <div className="detail-card-grid">
-                      <div className="detail-card">
-                        <span>{t("reports.detail.zipBundle")}</span>
-                        <a
-                          className="inline-link"
-                          href={packageDetail.downloadMetadata.zip.downloadUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {t("reports.detail.openSignedZip")}
-                        </a>
+        <section className="metric-grid">
+          {metrics.map((metric) => (
+            <article key={metric.label} className="metric-card">
+              <span>{metric.label}</span>
+              <strong>{metric.value}</strong>
+              <small>{metric.note}</small>
+            </article>
+          ))}
+        </section>
+
+        <section className="workspace-grid">
+          <article className="surface-card">
+            <div className="surface-head">
+              <div>
+                <p>{copyText(locale, "Snapshot list", "快照列表")}</p>
+                <h2>
+                  {activeTab === "jobs"
+                    ? copyText(locale, "Report job queue", "報表工作佇列")
+                    : copyText(locale, "Filing package queue", "申報套件佇列")}
+                </h2>
+              </div>
+              <div className="surface-controls">
+                <input
+                  className="search-input"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={copyText(locale, "Search id, type, scope", "搜尋編號、類型、範圍")}
+                />
+                <select
+                  className="status-select"
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                >
+                  <option value="all">{copyText(locale, "All status", "全部狀態")}</option>
+                  <option value="queued">queued</option>
+                  <option value="running">running</option>
+                  <option value="completed">completed</option>
+                  <option value="failed">failed</option>
+                </select>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="loading-card">
+                {copyText(locale, "Loading report snapshot…", "正在載入報表快照…")}
+              </div>
+            ) : activeTab === "jobs" ? (
+              filteredJobs.length === 0 ? (
+                <EmptyStatePanel definition={emptyStateDefinition} />
+              ) : (
+                <div className="table-shell">
+                  <div className="table-head table-head-jobs">
+                    <span>JOB</span>
+                    <span>KIND</span>
+                    <span>PARAMETERS</span>
+                    <span>STATUS</span>
+                    <span>TTL</span>
+                    <span>CREATED</span>
+                    <span>ACTIONS</span>
+                  </div>
+                  {filteredJobs.map((job) => {
+                    const actions =
+                      job.availableActions ?? fallbackJobActions(job);
+                    return (
+                      <button
+                        key={job.jobId}
+                        type="button"
+                        className={
+                          selection?.kind === "job" && selection.id === job.jobId
+                            ? "table-row active"
+                            : "table-row"
+                        }
+                        onClick={() => void inspectReportJob(job.jobId)}
+                      >
+                        <span className="mono">{job.jobId}</span>
+                        <span>
+                          <strong>{formatOpsCodeLabel(locale, job.jobType)}</strong>
+                          <small>{jobCategory(job.jobType)}</small>
+                        </span>
+                        <span>{job.parametersSummary ?? summarizeFilters(job.filters)}</span>
+                        <span>
+                          <StatusPill
+                            status={job.status}
+                            locale={locale}
+                            tone={pillToneForStatus(job.status)}
+                          />
+                        </span>
+                        <span className="mono">
+                          {job.artifact?.expiresAt
+                            ? formatRelativeMinutes(job.artifact.expiresAt)
+                            : copyText(locale, "pending", "待發行")}
+                        </span>
+                        <span className="mono">{formatDateTimeShort(job.createdAt)}</span>
+                        <span className="action-cell">
+                          {actions.map((action) => (
+                            <button
+                              key={`${job.jobId}-${action.action}`}
+                              type="button"
+                              className="action-pill"
+                              disabled={!action.enabled}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                requestAction("job", action, job);
+                              }}
+                            >
+                              {action.label ?? labelForAction(action.action, locale)}
+                            </button>
+                          ))}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            ) : filteredPackages.length === 0 ? (
+              <EmptyStatePanel definition={emptyStateDefinition} />
+            ) : (
+              <div className="table-shell">
+                <div className="table-head table-head-packages">
+                  <span>PACKAGE</span>
+                  <span>TYPE</span>
+                  <span>SCOPE / PERIOD</span>
+                  <span>STATUS</span>
+                  <span>EXPIRES</span>
+                  <span>GENERATED</span>
+                  <span>ACTIONS</span>
+                </div>
+                {filteredPackages.map((filingPackage) => {
+                  const actions =
+                    filingPackage.availableActions ??
+                    fallbackPackageActions(filingPackage);
+                  return (
+                    <button
+                      key={filingPackage.packageId}
+                      type="button"
+                      className={
+                        selection?.kind === "package" &&
+                        selection.id === filingPackage.packageId
+                          ? "table-row active"
+                          : "table-row"
+                      }
+                      onClick={() =>
+                        void inspectFilingPackage(filingPackage.packageId)
+                      }
+                    >
+                      <span className="mono">{filingPackage.packageId}</span>
+                      <span>
+                        <strong>
+                          {formatOpsCodeLabel(locale, filingPackage.packageType)}
+                        </strong>
                         <small>
-                          {t("reports.detail.expiresAt", {
-                            value: formatDateTime(
-                              packageDetail.downloadMetadata.zip.expiresAt,
-                            ),
-                          })}
+                          {filingPackage.immutable ?? true
+                            ? copyText(locale, "Immutable", "不可變")
+                            : copyText(locale, "Mutable", "可變")}
                         </small>
+                      </span>
+                      <span>
+                        {filingPackage.scopeSummary ??
+                          copyText(
+                            locale,
+                            "Scope not carried by list payload",
+                            "清單 payload 未攜帶 scope",
+                          )}
+                      </span>
+                      <span>
+                        <StatusPill
+                          status={filingPackage.status}
+                          locale={locale}
+                          tone={pillToneForStatus(filingPackage.status)}
+                        />
+                      </span>
+                      <span className="mono">
+                        {filingPackage.expiresAt
+                          ? formatRelativeMinutes(filingPackage.expiresAt)
+                          : copyText(locale, "issue on detail", "詳情發行")}
+                      </span>
+                      <span className="mono">
+                        {formatDateTimeShort(
+                          filingPackage.generatedAt ?? filingPackage.createdAt,
+                        )}
+                      </span>
+                      <span className="action-cell">
+                        {actions.map((action) => (
+                          <button
+                            key={`${filingPackage.packageId}-${action.action}`}
+                            type="button"
+                            className="action-pill"
+                            disabled={!action.enabled}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              requestAction("package", action, filingPackage);
+                            }}
+                          >
+                            {action.label ?? labelForAction(action.action, locale)}
+                          </button>
+                        ))}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </article>
+
+          <aside className="detail-card">
+            <div className="surface-head">
+              <div>
+                <p>{copyText(locale, "Selection detail", "選取詳情")}</p>
+                <h2>
+                  {selection?.kind === "package"
+                    ? copyText(locale, "Filing package detail", "申報套件詳情")
+                    : copyText(locale, "Report job detail", "報表工作詳情")}
+                </h2>
+              </div>
+            </div>
+
+            {detailLoadingKey ? (
+              <div className="loading-card">
+                {copyText(locale, "Loading detail…", "正在載入詳情…")}
+              </div>
+            ) : selection?.kind === "job" ? (
+              selectedJob ? (
+                <>
+                  <div className="detail-block">
+                    <div className="detail-id-row">
+                      <div>
+                        <strong>{selectedJob.jobId}</strong>
+                        <p>{formatOpsCodeLabel(locale, selectedJob.jobType)}</p>
                       </div>
-                      <div className="detail-card">
-                        <span>{t("reports.detail.pdfBundle")}</span>
-                        <a
-                          className="inline-link"
-                          href={packageDetail.downloadMetadata.pdf.downloadUrl}
-                          rel="noreferrer"
-                          target="_blank"
+                      <StatusPill
+                        status={selectedJob.status}
+                        locale={locale}
+                        tone={pillToneForStatus(selectedJob.status)}
+                      />
+                    </div>
+                    <dl className="detail-list">
+                      <DetailItem
+                        label={copyText(locale, "Submitted by", "提交者")}
+                        value={jobDetail?.submittedBy ?? selectedJob.submittedBy ?? "system"}
+                      />
+                      <DetailItem
+                        label={copyText(locale, "Submitted at", "提交時間")}
+                        value={formatDateTime(jobDetail?.createdAt ?? selectedJob.createdAt)}
+                      />
+                      <DetailItem
+                        label={copyText(locale, "Completed at", "完成時間")}
+                        value={formatDateTime(
+                          jobDetail?.completedAt ??
+                            selectedJob.completedAt ??
+                            (selectedJob.status === "completed"
+                              ? selectedJob.updatedAt
+                              : null),
+                        )}
+                      />
+                      <DetailItem
+                        label={copyText(locale, "Parameters", "參數")}
+                        value={jobDetail?.parametersSummary ?? summarizeFilters(selectedJob.filters)}
+                      />
+                    </dl>
+                  </div>
+
+                  <div className="detail-block">
+                    <div className="mini-banner">
+                      <strong>{copyText(locale, "Artifact handling", "成品處理")}</strong>
+                      <span>
+                        {jobDetail?.artifact?.downloadMetadata
+                          ? copyText(
+                              locale,
+                              `Signed URL TTL ${jobDetail.artifact.downloadMetadata.ttlMinutes} minutes`,
+                              `簽名網址 TTL ${jobDetail.artifact.downloadMetadata.ttlMinutes} 分鐘`,
+                            )
+                          : selectedJob.artifact
+                            ? copyText(
+                                locale,
+                                `Link expires ${formatRelativeMinutes(selectedJob.artifact.expiresAt)}`,
+                                `連結將於 ${formatRelativeMinutes(selectedJob.artifact.expiresAt)} 後到期`,
+                              )
+                            : copyText(
+                                locale,
+                                "Artifact not issued yet",
+                                "成品尚未發行",
+                              )}
+                      </span>
+                    </div>
+                    {selectedJob.status === "failed" && (
+                      <div className="failure-card">
+                        <strong>{copyText(locale, "Failure", "失敗原因")}</strong>
+                        <span>
+                          {jobDetail?.failureReason ??
+                            selectedJob.failureReason ??
+                            copyText(
+                              locale,
+                              "Backend did not provide a failure reason.",
+                              "後端尚未提供失敗原因。",
+                            )}
+                        </span>
+                      </div>
+                    )}
+                    <div className="detail-actions">
+                      {selectedJobActions.map((action) => (
+                        <button
+                          key={`detail-${action.action}`}
+                          type="button"
+                          className={
+                            action.action.startsWith("download")
+                              ? "primary-button"
+                              : "ghost-button"
+                          }
+                          disabled={!action.enabled}
+                          onClick={() => requestAction("job", action, selectedJob)}
                         >
-                          {t("reports.detail.openSignedPdf")}
-                        </a>
-                        <small>
-                          {t("reports.detail.expiresAt", {
-                            value: formatDateTime(
-                              packageDetail.downloadMetadata.pdf.expiresAt,
-                            ),
-                          })}
-                        </small>
+                          {action.label ?? labelForAction(action.action, locale)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {jobDetail?.rows?.length ? (
+                    <div className="detail-block">
+                      <h3>{copyText(locale, "Dispatch trace rows", "派車追蹤列")}</h3>
+                      <div className="detail-table">
+                        {jobDetail.rows.slice(0, 4).map((row) => (
+                          <div key={row.orderId} className="detail-table-row">
+                            <span className="mono">{row.orderNo}</span>
+                            <span>{row.callId ?? "—"}</span>
+                            <span>{row.recordingId ?? "—"}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ) : (
-                    <p className="cell-subcopy">
-                      {t("reports.detail.packagePending")}
-                    </p>
-                  )}
+                  ) : null}
+                </>
+              ) : (
+                <EmptyStatePanel definition={emptyStateDefinition} compact />
+              )
+            ) : selectedPackage ? (
+              <>
+                <div className="detail-block">
+                  <div className="detail-id-row">
+                    <div>
+                      <strong>{selectedPackage.packageId}</strong>
+                      <p>{formatOpsCodeLabel(locale, selectedPackage.packageType)}</p>
+                    </div>
+                    <StatusPill
+                      status={selectedPackage.status}
+                      locale={locale}
+                      tone={pillToneForStatus(selectedPackage.status)}
+                    />
+                  </div>
+                  <dl className="detail-list">
+                    <DetailItem
+                      label={copyText(locale, "Generated", "產生時間")}
+                      value={formatDateTime(
+                        packageDetail?.generatedAt ??
+                          selectedPackage.generatedAt ??
+                          selectedPackage.createdAt,
+                      )}
+                    />
+                    <DetailItem
+                      label={copyText(locale, "Manifest hash", "Manifest 雜湊")}
+                      value={packageDetail?.manifestHash ?? selectedPackage.manifestHash ?? "—"}
+                    />
+                    <DetailItem
+                      label={copyText(locale, "Scope", "範圍")}
+                      value={
+                        packageDetail?.scopeSummary ??
+                        selectedPackage.scopeSummary ??
+                        copyText(
+                          locale,
+                          "Scope not carried by current contract",
+                          "目前 contract 尚未攜帶 scope",
+                        )
+                      }
+                    />
+                    <DetailItem
+                      label={copyText(locale, "Items", "項目數")}
+                      value={String(
+                        packageDetail?.manifest?.entryCount ??
+                          selectedPackage.items.length,
+                      )}
+                    />
+                  </dl>
                 </div>
 
-                <div className="detail-section">
-                  <h4>{t("reports.detail.manifestEntries")}</h4>
-                  {packageDetail.manifest ? (
-                    <>
-                      <div className="manifest-summary">
-                        <span>
-                          {t("reports.detail.manifestId", {
-                            id: packageDetail.manifest.manifestId,
-                          })}
-                        </span>
-                        <span>
-                          {t("reports.detail.immutableEntries", {
-                            count: packageDetail.manifest.entryCount,
-                            suffix:
-                              packageDetail.manifest.entryCount === 1
-                                ? "entry"
-                                : "entries",
-                          })}
-                        </span>
-                        <span>
-                          {t("reports.detail.manifestGenerated", {
-                            value: formatDateTime(
-                              packageDetail.manifest.generatedAt,
-                            ),
-                          })}
-                        </span>
-                      </div>
-                      <table className="table compact-table">
-                        <thead>
-                          <tr>
-                            <th>{t("reports.col.item")}</th>
-                            <th>{t("reports.col.artifactCol")}</th>
-                            <th>{t("reports.col.manifestHash")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {packageDetail.manifest.entries.map((entry) => (
-                            <tr key={entry.itemId}>
-                              <td>
-                                <div className="cell-title">
-                                  {formatOpsCodeLabel(locale, entry.itemType)}
-                                </div>
-                                <div className="cell-subcopy">
-                                  {entry.itemId}
-                                </div>
-                              </td>
-                              <td>{entry.artifactId}</td>
-                              <td>
-                                <code>{shortHash(entry.manifestHash)}</code>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </>
-                  ) : (
-                    <p className="cell-subcopy">
-                      {t("reports.detail.manifestPending")}
-                    </p>
-                  )}
+                <div className="detail-block">
+                  <div className="mini-banner">
+                    <strong>{copyText(locale, "Signed downloads", "簽名下載")}</strong>
+                    <span>
+                      {packageDetail?.downloadMetadata
+                        ? copyText(
+                            locale,
+                            `ZIP expires ${formatRelativeMinutes(packageDetail.downloadMetadata.zip.expiresAt)} · PDF expires ${formatRelativeMinutes(packageDetail.downloadMetadata.pdf.expiresAt)}`,
+                            `ZIP ${formatRelativeMinutes(packageDetail.downloadMetadata.zip.expiresAt)} 後到期 · PDF ${formatRelativeMinutes(packageDetail.downloadMetadata.pdf.expiresAt)} 後到期`,
+                          )
+                        : copyText(
+                            locale,
+                            "Open detail to issue signed artifact metadata.",
+                            "開啟詳情後才會取得簽名成品 metadata。",
+                          )}
+                    </span>
+                  </div>
+                  <div className="detail-actions">
+                    {selectedPackageActions.map((action) => (
+                      <button
+                        key={`detail-${action.action}`}
+                        type="button"
+                        className={
+                          action.action.startsWith("download")
+                            ? "primary-button"
+                            : "ghost-button"
+                        }
+                        disabled={!action.enabled}
+                        onClick={() => requestAction("package", action, selectedPackage)}
+                      >
+                        {action.label ?? labelForAction(action.action, locale)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {packageDetail?.manifest?.entries?.length ? (
+                  <div className="detail-block">
+                    <h3>{copyText(locale, "Manifest entries", "Manifest 項目")}</h3>
+                    <div className="detail-table">
+                      {packageDetail.manifest.entries.slice(0, 4).map((entry) => (
+                        <div key={entry.itemId} className="detail-table-row">
+                          <span className="mono">{entry.itemId}</span>
+                          <span>{entry.itemType}</span>
+                          <span className="mono">{entry.manifestHash.slice(0, 12)}…</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </>
             ) : (
-              <p className="cell-subcopy">
-                {t("reports.detail.selectPackageDetail")}
-              </p>
+              <EmptyStatePanel definition={emptyStateDefinition} compact />
             )}
-          </div>
+          </aside>
         </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">{t("reports.reportJobsEyebrow")}</p>
-              <h3>{t("reports.recentJobs")}</h3>
-            </div>
-            <span className="panel-note">
-              {t("reports.totalJobs", { count: jobs.length })}
-            </span>
-          </div>
-          {loading ? (
-            <p>{t("reports.loadingJobs")}</p>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t("reports.col.job")}</th>
-                  <th>{t("reports.col.category")}</th>
-                  <th>{t("reports.col.status")}</th>
-                  <th>{t("reports.col.filters")}</th>
-                  <th>{t("reports.col.artifact")}</th>
-                  <th>{copyText(locale, "Access", "存取")}</th>
-                  <th>{t("reports.col.actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.length > 0 ? (
-                  jobs.map((job) => (
-                    <tr key={job.jobId}>
-                      <td>
-                        <div className="cell-title">
-                          {t(`reports.type.${job.jobType}`)}
-                        </div>
-                        <div className="cell-subcopy">{job.jobId}</div>
-                        <div className="cell-subcopy">
-                          {formatDateTime(job.createdAt)} • {job.format}
-                        </div>
-                      </td>
-                      <td>
-                        {t(
-                          `reports.category.${jobCategory(job.jobType).toLowerCase()}`,
-                        )}
-                      </td>
-                      <td>
-                        <div>{formatOpsCodeLabel(locale, job.status)}</div>
-                        <div className="cell-subcopy">
-                          {t("reports.detail.updated", {
-                            value: formatDateTime(job.updatedAt),
-                          })}
-                        </div>
-                      </td>
-                      <td>
-                        {Object.keys(job.filters).length > 0 ? (
-                          <pre className="filters-preview">
-                            {JSON.stringify(job.filters, null, 2)}
-                          </pre>
-                        ) : (
-                          <span className="cell-subcopy">
-                            {t("reports.detail.noFiltersShort")}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {job.artifact ? (
-                          <div className="package-links">
-                            <a
-                              className="inline-link"
-                              href={job.artifact.downloadUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {t("reports.downloadArtifact", {
-                                type: formatOpsCodeLabel(
-                                  locale,
-                                  job.artifact.artifactType,
-                                ),
-                              })}
-                            </a>
-                            <span className="cell-subcopy">
-                              {shortHash(job.artifact.manifestHash)}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="cell-subcopy">
-                            {t("reports.detail.pendingArtifact")}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {job.artifact ? (
-                          <div className="access-stack">
-                            <span
-                              className={
-                                expiresSoon(job.artifact.expiresAt)
-                                  ? "access-chip access-chip-warning"
-                                  : "access-chip"
-                              }
-                            >
-                              {copyText(locale, "Expires", "到期")}{" "}
-                              {formatDateTime(job.artifact.expiresAt)}
-                            </span>
-                            <span className="cell-subcopy">
-                              {copyText(
-                                locale,
-                                "Signed download only",
-                                "僅可透過簽名下載",
-                              )}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="cell-subcopy">
-                            {copyText(
-                              locale,
-                              "No signed URL yet",
-                              "尚未產生簽名網址",
-                            )}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          className="btn"
-                          type="button"
-                          onClick={() => void inspectReportJob(job.jobId)}
-                          disabled={detailLoadingKey === `job:${job.jobId}`}
-                        >
-                          {detailLoadingKey === `job:${job.jobId}`
-                            ? t("reports.loading")
-                            : t("reports.inspect")}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={7}>{t("reports.noJobs")}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          )}
-        </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">{t("reports.filingPackagesEyebrow")}</p>
-              <h3>{t("reports.packageHistory")}</h3>
-            </div>
-            <span className="panel-note">
-              {t("reports.packagesGenerated", { count: packages.length })}
-            </span>
-          </div>
-          {loading ? (
-            <p>{t("reports.loadingPackages")}</p>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t("reports.col.package")}</th>
-                  <th>{t("reports.col.status")}</th>
-                  <th>{t("reports.col.manifest")}</th>
-                  <th>{t("reports.col.items")}</th>
-                  <th>{t("reports.col.generated")}</th>
-                  <th>{t("reports.col.artifacts")}</th>
-                  <th>{copyText(locale, "Controls", "控制")}</th>
-                  <th>{t("reports.col.actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {packages.length > 0 ? (
-                  packages.map((pkg) => (
-                    <tr key={pkg.packageId}>
-                      <td>
-                        <div className="cell-title">
-                          {formatOpsCodeLabel(locale, pkg.packageType)}
-                        </div>
-                        <div className="cell-subcopy">{pkg.packageId}</div>
-                      </td>
-                      <td>
-                        <div>{formatOpsCodeLabel(locale, pkg.status)}</div>
-                        <div className="cell-subcopy">
-                          {formatOpsCodeLabel(
-                            locale,
-                            (pkg.immutable ?? true) ? "immutable" : "mutable",
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        {pkg.manifestHash ? (
-                          <code>{shortHash(pkg.manifestHash)}</code>
-                        ) : (
-                          <span className="cell-subcopy">
-                            {t("reports.pendingManifest")}
-                          </span>
-                        )}
-                      </td>
-                      <td>{pkg.items.length}</td>
-                      <td>{formatDateTime(pkg.generatedAt)}</td>
-                      <td>
-                        <div className="package-links">
-                          {pkg.artifactZipUrl ? (
-                            <a
-                              className="inline-link"
-                              href={pkg.artifactZipUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              ZIP
-                            </a>
-                          ) : null}
-                          {pkg.artifactPdfUrl ? (
-                            <a
-                              className="inline-link"
-                              href={pkg.artifactPdfUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              PDF
-                            </a>
-                          ) : null}
-                          {!pkg.artifactZipUrl && !pkg.artifactPdfUrl ? (
-                            <span className="cell-subcopy">
-                              {t("reports.detail.pendingArtifact")}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="access-stack">
-                          <span className="access-chip">
-                            {copyText(
-                              locale,
-                              (pkg.immutable ?? true) ? "Immutable" : "Mutable",
-                              (pkg.immutable ?? true) ? "不可變" : "可變",
-                            )}
-                          </span>
-                          <span className="cell-subcopy">
-                            {pkg.artifactZipUrl || pkg.artifactPdfUrl
-                              ? copyText(
-                                  locale,
-                                  "Short-lived download surfaces",
-                                  "短時效下載介面",
-                                )
-                              : copyText(
-                                  locale,
-                                  "Awaiting signed package links",
-                                  "等待簽名申報包連結",
-                                )}
-                          </span>
-                        </div>
-                      </td>
-                      <td>
-                        <button
-                          className="btn"
-                          type="button"
-                          onClick={() =>
-                            void inspectFilingPackage(pkg.packageId)
-                          }
-                          disabled={
-                            detailLoadingKey === `package:${pkg.packageId}`
-                          }
-                        >
-                          {detailLoadingKey === `package:${pkg.packageId}`
-                            ? t("reports.loading")
-                            : t("reports.inspect")}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={8}>{t("reports.noPackages")}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          )}
-        </section>
-
-        <div className="footer-links">
-          <Link className="route-link" href="/revenue">
-            <strong>{t("reports.revenueView")}</strong>{" "}
-            {t("reports.revenueViewSub")}
-          </Link>
-          <Link className="route-link" href="/dashboard">
-            <strong>{t("common.backToDashboard")}</strong>{" "}
-            {t("reports.backToDashboardSub")}
-          </Link>
-        </div>
-
-        <style jsx>{`
-          .summary-grid,
-          .form-grid,
-          .form-actions,
-          .footer-links,
-          .form-stack,
-          .detail-grid,
-          .detail-stats,
-          .detail-card-grid {
-            display: grid;
-            gap: 0.75rem;
-          }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .form-grid,
-          .detail-stats,
-          .detail-card-grid {
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-          }
-          .detail-grid {
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .summary-card,
-          .panel,
-          .detail-stat,
-          .detail-card {
-            padding: 1rem;
-            border-radius: 1rem;
-            border: 1px solid #e2e8f0;
-            background: #fff;
-          }
-          .summary-card,
-          .detail-stat,
-          .detail-card {
-            background: #f8fafc;
-          }
-          .summary-card strong {
-            font-size: 1.4rem;
-          }
-          .panel-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 1rem;
-            align-items: flex-start;
-            margin-bottom: 0.75rem;
-          }
-          .eyebrow,
-          .panel-note,
-          .cell-subcopy,
-          .detail-stat span,
-          .detail-card span {
-            color: #64748b;
-          }
-          .eyebrow {
-            margin: 0 0 0.25rem;
-            font-size: 0.75rem;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-          }
-          .pill {
-            display: inline-flex;
-            align-items: center;
-            border-radius: 999px;
-            border: 1px solid #cbd5e1;
-            padding: 0.3rem 0.7rem;
-            font-size: 0.75rem;
-            color: #334155;
-            background: #f8fafc;
-          }
-          label {
-            display: grid;
-            gap: 0.35rem;
-            color: #0f172a;
-          }
-          small {
-            color: #64748b;
-          }
-          input,
-          select {
-            width: 100%;
-            padding: 0.75rem 0.85rem;
-            border-radius: 0.8rem;
-            border: 1px solid #cbd5e1;
-          }
-          .btn {
-            padding: 0.65rem 0.85rem;
-            border-radius: 0.75rem;
-            border: 1px solid #cbd5e1;
-            background: white;
-            cursor: pointer;
-          }
-          .btn-primary {
-            background: #0f172a;
-            color: white;
-            border-color: #0f172a;
-          }
-          .table {
-            width: 100%;
-            border-collapse: collapse;
-          }
-          .table th,
-          .table td {
-            padding: 0.75rem;
-            border-top: 1px solid #e2e8f0;
-            text-align: left;
-            vertical-align: top;
-          }
-          .table th {
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: #475569;
-          }
-          .compact-table th,
-          .compact-table td {
-            padding: 0.6rem;
-          }
-          .cell-title {
-            font-weight: 600;
-          }
-          .filters-preview {
-            margin: 0;
-            padding: 0.5rem;
-            border-radius: 0.75rem;
-            background: #f8fafc;
-            font-size: 0.72rem;
-            overflow: auto;
-          }
-          .inline-link {
-            color: #2563eb;
-            text-decoration: none;
-          }
-          .package-links {
-            display: flex;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-            align-items: center;
-          }
-          .access-stack {
-            display: grid;
-            gap: 0.35rem;
-          }
-          .access-chip {
-            display: inline-flex;
-            width: fit-content;
-            padding: 0.2rem 0.55rem;
-            border-radius: 999px;
-            background: #eff6ff;
-            color: #1d4ed8;
-            font-size: 0.78rem;
-          }
-          .access-chip-warning {
-            background: #fff7ed;
-            color: #c2410c;
-          }
-          .error-banner {
-            margin-bottom: 1rem;
-            border-radius: 0.9rem;
-            padding: 0.85rem 1rem;
-            background: #fef2f2;
-            color: #b91c1c;
-          }
-          .detail-section {
-            display: grid;
-            gap: 0.75rem;
-            margin-top: 1rem;
-          }
-          .detail-section h4 {
-            margin: 0;
-            font-size: 0.95rem;
-            color: #0f172a;
-          }
-          .detail-stat,
-          .detail-card {
-            display: grid;
-            gap: 0.3rem;
-          }
-          .detail-stat strong,
-          .detail-card strong {
-            font-size: 1rem;
-            color: #0f172a;
-          }
-          .manifest-summary {
-            display: flex;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-            font-size: 0.85rem;
-            color: #475569;
-          }
-        `}</style>
       </div>
+
+      {pendingAction && (
+        <div className="modal-backdrop">
+          <div className="confirm-modal">
+            <p className="hero-brow">
+              {pendingAction.action.riskLevel === "high"
+                ? copyText(locale, "High-risk action", "高風險操作")
+                : copyText(locale, "Confirm action", "確認操作")}
+            </p>
+            <h2>{labelForAction(pendingAction.action.action, locale)}</h2>
+            <p className="modal-copy">
+              {copyText(
+                locale,
+                "This action is driven by availableActions and requires an explicit operator confirmation before execution.",
+                "此操作由 availableActions 驅動，執行前需要操作員明確確認。",
+              )}
+            </p>
+            {pendingAction.action.requiresReason && (
+              <label className="reason-field">
+                {copyText(locale, "Reason", "原因")}
+                <textarea
+                  value={reasonText}
+                  onChange={(event) => setReasonText(event.target.value)}
+                  rows={4}
+                />
+              </label>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  setPendingAction(null);
+                  setReasonText("");
+                }}
+              >
+                {copyText(locale, "Cancel", "取消")}
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void executePendingAction()}
+              >
+                {copyText(locale, "Confirm", "確認")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        .reports-page {
+          display: flex;
+          flex-direction: column;
+          gap: 24px;
+          padding-bottom: 40px;
+        }
+
+        .hero-shell,
+        .composer-panel,
+        .surface-card,
+        .detail-card,
+        .metric-card,
+        .notice-banner,
+        .error-banner {
+          border: 1px solid #f3d4d4;
+          border-radius: 28px;
+          background:
+            radial-gradient(circle at top right, rgba(251, 191, 188, 0.2), transparent 30%),
+            linear-gradient(180deg, rgba(255, 250, 250, 0.98), rgba(255, 245, 244, 0.96));
+          box-shadow: 0 20px 50px rgba(127, 29, 29, 0.08);
+        }
+
+        .hero-shell {
+          padding: 28px;
+        }
+
+        .hero-top {
+          display: flex;
+          justify-content: space-between;
+          gap: 20px;
+          align-items: flex-start;
+        }
+
+        .hero-brow {
+          margin: 0 0 8px;
+          font-size: 0.74rem;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: #b45309;
+        }
+
+        h1 {
+          margin: 0;
+          font-size: clamp(2rem, 4vw, 3rem);
+          line-height: 1;
+          color: #1f2937;
+        }
+
+        .hero-copy,
+        .modal-copy {
+          max-width: 64ch;
+          margin: 12px 0 0;
+          color: #6b7280;
+          line-height: 1.6;
+        }
+
+        .hero-actions,
+        .detail-actions,
+        .composer-submit,
+        .modal-actions {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .hero-actions {
+          justify-content: flex-end;
+        }
+
+        .primary-button,
+        .secondary-button,
+        .ghost-button,
+        .action-pill,
+        .tab,
+        .table-row {
+          transition:
+            transform 140ms ease,
+            box-shadow 140ms ease,
+            background 140ms ease,
+            border-color 140ms ease;
+        }
+
+        .primary-button,
+        .secondary-button,
+        .ghost-button {
+          border-radius: 999px;
+          padding: 0.85rem 1.2rem;
+          border: 1px solid transparent;
+          font: inherit;
+          cursor: pointer;
+        }
+
+        .primary-button {
+          background: linear-gradient(135deg, #111827, #7f1d1d);
+          color: white;
+        }
+
+        .secondary-button {
+          background: #fee2e2;
+          color: #7f1d1d;
+          border-color: #fecaca;
+        }
+
+        .ghost-button {
+          background: rgba(255, 255, 255, 0.88);
+          color: #374151;
+          border-color: #e5e7eb;
+        }
+
+        .primary-button:hover,
+        .secondary-button:hover,
+        .ghost-button:hover,
+        .action-pill:hover,
+        .tab:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 10px 18px rgba(31, 41, 55, 0.08);
+        }
+
+        .primary-button:disabled,
+        .secondary-button:disabled,
+        .ghost-button:disabled,
+        .action-pill:disabled {
+          cursor: not-allowed;
+          opacity: 0.55;
+          box-shadow: none;
+          transform: none;
+        }
+
+        .hero-meta {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          align-items: flex-end;
+          margin-top: 28px;
+        }
+
+        .freshness-banner {
+          display: flex;
+          gap: 18px;
+          align-items: center;
+          padding: 16px 18px;
+          border-radius: 24px;
+          border: 1px solid rgba(255, 255, 255, 0.65);
+          min-width: min(100%, 720px);
+        }
+
+        .freshness-fresh {
+          background: rgba(255, 255, 255, 0.78);
+        }
+
+        .freshness-stale {
+          background: rgba(254, 240, 138, 0.22);
+          border-color: rgba(202, 138, 4, 0.32);
+        }
+
+        .freshness-copy {
+          display: flex;
+          gap: 18px;
+          flex-wrap: wrap;
+          color: #6b7280;
+          font-size: 0.92rem;
+        }
+
+        .meta-label {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 42px;
+          height: 42px;
+          border-radius: 999px;
+          background: #111827;
+          color: white;
+          font-weight: 700;
+          margin-right: 12px;
+        }
+
+        .tab-strip {
+          display: flex;
+          gap: 10px;
+        }
+
+        .tab {
+          border: 1px solid #f3d4d4;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.8);
+          padding: 0.78rem 1rem;
+          cursor: pointer;
+          color: #6b7280;
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          font: inherit;
+        }
+
+        .tab span {
+          display: inline-flex;
+          min-width: 1.6rem;
+          height: 1.6rem;
+          border-radius: 999px;
+          background: #fee2e2;
+          align-items: center;
+          justify-content: center;
+          color: #7f1d1d;
+          font-size: 0.86rem;
+        }
+
+        .tab.active {
+          background: #111827;
+          color: white;
+          border-color: #111827;
+        }
+
+        .tab.active span {
+          background: rgba(255, 255, 255, 0.18);
+          color: white;
+        }
+
+        .message-stack {
+          display: grid;
+          gap: 12px;
+        }
+
+        .notice-banner,
+        .error-banner {
+          padding: 16px 18px;
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+        }
+
+        .notice-banner {
+          border-color: #cbd5e1;
+          background:
+            radial-gradient(circle at top right, rgba(148, 163, 184, 0.14), transparent 28%),
+            linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.96));
+        }
+
+        .error-banner {
+          border-color: #fecaca;
+          color: #991b1b;
+        }
+
+        .composer-panel {
+          padding: 22px;
+        }
+
+        .composer-form {
+          display: grid;
+          gap: 20px;
+        }
+
+        .composer-head {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          align-items: center;
+        }
+
+        .composer-head p,
+        .surface-head p,
+        .detail-id-row p {
+          margin: 0;
+          color: #9a3412;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          font-size: 0.74rem;
+        }
+
+        .composer-head h2,
+        .surface-head h2 {
+          margin: 6px 0 0;
+          font-size: 1.28rem;
+          color: #1f2937;
+        }
+
+        .composer-chip,
+        .status-pill {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          padding: 0.45rem 0.78rem;
+          font-size: 0.85rem;
+          font-weight: 600;
+        }
+
+        .composer-chip {
+          background: #111827;
+          color: white;
+        }
+
+        .composer-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 14px;
+        }
+
+        label {
+          display: grid;
+          gap: 8px;
+          font-weight: 600;
+          color: #374151;
+        }
+
+        input,
+        select,
+        textarea {
+          width: 100%;
+          border-radius: 16px;
+          border: 1px solid #e5e7eb;
+          background: rgba(255, 255, 255, 0.92);
+          padding: 0.85rem 1rem;
+          font: inherit;
+          color: #111827;
+        }
+
+        small {
+          color: #6b7280;
+          font-weight: 500;
+        }
+
+        .metric-grid,
+        .workspace-grid {
+          display: grid;
+          gap: 18px;
+        }
+
+        .metric-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .metric-card {
+          padding: 20px;
+          display: grid;
+          gap: 10px;
+        }
+
+        .metric-card span {
+          color: #6b7280;
+        }
+
+        .metric-card strong {
+          font-size: clamp(1.8rem, 3vw, 2.4rem);
+          color: #111827;
+        }
+
+        .workspace-grid {
+          grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.95fr);
+          align-items: start;
+        }
+
+        .surface-card,
+        .detail-card {
+          padding: 22px;
+        }
+
+        .surface-head {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          align-items: flex-start;
+          margin-bottom: 16px;
+        }
+
+        .surface-controls {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .search-input {
+          min-width: 240px;
+        }
+
+        .status-select {
+          min-width: 140px;
+        }
+
+        .loading-card,
+        .empty-state {
+          border-radius: 24px;
+          border: 1px dashed #f3d4d4;
+          padding: 32px 24px;
+          background: rgba(255, 255, 255, 0.64);
+          color: #6b7280;
+        }
+
+        .table-shell {
+          display: grid;
+        }
+
+        .table-head,
+        .table-row {
+          display: grid;
+          gap: 12px;
+          align-items: center;
+        }
+
+        .table-head {
+          padding: 0 14px 10px;
+          color: #9ca3af;
+          font-size: 0.72rem;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+
+        .table-head-jobs,
+        .table-row {
+          grid-template-columns: 1.1fr 1.1fr 1.5fr 0.9fr 0.8fr 1fr 1.1fr;
+        }
+
+        .table-head-packages {
+          grid-template-columns: 1.1fr 1.1fr 1.4fr 0.9fr 0.8fr 1fr 1.1fr;
+        }
+
+        .table-row {
+          width: 100%;
+          text-align: left;
+          padding: 16px 14px;
+          border: 1px solid transparent;
+          border-radius: 22px;
+          background: rgba(255, 255, 255, 0.76);
+          cursor: pointer;
+          margin-bottom: 8px;
+          color: #374151;
+          font: inherit;
+        }
+
+        .table-row strong {
+          display: block;
+          color: #111827;
+        }
+
+        .table-row small {
+          display: block;
+          margin-top: 4px;
+        }
+
+        .table-row.active {
+          border-color: #fca5a5;
+          background:
+            linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(254, 242, 242, 0.96)),
+            #fff;
+          box-shadow: inset 0 0 0 1px rgba(252, 165, 165, 0.24);
+        }
+
+        .table-row:hover {
+          transform: translateY(-1px);
+        }
+
+        .mono {
+          font-family: var(--font-geist-mono, "SFMono-Regular", Consolas, monospace);
+          font-size: 0.9rem;
+        }
+
+        .action-cell {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .action-pill {
+          border-radius: 999px;
+          border: 1px solid #e5e7eb;
+          background: rgba(255, 255, 255, 0.9);
+          color: #374151;
+          padding: 0.45rem 0.78rem;
+          cursor: pointer;
+          font: inherit;
+          font-size: 0.82rem;
+        }
+
+        .detail-card {
+          position: sticky;
+          top: 20px;
+          display: grid;
+          gap: 16px;
+        }
+
+        .detail-block {
+          border: 1px solid #f3e8e8;
+          border-radius: 24px;
+          padding: 18px;
+          background: rgba(255, 255, 255, 0.82);
+          display: grid;
+          gap: 16px;
+        }
+
+        .detail-id-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: flex-start;
+        }
+
+        .detail-id-row strong {
+          display: block;
+          font-size: 1.08rem;
+          color: #111827;
+        }
+
+        .detail-list {
+          display: grid;
+          gap: 12px;
+          margin: 0;
+        }
+
+        .detail-list div {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: baseline;
+        }
+
+        .detail-list dt {
+          color: #6b7280;
+        }
+
+        .detail-list dd {
+          margin: 0;
+          text-align: right;
+          color: #111827;
+          max-width: 65%;
+        }
+
+        .mini-banner,
+        .failure-card {
+          border-radius: 20px;
+          padding: 14px 16px;
+          display: grid;
+          gap: 6px;
+        }
+
+        .mini-banner {
+          background: #fff7ed;
+          color: #9a3412;
+        }
+
+        .failure-card {
+          background: #fef2f2;
+          color: #991b1b;
+        }
+
+        .detail-table {
+          display: grid;
+          gap: 8px;
+        }
+
+        .detail-table-row {
+          display: grid;
+          grid-template-columns: 1.15fr 1fr 1fr;
+          gap: 10px;
+          border-radius: 16px;
+          padding: 12px 14px;
+          background: #f8fafc;
+          color: #334155;
+        }
+
+        .status-pill {
+          gap: 8px;
+        }
+
+        .status-pill::before {
+          content: "";
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: currentColor;
+        }
+
+        .tone-success {
+          background: #dcfce7;
+          color: #166534;
+        }
+
+        .tone-info {
+          background: #dbeafe;
+          color: #1d4ed8;
+        }
+
+        .tone-pending {
+          background: #fef3c7;
+          color: #b45309;
+        }
+
+        .tone-danger {
+          background: #fee2e2;
+          color: #b91c1c;
+        }
+
+        .tone-neutral {
+          background: #e5e7eb;
+          color: #4b5563;
+        }
+
+        .empty-state.compact {
+          padding: 24px 18px;
+        }
+
+        .empty-accent {
+          width: 54px;
+          height: 54px;
+          border-radius: 18px;
+          margin-bottom: 14px;
+        }
+
+        .empty-state h3 {
+          margin: 0 0 8px;
+          color: #111827;
+        }
+
+        .empty-state p {
+          margin: 0;
+          color: #6b7280;
+          line-height: 1.6;
+        }
+
+        .reason-field {
+          font-weight: 600;
+        }
+
+        .modal-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(17, 24, 39, 0.42);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          z-index: 80;
+        }
+
+        .confirm-modal {
+          width: min(100%, 520px);
+          border-radius: 28px;
+          border: 1px solid #f3d4d4;
+          background:
+            radial-gradient(circle at top right, rgba(251, 191, 188, 0.2), transparent 30%),
+            linear-gradient(180deg, rgba(255, 250, 250, 0.99), rgba(255, 245, 244, 0.97));
+          padding: 24px;
+          box-shadow: 0 30px 70px rgba(17, 24, 39, 0.18);
+        }
+
+        .confirm-modal h2 {
+          margin: 0;
+          color: #111827;
+        }
+
+        @media (max-width: 1180px) {
+          .metric-grid,
+          .workspace-grid,
+          .composer-grid {
+            grid-template-columns: 1fr 1fr;
+          }
+
+          .hero-meta,
+          .hero-top {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .detail-card {
+            position: static;
+          }
+        }
+
+        @media (max-width: 900px) {
+          .metric-grid,
+          .workspace-grid,
+          .composer-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .table-head {
+            display: none;
+          }
+
+          .table-row,
+          .table-head-jobs,
+          .table-head-packages {
+            grid-template-columns: 1fr;
+          }
+
+          .search-input {
+            min-width: 0;
+          }
+
+          .detail-list div {
+            display: grid;
+          }
+
+          .detail-list dd {
+            text-align: left;
+            max-width: none;
+          }
+        }
+      `}</style>
     </>
+  );
+}
+
+function EmptyStatePanel({
+  definition,
+  compact = false,
+}: {
+  definition: EmptyStateDefinition;
+  compact?: boolean;
+}) {
+  return (
+    <div className={compact ? "empty-state compact" : "empty-state"}>
+      <div
+        className="empty-accent"
+        style={{
+          background: `linear-gradient(135deg, ${definition.accent}, rgba(255,255,255,0.92))`,
+        }}
+      />
+      <h3>{definition.title}</h3>
+      <p>{definition.body}</p>
+      <p>{definition.suggestion}</p>
+    </div>
+  );
+}
+
+function StatusPill({
+  status,
+  locale,
+  tone,
+}: {
+  status: string;
+  locale: "en" | "zh";
+  tone: string;
+}) {
+  const localizedStatus =
+    status === "completed"
+      ? copyText(locale, "completed", "已完成")
+      : status === "queued"
+        ? copyText(locale, "queued", "排隊中")
+        : status === "running"
+          ? copyText(locale, "running", "執行中")
+          : status === "failed"
+            ? copyText(locale, "failed", "失敗")
+            : status;
+
+  return <span className={`status-pill tone-${tone}`}>{localizedStatus}</span>;
+}
+
+function DetailItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
   );
 }
