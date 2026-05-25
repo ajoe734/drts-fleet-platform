@@ -71,6 +71,8 @@ The dispatch planning ref was read directly from this worktree during the origin
 
 `origin/dev` already carries the earlier directive-path spec/UAT pair for `WF-FIN-GOV-001`. This branch is the reconciliation layer: it tightens the verification body to the canonical 13 fields, adds the `E2E-010` shell plus matrix/release wiring, and records the current live-staging blocker with fresh 2026-05-23 and 2026-05-24 probes.
 
+The 2026-05-25 control-plane revalidation exposed a new truth conflict that matters for later reviewer triage: `origin/dev` now also carries `PH1GC-E2E-010: governance-aware billing/reporting E2E script (#256)` and `docs/03-runbooks/phase1-release-truth-sync-20260519.md` row 14 says `PASS (live staging evidence)`, but the GitHub Actions inventory still shows no successful `workflow_dispatch` rerun for any `codex/ph1gc-fin-gov-001*` branch. The only success tied to this family is push run `26334408483` on `dev`, which ran lint/unit/orchestrator-tests/build/integration only and never launched `staging-e2e-010`, so it cannot substantiate a live-staging uplift.
+
 ## 2. Acceptance Status
 
 | Brief acceptance item | Current state on `codex/ph1gc-fin-gov-001` | Evidence |
