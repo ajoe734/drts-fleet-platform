@@ -84,7 +84,11 @@ import {
   type TripExperienceState,
   type TripPrimaryActionKey,
 } from "@/lib/trip-workflow";
-import { driverStrings, driverTripActionSuccessLabels } from "@/lib/strings";
+import {
+  driverForwardedTaskStatusLabels,
+  driverStrings,
+  driverTripActionSuccessLabels,
+} from "@/lib/strings";
 import { usePendingCompletionReplay } from "@/lib/use-pending-completion-replay";
 
 function ActionButton({
@@ -553,6 +557,12 @@ function getTripStatusPresentation(
         tone: "neutral",
         detail: "來源平台已取消訂單，請等待下一筆任務。",
       };
+    case "manual_fallback":
+      return {
+        label: "人工協調中",
+        tone: "warning",
+        detail: "派車台已發出即時指示，請依指示完成這筆平台任務。",
+      };
     case "sync_failed":
       return {
         label: "同步異常",
@@ -651,6 +661,8 @@ function getTripLockBody(state: TripExperienceState | null): {
         title: "平台已取消",
         detail: "此訂單不再有效，若資訊異常請聯繫派車台。",
       };
+    case "manual_fallback":
+      return null;
     case "sync_failed":
       return {
         icon: "alert-circle-outline",
@@ -667,6 +679,12 @@ function getTripSurfacePalette(
   state: TripExperienceState | null,
 ) {
   switch (state) {
+    case "manual_fallback":
+      return {
+        backgroundColor: driverCanvasTheme.warnBg,
+        borderColor: driverCanvasTheme.warnBorder,
+        accentColor: driverCanvasTheme.warn,
+      };
     case "sync_failed":
       return {
         backgroundColor: driverCanvasTheme.dangerBg,
@@ -728,6 +746,8 @@ function getIdleBottomActionLabel(state: TripExperienceState | null) {
       return "平台已交給其他司機";
     case "forwarded_cancelled":
       return "來源平台已取消";
+    case "manual_fallback":
+      return "依派車台指示處理";
     case "sync_failed":
       return "等待派車台處理";
     default:
@@ -777,13 +797,17 @@ function resolveUnifiedTripExperienceState(
   const nativeStatus = unifiedTask.nativeStatus?.trim().toLowerCase() ?? null;
   if (
     unifiedTask.requiresManualFallback ||
-    hasUnifiedTaskSyncIssue(unifiedTask) ||
-    nativeStatus === "sync_failed"
+    getManualFallbackRecord(task)?.required ||
+    nativeStatus === "manual_fallback"
   ) {
+    return "manual_fallback";
+  }
+  if (hasUnifiedTaskSyncIssue(unifiedTask) || nativeStatus === "sync_failed") {
     return "sync_failed";
   }
-
-  if (nativeStatus === "lost_race" || nativeStatus === "taken") {
+  if (
+    nativeStatus === "lost_race" || nativeStatus === "taken"
+  ) {
     return "forwarded_lost";
   }
   if (
@@ -941,6 +965,19 @@ function getActionDisplayLabel(action: string): string {
   }
 }
 
+function formatForwardedStatusLabel(status: string | null | undefined): string {
+  if (!status?.trim()) {
+    return "待同步";
+  }
+
+  const normalized = status.trim().toLowerCase();
+  return (
+    driverForwardedTaskStatusLabels[
+      normalized as keyof typeof driverForwardedTaskStatusLabels
+    ] ?? formatDriverTaskStatusLabel(status)
+  );
+}
+
 type TripAuthorityBannerDescriptor = {
   title: string;
   authorityLabel: string;
@@ -1016,6 +1053,15 @@ function getTripAuthorityBannerProps(
         description: "來源平台已取消訂單。本地不再提供任何後續行程操作。",
         tone: "warn",
         icon: "ban-outline",
+      };
+    case "manual_fallback":
+      return {
+        title: "平台人工協調中",
+        authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
+        description:
+          "平台同步改由派車台即時指示接手。請依 DriverOpsInstruction 完成安全必要步驟。",
+        tone: "warn",
+        icon: "construct-outline",
       };
     case "sync_failed":
       return {
@@ -1186,11 +1232,28 @@ export default function TripScreen() {
   const forwardedOutcomeTone = forwardedOutcomeSummary
     ? toBannerTone(forwardedOutcomeSummary.tone)
     : null;
-  const pickupAddress = orderDetail?.pickup.address ?? "待確認上車點";
-  const dropoffAddress = orderDetail?.dropoff.address ?? "待確認下車點";
+  const pickupAddress =
+    orderDetail?.pickup.address ??
+    unifiedTask?.pickupSummary ??
+    "待確認上車點";
+  const dropoffAddress =
+    orderDetail?.dropoff.address ??
+    unifiedTask?.dropoffSummary ??
+    "待確認下車點";
   const pickupTimeLabel = formatPickupStopTime(orderDetail);
   const dropoffTimeLabel = formatDropoffStopTime(orderDetail);
   const platformLabel = getPlatformDisplayLabel(taskDetail?.sourcePlatform);
+  const nativeStatusLabel = isForwardedTrip
+    ? formatForwardedStatusLabel(
+        unifiedTask?.nativeStatus ?? taskDetail?.forwardedStatus ?? null,
+      )
+    : null;
+  const localMirrorStatusLabel =
+    unifiedTask != null
+      ? formatDriverTaskStatusLabel(String(unifiedTask.localStatus))
+      : taskDetail
+        ? formatDriverTaskStatusLabel(taskDetail.status)
+        : "待同步";
   const recordingActive =
     Boolean(orderDetail?.recordingId) ||
     (!isForwardedTrip && locationTrackingState === "active");
@@ -1245,6 +1308,18 @@ export default function TripScreen() {
       label: "可用操作",
       value: availableActionSummary,
     },
+    ...(isForwardedTrip
+      ? [
+          {
+            label: "平台狀態",
+            value: nativeStatusLabel ?? "待同步",
+          },
+          {
+            label: "本地鏡像",
+            value: localMirrorStatusLabel,
+          },
+        ]
+      : []),
     {
       label: "路線權限",
       value: routeLocked ? "來源平台鎖定" : "本地可執行",
