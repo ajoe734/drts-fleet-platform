@@ -2051,6 +2051,87 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         self.assertEqual(state["history"], [{"approval_id": "apr-old", "status": "resolved"}])
 
 
+class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
+    def _config(self, root: Path, *, interval: float | None = None) -> dict[str, object]:
+        supervisor_cfg: dict[str, object] = {}
+        if interval is not None:
+            supervisor_cfg["git_reconcile_interval_seconds"] = interval
+        config: dict[str, object] = {
+            "paths": {"status_file": str(root / "ai-status.json")},
+            "supervisor": supervisor_cfg,
+        }
+        return config
+
+    def test_first_call_runs_and_stamps_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text("{}", encoding="utf-8")
+            (root / "scripts").mkdir()
+            script = root / "scripts" / "ai_status.py"
+            script.write_text("# placeholder\n", encoding="utf-8")
+            config = self._config(root)
+            state: dict[str, object] = {"supervisor": {}}
+            fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="reconcile-from-git: no drift found against origin/dev\n", stderr="")
+            with mock.patch.object(supervisor.subprocess, "run", return_value=fake_result) as run_mock:
+                ran = supervisor.reconcile_status_from_git(config, state)
+            self.assertTrue(ran)
+            run_mock.assert_called_once()
+            self.assertIn("last_git_reconcile_at", state["supervisor"])  # type: ignore[index]
+
+    def test_second_call_within_window_skips_subprocess(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text("{}", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "ai_status.py").write_text("# placeholder\n", encoding="utf-8")
+            config = self._config(root, interval=60.0)
+            # Timestamp 5s ago — within 60s window.
+            recent = supervisor.datetime.now(supervisor.timezone.utc) - supervisor.timedelta(seconds=5)
+            state = {
+                "supervisor": {
+                    "last_git_reconcile_at": recent.replace(microsecond=0)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+            }
+            with mock.patch.object(supervisor.subprocess, "run") as run_mock:
+                ran = supervisor.reconcile_status_from_git(config, state)
+            self.assertFalse(ran)
+            run_mock.assert_not_called()
+
+    def test_second_call_after_window_runs_subprocess(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text("{}", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "ai_status.py").write_text("# placeholder\n", encoding="utf-8")
+            config = self._config(root, interval=60.0)
+            # Timestamp 120s ago — well outside 60s window.
+            old = supervisor.datetime.now(supervisor.timezone.utc) - supervisor.timedelta(seconds=120)
+            state = {
+                "supervisor": {
+                    "last_git_reconcile_at": old.replace(microsecond=0)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+            }
+            fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="reconcile-from-git: no drift found against origin/dev\n", stderr="")
+            with mock.patch.object(supervisor.subprocess, "run", return_value=fake_result) as run_mock:
+                ran = supervisor.reconcile_status_from_git(config, state)
+            self.assertTrue(ran)
+            run_mock.assert_called_once()
+
+    def test_skips_when_status_file_path_missing(self) -> None:
+        # OPS-STATE-RECONCILE-002 guard: don't raise KeyError when config
+        # omits paths.status_file (e.g. minimal test config).
+        config: dict[str, object] = {"paths": {}, "supervisor": {}}
+        state: dict[str, object] = {"supervisor": {}}
+        with mock.patch.object(supervisor.subprocess, "run") as run_mock:
+            ran = supervisor.reconcile_status_from_git(config, state)
+        self.assertFalse(ran)
+        run_mock.assert_not_called()
+
+
 class UnderutilizationSidecarDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
