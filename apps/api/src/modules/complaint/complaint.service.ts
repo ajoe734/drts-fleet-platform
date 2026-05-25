@@ -877,7 +877,11 @@ export class ComplaintService implements OnModuleInit {
     now = new Date(),
   ): ComplaintSlaStatus {
     const dueAtMs = new Date(complaintCase.slaDueAt).getTime();
-    const nowMs = now.getTime();
+    const evaluationTime =
+      complaintCase.status === "resolved" || complaintCase.status === "closed"
+        ? new Date(complaintCase.updatedAt)
+        : now;
+    const nowMs = evaluationTime.getTime();
 
     if (Number.isNaN(dueAtMs) || dueAtMs <= nowMs) {
       return "breached";

@@ -375,4 +375,106 @@ describe("Complaint SLA read model status", () => {
       vi.useRealTimers();
     }
   });
+
+  it("does not drift resolved and closed cases into breach after their lifecycle ends", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-13T08:00:00.000Z"));
+      const { complaintService } = createServices();
+
+      const resolvedCase = complaintService.createComplaintCase({
+        caseSource: "ops",
+        category: "safety_concern",
+        severity: "high",
+        description: "Resolved before SLA due",
+      });
+      const closedCase = complaintService.createComplaintCase({
+        caseSource: "ops",
+        category: "safety_concern",
+        severity: "high",
+        description: "Closed before SLA due",
+      });
+
+      vi.setSystemTime(new Date("2026-05-13T09:31:00.000Z"));
+      complaintService.resolveComplaintCase(resolvedCase.caseNo, {
+        resolutionCode: "resolved_driver_suspension",
+        closingNote: "Resolved while still inside SLA warning window.",
+      });
+      complaintService.resolveComplaintCase(closedCase.caseNo, {
+        resolutionCode: "resolved_driver_suspension",
+        closingNote: "Resolved before close.",
+      });
+      complaintService.closeComplaintCase(closedCase.caseNo, {
+        resolutionCode: "resolved_driver_suspension",
+        closingNote: "Closed while still inside SLA warning window.",
+      });
+
+      vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
+
+      expect(
+        complaintService.getComplaintCase(resolvedCase.caseNo).slaStatus,
+      ).toBe("warning");
+      expect(
+        complaintService.getComplaintCase(resolvedCase.caseNo).slaBreachedAt,
+      ).toBeNull();
+      expect(
+        complaintService.getComplaintCase(closedCase.caseNo).slaStatus,
+      ).toBe("warning");
+      expect(
+        complaintService.getComplaintCase(closedCase.caseNo).slaBreachedAt,
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("Complaint controller read-model envelopes", () => {
+  it("keeps complaint list, detail, and timeline refresh envelopes intact", () => {
+    const { complaintController } = createServices();
+
+    const createdEnvelope = complaintController.createComplaintCase({
+      caseSource: "ops",
+      category: "fare_dispute",
+      severity: "normal",
+      description: "Envelope regression coverage",
+    });
+    const caseNo = createdEnvelope.data.caseNo;
+
+    const listEnvelope = complaintController.listComplaintCases();
+    expect(listEnvelope.data.items).toHaveLength(1);
+    expect(listEnvelope.data.refresh.generatedAt).toBeTruthy();
+    expect(listEnvelope.data.emptyState).toBeUndefined();
+
+    const detailEnvelope = complaintController.getComplaintCase(caseNo);
+    expect(detailEnvelope.data.item.caseNo).toBe(caseNo);
+    expect(detailEnvelope.data.refresh.generatedAt).toBeTruthy();
+
+    const timelineEnvelope = complaintController.getComplaintTimeline(caseNo);
+    expect(timelineEnvelope.data.items).toHaveLength(1);
+    expect(timelineEnvelope.data.refresh.generatedAt).toBeTruthy();
+    expect(timelineEnvelope.data.emptyState).toBeUndefined();
+  });
+
+  it("returns empty-state envelopes for empty list and timeline read models", () => {
+    const { complaintController, complaintService } = createServices();
+
+    const emptyListEnvelope = complaintController.listComplaintCases();
+    expect(emptyListEnvelope.data.items).toHaveLength(0);
+    expect(emptyListEnvelope.data.emptyState?.reason).toBe("no_data");
+
+    const complaint = complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "other",
+      severity: "normal",
+      description: "Timeline empty-state coverage",
+    });
+    complaintService["complaintTimelines"].set(complaint.caseNo, []);
+
+    const emptyTimelineEnvelope = complaintController.getComplaintTimeline(
+      complaint.caseNo,
+    );
+    expect(emptyTimelineEnvelope.data.items).toHaveLength(0);
+    expect(emptyTimelineEnvelope.data.emptyState?.reason).toBe("no_data");
+  });
 });
