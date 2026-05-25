@@ -6,6 +6,7 @@ import type { CSSProperties, ReactElement } from "react";
 import {
   useDeferredValue,
   useEffect,
+  useEffectEvent,
   useMemo,
   useState,
   useTransition,
@@ -209,6 +210,26 @@ function buildDefaultRefresh(): UiRefreshMetadata {
   };
 }
 
+function getRefreshIntervalMs(tier: RefreshTier) {
+  switch (tier) {
+    case "urgent":
+      return 5_000;
+    case "fast":
+      return 3_000;
+    case "dispatch":
+      return 5_000;
+    case "medium":
+      return 15_000;
+    case "medium_slow":
+    case "slow":
+      return 30_000;
+    case "manual":
+      return null;
+    default:
+      return REFRESH_INTERVAL_MS;
+  }
+}
+
 function buildDefaultPageActions(): ResourceActionDescriptor[] {
   return [
     {
@@ -261,6 +282,19 @@ function getActionDescriptor(
   }
 
   return null;
+}
+
+function isCreateActionName(action: string) {
+  return [
+    "create_incident",
+    "create",
+    "createIncident",
+    "createIncidentFromDispatchException",
+  ].includes(action);
+}
+
+function isRefreshActionName(action: string) {
+  return action === "refresh" || action === "reload";
 }
 
 function getActionTitle(
@@ -411,32 +445,24 @@ function renderStatusBadge(status: IncidentStatus, locale: "en" | "zh") {
 function renderEmptyState(
   emptyState: EmptyStateEnvelope,
   locale: "en" | "zh",
+  refreshAction: ResourceActionDescriptor | null,
+  createAction: ResourceActionDescriptor | null,
   onRefresh: () => void,
   onCreate: () => void,
 ) {
   const copy = getEmptyStateCopy(emptyState.reason, locale);
   const tone = copy.tone;
   const nextAction = emptyState.nextAction;
-  const nextActionLabel =
-    nextAction?.action === "refresh"
-      ? locale === "en"
-        ? "Refresh"
-        : "重新整理"
-      : nextAction?.action === "create_incident" ||
-          nextAction?.action === "create" ||
-          nextAction?.action === "createIncident"
-        ? locale === "en"
-          ? "Create incident"
-          : "建立事故"
-        : null;
-  const nextActionHandler =
-    nextAction?.action === "refresh"
-      ? onRefresh
-      : nextAction?.action === "create_incident" ||
-          nextAction?.action === "create" ||
-          nextAction?.action === "createIncident"
-        ? onCreate
-        : null;
+  const emptyRefreshAction = isRefreshActionName(nextAction?.action ?? "")
+    ? nextAction
+    : emptyState.reason === "permission_denied"
+      ? null
+      : refreshAction;
+  const emptyCreateAction = isCreateActionName(nextAction?.action ?? "")
+    ? nextAction
+    : emptyState.reason === "no_data" || emptyState.reason === "not_provisioned"
+      ? createAction
+      : null;
 
   return (
     <Card
@@ -445,35 +471,31 @@ function renderEmptyState(
       subtitle={copy.body}
       actions={
         <>
-          {emptyState.reason !== "permission_denied" ? (
+          {emptyRefreshAction ? (
             <Btn
               theme={theme}
-              variant="secondary"
+              variant={getActionVariant(emptyRefreshAction)}
+              danger={isDangerAction(emptyRefreshAction)}
               icon="more"
+              disabled={emptyRefreshAction.enabled === false}
+              title={getActionTitle(emptyRefreshAction, locale)}
               onClick={onRefresh}
             >
               {locale === "en" ? "Refresh" : "重新整理"}
             </Btn>
           ) : null}
-          {emptyState.reason === "no_data" ||
-          emptyState.reason === "not_provisioned" ? (
-            <Btn theme={theme} variant="primary" icon="plus" onClick={onCreate}>
+          {emptyCreateAction ? (
+            <Btn
+              theme={theme}
+              variant={getActionVariant(emptyCreateAction)}
+              danger={isDangerAction(emptyCreateAction)}
+              icon="plus"
+              disabled={emptyCreateAction.enabled === false}
+              title={getActionTitle(emptyCreateAction, locale)}
+              onClick={onCreate}
+            >
               {locale === "en" ? "Create incident" : "建立事故"}
             </Btn>
-          ) : null}
-          {nextActionLabel && nextActionHandler ? (
-            <span title={getActionTitle(nextAction, locale)}>
-              <Btn
-                theme={theme}
-                variant={getActionVariant(nextAction)}
-                danger={isDangerAction(nextAction)}
-                icon={nextAction?.action === "refresh" ? "more" : "plus"}
-                disabled={nextAction?.enabled === false}
-                onClick={nextActionHandler}
-              >
-                {nextActionLabel}
-              </Btn>
-            </span>
           ) : null}
         </>
       }
@@ -672,27 +694,7 @@ export default function IncidentsPage() {
     exceptionNote: searchParams.get("exceptionNote") ?? "",
   };
 
-  useEffect(() => {
-    void loadRecords(false);
-  }, []);
-
-  useEffect(() => {
-    if (!createFromQuery) {
-      return;
-    }
-
-    setShowCreate(true);
-  }, [createFromQuery]);
-
-  useEffect(() => {
-    const handle = window.setInterval(() => {
-      void loadRecords(false);
-    }, REFRESH_INTERVAL_MS);
-
-    return () => window.clearInterval(handle);
-  }, []);
-
-  async function loadRecords(manual: boolean) {
+  const loadRecords = useEffectEvent(async (manual: boolean) => {
     if (manual) {
       setLoading(true);
     }
@@ -737,7 +739,7 @@ export default function IncidentsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  });
 
   const filteredRecords = useMemo(() => {
     return records
@@ -818,10 +820,35 @@ export default function IncidentsPage() {
     "createIncidentFromDispatchException",
   ]);
   const refreshAction = getActionDescriptor(pageActions, ["refresh", "reload"]);
+  const refreshIntervalMs = getRefreshIntervalMs(refreshTier);
   const filteredEmpty = filteredRecords.length === 0 && records.length > 0;
   const effectiveEmptyState = filteredEmpty
     ? buildFallbackEmptyState("filtered_empty")
     : emptyState;
+
+  useEffect(() => {
+    void loadRecords(false);
+  }, [loadRecords]);
+
+  useEffect(() => {
+    if (!createFromQuery || createAction?.enabled === false) {
+      return;
+    }
+
+    setShowCreate(true);
+  }, [createAction, createFromQuery]);
+
+  useEffect(() => {
+    if (refreshIntervalMs === null) {
+      return;
+    }
+
+    const handle = window.setInterval(() => {
+      void loadRecords(false);
+    }, refreshIntervalMs);
+
+    return () => window.clearInterval(handle);
+  }, [loadRecords, refreshIntervalMs]);
 
   const tableRows: IncidentTableRow[] = filteredRecords.map((record) => {
     return {
@@ -1533,6 +1560,8 @@ export default function IncidentsPage() {
             renderEmptyState(
               effectiveEmptyState,
               locale,
+              refreshAction,
+              createAction,
               () => void loadRecords(true),
               () => setShowCreate(true),
             )
