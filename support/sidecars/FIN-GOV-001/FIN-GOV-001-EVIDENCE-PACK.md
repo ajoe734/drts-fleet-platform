@@ -4,8 +4,8 @@
 **Current owner:** `Codex`
 **Current reviewer:** `Gemini2`
 **Collected:** `2026-05-19 (UTC)`
-**Latest refresh:** `2026-05-24 (PH1GC-FIN-GOV-001 / Codex)`
-**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-24 governed staging rerun (run 26375980122 on current pushed head 4dfa7a6b, staging job 77636204638) still blocked after exhausting repo-local bearer fallbacks. The final fail step still reports no staging bearer path returning HTTP 200; downloaded artifacts still show auth_token -> IAP 401 Invalid IAP credentials, dev fallback -> IAP 403 Access denied, and direct Cloud Run resolution -> iam.serviceAccounts.getAccessToken denied. Job annotations still record the shared fallback provider invalid_target plus staging-deployer getAccessToken/getOpenIdToken denial, so WF-FIN-GOV-001 remains PASS (static evidence) only.`
+**Latest refresh:** `2026-05-25 (PH1GC-FIN-GOV-001 / Codex)`
+**Current read:** `PARTIAL - static evidence consolidated; latest 2026-05-24 governed staging rerun (run 26375980122 on current pushed head 4dfa7a6b, staging job 77636204638) still blocked after exhausting repo-local bearer fallbacks. The final fail step still reports no staging bearer path returning HTTP 200; downloaded artifacts still show auth_token -> IAP 401 Invalid IAP credentials, dev fallback -> IAP 403 Access denied, and direct Cloud Run resolution -> iam.serviceAccounts.getAccessToken denied. Job annotations still record the shared fallback provider invalid_target plus staging-deployer getAccessToken/getOpenIdToken denial, so WF-FIN-GOV-001 remains PASS (static evidence) only. A 2026-05-25 GitHub Actions inventory also confirms there is still no successful workflow_dispatch staging rerun for any PH1GC-FIN-GOV-001 branch family; the only success is push run 26334408483 on dev, which did not execute staging-e2e-010.`
 
 ---
 
@@ -102,6 +102,16 @@ Based on the current artifacts, the conservative `WF-FIN-001` read remains:
   - cost-center-aware invoice context
   - quota usage / ledger visibility
   - approval audit chain continuity
+
+Additional 2026-05-25 control-plane finding:
+
+- `docs/03-runbooks/phase1-release-truth-sync-20260519.md` on `origin/dev`
+  now states `WF-FIN-GOV-001 ↔ matrix row 14  (gate read: PASS (live staging
+  evidence))`, but the GitHub Actions inventory still shows no successful
+  `workflow_dispatch` rerun for any `codex/ph1gc-fin-gov-001*` branch. Treat
+  that release-truth-sync line as a stale over-claim until a green governed
+  staging rerun exists and the release-gate matrix is updated from the same
+  evidence.
 
 This packet therefore strengthens the evidence inventory, but it does not
 justify a gate upgrade on its own.
