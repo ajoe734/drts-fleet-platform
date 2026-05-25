@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 
 import type {
   PlatformAdminTenantRecord,
+  PlatformTenantRolloutStage,
   PlatformTenantGovernanceSummaryQuery,
   PlatformTenantGovernanceSummaryResponse,
   PlatformTenantGovernanceSummaryRow,
@@ -19,6 +20,14 @@ const MAX_PAGE_SIZE = 100;
 const QUOTA_ALERT_THRESHOLD_PERCENT = 95;
 const PENDING_APPROVAL_ALERT_THRESHOLD_HOURS = 48;
 const HOUR_IN_MS = 60 * 60 * 1000;
+
+function toGovernanceRolloutStage(
+  tenant: PlatformAdminTenantRecord,
+): PlatformTenantRolloutStage {
+  return tenant.rollout.stage === "rollback_hold"
+    ? "production"
+    : tenant.rollout.stage;
+}
 
 @Injectable()
 export class PlatformTenantGovernanceService {
@@ -125,7 +134,7 @@ export class PlatformTenantGovernanceService {
       tenantCode: tenant.code,
       tenantName: tenant.name,
       tenantStatus: tenant.status,
-      tenantRolloutStage: tenant.rollout.stage,
+      tenantRolloutStage: toGovernanceRolloutStage(tenant),
       costCenterCount: costCenters.length,
       activeRuleCount: activeRules.length,
       monthlyQuotaPercentUsed,

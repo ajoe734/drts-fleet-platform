@@ -156,7 +156,7 @@ function createAction(
   return {
     ...ACTION_CATALOG[action],
     enabled,
-    ...(disabledReasonCode ? { disabledReasonCode } : {}),
+    ...(!enabled && disabledReasonCode ? { disabledReasonCode } : {}),
   } satisfies ResourceActionDescriptor;
 }
 
