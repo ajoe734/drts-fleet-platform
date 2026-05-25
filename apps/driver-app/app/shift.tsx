@@ -1,6 +1,15 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
@@ -43,6 +52,14 @@ const ODOMETER_PATTERN = /^\d+$/;
 const EXPECTED_SHIFT_HOURS = 8;
 const MAX_SHIFT_ODOMETER_DELTA_KM = 800;
 const SHIFT_REFRESH_STALE_AFTER_MS = 5 * 60 * 1000;
+const CROSS_APP_BASE_URLS = {
+  "ops-console":
+    process.env.EXPO_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003",
+  "platform-admin":
+    process.env.EXPO_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002",
+  "tenant-console":
+    process.env.EXPO_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3004",
+} as const;
 
 type ShiftActionName =
   | "refresh"
@@ -265,6 +282,14 @@ function getCrossAppTargetLabel(link: CrossAppResourceLink) {
   }
 }
 
+function buildCrossAppHref(link: CrossAppResourceLink) {
+  const baseUrl = CROSS_APP_BASE_URLS[link.targetApp];
+  const url = new URL(link.route, `${baseUrl}/`);
+  url.searchParams.set("resourceType", link.resourceType);
+  url.searchParams.set("resourceId", link.resourceId);
+  return url.toString();
+}
+
 function getRefreshLabel(metadata: UiRefreshMetadata) {
   switch (metadata.dataFreshness) {
     case "fresh":
@@ -295,6 +320,7 @@ function getEmptyStateConfig(
   state: EmptyStateEnvelope,
   actions: ResourceActionDescriptor[],
   router: ReturnType<typeof useRouter>,
+  openPlatformPresence: () => void,
 ): InlineEmptyStateConfig {
   const refreshAction = getActionByName(actions, "refresh");
 
@@ -336,7 +362,7 @@ function getEmptyStateConfig(
         icon: "ban-outline",
         variant: "warning",
         actionTitle: "查看平台狀態",
-        onAction: () => router.push("/platform-presence"),
+        onAction: openPlatformPresence,
       };
     case "external_unavailable":
       return {
@@ -346,7 +372,7 @@ function getEmptyStateConfig(
         icon: "warning-outline",
         variant: "danger",
         actionTitle: "查看平台狀態",
-        onAction: () => router.push("/platform-presence"),
+        onAction: openPlatformPresence,
       };
     case "filtered_empty":
       return {
@@ -356,7 +382,7 @@ function getEmptyStateConfig(
         icon: "swap-horizontal-outline",
         variant: "warning",
         actionTitle: "查看平台狀態",
-        onAction: () => router.push("/platform-presence"),
+        onAction: openPlatformPresence,
       };
     case "no_data":
     default:
@@ -520,6 +546,7 @@ export default function ShiftScreen() {
   const [lastSuccessfulLoadAt, setLastSuccessfulLoadAt] = useState<
     string | null
   >(null);
+  const [highRiskSheetVisible, setHighRiskSheetVisible] = useState(false);
 
   const odometerError = getOdometerValidationMessage(odometer, activeShift);
   const parsedOdometer = odometer.trim() ? Number(odometer.trim()) : null;
@@ -787,6 +814,22 @@ export default function ShiftScreen() {
   const platformPresenceDestinationLabel = getCrossAppTargetLabel(
     shiftResource.platformPresenceLink,
   );
+  const platformPresenceHref = buildCrossAppHref(
+    shiftResource.platformPresenceLink,
+  );
+
+  const openCrossAppLink = async (link: CrossAppResourceLink) => {
+    try {
+      await Linking.openURL(buildCrossAppHref(link));
+    } catch (error: unknown) {
+      setSubmissionError(
+        getErrorMessage(
+          error,
+          `${getCrossAppTargetLabel(link)} 連結開啟失敗，請稍後再試。`,
+        ),
+      );
+    }
+  };
 
   const handleClockIn = async () => {
     if (odometerError) {
@@ -855,11 +898,12 @@ export default function ShiftScreen() {
         ...current.filter((shift) => shift.shiftId !== completedShift.shiftId),
       ]);
       setActiveShift(null);
+      setHighRiskSheetVisible(false);
       setScreenError(null);
       Alert.alert(
         "已下班",
         requiresHighRiskReason
-          ? "班次已結束，異常里程說明已隨下線資料送出，待營運複核。"
+          ? `班次已結束，異常里程說明已隨下線資料送出，待營運於 ${platformPresenceDestinationLabel} 複核。`
           : "班次已結束，平台可接單狀態會依設定自動下線。",
       );
       setLocation("");
@@ -884,7 +928,7 @@ export default function ShiftScreen() {
     }
 
     if (action.action === "open_platform_presence") {
-      router.push("/platform-presence");
+      void openCrossAppLink(shiftResource.platformPresenceLink);
       return;
     }
 
@@ -906,16 +950,19 @@ export default function ShiftScreen() {
     }
 
     if (action.action === "clock_out") {
+      if (action.riskLevel === "high") {
+        setHighRiskSheetVisible(true);
+        return;
+      }
+
       const confirmMessage =
-        action.riskLevel === "high"
-          ? `本次里程差異 ${odometerDelta?.toLocaleString("zh-TW")} km，超過 ${MAX_SHIFT_ODOMETER_DELTA_KM} km 門檻，將附帶複核說明送交營運。`
-          : "結束班次後，平台可接單狀態會依 autoOfflineOnShiftEnd 設定同步更新。";
+        "結束班次後，平台可接單狀態會依 autoOfflineOnShiftEnd 設定同步更新。";
 
       Alert.alert("確認下班", confirmMessage, [
         { text: "取消", style: "cancel" },
         {
-          text: action.riskLevel === "high" ? "送出複核並下班" : "確認下班",
-          style: action.riskLevel === "high" ? "destructive" : "default",
+          text: "確認下班",
+          style: "default",
           onPress: () => {
             void handleClockOut();
           },
@@ -944,6 +991,9 @@ export default function ShiftScreen() {
       fullScreenEmptyState,
       shiftResource.availableActions,
       router,
+      () => {
+        void openCrossAppLink(shiftResource.platformPresenceLink);
+      },
     );
     return (
       <AppScreen scrollable={false}>
@@ -1107,6 +1157,9 @@ export default function ShiftScreen() {
               state,
               shiftResource.availableActions,
               router,
+              () => {
+                void openCrossAppLink(shiftResource.platformPresenceLink);
+              },
             )}
           />
         ))}
@@ -1339,7 +1392,9 @@ export default function ShiftScreen() {
               description="目前沒有可顯示的平台 presence 資料，可前往平台狀態頁確認綁定與上線狀態。"
               icon="swap-horizontal-outline"
               actionTitle={shiftResource.platformPresenceLink.label}
-              onAction={() => router.push("/platform-presence")}
+              onAction={() => {
+                void openCrossAppLink(shiftResource.platformPresenceLink);
+              }}
               style={styles.inlineEmptyState}
             />
           )}
@@ -1353,6 +1408,75 @@ export default function ShiftScreen() {
           icon="shield-checkmark"
         />
       </AppScreen>
+
+      <Modal
+        animationType="slide"
+        transparent
+        visible={highRiskSheetVisible}
+        onRequestClose={() => setHighRiskSheetVisible(false)}
+      >
+        <Pressable
+          style={styles.sheetBackdrop}
+          onPress={() => setHighRiskSheetVisible(false)}
+        />
+        <View style={styles.sheetContainer}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <StatusChip label="High risk" variant="danger" />
+            <Text style={styles.sheetTitle}>高里程差異需營運複核</Text>
+          </View>
+          <Text style={styles.sheetBody}>
+            本次班次里程差異 {odometerDelta?.toLocaleString("zh-TW")} km，
+            已超過 {MAX_SHIFT_ODOMETER_DELTA_KM} km 預設門檻。確認送出後， 這筆
+            clock-out 會連同複核說明交接到 {platformPresenceDestinationLabel}
+            的司機平台狀態頁，供營運追蹤處理。
+          </Text>
+
+          <View style={styles.sheetSummaryCard}>
+            <Text style={styles.sheetSummaryLabel}>ops-review handoff</Text>
+            <Text style={styles.sheetSummaryValue}>
+              {platformPresenceDestinationLabel}
+            </Text>
+            <Text style={styles.sheetSummaryMeta}>
+              {shiftResource.platformPresenceLink.route}
+            </Text>
+            <Text style={styles.sheetSummaryMeta} numberOfLines={1}>
+              {platformPresenceHref}
+            </Text>
+          </View>
+
+          <View style={styles.sheetSummaryCard}>
+            <Text style={styles.sheetSummaryLabel}>複核說明</Text>
+            <Text style={styles.sheetSummaryReason}>{reviewReason.trim()}</Text>
+          </View>
+
+          <View style={styles.sheetActionColumn}>
+            <ActionButton
+              title="查看平台中心"
+              onPress={() => {
+                void openCrossAppLink(shiftResource.platformPresenceLink);
+              }}
+              variant="secondary"
+              icon="open-outline"
+            />
+            <ActionButton
+              title="送出複核並下班"
+              onPress={() => {
+                void handleClockOut();
+              }}
+              variant="danger"
+              icon="checkmark-done-outline"
+              loading={submitting}
+            />
+            <ActionButton
+              title="取消"
+              onPress={() => setHighRiskSheetVisible(false)}
+              variant="ghost"
+              disabled={submitting}
+            />
+          </View>
+        </View>
+      </Modal>
 
       <BottomActionBar
         notice={
@@ -1671,5 +1795,68 @@ const styles = StyleSheet.create({
   availabilityMetaDivider: {
     ...Tokens.type.micro,
     color: Tokens.colors.textDim,
+  },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.48)",
+  },
+  sheetContainer: {
+    backgroundColor: Tokens.colors.bgRaised,
+    borderTopLeftRadius: Tokens.radius.xl,
+    borderTopRightRadius: Tokens.radius.xl,
+    padding: Tokens.spacing.lg,
+    gap: Tokens.spacing.md,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: Tokens.colors.border,
+  },
+  sheetHandle: {
+    width: 48,
+    height: 5,
+    borderRadius: Tokens.radius.full,
+    backgroundColor: Tokens.colors.borderStrong,
+    alignSelf: "center",
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+  },
+  sheetTitle: {
+    ...Tokens.type.title,
+    color: Tokens.colors.textStrong,
+    flex: 1,
+  },
+  sheetBody: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
+  },
+  sheetSummaryCard: {
+    backgroundColor: Tokens.colors.surfaceLo,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.xs,
+  },
+  sheetSummaryLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+  },
+  sheetSummaryValue: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+  },
+  sheetSummaryMeta: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textDim,
+  },
+  sheetSummaryReason: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textStrong,
+  },
+  sheetActionColumn: {
+    gap: Tokens.spacing.sm,
   },
 });
