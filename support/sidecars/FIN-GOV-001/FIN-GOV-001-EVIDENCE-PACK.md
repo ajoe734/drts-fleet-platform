@@ -5,7 +5,7 @@
 **Current reviewer:** `Codex2`
 **Collected:** `2026-05-19 (UTC)`
 **Latest refresh:** `2026-05-25 (PH1GC-FIN-GOV-001 / Codex)`
-**Current read:** `PARTIAL - static evidence consolidated; the latest 2026-05-25 governed staging rerun remains run 26382603169 on workflow-bearing head 45ad7d22 (staging job 77654656937), and it is still blocked after exhausting repo-local bearer fallbacks. The latest blocker-truth head referenced here is sync commit ff8609a7 on origin/codex/ph1gc-fin-gov-001, and no newer staging-e2e-010 rerun exists on that head. The new workflow_dispatch input path was exercised successfully: GitHub Actions accepted direct_api_origin=https://drts-api-kdhu6wzufa-uc.a.run.app, skipped Cloud Run discovery, minted the dev direct token, and reached the direct host, which now returns HTML 404 Page not found for /api/health instead of failing earlier on gcloud run services describe. Source review on the same branch confirms the API serves both /health and /api/health, so this 404 is not explained by a stale health-path assumption. The remaining bearer failures are unchanged: auth_token -> IAP 401 Invalid IAP credentials, staging deployer access/id token -> iam.serviceAccounts.getAccessToken / getOpenIdToken denied, shared fallback -> invalid_target, dev fallback IAP -> 403 Access denied. WF-FIN-GOV-001 therefore remains PASS (static evidence) only. A refreshed 2026-05-25 GitHub Actions inventory still shows no successful workflow_dispatch staging rerun for any PH1GC-FIN-GOV-001 branch family; the newest successful CI run is now push run 26383499009 on dev (created 2026-05-25T04:38Z, updated 2026-05-25T04:40Z), it still did not execute staging-e2e-010, and `gh variable list` still does not expose `STAGING_DIRECT_API_ORIGIN`.`
+**Current read:** `PARTIAL - static evidence consolidated; the latest 2026-05-25 governed staging rerun remains run 26382603169 on workflow-bearing head 45ad7d22 (staging job 77654656937), and it is still blocked after exhausting repo-local bearer fallbacks. The latest blocker-truth head referenced here is sync commit ff8609a7 on origin/codex/ph1gc-fin-gov-001, and no newer staging-e2e-010 rerun exists on that head. The new workflow_dispatch input path was exercised successfully: GitHub Actions accepted direct_api_origin=https://drts-api-kdhu6wzufa-uc.a.run.app, skipped Cloud Run discovery, minted the dev direct token, and reached the direct host, which now returns HTML 404 Page not found for /api/health instead of failing earlier on gcloud run services describe. A same-day local follow-up confirmed the alternate service URL emitted by the last successful deploy-staging run, https://drts-api-1071409254673.us-central1.run.app, also returns HTML 404 for both /health and /api/health, so the remaining direct branch is not just one stale alias. Local metadata access tokens are additionally scope-limited and cannot read run.googleapis.com or cloudresourcemanager.googleapis.com (`ACCESS_TOKEN_SCOPE_INSUFFICIENT`), so this VM cannot self-discover a newer Cloud Run status.url either. Source review on the same branch confirms the API serves both /health and /api/health, so the 404s are not explained by a stale health-path assumption. The remaining bearer failures are unchanged: auth_token -> IAP 401 Invalid IAP credentials, staging deployer access/id token -> iam.serviceAccounts.getAccessToken / getOpenIdToken denied, shared fallback -> invalid_target, dev fallback IAP -> 403 Access denied. WF-FIN-GOV-001 therefore remains PASS (static evidence) only. A refreshed 2026-05-25 GitHub Actions inventory still shows no successful workflow_dispatch staging rerun for any PH1GC-FIN-GOV-001 branch family; the newest successful CI run is now push run 26383499009 on dev (created 2026-05-25T04:38Z, updated 2026-05-25T04:40Z), it still did not execute staging-e2e-010, and `gh variable list` still does not expose `STAGING_DIRECT_API_ORIGIN`.`
 
 ---
 
@@ -181,6 +181,18 @@ Additional machine-local probe on `2026-05-23`:
 - metadata access token based `iamcredentials.googleapis.com ...:generateIdToken`
   still failed with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`
 
+Additional machine-local probe on `2026-05-25`:
+
+- metadata access token calls to
+  `https://run.googleapis.com/v2/projects/drts-staging-bobo-20260502/locations/us-central1/services/drts-api`
+  and
+  `https://cloudresourcemanager.googleapis.com/v1/projects/drts-staging-bobo-20260502`
+  both returned HTTP `403` with
+  `Request had insufficient authentication scopes.`
+- the metadata server only exposes these scopes on this worker:
+  `devstorage.read_only`, `logging.write`, `monitoring.write`, `pubsub`,
+  `service.management.readonly`, `servicecontrol`, `trace.append`
+
 Interpretation:
 
 - all user-account `gcloud` credentials available on this worker are stale for
@@ -190,6 +202,10 @@ Interpretation:
 - the remaining local barrier is authorization: the compute service account is
   not allowed through IAP, and the instance scopes do not permit IAM
   Credentials impersonation of the staging deployer account
+- the same scope restriction also prevents this VM from using Google control
+  plane APIs to read the current staging Cloud Run `status.url`, so local
+  direct-origin discovery is blocked before any follow-up direct retry can be
+  aimed at a fresher host
 
 ### 4.3 Direct Cloud Run fallback
 
@@ -197,9 +213,16 @@ Probe target:
 
 `https://drts-api-kdhu6wzufa-uc.a.run.app`
 
+Additional probe target from the last successful `Deploy - Staging` run log:
+
+`https://drts-api-1071409254673.us-central1.run.app`
+
 Observed result from `curl -i -sS --max-time 20
-https://drts-api-kdhu6wzufa-uc.a.run.app/api/health` and matching smoke-path
-checks against `/api/tenant/invoices/generate` and `/api/reports/jobs`:
+https://drts-api-kdhu6wzufa-uc.a.run.app/api/health`,
+`curl -i -sS --max-time 20 https://drts-api-1071409254673.us-central1.run.app/health`,
+`curl -i -sS --max-time 20 https://drts-api-1071409254673.us-central1.run.app/api/health`,
+and matching smoke-path checks against `/api/tenant/invoices/generate` and
+`/api/reports/jobs`:
 
 - HTTP `404`
 - body: Google frontend `Page not found`
@@ -208,10 +231,16 @@ Interpretation:
 
 - the historical Cloud Run origin documented in older evidence packs is no
   longer a usable direct fallback for this session
+- the alternate service URL emitted by the last successful deploy-staging run
+  is also not a usable direct fallback from this worker; both known public
+  `run.app` hosts now return the same Google frontend `404`
 - source review on `2026-05-25` confirms the API explicitly serves both
   `/health` and `/api/health` (`apps/api/src/main.ts`,
   `apps/api/src/health/health.controller.ts`), so the `404 Page not found`
   response is not a route-prefix mismatch
+- local metadata access tokens cannot query `run.googleapis.com` with the
+  scopes available on this worker, so this session cannot self-discover a
+  newer Cloud Run host from the control plane
 - the live collection path is effectively gated on the protected staging host
   plus valid bearer credentials
 
