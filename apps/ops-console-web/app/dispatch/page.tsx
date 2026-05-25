@@ -298,10 +298,16 @@ async function loadHealthPayload(): Promise<UiHealthEnvelope | null> {
 function resolveBoard(value: string | undefined): DispatchBoard {
   switch (value) {
     case "assigned":
+    case "exception_hold":
     case "exception":
+    case "no_eligible_supply":
     case "no_supply":
+    case "override_pending":
     case "governance":
     case "forwarded":
+      if (value === "exception_hold") return "exception";
+      if (value === "no_eligible_supply") return "no_supply";
+      if (value === "override_pending") return "governance";
       return value;
     default:
       return "ready";
@@ -773,7 +779,7 @@ function buildActionHref(
     switch (action.action) {
       case "inspect_adapter":
         return buildPlatformAdminHref(
-          `/adapters/${encodeURIComponent(record.platformCode)}`,
+          `/adapter-registry?platformCode=${encodeURIComponent(record.platformCode)}`,
         );
       case "force_refresh":
         return buildDispatchHref({
@@ -1406,12 +1412,10 @@ export default async function DispatchPage({
             >
               {order.mirrorOrderId}
             </Link>
-            <span style={{ fontSize: 11, color: theme.textDim }}>
-              {order.externalOrderId}
-            </span>
           </div>
         ),
         source: formatOpsCodeLabel(locale, order.platformCode),
+        externalOrderId: order.externalOrderId,
         route: (
           <div style={{ display: "grid", gap: 1, whiteSpace: "normal" }}>
             <span>
@@ -1462,6 +1466,7 @@ export default async function DispatchPage({
     boardColumns = [
       { h: "MIRROR", k: "mirror", w: 170, mono: true },
       { h: "SOURCE", k: "source", w: 140 },
+      { h: "EXTERNAL ORDER", k: "externalOrderId", w: 170, mono: true },
       { h: "PICKUP → DROP", k: "route", w: 360 },
       { h: "WINDOW", k: "window", w: 132, mono: true },
       { h: "STATUS", k: "status", w: 160 },
@@ -2047,13 +2052,13 @@ export default async function DispatchPage({
               </Pill>
             </Link>
             <Link
-              href={buildPlatformAdminHref("/adapters")}
+              href={buildPlatformAdminHref("/adapter-registry")}
               target="_blank"
               rel="noreferrer"
               style={{ textDecoration: "none", color: "inherit" }}
             >
               <Pill theme={theme} tone="warn" dot>
-                platform-admin /adapters ↗
+                platform-admin /adapter-registry ↗
               </Pill>
             </Link>
             <Link
