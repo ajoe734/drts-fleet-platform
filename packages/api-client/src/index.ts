@@ -97,6 +97,7 @@ import type {
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
   ServiceRecoveryActionRecord,
+  SearchResultRecord,
   InitiateVehicleOffboardingCommand,
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
@@ -250,6 +251,11 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+export interface RealmSearchQuery {
+  q: string;
+  types?: string[];
+}
+
 interface ListEnvelope<T> {
   items: T[];
 }
@@ -351,6 +357,18 @@ export class ApiClient {
   ): Promise<T[]> {
     const result = await this.get<T[] | ListEnvelope<T>>(path, options);
     return Array.isArray(result) ? result : (result.items ?? []);
+  }
+
+  private buildRealmSearchPath(
+    realm: "ops" | "platform" | "tenant",
+    query: RealmSearchQuery,
+  ): string {
+    const params = new URLSearchParams();
+    params.set("q", query.q);
+    if (query.types && query.types.length > 0) {
+      params.set("types", query.types.join(","));
+    }
+    return `/api/${realm}/search?${params.toString()}`;
   }
 
   private async request<T>(
@@ -1297,6 +1315,24 @@ export class ApiClient {
   ): Promise<FilingPackageDetailRecord> {
     return this.get<FilingPackageDetailRecord>(
       `/api/filing-packages/${packageId}`,
+    );
+  }
+
+  async searchOps(query: RealmSearchQuery): Promise<SearchResultRecord[]> {
+    return this.getList<SearchResultRecord>(
+      this.buildRealmSearchPath("ops", query),
+    );
+  }
+
+  async searchPlatform(query: RealmSearchQuery): Promise<SearchResultRecord[]> {
+    return this.getList<SearchResultRecord>(
+      this.buildRealmSearchPath("platform", query),
+    );
+  }
+
+  async searchTenant(query: RealmSearchQuery): Promise<SearchResultRecord[]> {
+    return this.getList<SearchResultRecord>(
+      this.buildRealmSearchPath("tenant", query),
     );
   }
 
