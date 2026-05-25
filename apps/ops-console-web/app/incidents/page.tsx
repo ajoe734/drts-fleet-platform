@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import type { CSSProperties, ReactElement } from "react";
 import {
   useDeferredValue,
   useEffect,
@@ -9,18 +10,19 @@ import {
   useState,
   useTransition,
 } from "react";
-import { PageHeader } from "@drts/ui-web";
 import type {
   CreateIncidentCommand,
+  CreateIncidentFromDispatchExceptionCommand,
   IncidentCategory,
   IncidentEscalationTarget,
   IncidentRecord,
   IncidentSeverity,
   IncidentStatus,
-  IncidentTimelineEntry,
-  RecordServiceRecoveryActionCommand,
-  ServiceRecoveryActionRecord,
-  UpdateIncidentCommand,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+  EmptyReason,
+  EmptyStateEnvelope,
+  RefreshTier,
 } from "@drts/contracts";
 import {
   INCIDENT_CATEGORIES,
@@ -30,7 +32,28 @@ import {
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
+import {
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasIcon,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTone,
+} from "@drts/ui-web";
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
+
+const REFRESH_TIER: RefreshTier = "medium";
+const REFRESH_INTERVAL_MS = 15_000;
 
 const STATUSES: IncidentStatus[] = [...INCIDENT_STATUSES];
 const SEVERITIES: IncidentSeverity[] = [...INCIDENT_SEVERITIES];
@@ -38,16 +61,6 @@ const CATEGORIES: IncidentCategory[] = [...INCIDENT_CATEGORIES];
 const ESCALATION_TARGETS: IncidentEscalationTarget[] = [
   ...INCIDENT_ESCALATION_TARGETS,
 ];
-
-const SERVICE_RECOVERY_TYPES = [
-  "passenger_recontact",
-  "fare_adjustment",
-  "redispatch_ordered",
-  "voucher_issued",
-  "apology_sent",
-  "driver_reassigned",
-  "other",
-] as const;
 
 type IncidentFormInitialValues = {
   title?: string;
@@ -61,10 +74,51 @@ type IncidentFormInitialValues = {
   reportedBy?: string;
   occurredAt?: string;
   location?: string;
+  dispatchExceptionOrderId?: string;
+  exceptionReasonCode?: string;
+  exceptionNote?: string;
 };
 
-function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "—";
+type IncidentRecordRuntime = IncidentRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type IncidentListRuntimeEnvelope = {
+  items: IncidentRecordRuntime[];
+  availableActions?: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  refresh?: UiRefreshMetadata;
+  refreshTier?: RefreshTier;
+};
+
+type IncidentTableRow = Record<string, unknown> & {
+  incidentId: string;
+  incidentCell: ReactElement;
+  categoryCell: ReactElement;
+  severityCell: ReactElement;
+  statusCell: ReactElement;
+  linksCell: ReactElement;
+  reportedBy: string;
+  occurredCell: ReactElement;
+  ageCell: ReactElement;
+  _selected?: boolean;
+};
+
+function formatDateTime(value: string | null | undefined, locale: "en" | "zh") {
+  if (!value) {
+    return "—";
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
 }
 
 function formatIncidentAge(
@@ -75,8 +129,9 @@ function formatIncidentAge(
     return locale === "en" ? "Time not recorded" : "尚未記錄時間";
   }
 
-  const deltaMinutes = Math.round(
-    (Date.now() - new Date(value).getTime()) / (1000 * 60),
+  const deltaMinutes = Math.max(
+    0,
+    Math.round((Date.now() - new Date(value).getTime()) / (1000 * 60)),
   );
   if (deltaMinutes < 60) {
     return locale === "en"
@@ -85,1118 +140,23 @@ function formatIncidentAge(
   }
 
   const deltaHours = Math.round(deltaMinutes / 60);
-  return locale === "en" ? `${deltaHours} hr ago` : `${deltaHours} 小時前`;
+  if (deltaHours < 24) {
+    return locale === "en" ? `${deltaHours} hr ago` : `${deltaHours} 小時前`;
+  }
+
+  const deltaDays = Math.round(deltaHours / 24);
+  return locale === "en" ? `${deltaDays} d ago` : `${deltaDays} 天前`;
 }
 
-export default function IncidentsPage() {
-  const { t, locale } = useTranslation();
-  const searchParams = useSearchParams();
-  const [records, setRecords] = useState<IncidentRecord[]>([]);
-  const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
-  const [recoveryActions, setRecoveryActions] = useState<
-    ServiceRecoveryActionRecord[]
-  >([]);
-  const [showRecoveryForm, setShowRecoveryForm] = useState(false);
-  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<IncidentStatus | "all">(
-    "all",
-  );
-  const [severityFilter, setSeverityFilter] = useState<
-    IncidentSeverity | "all"
-  >("all");
-  const [categoryFilter, setCategoryFilter] = useState<
-    IncidentCategory | "all"
-  >("all");
-  const deferredQuery = useDeferredValue(query.trim().toLowerCase());
-  const createFromQuery = searchParams.get("create") === "1";
-  const incidentIdFromQuery = searchParams.get("incidentId");
-  const complaintCaseNoFromQuery =
-    searchParams.get("complaintCaseNo")?.trim() ?? "";
-  const createDefaults: IncidentFormInitialValues = {
-    title: searchParams.get("title") ?? "",
-    description: searchParams.get("description") ?? "",
-    category: CATEGORIES.includes(
-      searchParams.get("category") as IncidentCategory,
-    )
-      ? (searchParams.get("category") as IncidentCategory)
-      : "operational",
-    severity: SEVERITIES.includes(
-      searchParams.get("severity") as IncidentSeverity,
-    )
-      ? (searchParams.get("severity") as IncidentSeverity)
-      : "medium",
-    complaintCaseNo: complaintCaseNoFromQuery,
-    relatedOrderId: searchParams.get("relatedOrderId") ?? "",
-    relatedVehicleId: searchParams.get("relatedVehicleId") ?? "",
-    relatedDriverId: searchParams.get("relatedDriverId") ?? "",
-    reportedBy: searchParams.get("reportedBy") ?? "ops-user-001",
-    location: searchParams.get("location") ?? "",
-  };
-  const selectedIncident = useMemo(
-    () =>
-      records.find((record) => record.incidentId === selectedIncidentId) ??
-      null,
-    [records, selectedIncidentId],
-  );
-
-  useEffect(() => {
-    void loadRecords();
-  }, []);
-
-  useEffect(() => {
-    if (!createFromQuery) {
-      return;
-    }
-    setShowCreate(true);
-    setEditingId(null);
-  }, [createFromQuery]);
-
-  useEffect(() => {
-    if (!incidentIdFromQuery) {
-      return;
-    }
-
-    setSelectedIncidentId(incidentIdFromQuery);
-    void loadTimeline(incidentIdFromQuery);
-  }, [incidentIdFromQuery]);
-
-  async function loadRecords() {
-    setLoading(true);
-    try {
-      const client = getOpsClient();
-      const result = await client.listIncidents();
-      setRecords(result);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadTimeline(incidentId: string) {
-    try {
-      const client = getOpsClient();
-      const [items, actions] = await Promise.all([
-        client.getIncidentTimeline(incidentId),
-        client.getServiceRecoveryActions(incidentId),
-      ]);
-      setSelectedIncidentId(incidentId);
-      setTimeline(items);
-      setRecoveryActions(actions);
-      setShowRecoveryForm(false);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
-    }
-  }
-
-  const filteredRecords = records
-    .filter((record) => {
-      if (statusFilter !== "all" && record.status !== statusFilter)
-        return false;
-      if (severityFilter !== "all" && record.severity !== severityFilter) {
-        return false;
-      }
-      if (categoryFilter !== "all" && record.category !== categoryFilter) {
-        return false;
-      }
-      if (!deferredQuery) return true;
-      const haystack = [
-        record.incidentId,
-        record.title,
-        record.description,
-        record.category,
-        record.severity,
-        record.status,
-        record.relatedOrderId ?? "",
-        record.relatedVehicleId ?? "",
-        record.relatedDriverId ?? "",
-        record.relatedComplaintCaseNo ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(deferredQuery);
-    })
-    .sort(compareIncidentPriority);
-  const criticalQueue = records
-    .filter(
-      (record) =>
-        record.severity === "critical" &&
-        record.status !== "resolved" &&
-        record.status !== "closed",
-    )
-    .sort(compareIncidentPriority);
-
-  const openCount = records.filter(
-    (record) => record.status === "open" || record.status === "investigating",
-  ).length;
-  const criticalCount = records.filter(
-    (record) => record.severity === "critical",
-  ).length;
-  const linkedCount = records.filter(
-    (record) =>
-      record.relatedOrderId ||
-      record.relatedVehicleId ||
-      record.relatedComplaintCaseNo,
-  ).length;
-  const recoveryPendingCount = records.filter(
-    (record) =>
-      (record.status === "open" || record.status === "investigating") &&
-      record.serviceRecoveryActions.length === 0,
-  ).length;
-  const incidentGuardrails = [
-    locale === "en"
-      ? "Driver SOS and dispatch-exception incidents remain ops-owned even when linked orders or complaints exist."
-      : "即使已連結訂單或客訴，driver SOS 與 dispatch-exception incident 仍由 ops 持有。",
-    locale === "en"
-      ? "Service recovery actions document passenger remediation; they do not replace timeline updates or formal resolution notes."
-      : "Service recovery action 用於記錄乘客補救，不能取代 timeline 更新或正式 resolution note。",
-    locale === "en"
-      ? "Escalation target signals who must join the response, not who may silently assume ownership."
-      : "Escalation target 代表必須加入處理的人，不代表可默默接手 owner。",
-  ];
-
-  function focusCriticalQueue() {
-    const section = document.getElementById("critical-sos-queue");
-    section?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  return (
-    <>
-      <PageHeader
-        title={t("incidents.title")}
-        subtitle={t("incidents.subtitle")}
-      />
-      <div>
-        {error && (
-          <div className="error-banner">
-            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
-          </div>
-        )}
-
-        <section className="workspace-hero">
-          <div>
-            <p className="eyebrow">
-              {locale === "en" ? "Incident workspace" : "Incident Workspace"}
-            </p>
-            <h3>
-              {selectedIncident
-                ? `${selectedIncident.incidentId} · ${selectedIncident.title}`
-                : t("incidents.selectIncident")}
-            </h3>
-            <p>
-              {selectedIncident
-                ? locale === "en"
-                  ? `${selectedIncident.incidentId} is active in the service recovery workspace.`
-                  : `${selectedIncident.incidentId} 已進入 service recovery workspace。`
-                : locale === "en"
-                  ? "Select an incident to coordinate SOS response, escalation, and service recovery."
-                  : "選擇事故以協調 SOS 回應、升級與 service recovery。"}
-            </p>
-          </div>
-          <div className="hero-chip-row">
-            <span className="hero-chip hero-chip-critical">
-              {locale === "en"
-                ? `${criticalQueue.length} critical in queue`
-                : `${criticalQueue.length} 筆重大事故待處理`}
-            </span>
-            <span className="hero-chip">
-              {locale === "en"
-                ? `${recoveryPendingCount} without recovery actions`
-                : `${recoveryPendingCount} 筆尚未記錄 recovery`}
-            </span>
-            <span className="hero-chip">
-              {locale === "en"
-                ? `${linkedCount} linked entities`
-                : `${linkedCount} 筆已連結實體`}
-            </span>
-          </div>
-        </section>
-
-        <section className="summary-grid">
-          {[
-            {
-              label: t("incidents.activeCount"),
-              value: openCount,
-              note: t("incidents.activeSub"),
-              isCritical: false,
-            },
-            {
-              label: t("incidents.criticalCount"),
-              value: criticalCount,
-              note: t("incidents.criticalSub"),
-              isCritical: true,
-            },
-            {
-              label: t("incidents.resolvedCount"),
-              value: linkedCount,
-              note: t("incidents.resolvedSub"),
-              isCritical: false,
-            },
-          ].map((card) => (
-            <button
-              key={card.label}
-              className={`summary-card ${card.isCritical ? "summary-card-alert" : ""}`}
-              type="button"
-              onClick={card.isCritical ? focusCriticalQueue : undefined}
-            >
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
-            </button>
-          ))}
-        </section>
-
-        <section className="assumption-panel">
-          <strong>
-            {locale === "en"
-              ? "Authority and service recovery guardrails"
-              : "權限與 service recovery guardrails"}
-          </strong>
-          <ul className="assumption-list">
-            {incidentGuardrails.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
-
-        <section id="critical-sos-queue" className="sos-queue">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">
-                {getOpsLabel(locale, "incidentsPriorityQueue")}
-              </p>
-              <h3>{getOpsLabel(locale, "incidentsCriticalQueue")}</h3>
-            </div>
-            <span className="panel-note">
-              {getOpsLabel(locale, "incidentsActiveCritical", {
-                count: criticalQueue.length,
-              })}
-            </span>
-          </div>
-          {criticalQueue.length > 0 ? (
-            <div className="sos-list">
-              {criticalQueue.map((record) => (
-                <article key={record.incidentId} className="sos-card">
-                  <div>
-                    <div className="sos-title-row">
-                      <strong className="cell-title">{record.title}</strong>
-                      {renderSeverityBadge(record.severity, locale)}
-                    </div>
-                    <div className="cell-subcopy">
-                      {record.incidentId} ·{" "}
-                      {formatOpsCodeLabel(locale, record.category)}
-                    </div>
-                    <div className="cell-subcopy">{record.description}</div>
-                  </div>
-                  <div className="sos-meta">
-                    <span className="status-pill">
-                      {formatOpsCodeLabel(locale, record.status)}
-                    </span>
-                    <button
-                      className="btn"
-                      type="button"
-                      onClick={() => void loadTimeline(record.incidentId)}
-                    >
-                      {getOpsLabel(locale, "incidentsReviewTimeline")}
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="all-clear-copy">
-              {getOpsLabel(locale, "incidentsAllClear")}
-            </p>
-          )}
-        </section>
-
-        <div className="toolbar">
-          <input
-            className="search-input"
-            type="search"
-            placeholder={t("incidents.search")}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <select
-            className="filter-select"
-            value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as IncidentStatus | "all")
-            }
-          >
-            <option value="all">{t("incidents.allStatuses")}</option>
-            {STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {formatOpsCodeLabel(locale, status)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="filter-select"
-            value={severityFilter}
-            onChange={(event) =>
-              setSeverityFilter(event.target.value as IncidentSeverity | "all")
-            }
-          >
-            <option value="all">{t("incidents.allSeverities")}</option>
-            {SEVERITIES.map((severity) => (
-              <option key={severity} value={severity}>
-                {formatOpsCodeLabel(locale, severity)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="filter-select"
-            value={categoryFilter}
-            onChange={(event) =>
-              setCategoryFilter(event.target.value as IncidentCategory | "all")
-            }
-          >
-            <option value="all">{t("incidents.allCategories")}</option>
-            {CATEGORIES.map((category) => (
-              <option key={category} value={category}>
-                {formatOpsCodeLabel(locale, category)}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={() => {
-              setShowCreate(true);
-              setEditingId(null);
-            }}
-          >
-            {t("incidents.createBtn")}
-          </button>
-          <button
-            className="btn"
-            type="button"
-            onClick={() => void loadRecords()}
-          >
-            {t("common.refresh")}
-          </button>
-        </div>
-
-        {(showCreate || editingId) && (
-          <IncidentForm
-            key={editingId ?? `create:${searchParams.toString()}`}
-            editingRecord={
-              editingId
-                ? records.find((record) => record.incidentId === editingId)
-                : undefined
-            }
-            {...(!editingId ? { initialValues: createDefaults } : {})}
-            onCancel={() => {
-              setShowCreate(false);
-              setEditingId(null);
-            }}
-            onSubmit={async (command) => {
-              try {
-                const client = getOpsClient();
-                if (editingId) {
-                  await client.updateIncident(
-                    editingId,
-                    command as UpdateIncidentCommand,
-                  );
-                } else {
-                  const created = await client.createIncident(
-                    command as CreateIncidentCommand,
-                  );
-                  if (complaintCaseNoFromQuery) {
-                    await client.linkIncidentToComplaint(
-                      created.incidentId,
-                      complaintCaseNoFromQuery,
-                    );
-                    setSelectedIncidentId(created.incidentId);
-                    await loadTimeline(created.incidentId);
-                  }
-                }
-                setShowCreate(false);
-                setEditingId(null);
-                await loadRecords();
-              } catch (e) {
-                setError(e instanceof Error ? e.message : t("common.unknown"));
-              }
-            }}
-          />
-        )}
-
-        {loading ? (
-          <p>{getOpsLabel(locale, "incidentsLoading")}</p>
-        ) : (
-          <div className="content-grid">
-            <section className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="eyebrow">{t("incidents.registry")}</p>
-                  <h3>{t("incidents.backlog")}</h3>
-                </div>
-                <span className="panel-note">
-                  {t("incidents.visible", { count: filteredRecords.length })}
-                </span>
-              </div>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>{t("incidents.col.incident")}</th>
-                    <th>{t("incidents.col.severity")}</th>
-                    <th>{t("incidents.col.status")}</th>
-                    <th>{t("incidents.col.escalation")}</th>
-                    <th>{t("incidents.col.vehicles")}</th>
-                    <th>{t("incidents.col.actions")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRecords.length > 0 ? (
-                    filteredRecords.map((record) => (
-                      <tr
-                        key={record.incidentId}
-                        className={
-                          record.incidentId === selectedIncidentId
-                            ? "row-selected"
-                            : record.severity === "critical"
-                              ? "row-critical"
-                              : ""
-                        }
-                      >
-                        <td>
-                          <div className="cell-title">{record.title}</div>
-                          <div className="cell-subcopy">
-                            {record.incidentId} ·{" "}
-                            {formatOpsCodeLabel(locale, record.category)}
-                          </div>
-                          <div className="cell-subcopy">
-                            {record.description}
-                          </div>
-                        </td>
-                        <td>{renderSeverityBadge(record.severity, locale)}</td>
-                        <td>{formatOpsCodeLabel(locale, record.status)}</td>
-                        <td>
-                          <div className="link-stack">
-                            {record.escalationTarget ? (
-                              <span className="escalation-badge">
-                                {t(
-                                  `incidents.escalationBadge.${record.escalationTarget}` as any,
-                                )}
-                              </span>
-                            ) : (
-                              <span className="cell-subcopy">—</span>
-                            )}
-                            {record.sourceDispatchExceptionOrderId && (
-                              <span className="dispatch-exception-tag">
-                                {t("incidents.dispatchException")}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="link-stack">
-                            {record.relatedOrderId && (
-                              <Link
-                                className="inline-link"
-                                href={`/dispatch?orderId=${encodeURIComponent(record.relatedOrderId)}`}
-                              >
-                                {getOpsLabel(locale, "order")}{" "}
-                                {record.relatedOrderId}
-                              </Link>
-                            )}
-                            {record.relatedVehicleId && (
-                              <Link className="inline-link" href="/vehicles">
-                                {getOpsLabel(locale, "vehicle")}{" "}
-                                {record.relatedVehicleId}
-                              </Link>
-                            )}
-                            {record.relatedComplaintCaseNo && (
-                              <Link
-                                className="inline-link"
-                                href={`/complaints?caseNo=${encodeURIComponent(
-                                  record.relatedComplaintCaseNo,
-                                )}`}
-                              >
-                                {getOpsLabel(locale, "complaint")}{" "}
-                                {record.relatedComplaintCaseNo}
-                              </Link>
-                            )}
-                            {!record.relatedOrderId &&
-                              !record.relatedVehicleId &&
-                              !record.relatedComplaintCaseNo && (
-                                <span className="cell-subcopy">
-                                  {getOpsLabel(
-                                    locale,
-                                    "incidentsNoLinkedEntities",
-                                  )}
-                                </span>
-                              )}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="link-stack">
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={() => setEditingId(record.incidentId)}
-                            >
-                              {t("common.edit")}
-                            </button>
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={() =>
-                                void loadTimeline(record.incidentId)
-                              }
-                            >
-                              {t("incidents.timeline")}
-                            </button>
-                            {record.status !== "resolved" &&
-                              record.status !== "closed" && (
-                                <button
-                                  className="btn btn-warning"
-                                  type="button"
-                                  onClick={async () => {
-                                    try {
-                                      const client = getOpsClient();
-                                      await client.updateIncident(
-                                        record.incidentId,
-                                        {
-                                          status: "resolved",
-                                        },
-                                      );
-                                      await loadRecords();
-                                      if (
-                                        selectedIncidentId === record.incidentId
-                                      ) {
-                                        await loadTimeline(record.incidentId);
-                                      }
-                                    } catch (e) {
-                                      setError(
-                                        e instanceof Error
-                                          ? e.message
-                                          : t("common.unknown"),
-                                      );
-                                    }
-                                  }}
-                                >
-                                  {t("incidents.resolve")}
-                                </button>
-                              )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={6}>{t("incidents.empty")}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </section>
-
-            <section className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="eyebrow">{t("incidents.timeline")}</p>
-                  <h3>{selectedIncidentId ?? t("incidents.selectIncident")}</h3>
-                </div>
-              </div>
-              {selectedIncident && (
-                <section className="incident-brief">
-                  <div className="detail-grid">
-                    <div>
-                      <span className="label">{t("common.status")}</span>
-                      <strong>
-                        {formatOpsCodeLabel(locale, selectedIncident.status)}
-                      </strong>
-                      <small>
-                        {formatIncidentAge(
-                          selectedIncident.occurredAt ??
-                            selectedIncident.createdAt,
-                          locale,
-                        )}
-                      </small>
-                    </div>
-                    <div>
-                      <span className="label">
-                        {t("incidents.col.severity")}
-                      </span>
-                      <strong>
-                        {formatOpsCodeLabel(locale, selectedIncident.severity)}
-                      </strong>
-                      <small>
-                        {selectedIncident.assignedTo ??
-                          (locale === "en" ? "Unassigned" : "未指派")}
-                      </small>
-                    </div>
-                    <div>
-                      <span className="label">
-                        {t("incidents.col.escalation")}
-                      </span>
-                      <strong>
-                        {selectedIncident.escalationTarget
-                          ? t(
-                              `incidents.escalationBadge.${selectedIncident.escalationTarget}` as any,
-                            )
-                          : t("incidents.form.escalationNone")}
-                      </strong>
-                      <small>
-                        {formatDateTime(selectedIncident.updatedAt)}
-                      </small>
-                    </div>
-                    <div>
-                      <span className="label">
-                        {t("incidents.serviceRecovery")}
-                      </span>
-                      <strong>
-                        {selectedIncident.serviceRecoveryActions.length}
-                      </strong>
-                      <small>
-                        {locale === "en"
-                          ? "recovery action(s) recorded"
-                          : "筆 recovery action 已記錄"}
-                      </small>
-                    </div>
-                  </div>
-                  <p className="brief-description">
-                    {selectedIncident.description}
-                  </p>
-                  <div className="link-stack">
-                    {selectedIncident.relatedOrderId && (
-                      <Link
-                        className="inline-link"
-                        href={`/dispatch?orderId=${encodeURIComponent(selectedIncident.relatedOrderId)}`}
-                      >
-                        {locale === "en"
-                          ? `Open dispatch order ${selectedIncident.relatedOrderId}`
-                          : `開啟派車訂單 ${selectedIncident.relatedOrderId}`}
-                      </Link>
-                    )}
-                    {selectedIncident.relatedComplaintCaseNo && (
-                      <Link
-                        className="inline-link"
-                        href={`/complaints?caseNo=${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
-                      >
-                        {locale === "en"
-                          ? `Open complaint ${selectedIncident.relatedComplaintCaseNo}`
-                          : `開啟客訴 ${selectedIncident.relatedComplaintCaseNo}`}
-                      </Link>
-                    )}
-                    {selectedIncident.location && (
-                      <span className="cell-subcopy">
-                        {locale === "en"
-                          ? `Location: ${selectedIncident.location}`
-                          : `地點：${selectedIncident.location}`}
-                      </span>
-                    )}
-                  </div>
-                </section>
-              )}
-              {selectedIncidentId ? (
-                timeline.length > 0 ? (
-                  <ul className="timeline-list">
-                    {timeline.map((entry) => (
-                      <li key={entry.entryId}>
-                        <strong>
-                          {formatOpsCodeLabel(locale, entry.action)}
-                        </strong>
-                        <div>{entry.note}</div>
-                        <small>
-                          {entry.actor} ·{" "}
-                          {new Date(entry.createdAt).toLocaleString()}
-                        </small>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="empty-copy">{t("incidents.timelineEmpty")}</p>
-                )
-              ) : (
-                <p className="empty-copy">
-                  {getOpsLabel(locale, "incidentsSelectHint")}
-                </p>
-              )}
-
-              {selectedIncidentId && (
-                <div className="recovery-section">
-                  <div className="panel-head">
-                    <div>
-                      <p className="eyebrow">
-                        {t("incidents.serviceRecovery")}
-                      </p>
-                      <h3>{t("incidents.serviceRecovery.title")}</h3>
-                    </div>
-                    <button
-                      className="btn btn-primary"
-                      type="button"
-                      onClick={() => setShowRecoveryForm(!showRecoveryForm)}
-                    >
-                      {t("incidents.serviceRecovery.add")}
-                    </button>
-                  </div>
-
-                  {showRecoveryForm && (
-                    <ServiceRecoveryForm
-                      onSubmit={async (command) => {
-                        try {
-                          const client = getOpsClient();
-                          await client.recordServiceRecoveryAction(
-                            selectedIncidentId,
-                            command,
-                          );
-                          await loadTimeline(selectedIncidentId);
-                        } catch (e) {
-                          setError(
-                            e instanceof Error
-                              ? e.message
-                              : t("common.unknown"),
-                          );
-                        }
-                      }}
-                      onCancel={() => setShowRecoveryForm(false)}
-                    />
-                  )}
-
-                  {recoveryActions.length > 0 ? (
-                    <ul className="timeline-list">
-                      {recoveryActions.map((action) => (
-                        <li key={action.actionId}>
-                          <strong>
-                            {t(
-                              `incidents.serviceRecovery.${action.actionType}` as any,
-                            )}
-                          </strong>
-                          <div>{action.note}</div>
-                          <small>
-                            {action.actor} ·{" "}
-                            {new Date(action.createdAt).toLocaleString()}
-                          </small>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="empty-copy">
-                      {t("incidents.serviceRecovery.empty")}
-                    </p>
-                  )}
-                </div>
-              )}
-            </section>
-          </div>
-        )}
-
-        <Link className="route-link" href="/dashboard">
-          <strong>{t("common.backToDashboard")}</strong>{" "}
-          {t("common.backToDashboardSub")}
-        </Link>
-
-        <style jsx>{`
-          .summary-grid,
-          .sos-list,
-          .toolbar,
-          .content-grid,
-          .link-stack,
-          .detail-grid {
-            display: grid;
-            gap: 0.75rem;
-          }
-          .workspace-hero,
-          .assumption-panel,
-          .summary-card,
-          .sos-queue,
-          .panel {
-            padding: 1rem;
-            border-radius: 1rem;
-            border: 1px solid #e2e8f0;
-            background: #fff;
-          }
-          .workspace-hero,
-          .assumption-panel {
-            margin-bottom: 1rem;
-          }
-          .workspace-hero {
-            display: grid;
-            gap: 1rem;
-            grid-template-columns: minmax(0, 1fr) auto;
-            align-items: start;
-            background: linear-gradient(135deg, #eff6ff, #fff7ed 70%, #ffffff);
-          }
-          .hero-chip-row {
-            display: flex;
-            gap: 0.65rem;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-          }
-          .hero-chip {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.22rem 0.6rem;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            font-weight: 700;
-            background: rgba(255, 255, 255, 0.86);
-            border: 1px solid #93c5fd;
-            color: #1d4ed8;
-          }
-          .hero-chip-critical {
-            border-color: #fca5a5;
-            background: #fee2e2;
-            color: #b91c1c;
-          }
-          .assumption-panel strong {
-            display: block;
-            margin-bottom: 0.55rem;
-          }
-          .assumption-list {
-            margin: 0;
-            padding-left: 1.1rem;
-            color: #475569;
-          }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .summary-card {
-            background: #f8fafc;
-            text-align: left;
-            cursor: default;
-          }
-          .summary-card-alert {
-            cursor: pointer;
-            border-color: #fca5a5;
-            background: linear-gradient(135deg, #fff1f2, #fef2f2);
-          }
-          .summary-card strong {
-            font-size: 1.4rem;
-          }
-          .sos-queue {
-            margin-bottom: 1rem;
-            background: linear-gradient(135deg, #fff7ed, #fff1f2);
-          }
-          .sos-card {
-            display: grid;
-            gap: 0.75rem;
-            grid-template-columns: minmax(0, 1fr) auto;
-            align-items: center;
-            padding: 0.9rem 1rem;
-            border-radius: 0.9rem;
-            border: 1px solid #fdba74;
-            background: rgba(255, 255, 255, 0.92);
-          }
-          .sos-title-row,
-          .sos-meta {
-            display: flex;
-            gap: 0.75rem;
-            align-items: center;
-            flex-wrap: wrap;
-          }
-          .all-clear-copy {
-            margin: 0;
-            color: #166534;
-          }
-          .status-pill,
-          .severity-badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: fit-content;
-            padding: 0.2rem 0.55rem;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            font-weight: 700;
-            text-transform: capitalize;
-          }
-          .status-pill {
-            background: #e2e8f0;
-            color: #334155;
-          }
-          .severity-badge {
-            border: 1px solid transparent;
-          }
-          .severity-critical {
-            background: #fee2e2;
-            border-color: #fca5a5;
-            color: #b91c1c;
-          }
-          .severity-high {
-            background: #ffedd5;
-            border-color: #fdba74;
-            color: #c2410c;
-          }
-          .severity-medium {
-            background: #fef3c7;
-            border-color: #fcd34d;
-            color: #a16207;
-          }
-          .severity-low {
-            background: #e2e8f0;
-            border-color: #cbd5e1;
-            color: #334155;
-          }
-          .toolbar {
-            grid-template-columns: 2fr repeat(3, minmax(0, 1fr)) auto auto;
-            align-items: center;
-            margin-bottom: 1rem;
-          }
-          .search-input,
-          .filter-select {
-            width: 100%;
-            padding: 0.75rem 0.85rem;
-            border-radius: 0.8rem;
-            border: 1px solid #cbd5e1;
-          }
-          .btn {
-            padding: 0.65rem 0.85rem;
-            border-radius: 0.75rem;
-            border: 1px solid #cbd5e1;
-            background: white;
-            cursor: pointer;
-          }
-          .btn-primary {
-            background: #0f172a;
-            color: white;
-            border-color: #0f172a;
-          }
-          .btn-warning {
-            background: #fef3c7;
-            border-color: #f59e0b;
-            color: #92400e;
-          }
-          .content-grid {
-            grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
-          }
-          .detail-grid {
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-          }
-          .panel-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 1rem;
-            align-items: flex-start;
-            margin-bottom: 0.75rem;
-          }
-          .eyebrow,
-          .panel-note,
-          .cell-subcopy,
-          .empty-copy {
-            color: #64748b;
-          }
-          .eyebrow {
-            margin: 0 0 0.25rem;
-            font-size: 0.75rem;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-          }
-          .table {
-            width: 100%;
-            border-collapse: collapse;
-          }
-          .table th,
-          .table td {
-            padding: 0.75rem 0.5rem;
-            border-bottom: 1px solid #e2e8f0;
-            text-align: left;
-            vertical-align: top;
-          }
-          .cell-title {
-            font-weight: 600;
-            color: #0f172a;
-          }
-          .inline-link,
-          .route-link {
-            color: #0f172a;
-            text-decoration: none;
-          }
-          .incident-brief {
-            display: grid;
-            gap: 0.8rem;
-            margin-bottom: 1rem;
-            padding: 0.9rem 1rem;
-            border-radius: 0.9rem;
-            border: 1px solid #dbeafe;
-            background: #f8fbff;
-          }
-          .label {
-            display: block;
-            margin-bottom: 0.2rem;
-            color: #64748b;
-            font-size: 0.74rem;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-          }
-          .brief-description {
-            margin: 0;
-            color: #334155;
-          }
-          .timeline-list {
-            margin: 0;
-            padding-left: 1rem;
-            display: grid;
-            gap: 0.9rem;
-          }
-          .timeline-list small {
-            color: #64748b;
-          }
-          .row-selected {
-            background: #eff6ff;
-          }
-          .row-critical {
-            background: #fef2f2;
-          }
-          .escalation-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.2rem 0.55rem;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            font-weight: 700;
-            background: #dbeafe;
-            border: 1px solid #93c5fd;
-            color: #1e40af;
-          }
-          .dispatch-exception-tag {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.15rem 0.45rem;
-            border-radius: 999px;
-            font-size: 0.72rem;
-            font-weight: 600;
-            background: #fef3c7;
-            border: 1px solid #fcd34d;
-            color: #a16207;
-          }
-          .recovery-section {
-            margin-top: 1rem;
-            padding-top: 1rem;
-            border-top: 1px solid #e2e8f0;
-          }
-          @media (max-width: 900px) {
-            .workspace-hero,
-            .toolbar,
-            .content-grid,
-            .sos-card {
-              grid-template-columns: 1fr;
-            }
-          }
-        `}</style>
-      </div>
-    </>
-  );
-}
-
-function compareIncidentPriority(a: IncidentRecord, b: IncidentRecord) {
+function compareIncidentPriority(
+  a: IncidentRecordRuntime,
+  b: IncidentRecordRuntime,
+) {
   const severityWeight =
     incidentSeverityWeight(b.severity) - incidentSeverityWeight(a.severity);
-  if (severityWeight !== 0) return severityWeight;
+  if (severityWeight !== 0) {
+    return severityWeight;
+  }
 
   return (
     new Date(b.occurredAt ?? b.createdAt).getTime() -
@@ -1218,193 +178,1246 @@ function incidentSeverityWeight(severity: IncidentSeverity) {
   }
 }
 
-function ServiceRecoveryForm({
-  onSubmit,
-  onCancel,
-}: {
-  onSubmit: (command: RecordServiceRecoveryActionCommand) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const { t } = useTranslation();
-  const [pending, startTransition] = useTransition();
-  const [actionType, setActionType] = useState<string>("passenger_recontact");
-  const [note, setNote] = useState("");
-  const [actor, setActor] = useState("ops-user-001");
+function getSeverityTone(severity: IncidentSeverity): CanvasTone {
+  if (severity === "critical" || severity === "high") {
+    return "danger";
+  }
+  if (severity === "medium") {
+    return "warn";
+  }
+  return "info";
+}
 
-  function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    startTransition(() => {
-      void onSubmit({
-        actionType:
-          actionType as RecordServiceRecoveryActionCommand["actionType"],
-        note: note.trim(),
-        actor: actor.trim() || "ops-user-001",
-      });
-    });
+function getStatusTone(status: IncidentStatus): CanvasTone {
+  if (status === "resolved" || status === "closed") {
+    return "success";
+  }
+  if (status === "investigating") {
+    return "danger";
+  }
+  return "warn";
+}
+
+function buildDefaultRefresh(): UiRefreshMetadata {
+  return {
+    generatedAt: new Date().toISOString(),
+    staleAfterMs: REFRESH_INTERVAL_MS,
+    dataFreshness: "fresh",
+    source: "live",
+  };
+}
+
+function buildDefaultPageActions(): ResourceActionDescriptor[] {
+  return [
+    {
+      action: "create_incident",
+      enabled: true,
+      riskLevel: "medium",
+    },
+    {
+      action: "refresh",
+      enabled: true,
+      riskLevel: "low",
+    },
+  ];
+}
+
+function classifyErrorReason(message: string): EmptyReason {
+  if (message.includes("403") || message.includes("401")) {
+    return "permission_denied";
+  }
+  if (
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("504") ||
+    message.toLowerCase().includes("timeout")
+  ) {
+    return "external_unavailable";
+  }
+  if (message.includes("404") || message.toLowerCase().includes("provision")) {
+    return "not_provisioned";
+  }
+  return "fetch_failed";
+}
+
+function buildFallbackEmptyState(reason: EmptyReason): EmptyStateEnvelope {
+  return {
+    reason,
+    messageCode: `incidents.${reason}`,
+  };
+}
+
+function getActionDescriptor(
+  actions: ResourceActionDescriptor[],
+  names: string[],
+): ResourceActionDescriptor | null {
+  for (const name of names) {
+    const match = actions.find((action) => action.action === name);
+    if (match) {
+      return match;
+    }
   }
 
-  return (
-    <form className="recovery-form" onSubmit={handleSubmit}>
-      <div className="form-grid">
-        <label>
-          {t("incidents.serviceRecovery.type")}
-          <select
-            value={actionType}
-            onChange={(event) => setActionType(event.target.value)}
-          >
-            {SERVICE_RECOVERY_TYPES.map((value) => (
-              <option key={value} value={value}>
-                {t(`incidents.serviceRecovery.${value}` as any)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {t("incidents.serviceRecovery.actor")}
-          <input
-            value={actor}
-            onChange={(event) => setActor(event.target.value)}
-            required
-          />
-        </label>
-        <label className="full-width">
-          {t("incidents.serviceRecovery.note")}
-          <textarea
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            rows={3}
-            required
-          />
-        </label>
-      </div>
-      <div className="form-actions">
-        <button className="btn btn-primary" type="submit" disabled={pending}>
-          {t("incidents.serviceRecovery.submit")}
-        </button>
-        <button className="btn" type="button" onClick={onCancel}>
-          {t("common.cancel")}
-        </button>
-      </div>
-      <style jsx>{`
-        .recovery-form {
-          margin-bottom: 0.75rem;
-          padding: 0.75rem;
-          border-radius: 0.75rem;
-          border: 1px solid #e2e8f0;
-          background: #f8fafc;
-        }
-        .form-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 0.75rem;
-        }
-        label {
-          display: grid;
-          gap: 0.35rem;
-          color: #0f172a;
-        }
-        input,
-        select,
-        textarea {
-          width: 100%;
-          padding: 0.7rem 0.8rem;
-          border-radius: 0.75rem;
-          border: 1px solid #cbd5e1;
-          background: white;
-        }
-        .full-width {
-          grid-column: 1 / -1;
-        }
-        .form-actions {
-          display: flex;
-          gap: 0.75rem;
-          margin-top: 0.75rem;
-        }
-      `}</style>
-    </form>
+  return null;
+}
+
+function isPriorityIncident(record: IncidentRecordRuntime) {
+  const open = record.status === "open" || record.status === "investigating";
+  if (!open) {
+    return false;
+  }
+
+  if (record.severity === "critical" || record.severity === "high") {
+    return true;
+  }
+
+  if (record.category === "safety" || record.sourceDispatchExceptionOrderId) {
+    return true;
+  }
+
+  const haystack = `${record.title} ${record.description}`.toLowerCase();
+  return haystack.includes("sos");
+}
+
+function hasLinkedEntities(record: IncidentRecordRuntime) {
+  return Boolean(
+    record.relatedOrderId ||
+    record.relatedVehicleId ||
+    record.relatedDriverId ||
+    record.relatedComplaintCaseNo,
   );
 }
 
 function renderSeverityBadge(severity: IncidentSeverity, locale: "en" | "zh") {
   return (
-    <span className={`severity-badge severity-${severity}`}>
+    <Pill theme={theme} tone={getSeverityTone(severity)} dot>
       {formatOpsCodeLabel(locale, severity)}
-    </span>
+    </Pill>
   );
 }
 
+function renderStatusBadge(status: IncidentStatus, locale: "en" | "zh") {
+  return (
+    <Pill theme={theme} tone={getStatusTone(status)} dot>
+      {formatOpsCodeLabel(locale, status)}
+    </Pill>
+  );
+}
+
+function renderEmptyState(
+  emptyState: EmptyStateEnvelope,
+  locale: "en" | "zh",
+  onRefresh: () => void,
+  onCreate: () => void,
+) {
+  const copy = getEmptyStateCopy(emptyState.reason, locale);
+  const tone = copy.tone;
+
+  return (
+    <Card
+      theme={theme}
+      title={copy.title}
+      subtitle={copy.body}
+      actions={
+        <>
+          {emptyState.reason !== "permission_denied" ? (
+            <Btn
+              theme={theme}
+              variant="secondary"
+              icon="more"
+              onClick={onRefresh}
+            >
+              {locale === "en" ? "Refresh" : "重新整理"}
+            </Btn>
+          ) : null}
+          {emptyState.reason === "no_data" ||
+          emptyState.reason === "not_provisioned" ? (
+            <Btn theme={theme} variant="primary" icon="plus" onClick={onCreate}>
+              {locale === "en" ? "Create incident" : "建立事故"}
+            </Btn>
+          ) : null}
+        </>
+      }
+      padding={20}
+      style={{
+        borderColor: tone === "danger" ? theme.dangerBorder : theme.border,
+        background: tone === "danger" ? theme.dangerBg : theme.surface,
+      }}
+    >
+      <div
+        style={{
+          display: "grid",
+          placeItems: "center",
+          gap: 12,
+          minHeight: 240,
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            width: 68,
+            height: 68,
+            borderRadius: 20,
+            display: "grid",
+            placeItems: "center",
+            background:
+              tone === "danger" ? "rgba(220, 38, 38, 0.16)" : theme.surfaceLo,
+            border: `1px solid ${tone === "danger" ? theme.dangerBorder : theme.border}`,
+          }}
+        >
+          <CanvasIcon name={copy.icon} size={28} />
+        </div>
+        <div style={{ maxWidth: 520 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>
+            {copy.title}
+          </div>
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12.5,
+              color: theme.textMuted,
+              lineHeight: 1.6,
+            }}
+          >
+            {copy.body}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function getEmptyStateCopy(reason: EmptyReason, locale: "en" | "zh") {
+  switch (reason) {
+    case "no_data":
+      return {
+        icon: "incidents" as const,
+        tone: "info" as const,
+        title: locale === "en" ? "No incidents yet" : "目前沒有事故",
+        body:
+          locale === "en"
+            ? "No incident records have been created in this workspace. Use the manual create action when Ops needs to start a case."
+            : "目前這個工作區尚未建立任何事故紀錄。當營運團隊需要主動開案時，可使用手動建立動作。",
+      };
+    case "not_provisioned":
+      return {
+        icon: "flags" as const,
+        tone: "warn" as const,
+        title:
+          locale === "en"
+            ? "Incident service is not provisioned"
+            : "事故服務尚未完成配置",
+        body:
+          locale === "en"
+            ? "The incident module is available in navigation, but the backing read model or upstream provisioning is not ready for this tenant."
+            : "側邊導覽已顯示事故模組，但底層讀模型或上游配置尚未對這個 tenant 就緒。",
+      };
+    case "fetch_failed":
+      return {
+        icon: "warn" as const,
+        tone: "danger" as const,
+        title:
+          locale === "en" ? "Unable to load incidents" : "無法載入事故列表",
+        body:
+          locale === "en"
+            ? "The last fetch failed before a valid snapshot arrived. Retry now or inspect adapter / API health before assuming there are no incidents."
+            : "最新請求在取得有效快照前失敗。請先重試，或檢查 adapter / API health，再判定目前沒有事故。",
+      };
+    case "permission_denied":
+      return {
+        icon: "users" as const,
+        tone: "danger" as const,
+        title:
+          locale === "en"
+            ? "You do not have incident access"
+            : "你目前沒有事故模組權限",
+        body:
+          locale === "en"
+            ? "The backend explicitly denied this list request. This is different from an empty queue and should remain visually distinct."
+            : "後端明確拒絕了此列表請求。這和空佇列不同，必須以獨立狀態呈現。",
+      };
+    case "external_unavailable":
+      return {
+        icon: "adapters" as const,
+        tone: "danger" as const,
+        title:
+          locale === "en"
+            ? "Upstream incident dependency is unavailable"
+            : "事故上游依賴目前不可用",
+        body:
+          locale === "en"
+            ? "A dependent service is unavailable. Keep the manual refresh affordance visible and avoid misrepresenting this as no data."
+            : "相依服務目前不可用。請保留手動重新整理入口，不要把這個狀態誤呈現成沒有資料。",
+      };
+    case "filtered_empty":
+      return {
+        icon: "filter" as const,
+        tone: "info" as const,
+        title:
+          locale === "en"
+            ? "No incidents match the current filters"
+            : "目前篩選條件沒有符合的事故",
+        body:
+          locale === "en"
+            ? "Try a different status, severity, category, or keyword. The underlying dataset still exists."
+            : "請調整狀態、嚴重度、分類或關鍵字。底層資料仍然存在，只是目前條件下沒有命中。",
+      };
+    default:
+      return {
+        icon: "incidents" as const,
+        tone: "info" as const,
+        title: locale === "en" ? "No incidents" : "沒有事故",
+        body: locale === "en" ? "No data available." : "目前沒有可顯示的資料。",
+      };
+  }
+}
+
+export default function IncidentsPage() {
+  const { t, locale } = useTranslation();
+  const searchParams = useSearchParams();
+  const [records, setRecords] = useState<IncidentRecordRuntime[]>([]);
+  const [pageActions, setPageActions] = useState<ResourceActionDescriptor[]>(
+    buildDefaultPageActions(),
+  );
+  const [refresh, setRefresh] = useState<UiRefreshMetadata>(
+    buildDefaultRefresh(),
+  );
+  const [emptyState, setEmptyState] = useState<EmptyStateEnvelope | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<IncidentStatus | "all">(
+    "all",
+  );
+  const [severityFilter, setSeverityFilter] = useState<
+    IncidentSeverity | "all"
+  >("all");
+  const [categoryFilter, setCategoryFilter] = useState<
+    IncidentCategory | "all"
+  >("all");
+
+  const deferredQuery = useDeferredValue(query.trim().toLowerCase());
+  const createFromQuery = searchParams.get("create") === "1";
+  const complaintCaseNoFromQuery =
+    searchParams.get("complaintCaseNo")?.trim() ?? "";
+  const dispatchExceptionOrderId =
+    searchParams.get("dispatchExceptionOrderId")?.trim() ?? "";
+  const exceptionReasonCode =
+    searchParams.get("exceptionReasonCode")?.trim() ?? "";
+
+  const createDefaults: IncidentFormInitialValues = {
+    title: searchParams.get("title") ?? "",
+    description: searchParams.get("description") ?? "",
+    category: CATEGORIES.includes(
+      searchParams.get("category") as IncidentCategory,
+    )
+      ? (searchParams.get("category") as IncidentCategory)
+      : "operational",
+    severity: SEVERITIES.includes(
+      searchParams.get("severity") as IncidentSeverity,
+    )
+      ? (searchParams.get("severity") as IncidentSeverity)
+      : "medium",
+    complaintCaseNo: complaintCaseNoFromQuery,
+    relatedOrderId:
+      searchParams.get("relatedOrderId") ?? dispatchExceptionOrderId,
+    relatedVehicleId: searchParams.get("relatedVehicleId") ?? "",
+    relatedDriverId: searchParams.get("relatedDriverId") ?? "",
+    reportedBy: searchParams.get("reportedBy") ?? "ops-user-001",
+    occurredAt: searchParams.get("occurredAt") ?? "",
+    location: searchParams.get("location") ?? "",
+    dispatchExceptionOrderId,
+    exceptionReasonCode,
+    exceptionNote: searchParams.get("exceptionNote") ?? "",
+  };
+
+  useEffect(() => {
+    void loadRecords(false);
+  }, []);
+
+  useEffect(() => {
+    if (!createFromQuery) {
+      return;
+    }
+
+    setShowCreate(true);
+  }, [createFromQuery]);
+
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      void loadRecords(false);
+    }, REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(handle);
+  }, []);
+
+  async function loadRecords(manual: boolean) {
+    if (manual) {
+      setLoading(true);
+    }
+
+    try {
+      const client = getOpsClient();
+      const payload =
+        await client.get<IncidentListRuntimeEnvelope>("/api/incidents");
+      const normalizedItems = Array.isArray(payload)
+        ? (payload as unknown as IncidentRecordRuntime[])
+        : (payload.items ?? []);
+      const normalizedEnvelope = Array.isArray(payload)
+        ? null
+        : (payload as IncidentListRuntimeEnvelope);
+
+      setRecords([...normalizedItems].sort(compareIncidentPriority));
+      setPageActions(
+        normalizedEnvelope?.availableActions ?? buildDefaultPageActions(),
+      );
+      setRefresh(normalizedEnvelope?.refresh ?? buildDefaultRefresh());
+      setEmptyState(
+        normalizedItems.length === 0
+          ? (normalizedEnvelope?.emptyState ??
+              buildFallbackEmptyState("no_data"))
+          : null,
+      );
+      setError(null);
+    } catch (loadError) {
+      const message =
+        loadError instanceof Error ? loadError.message : t("common.unknown");
+      setError(message);
+      setRefresh({
+        ...buildDefaultRefresh(),
+        dataFreshness: "degraded",
+        source: "cache",
+      });
+      if (records.length === 0) {
+        setEmptyState(buildFallbackEmptyState(classifyErrorReason(message)));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const filteredRecords = useMemo(() => {
+    return records
+      .filter((record) => {
+        if (statusFilter !== "all" && record.status !== statusFilter) {
+          return false;
+        }
+        if (severityFilter !== "all" && record.severity !== severityFilter) {
+          return false;
+        }
+        if (categoryFilter !== "all" && record.category !== categoryFilter) {
+          return false;
+        }
+        if (!deferredQuery) {
+          return true;
+        }
+        const haystack = [
+          record.incidentId,
+          record.title,
+          record.description,
+          record.category,
+          record.severity,
+          record.status,
+          record.relatedOrderId ?? "",
+          record.relatedVehicleId ?? "",
+          record.relatedDriverId ?? "",
+          record.relatedComplaintCaseNo ?? "",
+          record.reportedBy,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(deferredQuery);
+      })
+      .sort(compareIncidentPriority);
+  }, [records, statusFilter, severityFilter, categoryFilter, deferredQuery]);
+
+  const priorityQueue = useMemo(
+    () =>
+      records
+        .filter((record) => isPriorityIncident(record))
+        .sort(compareIncidentPriority),
+    [records],
+  );
+
+  const openCount = records.filter(
+    (record) => record.status === "open" || record.status === "investigating",
+  ).length;
+  const majorCount = records.filter(
+    (record) => record.severity === "critical" || record.severity === "high",
+  ).length;
+  const resolved30dCount = records.filter((record) => {
+    if (record.status !== "resolved" && record.status !== "closed") {
+      return false;
+    }
+    return (
+      Date.now() - new Date(record.updatedAt).getTime() <=
+      30 * 24 * 60 * 60 * 1000
+    );
+  }).length;
+  const linkedCount = records.filter((record) =>
+    hasLinkedEntities(record),
+  ).length;
+  const recoveryPendingCount = records.filter(
+    (record) =>
+      (record.status === "open" || record.status === "investigating") &&
+      record.serviceRecoveryActions.length === 0,
+  ).length;
+  const activeCritical = records.find(
+    (record) =>
+      record.severity === "critical" &&
+      (record.status === "open" || record.status === "investigating"),
+  );
+
+  const createAction = getActionDescriptor(pageActions, [
+    "create_incident",
+    "create",
+    "createIncident",
+    "createIncidentFromDispatchException",
+  ]);
+  const refreshAction = getActionDescriptor(pageActions, ["refresh", "reload"]);
+  const filteredEmpty = filteredRecords.length === 0 && records.length > 0;
+  const effectiveEmptyState = filteredEmpty
+    ? buildFallbackEmptyState("filtered_empty")
+    : emptyState;
+
+  const tableRows: IncidentTableRow[] = filteredRecords.map((record) => {
+    return {
+      incidentId: record.incidentId,
+      incidentCell: (
+        <div style={{ display: "grid", gap: 3, minWidth: 220 }}>
+          <Link
+            href={`/incidents/${encodeURIComponent(record.incidentId)}`}
+            style={{
+              color: theme.accent,
+              textDecoration: "none",
+              fontWeight: 700,
+              fontSize: 12.5,
+            }}
+          >
+            {record.incidentId}
+          </Link>
+          <div style={{ color: theme.text, fontWeight: 600 }}>
+            {record.title}
+          </div>
+          <div
+            style={{
+              color: theme.textMuted,
+              fontSize: 11.5,
+              lineHeight: 1.5,
+              whiteSpace: "normal",
+            }}
+          >
+            {record.description}
+          </div>
+        </div>
+      ),
+      categoryCell: (
+        <span style={{ fontFamily: theme.monoFamily }}>
+          {formatOpsCodeLabel(locale, record.category)}
+        </span>
+      ),
+      severityCell: renderSeverityBadge(record.severity, locale),
+      statusCell: renderStatusBadge(record.status, locale),
+      linksCell: (
+        <div style={{ display: "grid", gap: 4, minWidth: 220 }}>
+          {record.relatedOrderId ? (
+            <Link
+              href={`/dispatch/${encodeURIComponent(record.relatedOrderId)}`}
+              style={{ color: theme.text, textDecoration: "none" }}
+            >
+              order · {record.relatedOrderId}
+            </Link>
+          ) : null}
+          {record.relatedVehicleId ? (
+            <Link
+              href={`/vehicles?vehicleId=${encodeURIComponent(record.relatedVehicleId)}`}
+              style={{ color: theme.text, textDecoration: "none" }}
+            >
+              vehicle · {record.relatedVehicleId}
+            </Link>
+          ) : null}
+          {record.relatedDriverId ? (
+            <Link
+              href={`/drivers/${encodeURIComponent(record.relatedDriverId)}`}
+              style={{ color: theme.text, textDecoration: "none" }}
+            >
+              driver · {record.relatedDriverId}
+            </Link>
+          ) : null}
+          {record.relatedComplaintCaseNo ? (
+            <Link
+              href={`/complaints/${encodeURIComponent(record.relatedComplaintCaseNo)}`}
+              style={{ color: theme.text, textDecoration: "none" }}
+            >
+              complaint · {record.relatedComplaintCaseNo}
+            </Link>
+          ) : null}
+          {!hasLinkedEntities(record) ? (
+            <span style={{ color: theme.textDim }}>
+              {locale === "en" ? "No linked entities" : "沒有已連結實體"}
+            </span>
+          ) : null}
+        </div>
+      ),
+      reportedBy: record.reportedBy,
+      occurredCell: (
+        <div style={{ display: "grid", gap: 3 }}>
+          <span style={{ fontFamily: theme.monoFamily }}>
+            {formatDateTime(record.occurredAt ?? record.createdAt, locale)}
+          </span>
+          {record.sourceDispatchExceptionOrderId ? (
+            <Pill theme={theme} tone="warn">
+              {locale === "en" ? "dispatch exception" : "派遣異常"}
+            </Pill>
+          ) : null}
+        </div>
+      ),
+      ageCell: (
+        <span style={{ color: theme.textMuted }}>
+          {formatIncidentAge(record.occurredAt ?? record.createdAt, locale)}
+        </span>
+      ),
+      _selected: record.severity === "critical",
+    };
+  });
+
+  const tableColumns: CanvasTableColumn<IncidentTableRow>[] = [
+    { h: "INCIDENT", k: "incidentCell", w: 310, r: (row) => row.incidentCell },
+    { h: "CAT", k: "categoryCell", w: 120, r: (row) => row.categoryCell },
+    { h: "SEV", k: "severityCell", w: 100, r: (row) => row.severityCell },
+    { h: "STATUS", k: "statusCell", w: 110, r: (row) => row.statusCell },
+    { h: "RELATED", k: "linksCell", w: 250, r: (row) => row.linksCell },
+    { h: "REPORTED BY", k: "reportedBy", w: 120, mono: true },
+    { h: "OCCURRED", k: "occurredCell", w: 145, r: (row) => row.occurredCell },
+    { h: "AGE", k: "ageCell", w: 90, r: (row) => row.ageCell },
+  ];
+
+  const refreshLabel =
+    refresh.dataFreshness === "fresh"
+      ? locale === "en"
+        ? "T3 · fresh"
+        : "T3 · 新鮮"
+      : refresh.dataFreshness === "stale"
+        ? locale === "en"
+          ? "T3 · stale"
+          : "T3 · 資料偏舊"
+        : locale === "en"
+          ? "T3 · degraded"
+          : "T3 · 降級";
+
+  return (
+    <div
+      style={{
+        background: theme.bg,
+        color: theme.text,
+        minHeight: "100%",
+        borderRadius: 12,
+        overflow: "hidden",
+      }}
+    >
+      <PageHeader
+        theme={theme}
+        title={locale === "en" ? "Incidents" : "事故中心"}
+        subtitle={
+          locale === "en"
+            ? "safety · collision · property · service recovery — driver SOS / dispatch exception always remain ops-owned"
+            : "safety · collision · property · service recovery — driver SOS / dispatch exception 永遠維持 ops-owned"
+        }
+        tabs={[
+          locale === "en" ? "Active" : "進行中",
+          locale === "en" ? "Resolved" : "已受控",
+          locale === "en" ? "Closed" : "已結案",
+        ]}
+        activeTab={
+          statusFilter === "resolved"
+            ? locale === "en"
+              ? "Resolved"
+              : "已受控"
+            : statusFilter === "closed"
+              ? locale === "en"
+                ? "Closed"
+                : "已結案"
+              : locale === "en"
+                ? "Active"
+                : "進行中"
+        }
+        actions={
+          <>
+            <Pill
+              theme={theme}
+              tone={refresh.dataFreshness === "fresh" ? "info" : "warn"}
+            >
+              {refreshLabel}
+            </Pill>
+            <Btn
+              theme={theme}
+              variant="secondary"
+              icon="more"
+              disabled={refreshAction?.enabled === false}
+              onClick={() => void loadRecords(true)}
+            >
+              {locale === "en" ? "Refresh" : "重新整理"}
+            </Btn>
+            <Btn
+              theme={theme}
+              variant="primary"
+              icon="plus"
+              disabled={createAction?.enabled === false}
+              onClick={() => setShowCreate(true)}
+            >
+              {locale === "en" ? "Create incident" : "建立事故"}
+            </Btn>
+          </>
+        }
+      />
+
+      <div
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
+        {activeCritical ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={`${activeCritical.incidentId} · ${activeCritical.title}`}
+            body={
+              locale === "en"
+                ? `${formatOpsCodeLabel(locale, activeCritical.severity)} · ${formatOpsCodeLabel(
+                    locale,
+                    activeCritical.status,
+                  )} · ${activeCritical.description}`
+                : `${formatOpsCodeLabel(locale, activeCritical.severity)} · ${formatOpsCodeLabel(
+                    locale,
+                    activeCritical.status,
+                  )} · ${activeCritical.description}`
+            }
+            actions={
+              <Link
+                href={`/incidents/${encodeURIComponent(activeCritical.incidentId)}`}
+                style={{ textDecoration: "none" }}
+              >
+                <Btn theme={theme} variant="primary" icon="arrow">
+                  {locale === "en" ? "Open incident" : "前往事件"}
+                </Btn>
+              </Link>
+            }
+          />
+        ) : null}
+
+        {error ? (
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title={
+              locale === "en"
+                ? "Latest refresh returned an error"
+                : "最新刷新回傳錯誤"
+            }
+            body={error}
+          />
+        ) : null}
+
+        {(complaintCaseNoFromQuery || dispatchExceptionOrderId) &&
+        showCreate ? (
+          <Banner
+            theme={theme}
+            tone="info"
+            icon="ext"
+            title={
+              dispatchExceptionOrderId
+                ? locale === "en"
+                  ? "Dispatch exception handoff"
+                  : "派遣異常移交"
+                : locale === "en"
+                  ? "Complaint escalation handoff"
+                  : "客訴升級移交"
+            }
+            body={
+              dispatchExceptionOrderId
+                ? locale === "en"
+                  ? `This create flow was entered from dispatch exception order ${dispatchExceptionOrderId}.`
+                  : `這個建立流程是從派遣異常訂單 ${dispatchExceptionOrderId} 進入。`
+                : locale === "en"
+                  ? `This create flow was entered from complaint case ${complaintCaseNoFromQuery}.`
+                  : `這個建立流程是從客訴案號 ${complaintCaseNoFromQuery} 進入。`
+            }
+          />
+        ) : null}
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gap: 10,
+          }}
+        >
+          {[
+            {
+              title: locale === "en" ? "Pending major" : "待處理重大事故",
+              value: priorityQueue.length,
+              subtitle:
+                locale === "en" ? "major + SOS queue" : "重大事故 + SOS 佇列",
+            },
+            {
+              title: locale === "en" ? "Recovery missing" : "尚未記錄 recovery",
+              value: recoveryPendingCount,
+              subtitle:
+                locale === "en"
+                  ? "open / investigating without recovery"
+                  : "open / investigating 但尚無 recovery",
+            },
+            {
+              title: locale === "en" ? "Linked entities" : "已連結實體",
+              value: linkedCount,
+              subtitle:
+                locale === "en"
+                  ? "order / vehicle / driver / complaint"
+                  : "order / vehicle / driver / complaint",
+            },
+          ].map((item) => (
+            <Card
+              key={item.title}
+              theme={theme}
+              title={item.title}
+              subtitle={item.subtitle}
+            >
+              <div
+                style={{ fontSize: 30, fontWeight: 800, letterSpacing: -0.6 }}
+              >
+                {item.value}
+              </div>
+            </Card>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gap: 10,
+          }}
+        >
+          {[
+            {
+              title: locale === "en" ? "Active" : "進行中",
+              value: openCount,
+              subtitle:
+                locale === "en"
+                  ? "open + investigating"
+                  : "open + investigating",
+            },
+            {
+              title: locale === "en" ? "Major" : "重大事故",
+              value: majorCount,
+              subtitle:
+                locale === "en"
+                  ? "critical + high severity"
+                  : "critical + high severity",
+            },
+            {
+              title: locale === "en" ? "Resolved 30d" : "30 天內受控",
+              value: resolved30dCount,
+              subtitle:
+                locale === "en"
+                  ? "resolved / closed within 30 days"
+                  : "30 天內 resolved / closed",
+            },
+          ].map((item) => (
+            <Card
+              key={item.title}
+              theme={theme}
+              title={item.title}
+              subtitle={item.subtitle}
+            >
+              <div
+                style={{ fontSize: 26, fontWeight: 750, letterSpacing: -0.4 }}
+              >
+                {item.value}
+              </div>
+            </Card>
+          ))}
+        </div>
+
+        <Card
+          theme={theme}
+          title="Governance guardrail · 三條鐵律"
+          subtitle={
+            locale === "en"
+              ? "Ops policy text from the packet. Frontend may visualize it, but must not rewrite it."
+              : "來自 packet 的 ops policy 文字。前端可以視覺化，但不能改寫其含義。"
+          }
+        >
+          <ol
+            style={{
+              margin: 0,
+              paddingLeft: 18,
+              fontSize: 12.5,
+              lineHeight: 1.8,
+            }}
+          >
+            <li>
+              {locale === "en"
+                ? "Driver SOS + dispatch-exception incidents remain ops-owned even after order / complaint linkage."
+                : "Driver SOS + dispatch-exception incidents 即使後續連結到 order / complaint，仍維持 ops-owned。"}
+            </li>
+            <li>
+              {locale === "en"
+                ? "Service recovery action is not the same thing as a timeline update or a formal resolution note."
+                : "Service recovery action 不等於 timeline update，也不等於正式 resolution note。"}
+            </li>
+            <li>
+              {locale === "en"
+                ? "Escalation target does not silently transfer ownership; acknowledgment is required."
+                : "Escalation target 不代表默默轉移 owner；必須有 acknowledgment。"}
+            </li>
+          </ol>
+        </Card>
+
+        <Card
+          theme={theme}
+          title={locale === "en" ? "Priority queue" : "Priority queue"}
+          subtitle={
+            locale === "en"
+              ? "Major severity + SOS signals, separated from the full list."
+              : "重大嚴重度 + SOS 訊號，獨立於完整列表之外。"
+          }
+        >
+          {priorityQueue.length === 0 ? (
+            <div
+              style={{
+                padding: "14px 16px",
+                borderRadius: 10,
+                background: theme.successBg,
+                border: `1px solid ${theme.successBorder}`,
+                color: theme.success,
+                fontSize: 12.5,
+              }}
+            >
+              {locale === "en"
+                ? "No major or SOS incidents right now. Operations status is calm."
+                : "目前沒有重大事故或 SOS 事件，現況正常。"}
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {priorityQueue.slice(0, 6).map((record) => (
+                <div
+                  key={record.incidentId}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) auto",
+                    gap: 12,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: `1px solid ${theme.dangerBorder}`,
+                    background: theme.surface,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <Link
+                        href={`/incidents/${encodeURIComponent(record.incidentId)}`}
+                        style={{
+                          color: theme.accent,
+                          textDecoration: "none",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {record.incidentId}
+                      </Link>
+                      {renderSeverityBadge(record.severity, locale)}
+                      {renderStatusBadge(record.status, locale)}
+                    </div>
+                    <div style={{ marginTop: 4, fontWeight: 600 }}>
+                      {record.title}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        color: theme.textMuted,
+                        fontSize: 11.5,
+                      }}
+                    >
+                      {record.description}
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
+                    <span
+                      style={{
+                        fontFamily: theme.monoFamily,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {formatIncidentAge(
+                        record.occurredAt ?? record.createdAt,
+                        locale,
+                      )}
+                    </span>
+                    <Link
+                      href={`/incidents/${encodeURIComponent(record.incidentId)}`}
+                      style={{ textDecoration: "none" }}
+                    >
+                      <Btn theme={theme} variant="secondary" icon="arrow">
+                        {locale === "en" ? "Open" : "開啟"}
+                      </Btn>
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card
+          theme={theme}
+          title={locale === "en" ? "Full list" : "完整列表"}
+          subtitle={
+            locale === "en"
+              ? `Refresh tier ${REFRESH_TIER} · last snapshot ${formatDateTime(refresh.generatedAt, locale)} UTC`
+              : `Refresh tier ${REFRESH_TIER} · 最近快照 ${formatDateTime(refresh.generatedAt, locale)} UTC`
+          }
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "1.4fr repeat(3, minmax(0, 0.85fr)) auto auto auto",
+              gap: 8,
+              marginBottom: 14,
+            }}
+          >
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={
+                locale === "en"
+                  ? "Search incident, order, driver, complaint"
+                  : "搜尋 incident、order、driver、complaint"
+              }
+              style={inputStyle}
+            />
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as IncidentStatus | "all")
+              }
+              style={inputStyle}
+            >
+              <option value="all">
+                {locale === "en" ? "All status" : "全部狀態"}
+              </option>
+              {STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {formatOpsCodeLabel(locale, status)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={severityFilter}
+              onChange={(event) =>
+                setSeverityFilter(
+                  event.target.value as IncidentSeverity | "all",
+                )
+              }
+              style={inputStyle}
+            >
+              <option value="all">
+                {locale === "en" ? "All severity" : "全部嚴重度"}
+              </option>
+              {SEVERITIES.map((severity) => (
+                <option key={severity} value={severity}>
+                  {formatOpsCodeLabel(locale, severity)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={categoryFilter}
+              onChange={(event) =>
+                setCategoryFilter(
+                  event.target.value as IncidentCategory | "all",
+                )
+              }
+              style={inputStyle}
+            >
+              <option value="all">
+                {locale === "en" ? "All category" : "全部分類"}
+              </option>
+              {CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {formatOpsCodeLabel(locale, category)}
+                </option>
+              ))}
+            </select>
+            <Btn
+              theme={theme}
+              variant="ghost"
+              onClick={() => setStatusFilter("all")}
+            >
+              {locale === "en" ? "Reset" : "重設"}
+            </Btn>
+          </div>
+
+          {showCreate ? (
+            <div style={{ marginBottom: 16 }}>
+              <IncidentForm
+                initialValues={createDefaults}
+                onCancel={() => setShowCreate(false)}
+                onSubmit={async (command) => {
+                  try {
+                    const client = getOpsClient();
+                    if (
+                      "orderId" in command &&
+                      typeof command.orderId === "string" &&
+                      command.orderId.trim()
+                    ) {
+                      await client.createIncidentFromDispatchException(
+                        command as CreateIncidentFromDispatchExceptionCommand,
+                      );
+                    } else {
+                      const created = await client.createIncident(
+                        command as CreateIncidentCommand,
+                      );
+                      if (complaintCaseNoFromQuery) {
+                        await client.linkIncidentToComplaint(
+                          created.incidentId,
+                          complaintCaseNoFromQuery,
+                        );
+                      }
+                    }
+                    setShowCreate(false);
+                    await loadRecords(true);
+                  } catch (submitError) {
+                    setError(
+                      submitError instanceof Error
+                        ? submitError.message
+                        : t("common.unknown"),
+                    );
+                  }
+                }}
+              />
+            </div>
+          ) : null}
+
+          {loading ? (
+            <div style={loadingStyle}>
+              {locale === "en" ? "Loading incidents..." : "載入事故列表中..."}
+            </div>
+          ) : effectiveEmptyState ? (
+            renderEmptyState(
+              effectiveEmptyState,
+              locale,
+              () => void loadRecords(true),
+              () => setShowCreate(true),
+            )
+          ) : (
+            <Table theme={theme} columns={tableColumns} rows={tableRows} />
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 34,
+  padding: "7px 10px",
+  borderRadius: 8,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  color: theme.text,
+  fontSize: 12.5,
+};
+
+const loadingStyle: CSSProperties = {
+  minHeight: 220,
+  display: "grid",
+  placeItems: "center",
+  borderRadius: 10,
+  background: theme.surfaceLo,
+  color: theme.textMuted,
+  fontSize: 12.5,
+};
+
 function IncidentForm({
-  editingRecord,
   initialValues,
   onCancel,
   onSubmit,
 }: {
-  editingRecord: IncidentRecord | undefined;
   initialValues?: IncidentFormInitialValues;
   onCancel: () => void;
   onSubmit: (
-    command: CreateIncidentCommand | UpdateIncidentCommand,
+    command: CreateIncidentCommand | CreateIncidentFromDispatchExceptionCommand,
   ) => Promise<void>;
 }) {
   const { t, locale } = useTranslation();
   const [pending, startTransition] = useTransition();
-  const [title, setTitle] = useState(
-    editingRecord?.title ?? initialValues?.title ?? "",
-  );
+  const [title, setTitle] = useState(initialValues?.title ?? "");
   const [description, setDescription] = useState(
-    editingRecord?.description ?? initialValues?.description ?? "",
+    initialValues?.description ?? "",
   );
   const [category, setCategory] = useState<IncidentCategory>(
-    editingRecord?.category ?? initialValues?.category ?? "operational",
+    initialValues?.category ?? "operational",
   );
   const [severity, setSeverity] = useState<IncidentSeverity>(
-    editingRecord?.severity ?? initialValues?.severity ?? "medium",
+    initialValues?.severity ?? "medium",
   );
   const [relatedOrderId, setRelatedOrderId] = useState(
-    editingRecord?.relatedOrderId ?? initialValues?.relatedOrderId ?? "",
+    initialValues?.relatedOrderId ?? "",
   );
   const [relatedVehicleId, setRelatedVehicleId] = useState(
-    editingRecord?.relatedVehicleId ?? initialValues?.relatedVehicleId ?? "",
+    initialValues?.relatedVehicleId ?? "",
   );
   const [relatedDriverId, setRelatedDriverId] = useState(
-    editingRecord?.relatedDriverId ?? initialValues?.relatedDriverId ?? "",
+    initialValues?.relatedDriverId ?? "",
   );
   const [reportedBy, setReportedBy] = useState(
-    editingRecord?.reportedBy ?? initialValues?.reportedBy ?? "ops-user-001",
+    initialValues?.reportedBy ?? "ops-user-001",
   );
-  const [occurredAt, setOccurredAt] = useState(
-    editingRecord?.occurredAt
-      ? new Date(editingRecord.occurredAt).toISOString().slice(0, 16)
-      : (initialValues?.occurredAt ?? ""),
-  );
-  const [location, setLocation] = useState(
-    editingRecord?.location ?? initialValues?.location ?? "",
-  );
-  const [status, setStatus] = useState<IncidentStatus>(
-    editingRecord?.status ?? "open",
-  );
-  const [assignedTo, setAssignedTo] = useState(editingRecord?.assignedTo ?? "");
-  const [resolutionNote, setResolutionNote] = useState(
-    editingRecord?.resolutionNote ?? "",
-  );
+  const [occurredAt, setOccurredAt] = useState(initialValues?.occurredAt ?? "");
+  const [location, setLocation] = useState(initialValues?.location ?? "");
   const [escalationTarget, setEscalationTarget] = useState<
     IncidentEscalationTarget | ""
-  >(editingRecord?.escalationTarget ?? "");
+  >("");
+  const [exceptionReasonCode, setExceptionReasonCode] = useState(
+    initialValues?.exceptionReasonCode ?? "",
+  );
+  const [exceptionNote, setExceptionNote] = useState(
+    initialValues?.exceptionNote ?? "",
+  );
 
-  const isEditing = Boolean(editingRecord);
+  const dispatchExceptionOrderId =
+    initialValues?.dispatchExceptionOrderId?.trim() ?? "";
+  const isDispatchExceptionCreate = dispatchExceptionOrderId.length > 0;
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     startTransition(() => {
-      if (isEditing) {
-        const command: UpdateIncidentCommand = {
-          status,
-          severity,
-          ...(assignedTo.trim() ? { assignedTo: assignedTo.trim() } : {}),
-          ...(resolutionNote.trim()
-            ? { resolutionNote: resolutionNote.trim() }
+      if (isDispatchExceptionCreate) {
+        const command: CreateIncidentFromDispatchExceptionCommand = {
+          orderId: dispatchExceptionOrderId,
+          exceptionReasonCode:
+            exceptionReasonCode.trim() || "dispatch_exception",
+          ...(exceptionNote.trim()
+            ? { exceptionNote: exceptionNote.trim() }
             : {}),
-          escalationTarget: escalationTarget || null,
+          severity,
+          ...(escalationTarget ? { escalationTarget } : {}),
+          reportedBy: reportedBy.trim() || "ops-user-001",
         };
         void onSubmit(command);
         return;
@@ -1435,242 +1448,236 @@ function IncidentForm({
   }
 
   return (
-    <form className="incident-form" onSubmit={handleSubmit}>
-      <div className="panel-head">
+    <form
+      onSubmit={handleSubmit}
+      style={{
+        borderRadius: 12,
+        border: `1px solid ${theme.border}`,
+        background: theme.surface,
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
         <div>
-          <p className="eyebrow">{t("maintenance.form.editor")}</p>
-          <h3>
-            {isEditing
-              ? t("incidents.form.updateTitle")
-              : t("incidents.form.createTitle")}
-          </h3>
+          <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>
+            {isDispatchExceptionCreate
+              ? locale === "en"
+                ? "Create incident from dispatch exception"
+                : "從派遣異常建立事故"
+              : locale === "en"
+                ? "Create incident"
+                : "建立事故"}
+          </div>
+          <div style={{ marginTop: 4, fontSize: 12, color: theme.textMuted }}>
+            {isDispatchExceptionCreate
+              ? locale === "en"
+                ? `Source order ${dispatchExceptionOrderId}`
+                : `來源訂單 ${dispatchExceptionOrderId}`
+              : locale === "en"
+                ? "Manual incident create"
+                : "手動建立 incident"}
+          </div>
         </div>
       </div>
-      {!isEditing ? (
-        <>
-          <div className="form-grid">
-            <label>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: 12,
+        }}
+      >
+        {!isDispatchExceptionCreate ? (
+          <>
+            <label style={labelStyle}>
               {t("incidents.form.title")}
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 required
+                style={inputStyle}
               />
             </label>
-            <label>
+            <label style={labelStyle}>
               {t("incidents.form.reportedBy")}
               <input
                 value={reportedBy}
                 onChange={(event) => setReportedBy(event.target.value)}
                 required
+                style={inputStyle}
               />
             </label>
-            <label>
+            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
+              {t("incidents.form.description")}
+              <textarea
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                required
+                rows={3}
+                style={{ ...inputStyle, resize: "vertical" }}
+              />
+            </label>
+            <label style={labelStyle}>
               {t("incidents.form.category")}
               <select
                 value={category}
                 onChange={(event) =>
                   setCategory(event.target.value as IncidentCategory)
                 }
+                style={inputStyle}
               >
-                {CATEGORIES.map((value) => (
-                  <option key={value} value={value}>
-                    {formatOpsCodeLabel(locale, value)}
+                {CATEGORIES.map((item) => (
+                  <option key={item} value={item}>
+                    {formatOpsCodeLabel(locale, item)}
                   </option>
                 ))}
               </select>
             </label>
-            <label>
-              {t("incidents.form.severity")}
-              <select
-                value={severity}
-                onChange={(event) =>
-                  setSeverity(event.target.value as IncidentSeverity)
-                }
-              >
-                {SEVERITIES.map((value) => (
-                  <option key={value} value={value}>
-                    {formatOpsCodeLabel(locale, value)}
-                  </option>
-                ))}
-              </select>
+          </>
+        ) : (
+          <>
+            <label style={labelStyle}>
+              {locale === "en" ? "Reported by" : "通報者"}
+              <input
+                value={reportedBy}
+                onChange={(event) => setReportedBy(event.target.value)}
+                required
+                style={inputStyle}
+              />
             </label>
-            <label>
+            <label style={labelStyle}>
+              {locale === "en" ? "Dispatch reason code" : "派遣異常原因碼"}
+              <input
+                value={exceptionReasonCode}
+                onChange={(event) => setExceptionReasonCode(event.target.value)}
+                required
+                style={inputStyle}
+              />
+            </label>
+            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
+              {locale === "en" ? "Exception note" : "異常備註"}
+              <textarea
+                value={exceptionNote}
+                onChange={(event) => setExceptionNote(event.target.value)}
+                rows={3}
+                style={{ ...inputStyle, resize: "vertical" }}
+              />
+            </label>
+          </>
+        )}
+
+        <label style={labelStyle}>
+          {t("incidents.form.severity")}
+          <select
+            value={severity}
+            onChange={(event) =>
+              setSeverity(event.target.value as IncidentSeverity)
+            }
+            style={inputStyle}
+          >
+            {SEVERITIES.map((item) => (
+              <option key={item} value={item}>
+                {formatOpsCodeLabel(locale, item)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label style={labelStyle}>
+          {t("incidents.form.escalation")}
+          <select
+            value={escalationTarget}
+            onChange={(event) =>
+              setEscalationTarget(
+                event.target.value as IncidentEscalationTarget | "",
+              )
+            }
+            style={inputStyle}
+          >
+            <option value="">{t("incidents.form.escalationNone")}</option>
+            {ESCALATION_TARGETS.map((item) => (
+              <option key={item} value={item}>
+                {t(`incidents.escalationBadge.${item}` as any)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {!isDispatchExceptionCreate ? (
+          <>
+            <label style={labelStyle}>
               {t("incidents.form.relatedOrder")}
               <input
                 value={relatedOrderId}
                 onChange={(event) => setRelatedOrderId(event.target.value)}
+                style={inputStyle}
               />
             </label>
-            <label>
+            <label style={labelStyle}>
               {t("incidents.form.relatedVehicle")}
               <input
                 value={relatedVehicleId}
                 onChange={(event) => setRelatedVehicleId(event.target.value)}
+                style={inputStyle}
               />
             </label>
-            <label>
+            <label style={labelStyle}>
               {t("incidents.form.relatedDriver")}
               <input
                 value={relatedDriverId}
                 onChange={(event) => setRelatedDriverId(event.target.value)}
+                style={inputStyle}
               />
             </label>
-            <label>
+            <label style={labelStyle}>
               {t("incidents.form.occurredAt")}
               <input
                 type="datetime-local"
                 value={occurredAt}
                 onChange={(event) => setOccurredAt(event.target.value)}
+                style={inputStyle}
               />
             </label>
-            <label className="full-width">
+            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
               {t("incidents.form.location")}
               <input
                 value={location}
                 onChange={(event) => setLocation(event.target.value)}
+                style={inputStyle}
               />
             </label>
-            <label className="full-width">
-              {t("incidents.form.description")}
-              <textarea
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                rows={4}
-                required
-              />
-            </label>
-          </div>
-        </>
-      ) : (
-        <div className="form-grid">
-          <label>
-            {t("incidents.form.status")}
-            <select
-              value={status}
-              onChange={(event) =>
-                setStatus(event.target.value as IncidentStatus)
-              }
-            >
-              {STATUSES.map((value) => (
-                <option key={value} value={value}>
-                  {formatOpsCodeLabel(locale, value)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            {t("incidents.form.severity")}
-            <select
-              value={severity}
-              onChange={(event) =>
-                setSeverity(event.target.value as IncidentSeverity)
-              }
-            >
-              {SEVERITIES.map((value) => (
-                <option key={value} value={value}>
-                  {formatOpsCodeLabel(locale, value)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            {t("incidents.form.assignedTo")}
-            <input
-              value={assignedTo}
-              onChange={(event) => setAssignedTo(event.target.value)}
-            />
-          </label>
-          <label>
-            {t("incidents.form.escalationTarget")}
-            <select
-              value={escalationTarget}
-              onChange={(event) =>
-                setEscalationTarget(
-                  event.target.value as IncidentEscalationTarget | "",
-                )
-              }
-            >
-              <option value="">{t("incidents.form.escalationNone")}</option>
-              {ESCALATION_TARGETS.map((value) => (
-                <option key={value} value={value}>
-                  {t(`incidents.escalationBadge.${value}` as any)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="full-width">
-            {t("incidents.form.resolutionNote")}
-            <textarea
-              value={resolutionNote}
-              onChange={(event) => setResolutionNote(event.target.value)}
-              rows={4}
-            />
-          </label>
-        </div>
-      )}
-      <div className="form-actions">
-        <button className="btn btn-primary" type="submit" disabled={pending}>
-          {pending
-            ? t("incidents.form.saving")
-            : isEditing
-              ? t("incidents.form.saveChanges")
-              : t("incidents.form.createRecord")}
-        </button>
-        <button className="btn" type="button" onClick={onCancel}>
-          {t("common.cancel")}
-        </button>
+          </>
+        ) : null}
       </div>
-      <style jsx>{`
-        .incident-form {
-          margin-bottom: 1rem;
-          padding: 1rem;
-          border-radius: 1rem;
-          border: 1px solid #e2e8f0;
-          background: #f8fafc;
-        }
-        .panel-head {
-          display: flex;
-          justify-content: space-between;
-          gap: 1rem;
-          align-items: flex-start;
-          margin-bottom: 0.75rem;
-        }
-        .eyebrow {
-          margin: 0 0 0.25rem;
-          font-size: 0.75rem;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          color: #64748b;
-        }
-        .form-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 0.75rem;
-        }
-        label {
-          display: grid;
-          gap: 0.35rem;
-          color: #0f172a;
-        }
-        input,
-        select,
-        textarea {
-          width: 100%;
-          padding: 0.7rem 0.8rem;
-          border-radius: 0.75rem;
-          border: 1px solid #cbd5e1;
-          background: white;
-        }
-        .full-width {
-          grid-column: 1 / -1;
-        }
-        .form-actions {
-          display: flex;
-          gap: 0.75rem;
-          margin-top: 0.75rem;
-        }
-      `}</style>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <Btn theme={theme} variant="primary" icon="plus" disabled={pending}>
+          {isDispatchExceptionCreate
+            ? locale === "en"
+              ? "Create from exception"
+              : "從異常建立"
+            : locale === "en"
+              ? "Create incident"
+              : "建立事故"}
+        </Btn>
+        <Btn theme={theme} variant="secondary" onClick={onCancel}>
+          {t("common.cancel")}
+        </Btn>
+      </div>
     </form>
   );
 }
+
+const labelStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  fontSize: 12,
+  color: theme.textMuted,
+};
