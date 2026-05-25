@@ -288,6 +288,7 @@ function buildFallbackUnifiedTaskView(
   task: DriverTaskRecord,
 ): UnifiedDriverTaskView {
   const forwarded = task.sourcePlatform != null;
+  const allowedActions = getAllowedActionsFromTask(task, forwarded);
   return {
     taskId: task.taskId,
     orderId: task.orderId,
@@ -315,7 +316,12 @@ function buildFallbackUnifiedTaskView(
             : forwarded
               ? "read_only"
               : "blocked",
-    allowedActions: getAllowedActionsFromTask(task, forwarded),
+    allowedActions,
+    availableActions: allowedActions.map((action: DriverTaskAction) => ({
+      action,
+      enabled: true,
+      riskLevel: action === "accept" || action === "reject" ? "medium" : "low",
+    })),
     routeLocked: forwarded || !task.routeProvided,
     fareAuthority: forwarded ? "external_platform" : "drts",
     settlementAuthority: forwarded ? "external_platform" : "drts",
@@ -774,6 +780,10 @@ function formatDisabledReasonCode(reason: string | undefined) {
 function buildActionDescriptors(
   task: UnifiedDriverTaskView,
 ): ResourceActionDescriptor[] {
+  if (Array.isArray(task.availableActions)) {
+    return task.availableActions;
+  }
+
   const descriptors: ResourceActionDescriptor[] = task.allowedActions.map(
     (action: DriverTaskAction) => ({
       action,
@@ -838,6 +848,28 @@ function inferEmptyReason(
   }
 
   return "no_data";
+}
+
+function resolveDisplayedEmptyReason(
+  envelope: TaskInboxEnvelope,
+  selectedFilter: TaskFilterValue,
+): EmptyReason {
+  if (selectedFilter !== "all") {
+    return "filtered_empty";
+  }
+
+  return (
+    envelope.empty?.reason ?? inferEmptyReason(envelope.items, selectedFilter)
+  );
+}
+
+function formatRefreshTierLabel(tier: TaskInboxEnvelope["refreshTier"]) {
+  switch (tier) {
+    case "medium":
+      return "T3 / 15s";
+    default:
+      return tier;
+  }
 }
 
 function buildRefreshMetadata(
@@ -923,13 +955,17 @@ function getRefreshState(refresh: UiRefreshMetadata) {
 
 function EmptyStateCard({
   reason,
+  nextAction,
   onRetry,
   onOpenPlatform,
+  onOpenSettings,
   onOpenTrip,
 }: {
   reason: EmptyReason;
+  nextAction?: ResourceActionDescriptor;
   onRetry: () => void;
   onOpenPlatform: () => void;
+  onOpenSettings: () => void;
   onOpenTrip: () => void;
 }) {
   const config: Record<
@@ -981,8 +1017,8 @@ function EmptyStateCard({
       title: "任務功能尚未啟用",
       body: "這台裝置或你的司機帳號尚未完成任務功能配置，暫時無法使用 unified inbox。",
       action: {
-        label: "開啟行程",
-        onPress: onOpenTrip,
+        label: "前往設定",
+        onPress: onOpenSettings,
       },
     },
     permission_denied: {
@@ -1018,6 +1054,18 @@ function EmptyStateCard({
   };
 
   const current = config[reason];
+  const resolvedAction =
+    nextAction?.enabled === false
+      ? current.action
+      : nextAction?.action === "refresh"
+        ? { label: "重新整理", onPress: onRetry }
+        : nextAction?.action === "open_platform_presence"
+          ? { label: "檢查平台", onPress: onOpenPlatform }
+          : nextAction?.action === "open_settings"
+            ? { label: "前往設定", onPress: onOpenSettings }
+            : nextAction?.action === "open_trip"
+              ? { label: "開啟行程", onPress: onOpenTrip }
+              : current.action;
 
   return (
     <Card style={styles.emptyCard}>
@@ -1036,8 +1084,8 @@ function EmptyStateCard({
       </View>
       <Text style={styles.emptyTitle}>{current.title}</Text>
       <Text style={styles.emptyBody}>{current.body}</Text>
-      <Btn variant="primary" size="sm" onPress={current.action.onPress}>
-        {current.action.label}
+      <Btn variant="primary" size="sm" onPress={resolvedAction.onPress}>
+        {resolvedAction.label}
       </Btn>
     </Card>
   );
@@ -1244,6 +1292,7 @@ export default function JobsScreen() {
   }, [envelope.items]);
 
   const refreshState = getRefreshState(envelope.refresh);
+  const emptyReason = resolveDisplayedEmptyReason(envelope, selectedFilter);
 
   const openTrip = (taskId?: string) => {
     const route = taskId
@@ -1254,6 +1303,10 @@ export default function JobsScreen() {
 
   const openPlatformPresence = () => {
     router.push("/platform-presence");
+  };
+
+  const openSettings = () => {
+    router.push("/settings");
   };
 
   const loadTasks = async (nextFilter: TaskFilterValue) => {
@@ -1389,10 +1442,9 @@ export default function JobsScreen() {
         empty:
           filteredTasks.length === 0
             ? {
-                reason:
-                  current.empty?.reason ??
-                  inferEmptyReason(current.items, selectedFilter),
+                reason: resolveDisplayedEmptyReason(current, selectedFilter),
                 messageCode: current.empty?.messageCode ?? "driver.jobs.empty",
+                nextAction: current.empty?.nextAction,
               }
             : null,
       }));
@@ -1525,7 +1577,7 @@ export default function JobsScreen() {
           title={
             refreshState === "stale" ? "任務資料可能已過期" : "任務資料等待同步"
           }
-          body={`最近快照 ${formatTimestamp(envelope.refresh.generatedAt) ?? "未知"} · refresh tier T3 / 15s`}
+          body={`最近快照 ${formatTimestamp(envelope.refresh.generatedAt) ?? "未知"} · refresh tier ${formatRefreshTierLabel(envelope.refreshTier)}`}
           actions={
             <Btn variant="secondary" size="xs" onPress={() => void onRefresh()}>
               立即同步
@@ -1648,9 +1700,11 @@ export default function JobsScreen() {
         </View>
       ) : !tasksEnabled || filteredTasks.length === 0 ? (
         <EmptyStateCard
-          reason={envelope.empty?.reason ?? "no_data"}
+          reason={emptyReason}
+          nextAction={envelope.empty?.nextAction}
           onRetry={() => void onRefresh()}
           onOpenPlatform={openPlatformPresence}
+          onOpenSettings={openSettings}
           onOpenTrip={() => openTrip()}
         />
       ) : (

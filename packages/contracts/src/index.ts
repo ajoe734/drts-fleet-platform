@@ -2558,6 +2558,7 @@ export interface UnifiedDriverTaskView {
   localStatus: DriverTaskStatus | ForwardedOrderStatus;
   driverActionState: DriverTaskActionState;
   allowedActions: DriverTaskAction[];
+  availableActions?: import("./ui-runtime").ResourceActionDescriptor[];
   routeLocked: boolean;
   fareAuthority: DriverTaskAuthorityMode;
   settlementAuthority: DriverTaskAuthorityMode;

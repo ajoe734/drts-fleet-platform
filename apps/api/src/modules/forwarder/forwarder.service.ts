@@ -19,6 +19,7 @@ import type {
   BroadcastForwardedOrderCommand,
   DriverTaskAction,
   DriverTaskRecord,
+  ResourceActionDescriptor,
   CompleteForwarderReconciliationCommand,
   EngageForwarderManualFallbackCommand,
   ForwardedDriverActionOutcome,
@@ -1629,6 +1630,7 @@ export class ForwarderService implements OnModuleInit {
     order: OwnedOrderRecord | null,
   ): UnifiedDriverTaskView {
     const blockingReason = this.resolveOwnedBlockingReason(task);
+    const allowedActions = this.resolveOwnedAllowedActions(task);
 
     return {
       taskId: task.taskId,
@@ -1640,7 +1642,8 @@ export class ForwarderService implements OnModuleInit {
       nativeStatus: null,
       localStatus: task.status,
       driverActionState: this.resolveOwnedDriverActionState(task),
-      allowedActions: this.resolveOwnedAllowedActions(task),
+      allowedActions,
+      availableActions: this.buildOwnedAvailableActions(allowedActions),
       routeLocked: false,
       fareAuthority: "drts",
       settlementAuthority: "drts",
@@ -1664,6 +1667,7 @@ export class ForwarderService implements OnModuleInit {
   ): UnifiedDriverTaskView {
     const syncIssueSummary = this.resolveForwardedSyncIssueSummary(order);
     const requiresReauth = this.resolveForwardedRequiresReauth(order);
+    const allowedActions = this.resolveForwardedAllowedActions(order);
     const blockingReason =
       this.resolveForwardedBlockingReason(order) ??
       (requiresReauth
@@ -1680,7 +1684,12 @@ export class ForwarderService implements OnModuleInit {
       nativeStatus: order.lastNativeStatus,
       localStatus: order.status,
       driverActionState: this.resolveForwardedDriverActionState(order),
-      allowedActions: this.resolveForwardedAllowedActions(order),
+      allowedActions,
+      availableActions: this.buildForwardedAvailableActions(
+        order,
+        allowedActions,
+        requiresReauth,
+      ),
       routeLocked: true,
       fareAuthority: "external_platform",
       settlementAuthority: "external_platform",
@@ -1744,6 +1753,16 @@ export class ForwarderService implements OnModuleInit {
     }
   }
 
+  private buildOwnedAvailableActions(
+    allowedActions: DriverTaskAction[],
+  ): ResourceActionDescriptor[] {
+    return allowedActions.map((action) => ({
+      action,
+      enabled: true,
+      riskLevel: action === "accept" || action === "reject" ? "medium" : "low",
+    }));
+  }
+
   private resolveOwnedBlockingReason(task: DriverTaskRecord) {
     const gate = task.complianceGates?.find(
       (candidate) => candidate.blocking || candidate.state !== "clear",
@@ -1801,6 +1820,56 @@ export class ForwarderService implements OnModuleInit {
     }
 
     return [];
+  }
+
+  private buildForwardedAvailableActions(
+    order: ForwardedOrderRecord,
+    allowedActions: DriverTaskAction[],
+    requiresReauth: boolean,
+  ): ResourceActionDescriptor[] {
+    const descriptors: ResourceActionDescriptor[] = allowedActions.map(
+      (action) => ({
+        action,
+        enabled: true,
+        riskLevel: "medium",
+      }),
+    );
+
+    if (this.resolveForwardedDriverActionState(order) !== "action_required") {
+      return descriptors;
+    }
+
+    const disabledReasonCode = requiresReauth
+      ? "platform_reauth_required"
+      : order.manualFallback.required || order.status === "sync_failed"
+        ? "platform_sync_issue"
+        : "platform_mirror_only";
+
+    if (!descriptors.some((descriptor) => descriptor.action === "accept")) {
+      descriptors.push({
+        action: "accept",
+        enabled: false,
+        disabledReasonCode:
+          disabledReasonCode === "platform_mirror_only"
+            ? "platform_accept_not_supported"
+            : disabledReasonCode,
+        riskLevel: "medium",
+      });
+    }
+
+    if (!descriptors.some((descriptor) => descriptor.action === "reject")) {
+      descriptors.push({
+        action: "reject",
+        enabled: false,
+        disabledReasonCode:
+          disabledReasonCode === "platform_mirror_only"
+            ? "platform_reject_not_supported"
+            : disabledReasonCode,
+        riskLevel: "medium",
+      });
+    }
+
+    return descriptors;
   }
 
   private resolveForwardedOutcomeFromStatus(
