@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import type { UiHealthDegradedService, UiHealthEnvelope } from "@drts/contracts";
+import type { AdapterHealthRecord } from "@drts/contracts";
+import type {
+  UiHealthDegradedService,
+  UiHealthEnvelope,
+} from "@drts/contracts";
 
 import { ForwarderService } from "../modules/forwarder/forwarder.service";
 
@@ -10,7 +14,7 @@ export class HealthService {
   getHealthEnvelope(): UiHealthEnvelope {
     const degradedServices = this.forwarderService
       .listAdapterHealth()
-      .filter((adapter) => adapter.status !== "healthy")
+      .filter(this.isDegradedAdapter)
       .map((adapter) => this.toDegradedService(adapter));
 
     return {
@@ -35,7 +39,7 @@ export class HealthService {
   }
 
   private toDegradedService(
-    adapter: ReturnType<ForwarderService["listAdapterHealth"]>[number],
+    adapter: DegradedAdapterHealth,
   ): UiHealthDegradedService {
     return {
       service: adapter.platformCode,
@@ -52,4 +56,14 @@ export class HealthService {
         return "Platform forwarding delayed";
     }
   }
+
+  private isDegradedAdapter(
+    adapter: AdapterHealthRecord,
+  ): adapter is DegradedAdapterHealth {
+    return adapter.status !== "healthy";
+  }
 }
+
+type DegradedAdapterHealth = AdapterHealthRecord & {
+  status: "degraded" | "down";
+};

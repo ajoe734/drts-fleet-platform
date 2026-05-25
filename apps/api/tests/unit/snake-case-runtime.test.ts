@@ -8,6 +8,7 @@ import {
 } from "../../src/common/api-envelope";
 import { SnakeCaseExceptionFilter } from "../../src/common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "../../src/common/snake-case.interceptor";
+import { HealthService } from "../../src/health/health.service";
 
 describe("snake_case runtime serialization", () => {
   it("serializes success envelopes through the global interceptor path", async () => {
@@ -28,6 +29,36 @@ describe("snake_case runtime serialization", () => {
         request_id: "req-wire-rt-001",
         timestamp: expect.any(String),
       },
+    });
+  });
+
+  it("serializes UiHealthEnvelope responses with snake_case wire keys", async () => {
+    const interceptor = new SnakeCaseInterceptor();
+    const healthService = new HealthService({
+      listAdapterHealth: () => [
+        {
+          platformCode: "sandbox",
+          status: "degraded",
+        },
+      ],
+    } as never);
+
+    const result = await lastValueFrom(
+      interceptor.intercept({} as never, {
+        handle: () => of(healthService.getHealthEnvelope()),
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "degraded",
+      degraded_services: [
+        {
+          service: "sandbox",
+          impact: "Platform forwarding delayed",
+          severity: "warning",
+        },
+      ],
+      last_checked_at: expect.any(String),
     });
   });
 
