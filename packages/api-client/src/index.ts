@@ -230,6 +230,7 @@ import type {
   ReassignDispatchCommand,
   DriverCompleteTaskCommand,
   UpdateTenantBookingCommand,
+  TenantBookingCommandResult,
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
   InviteTenantRoleCommand,
@@ -660,6 +661,36 @@ export class ApiClient {
   ) {
     return this.post(
       `/api/tenant/bookings/${encodeURIComponent(bookingId)}/cancel`,
+      { body: command },
+    );
+  }
+
+  // Q-TEN04 — synchronous command pattern entry points. UI clients should
+  // prefer these over the REST verbs above so they observe `commandId` +
+  // `accepted+pending` status uniformly.
+  async createTenantBookingCommand(command: CreateTenantBookingCommand) {
+    return this.post<TenantBookingCommandResult>(
+      "/api/tenant/bookings/commands/create",
+      { body: command },
+    );
+  }
+
+  async updateTenantBookingCommand(
+    bookingId: string,
+    command: UpdateTenantBookingCommand,
+  ) {
+    return this.post<TenantBookingCommandResult>(
+      `/api/tenant/bookings/${encodeURIComponent(bookingId)}/commands/update`,
+      { body: command },
+    );
+  }
+
+  async cancelTenantBookingCommand(
+    bookingId: string,
+    command: CancelOwnedOrderCommand,
+  ) {
+    return this.post<TenantBookingCommandResult>(
+      `/api/tenant/bookings/${encodeURIComponent(bookingId)}/commands/cancel`,
       { body: command },
     );
   }

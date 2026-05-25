@@ -196,6 +196,65 @@ export class OwnedMobilityController {
     );
   }
 
+  // Q-TEN04 — synchronous command pattern. UI clients consume these
+  // instead of the REST verbs above so they can render
+  // `commandId` + `accepted+pending` status uniformly.
+  @Post("tenant/bookings/commands/create")
+  createTenantBookingCommand(
+    @Body() command: CreateTenantBookingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.createTenantBookingCommand(
+        command,
+        this.requireTenantId(tenantId),
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/bookings/:bookingId/commands/update")
+  updateTenantBookingCommand(
+    @Param("bookingId") bookingId: string,
+    @Body() command: UpdateTenantBookingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.updateTenantBookingCommand(
+        this.requireTenantId(tenantId),
+        bookingId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/bookings/:bookingId/commands/cancel")
+  cancelTenantBookingCommand(
+    @Param("bookingId") bookingId: string,
+    @Body() command: CancelOwnedOrderCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.cancelTenantBookingCommand(
+        this.requireTenantId(tenantId),
+        bookingId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Get("tenant/bookings")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listTenantBookings(
