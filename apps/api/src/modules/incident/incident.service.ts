@@ -201,8 +201,7 @@ export class IncidentService implements OnModuleInit {
       this.toIncidentReadModel(incident, identity),
     );
     const generatedAt = new Date().toISOString();
-
-    return {
+    const readModel: IncidentListReadModel = {
       items,
       pageInfo: {
         page: 1,
@@ -212,14 +211,16 @@ export class IncidentService implements OnModuleInit {
       },
       refresh: this.buildRefreshMetadata(generatedAt),
       health: this.buildHealthEnvelope(generatedAt),
-      emptyState:
-        items.length === 0
-          ? {
-              reason: "no_data",
-              messageCode: "incident.empty.no_data",
-            }
-          : undefined,
     };
+
+    if (items.length === 0) {
+      readModel.emptyState = {
+        reason: "no_data",
+        messageCode: "incident.empty.no_data",
+      };
+    }
+
+    return readModel;
   }
 
   getIncident(incidentId: string) {
@@ -724,7 +725,10 @@ export class IncidentService implements OnModuleInit {
   ) {
     const suppression =
       incident.driverMatchingSuppression ??
-      this.createDefaultMatchingSuppression(incident.incidentId, incident.createdAt);
+      this.createDefaultMatchingSuppression(
+        incident.incidentId,
+        incident.createdAt,
+      );
     const now = incident.updatedAt;
 
     if (command.action === "extend") {
@@ -821,10 +825,9 @@ export class IncidentService implements OnModuleInit {
   ) {
     return {
       ...this.clone(incident),
-      driverMatchingSuppression:
-        incident.driverMatchingSuppression
-          ? { ...incident.driverMatchingSuppression }
-          : null,
+      driverMatchingSuppression: incident.driverMatchingSuppression
+        ? { ...incident.driverMatchingSuppression }
+        : null,
       availableActions: this.buildAvailableActions(incident, identity),
     };
   }
@@ -835,6 +838,7 @@ export class IncidentService implements OnModuleInit {
   ): ResourceActionDescriptor[] {
     const actions: ResourceActionDescriptor[] = [];
     const suppression = incident.driverMatchingSuppression;
+    const isOpsManager = this.isOpsManager(identity);
 
     if (suppression?.active) {
       actions.push({
@@ -843,15 +847,16 @@ export class IncidentService implements OnModuleInit {
         requiresReason: true,
         riskLevel: "high",
       });
-      actions.push({
+      const extendAction: ResourceActionDescriptor = {
         action: "extend_matching_suppression",
-        enabled: this.isOpsManager(identity),
-        disabledReasonCode: this.isOpsManager(identity)
-          ? undefined
-          : "ops_manager_required",
+        enabled: isOpsManager,
         requiresReason: true,
         riskLevel: "high",
-      });
+      };
+      if (!isOpsManager) {
+        extendAction.disabledReasonCode = "ops_manager_required";
+      }
+      actions.push(extendAction);
     }
 
     if (incident.status !== "resolved" && incident.status !== "closed") {
