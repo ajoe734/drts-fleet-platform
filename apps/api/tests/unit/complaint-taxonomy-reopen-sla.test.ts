@@ -374,6 +374,50 @@ describe("Complaint SLA read model status", () => {
     }
   });
 
+  it("keeps legacy persisted breached cases breached after rehydrate even when dueAt is still in the future", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const repository = {
+      loadState: vi.fn(async () => ({
+        complaintCases: [
+          {
+            caseNo: "C-20260513-000001",
+            caseSource: "ops",
+            relatedOrderId: null,
+            relatedCallId: null,
+            relatedIncidentId: null,
+            category: "other",
+            severity: "normal",
+            description: "Legacy persisted breached complaint",
+            assigneeId: "AGENT-42",
+            status: "under_investigation",
+            slaBreach: true,
+            slaStatus: "within_sla",
+            slaDueAt: "2099-05-13T12:00:00.000Z",
+            slaBreachedAt: null,
+            reopenCount: 0,
+            resolutionCode: null,
+            closingNote: null,
+            createdAt: "2026-05-13T08:00:00.000Z",
+            updatedAt: "2026-05-13T10:15:00.000Z",
+          },
+        ],
+        complaintTimelines: [],
+      })),
+      persistChanges: vi.fn(async () => undefined),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const complaintService = new ComplaintService(
+      auditNotificationService,
+      repository as any,
+    );
+
+    await complaintService.onModuleInit();
+
+    const complaint = complaintService.getComplaintCase("C-20260513-000001");
+    expect(complaint.slaStatus).toBe("breached");
+    expect(complaint.slaBreachedAt).toBe("2026-05-13T10:15:00.000Z");
+  });
+
   it("does not drift resolved and closed cases into breach after their lifecycle ends", () => {
     vi.useFakeTimers();
     try {
