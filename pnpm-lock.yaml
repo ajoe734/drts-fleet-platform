@@ -58,6 +58,9 @@ importers:
       "@drts/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts
+      "@drts/shared-types":
+        specifier: workspace:*
+        version: link:../../packages/shared-types
       "@nestjs/common":
         specifier: ^11.1.18
         version: 11.1.18(reflect-metadata@0.2.2)(rxjs@7.8.2)
