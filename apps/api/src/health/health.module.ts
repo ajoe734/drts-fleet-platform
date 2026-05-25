@@ -8,5 +8,6 @@ import { DatabaseModule } from "../common/db/database.module";
   imports: [DatabaseModule],
   controllers: [HealthController],
   providers: [HealthService],
+  exports: [HealthService],
 })
 export class HealthModule {}

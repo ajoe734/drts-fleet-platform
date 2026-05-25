@@ -17,6 +17,7 @@ import type {
   ShiftRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
+import { deepToCamelCase } from "@drts/api-client";
 import { getOpsClient } from "@/lib/api-client";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import {
@@ -514,7 +515,8 @@ async function loadHealthPayload(): Promise<UiHealthEnvelope> {
     throw new Error(`Health request failed with status ${response.status}`);
   }
 
-  return (await response.json()) as UiHealthEnvelope;
+  const snakeCasePayload = await response.json();
+  return deepToCamelCase(snakeCasePayload) as UiHealthEnvelope;
 }
 
 export default async function DashboardPage() {
@@ -649,6 +651,15 @@ export default async function DashboardPage() {
   ].join(" · ");
 
   const banners = [
+    // Health degraded services banners
+    ...(health.degradedServices ?? []).map((service) => ({
+      key: `degraded-${service.service}`,
+      tone: getHealthTone(service.severity),
+      title: t(`dashboard.degradedService.${service.service}.title`, locale),
+      body: service.impact,
+      href: "/platform-admin/health",
+      cta: t("dashboard.platformOps.openHealth", locale),
+    })),
     topAlert
       ? {
           key: topAlert.key,

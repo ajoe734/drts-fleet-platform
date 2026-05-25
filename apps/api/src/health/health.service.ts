@@ -44,6 +44,15 @@ export class HealthService {
       }
     }
 
+    // Check Additional Services
+    degradedServices.push(...(await this.getAdditionalDegradedServices()));
+
     return buildHealthPayload(degradedServices);
+  }
+
+  protected async getAdditionalDegradedServices(): Promise<
+    UiHealthDegradedService[]
+  > {
+    return [];
   }
 }

@@ -19,18 +19,3 @@ export interface AuditStubRecord {
   surface: ProductSurface;
   createdAt: string;
 }
-
-export interface DegradedService {
-  name: string;
-  severity: "low" | "medium" | "high" | "critical";
-  message: string;
-}
-
-export interface UiHealthEnvelope {
-  service: string;
-  status: "healthy" | "degraded" | "down";
-  mode: string;
-  execution_mode: string;
-  lastCheckedAt: string;
-  degradedServices: DegradedService[];
-}
