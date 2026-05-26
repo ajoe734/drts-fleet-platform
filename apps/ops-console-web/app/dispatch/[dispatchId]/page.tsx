@@ -543,6 +543,29 @@ function readForwardedList(
   return [];
 }
 
+function readForwardedNumber(
+  order: ForwardedOrderRecord,
+  keys: string[],
+): number | null {
+  const sources = [order.authoritativeSnapshot, order.payload];
+  for (const source of sources) {
+    if (!isRecord(source)) {
+      continue;
+    }
+
+    for (const key of keys) {
+      const value = key.includes(".")
+        ? getNestedValue(source, key)
+        : source[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
 function pickCurrentTask(tasks: DriverTaskRecord[]) {
   return (
     [...tasks].sort((left, right) => {
@@ -2363,6 +2386,19 @@ export default async function DispatchDetailPage({
     readForwardedBoolean(forwardedOrder, ["routeLocked"]) ??
     mirroredTask?.routeLocked ??
     false;
+  const forwardedServiceBucket =
+    readForwardedValue(forwardedOrder, [
+      "serviceBucket",
+      "order.serviceBucket",
+      "dispatch.serviceBucket",
+    ]) ?? null;
+  const forwardedEtaMinutes = readForwardedNumber(forwardedOrder, [
+    "etaMinutes",
+    "eta.etaMinutes",
+    "dispatchEtaMinutes",
+    "latestEtaMinutes",
+    "trip.etaMinutes",
+  ]);
   const waypointList = readForwardedList(forwardedOrder, [
     "waypoints",
     "route.waypoints",
@@ -2481,6 +2517,14 @@ export default async function DispatchDetailPage({
       mono: true,
     },
     {
+      k: locale === "zh" ? "服務桶" : "Service bucket",
+      v: formatCode(locale, forwardedServiceBucket),
+    },
+    {
+      k: locale === "zh" ? "ETA" : "ETA",
+      v: formatEtaLabel(forwardedEtaMinutes),
+    },
+    {
       k: locale === "zh" ? "Route locked" : "Route locked",
       v: routeLocked ? "true" : "false",
       mono: true,
@@ -2527,6 +2571,8 @@ export default async function DispatchDetailPage({
             : "Forwarded dispatch workspace",
           formatCode(locale, forwardedOrder.status),
           formatCode(locale, forwardedOrder.platformCode),
+          formatCode(locale, forwardedServiceBucket),
+          formatEtaLabel(forwardedEtaMinutes),
         ].join(" · ")}
         actions={
           <div style={actionRowStyle}>
