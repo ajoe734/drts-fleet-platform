@@ -185,6 +185,37 @@ export interface EmptyStateEnvelope {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Shared UI runtime resource envelopes
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Optional per-resource action list used for CTA gating. Frontends should
+ * consume this instead of inferring button visibility from roles alone.
+ */
+export interface UiActionableResource {
+  availableActions?: ResourceActionDescriptor[];
+}
+
+/**
+ * Shared runtime envelope for list surfaces that participate in the Q-X01 /
+ * Q-X02 / Q-X13 / Q-X15 UI contracts.
+ *
+ * - `availableActions` gates page-level CTAs for the list surface itself.
+ * - `emptyState` distinguishes zero-item reasons so the UI does not collapse
+ *   them into a generic "no data" state.
+ * - `refresh` / `refreshMetadata` allow either field name while backends
+ *   converge on the canonical runtime envelope.
+ */
+export interface UiRuntimeListEnvelope<TItem> {
+  items: TItem[];
+  availableActions?: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  refresh?: UiRefreshMetadata;
+  refreshMetadata?: UiRefreshMetadata;
+  refreshTier?: RefreshTier;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Q-X09 / Q-X10 — ActionReceipt
 // ─────────────────────────────────────────────────────────────────────────────
 

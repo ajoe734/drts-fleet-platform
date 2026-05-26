@@ -14,16 +14,18 @@ import {
 import type {
   CreateIncidentCommand,
   CreateIncidentFromDispatchExceptionCommand,
+  EmptyReason,
+  EmptyStateEnvelope,
   IncidentCategory,
   IncidentEscalationTarget,
   IncidentRecord,
   IncidentSeverity,
   IncidentStatus,
   ResourceActionDescriptor,
-  UiRefreshMetadata,
-  EmptyReason,
-  EmptyStateEnvelope,
   RefreshTier,
+  UiActionableResource,
+  UiRefreshMetadata,
+  UiRuntimeListEnvelope,
 } from "@drts/contracts";
 import {
   INCIDENT_CATEGORIES,
@@ -87,18 +89,7 @@ type IncidentFormInitialValues = {
   exceptionNote?: string;
 };
 
-type IncidentRecordRuntime = IncidentRecord & {
-  availableActions?: ResourceActionDescriptor[];
-};
-
-type IncidentListRuntimeEnvelope = {
-  items: IncidentRecordRuntime[];
-  availableActions?: ResourceActionDescriptor[];
-  emptyState?: EmptyStateEnvelope;
-  refresh?: UiRefreshMetadata;
-  refreshMetadata?: UiRefreshMetadata;
-  refreshTier?: RefreshTier;
-};
+type IncidentRecordRuntime = IncidentRecord & UiActionableResource;
 
 type IncidentTableRow = Record<string, unknown> & {
   incidentId: string;
@@ -791,15 +782,13 @@ export default function IncidentsPage() {
 
     try {
       const client = getOpsClient();
-      const payload = await client.get<IncidentListRuntimeEnvelope>(
-        incidentListRequestPath,
-      );
+      const payload = await client.get<
+        UiRuntimeListEnvelope<IncidentRecordRuntime>
+      >(incidentListRequestPath);
       const normalizedItems = Array.isArray(payload)
         ? (payload as unknown as IncidentRecordRuntime[])
         : (payload.items ?? []);
-      const normalizedEnvelope = Array.isArray(payload)
-        ? null
-        : (payload as IncidentListRuntimeEnvelope);
+      const normalizedEnvelope = Array.isArray(payload) ? null : payload;
 
       setRecords([...normalizedItems].sort(compareIncidentPriority));
       setPageActions(
