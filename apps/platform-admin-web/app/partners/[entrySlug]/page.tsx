@@ -72,6 +72,8 @@ type CredentialRow = Record<string, unknown> & {
   revokedAt: string | null;
 };
 
+type CredentialLifecycleFilter = "active" | "revoked" | "all";
+
 type ActionIntent =
   | "edit"
   | "activate"
@@ -247,6 +249,13 @@ const overlayActionsStyle = {
 const deepLinkStyle = {
   display: "grid",
   gap: 10,
+} satisfies CSSProperties;
+
+const filterRowStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  alignItems: "center",
 } satisfies CSSProperties;
 
 function buildPlatformNav(locale: string): CanvasShellNavItem[] {
@@ -501,9 +510,13 @@ function findAction(
 function resolveCredentialEmptyReason(
   entry: PartnerDetailRecord,
   credentials: PartnerIngressCredentialRecord[],
+  visibleCredentialCount: number,
   error: string | null,
 ): EmptyReason | null {
   if (credentials.length > 0) {
+    if (visibleCredentialCount === 0) {
+      return "filtered_empty";
+    }
     return null;
   }
   if (error) {
@@ -712,8 +725,24 @@ function deriveDeepLinks(
     openInNewTab: boolean;
     helper: string;
   }> = [];
+  const seen = new Set<string>();
 
-  links.push({
+  const pushLink = (link: {
+    key: string;
+    label: string;
+    href: string;
+    openInNewTab: boolean;
+    helper: string;
+  }) => {
+    const dedupeKey = `${link.label}::${link.href}`;
+    if (seen.has(dedupeKey)) {
+      return;
+    }
+    seen.add(dedupeKey);
+    links.push(link);
+  };
+
+  pushLink({
     key: "tenant-detail",
     label: locale === "en" ? "Tenant detail" : "Tenant 詳情",
     href: `/tenants/${encodeURIComponent(entry.tenantId)}`,
@@ -724,7 +753,7 @@ function deriveDeepLinks(
         : "回到 Platform Admin 的 tenant 詳情，檢查 rollout、onboarding 與治理狀態。",
   });
 
-  links.push({
+  pushLink({
     key: "tenant-ops",
     label: locale === "en" ? "Ops tenant view" : "Ops tenant 視圖",
     href: `https://ops.drts.io/tenants/${encodeURIComponent(entry.tenantId)}`,
@@ -735,7 +764,7 @@ function deriveDeepLinks(
         : "在 Ops Console 以新分頁開啟此 tenant 的 operational dispatch context。",
   });
 
-  links.push({
+  pushLink({
     key: "adapter-registry",
     label: locale === "en" ? "Adapter registry" : "Adapter registry",
     href: `/adapter-registry?entrySlug=${encodeURIComponent(entry.entrySlug)}`,
@@ -746,7 +775,7 @@ function deriveDeepLinks(
         : "檢查 adapter linkage、健康狀態與 credential 依賴。",
   });
 
-  links.push({
+  pushLink({
     key: "audit",
     label: locale === "en" ? "Audit trail" : "Audit trail",
     href: `/audit?resourceType=partner_entry&resourceId=${encodeURIComponent(entry.entrySlug)}`,
@@ -757,9 +786,54 @@ function deriveDeepLinks(
         : "將 audit evidence 篩到此 partner entry 與其所有狀態變更。",
   });
 
+  const explicitLinks = [
+    {
+      key: "tenant-link",
+      link: entry.tenantLink,
+      fallbackHelper:
+        locale === "en"
+          ? "Backend-provided tenant governance link for this entry."
+          : "後端提供的 tenant governance 連結。",
+    },
+    {
+      key: "adapter-link",
+      link: entry.adapterLink,
+      fallbackHelper:
+        locale === "en"
+          ? "Backend-provided adapter linkage for this entry."
+          : "後端提供的 adapter linkage。",
+    },
+    {
+      key: "webhook-link",
+      link: entry.webhookLink,
+      fallbackHelper:
+        locale === "en"
+          ? "Backend-provided webhook configuration linkage for this entry."
+          : "後端提供的 webhook configuration linkage。",
+    },
+  ];
+
+  explicitLinks.forEach(({ key, link, fallbackHelper }) => {
+    if (!link) {
+      return;
+    }
+    pushLink({
+      key,
+      label: String(link.label),
+      href:
+        link.route.startsWith("http")
+          ? link.route
+          : link.targetApp === "ops-console"
+            ? `https://ops.drts.io${link.route}`
+            : link.route,
+      openInNewTab: link.openMode === "new_tab",
+      helper: fallbackHelper,
+    });
+  });
+
   const upstream = entry.crossAppLinks ?? [];
   upstream.forEach((link) => {
-    links.push({
+    pushLink({
       key: `${link.targetApp}:${link.resourceType}:${link.resourceId}`,
       label: String(link.label),
       href:
@@ -1033,6 +1107,8 @@ export default function PartnerDetailPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [isCompactViewport, setIsCompactViewport] = useState(false);
+  const [credentialFilter, setCredentialFilter] =
+    useState<CredentialLifecycleFilter>("active");
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1329,9 +1405,23 @@ export default function PartnerDetailPage() {
     ];
   }, [entry, locale]);
 
+  const filteredCredentials = useMemo(
+    () =>
+      credentials.filter((credential) => {
+        if (credentialFilter === "all") {
+          return true;
+        }
+        if (credentialFilter === "revoked") {
+          return Boolean(credential.revokedAt);
+        }
+        return !credential.revokedAt;
+      }),
+    [credentialFilter, credentials],
+  );
+
   const credentialRows = useMemo<CredentialRow[]>(
     () =>
-      [...credentials]
+      [...filteredCredentials]
         .sort((left, right) => {
           if (Boolean(left.revokedAt) !== Boolean(right.revokedAt)) {
             return left.revokedAt ? 1 : -1;
@@ -1351,7 +1441,7 @@ export default function PartnerDetailPage() {
             : "—",
           revokedAt: credential.revokedAt,
         })),
-    [credentials],
+    [filteredCredentials],
   );
 
   const credentialColumns = useMemo<CanvasTableColumn<CredentialRow>[]>(
@@ -1430,8 +1520,16 @@ export default function PartnerDetailPage() {
   );
 
   const credentialEmptyReason = useMemo(
-    () => (entry ? resolveCredentialEmptyReason(entry, credentials, error) : null),
-    [credentials, entry, error],
+    () =>
+      entry
+        ? resolveCredentialEmptyReason(
+            entry,
+            credentials,
+            filteredCredentials.length,
+            error,
+          )
+        : null,
+    [credentials, entry, error, filteredCredentials.length],
   );
 
   const deepLinks = useMemo(
@@ -2212,6 +2310,38 @@ export default function PartnerDetailPage() {
                   }
                 >
                   <div style={sectionStackStyle}>
+                    <div style={filterRowStyle}>
+                      {(["active", "revoked", "all"] as const).map((filterValue) => (
+                        <Btn
+                          key={filterValue}
+                          theme={theme}
+                          variant={
+                            credentialFilter === filterValue
+                              ? "primary"
+                              : "secondary"
+                          }
+                          size="xs"
+                          onClick={() => setCredentialFilter(filterValue)}
+                        >
+                          {filterValue === "active"
+                            ? locale === "en"
+                              ? "Active"
+                              : "有效"
+                            : filterValue === "revoked"
+                              ? locale === "en"
+                                ? "Revoked"
+                                : "已撤銷"
+                              : locale === "en"
+                                ? "All"
+                                : "全部"}
+                        </Btn>
+                      ))}
+                      <span style={mutedTextStyle}>
+                        {locale === "en"
+                          ? `${credentialRows.length} visible / ${credentials.length} total`
+                          : `顯示 ${credentialRows.length} / 共 ${credentials.length} 筆`}
+                      </span>
+                    </div>
                     {credentialRows.length > 0 ? (
                       <Table<CredentialRow>
                         theme={theme}
