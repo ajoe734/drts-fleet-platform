@@ -249,9 +249,37 @@ function actionLinkStyle(
     lineHeight: 1,
     textDecoration: "none",
     opacity: disabled ? 0.48 : 1,
-    pointerEvents: disabled ? "none" : "auto",
+    cursor: disabled ? "not-allowed" : "pointer",
     ...base,
   } as const;
+}
+
+function ActionAffordance({
+  href,
+  disabled,
+  title,
+  style,
+  children,
+}: {
+  href: string;
+  disabled: boolean;
+  title: string | undefined;
+  style: ReturnType<typeof actionLinkStyle>;
+  children: ReactNode;
+}) {
+  if (disabled) {
+    return (
+      <span title={title} aria-disabled="true" style={style}>
+        {children}
+      </span>
+    );
+  }
+
+  return (
+    <Link href={href} title={title} style={style}>
+      {children}
+    </Link>
+  );
 }
 
 function getStatusTone(status: IncidentRecord["status"]): CanvasTone {
@@ -682,7 +710,7 @@ export default async function IncidentDetailPage({
       k: locale === "en" ? "Complaint" : "客訴",
       v: incident.relatedComplaintCaseNo ? (
         <Link
-          href={`/complaints?caseNo=${encodeURIComponent(incident.relatedComplaintCaseNo)}`}
+          href={`/complaints/${encodeURIComponent(incident.relatedComplaintCaseNo)}`}
           style={actionLinkStyle(theme, "secondary")}
         >
           <CanvasIcon name="ext" size={12} />
@@ -866,9 +894,10 @@ export default async function IncidentDetailPage({
               {availableActions.length > 0 ? (
                 availableActions.map(
                   (action: ResourceActionDescriptor, index: number) => (
-                    <Link
+                    <ActionAffordance
                       key={`${action.action}:${index}`}
                       href={actionTarget(incident, action)}
+                      disabled={!action.enabled}
                       title={
                         action.enabled ? undefined : action.disabledReasonCode
                       }
@@ -897,7 +926,7 @@ export default async function IncidentDetailPage({
                         size={12}
                       />
                       <span>{getActionCopy(action.action, locale)}</span>
-                    </Link>
+                    </ActionAffordance>
                   ),
                 )
               ) : (
@@ -1028,13 +1057,14 @@ export default async function IncidentDetailPage({
               title={t("incidents.serviceRecovery.title", locale)}
               actions={
                 serviceRecoveryAction ? (
-                  <Link
+                  <ActionAffordance
                     href={actionTarget(incident, serviceRecoveryAction)}
                     title={
                       serviceRecoveryAction.enabled
                         ? undefined
                         : serviceRecoveryAction.disabledReasonCode
                     }
+                    disabled={!serviceRecoveryAction.enabled}
                     style={actionLinkStyle(
                       theme,
                       "primary",
@@ -1043,7 +1073,7 @@ export default async function IncidentDetailPage({
                   >
                     <CanvasIcon name="plus" size={12} />
                     <span>{t("incidents.serviceRecovery.add", locale)}</span>
-                  </Link>
+                  </ActionAffordance>
                 ) : undefined
               }
             >
@@ -1153,7 +1183,7 @@ export default async function IncidentDetailPage({
                 ) : null}
                 {incident.relatedComplaintCaseNo ? (
                   <Link
-                    href={`/complaints?caseNo=${encodeURIComponent(incident.relatedComplaintCaseNo)}`}
+                    href={`/complaints/${encodeURIComponent(incident.relatedComplaintCaseNo)}`}
                     style={actionLinkStyle(theme, "ghost")}
                   >
                     <CanvasIcon name="ext" size={12} />
