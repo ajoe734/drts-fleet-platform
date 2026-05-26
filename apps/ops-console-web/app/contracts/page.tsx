@@ -57,9 +57,14 @@ type ActionRenderTarget = {
   target?: "_blank";
 };
 
+type ContractsEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+type ContractsEmptyStateEnvelope = Omit<EmptyStateEnvelope, "reason"> & {
+  reason: ContractsEmptyReason;
+};
+
 const REFRESH_TIER: RefreshTier = "medium";
 const REFRESH_TIER_MS = 15_000;
-const EMPTY_REASON_VALUES = new Set<EmptyReason>([
+const EMPTY_REASON_VALUES = new Set<ContractsEmptyReason>([
   "no_data",
   "not_provisioned",
   "fetch_failed",
@@ -184,7 +189,7 @@ function daysUntil(value: string) {
   return Math.ceil(diff / (24 * 60 * 60 * 1000));
 }
 
-function classifyLoadError(message: string): EmptyReason {
+function classifyLoadError(message: string): ContractsEmptyReason {
   const normalized = message.toLowerCase();
   if (
     normalized.includes("403") ||
@@ -210,9 +215,11 @@ function classifyLoadError(message: string): EmptyReason {
   return "fetch_failed";
 }
 
-function parseEmptyReason(value: string | undefined): EmptyReason | null {
-  return value && EMPTY_REASON_VALUES.has(value as EmptyReason)
-    ? (value as EmptyReason)
+function parseEmptyReason(
+  value: string | undefined,
+): ContractsEmptyReason | null {
+  return value && EMPTY_REASON_VALUES.has(value as ContractsEmptyReason)
+    ? (value as ContractsEmptyReason)
     : null;
 }
 
@@ -400,7 +407,7 @@ function renderEmptyState({
   query,
   nextAction,
 }: {
-  reason: EmptyReason;
+  reason: ContractsEmptyReason;
   locale: "en" | "zh";
   query: string;
   nextAction?: ResourceActionDescriptor;
@@ -681,27 +688,37 @@ export default async function ContractsPage({
         openMode: "new_tab",
         label: copyText(locale, "Tenant SLA", "Tenant SLA"),
       };
+      const fallbackActions: ResourceActionDescriptor[] = [
+        {
+          action: "open_platform_admin",
+          enabled: true,
+          riskLevel: "low",
+        },
+        ...(entry.tenantId
+          ? [
+              {
+                action: "open_tenant_console",
+                enabled: true,
+                riskLevel: "low",
+              } satisfies ResourceActionDescriptor,
+            ]
+          : [
+              {
+                action: "open_tenant_console",
+                enabled: false,
+                disabledReasonCode: "tenant_missing",
+                riskLevel: "low",
+              } satisfies ResourceActionDescriptor,
+            ]),
+      ];
+
       return {
         ...entry,
         linkedContracts,
         availableActions:
           entry.availableActions && entry.availableActions.length > 0
             ? entry.availableActions
-            : [
-                {
-                  action: "open_platform_admin",
-                  enabled: true,
-                  riskLevel: "low",
-                },
-                {
-                  action: "open_tenant_console",
-                  enabled: !!entry.tenantId,
-                  disabledReasonCode: entry.tenantId
-                    ? undefined
-                    : "tenant_missing",
-                  riskLevel: "low",
-                },
-              ],
+            : fallbackActions,
         links:
           entry.ownerLinks && entry.ownerLinks.length > 0
             ? entry.ownerLinks
@@ -751,7 +768,7 @@ export default async function ContractsPage({
   if (primaryError) {
     refreshMetadata.dataFreshness = "degraded";
   }
-  const resolvedEmptyReason =
+  const resolvedEmptyReason: ContractsEmptyReason | null =
     emptyReasonOverride ??
     (primaryError
       ? classifyLoadError(primaryError)
@@ -760,19 +777,21 @@ export default async function ContractsPage({
           ? "filtered_empty"
           : "no_data"
         : null);
-  const emptyState: EmptyStateEnvelope | null = resolvedEmptyReason
-    ? {
-        reason: resolvedEmptyReason,
-        messageCode: `contracts.${resolvedEmptyReason}`,
-        nextAction:
-          resolvedEmptyReason === "filtered_empty"
-            ? {
-                action: "clear_filters",
-                enabled: true,
-                riskLevel: "low",
-              }
-            : undefined,
-      }
+  const emptyState: ContractsEmptyStateEnvelope | null = resolvedEmptyReason
+    ? resolvedEmptyReason === "filtered_empty"
+      ? {
+          reason: resolvedEmptyReason,
+          messageCode: `contracts.${resolvedEmptyReason}`,
+          nextAction: {
+            action: "clear_filters",
+            enabled: true,
+            riskLevel: "low",
+          },
+        }
+      : {
+          reason: resolvedEmptyReason,
+          messageCode: `contracts.${resolvedEmptyReason}`,
+        }
     : null;
 
   const searchAction: ResourceActionDescriptor = {
@@ -942,12 +961,20 @@ export default async function ContractsPage({
       </div>
 
       {emptyState ? (
-        renderEmptyState({
-          reason: emptyState.reason,
-          locale,
-          query,
-          nextAction: emptyState.nextAction,
-        })
+        renderEmptyState(
+          emptyState.nextAction
+            ? {
+                reason: emptyState.reason,
+                locale,
+                query,
+                nextAction: emptyState.nextAction,
+              }
+            : {
+                reason: emptyState.reason,
+                locale,
+                query,
+              },
+        )
       ) : (
         <div
           style={{
