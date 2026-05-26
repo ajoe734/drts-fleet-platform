@@ -1,12 +1,13 @@
 # UI-FE-ADM-REIMB Acceptance Packet & Dependency Map
 
 - Sidecar Task: `UI-FE-ADM-REIMB-SIDECAR-ACCEPTANCE`
-- Sidecar Owner / Reviewer: `Codex` / `Claude`
+- Sidecar Owner / Reviewer: `Codex` / `Codex2`
 - Parent Task: `UI-FE-ADM-REIMB`
 - Adjacent Sibling Task: `UI-FE-ADM-REIMBID`
 - Helper Kind: `acceptance_packet`
 - Class: support-only; no canonical-truth mutation
 - Generated: `2026-05-25` (UTC)
+- Refreshed Against Machine Truth: `2026-05-26` (UTC)
 
 ## Purpose
 
@@ -15,6 +16,8 @@ for the already-closed reimbursement queue slice `UI-FE-ADM-REIMB` without
 editing canonical truth. This packet is scoped to the queue page only. The
 detail page remains a separate sibling task (`UI-FE-ADM-REIMBID`) and is not
 re-adjudicated here.
+
+This sidecar's assigned reviewer is `Codex2` per canonical machine truth.
 
 ## Scope And Guardrails
 
