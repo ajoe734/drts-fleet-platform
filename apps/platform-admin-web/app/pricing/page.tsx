@@ -371,11 +371,17 @@ function formatPercent(value: number) {
 function statusTone(
   status: PlatformPricingRuleRecord["status"] | DriverFeePlanRecord["status"],
 ): CanvasTone {
-  if (status === "active" || status === "published") {
+  if (status === "published") {
     return "success";
   }
-  if (status === "draft") {
+  if (status === "draft" || status === "review_required") {
     return "warn";
+  }
+  if (status === "scheduled") {
+    return "info";
+  }
+  if (status === "rollback_hold") {
+    return "danger";
   }
   return "neutral";
 }
@@ -390,9 +396,9 @@ export default function PricingPage() {
     useState<ProductRuleCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "active" | "draft" | "archived">(
-    "all",
-  );
+  const [filter, setFilter] = useState<
+    "all" | "published" | "review_required" | "superseded"
+  >("all");
   const [showCreate, setShowCreate] = useState(false);
   const [pricingForm, setPricingForm] =
     useState<PricingFormState>(EMPTY_PRICING_FORM);
@@ -632,12 +638,12 @@ export default function PricingPage() {
   }, [filter, sortedRules]);
 
   const draftRules = useMemo(
-    () => sortedRules.filter((rule) => rule.status === "draft"),
+    () => sortedRules.filter((rule) => rule.status === "review_required"),
     [sortedRules],
   );
 
   const activeRule = useMemo(
-    () => sortedRules.find((rule) => rule.status === "active") ?? null,
+    () => sortedRules.find((rule) => rule.status === "published") ?? null,
     [sortedRules],
   );
 
@@ -650,9 +656,14 @@ export default function PricingPage() {
   const ruleCounts = useMemo(
     () => ({
       all: rules.length,
-      active: rules.filter((rule) => rule.status === "active").length,
       draft: rules.filter((rule) => rule.status === "draft").length,
-      archived: rules.filter((rule) => rule.status === "archived").length,
+      reviewRequired: rules.filter((rule) => rule.status === "review_required")
+        .length,
+      published: rules.filter((rule) => rule.status === "published").length,
+      scheduled: rules.filter((rule) => rule.status === "scheduled").length,
+      rollbackHold: rules.filter((rule) => rule.status === "rollback_hold")
+        .length,
+      superseded: rules.filter((rule) => rule.status === "superseded").length,
     }),
     [rules],
   );
@@ -1068,7 +1079,11 @@ export default function PricingPage() {
             {t("pricing.platformDrafts")} {ruleCounts.draft}
           </CanvasPill>
           <CanvasPill theme={th} tone="success">
-            {t("pricing.activeTemplates")} {ruleCounts.active}
+            {t("pricing.activeTemplates")} {ruleCounts.published}
+          </CanvasPill>
+          <CanvasPill theme={th} tone="info">
+            {formatPlatformCodeLabel(locale, "review_required")}{" "}
+            {ruleCounts.reviewRequired}
           </CanvasPill>
           <CanvasPill theme={th} tone="info">
             {t("pricing.publishedPlans")} {feePlanRows.length}
@@ -1228,16 +1243,16 @@ export default function PricingPage() {
               padding={0}
             >
               <div style={cardToolbarStyle}>
-                {(["all", "active", "draft", "archived"] as const).map(
+                {(["all", "published", "review_required", "superseded"] as const).map(
                   (value) => {
                     const count =
                       value === "all"
                         ? ruleCounts.all
-                        : value === "active"
-                          ? ruleCounts.active
-                          : value === "draft"
-                            ? ruleCounts.draft
-                            : ruleCounts.archived;
+                        : value === "published"
+                          ? ruleCounts.published
+                          : value === "review_required"
+                            ? ruleCounts.reviewRequired
+                            : ruleCounts.superseded;
 
                     return (
                       <button

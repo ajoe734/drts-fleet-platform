@@ -6,6 +6,7 @@
  */
 
 import type {
+  ActionReceipt,
   AcknowledgeOpsApprovalRequestBreachCommand,
   AddComplaintCaseNoteCommand,
   AddReconciliationIssueCommentCommand,
@@ -2092,8 +2093,8 @@ export class ApiClient {
   async publishPlatformPricingRule(
     ruleId: string,
     command: PublishPlatformPricingRuleCommand,
-  ): Promise<PlatformPricingRuleRecord> {
-    return this.post<PlatformPricingRuleRecord>(
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
       `/api/platform-admin/pricing-rules/${ruleId}/publish`,
       { body: command },
     );

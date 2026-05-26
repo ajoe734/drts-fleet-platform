@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   AuditLogRecord,
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
@@ -14,16 +15,19 @@ import type {
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
   PlatformPricingRuleRecord,
+  PlatformPricingRuleStatus,
   PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
+  ResourceActionDescriptor,
   SetPlatformMaintenanceModeCommand,
   TenantInvoiceRecord,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { AuditedActionResult } from "../../common/action-receipt";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
   DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
@@ -38,6 +42,14 @@ import {
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
 } from "./platform-admin.repository";
+
+type LegacyPlatformPricingRuleStatus = "active" | "archived";
+
+type PricingRulePublishResult = {
+  rule: PlatformPricingRuleRecord;
+  receiptStatus: Extract<ActionReceipt["status"], "accepted" | "completed">;
+  receiptMessage: string;
+};
 
 const PUBLIC_INFO_SEED: PublicInfoVersionRecord[] = [
   {
@@ -120,14 +132,24 @@ const PLATFORM_PRICING_RULES_SEED: PlatformPricingRuleRecord[] = [
     serviceFeeBps: 1500,
     reimbursementMode: "platform_funded",
     applicableTo: "all",
-    status: "active",
+    status: "published",
     effectiveFrom: "2026-01-01T00:00:00.000Z",
     effectiveTo: null,
+    reviewRequestedBy: "pa-admin-001",
+    reviewRequestedAt: "2025-12-20T00:00:00.000Z",
+    scheduledBy: null,
+    scheduledAt: null,
     publishedBy: "pa-admin-001",
     publishedAt: "2026-01-01T00:00:00.000Z",
+    supersededByRuleId: null,
+    supersededAt: null,
+    rollbackHoldReason: null,
+    rollbackHeldBy: null,
+    rollbackHeldAt: null,
     notes: "Baseline fee plan for platform-wide enterprise dispatch tenants.",
     createdAt: "2025-12-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
+    availableActions: [],
   },
   {
     ruleId: "rule-demo-002",
@@ -136,14 +158,24 @@ const PLATFORM_PRICING_RULES_SEED: PlatformPricingRuleRecord[] = [
     serviceFeeBps: 1000,
     reimbursementMode: "mixed",
     applicableTo: "t_demo",
-    status: "active",
+    status: "published",
     effectiveFrom: "2026-03-01T00:00:00.000Z",
     effectiveTo: null,
+    reviewRequestedBy: "pa-admin-001",
+    reviewRequestedAt: "2026-02-20T00:00:00.000Z",
+    scheduledBy: null,
+    scheduledAt: null,
     publishedBy: "pa-admin-001",
     publishedAt: "2026-03-01T00:00:00.000Z",
+    supersededByRuleId: null,
+    supersededAt: null,
+    rollbackHoldReason: null,
+    rollbackHeldBy: null,
+    rollbackHeldAt: null,
     notes: "Reduced fee schedule for the demo tenant enterprise program.",
     createdAt: "2026-02-15T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
+    availableActions: [],
   },
 ];
 
@@ -174,7 +206,7 @@ export class PlatformAdminService implements OnModuleInit {
   };
 
   private pricingRules: PlatformPricingRuleRecord[] =
-    PLATFORM_PRICING_RULES_SEED.map((r) => ({ ...r }));
+    PLATFORM_PRICING_RULES_SEED.map((rule) => this.clonePricingRule(rule));
 
   private readonly placardDownloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
 
@@ -815,11 +847,21 @@ export class PlatformAdminService implements OnModuleInit {
       status: "draft",
       effectiveFrom: this.normalizeNullableText(command.effectiveFrom) ?? now,
       effectiveTo: null,
+      reviewRequestedBy: null,
+      reviewRequestedAt: null,
+      scheduledBy: null,
+      scheduledAt: null,
       publishedBy: null,
       publishedAt: null,
+      supersededByRuleId: null,
+      supersededAt: null,
+      rollbackHoldReason: null,
+      rollbackHeldBy: null,
+      rollbackHeldAt: null,
       notes: this.normalizeNullableText(command.notes),
       createdAt: now,
       updatedAt: now,
+      availableActions: [],
     };
 
     this.pricingRules = [
@@ -848,59 +890,289 @@ export class PlatformAdminService implements OnModuleInit {
     return this.clonePricingRule(rule);
   }
 
+  requestPlatformPricingRuleReview(
+    ruleId: string,
+    requestId?: string,
+    actorId?: string | null,
+  ): PlatformPricingRuleRecord {
+    const rule = this.requirePricingRule(ruleId);
+    if (rule.status !== "draft") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PRICING_RULE_REVIEW_STATE_INVALID",
+        "Only draft pricing rules can be moved into review_required.",
+        {
+          ruleId,
+          status: rule.status,
+        },
+      );
+    }
+
+    const reviewActorId = this.requirePlatformAdminActorId(
+      actorId,
+      "mark pricing rules as review required",
+    );
+    const reviewedAt = new Date().toISOString();
+
+    rule.status = "review_required";
+    rule.reviewRequestedBy = reviewActorId;
+    rule.reviewRequestedAt = reviewedAt;
+    rule.updatedAt = reviewedAt;
+
+    this.recordAudit(
+      {
+        actorId: reviewActorId,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "request_platform_pricing_rule_review",
+        resourceType: "platform_pricing_rule",
+        resourceId: rule.ruleId,
+        oldValuesSummary: {
+          previousStatus: "draft",
+        },
+        newValuesSummary: {
+          status: rule.status,
+          version: rule.version,
+          applicableTo: rule.applicableTo,
+          reviewedAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.clonePricingRule(rule);
+  }
+
   publishPlatformPricingRule(
     ruleId: string,
     command: PublishPlatformPricingRuleCommand,
     requestId?: string,
-  ): PlatformPricingRuleRecord {
+    actorId?: string | null,
+  ): AuditedActionResult<PricingRulePublishResult> {
     const rule = this.requirePricingRule(ruleId);
-    const previousActive = this.pricingRules.find(
-      (candidate) =>
-        candidate.ruleId !== rule.ruleId &&
-        candidate.ruleName === rule.ruleName &&
-        candidate.applicableTo === rule.applicableTo &&
-        candidate.status === "active",
-    );
-    const publishedAt = new Date().toISOString();
-
-    if (previousActive) {
-      previousActive.status = "archived";
-      previousActive.effectiveTo =
-        this.normalizeNullableText(command.effectiveFrom) ?? publishedAt;
-      previousActive.updatedAt = publishedAt;
+    if (rule.status !== "review_required") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PRICING_RULE_REVIEW_REQUIRED",
+        "Only review_required pricing rules can be published.",
+        {
+          ruleId,
+          status: rule.status,
+        },
+      );
     }
 
-    rule.status = "active";
-    rule.publishedBy = this.normalizeNullableText(command.publishedBy);
-    rule.publishedAt = publishedAt;
-    rule.effectiveFrom =
-      this.normalizeNullableText(command.effectiveFrom) ?? rule.effectiveFrom;
-    rule.effectiveTo = this.normalizeNullableText(command.effectiveTo);
-    rule.updatedAt = publishedAt;
+    const publisherActorId = this.requirePlatformAdminActorId(
+      actorId,
+      "publish pricing rules",
+    );
+    const publishReason = this.requireReason(
+      command.reason,
+      "publish pricing rules",
+    );
+    const publishWindow = this.resolvePricingPublishWindow(rule, command);
+    const now = new Date().toISOString();
+    const publishMode =
+      publishWindow.effectiveFrom > now ? "scheduled" : "published";
+    const previousPublished = this.findPublishedPricingRule(rule);
 
-    this.recordAudit(
+    if (publishMode === "published" && previousPublished) {
+      this.supersedePricingRule(previousPublished, rule.ruleId, now);
+    }
+
+    rule.status = publishMode;
+    rule.effectiveFrom = publishWindow.effectiveFrom;
+    rule.effectiveTo = publishWindow.effectiveTo;
+    rule.updatedAt = now;
+
+    if (publishMode === "scheduled") {
+      rule.scheduledBy = publisherActorId;
+      rule.scheduledAt = now;
+      rule.publishedBy = null;
+      rule.publishedAt = null;
+    } else {
+      rule.scheduledBy = null;
+      rule.scheduledAt = null;
+      rule.publishedBy = publisherActorId;
+      rule.publishedAt = now;
+      rule.rollbackHoldReason = null;
+      rule.rollbackHeldBy = null;
+      rule.rollbackHeldAt = null;
+    }
+
+    const auditLog = this.recordAudit(
       {
-        actorId: null,
+        actorId: publisherActorId,
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
-        actionName: "publish_platform_pricing_rule",
+        actionName:
+          publishMode === "scheduled"
+            ? "schedule_platform_pricing_rule_publish"
+            : "publish_platform_pricing_rule",
         resourceType: "platform_pricing_rule",
         resourceId: rule.ruleId,
-        ...(previousActive
-          ? {
-              oldValuesSummary: {
-                previousRuleId: previousActive.ruleId,
-                previousVersion: previousActive.version,
-                previousStatus: "active",
-              },
-            }
-          : {}),
+        oldValuesSummary: {
+          previousStatus: "review_required",
+          previousRuleId: previousPublished?.ruleId ?? null,
+          previousVersion: previousPublished?.version ?? null,
+          previousPublishedAt: previousPublished?.publishedAt ?? null,
+        },
         newValuesSummary: {
           ruleId: rule.ruleId,
           version: rule.version,
-          publishedAt,
+          status: publishMode,
+          effectiveFrom: publishWindow.effectiveFrom,
+          effectiveTo: publishWindow.effectiveTo,
+          reason: publishReason,
           applicableTo: rule.applicableTo,
+          actorId: publisherActorId,
+          versionDiff: this.buildPricingRuleVersionDiff(previousPublished, rule),
+        },
+      },
+      requestId,
+    );
+
+    return {
+      data: {
+        rule: this.clonePricingRule(rule),
+        receiptStatus: publishMode === "scheduled" ? "accepted" : "completed",
+        receiptMessage:
+          publishMode === "scheduled"
+            ? "Pricing rule scheduled for publish."
+            : "Pricing rule published.",
+      },
+      auditLog,
+    };
+  }
+
+  activateScheduledPlatformPricingRule(
+    ruleId: string,
+    requestId?: string,
+    actorId?: string | null,
+  ): PlatformPricingRuleRecord {
+    const rule = this.requirePricingRule(ruleId);
+    if (rule.status !== "scheduled") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PRICING_RULE_SCHEDULE_STATE_INVALID",
+        "Only scheduled pricing rules can be activated.",
+        {
+          ruleId,
+          status: rule.status,
+        },
+      );
+    }
+
+    const activationAt = new Date().toISOString();
+    if (rule.effectiveFrom > activationAt) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PRICING_RULE_SCHEDULE_NOT_READY",
+        "Scheduled pricing rules can only be activated at or after effectiveFrom.",
+        {
+          ruleId,
+          effectiveFrom: rule.effectiveFrom,
+          activationAt,
+        },
+      );
+    }
+
+    const activationActorId = this.requirePlatformAdminActorId(
+      actorId,
+      "activate scheduled pricing rules",
+    );
+    const previousPublished = this.findPublishedPricingRule(rule);
+    if (previousPublished) {
+      this.supersedePricingRule(previousPublished, rule.ruleId, activationAt);
+    }
+
+    rule.status = "published";
+    rule.scheduledBy = null;
+    rule.scheduledAt = null;
+    rule.publishedBy = activationActorId;
+    rule.publishedAt = activationAt;
+    rule.updatedAt = activationAt;
+
+    this.recordAudit(
+      {
+        actorId: activationActorId,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "activate_scheduled_platform_pricing_rule",
+        resourceType: "platform_pricing_rule",
+        resourceId: rule.ruleId,
+        oldValuesSummary: {
+          previousStatus: "scheduled",
+          previousRuleId: previousPublished?.ruleId ?? null,
+          previousVersion: previousPublished?.version ?? null,
+        },
+        newValuesSummary: {
+          status: rule.status,
+          effectiveFrom: rule.effectiveFrom,
+          publishedAt: activationAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.clonePricingRule(rule);
+  }
+
+  setPlatformPricingRuleRollbackHold(
+    ruleId: string,
+    reason: string,
+    requestId?: string,
+    actorId?: string | null,
+  ): PlatformPricingRuleRecord {
+    const rule = this.requirePricingRule(ruleId);
+    if (rule.status !== "published") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PRICING_RULE_ROLLBACK_HOLD_STATE_INVALID",
+        "Only published pricing rules can enter rollback_hold.",
+        {
+          ruleId,
+          status: rule.status,
+        },
+      );
+    }
+
+    const holdActorId = this.requirePlatformAdminActorId(
+      actorId,
+      "place pricing rules into rollback hold",
+    );
+    const holdReason = this.requireReason(
+      reason,
+      "place pricing rules into rollback hold",
+    );
+    const holdAt = new Date().toISOString();
+
+    rule.status = "rollback_hold";
+    rule.rollbackHoldReason = holdReason;
+    rule.rollbackHeldBy = holdActorId;
+    rule.rollbackHeldAt = holdAt;
+    rule.updatedAt = holdAt;
+
+    this.recordAudit(
+      {
+        actorId: holdActorId,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "set_platform_pricing_rule_rollback_hold",
+        resourceType: "platform_pricing_rule",
+        resourceId: rule.ruleId,
+        oldValuesSummary: {
+          previousStatus: "published",
+          publishedAt: rule.publishedAt,
+        },
+        newValuesSummary: {
+          status: rule.status,
+          rollbackHoldReason: holdReason,
+          rollbackHeldAt: holdAt,
         },
       },
       requestId,
@@ -975,7 +1247,7 @@ export class PlatformAdminService implements OnModuleInit {
         },
       );
     }
-    return rule;
+    return this.normalizePricingRuleRecord(rule);
   }
 
   private recordAudit(
@@ -993,7 +1265,7 @@ export class PlatformAdminService implements OnModuleInit {
     if (requestId) {
       auditLogInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditLogInput);
+    return this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 
   private clonePublicInfoVersion(
@@ -1041,8 +1313,215 @@ export class PlatformAdminService implements OnModuleInit {
   private clonePricingRule(
     rule: PlatformPricingRuleRecord,
   ): PlatformPricingRuleRecord {
+    const normalizedRule = this.normalizePricingRuleRecord({ ...rule });
+
     return {
-      ...rule,
+      ...normalizedRule,
+      availableActions: this.buildPricingRuleAvailableActions(normalizedRule),
+    };
+  }
+
+  private normalizePricingRuleRecord(
+    rule: PlatformPricingRuleRecord,
+  ): PlatformPricingRuleRecord {
+    const legacyStatus = rule.status as LegacyPlatformPricingRuleStatus;
+    rule.status =
+      legacyStatus === "active"
+        ? "published"
+        : legacyStatus === "archived"
+          ? "superseded"
+          : rule.status;
+    rule.reviewRequestedBy = rule.reviewRequestedBy ?? null;
+    rule.reviewRequestedAt = rule.reviewRequestedAt ?? null;
+    rule.scheduledBy = rule.scheduledBy ?? null;
+    rule.scheduledAt = rule.scheduledAt ?? null;
+    rule.publishedBy = rule.publishedBy ?? null;
+    rule.publishedAt = rule.publishedAt ?? null;
+    rule.supersededByRuleId = rule.supersededByRuleId ?? null;
+    rule.supersededAt = rule.supersededAt ?? null;
+    rule.rollbackHoldReason = rule.rollbackHoldReason ?? null;
+    rule.rollbackHeldBy = rule.rollbackHeldBy ?? null;
+    rule.rollbackHeldAt = rule.rollbackHeldAt ?? null;
+    rule.availableActions = [];
+
+    return rule;
+  }
+
+  private buildPricingRuleAvailableActions(
+    rule: PlatformPricingRuleRecord,
+  ): ResourceActionDescriptor[] {
+    const actions: ResourceActionDescriptor[] = [];
+    const publishDisabledReasonCode = this.getPricingPublishDisabledReasonCode(
+      rule.status,
+    );
+
+    if (rule.status === "draft") {
+      actions.push({
+        action: "request_review",
+        enabled: true,
+        riskLevel: "medium",
+      });
+    }
+
+    actions.push({
+      action: "publish",
+      enabled: rule.status === "review_required",
+      ...(publishDisabledReasonCode
+        ? {
+            disabledReasonCode: publishDisabledReasonCode,
+          }
+        : {}),
+      requiresReason: true,
+      riskLevel: "high",
+    });
+
+    if (rule.status === "published") {
+      actions.push({
+        action: "rollback_hold",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      });
+    }
+
+    return actions;
+  }
+
+  private getPricingPublishDisabledReasonCode(
+    status: PlatformPricingRuleStatus,
+  ) {
+    switch (status) {
+      case "draft":
+        return "pricing_review_required";
+      case "scheduled":
+        return "pricing_already_scheduled";
+      case "published":
+        return "pricing_already_published";
+      case "superseded":
+        return "pricing_superseded";
+      case "rollback_hold":
+        return "pricing_rollback_hold_active";
+      default:
+        return undefined;
+    }
+  }
+
+  private requireReason(reason: string | null | undefined, action: string) {
+    const normalizedReason = this.normalizeNullableText(reason);
+    if (!normalizedReason) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ACTION_REASON_REQUIRED",
+        `A non-empty reason is required to ${action}.`,
+      );
+    }
+
+    return normalizedReason;
+  }
+
+  private resolvePricingPublishWindow(
+    rule: PlatformPricingRuleRecord,
+    command: PublishPlatformPricingRuleCommand,
+  ) {
+    const effectiveFrom =
+      this.normalizeNullableText(command.effectiveFrom) ?? rule.effectiveFrom;
+    const effectiveTo = this.normalizeNullableText(command.effectiveTo);
+    const effectiveFromTime = Date.parse(effectiveFrom);
+
+    if (Number.isNaN(effectiveFromTime)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PRICING_RULE_EFFECTIVE_FROM_INVALID",
+        "effectiveFrom must be a valid ISO-8601 timestamp.",
+        {
+          effectiveFrom,
+        },
+      );
+    }
+
+    if (effectiveTo) {
+      const effectiveToTime = Date.parse(effectiveTo);
+      if (Number.isNaN(effectiveToTime)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "PRICING_RULE_EFFECTIVE_TO_INVALID",
+          "effectiveTo must be a valid ISO-8601 timestamp.",
+          {
+            effectiveTo,
+          },
+        );
+      }
+      if (effectiveToTime < effectiveFromTime) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "PRICING_RULE_EFFECTIVE_WINDOW_INVALID",
+          "effectiveTo must be at or after effectiveFrom.",
+          {
+            effectiveFrom,
+            effectiveTo,
+          },
+        );
+      }
+    }
+
+    return {
+      effectiveFrom: new Date(effectiveFromTime).toISOString(),
+      effectiveTo: effectiveTo
+        ? new Date(Date.parse(effectiveTo)).toISOString()
+        : null,
+    };
+  }
+
+  private findPublishedPricingRule(rule: PlatformPricingRuleRecord) {
+    return this.pricingRules.find(
+      (candidate) =>
+        candidate.ruleId !== rule.ruleId &&
+        candidate.ruleName === rule.ruleName &&
+        candidate.applicableTo === rule.applicableTo &&
+        this.normalizePricingRuleRecord(candidate).status === "published",
+    );
+  }
+
+  private supersedePricingRule(
+    rule: PlatformPricingRuleRecord,
+    successorRuleId: string,
+    supersededAt: string,
+  ) {
+    rule.status = "superseded";
+    rule.effectiveTo = supersededAt;
+    rule.supersededByRuleId = successorRuleId;
+    rule.supersededAt = supersededAt;
+    rule.updatedAt = supersededAt;
+  }
+
+  private buildPricingRuleVersionDiff(
+    previousPublished: PlatformPricingRuleRecord | undefined,
+    nextRule: PlatformPricingRuleRecord,
+  ) {
+    const changedFields = [
+      previousPublished?.version !== nextRule.version ? "version" : null,
+      previousPublished?.serviceFeeBps !== nextRule.serviceFeeBps
+        ? "serviceFeeBps"
+        : null,
+      previousPublished?.reimbursementMode !== nextRule.reimbursementMode
+        ? "reimbursementMode"
+        : null,
+      previousPublished?.effectiveFrom !== nextRule.effectiveFrom
+        ? "effectiveFrom"
+        : null,
+      previousPublished?.effectiveTo !== nextRule.effectiveTo
+        ? "effectiveTo"
+        : null,
+      previousPublished?.notes !== nextRule.notes ? "notes" : null,
+    ].filter((field): field is string => field !== null);
+
+    return {
+      previousRuleId: previousPublished?.ruleId ?? null,
+      previousVersion: previousPublished?.version ?? null,
+      nextRuleId: nextRule.ruleId,
+      nextVersion: nextRule.version,
+      changedFields:
+        changedFields.length > 0 ? changedFields : ["initial_publish"],
     };
   }
 

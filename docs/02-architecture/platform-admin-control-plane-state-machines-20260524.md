@@ -73,11 +73,19 @@ All credential transitions must return `ActionReceipt` and audit id.
 
 ```text
 draft
+  └─ request review → review_required
 review_required
+  ├─ publish with future effectiveFrom → scheduled
+  └─ publish with current/past effectiveFrom → published
 scheduled
+  └─ effectiveFrom reached / activation audit → published
 published
+  ├─ publish successor version in same scope → superseded
+  └─ incident / regression / operator decision → rollback_hold
 superseded
+  └─ terminal history state
 rollback_hold
+  └─ publish remains blocked until a separate remediation workflow moves the rule back to review
 ```
 
 Publishing requires:
@@ -87,6 +95,11 @@ Publishing requires:
 - effective time;
 - reason where high-risk;
 - audit receipt.
+
+Publish and rollback-hold actions are backend-authored high-risk actions. Their
+`ResourceActionDescriptor` must set `riskLevel = "high"` and
+`requiresReason = true`; successful publish writes return `ActionReceipt`
+including the canonical `auditId`.
 
 ## 6. Vehicle / driver control-plane states
 

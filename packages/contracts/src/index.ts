@@ -4879,6 +4879,14 @@ export interface OperationalObservabilitySnapshot {
   roleViews: OperationalRoleView[];
 }
 
+export type PlatformPricingRuleStatus =
+  | "draft"
+  | "review_required"
+  | "scheduled"
+  | "published"
+  | "superseded"
+  | "rollback_hold";
+
 export interface PlatformPricingRuleRecord {
   ruleId: string;
   ruleName: string;
@@ -4886,14 +4894,24 @@ export interface PlatformPricingRuleRecord {
   serviceFeeBps: number;
   reimbursementMode: "platform_funded" | "mixed";
   applicableTo: "all" | string;
-  status: "active" | "draft" | "archived";
+  status: PlatformPricingRuleStatus;
   effectiveFrom: string;
   effectiveTo: string | null;
+  reviewRequestedBy: string | null;
+  reviewRequestedAt: string | null;
+  scheduledBy: string | null;
+  scheduledAt: string | null;
   publishedBy: string | null;
   publishedAt: string | null;
+  supersededByRuleId: string | null;
+  supersededAt: string | null;
+  rollbackHoldReason: string | null;
+  rollbackHeldBy: string | null;
+  rollbackHeldAt: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  availableActions: ResourceActionDescriptor[];
 }
 
 export interface CreatePlatformPricingRuleCommand {
@@ -4910,6 +4928,7 @@ export interface PublishPlatformPricingRuleCommand {
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
   publishedBy?: string | null;
+  reason?: string | null;
 }
 
 export interface SetTenantStatusCommand {

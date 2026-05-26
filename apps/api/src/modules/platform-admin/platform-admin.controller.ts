@@ -25,6 +25,7 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { toActionReceiptEnvelope } from "../../common/action-receipt";
 import { CurrentIdentity } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { PlatformAdminService } from "./platform-admin.service";
@@ -242,14 +243,24 @@ export class PlatformAdminController {
   publishPlatformPricingRule(
     @Param("ruleId") ruleId: string,
     @Body() command: PublishPlatformPricingRuleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.platformAdminService.publishPlatformPricingRule(
-        ruleId,
-        command,
-        requestId,
-      ),
+    const result = this.platformAdminService.publishPlatformPricingRule(
+      ruleId,
+      command,
+      requestId,
+      this.requireActorId(identity),
+    );
+
+    return toActionReceiptEnvelope(
+      {
+        auditLog: result.auditLog,
+        resourceType: "platform_pricing_rule",
+        resourceId: result.data.rule.ruleId,
+        status: result.data.receiptStatus,
+        message: result.data.receiptMessage,
+      },
       requestId,
     );
   }
