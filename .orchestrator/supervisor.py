@@ -171,6 +171,46 @@ CHAIRMAN_REPORT_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-review-report
 PREMATURE_EXIT_REASON = "Worker exited before the task reached a terminal status."
 
 
+def prune_done_handoffs(status: dict[str, Any], keep: int = 500) -> None:
+    """Trim ``status["handoffs"]`` in place, keeping all pending entries plus
+    the most recent ``keep`` done entries.
+
+    ai-status.json accumulates handoff records forever; each completed task
+    appends 1+ entries with status="done" that supervisor never reads again
+    (see the ``pending_handoffs = [...]`` filter and the iteration in
+    ``ensure_review_finalize_handoff`` / ``ensure_owner_resume_handoff`` —
+    both consume only pending entries). Without pruning the file grew to
+    ~9 MB with 17k handoffs by the 2026-05-26 incident, slowing the
+    dashboard fetch to the point of appearing dead. See
+    feedback_ai_status_handoff_bloat for the incident write-up.
+
+    Called from ``write_status_with_prune`` (the only sanctioned writer of
+    the status file) so every supervisor cycle that mutates status also
+    bounds the audit-log tail. No-op when handoffs already fit.
+    """
+    handoffs = status.get("handoffs") or []
+    if not isinstance(handoffs, list) or len(handoffs) <= keep:
+        return
+    pending = [x for x in handoffs if x.get("status") != "done"]
+    done = [x for x in handoffs if x.get("status") == "done"]
+    if len(done) <= keep:
+        return
+    status["handoffs"] = pending + done[-keep:]
+
+
+def write_status_with_prune(status_path, status: dict[str, Any], *, keep_handoffs: int = 500) -> None:
+    """Standard status-file write that also bounds the handoffs audit-log tail.
+
+    All supervisor paths that previously called ``write_json(status_path, status)``
+    now route through this wrapper so the prune cannot be forgotten in a new
+    code path. ``keep_handoffs`` is tunable via the
+    ``supervisor.handoff_keep_count`` config key for hosts that want longer
+    audit history.
+    """
+    prune_done_handoffs(status, keep=keep_handoffs)
+    write_json(status_path, status)
+
+
 def supervisor_pid_path(config: dict[str, Any]) -> Path:
     return config_path(config, "state_file").parent / "supervisor.pid"
 
@@ -2934,7 +2974,7 @@ def persist_task_reassignment(
             }
         )
 
-    write_json(status_path, status)
+    write_status_with_prune(status_path, status, keep_handoffs=int(config.get("supervisor", {}).get("handoff_keep_count", 500)))
     return sync_status_pipeline(config)
 
 
@@ -6105,7 +6145,7 @@ def apply_chair_reassignment_action(
             "created_at": timestamp,
         }
     )
-    write_json(status_path, status)
+    write_status_with_prune(status_path, status, keep_handoffs=int(config.get("supervisor", {}).get("handoff_keep_count", 500)))
     if not sync_status_pipeline(config):
         return False
     clear_failure_streak(state, task_id, role)
@@ -6478,7 +6518,7 @@ def apply_chair_parent_resume_action(
             blocker["status"] = "resolved"
             blocker["resolved_at"] = timestamp
 
-    write_json(status_path, status)
+    write_status_with_prune(status_path, status, keep_handoffs=int(config.get("supervisor", {}).get("handoff_keep_count", 500)))
     if not sync_status_pipeline(config):
         return False
 
