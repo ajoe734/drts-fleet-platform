@@ -5,9 +5,9 @@ Owner: `Codex2`
 Reviewer: `Codex`
 Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
-Status: `blocked`
-Machine-truth status on `2026-05-25`: canonical `ai-status.json` now carries standalone task `PH1GC-FIN-GOV-001` under `Codex2`, refreshed to `in_progress` at `2026-05-25T14:22:33Z` for revalidation and then expected to settle at `blocked` because only the live-uplift acceptance item remains externally blocked. The downstream repo-local deliverables remain represented by `WF-FIN-GOV-001-MATRIX`, `FIN-GOV-UAT-001`, and `WF-FIN-GOV-001-E2E`, all `done`.
-Current branch head during 2026-05-25 blocker refresh: `d720fdf9` (`wip(PH1GC-FIN-GOV-001): anchor sidecar machine-truth status`)
+Status: `in_progress` (acceptance still blocked by trunk visibility + live staging evidence)
+Machine-truth status on `2026-05-26`: canonical `ai-status.json` still carries standalone task `PH1GC-FIN-GOV-001` under `Codex2`, refreshed to `in_progress` at `2026-05-26T04:02:11Z` for revalidation against latest `origin/dev`. The downstream repo-local deliverables remain represented by `WF-FIN-GOV-001-MATRIX`, `FIN-GOV-UAT-001`, and `WF-FIN-GOV-001-E2E`, all `done`, but the parent closeout cannot advance because task-level acceptance still depends on trunk absorption plus live-uplift evidence.
+Current branch head during 2026-05-26 blocker refresh: `4e3b4e19` (`wip(PH1GC-FIN-GOV-001): anchor blocked closeout truth sync`)
 Files changed:
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
@@ -70,12 +70,27 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` still references the pre-fix shape, so trunk visibility acceptance remains open until the branch is replayed or merged.
 - `origin/dev` has advanced since this branch family forked; a direct `git rebase origin/dev` currently stops at the historical `02adc6fb` E2E-010 shell-introduction commit with an add/add conflict against the now-landed upstream script, so the correct next step is a minimal replay or branch refresh after the external blocker clears, not a blind conflict resolution during closeout triage.
 
+## 2026-05-26 Revalidation
+
+- `git fetch origin` completed before re-checking trunk acceptance.
+- `git rev-parse HEAD` = `4e3b4e19450185935bc376e8dcbc5d6e0bb3d78b`.
+- `git rev-parse origin/dev` = `042e0fc78686983c9ebee2b59db0be9735f1b240`.
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` listed `E2E-010-governance-aware-billing-reporting.sh`.
+- `git diff --check origin/dev...HEAD` passed.
+- `git show origin/dev:docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` still shows the older verification-body shape with `ownerName` and `approvalEvaluationId`, so acceptance item 1 remains open on trunk.
+- `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` still references the older field set, so acceptance item 2 remains open on trunk.
+- `git show origin/dev:docs/04-uat/fbp-014a-e2e-matrix.md` still ends at the older acceptance snapshot and does not yet expose the `WF-FIN-GOV-001` E2E-010 matrix section carried on this branch.
+- No new governed staging evidence was produced from this workspace on 2026-05-26; the live-uplift acceptance item therefore remains unsatisfied.
+
 ## Blocker
 
-Fresh 2026-05-25 validation still shows:
+Fresh 2026-05-26 validation still shows:
 
 - the prior owner-lane live probes still end at staging IAP/IAM/WIF auth failure, so no new reviewer-readable governed staging artifact can be collected from this workspace
 - the corrected directive-§H spec/UAT/E2E chain still lives on `codex2/ph1gc-fin-gov-001`; `origin/dev` has not yet absorbed the fixed 13-field body, so the trunk-visibility acceptance items remain open even before live uplift
+- the latest `origin/dev` snapshot (`042e0fc7`) still exposes the pre-fix spec/UAT/matrix chain, so this is not just stale sidecar wording; trunk truth itself remains behind the branch
 - `WF-FIN-GOV-001` therefore still cannot honestly claim `PASS (live staging evidence)` without a fresh green `STRICT_VERIFICATION_BODY=1` governed rerun plus reviewer-readable invoice/report artifacts
 - replay/merge-to-`dev` plus environment access are the remaining blockers
 
