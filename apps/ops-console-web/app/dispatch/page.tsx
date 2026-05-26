@@ -1272,6 +1272,11 @@ function renderBoardSignalBanner({
   }
 
   if (board === "exception") {
+    const holdReason = formatDispatchCode(
+      locale,
+      selectedRecord.exceptionHold?.reasonCode,
+      locale === "zh" ? "未知" : "unknown",
+    );
     return (
       <Banner
         theme={theme}
@@ -1280,8 +1285,8 @@ function renderBoardSignalBanner({
         title={zh ? "例外保留需先清除" : "Exception hold must be cleared"}
         body={
           zh
-            ? `${title} · hold 原因 ${selectedRecord.exceptionHold?.reasonCode ?? "unknown"}`
-            : `${title} · hold reason ${selectedRecord.exceptionHold?.reasonCode ?? "unknown"}`
+            ? `${title} · hold 原因 ${holdReason}`
+            : `${title} · hold reason ${holdReason}`
         }
         actions={renderActionButton(
           pickPrimaryAction(selectedActions, [
@@ -1993,7 +1998,7 @@ export default async function DispatchPage({
         </div>
       ),
       tenant: getTenantLabel(order),
-      reason: order.exceptionHold?.reasonCode ?? "—",
+      reason: formatDispatchCode(locale, order.exceptionHold?.reasonCode),
       owner:
         order.exceptionHold?.overrideRequest?.requestedBy.actorId ??
         order.exceptionHold?.resolution?.actorId ??
