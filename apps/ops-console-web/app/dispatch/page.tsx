@@ -908,6 +908,46 @@ function buildActionHref(
   }&intent=${encodeURIComponent(action.action)}`;
 }
 
+function buildEmptyStateActionContext(
+  board: DispatchBoard,
+  action: ResourceActionDescriptor,
+  locale: Locale,
+  selectedService: OwnedServiceFilter,
+  selectedFacet: ForwardedFacetFilter,
+): BoardActionContext {
+  let href = buildDispatchHref({
+    board,
+    service: selectedService,
+    facet: selectedFacet,
+  });
+  let external = false;
+
+  switch (action.action) {
+    case "jump_approval_request":
+      href = "/approval-requests";
+      break;
+    case "createIncidentFromDispatchException":
+    case "escalate_incident":
+      href = "/incidents";
+      break;
+    case "inspect_adapter":
+      href = buildPlatformAdminHref("/adapter-registry");
+      external = true;
+      break;
+    default:
+      break;
+  }
+
+  return {
+    href,
+    label: resolveActionLabel(action.action, locale),
+    riskLevel: action.riskLevel,
+    disabled: !action.enabled,
+    disabledReason: action.disabledReasonCode,
+    external,
+  };
+}
+
 function buildActionContexts(
   board: DispatchBoard,
   record: BoardRecord,
@@ -1005,6 +1045,8 @@ function renderEmptyState(
   board: DispatchBoard,
   emptyState: EmptyStateEnvelope,
   locale: Locale,
+  selectedService: OwnedServiceFilter,
+  selectedFacet: ForwardedFacetFilter,
 ) {
   const zh = locale === "zh";
   const mapping: Record<
@@ -1079,6 +1121,15 @@ function renderEmptyState(
       : content.tone === "warn"
         ? "warning"
         : content.tone;
+  const nextAction = emptyState.nextAction
+    ? buildEmptyStateActionContext(
+        board,
+        emptyState.nextAction,
+        locale,
+        selectedService,
+        selectedFacet,
+      )
+    : null;
   return (
     <WorkflowEmptyState
       tone={tone}
@@ -1094,20 +1145,13 @@ function renderEmptyState(
       icon={<span style={{ fontSize: 22 }}>{content.icon}</span>}
       actions={
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {emptyState.nextAction ? (
-            <Link
-              href={`${buildDispatchHref({ board })}${
-                buildDispatchHref({ board }).includes("?") ? "&" : "?"
-              }intent=${encodeURIComponent(emptyState.nextAction.action)}`}
-              style={{ textDecoration: "none" }}
-            >
-              <Btn theme={theme} variant="primary" icon="arrow">
-                {resolveActionLabel(emptyState.nextAction.action, locale)}
-              </Btn>
-            </Link>
-          ) : null}
+          {nextAction ? renderActionButton(nextAction, locale) : null}
           <Link
-            href={buildDispatchHref({ board })}
+            href={buildDispatchHref({
+              board,
+              service: selectedService,
+              facet: selectedFacet,
+            })}
             style={{ textDecoration: "none" }}
           >
             <Btn theme={theme} variant="secondary" icon="arrow">
@@ -2431,7 +2475,13 @@ export default async function DispatchPage({
 
             {boardEmptyState ? (
               <div style={{ padding: 24 }}>
-                {renderEmptyState(board, boardEmptyState, locale)}
+                {renderEmptyState(
+                  board,
+                  boardEmptyState,
+                  locale,
+                  selectedService,
+                  selectedFacet,
+                )}
               </div>
             ) : (
               <>
