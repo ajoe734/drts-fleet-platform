@@ -15,6 +15,7 @@ import type {
   PartnerChannelEntryRecord,
   PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
+  RefreshTier,
   ReconciliationIssueRecord,
   ResourceActionDescriptor,
   UiRefreshMetadata,
@@ -91,13 +92,22 @@ type GovernanceQueueItem = {
 };
 
 type AuditTableRow = AuditLogRecord & Record<string, unknown>;
+type EmptyStatePresentation = {
+  title: string;
+  summary: string;
+  hint: string;
+  tone: HomeBannerTone;
+};
 
 const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
 });
 
+const HOME_REFRESH_TIER: RefreshTier = "medium_slow";
 const HOME_REFRESH_INTERVAL_MS = 30_000;
+const HOME_ROUTE_COUNT = 18;
+const HOME_SECTION_COUNT = 6;
 
 const initialSources: HomeSources = {
   tenants: { data: [], error: null },
@@ -212,11 +222,31 @@ const actionRowStyle = {
 
 const inlineEmptyStateStyle = {
   display: "grid",
-  gap: 8,
-  padding: "12px 14px",
-  borderRadius: 10,
+  gap: 10,
+  padding: "14px 16px",
+  borderRadius: 12,
   border: `1px dashed ${theme.border}`,
   background: theme.bgRaised,
+} satisfies CSSProperties;
+
+const inlineEmptyStateHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 10,
+  alignItems: "center",
+} satisfies CSSProperties;
+
+const inlineEmptyStateTitleStyle = {
+  color: theme.text,
+  fontWeight: 700,
+  fontSize: 13,
+  lineHeight: 1.35,
+} satisfies CSSProperties;
+
+const inlineEmptyStateHintStyle = {
+  color: theme.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.45,
 } satisfies CSSProperties;
 
 const queueStackStyle = {
@@ -227,6 +257,20 @@ const queueStackStyle = {
 const statusGridStyle = {
   display: "grid",
   gap: 10,
+} satisfies CSSProperties;
+
+const workspaceLinkStackStyle = {
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const workspaceLinkStyle = {
+  display: "grid",
+  gap: 4,
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
 } satisfies CSSProperties;
 
 const statusRowStyle = {
@@ -511,46 +555,148 @@ function formatHealthStatus(locale: string, refresh: UiRefreshMetadata) {
   return locale === "en" ? "live snapshot" : "即時快照";
 }
 
+function formatRefreshTier(locale: string, refreshTier: RefreshTier) {
+  if (refreshTier === "manual") {
+    return locale === "en" ? "T6 · manual" : "T6 · 手動";
+  }
+
+  return locale === "en"
+    ? "T4 · medium_slow · 30s"
+    : "T4 · medium_slow · 30 秒";
+}
+
+function describeEmptyState(
+  locale: string,
+  reason: EmptyReason,
+): EmptyStatePresentation {
+  const copy =
+    locale === "en"
+      ? {
+          no_data: {
+            title: "Nothing has landed here yet",
+            summary:
+              "The module is available, but there are no records to review.",
+            hint: "Use the next action when this queue should be initialized by Platform Admin.",
+            tone: "info",
+          },
+          not_provisioned: {
+            title: "Setup is still incomplete",
+            summary:
+              "This surface depends on upstream provisioning that has not been completed.",
+            hint: "Provision the missing package before expecting live production traffic.",
+            tone: "info",
+          },
+          fetch_failed: {
+            title: "Snapshot fetch failed",
+            summary:
+              "The request did not return a usable response for this module.",
+            hint: "Refresh first; if it repeats, inspect audit and health before taking action.",
+            tone: "danger",
+          },
+          permission_denied: {
+            title: "Read scope is restricted",
+            summary:
+              "You can reach this module, but this dataset is outside your authority boundary.",
+            hint: "Use another module or ask a higher-scope admin if you need this dataset.",
+            tone: "danger",
+          },
+          external_unavailable: {
+            title: "External dependency is unavailable",
+            summary:
+              "A downstream observability or integration source is not returning live data.",
+            hint: "Treat this area as degraded and pivot through the linked cross-app board if needed.",
+            tone: "warn",
+          },
+          driver_not_eligible: {
+            title: "Not eligible for this workflow",
+            summary:
+              "This state is reserved for a driver-specific queue and should not block platform governance.",
+            hint: "If this appears here, verify the surface contract.",
+            tone: "warn",
+          },
+          filtered_empty: {
+            title: "Filter removed every module",
+            summary:
+              "The current query does not match any home-board module or route.",
+            hint: "Clear the filter to restore the full sitemap.",
+            tone: "info",
+          },
+        }
+      : {
+          no_data: {
+            title: "目前尚未進入任何資料",
+            summary: "模組已可進入，但暫時沒有待審視的紀錄。",
+            hint: "若此佇列本應由 Platform Admin 初始化，請使用下一步 CTA。",
+            tone: "info",
+          },
+          not_provisioned: {
+            title: "建置流程尚未完成",
+            summary: "此工作面依賴的上游 provisioning 還沒完成。",
+            hint: "補齊 package / 設定後，才會開始承接正式流量。",
+            tone: "info",
+          },
+          fetch_failed: {
+            title: "快照讀取失敗",
+            summary: "本模組請求沒有回傳可用資料。",
+            hint: "先重新整理；若持續失敗，請先檢查 audit 與 health 再操作。",
+            tone: "danger",
+          },
+          permission_denied: {
+            title: "讀取權限受限",
+            summary:
+              "你能抵達這個模組，但這份資料超出目前 authority boundary。",
+            hint: "請改走其他模組，或由更高權限管理者處理。",
+            tone: "danger",
+          },
+          external_unavailable: {
+            title: "外部依賴暫時不可用",
+            summary:
+              "下游 observability / integration 來源目前沒有回傳 live data。",
+            hint: "此區塊應視為 degraded；必要時改走對應的 cross-app board。",
+            tone: "warn",
+          },
+          driver_not_eligible: {
+            title: "不符合此工作流條件",
+            summary: "這是 driver 專屬隊列狀態，不應阻塞平台治理首頁。",
+            hint: "若首頁出現此狀態，請回查 surface contract。",
+            tone: "warn",
+          },
+          filtered_empty: {
+            title: "篩選條件排除了所有模組",
+            summary: "目前查詢沒有命中任何首頁模組或 route。",
+            hint: "清除篩選即可回到完整 sitemap。",
+            tone: "info",
+          },
+        };
+
+  return copy[reason];
+}
+
 function renderEmptyState(
   locale: string,
   emptyState: ModuleCard["emptyState"],
   onAction: (action: HomeAction) => void,
+  onClearFilter?: (() => void) | undefined,
 ) {
   if (!emptyState) {
     return null;
   }
 
-  const copy: Record<EmptyReason, string> =
-    locale === "en"
-      ? {
-          no_data: "No records yet",
-          not_provisioned: "Not provisioned",
-          fetch_failed: "Unable to fetch data",
-          permission_denied: "You can view the module, but not this dataset",
-          external_unavailable: "External system unavailable",
-          driver_not_eligible: "Not eligible for this queue",
-          filtered_empty: "No modules match this filter",
-        }
-      : {
-          no_data: "目前沒有資料",
-          not_provisioned: "尚未完成建置",
-          fetch_failed: "資料讀取失敗",
-          permission_denied: "你可看到模組，但無權讀取這份資料",
-          external_unavailable: "外部系統暫時不可用",
-          driver_not_eligible: "目前不符合接單條件",
-          filtered_empty: "目前沒有符合篩選的模組",
-        };
+  const presentation = describeEmptyState(locale, emptyState.reason);
 
   return (
     <div style={inlineEmptyStateStyle}>
-      <CanvasPill
-        theme={theme}
-        tone={toneForEmptyReason(emptyState.reason)}
-        dot
-      >
-        {copy[emptyState.reason]}
-      </CanvasPill>
+      <div style={inlineEmptyStateHeaderStyle}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <div style={inlineEmptyStateTitleStyle}>{presentation.title}</div>
+          <div style={inlineEmptyStateHintStyle}>{presentation.summary}</div>
+        </div>
+        <CanvasPill theme={theme} tone={presentation.tone} dot>
+          {emptyState.reason}
+        </CanvasPill>
+      </div>
       <div style={moduleDetailStyle}>{emptyState.message}</div>
+      <div style={inlineEmptyStateHintStyle}>{presentation.hint}</div>
       {emptyState.nextAction ? (
         <div style={actionRowStyle}>
           <CanvasBtn
@@ -560,6 +706,12 @@ function renderEmptyState(
             onClick={() => onAction(emptyState.nextAction!)}
           >
             {emptyState.nextAction.label}
+          </CanvasBtn>
+        </div>
+      ) : emptyState.reason === "filtered_empty" && onClearFilter ? (
+        <div style={actionRowStyle}>
+          <CanvasBtn theme={theme} variant="secondary" onClick={onClearFilter}>
+            {locale === "en" ? "Clear filter" : "清除篩選"}
           </CanvasBtn>
         </div>
       ) : null}
@@ -656,6 +808,7 @@ export default function HomePage() {
           queueSubtitle: "Cross-module items that need platform intervention.",
           workspaceTitle: "Workspace status",
           workspaceSubtitle: "Refresh tier, route map, and cross-app posture.",
+          workspaceLinksTitle: "Cross-app deep links",
           searchPlaceholder: "Filter modules or routes…",
           routesTitle: "Module sitemap",
           routesSubtitle: "Landing board aligned to the Platform Admin canvas.",
@@ -677,7 +830,7 @@ export default function HomePage() {
           refreshTier: "Refresh tier",
           healthState: "Freshness",
           routeCoverage: "Route coverage",
-          routeCoverageValue: "18 routes / 6 sections",
+          routeCoverageValue: `${HOME_ROUTE_COUNT} routes / ${HOME_SECTION_COUNT} sections`,
           crossApp: "Cross-app links",
           crossAppValue: "ops-console + tenant-console",
           lastGenerated: "Generated",
@@ -702,6 +855,7 @@ export default function HomePage() {
           queueSubtitle: "跨模組需要平台治理人介入的事項。",
           workspaceTitle: "工作面狀態",
           workspaceSubtitle: "refresh tier、route map 與 cross-app posture。",
+          workspaceLinksTitle: "跨 app deep links",
           searchPlaceholder: "篩選模組或 route…",
           routesTitle: "模組 sitemap",
           routesSubtitle: "依 Platform Admin canvas 重建的 landing board。",
@@ -723,7 +877,7 @@ export default function HomePage() {
           refreshTier: "Refresh tier",
           healthState: "資料鮮度",
           routeCoverage: "Route coverage",
-          routeCoverageValue: "18 routes / 6 sections",
+          routeCoverageValue: `${HOME_ROUTE_COUNT} routes / ${HOME_SECTION_COUNT} sections`,
           crossApp: "Cross-app links",
           crossAppValue: "ops-console + tenant-console",
           lastGenerated: "快照時間",
@@ -1506,6 +1660,31 @@ export default function HomePage() {
   }, [filteredModules]);
 
   const recentAudit = sources.audit.data.slice(0, 5);
+  const workspaceLinks = useMemo(() => {
+    const links = new Map<string, HomeAction>();
+
+    for (const item of governanceQueue) {
+      if (item.resourceLink) {
+        links.set(item.resourceLink.route, {
+          action: `link-${item.resourceLink.resourceId}`,
+          enabled: true,
+          riskLevel: "low",
+          label: item.resourceLink.label,
+          resourceLink: item.resourceLink,
+        });
+      }
+    }
+
+    for (const card of moduleCards) {
+      for (const action of card.availableActions) {
+        if (action.resourceLink) {
+          links.set(action.resourceLink.route, action);
+        }
+      }
+    }
+
+    return Array.from(links.values());
+  }, [governanceQueue, moduleCards]);
   const governanceItemCount =
     governanceQueue.length + metrics.rollbackTenants + metrics.criticalAlerts;
   const showDegradedBanner =
@@ -1713,7 +1892,7 @@ export default function HomePage() {
               <div style={statusRowStyle}>
                 <span>{copy.refreshTier}</span>
                 <CanvasPill theme={theme} tone="accent">
-                  T4 · medium_slow · 30s
+                  {formatRefreshTier(locale, HOME_REFRESH_TIER)}
                 </CanvasPill>
               </div>
               <div style={statusRowStyle}>
@@ -1744,6 +1923,37 @@ export default function HomePage() {
                 <span style={actorMetaStyle}>
                   {formatDateTime(refresh.generatedAt)}
                 </span>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <span style={actorPrimaryStyle}>
+                  {copy.workspaceLinksTitle}
+                </span>
+                <div style={workspaceLinkStackStyle}>
+                  {workspaceLinks.slice(0, 4).map((action) => (
+                    <button
+                      key={action.action}
+                      type="button"
+                      onClick={() => openAction(router, action)}
+                      style={{
+                        ...workspaceLinkStyle,
+                        cursor: action.enabled ? "pointer" : "not-allowed",
+                        textAlign: "left",
+                        color: theme.text,
+                        fontFamily: theme.fontFamily,
+                      }}
+                    >
+                      <span style={inlineEmptyStateTitleStyle}>
+                        {action.label}
+                      </span>
+                      <span style={inlineEmptyStateHintStyle}>
+                        {action.resourceLink?.route ?? action.href}
+                        {action.resourceLink?.openMode === "new_tab"
+                          ? ` · ${copy.showNewTab}`
+                          : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </CanvasCard>
@@ -1781,6 +1991,7 @@ export default function HomePage() {
                 message: copy.filteredEmpty,
               },
               (action) => openAction(router, action),
+              () => setModuleQuery(""),
             )
           ) : (
             <div style={moduleSectionStyle}>
