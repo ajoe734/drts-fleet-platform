@@ -7,7 +7,7 @@ Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `blocked` (acceptance still blocked by trunk visibility + live staging evidence)
 Machine-truth status on `2026-05-26`: canonical `ai-status.json` was briefly moved to `in_progress` for dispatch revalidation and should return to `blocked` once the refreshed blocker note is written. The downstream repo-local deliverables remain represented by `WF-FIN-GOV-001-MATRIX`, `FIN-GOV-UAT-001`, and `WF-FIN-GOV-001-E2E`, all `done`, but the parent closeout cannot advance because task-level acceptance still depends on trunk absorption plus live-uplift evidence.
-Current branch head during latest dispatch revalidation: `d0e67375` (`wip(PH1GC-FIN-GOV-001): anchor dispatch blocker refresh`)
+Current branch head after `origin/dev` merge refresh: `5d67b21b` (`wip(PH1GC-FIN-GOV-001): merge origin/dev for trunk replay refresh`)
 Files changed:
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
@@ -51,12 +51,12 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 3. `E2E-010` now emits the verification body from a single `VB_FIELDS` list, records the field count as evidence, and fails immediately if the list drifts away from 13 fields.
 4. `STRICT_VERIFICATION_BODY=1` remains the only honest uplift gate: every field must still be recorded, and any `NOT_POPULATED` value remains a hard failure in strict mode.
 5. Release-truth wording is now aligned across the branch artifacts: the matrix row, release-truth sync, audit, and evidence sidecar all keep `WF-FIN-GOV-001` at `PASS (static evidence)` until live uplift evidence exists.
-6. The task remains blocked on two fronts: the corrected repo-local artifact chain is still only on this branch, and the live-uplift evidence is still blocked by staging auth.
+6. The task remains blocked on two fronts: the corrected repo-local artifact chain is still only on this branch until it is merged to `origin/dev`, and the live-uplift evidence is still blocked by staging auth.
 
 ## Current Acceptance Read
 
 - Acceptance items 1 through 4 and 6 are satisfied on this branch via the spec/UAT/E2E/closeout evidence chain.
-- Acceptance items 1 and 2 are not yet satisfied on `origin/dev`: the current trunk copies of the spec/UAT still carry the older `ownerName` / `approvalEvaluationId` shape rather than the corrected directive-§H 13-field body.
+- Acceptance items 1 and 2 are not yet satisfied on `origin/dev`: the current trunk copies of the spec/UAT still carry the older `ownerName` / `approvalEvaluationId` shape rather than the corrected directive-§H 13-field body, even though this branch has now been refreshed on top of the latest reachable `origin/dev`.
 - Acceptance item 5 is still unsatisfied: the governed staging rerun needed for `PASS (live staging evidence)` is blocked by staging auth, so the branch and machine-truth artifacts intentionally keep the gate at `PASS (static evidence)`.
 
 ## 2026-05-25 Revalidation
@@ -165,6 +165,22 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md | grep -n 'ownerName\\|approvalEvaluationId'` still returns the older field-set assertions, confirming acceptance item 2 remains open on trunk.
 - No governed staging rerun was executed from this workspace during this revalidation, so there is still no reviewer-readable invoice/report artifact and no green live `STRICT_VERIFICATION_BODY=1` run to justify a `PASS (live staging evidence)` uplift.
 
+## 2026-05-26 `origin/dev` merge refresh
+
+- The task branch was merged with the latest reachable `origin/dev` instead of replaying 37 historical commits through `git rebase`.
+- `git rebase origin/dev` was re-checked and still hit the expected historical add/add conflict on the original `E2E-010` shell-introduction commit; using a merge refresh avoids reopening that replay stack on every revalidation.
+- `git merge --no-ff origin/dev` surfaced three conflicts:
+  - `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (add/add): resolved in favor of this branch's final 13-field verification-body shell.
+  - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`: resolved in favor of this branch's newer `WF-FIN-GOV-001` audit wording.
+  - `scripts/ai_status.py`: resolved in favor of `origin/dev` to avoid reintroducing unrelated task drift.
+- Merge result was anchored at `5d67b21b833c66355f3c0e515d33f1154bb568bf` (`wip(PH1GC-FIN-GOV-001): merge origin/dev for trunk replay refresh`).
+- Post-merge verification remained green:
+  - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+  - `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+  - `bash tests/e2e/run-e2e.sh --suite 010 --dry-run`
+  - `git diff --check origin/dev...HEAD`
+- This refresh removes the earlier "branch is stuck on an old base" concern; the remaining blockers are now only trunk absorption of this branch's corrected artifact chain and the missing governed staging rerun / live evidence.
+
 ## Blocker
 
 Fresh 2026-05-26 validation still shows:
@@ -173,6 +189,6 @@ Fresh 2026-05-26 validation still shows:
 - the corrected directive-§H spec/UAT/E2E chain still lives on `codex2/ph1gc-fin-gov-001`; `origin/dev` has not yet absorbed the fixed 13-field body, so the trunk-visibility acceptance items remain open even before live uplift
 - the latest `origin/dev` snapshot (`070f9aea`) still exposes the pre-fix spec/UAT chain, so this is not just stale sidecar wording; trunk truth itself remains behind the branch
 - `WF-FIN-GOV-001` therefore still cannot honestly claim `PASS (live staging evidence)` without a fresh green `STRICT_VERIFICATION_BODY=1` governed rerun plus reviewer-readable invoice/report artifacts
-- replay/merge-to-`dev` plus environment access are the remaining blockers
+- merge-to-`dev` plus environment access are the remaining blockers
 
-Until the corrected branch artifacts are replayed onto `origin/dev` and a valid staging bearer path exists so the governed rerun can pass `STRICT_VERIFICATION_BODY=1`, this task should stay `blocked`, not `review` or `done`.
+Until the corrected branch artifacts are merged onto `origin/dev` and a valid staging bearer path exists so the governed rerun can pass `STRICT_VERIFICATION_BODY=1`, this task should stay `blocked`, not `review` or `done`.
