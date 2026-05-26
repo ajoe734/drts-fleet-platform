@@ -654,22 +654,30 @@ function buildShiftActions(
       enabled: true,
       riskLevel: "low",
     },
-    {
-      action: "inspect_supply_gap",
-      enabled: anomalyCodes.length > 0,
-      disabledReasonCode:
-        anomalyCodes.length > 0 ? undefined : "supply_looks_normal",
-      riskLevel: "low",
-    },
-    {
-      action: "open_maintenance",
-      enabled: !shift.vehicleId || shift.status === "abandoned",
-      disabledReasonCode:
-        !shift.vehicleId || shift.status === "abandoned"
-          ? undefined
-          : "vehicle_not_blocked",
-      riskLevel: "low",
-    },
+    anomalyCodes.length > 0
+      ? {
+          action: "inspect_supply_gap",
+          enabled: true,
+          riskLevel: "low",
+        }
+      : {
+          action: "inspect_supply_gap",
+          enabled: false,
+          disabledReasonCode: "supply_looks_normal",
+          riskLevel: "low",
+        },
+    !shift.vehicleId || shift.status === "abandoned"
+      ? {
+          action: "open_maintenance",
+          enabled: true,
+          riskLevel: "low",
+        }
+      : {
+          action: "open_maintenance",
+          enabled: false,
+          disabledReasonCode: "vehicle_not_blocked",
+          riskLevel: "low",
+        },
   ];
 }
 
