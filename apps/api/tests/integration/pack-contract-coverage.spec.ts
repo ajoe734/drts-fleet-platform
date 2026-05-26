@@ -1,28 +1,96 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import "reflect-metadata";
 
-import { DriverSettingsController } from "../../src/modules/driver-settings/driver-settings.controller";
-import { DriverSettingsService } from "../../src/modules/driver-settings/driver-settings.service";
-import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
-import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
-import { TenantsController } from "../../src/modules/platform-admin/tenants.controller";
-import { TenantsService } from "../../src/modules/platform-admin/tenants.service";
-import { TenantPartnerController } from "../../src/modules/tenant-partner/tenant-partner.controller";
-import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
+import { randomUUID } from "node:crypto";
+import type { AddressInfo } from "node:net";
 
-const cleanups: Array<() => void | Promise<void>> = [];
+import type { INestApplication } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-afterEach(async () => {
-  while (cleanups.length > 0) {
-    await cleanups.pop()?.();
+import { AppModule } from "../../src/app.module";
+
+type WireRecord = Record<string, unknown>;
+
+type BootstrapHeadersInput = {
+  actorId: string;
+  actorType: string;
+  realm: string;
+  requestId: string;
+  tenantId?: string;
+};
+
+type RequestOptions = {
+  body?: unknown;
+  headers: BootstrapHeadersInput;
+  method: "PATCH" | "POST";
+  path: string;
+};
+
+let app: INestApplication;
+let baseUrl: string;
+
+beforeAll(async () => {
+  app = await NestFactory.create(AppModule, { logger: false });
+  app.setGlobalPrefix("api", {
+    exclude: ["health"],
+  });
+  await app.listen(0, "127.0.0.1");
+
+  const address = app.getHttpServer().address() as AddressInfo | string | null;
+  if (!address || typeof address === "string") {
+    throw new Error("Expected HTTP server to bind to an ephemeral port.");
   }
+
+  baseUrl = `http://127.0.0.1:${address.port}`;
+}, 60_000);
+
+afterAll(async () => {
+  await app.close();
 });
 
 function expectIsoString(value: string) {
   expect(Number.isNaN(Date.parse(value))).toBe(false);
 }
 
+function buildHeaders(input: BootstrapHeadersInput): HeadersInit {
+  return {
+    "content-type": "application/json",
+    "x-actor-id": input.actorId,
+    "x-actor-type": input.actorType,
+    "x-realm": input.realm,
+    "x-request-id": input.requestId,
+    ...(input.tenantId ? { "x-tenant-id": input.tenantId } : {}),
+  };
+}
+
+async function requestJson(options: RequestOptions) {
+  const response = await fetch(`${baseUrl}${options.path}`, {
+    method: options.method,
+    headers: buildHeaders(options.headers),
+    ...(options.body === undefined
+      ? {}
+      : { body: JSON.stringify(options.body) }),
+  });
+  const body = (await response.json()) as WireRecord;
+
+  return { body, response };
+}
+
+function expectSuccessEnvelope(
+  body: WireRecord,
+  expectedRequestId: string,
+): WireRecord {
+  const meta = body.meta as WireRecord;
+  const data = body.data as WireRecord;
+
+  expect(meta.request_id).toBe(expectedRequestId);
+  expectIsoString(String(meta.timestamp));
+
+  return data;
+}
+
 function expectMutationContracts(
-  data: Record<string, unknown>,
+  data: WireRecord,
   expected: {
     actionId: string;
     resourceId: string;
@@ -30,32 +98,30 @@ function expectMutationContracts(
     staleAfterMs: number;
   },
 ) {
-  const receipt = data.receipt as Record<string, unknown>;
-  const refresh = data.refresh as Record<string, unknown>;
-  const availableActions = data.availableActions as Array<
-    Record<string, unknown>
-  >;
+  const receipt = data.receipt as WireRecord;
+  const refresh = data.refresh as WireRecord;
+  const availableActions = data.available_actions as WireRecord[];
 
   expect(receipt).toEqual(
     expect.objectContaining({
-      actionId: expected.actionId,
-      auditId: expect.any(String),
-      resourceId: expected.resourceId,
-      resourceType: expected.resourceType,
-      status: "completed",
+      action_id: expected.actionId,
+      audit_id: expect.any(String),
       message: expect.any(String),
+      resource_id: expected.resourceId,
+      resource_type: expected.resourceType,
+      status: "completed",
     }),
   );
-  expect(String(receipt.auditId)).toContain(expected.actionId);
+  expect(String(receipt.audit_id)).toContain(expected.actionId);
 
   expect(refresh).toEqual(
     expect.objectContaining({
-      staleAfterMs: expected.staleAfterMs,
-      dataFreshness: "fresh",
+      data_freshness: "fresh",
       source: "live",
+      stale_after_ms: expected.staleAfterMs,
     }),
   );
-  expectIsoString(String(refresh.generatedAt));
+  expectIsoString(String(refresh.generated_at));
 
   expect(Array.isArray(availableActions)).toBe(true);
   expect(availableActions.length).toBeGreaterThan(0);
@@ -63,162 +129,153 @@ function expectMutationContracts(
     expect.objectContaining({
       action: expect.any(String),
       enabled: expect.any(Boolean),
-      riskLevel: expect.stringMatching(/^(low|medium|high)$/),
+      risk_level: expect.stringMatching(/^(low|medium|high)$/),
     }),
   );
 }
 
-function createPlatformAdminHarness() {
-  const auditNotificationService = {
-    recordAuditLog: vi.fn(),
-  };
-  const service = new TenantsService(auditNotificationService as never);
-  const controller = new TenantsController(service);
-
-  return { controller, service };
-}
-
-function createOpsConsoleHarness() {
-  const regulatoryRegistryService = {
-    getVehicleDispatchability: vi.fn(() => true),
-  };
-  const auditNotificationService = {
-    recordAuditLog: vi.fn(),
-  };
-  const callcenterService = {
-    registerRecordingAttachmentListener: vi.fn(),
-    registerRecordingStateChangeListener: vi.fn(),
-  };
-  const taskEventsService = {};
-  const service = new OwnedMobilityService(
-    regulatoryRegistryService as never,
-    auditNotificationService as never,
-    callcenterService as never,
-    taskEventsService as never,
-  );
-  const controller = new OwnedMobilityController(service);
-
-  return { controller, regulatoryRegistryService };
-}
-
-function createTenantHarness() {
-  const auditNotificationService = {
-    recordAuditLog: vi.fn(),
-    notifyApprovalRecipients: vi.fn(),
-  };
-  const service = new TenantPartnerService(auditNotificationService as never);
-  cleanups.push(() => service.onModuleDestroy());
-
-  return {
-    controller: new TenantPartnerController(service, {} as never),
-  };
-}
-
-function createDriverHarness() {
-  const auditNotificationService = {
-    recordAuditLog: vi.fn(),
-  };
-  const service = new DriverSettingsService(auditNotificationService as never);
-
-  return {
-    controller: new DriverSettingsController(service),
-  };
-}
-
 describe("Pack contract coverage", () => {
-  it("covers ActionReceipt, ResourceActionDescriptor, and UiRefreshMetadata for platform-admin rollout mutations", () => {
-    const { controller, service } = createPlatformAdminHarness();
-    const created = service.create({
-      code: "alpha_dispatch",
-      name: "Alpha Dispatch",
+  it("covers ActionReceipt, ResourceActionDescriptor, and UiRefreshMetadata for platform-admin rollout mutations", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const createRequestId = `req-platform-create-${suffix}`;
+    const rolloutRequestId = `req-platform-rollout-${suffix}`;
+
+    const createResponse = await requestJson({
+      method: "POST",
+      path: "/api/platform-admin/tenants",
+      headers: {
+        actorId: "platform-admin-pack-contracts",
+        actorType: "platform_admin",
+        realm: "platform",
+        requestId: createRequestId,
+      },
+      body: {
+        code: `pack_contract_${suffix}`,
+        name: `Pack Contract ${suffix.toUpperCase()}`,
+      },
     });
 
-    const response = controller.setRolloutStage(
-      created.id,
-      { stage: "sandbox" },
-      "req-platform-rollout",
-    );
-    const data = response.data as Record<string, unknown>;
+    expect(createResponse.response.status).toBe(201);
+    const created = expectSuccessEnvelope(createResponse.body, createRequestId);
 
-    expect(data.id).toBe(created.id);
-    expect((data.rollout as Record<string, unknown>).stage).toBe("sandbox");
+    const tenantId = String(created.id);
+    const rolloutResponse = await requestJson({
+      method: "POST",
+      path: `/api/platform-admin/tenants/${tenantId}/rollout`,
+      headers: {
+        actorId: "platform-admin-pack-contracts",
+        actorType: "platform_admin",
+        realm: "platform",
+        requestId: rolloutRequestId,
+      },
+      body: { stage: "sandbox" },
+    });
+
+    expect(rolloutResponse.response.status).toBe(201);
+    const data = expectSuccessEnvelope(rolloutResponse.body, rolloutRequestId);
+
+    expect(data.id).toBe(tenantId);
+    expect((data.rollout as WireRecord).stage).toBe("sandbox");
     expectMutationContracts(data, {
       actionId: "update_platform_tenant_rollout",
-      resourceId: created.id,
+      resourceId: tenantId,
       resourceType: "platform_tenant",
       staleAfterMs: 30_000,
     });
   });
 
-  it("covers ActionReceipt, ResourceActionDescriptor, and UiRefreshMetadata for ops-console queue check-in", () => {
-    const { controller, regulatoryRegistryService } = createOpsConsoleHarness();
-
-    const response = controller.queueCheckIn(
-      {
-        siteId: "site-tpe-terminal-a",
-        vehicleId: "vehicle-001",
+  it("covers ActionReceipt, ResourceActionDescriptor, and UiRefreshMetadata for ops-console queue check-in", async () => {
+    const requestId = `req-ops-queue-check-in-${randomUUID().slice(0, 8)}`;
+    const response = await requestJson({
+      method: "POST",
+      path: "/api/dispatch/queue/check-in",
+      headers: {
+        actorId: "ops-pack-contracts",
+        actorType: "ops_user",
+        realm: "ops",
+        requestId,
       },
-      "req-ops-queue-check-in",
-    );
-    const data = response.data as Record<string, unknown>;
+      body: {
+        siteId: "taichung-port",
+        vehicleId: "veh-demo-001",
+      },
+    });
 
-    expect(data.siteId).toBe("site-tpe-terminal-a");
-    expect(data.vehicleId).toBe("vehicle-001");
+    expect(response.response.status).toBe(201);
+    const data = expectSuccessEnvelope(response.body, requestId);
+
+    expect(data.site_id).toBe("taichung-port");
+    expect(data.vehicle_id).toBe("veh-demo-001");
     expect(data.status).toBe("checked_in");
     expectMutationContracts(data, {
       actionId: "queue_check_in",
-      resourceId: String(data.queueEntryId),
+      resourceId: String(data.queue_entry_id),
       resourceType: "queue_entry",
       staleAfterMs: 5_000,
     });
-    expect(
-      regulatoryRegistryService.getVehicleDispatchability,
-    ).toHaveBeenCalledWith("vehicle-001", "standard_taxi");
   });
 
-  it("covers ActionReceipt, ResourceActionDescriptor, and UiRefreshMetadata for tenant cost-center upserts", () => {
-    const { controller } = createTenantHarness();
-
-    const response = controller.upsertCostCenter(
-      {
-        code: "FINANCE-OPS",
-        name: "Finance Ops",
+  it("covers ActionReceipt, ResourceActionDescriptor, and UiRefreshMetadata for tenant cost-center upserts", async () => {
+    const tenantId = `tenant-pack-${randomUUID().slice(0, 8)}`;
+    const code = `FINANCE-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const requestId = `req-tenant-cost-center-${randomUUID().slice(0, 8)}`;
+    const response = await requestJson({
+      method: "POST",
+      path: "/api/tenant/cost-centers",
+      headers: {
+        actorId: `${tenantId}-admin`,
+        actorType: "tenant_admin",
+        realm: "tenant",
+        requestId,
+        tenantId,
       },
-      "tenant-demo-001",
-      "req-tenant-cost-center",
-    );
-    const data = response.data as Record<string, unknown>;
+      body: {
+        code,
+        name: `Finance Ops ${code}`,
+      },
+    });
 
-    expect(data.tenantId).toBe("tenant-demo-001");
-    expect(data.code).toBe("FINANCE-OPS");
-    expect(data.activeFlag).toBe(true);
+    expect(response.response.status).toBe(201);
+    const data = expectSuccessEnvelope(response.body, requestId);
+
+    expect(data.tenant_id).toBe(tenantId);
+    expect(data.code).toBe(code);
+    expect(data.active_flag).toBe(true);
     expectMutationContracts(data, {
       actionId: "upsert_cost_center",
-      resourceId: "FINANCE-OPS",
+      resourceId: code,
       resourceType: "tenant_cost_center",
       staleAfterMs: 30_000,
     });
   });
 
-  it("covers ActionReceipt, ResourceActionDescriptor, and UiRefreshMetadata for driver settings updates", () => {
-    const { controller } = createDriverHarness();
-
-    const response = controller.updateSettings(
-      "driver-001",
-      {
+  it("covers ActionReceipt, ResourceActionDescriptor, and UiRefreshMetadata for driver settings updates", async () => {
+    const driverId = `driver-pack-${randomUUID().slice(0, 8)}`;
+    const requestId = `req-driver-settings-${randomUUID().slice(0, 8)}`;
+    const response = await requestJson({
+      method: "PATCH",
+      path: `/api/driver-settings/${driverId}`,
+      headers: {
+        actorId: driverId,
+        actorType: "driver_user",
+        realm: "driver",
+        requestId,
+      },
+      body: {
         autoAcceptEnabled: true,
         preferredAreas: ["taipei_city"],
       },
-      "req-driver-settings",
-    );
-    const data = response.data as Record<string, unknown>;
+    });
 
-    expect(data.driverId).toBe("driver-001");
-    expect(data.autoAcceptEnabled).toBe(true);
-    expect(data.preferredAreas).toEqual(["taipei_city"]);
+    expect(response.response.status).toBe(200);
+    const data = expectSuccessEnvelope(response.body, requestId);
+
+    expect(data.driver_id).toBe(driverId);
+    expect(data.auto_accept_enabled).toBe(true);
+    expect(data.preferred_areas).toEqual(["taipei_city"]);
     expectMutationContracts(data, {
       actionId: "update_driver_settings",
-      resourceId: "driver-001",
+      resourceId: driverId,
       resourceType: "driver_settings",
       staleAfterMs: 15_000,
     });
