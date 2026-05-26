@@ -18,9 +18,23 @@ on:
         description: 'Branch or commit SHA to run against'
         required: false
         default: 'dev'
+      direct_api_origin:
+        description: 'Optional direct Cloud Run API origin override (preferred over repo variable for one-off staging E2E-010 reruns)'
+        required: false
+        default: ''
+        type: string
+      run_staging_e2e_010:
+        description: 'Also run protected staging E2E-010 with WIF/IAP auth'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: ci-integ-${{ github.ref }}
@@ -101,6 +115,378 @@ jobs:
       - name: Run orchestrator unit tests
         working-directory: .orchestrator
         run: python3 -m unittest discover -s . -p 'test_*.py' -v
+
+  staging-e2e-010:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_staging_e2e_010 == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PROJECT_ID: ${{ vars.STAGING_GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.STAGING_GCP_REGION || vars.GCP_REGION }}
+      API_SERVICE: ${{ vars.STAGING_GCP_API_SERVICE || 'drts-api' }}
+      DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
+      WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+      SHARED_DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      SHARED_WIF_PROVIDER_VALUE: ${{ secrets.WIF_PROVIDER }}
+      DEV_DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      DEV_WIF_PROVIDER_VALUE: ${{ secrets.DEV_WIF_PROVIDER }}
+      SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
+      CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
+      DIRECT_API_ORIGIN_INPUT: ${{ inputs.direct_api_origin || '' }}
+      DIRECT_API_ORIGIN_VAR: ${{ vars.STAGING_DIRECT_API_ORIGIN || '' }}
+      IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Validate staging GitHub config
+        run: |
+          set -euo pipefail
+
+          missing=()
+          [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.STAGING_GCP_PROJECT_ID or vars.GCP_PROJECT_ID")
+          [[ -n "${REGION:-}" ]] || missing+=("vars.STAGING_GCP_REGION or vars.GCP_REGION")
+          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.DEV_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.STAGING_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing staging workflow configuration: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Authenticate to GCP
+        id: gcp_auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        continue-on-error: true
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+
+      - name: Best-effort fetch internal key
+        run: |
+          set -euo pipefail
+
+          if ! command -v gcloud >/dev/null 2>&1; then
+            echo "::notice::gcloud is unavailable on this runner; continuing without E2E_INTERNAL_KEY."
+            exit 0
+          fi
+
+          secret_name="${SECRET_PREFIX}-internal-key"
+          if value="$(gcloud secrets versions access latest --secret "$secret_name" --project "$PROJECT_ID" 2>/dev/null)"; then
+            echo "::notice::Loaded optional ${secret_name} for E2E staging calls."
+            echo "::add-mask::$value"
+            printf 'E2E_INTERNAL_KEY=%s\n' "$value" >> "$GITHUB_ENV"
+          else
+            echo "::notice::Optional secret ${secret_name} not accessible; continuing without E2E_INTERNAL_KEY."
+          fi
+
+      - name: Resolve direct Cloud Run API origin
+        id: direct_api
+        run: |
+          set -euo pipefail
+
+          api_service="${API_SERVICE:-drts-api}"
+          direct_input="${DIRECT_API_ORIGIN_INPUT:-}"
+          direct_var="${DIRECT_API_ORIGIN_VAR:-}"
+          stderr_path="${RUNNER_TEMP}/e2e-010-direct-api-resolve.stderr.txt"
+
+          echo "service=${api_service}" >> "$GITHUB_OUTPUT"
+          echo "stderr_path=${stderr_path}" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "${direct_input}" ]]; then
+            api_url="${direct_input}"
+            echo "source=dispatch_input" >> "$GITHUB_OUTPUT"
+            echo "url=${api_url}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Using workflow_dispatch input direct_api_origin for direct Cloud Run API origin: ${api_url}"
+          elif [[ -n "${direct_var}" ]]; then
+            api_url="${direct_var}"
+            echo "source=repo_variable" >> "$GITHUB_OUTPUT"
+            echo "url=${api_url}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Using vars.STAGING_DIRECT_API_ORIGIN override for direct Cloud Run API origin: ${api_url}"
+          elif ! command -v gcloud >/dev/null 2>&1; then
+            : >"${stderr_path}"
+            {
+              echo "gcloud is unavailable on this runner."
+              echo "Provide workflow_dispatch input direct_api_origin or vars.STAGING_DIRECT_API_ORIGIN to enable the direct Cloud Run fallback without Cloud Run describe access."
+            } >"${stderr_path}"
+            echo "source=unavailable" >> "$GITHUB_OUTPUT"
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "::warning::gcloud is unavailable; direct Cloud Run API origin cannot be auto-discovered."
+          else
+            if api_url="$(gcloud run services describe "${api_service}" \
+              --region "$REGION" \
+              --project "$PROJECT_ID" \
+              --format='value(status.url)' 2>"${stderr_path}")"; then
+              echo "source=describe" >> "$GITHUB_OUTPUT"
+              echo "url=${api_url}" >> "$GITHUB_OUTPUT"
+              echo "::notice::Resolved direct Cloud Run API origin for ${api_service}: ${api_url}"
+            else
+              echo "source=describe_failed" >> "$GITHUB_OUTPUT"
+              echo "url=" >> "$GITHUB_OUTPUT"
+              echo "::warning::Could not resolve direct Cloud Run API origin for ${api_service}. See uploaded resolve log for the underlying gcloud error."
+              cat "${stderr_path}"
+            fi
+          fi
+
+      - name: Probe IAP health with auth_token
+        id: auth_token_probe
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="${{ steps.gcp_auth.outputs.auth_token }}"
+          if [[ -z "${token}" ]]; then
+            echo "::error::google-github-actions/auth did not expose auth_token"
+            exit 1
+          fi
+
+          echo "::add-mask::$token"
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-iap-health-auth-token-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_AUTH_TOKEN_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          printf 'E2E_010_AUTH_TOKEN_HEALTH_BODY_PATH=%s\n' "${RUNNER_TEMP}/e2e-010-iap-health-auth-token-body.txt" >> "$GITHUB_ENV"
+          echo "auth_token probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-iap-health-auth-token-body.txt"
+
+      - name: Mint service-account access token
+        id: access_token_auth
+        if: ${{ steps.auth_token_probe.outputs.status != '200' }}
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Probe IAP health with access token
+        id: access_token_probe
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_auth.outputs.access_token != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="${{ steps.access_token_auth.outputs.access_token }}"
+          echo "::add-mask::$token"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-iap-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_IAP_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          printf 'E2E_010_IAP_HEALTH_BODY_PATH=%s\n' "${RUNNER_TEMP}/e2e-010-iap-health-body.txt" >> "$GITHUB_ENV"
+          echo "Access-token probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-iap-health-body.txt"
+
+      - name: Mint primary IAP verification token
+        id: primary_iap_token
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' }}
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.IAP_CLIENT_ID }}
+          id_token_include_email: true
+
+      - name: Probe IAP health with primary id token
+        id: primary_id_token_probe
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_iap_token.outputs.id_token != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="${{ steps.primary_iap_token.outputs.id_token }}"
+          echo "::add-mask::$token"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-primary-id-token-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_PRIMARY_ID_TOKEN_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          echo "Primary id-token probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-primary-id-token-health-body.txt"
+
+      - name: Mint shared fallback IAP verification token
+        id: shared_iap_token
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && env.SHARED_WIF_PROVIDER_VALUE != '' && env.SHARED_DEPLOYER_SERVICE_ACCOUNT != '' }}
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.SHARED_WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.SHARED_DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.IAP_CLIENT_ID }}
+          id_token_include_email: true
+
+      - name: Probe IAP health with shared fallback id token
+        id: shared_id_token_probe
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_iap_token.outputs.id_token != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="${{ steps.shared_iap_token.outputs.id_token }}"
+          echo "::add-mask::$token"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-shared-id-token-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_SHARED_ID_TOKEN_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          echo "Shared fallback id-token probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-shared-id-token-health-body.txt"
+
+      - name: Mint dev fallback IAP verification token
+        id: dev_iap_token
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && env.DEV_WIF_PROVIDER_VALUE != '' && env.DEV_DEPLOYER_SERVICE_ACCOUNT != '' }}
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEV_DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.IAP_CLIENT_ID }}
+          id_token_include_email: true
+
+      - name: Probe IAP health with dev fallback id token
+        id: dev_id_token_probe
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_iap_token.outputs.id_token != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="${{ steps.dev_iap_token.outputs.id_token }}"
+          echo "::add-mask::$token"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-dev-id-token-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_DEV_ID_TOKEN_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          echo "Dev fallback id-token probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-dev-id-token-health-body.txt"
+
+      - name: Mint dev fallback direct Cloud Run token
+        id: dev_direct_api_token
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_id_token_probe.outputs.status != '200' && steps.direct_api.outputs.url != '' && env.DEV_WIF_PROVIDER_VALUE != '' && env.DEV_DEPLOYER_SERVICE_ACCOUNT != '' }}
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEV_DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ steps.direct_api.outputs.url }}
+          id_token_include_email: true
+
+      - name: Probe direct Cloud Run health with dev fallback token
+        id: dev_direct_api_probe
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_id_token_probe.outputs.status != '200' && steps.dev_direct_api_token.outputs.id_token != '' && steps.direct_api.outputs.url != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          token="${{ steps.dev_direct_api_token.outputs.id_token }}"
+          api_url="${{ steps.direct_api.outputs.url }}"
+          echo "::add-mask::$token"
+
+          status="$(curl -sS \
+            -o "${RUNNER_TEMP}/e2e-010-dev-direct-api-health-body.txt" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            "${api_url}/api/health")"
+
+          if [[ "${status}" == "200" ]]; then
+            printf 'E2E_AUTH_BEARER_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+            printf 'E2E_API_URL=%s\n' "$api_url" >> "$GITHUB_ENV"
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          printf 'E2E_010_DIRECT_API_HEALTH_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          echo "Dev direct-API probe returned HTTP ${status}"
+          cat "${RUNNER_TEMP}/e2e-010-dev-direct-api-health-body.txt"
+
+      - name: Fail when no staging bearer path works
+        if: ${{ steps.auth_token_probe.outputs.status != '200' && steps.access_token_probe.outputs.status != '200' && steps.primary_id_token_probe.outputs.status != '200' && steps.shared_id_token_probe.outputs.status != '200' && steps.dev_id_token_probe.outputs.status != '200' && steps.dev_direct_api_probe.outputs.status != '200' }}
+        run: |
+          echo "::error::Unable to obtain a staging bearer path that returns HTTP 200 from either ${CONTROL_PLANE_API_ORIGIN}/api/health or the direct Cloud Run API origin."
+          echo "::error::Tried auth_token, primary service-account id token, shared fallback id token, dev fallback id token, and dev fallback direct Cloud Run token."
+          exit 1
+
+      - name: Syntax check E2E-010
+        run: bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh
+
+      - name: Run E2E-010 against staging
+        env:
+          E2E_API_URL: ${{ env.E2E_API_URL || env.CONTROL_PLANE_API_ORIGIN }}
+          E2E_CHAIN_FILE: ${{ runner.temp }}/e2e-010-chain.json
+          E2E_EVIDENCE_FILE: ${{ runner.temp }}/e2e-010-evidence.log
+          STRICT_VERIFICATION_BODY: 1
+        run: |
+          set -euo pipefail
+
+          bash tests/e2e/E2E-010-governance-aware-billing-reporting.sh | tee "${RUNNER_TEMP}/e2e-010-console.log"
+
+      - name: Upload E2E-010 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-010-staging-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/e2e-010-console.log
+            ${{ runner.temp }}/e2e-010-evidence.log
+            ${{ runner.temp }}/e2e-010-chain.json
+            ${{ runner.temp }}/e2e-010-iap-health-auth-token-body.txt
+            ${{ runner.temp }}/e2e-010-iap-health-body.txt
+            ${{ runner.temp }}/e2e-010-primary-id-token-health-body.txt
+            ${{ runner.temp }}/e2e-010-shared-id-token-health-body.txt
+            ${{ runner.temp }}/e2e-010-dev-id-token-health-body.txt
+            ${{ runner.temp }}/e2e-010-dev-direct-api-health-body.txt
+            ${{ runner.temp }}/e2e-010-direct-api-resolve.stderr.txt
 
   # Aggregate job for branch-protection "required check" simplicity.
   ci-integ:

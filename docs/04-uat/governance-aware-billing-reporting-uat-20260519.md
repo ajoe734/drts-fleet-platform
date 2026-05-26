@@ -1,12 +1,17 @@
 # Governance-Aware Billing & Reporting — UAT
 
 **Date**: 2026-05-19 (date stamped to align with directive; reconciled commit 2026-05-22)
-**Authority**: directive §H `FIN-GOV-001` — `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
+**Authority**: directive §H `FIN-GOV-001` — `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (with execution-worklist alignment at `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` §G1 and audit reconciliation at `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` §2.14)
 **Workflow family**: `WF-FIN-GOV-001`
 **Spec reference**: `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
 **Executable proof**: `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (driven by `PH1GC-E2E-010`)
 
 This UAT codifies the human-runnable acceptance scenarios for governance-aware billing and reporting. Each scenario maps to a verification-body field cluster in the spec and to an assertion block in `E2E-010`.
+
+The strict gate for this slice is the spec's 13-field verification body. Directive §H items that are observable but not first-class strict fields on current contracts are still required as supplemental evidence:
+
+- `ownerName` should appear as reviewer-readable invoice/report presentation metadata when the runtime exposes it.
+- the approval-evaluation snapshot is evidenced through `approvalRequestId`, `approvalState`, plus the recorded `evaluatedAt` / `decision` probe results from `FG-03`, because `origin/dev` does not expose a separate `approvalEvaluationId` contract.
 
 ---
 
@@ -34,7 +39,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 4. Generate the invoice for the billing window.
 5. Generate the report export for the billing window.
 
-**Assert**: the billing record carries `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` / `ownerName` populated, `approvalEvaluationId` set, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set. `partnerProgramCode` and `platformEarningsRef` null. `legacy_unmapped = false`. The report export contains the same booking row with the same field values. `reportArtifactId` is non-null on the billing record after the export completes.
+**Assert**: the billing record carries the full 13-field verification body for the non-partner owned flow: `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` populated, `legacy_unmapped = false`, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set, and `reportArtifactId` becomes non-null after export. `partnerProgramCode`, `eligibilityVerificationId`, and `platformEarningsRef` remain null on this owned non-partner path. The report export contains the same governance fields for the same booking row, and reviewer-readable owner presentation metadata (`ownerName`) is shown when the runtime emits it.
 
 ### `UAT-FIN-GOV-002` — Approval-required threshold, manual approval
 
@@ -42,7 +47,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 2. Booking enters approval queue; approver approves.
 3. Trip completes; invoice + report generated.
 
-**Assert**: billing record `approvalState = approved` (not `auto_approved`), `approvalEvaluationId` traces back to the manual approval action, audit log contains the approver's user id and timestamp.
+**Assert**: billing record `approvalState = approved` (not `auto_approved`), `approvalRequestId` traces back to the manual approval action, the approval snapshot exposes `evaluatedAt` / `decision`, and the audit log contains the approver's user id and timestamp.
 
 ### `UAT-FIN-GOV-003` — Escalated then approved
 
@@ -50,7 +55,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 2. Approver below threshold rejects → escalation → higher-level approver approves.
 3. Trip completes; invoice + report generated.
 
-**Assert**: `approvalState = escalated_then_approved`. The audit log contains both the rejection and the eventual approval rows.
+**Assert**: `approvalState = escalated_then_approved`. The approval snapshot shows the escalation path through `decision` / `evaluatedAt`, and the audit log contains both the rejection and the eventual approval rows.
 
 ### `UAT-FIN-GOV-004` — Quota usage tracking
 
@@ -67,7 +72,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 3. Cost-center attribution flows through to the partner booking (per tenant configuration).
 4. Trip completes; invoice + report generated.
 
-**Assert**: billing record carries both partner fields (`partnerProgramCode`, `eligibilityVerificationId`) **and** governance fields (`costCenterCode`, `approvalEvaluationId`, `quotaPeriodKey`). `referenceToken` is masked. `referenceHash` is set. Subsidy line item is applied to the booking total.
+**Assert**: billing record carries both partner fields (`partnerProgramCode`, `eligibilityVerificationId`) **and** governance fields (`costCenterCode`, `approvalRequestId`, `quotaPeriodKey`). `referenceToken` is masked. `referenceHash` is set. Subsidy line item is applied to the booking total.
 
 ### `UAT-FIN-GOV-006` — Forwarded booking governance integration
 
@@ -133,18 +138,45 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 
 ---
 
-## 4. Acceptance criteria for `WF-FIN-GOV-001` gate-read uplift
+## 4. Verification-body traceability
+
+The table below makes the 13-field acceptance body auditable across human UAT and `E2E-010`.
+
+| Strict verification-body field | Primary UAT scenario(s) | `E2E-010` evidence path | Reviewer note |
+| ------------------------------ | ----------------------- | ----------------------- | ------------- |
+| `costCenterCode` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-005`, `UAT-FIN-GOV-006` | `FG-01 lineCostCenterCode`, final `VERIFY costCenterCode` | Must survive from booking attribution into invoice/report evidence. |
+| `costCenterName` | `UAT-FIN-GOV-001` | `FG-01 lineCostCenterName`, `FG-04 reportCostCenterField`, final `VERIFY costCenterName` | Rendered from the billing-time registry snapshot. |
+| `ownerUserId` | `UAT-FIN-GOV-001` | `FG-01 lineOwnerUserId`, `FG-04 reportOwnerUserField`, final `VERIFY ownerUserId` | Immutable owner attribution key; see supplemental `ownerName` evidence below. |
+| `legacy_unmapped` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-011` | `FG-01 lineLegacyUnmapped`, `FG-04 reportLegacyUnmappedField`, `FG-07 coverage*`, final `VERIFY legacy_unmapped` | Defaults `false` on governed happy path; integrity rule is exercised separately. |
+| `approvalRequestId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003`, `UAT-FIN-GOV-005` | `FG-03 approvalRequestId`, final `VERIFY approvalRequestId` | Links the billed booking back to the approval workflow. |
+| `approvalState` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003`, `UAT-FIN-GOV-008` | `FG-01 lineApprovalState`, `FG-03 approvalRequestState` / `approvalStateAfterApprove`, `FG-04 reportApprovalStateField`, final `VERIFY approvalState` | Must show the terminal approved state on billable flows and rejection on negative path. |
+| `quotaPeriodKey` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-005`, `UAT-FIN-GOV-006` | `FG-02 quotaPeriodKey`, final `VERIFY quotaPeriodKey` | Shared period key across bookings in the same quota window. |
+| `quotaUsageDelta` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-012` | `FG-02 quotaUsageDelta`, final `VERIFY quotaUsageDelta` | Used both for positive quota accumulation and post-export immutability checks. |
+| `partnerProgramCode` | `UAT-FIN-GOV-005` | `FG-05 settlementPartnerProgramId`, final `VERIFY partnerProgramCode` | Nullable on non-partner paths, but still must be explicitly recorded. |
+| `eligibilityVerificationId` | `UAT-FIN-GOV-005` | `FG-01 lineEligibilityVerificationId`, final `VERIFY eligibilityVerificationId` | Carries partner eligibility lineage into the governed billing row. |
+| `platformEarningsRef` | `UAT-FIN-GOV-006` | `FG-01 linePlatformEarningsRef`, `FG-06 platformEarningsRef`, final `VERIFY platformEarningsRef` | Nullable on owned flows; required on forwarded/platform-split flows. |
+| `auditId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-009`, `UAT-FIN-GOV-010`, `UAT-FIN-GOV-011`, `UAT-FIN-GOV-012`, `UAT-FIN-GOV-013` | `FG-08 invoiceAuditId`, final `VERIFY auditId` | The strict field is the finance-artifact audit anchor; negative scenarios confirm denied attempts are also audited. |
+| `reportArtifactId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-005`, `UAT-FIN-GOV-006` | `FG-04 reportArtifactId`, final `VERIFY reportArtifactId` | May be lazy-populated until export, but must be present for live uplift. |
+
+Directive §H also expects two reviewer-readable evidence items that are intentionally not promoted into the strict 13-field body on current contracts:
+
+| Supplemental directive evidence | Primary UAT scenario(s) | `E2E-010` evidence path | Why it stays supplemental |
+| ------------------------------- | ----------------------- | ----------------------- | ------------------------- |
+| `ownerName` | `UAT-FIN-GOV-001` | `FG-01 lineOwnerName`, `FG-04 reportOwnerNameField` | Mutable display text; `ownerUserId` remains the strict reconciliation key. |
+| approval-evaluation snapshot (`approvalEvaluationId` intent) | `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003` | `FG-03 evaluatedAt`, `FG-03 decision`, plus `approvalRequestId` / `approvalState` | `origin/dev` exposes approval lineage through the request id + snapshot, not a distinct `approvalEvaluationId` contract. |
+
+## 5. Acceptance criteria for `WF-FIN-GOV-001` gate-read uplift
 
 To uplift `WF-FIN-GOV-001` matrix row to `PASS (live staging evidence)`:
 
 1. All happy-path scenarios `UAT-FIN-GOV-001` through `UAT-FIN-GOV-006` pass against a staging environment with real `WF-TGV-001` data.
 2. All negative-path scenarios `UAT-FIN-GOV-007` through `UAT-FIN-GOV-013` pass.
-3. `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` runs to completion against the staging environment with a deterministic seed (no silent passes) and asserts each of the 13 spec-defined fields.
+3. `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` runs to completion against the staging environment with a deterministic seed (no silent passes), records each of the 13 spec-defined fields, and returns green under `STRICT_VERIFICATION_BODY=1`.
 4. The closeout report (per directive §7) includes the verification commands and the staging run reference.
 
 ---
 
-## 5. Out of scope
+## 6. Out of scope
 
 - Cross-period reconciliation (Phase 2).
 - Real-time governance dashboards (Phase 2 deferred per spec §7).
