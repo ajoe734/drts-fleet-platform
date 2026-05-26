@@ -74,6 +74,10 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import {
+  attachUiMutationMetadata,
+  createResourceActionDescriptor,
+} from "../../common/ui-contract-response";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { TenantPartnerService } from "./tenant-partner.service";
 
@@ -496,12 +500,31 @@ export class TenantPartnerController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const costCenter = this.tenantPartnerService.upsertCostCenter(
+      this.requireTenantId(tenantId),
+      command,
+      requestId,
+    );
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertCostCenter(
-        this.requireTenantId(tenantId),
-        command,
-        requestId,
-      ),
+      attachUiMutationMetadata(costCenter, {
+        actionId: "upsert_cost_center",
+        availableActions: [
+          createResourceActionDescriptor("update_cost_center"),
+          createResourceActionDescriptor("disable_cost_center", {
+            enabled: costCenter.activeFlag,
+            disabledReasonCode: costCenter.activeFlag
+              ? undefined
+              : "COST_CENTER_ALREADY_DISABLED",
+            requiresReason: true,
+            riskLevel: "medium",
+          }),
+        ],
+        generatedAt: costCenter.updatedAt,
+        message: `Cost center ${costCenter.code} saved for tenant ${costCenter.tenantId}.`,
+        resourceId: costCenter.code,
+        resourceType: "tenant_cost_center",
+        staleAfterMs: 30_000,
+      }),
       requestId,
     );
   }

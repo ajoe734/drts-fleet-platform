@@ -46,6 +46,10 @@ import {
 import { CurrentIdentity } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import {
+  attachUiMutationMetadata,
+  createResourceActionDescriptor,
+} from "../../common/ui-contract-response";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
 @Controller()
@@ -484,8 +488,28 @@ export class OwnedMobilityController {
     @Body() command: QueueCheckInCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const queueEntry = this.ownedMobilityService.queueCheckIn(
+      command,
+      requestId,
+    );
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.queueCheckIn(command, requestId),
+      attachUiMutationMetadata(queueEntry, {
+        actionId: "queue_check_in",
+        availableActions: [
+          createResourceActionDescriptor("queue_check_out", {
+            enabled: queueEntry.status === "checked_in",
+            disabledReasonCode:
+              queueEntry.status === "checked_in"
+                ? undefined
+                : "QUEUE_ENTRY_NOT_ACTIVE",
+          }),
+        ],
+        generatedAt: queueEntry.checkedInAt,
+        message: `Vehicle ${queueEntry.vehicleId} checked in at ${queueEntry.siteId}.`,
+        resourceId: queueEntry.queueEntryId,
+        resourceType: "queue_entry",
+        staleAfterMs: 5_000,
+      }),
       requestId,
     );
   }

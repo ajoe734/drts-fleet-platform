@@ -10,6 +10,10 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  attachUiMutationMetadata,
+  createResourceActionDescriptor,
+} from "../../common/ui-contract-response";
 import { TenantsService } from "./tenants.service";
 import type { TenantSummary } from "./tenants.service";
 
@@ -67,7 +71,27 @@ export class TenantsController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const updated = this.tenants.setRolloutStage(tenantId, body, requestId);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toApiSuccessEnvelope(
+      attachUiMutationMetadata(updated, {
+        actionId: "update_platform_tenant_rollout",
+        availableActions: [
+          createResourceActionDescriptor("update_platform_tenant_rollout", {
+            enabled: updated.status !== "rollback_hold",
+            disabledReasonCode:
+              updated.status === "rollback_hold"
+                ? "TENANT_IN_ROLLBACK_HOLD"
+                : undefined,
+            riskLevel: "medium",
+          }),
+        ],
+        generatedAt: updated.updatedAt,
+        message: `Tenant ${updated.code} rollout stage updated to ${updated.rollout.stage}.`,
+        resourceId: updated.id,
+        resourceType: "platform_tenant",
+        staleAfterMs: 30_000,
+      }),
+      requestId,
+    );
   }
 
   @Post("tenants/:tenantId/roles/invite")

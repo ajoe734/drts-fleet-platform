@@ -3,6 +3,10 @@ import { Body, Controller, Get, Headers, Param, Patch } from "@nestjs/common";
 import type { UpdateDriverSettingsCommand } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  attachUiMutationMetadata,
+  createResourceActionDescriptor,
+} from "../../common/ui-contract-response";
 import { DriverSettingsService } from "./driver-settings.service";
 
 @Controller("driver-settings")
@@ -34,8 +38,28 @@ export class DriverSettingsController {
     @Body() command: UpdateDriverSettingsCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const settings = this.driverSettingsService.updateSettings(
+      driverId,
+      command,
+      requestId,
+    );
     return toApiSuccessEnvelope(
-      this.driverSettingsService.updateSettings(driverId, command, requestId),
+      attachUiMutationMetadata(settings, {
+        actionId: "update_driver_settings",
+        availableActions: [
+          createResourceActionDescriptor("update_driver_settings"),
+          createResourceActionDescriptor(
+            settings.autoAcceptEnabled
+              ? "disable_auto_accept"
+              : "enable_auto_accept",
+          ),
+        ],
+        generatedAt: settings.updatedAt,
+        message: `Driver settings updated for ${settings.driverId}.`,
+        resourceId: settings.driverId,
+        resourceType: "driver_settings",
+        staleAfterMs: 15_000,
+      }),
       requestId,
     );
   }
