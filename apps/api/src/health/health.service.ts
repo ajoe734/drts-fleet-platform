@@ -46,13 +46,13 @@ export class HealthService {
   ): UiHealthDegradedService {
     return {
       service: adapter.platformCode,
-      impact: this.describeImpact(adapter.reason),
+      impact: this.describeImpact(adapter),
       severity: adapter.status === "down" ? "critical" : "warning",
     };
   }
 
-  private describeImpact(reason: AdapterHealthReason): string {
-    switch (reason) {
+  private describeImpact(adapter: DegradedAdapterHealth): string {
+    switch (adapter.reason) {
       case "auth":
         return "Forwarder authentication";
       case "credential":
@@ -65,8 +65,18 @@ export class HealthService {
         return "Forwarded webhook delivery";
       case "none":
       case "stub":
-        return "Platform forwarding";
+        return this.describeFallbackImpact(adapter.status);
+      default:
+        return this.describeFallbackImpact(adapter.status);
     }
+  }
+
+  private describeFallbackImpact(
+    status: DegradedAdapterHealth["status"],
+  ): string {
+    return status === "down"
+      ? "Platform forwarding unavailable"
+      : "Platform forwarding delayed";
   }
 
   private resolveLastCheckedAt(adapterHealth: AdapterHealthRecord[]): string {
@@ -90,4 +100,5 @@ export class HealthService {
 
 type DegradedAdapterHealth = AdapterHealthRecord & {
   status: "degraded" | "down";
+  reason?: AdapterHealthReason;
 };
