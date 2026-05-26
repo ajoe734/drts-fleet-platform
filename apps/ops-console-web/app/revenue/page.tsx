@@ -9,6 +9,7 @@ import type {
   ForwarderReconciliationIssue,
   OwnedOrderRecord,
   ReconciliationIssueRecord,
+  RefreshTier,
   ResourceActionDescriptor,
   SettlementMatrixRecord,
   UiHealthEnvelope,
@@ -30,6 +31,7 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
+import { RevenueAutoRefresh } from "@/components/revenue-auto-refresh";
 import { getOpsClient } from "@/lib/api-client";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import {
@@ -53,7 +55,8 @@ import {
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 
-// Refresh tier T3 per packet §5.11 — RefreshTier "medium" == 15s polling.
+// Refresh tier T3 per packet §5.11 — RefreshTier "medium" drives 15s polling.
+const REVENUE_REFRESH_TIER: RefreshTier = "medium";
 const REVENUE_STALE_AFTER_MS = 15_000;
 
 type RevenueTab = "insight" | "channel" | "matrix" | "mismatch";
@@ -117,17 +120,22 @@ function resolveTab(value: string | undefined): RevenueTab {
     : "matrix";
 }
 
+const PERIOD_KEYS: readonly RevenuePeriod[] = [
+  "today",
+  "yesterday",
+  "7d",
+  "30d",
+] as const;
+
 function resolveFilters(
   searchParams?: Record<string, string | string[] | undefined>,
 ): RevenueFilters {
   const rawPeriod = firstParam(searchParams?.period);
-  const period: RevenuePeriod =
-    rawPeriod === "today" ||
-    rawPeriod === "7d" ||
-    rawPeriod === "30d" ||
-    rawPeriod === "all"
-      ? rawPeriod
-      : "7d";
+  const period: RevenuePeriod = (PERIOD_KEYS as readonly string[]).includes(
+    rawPeriod ?? "",
+  )
+    ? (rawPeriod as RevenuePeriod)
+    : "7d";
   const serviceBucket = firstParam(searchParams?.serviceBucket) ?? "all";
   const vehicleId = firstParam(searchParams?.vehicleId) ?? "all";
   return {
@@ -221,8 +229,8 @@ function buildRefreshMetadata(anyFetchFailed: boolean): UiRefreshMetadata {
   return {
     generatedAt: isoMinusMs(REVENUE_STALE_AFTER_MS / 5),
     staleAfterMs: REVENUE_STALE_AFTER_MS,
-    dataFreshness: anyFetchFailed ? "degraded" : "stale",
-    source: "cache",
+    dataFreshness: anyFetchFailed ? "degraded" : "fresh",
+    source: anyFetchFailed ? "cache" : "live",
   };
 }
 
@@ -734,6 +742,153 @@ function MismatchDrawer({
   );
 }
 
+function makeDescriptor(args: {
+  action: string;
+  enabled: boolean;
+  disabledReasonCode?: string | undefined;
+  requiresReason?: boolean | undefined;
+  riskLevel: ResourceActionDescriptor["riskLevel"];
+}): ResourceActionDescriptor {
+  const descriptor: ResourceActionDescriptor = {
+    action: args.action,
+    enabled: args.enabled,
+    riskLevel: args.riskLevel,
+  };
+  if (args.disabledReasonCode !== undefined) {
+    descriptor.disabledReasonCode = args.disabledReasonCode;
+  }
+  if (args.requiresReason !== undefined) {
+    descriptor.requiresReason = args.requiresReason;
+  }
+  return descriptor;
+}
+
+function buildRevenuePageAvailableActions(ctx: {
+  ordersOk: boolean;
+  matrixOk: boolean;
+  forwarderIssuesOk: boolean;
+  financeIssuesOk: boolean;
+  mismatchCount: number;
+}): ResourceActionDescriptor[] {
+  const filtersOk = ctx.ordersOk;
+  const refreshDegraded =
+    !ctx.ordersOk ||
+    !ctx.matrixOk ||
+    !ctx.forwarderIssuesOk ||
+    !ctx.financeIssuesOk;
+  const filterDisabledReason = filtersOk ? undefined : "orders_unavailable";
+  const refreshDisabledReason = refreshDegraded
+    ? "degraded_upstream"
+    : undefined;
+  return [
+    makeDescriptor({
+      action: "filterPeriod",
+      enabled: filtersOk,
+      disabledReasonCode: filterDisabledReason,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "filterServiceBucket",
+      enabled: filtersOk,
+      disabledReasonCode: filterDisabledReason,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "filterVehicle",
+      enabled: filtersOk,
+      disabledReasonCode: filterDisabledReason,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "refresh",
+      enabled: true,
+      disabledReasonCode: refreshDisabledReason,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "openPlatformAdminPayments",
+      enabled: true,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "export",
+      enabled: false,
+      disabledReasonCode: "phase1_no_export",
+      riskLevel: "low",
+    }),
+  ];
+}
+
+function buildMismatchAvailableActions(ctx: {
+  hasFinanceIssue: boolean;
+  resolved: boolean;
+}): ResourceActionDescriptor[] {
+  const escalateDisabled = ctx.resolved ? "already_resolved" : undefined;
+  return [
+    makeDescriptor({
+      action: "openMismatchDrawer",
+      enabled: true,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "escalatePlatformAdmin",
+      enabled: true,
+      disabledReasonCode: escalateDisabled,
+      requiresReason: false,
+      riskLevel: "low",
+    }),
+  ];
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const MIN_MS = 60 * 1000;
+
+function formatAgeLabel(
+  ms: number,
+  locale: Locale,
+): { compact: string; ariaLabel: string } {
+  if (ms < MIN_MS) {
+    const label = t("revenue.mismatch.age.justNow", locale);
+    return { compact: label, ariaLabel: label };
+  }
+  if (ms < HOUR_MS) {
+    const minutes = Math.floor(ms / MIN_MS);
+    const label = t("revenue.mismatch.age.minutes", locale, { minutes });
+    return { compact: label, ariaLabel: label };
+  }
+  if (ms < DAY_MS) {
+    const hours = Math.floor(ms / HOUR_MS);
+    const label = t("revenue.mismatch.age.hours", locale, { hours });
+    return { compact: label, ariaLabel: label };
+  }
+  const days = Math.floor(ms / DAY_MS);
+  const label = t("revenue.mismatch.age.days", locale, { days });
+  return { compact: label, ariaLabel: label };
+}
+
+// Sort order: unassigned (no finance issue OR no ownerId) first, then by
+// ownerId asc, then by reconciliation job createdAt asc (oldest first).
+// Resolved issues sink to the bottom because they no longer demand owner
+// attention (packet §5.11 "sorted by owner / age").
+function mismatchSortKey(
+  issue: ForwarderReconciliationIssue,
+  financeIssue: ReconciliationIssueRecord | undefined,
+): [number, string, number] {
+  const isResolved = financeIssue?.status === "resolved";
+  if (isResolved) return [2, financeIssue?.ownerId ?? "", -mismatchAge(issue)];
+  const ownerId = financeIssue?.ownerId ?? null;
+  // Tier 0: needs assignment (no finance issue yet, or finance issue
+  // open with no owner). Tier 1: assigned. Older within tier first.
+  const tier = ownerId === null ? 0 : 1;
+  return [tier, ownerId ?? "", -mismatchAge(issue)];
+}
+
+function mismatchAge(issue: ForwarderReconciliationIssue): number {
+  const ts = new Date(issue.reconciliationJob.createdAt).getTime();
+  return Number.isFinite(ts) ? Date.now() - ts : 0;
+}
+
 export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const client = getOpsClient();
   const resolvedSearchParams = await (searchParams ??
@@ -810,13 +965,22 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     (order) => order.status === "completed",
   );
   const periodOrders = completedOrders.filter((order) => {
-    if (filters.period === "all") return true;
-    const days =
-      filters.period === "today" ? 0 : filters.period === "7d" ? 6 : 29;
-    const threshold = new Date();
-    threshold.setHours(0, 0, 0, 0);
-    threshold.setDate(threshold.getDate() - days);
-    return new Date(order.updatedAt).getTime() >= threshold.getTime();
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startMs = start.getTime();
+    const endMs = startMs + 24 * 60 * 60 * 1000;
+    if (filters.period === "today") {
+      const ts = new Date(order.updatedAt).getTime();
+      return ts >= startMs && ts < endMs;
+    }
+    if (filters.period === "yesterday") {
+      const ts = new Date(order.updatedAt).getTime();
+      return ts >= startMs - 24 * 60 * 60 * 1000 && ts < startMs;
+    }
+    const days = filters.period === "7d" ? 6 : 29;
+    const lookback = new Date(start);
+    lookback.setDate(lookback.getDate() - days);
+    return new Date(order.updatedAt).getTime() >= lookback.getTime();
   });
 
   const ownedTrips = periodOrders.filter((order) => !order.partnerId).length;
@@ -916,28 +1080,19 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   });
   const activeTab = tabs[TAB_KEYS.indexOf(tab)];
 
-  // availableActions[] drives all CTAs per Q-X13. 0-length list means
-  // the surface is read-only for the current actor. Until backend wires
-  // per-actor scopes, period/serviceBucket/vehicle filters and refresh
-  // are always enabled (low risk); export is gated as not-yet-enabled.
-  const pageActions: ResourceActionDescriptor[] = [
-    {
-      action: "filterPeriod",
-      enabled: true,
-      riskLevel: "low",
-    },
-    {
-      action: "refresh",
-      enabled: true,
-      riskLevel: "low",
-    },
-    {
-      action: "export",
-      enabled: false,
-      disabledReasonCode: "phase1_no_export",
-      riskLevel: "low",
-    },
-  ];
+  // Per packet §3.5 (Q-X13) the page's CTAs come from the resource's
+  // `availableActions[]`. Until the backend list endpoints carry that
+  // descriptor on the page resource, we synthesize it here from data
+  // signals (health, fetch outcomes, mismatch backlog presence) so the
+  // renderer below stays descriptor-driven. When the backend lights up
+  // the descriptor, only this helper changes.
+  const pageActions = buildRevenuePageAvailableActions({
+    ordersOk: ordersOutcome.ok,
+    matrixOk: matrixOutcome.ok,
+    forwarderIssuesOk: forwarderIssuesOutcome.ok,
+    financeIssuesOk: financeIssuesOutcome.ok,
+    mismatchCount,
+  });
 
   const renderTabBody = () => {
     switch (tab) {
@@ -969,8 +1124,11 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     tabContent
   );
 
+  const refreshTier: RefreshTier = REVENUE_REFRESH_TIER;
+
   return (
     <>
+      <RevenueAutoRefresh tier={refreshTier} />
       <PageHeader
         theme={theme}
         title={t("revenue.canvas.title", locale)}
@@ -1067,36 +1225,67 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   );
 
   function renderHeaderActions() {
-    return (
-      <>
-        {pageActions
-          .filter((descriptor) => descriptor.enabled)
-          .map((descriptor) => {
-            if (descriptor.action === "refresh") {
-              return (
-                <Link
-                  key={descriptor.action}
-                  href={buildHref(filters, tab, { mismatch: mismatchId })}
-                  style={{ textDecoration: "none" }}
-                >
-                  <Btn theme={theme} icon="arrow">
-                    {t(`revenue.action.${descriptor.action}`, locale)}
-                  </Btn>
-                </Link>
-              );
-            }
-            return (
-              <Btn
-                key={descriptor.action}
-                theme={theme}
-                icon={descriptor.action === "filterPeriod" ? "filter" : "ext"}
-              >
-                {t(`revenue.action.${descriptor.action}`, locale)}
-              </Btn>
-            );
-          })}
-      </>
-    );
+    return <>{pageActions.map(renderHeaderAction)}</>;
+  }
+
+  function renderHeaderAction(descriptor: ResourceActionDescriptor) {
+    const labelKey = `revenue.action.${descriptor.action}`;
+    const label = t(labelKey, locale);
+    switch (descriptor.action) {
+      case "refresh":
+        return (
+          <Link
+            key={descriptor.action}
+            href={buildHref(filters, tab, { mismatch: mismatchId })}
+            style={{ textDecoration: "none" }}
+            aria-disabled={!descriptor.enabled}
+          >
+            <Btn theme={theme} icon="arrow" disabled={!descriptor.enabled}>
+              {label}
+            </Btn>
+          </Link>
+        );
+      case "openPlatformAdminPayments":
+        return descriptor.enabled ? (
+          <CrossAppLink
+            key={descriptor.action}
+            href={crossAppHref(platformAdminPaymentsLink(label))}
+            label={label}
+          />
+        ) : null;
+      case "filterPeriod":
+      case "filterServiceBucket":
+      case "filterVehicle":
+        // Filter chips render below in `renderFilterChips`; here we
+        // surface a header-level affordance only when filters are
+        // unavailable so the disabled reason is visible.
+        return descriptor.enabled ? null : (
+          <Btn key={descriptor.action} theme={theme} icon="filter" disabled>
+            {label}
+          </Btn>
+        );
+      case "export":
+        return (
+          <Btn
+            key={descriptor.action}
+            theme={theme}
+            icon="ext"
+            disabled={!descriptor.enabled}
+          >
+            {label}
+          </Btn>
+        );
+      default:
+        return (
+          <Btn
+            key={descriptor.action}
+            theme={theme}
+            disabled={!descriptor.enabled}
+          >
+            {label}
+          </Btn>
+        );
+    }
   }
 
   function renderFilterChips() {
@@ -1105,7 +1294,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         <span style={{ fontSize: 11.5, color: theme.textMuted }}>
           {t("revenue.action.filterPeriod", locale)}
         </span>
-        {(["today", "7d", "30d", "all"] as RevenuePeriod[]).map((p) => (
+        {PERIOD_KEYS.map((p) => (
           <Link
             key={`period-${p}`}
             href={buildHref(filters, tab, { period: p, mismatch: null })}
@@ -1566,6 +1755,8 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
     type MismatchRow = {
       jobId: string;
+      issueIdLabel: string;
+      issueIdSub: string | null;
       mirrorOrderId: string;
       externalOrderId: string;
       platform: string;
@@ -1573,10 +1764,29 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       status: ForwarderReconciliationIssue["status"];
       ownerLabel: string;
       ownerTone: CanvasTone;
+      ageCompact: string;
+      ageAria: string;
+      availableActions: ResourceActionDescriptor[];
+      financeLink: ReturnType<typeof platformAdminReconciliationLink>;
       isSelected: boolean;
     };
 
-    const rows: MismatchRow[] = forwarderIssues.map((issue) => {
+    const sortedIssues = [...forwarderIssues].sort((left, right) => {
+      const leftFinance = financeIssueByJobId.get(
+        left.reconciliationJob.reconciliationJobId,
+      );
+      const rightFinance = financeIssueByJobId.get(
+        right.reconciliationJob.reconciliationJobId,
+      );
+      const leftKey = mismatchSortKey(left, leftFinance);
+      const rightKey = mismatchSortKey(right, rightFinance);
+      if (leftKey[0] !== rightKey[0]) return leftKey[0] - rightKey[0];
+      if (leftKey[1] !== rightKey[1])
+        return leftKey[1].localeCompare(rightKey[1]);
+      return leftKey[2] - rightKey[2];
+    });
+
+    const rows: MismatchRow[] = sortedIssues.map((issue) => {
       const jobId = issue.reconciliationJob.reconciliationJobId;
       const financeIssue = financeIssueByJobId.get(jobId);
       const ownerLabel = financeIssue
@@ -1589,8 +1799,16 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             ? "warn"
             : "danger"
         : "neutral";
+      const issueIdLabel = financeIssue
+        ? financeIssue.issueId
+        : t("revenue.mismatch.jobOnly", locale, { jobId: jobId.slice(0, 14) });
+      const issueIdSub = financeIssue ? `job · ${jobId.slice(0, 14)}` : null;
+      const ageMs = mismatchAge(issue);
+      const age = formatAgeLabel(ageMs, locale);
       return {
         jobId,
+        issueIdLabel,
+        issueIdSub,
         mirrorOrderId: issue.mirrorOrderId,
         externalOrderId: issue.externalOrderId,
         platform: formatOpsCodeLabel(locale, issue.platformCode),
@@ -1598,14 +1816,86 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         status: issue.status,
         ownerLabel,
         ownerTone,
+        ageCompact: age.compact,
+        ageAria: age.ariaLabel,
+        availableActions: buildMismatchAvailableActions({
+          hasFinanceIssue: Boolean(financeIssue),
+          resolved: financeIssue?.status === "resolved",
+        }),
+        financeLink: platformAdminReconciliationLink(
+          financeIssue?.issueId ?? null,
+          financeIssue
+            ? t("revenue.action.escalatePlatformAdmin", locale)
+            : t("revenue.mismatch.drawer.openPlatformAdminCreate", locale),
+        ),
         isSelected: jobId === mismatchId,
       };
     });
 
+    const renderMismatchRowAction = (
+      row: MismatchRow,
+      descriptor: ResourceActionDescriptor,
+    ) => {
+      const label = t(`revenue.action.${descriptor.action}`, locale);
+      switch (descriptor.action) {
+        case "openMismatchDrawer":
+          return (
+            <Link
+              key={descriptor.action}
+              href={buildHref(filters, "mismatch", { mismatch: row.jobId })}
+              style={{ textDecoration: "none" }}
+              aria-disabled={!descriptor.enabled}
+            >
+              <Btn
+                theme={theme}
+                variant={row.isSelected ? "primary" : "secondary"}
+                icon="arrow"
+                disabled={!descriptor.enabled}
+              >
+                {label}
+              </Btn>
+            </Link>
+          );
+        case "escalatePlatformAdmin":
+          if (!descriptor.enabled) return null;
+          return (
+            <CrossAppLink
+              key={descriptor.action}
+              href={crossAppHref(row.financeLink)}
+              label={label}
+            />
+          );
+        default:
+          return null;
+      }
+    };
+
     const columns: CanvasTableColumn<MismatchRow>[] = [
       {
+        h: t("revenue.mismatch.col.issueId", locale),
+        w: 200,
+        r: (row) => (
+          <div>
+            <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+              {row.issueIdLabel}
+            </div>
+            {row.issueIdSub ? (
+              <div
+                style={{
+                  color: theme.textMuted,
+                  fontSize: 11,
+                  fontFamily: theme.monoFamily,
+                }}
+              >
+                {row.issueIdSub}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
         h: t("revenue.mismatch.col.mirror", locale),
-        w: 240,
+        w: 220,
         r: (row) => (
           <div>
             <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
@@ -1650,22 +1940,36 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         ),
       },
       {
-        h: t("revenue.mismatch.col.cta", locale),
-        w: 220,
+        h: t("revenue.mismatch.col.age", locale),
+        w: 90,
         align: "right",
         r: (row) => (
-          <Link
-            href={buildHref(filters, "mismatch", { mismatch: row.jobId })}
-            style={{ textDecoration: "none" }}
+          <span
+            title={row.ageAria}
+            style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}
           >
-            <Btn
-              theme={theme}
-              variant={row.isSelected ? "primary" : "secondary"}
-              icon="arrow"
-            >
-              {t("revenue.mismatch.openDrawer", locale)}
-            </Btn>
-          </Link>
+            {row.ageCompact}
+          </span>
+        ),
+      },
+      {
+        h: t("revenue.mismatch.col.cta", locale),
+        w: 300,
+        align: "right",
+        r: (row) => (
+          <div
+            style={{
+              display: "inline-flex",
+              gap: 6,
+              justifyContent: "flex-end",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            {row.availableActions.map((descriptor) =>
+              renderMismatchRowAction(row, descriptor),
+            )}
+          </div>
         ),
       },
     ];
@@ -1674,7 +1978,10 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       <Card
         theme={theme}
         title={t("revenue.mismatch.title", locale)}
-        subtitle={t("revenue.mismatch.subtitle", locale)}
+        subtitle={`${t("revenue.mismatch.subtitle", locale)} · ${t(
+          "revenue.mismatch.sort.ownerAge",
+          locale,
+        )}`}
         padding={0}
       >
         <Table theme={theme} columns={columns} rows={rows} />

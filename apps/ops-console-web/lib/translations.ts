@@ -751,9 +751,9 @@ const en = {
   "revenue.subtitle":
     "Revenue analytics — trip income, driver payouts, and settlement status",
   "revenue.period.today": "Today",
+  "revenue.period.yesterday": "Yesterday",
   "revenue.period.7d": "Last 7 days",
   "revenue.period.30d": "Last 30 days",
-  "revenue.period.all": "All time",
   "revenue.bucket.all": "All products",
   "revenue.vehicle.all": "All vehicles",
   "revenue.totalRevenue": "Total Revenue",
@@ -1453,12 +1453,22 @@ const en = {
   "revenue.mismatch.title": "Mismatch review (Q-OPS14)",
   "revenue.mismatch.subtitle":
     "Forwarded mirrors with sync_failed or manual fallback — drawer is read-only, mutation lives in Platform Admin.",
+  "revenue.mismatch.col.issueId": "Issue / job",
   "revenue.mismatch.col.mirror": "Mirror / external",
   "revenue.mismatch.col.platform": "Platform",
   "revenue.mismatch.col.reason": "Reason",
   "revenue.mismatch.col.owner": "Finance owner",
+  "revenue.mismatch.col.age": "Age",
   "revenue.mismatch.col.cta": "Drawer / cross-app",
+  "revenue.mismatch.sort.ownerAge":
+    "Sorted by owner then age (unassigned issues first, oldest within owner).",
+  "revenue.mismatch.age.days": "{days}d",
+  "revenue.mismatch.age.hours": "{hours}h",
+  "revenue.mismatch.age.minutes": "{minutes}m",
+  "revenue.mismatch.age.justNow": "just now",
+  "revenue.mismatch.jobOnly": "job · {jobId}",
   "revenue.mismatch.openDrawer": "Open mismatch drawer",
+  "revenue.mismatch.escalatePlatformAdmin": "Escalate in Platform Admin",
   "revenue.mismatch.drawer.eyebrow": "Mismatch · read-only",
   "revenue.mismatch.drawer.title": "Forwarded reconciliation",
   "revenue.mismatch.drawer.subtitle":
@@ -1519,6 +1529,8 @@ const en = {
   "revenue.action.requestAccess": "Request access",
   "revenue.action.openInPlatformAdmin": "Open in Platform Admin",
   "revenue.action.openPlatformAdminPayments": "Open Platform Admin /payments",
+  "revenue.action.openMismatchDrawer": "Open mismatch drawer",
+  "revenue.action.escalatePlatformAdmin": "Escalate in Platform Admin",
 
   // ── Driver Earnings ──
   "driverEarnings.title": "Driver Earnings",
@@ -2295,9 +2307,9 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.title": "收益儀表板",
   "revenue.subtitle": "收益分析 — 行程收入、司機應付款與結算狀態",
   "revenue.period.today": "今日",
+  "revenue.period.yesterday": "昨日",
   "revenue.period.7d": "近 7 天",
   "revenue.period.30d": "近 30 天",
-  "revenue.period.all": "所有時間",
   "revenue.bucket.all": "所有產品",
   "revenue.vehicle.all": "所有車輛",
   "revenue.totalRevenue": "總收益",
@@ -2953,12 +2965,22 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.mismatch.title": "Mismatch review (Q-OPS14)",
   "revenue.mismatch.subtitle":
     "Forwarded 鏡像 sync_failed / manual fallback — drawer 為唯讀，mutation 在 Platform Admin。",
+  "revenue.mismatch.col.issueId": "問題 / 任務",
   "revenue.mismatch.col.mirror": "鏡像 / 外部",
   "revenue.mismatch.col.platform": "平台",
   "revenue.mismatch.col.reason": "原因",
   "revenue.mismatch.col.owner": "Finance 處理人",
+  "revenue.mismatch.col.age": "經過時間",
   "revenue.mismatch.col.cta": "drawer / cross-app",
+  "revenue.mismatch.sort.ownerAge":
+    "排序：依 finance owner 再依 age (未指派優先 · 同 owner 最久未處理優先)",
+  "revenue.mismatch.age.days": "{days} 天",
+  "revenue.mismatch.age.hours": "{hours} 小時",
+  "revenue.mismatch.age.minutes": "{minutes} 分鐘",
+  "revenue.mismatch.age.justNow": "剛剛",
+  "revenue.mismatch.jobOnly": "job · {jobId}",
   "revenue.mismatch.openDrawer": "開啟 mismatch drawer",
+  "revenue.mismatch.escalatePlatformAdmin": "於 Platform Admin 處理",
   "revenue.mismatch.drawer.eyebrow": "Mismatch · 唯讀",
   "revenue.mismatch.drawer.title": "Forwarded reconciliation",
   "revenue.mismatch.drawer.subtitle":
@@ -3013,6 +3035,8 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.action.requestAccess": "申請存取",
   "revenue.action.openInPlatformAdmin": "在 Platform Admin 開啟",
   "revenue.action.openPlatformAdminPayments": "開啟 Platform Admin /payments",
+  "revenue.action.openMismatchDrawer": "開啟 mismatch drawer",
+  "revenue.action.escalatePlatformAdmin": "於 Platform Admin 處理",
 
   // ── Driver Earnings ──
   "driverEarnings.title": "司機收益",
