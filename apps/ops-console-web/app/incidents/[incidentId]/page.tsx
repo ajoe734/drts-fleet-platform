@@ -412,12 +412,96 @@ function getActionCopy(action: string, locale: Locale) {
   return formatOpsCodeLabel(locale, action);
 }
 
-function buildIncidentWorkspaceLink(incidentId: string) {
-  return `/incidents?incidentId=${encodeURIComponent(incidentId)}`;
+function buildIncidentDetailLink(incidentId: string, intent?: string) {
+  const base = `/incidents/${encodeURIComponent(incidentId)}`;
+  return intent ? `${base}?intent=${encodeURIComponent(intent)}` : base;
 }
 
-function buildComplaintWorkspaceLink(caseNo: string) {
-  return `/complaints?caseNo=${encodeURIComponent(caseNo)}`;
+function buildComplaintDetailLink(caseNo: string) {
+  return `/complaints/${encodeURIComponent(caseNo)}`;
+}
+
+function getActionIntent(action: string) {
+  const normalized = action.toLowerCase();
+  if (normalized.includes("update")) {
+    return "update";
+  }
+  if (normalized.includes("resolve")) {
+    return "resolve";
+  }
+  if (normalized.includes("close")) {
+    return "close";
+  }
+  if (normalized.includes("recovery")) {
+    return "service_recovery";
+  }
+  if (normalized.includes("ack")) {
+    return "acknowledge";
+  }
+  if (normalized.includes("lift")) {
+    return "lift_suppression";
+  }
+  return normalized;
+}
+
+function getActionIcon(action: string) {
+  const normalized = action.toLowerCase();
+  if (normalized.includes("close")) {
+    return "audit";
+  }
+  if (normalized.includes("resolve")) {
+    return "check";
+  }
+  if (normalized.includes("recovery")) {
+    return "plus";
+  }
+  if (normalized.includes("lift")) {
+    return "clock";
+  }
+  if (normalized.includes("ack")) {
+    return "warn";
+  }
+  if (normalized.includes("update")) {
+    return "copy";
+  }
+  return "ext";
+}
+
+function buildActionTitle(
+  action: ResourceActionDescriptor,
+  locale: Locale,
+  isInPlace: boolean,
+) {
+  const details = [
+    action.enabled
+      ? null
+      : locale === "en"
+        ? `Disabled: ${formatOpsCodeLabel(locale, action.disabledReasonCode ?? "unavailable")}`
+        : `停用：${formatOpsCodeLabel(locale, action.disabledReasonCode ?? "unavailable")}`,
+    action.riskLevel === "high"
+      ? locale === "en"
+        ? "High-risk confirmation"
+        : "高風險確認"
+      : action.riskLevel === "medium"
+        ? locale === "en"
+          ? "Medium-risk confirmation"
+          : "中風險確認"
+        : locale === "en"
+          ? "Low-risk action"
+          : "低風險動作",
+    action.requiresReason
+      ? locale === "en"
+        ? "Reason required"
+        : "必填原因"
+      : null,
+    isInPlace
+      ? locale === "en"
+        ? "Stays in this incident workspace"
+        : "停留在此事故工作區"
+      : null,
+  ].filter(Boolean);
+
+  return details.join(" · ");
 }
 
 function actionTarget(
@@ -433,12 +517,18 @@ function actionTarget(
     normalized.includes("ack") ||
     normalized.includes("escalation")
   ) {
-    return buildIncidentWorkspaceLink(incident.incidentId);
+    return buildIncidentDetailLink(
+      incident.incidentId,
+      getActionIntent(action.action),
+    );
   }
   if (normalized.includes("lift") && incident.relatedDriverId) {
-    return `/drivers/${encodeURIComponent(incident.relatedDriverId)}`;
+    return `/drivers/${encodeURIComponent(incident.relatedDriverId)}?incidentId=${encodeURIComponent(incident.incidentId)}&intent=lift_suppression`;
   }
-  return buildIncidentWorkspaceLink(incident.incidentId);
+  return buildIncidentDetailLink(
+    incident.incidentId,
+    getActionIntent(action.action),
+  );
 }
 
 function EmptyStateBlock({
@@ -562,7 +652,7 @@ export default async function IncidentDetailPage({
     recoveryResult,
     relatedOrder,
     auditLogsResult,
-    drivers,
+    driverRegistryResult,
   ] = await Promise.all([
     resolveSection(
       () => client.getIncidentTimeline(incidentId),
@@ -580,15 +670,15 @@ export default async function IncidentDetailPage({
       : Promise.resolve(null as OwnedOrderRecord | null),
     resolveSection(() => client.listAuditLogs(), [] as AuditLogRecord[]),
     incident.relatedDriverId
-      ? resolveOrFallback(
-          () => client.listDrivers(),
-          [] as DriverRegistryRecord[],
-        )
-      : Promise.resolve([] as DriverRegistryRecord[]),
+      ? resolveSection(() => client.listDrivers(), [] as DriverRegistryRecord[])
+      : Promise.resolve({
+          data: [] as DriverRegistryRecord[],
+          error: null,
+        }),
   ]);
 
   const relatedDriver =
-    drivers.find(
+    driverRegistryResult.data.find(
       (driver: DriverRegistryRecord) =>
         driver.driverId === incident.relatedDriverId,
     ) ?? null;
@@ -612,6 +702,12 @@ export default async function IncidentDetailPage({
     );
   const isReadOnly =
     incident.status === "resolved" || incident.status === "closed";
+  const suppressionEmptyReason = incident.relatedDriverId
+    ? inferEmptyReason(
+        relatedDriver ? null : driverRegistryResult.error,
+        "no_data",
+      )
+    : "no_data";
 
   const timelineItems: TimelineItem[] = [...timelineResult.data]
     .sort(
@@ -729,7 +825,7 @@ export default async function IncidentDetailPage({
       k: locale === "en" ? "Complaint" : "客訴",
       v: incident.relatedComplaintCaseNo ? (
         <Link
-          href={buildComplaintWorkspaceLink(incident.relatedComplaintCaseNo)}
+          href={buildComplaintDetailLink(incident.relatedComplaintCaseNo)}
           style={actionLinkStyle(theme, "secondary")}
         >
           <CanvasIcon name="ext" size={12} />
@@ -925,9 +1021,7 @@ export default async function IncidentDetailPage({
                       key={`${action.action}:${index}`}
                       href={actionTarget(incident, action)}
                       disabled={!action.enabled}
-                      title={
-                        action.enabled ? undefined : action.disabledReasonCode
-                      }
+                      title={buildActionTitle(action, locale, true)}
                       style={actionLinkStyle(
                         theme,
                         action.riskLevel === "high"
@@ -939,17 +1033,7 @@ export default async function IncidentDetailPage({
                       )}
                     >
                       <CanvasIcon
-                        name={
-                          action.action.includes("close")
-                            ? "audit"
-                            : action.action.includes("resolve")
-                              ? "check"
-                              : action.action.includes("recovery")
-                                ? "plus"
-                                : action.action.includes("lift")
-                                  ? "clock"
-                                  : "copy"
-                        }
+                        name={getActionIcon(action.action)}
                         size={12}
                       />
                       <span>{getActionCopy(action.action, locale)}</span>
@@ -964,6 +1048,18 @@ export default async function IncidentDetailPage({
                 </Pill>
               )}
             </div>
+            <span
+              style={{
+                color: theme.textMuted,
+                fontSize: 11.5,
+                maxWidth: 620,
+                textAlign: "right",
+              }}
+            >
+              {locale === "en"
+                ? "Actions are backend-driven via availableActions. Medium and high-risk actions keep confirmation semantics; high-risk actions require a reason."
+                : "所有 CTA 由 availableActions 驅動；中高風險動作維持確認語意，高風險動作必須填寫原因。"}
+            </span>
           </div>
         }
       />
@@ -1184,6 +1280,15 @@ export default async function IncidentDetailPage({
                     cols={1}
                     items={[
                       {
+                        k: locale === "en" ? "Reason code" : "原因代碼",
+                        v: formatOpsCodeLabel(locale, suppression.reasonCode),
+                      },
+                      {
+                        k: locale === "en" ? "Expires at" : "到期時間",
+                        v: formatDateTime(locale, suppression.expiresAt),
+                        mono: true,
+                      },
+                      {
                         k: locale === "en" ? "Source incident" : "來源事故",
                         v: suppression.sourceIncidentId ?? incident.incidentId,
                       },
@@ -1196,8 +1301,32 @@ export default async function IncidentDetailPage({
                     ]}
                   />
                 </div>
+              ) : incident.relatedDriverId ? (
+                <EmptyStateBlock
+                  reason={suppressionEmptyReason}
+                  locale={locale}
+                  nextAction={
+                    suppressionEmptyReason === "no_data" ? (
+                      <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                        {locale === "en"
+                          ? "Linked driver exists, but no active DriverMatchingSuppression is in force."
+                          : "此事故已有關聯司機，但目前沒有生效中的 DriverMatchingSuppression。"}
+                      </span>
+                    ) : undefined
+                  }
+                />
               ) : (
-                <EmptyStateBlock reason="no_data" locale={locale} />
+                <EmptyStateBlock
+                  reason="no_data"
+                  locale={locale}
+                  nextAction={
+                    <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                      {locale === "en"
+                        ? "This incident is not linked to a driver, so suppression does not apply."
+                        : "這筆事故目前沒有關聯司機，因此不適用配對抑制狀態。"}
+                    </span>
+                  }
+                />
               )}
             </Card>
 
@@ -1249,7 +1378,7 @@ export default async function IncidentDetailPage({
                 ) : null}
                 {incident.relatedComplaintCaseNo ? (
                   <Link
-                    href={buildComplaintWorkspaceLink(
+                    href={buildComplaintDetailLink(
                       incident.relatedComplaintCaseNo,
                     )}
                     style={actionLinkStyle(theme, "ghost")}
