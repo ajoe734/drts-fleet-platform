@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   PlatformAdminTenantRecord,
   TenantIntegrationReadinessItem,
+  TenantNotificationSubscription,
 } from "@drts/contracts";
 
 import type { TenantReportReadinessSnapshot } from "../../src/modules/reporting-filing/reporting-filing.service";
@@ -126,6 +127,26 @@ function createReportSnapshot(
   };
 }
 
+function createBaselineNotificationSubscriptions(): TenantNotificationSubscription[] {
+  return [
+    {
+      eventType: "reservation.failed",
+      channel: "ops_console",
+      enabled: true,
+    },
+    {
+      eventType: "tenant.sla.threshold_breached",
+      channel: "webhook",
+      enabled: true,
+    },
+    {
+      eventType: "tenant.webhook.delivery_failed",
+      channel: "ops_console",
+      enabled: true,
+    },
+  ];
+}
+
 function createTenant(
   overrides: Partial<PlatformAdminTenantRecord> = {},
 ): PlatformAdminTenantRecord {
@@ -134,12 +155,7 @@ function createTenant(
     code: "demo",
     name: "Demo Tenant",
     status: "active",
-    enabledModules: [
-      "enterprise_dispatch",
-      "billing",
-      "reporting",
-      "webhooks",
-    ],
+    enabledModules: ["enterprise_dispatch", "billing", "reporting", "webhooks"],
     quotas: {
       activeDrivers: 50,
       monthlyBookings: 1000,
@@ -181,11 +197,15 @@ function createTenant(
 function createService(options?: {
   partnerSnapshot?: TenantPartnerIntegrationReadinessSnapshot;
   reportSnapshot?: TenantReportReadinessSnapshot;
+  baselineNotificationSubscriptions?: TenantNotificationSubscription[];
   tenant?: PlatformAdminTenantRecord | null;
 }) {
   const partnerSnapshot =
     options?.partnerSnapshot ?? createTenantPartnerSnapshot();
   const reportSnapshot = options?.reportSnapshot ?? createReportSnapshot();
+  const baselineNotificationSubscriptions =
+    options?.baselineNotificationSubscriptions ??
+    createBaselineNotificationSubscriptions();
   const tenant = Object.prototype.hasOwnProperty.call(options ?? {}, "tenant")
     ? (options?.tenant ?? null)
     : createTenant();
@@ -226,7 +246,7 @@ function createService(options?: {
           "dispatch.assigned",
           "invoice.issued",
         ],
-        baselineNotificationSubscriptions: [],
+        baselineNotificationSubscriptions,
         onboardingChecklist: [],
       }),
     } as never,
@@ -323,20 +343,21 @@ describe("TenantIntegrationService", () => {
     expect(statusMap(summary.items)).toEqual({
       api_keys: "ready",
       webhooks: "not_provisioned",
-      notifications: "partial",
+      notifications: "ready",
       sla: "ready",
       reports: "blocked",
       modules: "partial",
       partner_entries: "blocked",
     });
-    expect(summary.items.find((item) => item.subSystem === "webhooks"))
-      .toMatchObject({
-        nextAction: {
-          action: "set_up_webhook",
-          enabled: true,
-          riskLevel: "low",
-        },
-      });
+    expect(
+      summary.items.find((item) => item.subSystem === "webhooks"),
+    ).toMatchObject({
+      nextAction: {
+        action: "set_up_webhook",
+        enabled: true,
+        riskLevel: "low",
+      },
+    });
   });
 
   it("reports a first-time tenant as not provisioned when no source systems are configured", () => {
@@ -369,6 +390,66 @@ describe("TenantIntegrationService", () => {
       reports: "not_provisioned",
       modules: "not_provisioned",
       partner_entries: "not_provisioned",
+    });
+  });
+
+  it("treats baseline notification routing as ready without requiring email", () => {
+    const service = createService({
+      partnerSnapshot: createTenantPartnerSnapshot({
+        notificationPreferences: {
+          tenantId: "tenant-demo-001",
+          subscriptions: [
+            {
+              eventType: "reservation.failed",
+              channel: "ops_console",
+              enabled: true,
+            },
+            {
+              eventType: "tenant.sla.threshold_breached",
+              channel: "webhook",
+              enabled: true,
+            },
+          ],
+          updatedAt: "2026-05-25T00:00:00.000Z",
+        },
+      }),
+    });
+
+    const summary = service.getTenantIntegrationReadiness("tenant-demo-001");
+
+    expect(
+      summary.items.find((item) => item.subSystem === "notifications"),
+    ).toMatchObject({
+      status: "ready",
+      detail: "2/2 baseline channels enabled.",
+    });
+  });
+
+  it("marks reporting-enabled tenants with zero report jobs as not provisioned", () => {
+    const service = createService({
+      reportSnapshot: createReportSnapshot({
+        jobCount: 0,
+        activeArtifactCount: 0,
+        failedJobCount: 0,
+        runningJobCount: 0,
+      }),
+      tenant: createTenant({
+        enabledModules: ["enterprise_dispatch", "reporting"],
+      }),
+    });
+
+    const summary = service.getTenantIntegrationReadiness("tenant-demo-001");
+
+    expect(
+      summary.items.find((item) => item.subSystem === "reports"),
+    ).toMatchObject({
+      status: "not_provisioned",
+      detail: "Reporting is enabled but no report jobs have been created yet.",
+      nextAction: {
+        action: "create_report_job",
+        enabled: true,
+        riskLevel: "low",
+      },
     });
   });
 });

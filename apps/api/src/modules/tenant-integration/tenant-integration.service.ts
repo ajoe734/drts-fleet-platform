@@ -5,6 +5,7 @@ import type {
   ResourceActionDescriptor,
   TenantIntegrationReadinessItem,
   TenantIntegrationReadinessSummary,
+  TenantNotificationSubscription,
 } from "@drts/contracts";
 import { PLATFORM_TENANT_MODULES } from "@drts/contracts";
 
@@ -18,7 +19,6 @@ import {
   type TenantPartnerIntegrationReadinessSnapshot,
 } from "../tenant-partner/tenant-partner.service";
 
-const REQUIRED_NOTIFICATION_CHANNELS = ["email", "webhook", "ops_console"];
 const REQUIRED_API_KEY_SCOPES = [
   "tenant:write",
   "reports:read",
@@ -54,7 +54,10 @@ export class TenantIntegrationService {
           tenantSnapshot,
           governancePackage.baselineWebhookEvents,
         ),
-        this.buildNotificationsItem(tenantSnapshot),
+        this.buildNotificationsItem(
+          tenantSnapshot,
+          governancePackage.baselineNotificationSubscriptions,
+        ),
         this.buildSlaItem(tenantSnapshot),
         this.buildReportsItem(
           tenant?.enabledModules ?? [],
@@ -142,7 +145,9 @@ export class TenantIntegrationService {
     );
     const missingEvents = requiredEvents.filter(
       (eventType) =>
-        !activeEndpoints.some((endpoint) => endpoint.events.includes(eventType)),
+        !activeEndpoints.some((endpoint) =>
+          endpoint.events.includes(eventType),
+        ),
     );
     const validationGaps = activeEndpoints.filter(
       (endpoint) => !endpoint.runtimeMetadata?.lastValidatedAt,
@@ -188,6 +193,7 @@ export class TenantIntegrationService {
 
   private buildNotificationsItem(
     snapshot: TenantPartnerIntegrationReadinessSnapshot,
+    baselineSubscriptions: readonly TenantNotificationSubscription[],
   ): TenantIntegrationReadinessItem {
     if (
       !snapshot.hasNotificationPreferences ||
@@ -206,6 +212,18 @@ export class TenantIntegrationService {
         .filter((subscription) => subscription.enabled)
         .map((subscription) => subscription.channel),
     );
+    const requiredChannels = new Set(
+      baselineSubscriptions
+        .filter((subscription) => subscription.enabled)
+        .map((subscription) => subscription.channel),
+    );
+    const coveredRequiredChannelCount = Array.from(requiredChannels).filter(
+      (channel) => enabledChannels.has(channel),
+    ).length;
+    const detail =
+      requiredChannels.size > 0
+        ? `${coveredRequiredChannelCount}/${requiredChannels.size} baseline channels enabled.`
+        : `${enabledChannels.size} channels enabled.`;
 
     if (enabledChannels.size === 0) {
       return this.buildItem(
@@ -216,18 +234,17 @@ export class TenantIntegrationService {
       );
     }
 
-    if (enabledChannels.size === REQUIRED_NOTIFICATION_CHANNELS.length) {
-      return this.buildItem(
-        "notifications",
-        "ready",
-        `${enabledChannels.size}/${REQUIRED_NOTIFICATION_CHANNELS.length} channels enabled.`,
-      );
+    if (
+      requiredChannels.size === 0 ||
+      coveredRequiredChannelCount === requiredChannels.size
+    ) {
+      return this.buildItem("notifications", "ready", detail);
     }
 
     return this.buildItem(
       "notifications",
       "partial",
-      `${enabledChannels.size}/${REQUIRED_NOTIFICATION_CHANNELS.length} channels enabled.`,
+      detail,
       "configure_notifications",
     );
   }
@@ -260,11 +277,7 @@ export class TenantIntegrationService {
     }
 
     if (configuredThresholdCount === 3) {
-      return this.buildItem(
-        "sla",
-        "ready",
-        "3/3 SLA thresholds configured.",
-      );
+      return this.buildItem("sla", "ready", "3/3 SLA thresholds configured.");
     }
 
     return this.buildItem(
@@ -294,6 +307,15 @@ export class TenantIntegrationService {
         "reports",
         "blocked",
         `Tenant status is ${tenantStatus}; report operations are gated.`,
+        "create_report_job",
+      );
+    }
+
+    if (snapshot.jobCount === 0) {
+      return this.buildItem(
+        "reports",
+        "not_provisioned",
+        "Reporting is enabled but no report jobs have been created yet.",
         "create_report_job",
       );
     }
