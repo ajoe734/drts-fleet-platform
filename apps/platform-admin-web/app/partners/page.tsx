@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
 } from "react";
@@ -22,16 +23,20 @@ import {
   PARTNER_ENTRY_AUTH_MODES,
   PARTNER_ENTRY_STATUSES,
   PARTNER_ELIGIBILITY_MODES,
+  type CrossAppResourceLink,
+  type EmptyReason,
+  type EmptyStateEnvelope,
   type PartnerChannelEntryRecord,
+  type RefreshTier,
+  type ResourceActionDescriptor,
+  type UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
   CanvasField,
   CanvasIcon,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -39,6 +44,18 @@ import {
   buildCanvasTheme,
   type CanvasShellNavItem,
 } from "@drts/ui-web";
+
+// Refresh cadence (Q-X02) for `/partners` per packet §3.2 + §5.5.
+const PARTNERS_REFRESH_TIER: RefreshTier = "medium_slow";
+const REFRESH_CADENCE_MS_BY_TIER: Record<RefreshTier, number> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 0,
+};
 
 type PartnerFilter = "all" | "active" | "inactive" | "revoked" | "attention";
 type PartnerTableRow = PartnerChannelEntryRecord & Record<string, unknown>;
@@ -52,21 +69,15 @@ const shellStyle = {
 
 const pageStackStyle = {
   display: "grid",
-  gap: 16,
+  gap: 14,
   padding: 24,
 } satisfies CSSProperties;
 
-const pillsRowStyle = {
+const filterBarStyle = {
   display: "flex",
   gap: 8,
   alignItems: "center",
   flexWrap: "wrap",
-} satisfies CSSProperties;
-
-const kpiGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
 } satisfies CSSProperties;
 
 const formGridStyle = {
@@ -104,17 +115,6 @@ const monoSubtleStyle = {
 const entryLinkStyle = {
   color: theme.text,
   fontWeight: 600,
-  textDecoration: "none",
-} satisfies CSSProperties;
-
-const iconLinkStyle = {
-  width: 22,
-  height: 22,
-  borderRadius: 6,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: theme.textDim,
   textDecoration: "none",
 } satisfies CSSProperties;
 
@@ -286,31 +286,187 @@ function statusTone(
   }
 }
 
-function partnerNeedsAttention(entry: PartnerChannelEntryRecord) {
-  return buildPartnerReadinessItems(entry, (key: string) => key).some(
-    (item) => !item.ready,
-  );
-}
-
-function readinessState(
+function partnerReadinessGap(
   entry: PartnerChannelEntryRecord,
   t: (key: string) => string,
-): {
-  missingCount: number;
-  label: string;
-  tone: "success" | "warn";
-} {
-  const items = buildPartnerReadinessItems(entry, t);
-  const missingCount = items.filter((item) => !item.ready).length;
+): number {
+  return buildPartnerReadinessItems(entry, t).filter((item) => !item.ready)
+    .length;
+}
 
+function partnerNeedsAttention(
+  entry: PartnerChannelEntryRecord,
+  t: (key: string) => string,
+) {
+  return partnerReadinessGap(entry, t) > 0;
+}
+
+function readinessLabel(missing: number, locale: string): string {
+  if (missing === 0) {
+    return "ok";
+  }
+  if (locale === "en") {
+    return missing === 1 ? "1 gap" : `${missing} gaps`;
+  }
+  return `${missing} 缺口`;
+}
+
+// `/partners/[entrySlug]` cross-app deep links the user can follow per
+// packet §3.10. Only audit is a same-app deep link today, but it goes via
+// `CrossAppResourceLink` so the UI surface is uniform when other targets
+// (e.g. ops-console operational view) get wired up.
+function buildAuditLink(
+  entry: PartnerChannelEntryRecord,
+): CrossAppResourceLink {
   return {
-    missingCount,
-    label:
-      missingCount === 0
-        ? "ok"
-        : `${missingCount} ${missingCount === 1 ? "gap" : "gaps"}`,
-    tone: missingCount === 0 ? "success" : "warn",
+    targetApp: "platform-admin",
+    route: `/audit?resourceType=partner_entry&resourceId=${encodeURIComponent(entry.partnerId)}`,
+    resourceType: "partner_entry",
+    resourceId: entry.partnerId,
+    openMode: "same_tab",
+    label: "audit",
   };
+}
+
+// Default `availableActions` for the partner-list scope when the backend
+// has not yet shipped the envelope (tracked by UI-BE-006). Once the API
+// returns `availableActions[]` on the list response, this fallback is
+// dropped and the descriptors flow straight through.
+function defaultListAvailableActions(): ResourceActionDescriptor[] {
+  return [
+    { action: "create_partner_entry", enabled: true, riskLevel: "medium" },
+    { action: "refresh_partner_entries", enabled: true, riskLevel: "low" },
+  ];
+}
+
+function pickAction(
+  actions: ResourceActionDescriptor[],
+  name: string,
+): ResourceActionDescriptor | null {
+  return actions.find((descriptor) => descriptor.action === name) ?? null;
+}
+
+function deriveEmptyReason(
+  rawError: string | null,
+  filter: PartnerFilter,
+  totalLoaded: number,
+): EmptyReason {
+  if (rawError) {
+    if (/permission|forbidden|denied/i.test(rawError)) {
+      return "permission_denied";
+    }
+    if (/external|adapter|upstream|gateway/i.test(rawError)) {
+      return "external_unavailable";
+    }
+    return "fetch_failed";
+  }
+  if (filter !== "all" && totalLoaded > 0) {
+    return "filtered_empty";
+  }
+  return totalLoaded === 0 ? "no_data" : "filtered_empty";
+}
+
+function emptyStateCopy(
+  reason: EmptyReason,
+  locale: string,
+): { title: string; body: string; cta?: string } {
+  const en = locale === "en";
+  switch (reason) {
+    case "no_data":
+      return en
+        ? {
+            title: "No partner entries yet",
+            body: "No partner programs are registered for this platform. Create the first entry to onboard a bank or hotel program.",
+            cta: "Create entry",
+          }
+        : {
+            title: "尚無 partner entry",
+            body: "目前還沒有任何 partner 程式登錄。可以建立第一筆 entry 以開通銀行或飯店方案。",
+            cta: "建立 entry",
+          };
+    case "not_provisioned":
+      return en
+        ? {
+            title: "Partner module not provisioned",
+            body: "The partner-entry module is not enabled for this realm. Ask `pa_super_admin` to enable it before onboarding programs.",
+          }
+        : {
+            title: "Partner 模組尚未啟用",
+            body: "本平台尚未啟用 partner-entry 模組。請洽 `pa_super_admin` 開通後再建立方案。",
+          };
+    case "fetch_failed":
+      return en
+        ? {
+            title: "Could not load partner entries",
+            body: "The backend returned an error. Try refreshing — if the problem persists, check `/health` for downstream alerts.",
+            cta: "Retry",
+          }
+        : {
+            title: "讀取 partner entry 失敗",
+            body: "後端回傳錯誤。可重新整理重試,如果持續失敗請到 `/health` 確認下游服務狀態。",
+            cta: "重新整理",
+          };
+    case "permission_denied":
+      return en
+        ? {
+            title: "You can see this page but cannot list entries",
+            body: "Your role does not include `partner_entry:read`. Ask `pa_super_admin` to assign `pa_partner_mgr` if you need to onboard partners.",
+          }
+        : {
+            title: "你可以看到本頁,但沒有 entry 讀取權限",
+            body: "你目前的角色未包含 `partner_entry:read`。如果需要管理 partner,請洽 `pa_super_admin` 指派 `pa_partner_mgr`。",
+          };
+    case "external_unavailable":
+      return en
+        ? {
+            title: "Upstream eligibility service is unavailable",
+            body: "Partner registry depends on an external eligibility adapter that is currently degraded. Try again shortly.",
+            cta: "Retry",
+          }
+        : {
+            title: "上游 eligibility 服務暫時無法使用",
+            body: "Partner 登錄依賴的外部 eligibility adapter 目前 degraded,稍後再試。",
+            cta: "重新整理",
+          };
+    case "filtered_empty":
+      return en
+        ? {
+            title: "No partner entries match this filter",
+            body: "Try a different filter or clear it to see all entries.",
+            cta: "Clear filter",
+          }
+        : {
+            title: "目前篩選沒有 partner entry",
+            body: "換一個篩選,或清除篩選以檢視全部。",
+            cta: "清除篩選",
+          };
+    case "driver_not_eligible":
+    default:
+      // `driver_not_eligible` is driver-app-only; render a generic fallback
+      // so the platform-admin list still has a visible state.
+      return en
+        ? { title: "Not available", body: "This list is not available." }
+        : { title: "目前無法使用", body: "本清單目前無法使用。" };
+  }
+}
+
+function emptyStateTone(
+  reason: EmptyReason,
+): "info" | "warn" | "danger" | "success" {
+  switch (reason) {
+    case "fetch_failed":
+    case "external_unavailable":
+      return "danger";
+    case "permission_denied":
+    case "not_provisioned":
+      return "warn";
+    case "filtered_empty":
+      return "info";
+    case "no_data":
+    case "driver_not_eligible":
+    default:
+      return "info";
+  }
 }
 
 export default function PartnersPage() {
@@ -319,34 +475,47 @@ export default function PartnersPage() {
   const [entries, setEntries] = useState<PartnerChannelEntryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showFilters, setShowFilters] = useState(false);
+  const [refreshMetadata, setRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
+  const [serverEmpty, setServerEmpty] = useState<EmptyStateEnvelope | null>(
+    null,
+  );
+  const [listActions, setListActions] = useState<ResourceActionDescriptor[]>(
+    defaultListAvailableActions(),
+  );
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createReceipt, setCreateReceipt] = useState<string | null>(null);
   const [filter, setFilter] = useState<PartnerFilter>("all");
   const [createForm, setCreateForm] =
     useState<EntryFormState>(EMPTY_ENTRY_FORM);
+  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const copy =
     locale === "en"
       ? {
           title: "Partner entry",
           subtitle:
-            "Bank, hotel, and enterprise-facing partner entry programs, auth posture, eligibility, and branding metadata.",
-          breadcrumbRoot: "Tenant Governance",
+            "Bank, hotel, and enterprise-facing partner entry programs — auth, eligibility, branding, and credential readiness.",
+          breadcrumbRoot: "Partner Governance",
           searchPlaceholder: "Search entries, tenants, credentials...",
-          filterAction: "Filter",
-          filterTitle: "Entry filters",
-          filterSubtitle:
-            "Narrow the roster, refresh the dataset, and keep readiness gaps visible before promotion.",
-          createTitle: "Create partner entry",
-          createSubtitle:
-            "Provision routing, auth mode, eligibility mode, and brand metadata before traffic goes live.",
           refresh: "Refresh",
-          last30Days: "last 30 days",
-          errorTitle: "Unable to load partner entries",
+          stale: "Stale — refresh",
+          fresh: "Fresh",
+          degraded: "Degraded source",
+          freshnessUnknown: "Freshness unknown",
+          lastUpdated: "Last updated",
+          tier: "Refresh cadence",
+          tier30s: "30s · medium-slow",
           attentionTitle: "Promotion readiness has gaps",
           attentionBody: (count: number) =>
             `${count} partner entr${count === 1 ? "y" : "ies"} still have readiness gaps and should not be promoted blindly.`,
+          newEntry: "New entry",
+          createTitle: "Create partner entry",
+          createSubtitle:
+            "Provision routing, auth mode, eligibility mode, and brand metadata before traffic goes live.",
+          openDetail: "Open entry detail",
+          openAudit: "Audit",
           filters: {
             all: "all",
             active: "active",
@@ -354,38 +523,32 @@ export default function PartnersPage() {
             attention: "attention",
             revoked: "revoked",
           },
-          kpis: {
-            active: "Active entries",
-            attention: "Needs attention",
-            revoked: "Revoked entries",
-          },
-          detail: {
-            selection: "Selected filter",
-            visible: "Visible rows",
-            latest: "Latest update",
-            readiness: "Attention rows",
-          },
-          openDetail: "Open entry detail",
+          receipt: (slug: string) =>
+            `Partner entry /${slug} created. Toast receipt available; audit reference attached.`,
         }
       : {
           title: "合作夥伴 entry",
           subtitle:
-            "銀行、飯店與企業 partner 入口、auth 模式、eligibility 與品牌治理資料。",
-          breadcrumbRoot: "租戶治理",
+            "銀行、飯店與企業 partner 入口 — auth、eligibility、品牌與 credential 就緒度。",
+          breadcrumbRoot: "合作夥伴治理",
           searchPlaceholder: "搜尋 entry、租戶、憑證...",
-          filterAction: "篩選",
-          filterTitle: "Entry 篩選",
-          filterSubtitle:
-            "收斂治理清單、重新整理資料，並在 promotion 前保留 readiness 缺口視角。",
+          refresh: "重新整理",
+          stale: "資料已過期 — 重新整理",
+          fresh: "資料即時",
+          degraded: "資料來源 degraded",
+          freshnessUnknown: "資料時效未知",
+          lastUpdated: "最近更新",
+          tier: "更新節奏",
+          tier30s: "30 秒 · medium-slow",
+          attentionTitle: "Promotion readiness 尚未完整",
+          attentionBody: (count: number) =>
+            `${count} 筆 partner entry 仍有 readiness 缺口,不應直接推進。`,
+          newEntry: "建立 entry",
           createTitle: "建立 partner entry",
           createSubtitle:
             "在正式導流前先補齊 routing、auth mode、eligibility mode 與品牌 metadata。",
-          refresh: "重新整理",
-          last30Days: "近 30 天",
-          errorTitle: "無法載入 partner entries",
-          attentionTitle: "Promotion readiness 尚未完整",
-          attentionBody: (count: number) =>
-            `${count} 筆 partner entry 仍有 readiness 缺口，不應直接推進。`,
+          openDetail: "查看 entry 詳情",
+          openAudit: "稽核",
           filters: {
             all: "全部",
             active: "active",
@@ -393,18 +556,8 @@ export default function PartnersPage() {
             attention: "待處理",
             revoked: "revoked",
           },
-          kpis: {
-            active: "啟用 entry",
-            attention: "待補 readiness",
-            revoked: "已撤銷 entry",
-          },
-          detail: {
-            selection: "目前篩選",
-            visible: "可見列數",
-            latest: "最近更新",
-            readiness: "待處理列數",
-          },
-          openDetail: "查看 entry 詳情",
+          receipt: (slug: string) =>
+            `Partner entry /${slug} 已建立,toast 收據已發,稽核 ID 已附帶。`,
         };
 
   const navItems = useMemo(() => buildPlatformNav(locale), [locale]);
@@ -412,11 +565,43 @@ export default function PartnersPage() {
   const loadEntries = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const startedAt = Date.now();
     try {
       const result = await client.listPlatformPartnerEntries();
-      setEntries(result ?? []);
+      const items = result ?? [];
+      setEntries(items);
+      // Until UI-BE-006 ships `UiRefreshMetadata` on the envelope, derive
+      // a best-effort freshness snapshot from the load time so the UI can
+      // render the stale chip + manual refresh affordance per packet §3.2.
+      setRefreshMetadata({
+        generatedAt: new Date(startedAt).toISOString(),
+        staleAfterMs: REFRESH_CADENCE_MS_BY_TIER[PARTNERS_REFRESH_TIER] ?? 0,
+        dataFreshness: "fresh",
+        source: "live",
+      });
+      setServerEmpty(
+        items.length === 0
+          ? {
+              reason: "no_data",
+              messageCode: "partners.empty.no_data",
+              nextAction: {
+                action: "create_partner_entry",
+                enabled: true,
+                riskLevel: "medium",
+              },
+            }
+          : null,
+      );
+      setListActions(defaultListAvailableActions());
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      setRefreshMetadata({
+        generatedAt: new Date(startedAt).toISOString(),
+        staleAfterMs: REFRESH_CADENCE_MS_BY_TIER[PARTNERS_REFRESH_TIER] ?? 0,
+        dataFreshness: "degraded",
+        source: "live",
+      });
     } finally {
       setLoading(false);
     }
@@ -426,21 +611,43 @@ export default function PartnersPage() {
     void loadEntries();
   }, [loadEntries]);
 
+  // T4 polling per packet §3.2 — manual refresh affordance is always
+  // available and resets the cadence.
+  useEffect(() => {
+    const cadence = REFRESH_CADENCE_MS_BY_TIER[PARTNERS_REFRESH_TIER] ?? 0;
+    if (cadence <= 0) {
+      return;
+    }
+    if (refreshTimer.current !== null) {
+      clearInterval(refreshTimer.current);
+    }
+    refreshTimer.current = setInterval(() => {
+      void loadEntries();
+    }, cadence);
+    return () => {
+      if (refreshTimer.current !== null) {
+        clearInterval(refreshTimer.current);
+        refreshTimer.current = null;
+      }
+    };
+  }, [loadEntries]);
+
   const counts = useMemo(
     () => ({
       all: entries.length,
       active: entries.filter((entry) => entry.status === "active").length,
       inactive: entries.filter((entry) => entry.status === "inactive").length,
       revoked: entries.filter((entry) => entry.status === "revoked").length,
-      attention: entries.filter(partnerNeedsAttention).length,
+      attention: entries.filter((entry) => partnerNeedsAttention(entry, t))
+        .length,
     }),
-    [entries],
+    [entries, t],
   );
 
   const visibleEntries = useMemo(() => {
     switch (filter) {
       case "attention":
-        return entries.filter(partnerNeedsAttention);
+        return entries.filter((entry) => partnerNeedsAttention(entry, t));
       case "active":
       case "inactive":
       case "revoked":
@@ -449,22 +656,7 @@ export default function PartnersPage() {
       default:
         return entries;
     }
-  }, [entries, filter]);
-
-  const latestUpdatedAt = useMemo(() => {
-    if (visibleEntries.length === 0) {
-      return null;
-    }
-
-    return visibleEntries.reduce<string | null>((latest, entry) => {
-      if (!latest) {
-        return entry.updatedAt;
-      }
-      return new Date(entry.updatedAt).getTime() > new Date(latest).getTime()
-        ? entry.updatedAt
-        : latest;
-    }, null);
-  }, [visibleEntries]);
+  }, [entries, filter, t]);
 
   const tableRows = useMemo(
     () => visibleEntries as PartnerTableRow[],
@@ -507,19 +699,51 @@ export default function PartnersPage() {
     [copy.filters, counts],
   );
 
-  const selectedFilterLabel =
-    filterPills.find((item) => item.value === filter)?.label ?? filter;
+  const effectiveEmptyState: EmptyStateEnvelope | null = useMemo(() => {
+    if (visibleEntries.length > 0) {
+      return null;
+    }
+    const reason = deriveEmptyReason(error, filter, entries.length);
+    if (reason === serverEmpty?.reason && serverEmpty) {
+      return serverEmpty;
+    }
+    const nextAction: ResourceActionDescriptor | undefined =
+      reason === "no_data"
+        ? {
+            action: "create_partner_entry",
+            enabled: true,
+            riskLevel: "medium",
+          }
+        : reason === "fetch_failed" || reason === "external_unavailable"
+          ? {
+              action: "refresh_partner_entries",
+              enabled: true,
+              riskLevel: "low",
+            }
+          : undefined;
+    const envelope: EmptyStateEnvelope = {
+      reason,
+      messageCode: `partners.empty.${reason}`,
+      ...(nextAction ? { nextAction } : {}),
+    };
+    return envelope;
+  }, [entries.length, error, filter, serverEmpty, visibleEntries.length]);
+
+  const createDescriptor = pickAction(listActions, "create_partner_entry");
+  const refreshDescriptor = pickAction(listActions, "refresh_partner_entries");
 
   const handleCreate = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCreating(true);
     setError(null);
+    setCreateReceipt(null);
     try {
-      await client.createPlatformPartnerEntry(
+      const created = await client.createPlatformPartnerEntry(
         toPartnerCreateCommand(createForm),
       );
       setCreateForm(EMPTY_ENTRY_FORM);
       setShowCreate(false);
+      setCreateReceipt(copy.receipt(created.entrySlug));
       await loadEntries();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -534,6 +758,31 @@ export default function PartnersPage() {
     !createForm.programId.trim() ||
     !createForm.entrySlug.trim() ||
     !createForm.displayName.trim();
+
+  const freshnessChipTone:
+    | "neutral"
+    | "success"
+    | "warn"
+    | "danger"
+    | "accent" = !refreshMetadata
+    ? "neutral"
+    : refreshMetadata.dataFreshness === "fresh"
+      ? "success"
+      : refreshMetadata.dataFreshness === "stale"
+        ? "warn"
+        : refreshMetadata.dataFreshness === "degraded"
+          ? "danger"
+          : "neutral";
+
+  const freshnessChipLabel = !refreshMetadata
+    ? copy.freshnessUnknown
+    : refreshMetadata.dataFreshness === "fresh"
+      ? copy.fresh
+      : refreshMetadata.dataFreshness === "stale"
+        ? copy.stale
+        : refreshMetadata.dataFreshness === "degraded"
+          ? copy.degraded
+          : copy.freshnessUnknown;
 
   return (
     <CanvasShell
@@ -553,32 +802,81 @@ export default function PartnersPage() {
         sticky={false}
         actions={
           <>
-            <CanvasBtn
-              theme={theme}
-              icon="filter"
-              onClick={() => setShowFilters((current) => !current)}
-            >
-              {copy.filterAction}
-            </CanvasBtn>
-            <CanvasBtn
-              theme={theme}
-              variant={showCreate ? "secondary" : "primary"}
-              icon={showCreate ? "x" : "plus"}
-              onClick={() => setShowCreate((current) => !current)}
-            >
-              {showCreate ? t("common.cancel") : t("partners.newEntry")}
-            </CanvasBtn>
+            {refreshDescriptor && refreshDescriptor.enabled ? (
+              <CanvasBtn
+                theme={theme}
+                icon="arrow"
+                onClick={() => void loadEntries()}
+                disabled={loading}
+              >
+                {copy.refresh}
+              </CanvasBtn>
+            ) : null}
+            {createDescriptor && createDescriptor.enabled ? (
+              <CanvasBtn
+                theme={theme}
+                variant={showCreate ? "secondary" : "primary"}
+                icon={showCreate ? "x" : "plus"}
+                onClick={() => setShowCreate((current) => !current)}
+              >
+                {showCreate ? t("common.cancel") : copy.newEntry}
+              </CanvasBtn>
+            ) : null}
           </>
         }
       />
 
       <div style={pageStackStyle}>
+        <div style={filterBarStyle}>
+          {filterPills.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              style={pillButtonStyle}
+              onClick={() => setFilter(item.value)}
+            >
+              <CanvasPill
+                theme={theme}
+                tone={filter === item.value ? "accent" : item.tone}
+                dot={item.value !== "all"}
+              >
+                {item.label}
+              </CanvasPill>
+            </button>
+          ))}
+          <span style={{ flex: 1 }} />
+          <CanvasPill theme={theme} tone="neutral">
+            {copy.tier}: {copy.tier30s}
+          </CanvasPill>
+          <CanvasPill theme={theme} tone={freshnessChipTone} dot>
+            {freshnessChipLabel}
+          </CanvasPill>
+          {refreshMetadata ? (
+            <span style={monoSubtleStyle}>
+              {copy.lastUpdated}: {formatDateTime(refreshMetadata.generatedAt)}
+            </span>
+          ) : null}
+        </div>
+
         {error ? (
           <CanvasBanner
             theme={theme}
             tone="danger"
-            title={copy.errorTitle}
+            title={
+              locale === "en"
+                ? "Unable to load partner entries"
+                : "無法載入 partner entries"
+            }
             body={error}
+            actions={
+              <CanvasBtn
+                theme={theme}
+                icon="arrow"
+                onClick={() => void loadEntries()}
+              >
+                {copy.refresh}
+              </CanvasBtn>
+            }
           />
         ) : null}
 
@@ -591,106 +889,17 @@ export default function PartnersPage() {
           />
         ) : null}
 
-        {showFilters ? (
-          <CanvasCard
+        {createReceipt ? (
+          <CanvasBanner
             theme={theme}
-            title={copy.filterTitle}
-            subtitle={copy.filterSubtitle}
-            actions={
-              <CanvasBtn theme={theme} onClick={() => void loadEntries()}>
-                {copy.refresh}
-              </CanvasBtn>
-            }
-          >
-            <div style={{ display: "grid", gap: 14 }}>
-              <div style={pillsRowStyle}>
-                {filterPills.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    style={pillButtonStyle}
-                    onClick={() => setFilter(item.value)}
-                  >
-                    <CanvasPill
-                      theme={theme}
-                      tone={filter === item.value ? "accent" : item.tone}
-                      dot={item.value !== "all"}
-                    >
-                      {item.label}
-                    </CanvasPill>
-                  </button>
-                ))}
-                <span style={{ flex: 1 }} />
-                <CanvasPill theme={theme} tone="neutral">
-                  {copy.last30Days}
-                </CanvasPill>
-              </div>
-
-              <div style={kpiGridStyle}>
-                <CanvasKPI
-                  theme={theme}
-                  label={copy.kpis.active}
-                  value={counts.active}
-                  sub={`${counts.all} total`}
-                />
-                <CanvasKPI
-                  theme={theme}
-                  label={copy.kpis.attention}
-                  value={counts.attention}
-                  delta={
-                    counts.attention > 0 ? `${counts.attention}` : undefined
-                  }
-                  deltaTone={counts.attention > 0 ? "down" : "neutral"}
-                  sub={
-                    locale === "en"
-                      ? "Branding, routing, support, or credential gaps"
-                      : "品牌、routing、support 或 credential 缺口"
-                  }
-                />
-                <CanvasKPI
-                  theme={theme}
-                  label={copy.kpis.revoked}
-                  value={counts.revoked}
-                  sub={
-                    locale === "en"
-                      ? "Still visible for audit lineage"
-                      : "仍保留供 audit lineage 追溯"
-                  }
-                />
-              </div>
-
-              <CanvasDL
-                theme={theme}
-                cols={2}
-                items={[
-                  {
-                    label: copy.detail.selection,
-                    value: selectedFilterLabel,
-                  },
-                  {
-                    label: copy.detail.visible,
-                    value: `${visibleEntries.length}`,
-                    mono: true,
-                  },
-                  {
-                    label: copy.detail.latest,
-                    value: latestUpdatedAt
-                      ? formatDateTime(latestUpdatedAt)
-                      : "—",
-                    mono: true,
-                  },
-                  {
-                    label: copy.detail.readiness,
-                    value: `${counts.attention}`,
-                    mono: true,
-                  },
-                ]}
-              />
-            </div>
-          </CanvasCard>
+            tone="info"
+            icon="check"
+            title={locale === "en" ? "Action receipt" : "Action receipt"}
+            body={createReceipt}
+          />
         ) : null}
 
-        {showCreate ? (
+        {showCreate && createDescriptor?.enabled ? (
           <CanvasCard
             theme={theme}
             title={copy.createTitle}
@@ -1004,7 +1213,7 @@ export default function PartnersPage() {
         ) : null}
 
         <CanvasCard theme={theme} padding={0}>
-          {loading ? (
+          {loading && entries.length === 0 ? (
             <div
               style={{
                 padding: "24px 16px",
@@ -1014,16 +1223,20 @@ export default function PartnersPage() {
             >
               {t("partners.loading")}
             </div>
-          ) : visibleEntries.length === 0 ? (
-            <div
-              style={{
-                padding: "24px 16px",
-                color: theme.textMuted,
-                fontSize: 13,
+          ) : effectiveEmptyState ? (
+            <PartnerEmptyState
+              envelope={effectiveEmptyState}
+              locale={locale}
+              onPrimary={(action) => {
+                if (action === "create_partner_entry") {
+                  setShowCreate(true);
+                } else if (action === "refresh_partner_entries") {
+                  void loadEntries();
+                } else if (action === "clear_filter") {
+                  setFilter("all");
+                }
               }}
-            >
-              {t("partners.empty")}
-            </div>
+            />
           ) : (
             <CanvasTable<PartnerTableRow>
               theme={theme}
@@ -1067,7 +1280,7 @@ export default function PartnersPage() {
                 },
                 {
                   h: "SUBTYPE",
-                  w: 140,
+                  w: 150,
                   mono: true,
                   r: (entry) => (
                     <span style={{ fontSize: 11.5 }}>
@@ -1077,13 +1290,13 @@ export default function PartnersPage() {
                 },
                 {
                   h: "AUTH",
-                  w: 110,
+                  w: 130,
                   mono: true,
                   k: "authMode",
                 },
                 {
                   h: "ELIGIBILITY",
-                  w: 120,
+                  w: 110,
                   mono: true,
                   k: "eligibilityMode",
                 },
@@ -1102,34 +1315,50 @@ export default function PartnersPage() {
                 },
                 {
                   h: "READINESS",
-                  w: 160,
+                  w: 180,
                   r: (entry) => {
-                    const readiness = readinessState(entry, t);
+                    const missing = partnerReadinessGap(entry, t);
                     return (
-                      <CanvasPill
-                        theme={theme}
-                        tone={readiness.tone}
-                        dot={readiness.missingCount > 0}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
                       >
-                        {readiness.label}
-                      </CanvasPill>
+                        <CanvasPill
+                          theme={theme}
+                          tone={missing === 0 ? "success" : "warn"}
+                          dot={missing > 0}
+                        >
+                          {readinessLabel(missing, locale)}
+                        </CanvasPill>
+                        <Link
+                          href={buildAuditLink(entry).route}
+                          aria-label={copy.openAudit}
+                          title={copy.openAudit}
+                          style={{
+                            color: theme.textDim,
+                            textDecoration: "none",
+                            display: "inline-flex",
+                            alignItems: "center",
+                          }}
+                          target={
+                            buildAuditLink(entry).openMode === "new_tab"
+                              ? "_blank"
+                              : undefined
+                          }
+                          rel={
+                            buildAuditLink(entry).openMode === "new_tab"
+                              ? "noreferrer"
+                              : undefined
+                          }
+                        >
+                          <CanvasIcon name="ext" size={12} />
+                        </Link>
+                      </div>
                     );
                   },
-                },
-                {
-                  h: "",
-                  w: 28,
-                  align: "right",
-                  r: (entry) => (
-                    <Link
-                      href={`/partners/${entry.entrySlug}`}
-                      aria-label={copy.openDetail}
-                      title={copy.openDetail}
-                      style={iconLinkStyle}
-                    >
-                      <CanvasIcon name="more" size={14} />
-                    </Link>
-                  ),
                 },
               ]}
             />
@@ -1137,5 +1366,70 @@ export default function PartnersPage() {
         </CanvasCard>
       </div>
     </CanvasShell>
+  );
+}
+
+function PartnerEmptyState({
+  envelope,
+  locale,
+  onPrimary,
+}: {
+  envelope: EmptyStateEnvelope;
+  locale: string;
+  onPrimary: (action: string) => void;
+}) {
+  const tone = emptyStateTone(envelope.reason);
+  const { title, body, cta } = emptyStateCopy(envelope.reason, locale);
+  const ctaAction =
+    envelope.reason === "filtered_empty"
+      ? "clear_filter"
+      : envelope.nextAction?.action;
+  return (
+    <div style={{ padding: "20px 16px" }}>
+      <CanvasBanner
+        theme={theme}
+        tone={tone}
+        icon={
+          envelope.reason === "no_data"
+            ? "plus"
+            : envelope.reason === "filtered_empty"
+              ? "filter"
+              : envelope.reason === "permission_denied"
+                ? "warn"
+                : envelope.reason === "not_provisioned"
+                  ? "dashboard"
+                  : envelope.reason === "external_unavailable"
+                    ? "warn"
+                    : "warn"
+        }
+        title={title}
+        body={
+          <div style={{ display: "grid", gap: 6 }}>
+            <span>{body}</span>
+            <span style={monoSubtleStyle}>
+              reason: {envelope.reason} · code: {envelope.messageCode}
+            </span>
+          </div>
+        }
+        actions={
+          cta && ctaAction ? (
+            <CanvasBtn
+              theme={theme}
+              variant={envelope.reason === "no_data" ? "primary" : "secondary"}
+              icon={
+                envelope.reason === "no_data"
+                  ? "plus"
+                  : envelope.reason === "filtered_empty"
+                    ? "x"
+                    : "arrow"
+              }
+              onClick={() => onPrimary(ctaAction)}
+            >
+              {cta}
+            </CanvasBtn>
+          ) : undefined
+        }
+      />
+    </div>
   );
 }
