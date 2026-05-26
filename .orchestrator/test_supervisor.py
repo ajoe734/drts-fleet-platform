@@ -6324,5 +6324,57 @@ class DispatchCooldownTests(unittest.TestCase):
         self.assertEqual(settings.get("dispatch_cooldown_seconds"), 0)
 
 
+
+
+class PruneDoneHandoffsTests(unittest.TestCase):
+    """`prune_done_handoffs` bounds ai-status.json's handoffs audit-log tail.
+
+    Without this prune the file grew to ~9 MB / 17k entries during the
+    2026-05-26 incident, making the dashboard fetch unusably slow. See
+    feedback_ai_status_handoff_bloat.
+    """
+
+    def test_noop_under_keep_threshold(self) -> None:
+        s = {"handoffs": [{"status": "done"}] * 100}
+        supervisor.prune_done_handoffs(s, keep=500)
+        self.assertEqual(len(s["handoffs"]), 100)
+
+    def test_pending_entries_always_preserved(self) -> None:
+        # 2000 done + 5 pending; even with keep=10, pending entries survive.
+        handoffs = (
+            [{"status": "done", "task_id": f"D{i}"} for i in range(2000)]
+            + [{"status": "pending", "task_id": f"P{i}"} for i in range(5)]
+        )
+        s = {"handoffs": list(handoffs)}
+        supervisor.prune_done_handoffs(s, keep=10)
+        kinds = [x.get("status") for x in s["handoffs"]]
+        self.assertEqual(kinds.count("pending"), 5,
+                         "all pending handoffs must survive prune")
+        self.assertEqual(kinds.count("done"), 10,
+                         "only the last `keep` done entries survive")
+
+    def test_keeps_most_recent_done_by_position(self) -> None:
+        # done entries are appended chronologically; the prune must keep the
+        # tail, not the head, so audit history reflects what *just* happened.
+        handoffs = [{"status": "done", "task_id": f"T{i}"} for i in range(1000)]
+        s = {"handoffs": list(handoffs)}
+        supervisor.prune_done_handoffs(s, keep=3)
+        self.assertEqual(
+            [x["task_id"] for x in s["handoffs"]],
+            ["T997", "T998", "T999"],
+        )
+
+    def test_missing_handoffs_key_is_safe(self) -> None:
+        s = {}
+        supervisor.prune_done_handoffs(s, keep=500)  # must not raise
+        self.assertNotIn("handoffs", s)
+
+    def test_non_list_handoffs_is_safe(self) -> None:
+        # Bad data type — defensive against malformed input.
+        s = {"handoffs": "not-a-list"}
+        supervisor.prune_done_handoffs(s, keep=500)
+        self.assertEqual(s["handoffs"], "not-a-list")  # unchanged
+
+
 if __name__ == "__main__":
     unittest.main()
