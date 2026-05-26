@@ -110,6 +110,10 @@ type IncidentTableRow = Record<string, unknown> & {
 
 type IncidentCreateMode = "manual" | "dispatch_exception";
 
+type IncidentDraftCommand =
+  | CreateIncidentCommand
+  | CreateIncidentFromDispatchExceptionCommand;
+
 function formatDateTime(value: string | null | undefined, locale: "en" | "zh") {
   if (!value) {
     return "—";
@@ -741,6 +745,8 @@ export default function IncidentsPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [createMode, setCreateMode] = useState<IncidentCreateMode>("manual");
+  const [activeCreateAction, setActiveCreateAction] =
+    useState<ResourceActionDescriptor | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | "all">(
     "all",
@@ -975,8 +981,14 @@ export default function IncidentsPage() {
   useEffect(() => {
     if (dispatchExceptionOrderId) {
       setCreateMode("dispatch_exception");
+      setActiveCreateAction(
+        getActionDescriptor(pageActions, [
+          ACTION_CREATE_FROM_DISPATCH_EXCEPTION,
+          "createIncidentFromDispatchException",
+        ]),
+      );
     }
-  }, [dispatchExceptionOrderId]);
+  }, [dispatchExceptionOrderId, pageActions]);
 
   useEffect(() => {
     void loadRecords(false);
@@ -988,6 +1000,7 @@ export default function IncidentsPage() {
     }
 
     setCreateMode(getCreateModeForAction(createAction.action));
+    setActiveCreateAction(createAction);
     setShowCreate(true);
   }, [createAction, createFromQuery]);
 
@@ -1018,6 +1031,7 @@ export default function IncidentsPage() {
       case "createIncident":
       case "createIncidentFromDispatchException":
         setCreateMode(getCreateModeForAction(action.action));
+        setActiveCreateAction(action);
         setShowCreate(true);
         return;
       case ACTION_REFRESH_INCIDENTS:
@@ -1752,6 +1766,7 @@ export default function IncidentsPage() {
             <div style={{ marginBottom: 16 }}>
               <IncidentForm
                 createMode={createMode}
+                actionDescriptor={activeCreateAction}
                 initialValues={createDefaults}
                 onCancel={() => setShowCreate(false)}
                 onSubmit={async (command) => {
@@ -1836,19 +1851,21 @@ const loadingStyle: CSSProperties = {
 
 function IncidentForm({
   createMode,
+  actionDescriptor,
   initialValues,
   onCancel,
   onSubmit,
 }: {
   createMode: IncidentCreateMode;
+  actionDescriptor?: ResourceActionDescriptor | null;
   initialValues?: IncidentFormInitialValues;
   onCancel: () => void;
-  onSubmit: (
-    command: CreateIncidentCommand | CreateIncidentFromDispatchExceptionCommand,
-  ) => Promise<void>;
+  onSubmit: (command: IncidentDraftCommand) => Promise<void>;
 }) {
   const { t, locale } = useTranslation();
   const [pending, startTransition] = useTransition();
+  const [pendingCommand, setPendingCommand] =
+    useState<IncidentDraftCommand | null>(null);
   const [title, setTitle] = useState(initialValues?.title ?? "");
   const [description, setDescription] = useState(
     initialValues?.description ?? "",
@@ -1887,12 +1904,22 @@ function IncidentForm({
     initialValues?.dispatchExceptionOrderId?.trim() ?? "";
   const isDispatchExceptionCreate =
     createMode === "dispatch_exception" && dispatchExceptionOrderId.length > 0;
+  const requiresConfirmation =
+    actionDescriptor?.riskLevel === "medium" ||
+    actionDescriptor?.riskLevel === "high";
+
+  function submitCommand(command: IncidentDraftCommand) {
+    startTransition(() => {
+      void onSubmit(command).then(() => {
+        setPendingCommand(null);
+      });
+    });
+  }
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    startTransition(() => {
-      if (isDispatchExceptionCreate) {
-        const command: CreateIncidentFromDispatchExceptionCommand = {
+    const command: IncidentDraftCommand = isDispatchExceptionCreate
+      ? {
           orderId: dispatchExceptionOrderId,
           exceptionReasonCode:
             exceptionReasonCode.trim() || "dispatch_exception",
@@ -1902,33 +1929,34 @@ function IncidentForm({
           severity,
           ...(escalationTarget ? { escalationTarget } : {}),
           reportedBy: reportedBy.trim() || "ops-user-001",
+        }
+      : {
+          title: title.trim(),
+          description: description.trim(),
+          category,
+          severity,
+          reportedBy: reportedBy.trim() || "ops-user-001",
+          ...(relatedOrderId.trim()
+            ? { relatedOrderId: relatedOrderId.trim() }
+            : {}),
+          ...(relatedVehicleId.trim()
+            ? { relatedVehicleId: relatedVehicleId.trim() }
+            : {}),
+          ...(relatedDriverId.trim()
+            ? { relatedDriverId: relatedDriverId.trim() }
+            : {}),
+          ...(occurredAt
+            ? { occurredAt: new Date(occurredAt).toISOString() }
+            : {}),
+          ...(location.trim() ? { location: location.trim() } : {}),
         };
-        void onSubmit(command);
-        return;
-      }
 
-      const command: CreateIncidentCommand = {
-        title: title.trim(),
-        description: description.trim(),
-        category,
-        severity,
-        reportedBy: reportedBy.trim() || "ops-user-001",
-        ...(relatedOrderId.trim()
-          ? { relatedOrderId: relatedOrderId.trim() }
-          : {}),
-        ...(relatedVehicleId.trim()
-          ? { relatedVehicleId: relatedVehicleId.trim() }
-          : {}),
-        ...(relatedDriverId.trim()
-          ? { relatedDriverId: relatedDriverId.trim() }
-          : {}),
-        ...(occurredAt
-          ? { occurredAt: new Date(occurredAt).toISOString() }
-          : {}),
-        ...(location.trim() ? { location: location.trim() } : {}),
-      };
-      void onSubmit(command);
-    });
+    if (requiresConfirmation) {
+      setPendingCommand(command);
+      return;
+    }
+
+    submitCommand(command);
   }
 
   return (
@@ -2155,6 +2183,105 @@ function IncidentForm({
           {t("common.cancel")}
         </Btn>
       </div>
+
+      {pendingCommand ? (
+        <div style={confirmOverlayStyle}>
+          <div style={confirmDialogStyle}>
+            <div style={{ display: "grid", gap: 10 }}>
+              <Pill
+                theme={theme}
+                tone={
+                  actionDescriptor?.riskLevel === "high" ? "danger" : "warn"
+                }
+              >
+                {locale === "en"
+                  ? `${actionDescriptor?.riskLevel ?? "medium"} risk action`
+                  : `${actionDescriptor?.riskLevel === "high" ? "高" : "中"}風險動作`}
+              </Pill>
+              <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>
+                {isDispatchExceptionCreate
+                  ? locale === "en"
+                    ? "Confirm incident creation from dispatch exception"
+                    : "確認從派遣異常建立事故"
+                  : locale === "en"
+                    ? "Confirm incident creation"
+                    : "確認建立事故"}
+              </div>
+              <div
+                style={{
+                  color: theme.textMuted,
+                  fontSize: 12.5,
+                  lineHeight: 1.7,
+                }}
+              >
+                {isDispatchExceptionCreate
+                  ? locale === "en"
+                    ? `Order ${dispatchExceptionOrderId} will create an ops-owned incident with severity ${formatOpsCodeLabel(locale, severity)}. Review the exception reason before continuing.`
+                    : `訂單 ${dispatchExceptionOrderId} 將建立一筆維持 ops-owned 的事故，嚴重度為 ${formatOpsCodeLabel(locale, severity)}。送出前請再次確認異常原因。`
+                  : locale === "en"
+                    ? `Incident “${title.trim()}” will be created with ${formatOpsCodeLabel(locale, category)} / ${formatOpsCodeLabel(locale, severity)}.`
+                    : `事故「${title.trim()}」將以 ${formatOpsCodeLabel(locale, category)} / ${formatOpsCodeLabel(locale, severity)} 建立。`}
+              </div>
+              {isDispatchExceptionCreate ? (
+                <div style={confirmSummaryStyle}>
+                  <div>
+                    <strong>{locale === "en" ? "Reason" : "原因"}</strong>
+                    <div>
+                      {exceptionReasonCode.trim() || "dispatch_exception"}
+                    </div>
+                  </div>
+                  {exceptionNote.trim() ? (
+                    <div>
+                      <strong>{locale === "en" ? "Note" : "備註"}</strong>
+                      <div>{exceptionNote.trim()}</div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div style={confirmSummaryStyle}>
+                  <div>
+                    <strong>
+                      {locale === "en" ? "Reported by" : "通報者"}
+                    </strong>
+                    <div>{reportedBy.trim() || "ops-user-001"}</div>
+                  </div>
+                  {relatedOrderId.trim() ? (
+                    <div>
+                      <strong>{locale === "en" ? "Order" : "訂單"}</strong>
+                      <div>{relatedOrderId.trim()}</div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <Btn
+                theme={theme}
+                variant="primary"
+                icon="check"
+                disabled={pending}
+                onClick={() => submitCommand(pendingCommand)}
+              >
+                {isDispatchExceptionCreate
+                  ? locale === "en"
+                    ? "Confirm create"
+                    : "確認建立"
+                  : locale === "en"
+                    ? "Confirm incident"
+                    : "確認事故"}
+              </Btn>
+              <Btn
+                theme={theme}
+                variant="secondary"
+                disabled={pending}
+                onClick={() => setPendingCommand(null)}
+              >
+                {locale === "en" ? "Back" : "返回"}
+              </Btn>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -2164,4 +2291,34 @@ const labelStyle: CSSProperties = {
   gap: 6,
   fontSize: 12,
   color: theme.textMuted,
+};
+
+const confirmOverlayStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(4, 8, 20, 0.72)",
+  display: "grid",
+  placeItems: "center",
+  padding: 24,
+  zIndex: 60,
+};
+
+const confirmDialogStyle: CSSProperties = {
+  width: "min(560px, 100%)",
+  borderRadius: 16,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  boxShadow: "0 24px 80px rgba(0, 0, 0, 0.35)",
+  padding: 20,
+};
+
+const confirmSummaryStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+  borderRadius: 12,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  padding: 12,
+  fontSize: 12.5,
+  color: theme.text,
 };
