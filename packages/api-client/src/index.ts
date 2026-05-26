@@ -162,6 +162,7 @@ import type {
   UpdatePlatformAdapterCommand,
   SettlementMatrixRecord,
   ShiftRecord,
+  TenantAddressDirectoryResponse,
   TenantAddressRecord,
   TenantAddressExportViewRecord,
   TenantApiKeyRecord,
@@ -1312,6 +1313,10 @@ export class ApiClient {
 
   async listAddresses(): Promise<TenantAddressRecord[]> {
     return this.getList<TenantAddressRecord>("/api/tenant/addresses");
+  }
+
+  async getAddressDirectory(): Promise<TenantAddressDirectoryResponse> {
+    return this.get<TenantAddressDirectoryResponse>("/api/tenant/addresses");
   }
 
   async listCostCenters(options?: {

@@ -1,11 +1,13 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type {
+  CrossAppResourceLink,
   EmptyReason,
   ResourceActionDescriptor,
+  TenantAddressDirectoryRecord,
+  TenantAddressDirectoryResponse,
   TenantAddressExportViewRecord,
   TenantAddressQualityIssue,
-  TenantAddressRecord,
   TenantPassengerRecord,
 } from "@drts/contracts";
 import {
@@ -21,6 +23,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
+import { changeAddressLifecycleAction, upsertAddressAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +37,6 @@ const OPS_CONSOLE_URL =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "https://ops-console.local";
 const PLATFORM_ADMIN_URL =
   process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "https://platform-admin.local";
-const REFRESH_CADENCE_SECONDS = 30;
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -45,14 +47,14 @@ const pageBodyStyle: CSSProperties = {
 
 const topGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.8fr) minmax(280px, 1fr)",
+  gridTemplateColumns: "minmax(0, 1.8fr) minmax(320px, 1fr)",
   gap: 16,
   alignItems: "start",
 };
 
 const lowerGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.35fr) minmax(280px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.92fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -115,8 +117,7 @@ const secondaryTextStyle: CSSProperties = {
 
 const filterFormStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns:
-    "minmax(0, 1.4fr) repeat(3, minmax(120px, 0.58fr)) minmax(120px, 0.58fr) auto",
+  gridTemplateColumns: "minmax(0, 1.4fr) repeat(3, minmax(120px, 0.58fr)) auto",
   gap: 12,
 };
 
@@ -131,12 +132,12 @@ const fieldStackStyle: CSSProperties = {
 };
 
 const fieldInputStyle: CSSProperties = {
-  height: 34,
+  minHeight: 34,
   borderRadius: 8,
   border: `1px solid ${th.border}`,
   background: th.surface,
   color: th.text,
-  padding: "0 11px",
+  padding: "8px 11px",
   fontSize: 12.5,
   fontFamily: th.fontFamily,
 };
@@ -159,13 +160,13 @@ const actionLinkStyle: CSSProperties = {
   gap: 6,
   padding: "5px 10px",
   fontSize: 12,
-  height: 28,
+  minHeight: 28,
   fontWeight: 500,
   background: th.surface,
   color: th.text,
   border: `1px solid ${th.border}`,
   borderRadius: 7,
-  lineHeight: 1,
+  lineHeight: 1.25,
   textDecoration: "none",
   fontFamily: th.fontFamily,
 };
@@ -189,12 +190,6 @@ const disabledActionStyle: CSSProperties = {
   cursor: "not-allowed",
 };
 
-const actionMetaStyle: CSSProperties = {
-  fontSize: 10.5,
-  color: th.textDim,
-  fontFamily: th.monoFamily,
-};
-
 const externalLinkStyle: CSSProperties = {
   color: th.text,
   textDecoration: "none",
@@ -205,18 +200,40 @@ const externalLinkStyle: CSSProperties = {
   gap: 3,
 };
 
+const formStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+};
+
+const formGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 12,
+};
+
+const fullWidthFieldStyle: CSSProperties = {
+  ...fieldStackStyle,
+  gridColumn: "1 / -1",
+};
+
 type AddressTabKey = "active" | "inactive" | "quality" | "export";
+type AddressMode = "create" | "edit" | "deactivate" | "reactivate";
 type AddressEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+type FlashTone = "default" | "warning";
 
 type SearchParams = {
   q?: string;
   tab?: string;
   owner?: string;
   tag?: string;
-  emptyReason?: string;
+  mode?: string;
+  addressId?: string;
+  notice?: string;
+  tone?: string;
 };
 
-type AddressRow = TenantAddressRecord &
+type AddressRow = TenantAddressDirectoryRecord &
   Record<string, unknown> & {
     ownerName: string;
     stateLabel: string;
@@ -224,12 +241,10 @@ type AddressRow = TenantAddressRecord &
     geocodeLabel: string;
     qualitySummary: string[];
     exportMaskedAddress: string;
-    availableActions: ResourceActionDescriptor[];
   };
 
 type AddressPageData = {
-  addresses: TenantAddressRecord[];
-  exportRows: TenantAddressExportViewRecord[];
+  directory: TenantAddressDirectoryResponse | null;
   passengers: TenantPassengerRecord[];
   errors: string[];
 };
@@ -238,9 +253,14 @@ type EmptyStateConfig = {
   title: string;
   body: string;
   tone: Exclude<CanvasTone, "neutral">;
-  icon: "warn" | "clock" | "ext" | "search" | "plus";
   ctaLabel: string;
-  href: string;
+};
+
+type ActionConfig = {
+  mode: AddressMode;
+  title: string;
+  body: string;
+  submitLabel: string;
 };
 
 const TAB_LABELS: Record<AddressTabKey, string> = {
@@ -255,49 +275,64 @@ const EMPTY_STATE_CONFIG: Record<AddressEmptyReason, EmptyStateConfig> = {
     title: "此租戶尚未建立地址簿",
     body: "建立第一筆上車或下車地址後，叫車表單與匯出檢視才會開始復用地址資料。",
     tone: "info",
-    icon: "plus",
     ctaLabel: "建立地址",
-    href: "/addresses",
   },
   not_provisioned: {
     title: "地址簿尚未完成租戶啟用",
     body: "目前 tenant 基礎設定尚未 provision 完成，地址資料與匯出遮罩檢視都不會對外開放。",
     tone: "warn",
-    icon: "clock",
     ctaLabel: "查看租戶設定",
-    href: "/settings",
   },
   fetch_failed: {
     title: "地址資料讀取失敗",
     body: "上一次從 `/api/tenant/addresses` 取數失敗，請重新整理；若持續失敗，請轉往稽核與 API health。",
     tone: "danger",
-    icon: "warn",
     ctaLabel: "重新整理",
-    href: "/addresses",
   },
   permission_denied: {
     title: "目前角色不可查看地址簿",
     body: "後端未回傳可讀取本頁的 authority。CTA 應保留為 disabled，而不是直接消失。",
     tone: "warn",
-    icon: "warn",
     ctaLabel: "查看角色設定",
-    href: "/users",
   },
   external_unavailable: {
     title: "外部地址校正依賴目前不可用",
     body: "地址簿仍保留最後快照，但 geocode 與品質校正暫時無法更新，請改走人工確認流程。",
     tone: "warn",
-    icon: "ext",
     ctaLabel: "查看整合就緒度",
-    href: "/settings",
   },
   filtered_empty: {
     title: "目前篩選條件沒有任何結果",
     body: "清空搜尋、切回已啟用頁籤，或改看匯出遮罩檢視；這是 distinct state，不等於租戶沒有資料。",
     tone: "info",
-    icon: "search",
     ctaLabel: "清空篩選",
-    href: "/addresses",
+  },
+};
+
+const ACTION_CONFIG: Record<AddressMode, ActionConfig> = {
+  create: {
+    mode: "create",
+    title: "建立地址",
+    body: "Create address (medium) 直接走 `/api/tenant/addresses`，建立後可被 `/bookings/new` 預填重用。",
+    submitLabel: "建立地址",
+  },
+  edit: {
+    mode: "edit",
+    title: "更新地址",
+    body: "Update address (medium) 只能從 row `availableActions` 進入，不再本地推導權限。",
+    submitLabel: "儲存變更",
+  },
+  deactivate: {
+    mode: "deactivate",
+    title: "停用地址",
+    body: "Soft deactivate (high) 會保留既有歷史 booking snapshot，且必須輸入 reason。",
+    submitLabel: "確認停用",
+  },
+  reactivate: {
+    mode: "reactivate",
+    title: "重新啟用地址",
+    body: "Reactivate (medium) 會恢復此地址在建立新 booking 時的可選取狀態。",
+    submitLabel: "重新啟用",
   },
 };
 
@@ -331,20 +366,16 @@ function getTab(rawTab: string | undefined): AddressTabKey {
   return "active";
 }
 
-function getEmptyReason(
-  rawValue: string | undefined,
-): AddressEmptyReason | null {
-  switch (rawValue) {
-    case "no_data":
-    case "not_provisioned":
-    case "fetch_failed":
-    case "permission_denied":
-    case "external_unavailable":
-    case "filtered_empty":
-      return rawValue;
-    default:
-      return null;
+function getMode(rawMode: string | undefined): AddressMode | null {
+  if (
+    rawMode === "create" ||
+    rawMode === "edit" ||
+    rawMode === "deactivate" ||
+    rawMode === "reactivate"
+  ) {
+    return rawMode;
   }
+  return null;
 }
 
 function getQualityLabel(issue: TenantAddressQualityIssue) {
@@ -352,7 +383,7 @@ function getQualityLabel(issue: TenantAddressQualityIssue) {
   return "missing_geocode";
 }
 
-function getGeocodeLabel(record: TenantAddressRecord) {
+function getGeocodeLabel(record: AddressRow | TenantAddressDirectoryRecord) {
   if (record.geocodeSource === "provider") return "provider";
   if (record.geocodeSource === "manual") return "manual";
   return "none";
@@ -366,67 +397,9 @@ function getStateLabel(activeFlag: boolean) {
   return activeFlag ? "active" : "inactive";
 }
 
-function buildPageActions(): ResourceActionDescriptor[] {
-  return [
-    {
-      action: "create",
-      enabled: true,
-      riskLevel: "medium",
-    },
-    {
-      action: "export",
-      enabled: true,
-      riskLevel: "low",
-    },
-  ];
-}
-
-function buildRowActions(
-  record: TenantAddressRecord,
-): ResourceActionDescriptor[] {
-  const actions: ResourceActionDescriptor[] = [
-    {
-      action: "edit",
-      enabled: true,
-      riskLevel: "medium",
-    },
-  ];
-
-  if (record.activeFlag) {
-    actions.push({
-      action: "deactivate",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    });
-    actions.push({
-      action: "reactivate",
-      enabled: false,
-      disabledReasonCode: "already_active",
-      riskLevel: "medium",
-    });
-    return actions;
-  }
-
-  actions.push({
-    action: "deactivate",
-    enabled: false,
-    disabledReasonCode: "already_inactive",
-    requiresReason: true,
-    riskLevel: "high",
-  });
-  actions.push({
-    action: "reactivate",
-    enabled: true,
-    riskLevel: "medium",
-  });
-
-  return actions;
-}
-
 function compareAddresses(
-  left: TenantAddressRecord,
-  right: TenantAddressRecord,
+  left: TenantAddressDirectoryRecord,
+  right: TenantAddressDirectoryRecord,
 ) {
   if (left.activeFlag !== right.activeFlag) {
     return left.activeFlag ? -1 : 1;
@@ -442,35 +415,24 @@ function compareAddresses(
 async function loadAddressPageData(): Promise<AddressPageData> {
   const client = getTenantClient();
   const errors: string[] = [];
-  const [addressesResult, exportResult, passengersResult] =
-    await Promise.allSettled([
-      client.listAddresses() as Promise<TenantAddressRecord[]>,
-      client.listAddressExportView() as Promise<
-        TenantAddressExportViewRecord[]
-      >,
-      client.listPassengers() as Promise<TenantPassengerRecord[]>,
-    ]);
+  const [directoryResult, passengersResult] = await Promise.allSettled([
+    client.getAddressDirectory(),
+    client.listPassengers() as Promise<TenantPassengerRecord[]>,
+  ]);
 
-  const addresses =
-    addressesResult.status === "fulfilled"
-      ? [...addressesResult.value].sort(compareAddresses)
-      : [];
-  const exportRows =
-    exportResult.status === "fulfilled" ? exportResult.value : [];
+  const directory =
+    directoryResult.status === "fulfilled" ? directoryResult.value : null;
   const passengers =
     passengersResult.status === "fulfilled" ? passengersResult.value : [];
 
-  if (addressesResult.status === "rejected") {
-    errors.push(`地址簿: ${toErrorMessage(addressesResult.reason)}`);
-  }
-  if (exportResult.status === "rejected") {
-    errors.push(`匯出遮罩檢視: ${toErrorMessage(exportResult.reason)}`);
+  if (directoryResult.status === "rejected") {
+    errors.push(`地址簿: ${toErrorMessage(directoryResult.reason)}`);
   }
   if (passengersResult.status === "rejected") {
     errors.push(`乘客目錄: ${toErrorMessage(passengersResult.reason)}`);
   }
 
-  return { addresses, exportRows, passengers, errors };
+  return { directory, passengers, errors };
 }
 
 function matchesQuery(row: AddressRow, query: string) {
@@ -497,12 +459,58 @@ function matchesTag(row: AddressRow, tag: string) {
   return row.tags.includes(tag);
 }
 
-function renderActionChip(action: ResourceActionDescriptor, href: string) {
-  const label = `${action.action} · ${action.riskLevel}`;
-  if (!action.enabled) {
+function buildScopedHref(
+  query: string,
+  selectedTab: AddressTabKey,
+  owner: string,
+  tag: string,
+  overrides: Record<string, string | undefined | null>,
+) {
+  const params = new URLSearchParams();
+  if (selectedTab !== "active") params.set("tab", selectedTab);
+  if (query) params.set("q", query);
+  if (owner) params.set("owner", owner);
+  if (tag) params.set("tag", tag);
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === null) {
+      params.delete(key);
+      continue;
+    }
+    if (typeof value === "string" && value.length > 0) {
+      params.set(key, value);
+    } else {
+      params.delete(key);
+    }
+  }
+
+  const result = params.toString();
+  return result ? `/addresses?${result}` : "/addresses";
+}
+
+function buildTabLink(
+  tab: AddressTabKey,
+  query: string,
+  owner: string,
+  tag: string,
+) {
+  return buildScopedHref(query, tab, owner, tag, {
+    mode: null,
+    addressId: null,
+    notice: null,
+    tone: null,
+  });
+}
+
+function renderActionChip(
+  action: ResourceActionDescriptor,
+  href: string | null,
+  label: string,
+) {
+  if (!action.enabled || !href) {
     return (
       <span
-        key={label}
+        key={`${action.action}-${label}`}
         style={disabledActionStyle}
         title={action.disabledReasonCode}
       >
@@ -511,27 +519,75 @@ function renderActionChip(action: ResourceActionDescriptor, href: string) {
     );
   }
   return (
-    <Link key={label} href={href} style={actionLinkStyle}>
+    <Link key={`${action.action}-${label}`} href={href} style={actionLinkStyle}>
       {label}
     </Link>
   );
 }
 
-function buildActionHref(action: ResourceActionDescriptor, row: AddressRow) {
-  if (action.action === "edit") {
-    return `/addresses?q=${encodeURIComponent(row.addressId)}`;
+function getActionLabel(action: ResourceActionDescriptor) {
+  const actionLabelMap: Record<string, string> = {
+    create: "create",
+    export: "export",
+    update: "update",
+    deactivate: "deactivate",
+    reactivate: "reactivate",
+  };
+  return `${actionLabelMap[action.action] ?? action.action} · ${action.riskLevel}`;
+}
+
+function buildPageActionHref(
+  action: ResourceActionDescriptor,
+  query: string,
+  selectedTab: AddressTabKey,
+  owner: string,
+  tag: string,
+) {
+  if (action.action === "create") {
+    return buildScopedHref(query, selectedTab, owner, tag, {
+      mode: "create",
+      addressId: null,
+      notice: null,
+      tone: null,
+    });
   }
-  if (action.action === "deactivate") {
-    return `/addresses?tab=inactive&q=${encodeURIComponent(row.addressId)}`;
+  if (action.action === "export") {
+    return buildScopedHref(query, "export", owner, tag, {
+      mode: null,
+      addressId: null,
+      notice: null,
+      tone: null,
+    });
   }
-  if (action.action === "reactivate") {
-    return `/addresses?tab=active&q=${encodeURIComponent(row.addressId)}`;
+  return null;
+}
+
+function buildRowActionHref(
+  action: ResourceActionDescriptor,
+  row: AddressRow,
+  query: string,
+  selectedTab: AddressTabKey,
+  owner: string,
+  tag: string,
+) {
+  if (
+    action.action !== "update" &&
+    action.action !== "deactivate" &&
+    action.action !== "reactivate"
+  ) {
+    return null;
   }
-  return "/addresses";
+
+  return buildScopedHref(query, selectedTab, owner, tag, {
+    mode: action.action === "update" ? "edit" : action.action,
+    addressId: row.addressId,
+    notice: null,
+    tone: null,
+  });
 }
 
 function toAddressRow(
-  record: TenantAddressRecord,
+  record: TenantAddressDirectoryRecord,
   passengersById: Map<string, TenantPassengerRecord>,
   exportRowsById: Map<string, TenantAddressExportViewRecord>,
 ): AddressRow {
@@ -547,7 +603,6 @@ function toAddressRow(
     geocodeLabel: getGeocodeLabel(record),
     qualitySummary: (record.qualityIssues ?? []).map(getQualityLabel),
     exportMaskedAddress: exportRow?.maskedAddressText ?? "—",
-    availableActions: buildRowActions(record),
   };
 }
 
@@ -558,24 +613,15 @@ function buildTabs(
   tag: string,
 ) {
   const tabKeys: AddressTabKey[] = ["active", "inactive", "quality", "export"];
-  const tabs = tabKeys.map((tab) => {
-    const params = new URLSearchParams();
-    if (tab !== "active") params.set("tab", tab);
-    if (query) params.set("q", query);
-    if (owner) params.set("owner", owner);
-    if (tag) params.set("tag", tag);
-    const href =
-      params.size > 0 ? `/addresses?${params.toString()}` : "/addresses";
-    return (
-      <Link
-        key={tab}
-        href={href}
-        style={{ color: "inherit", textDecoration: "none" }}
-      >
-        {TAB_LABELS[tab]}
-      </Link>
-    );
-  });
+  const tabs = tabKeys.map((tab) => (
+    <Link
+      key={tab}
+      href={buildTabLink(tab, query, owner, tag)}
+      style={{ color: "inherit", textDecoration: "none" }}
+    >
+      {TAB_LABELS[tab]}
+    </Link>
+  ));
 
   return {
     tabs,
@@ -583,45 +629,349 @@ function buildTabs(
   };
 }
 
-function getLatestSnapshot(
-  addresses: TenantAddressRecord[],
-  exportRows: TenantAddressExportViewRecord[],
-) {
-  const timestamps = [
-    ...addresses.map((row) => parseDate(row.updatedAt)?.getTime() ?? 0),
-    ...exportRows.map(
-      (row) => parseDate(row.exportGeneratedAt)?.getTime() ?? 0,
-    ),
-  ];
-  const latest = Math.max(...timestamps, 0);
-  return latest > 0 ? new Date(latest).toISOString() : null;
-}
-
 function getEmptyReasonForRows(
   rows: AddressRow[],
   query: string,
   owner: string,
   tag: string,
-  explicitReason: AddressEmptyReason | null,
-  totalRows: number,
+  backendReason: AddressEmptyReason | null,
+  hasFetchError: boolean,
 ) {
-  if (explicitReason) return explicitReason;
+  if (hasFetchError && rows.length === 0) return "fetch_failed" as const;
   if (rows.length > 0) return null;
   if (query || owner || tag) return "filtered_empty" as const;
-  if (totalRows === 0) return "no_data" as const;
-  return "filtered_empty" as const;
+  return backendReason;
 }
 
 function getRefreshTone(
+  dataFreshness:
+    | TenantAddressDirectoryResponse["refreshMetadata"]["dataFreshness"]
+    | null,
   errors: string[],
-  snapshotAt: string | null,
 ): CanvasTone {
   if (errors.length > 0) return "warn";
-  if (!snapshotAt) return "neutral";
-  const snapshotMs = parseDate(snapshotAt)?.getTime() ?? 0;
-  return Date.now() - snapshotMs > REFRESH_CADENCE_SECONDS * 1000
-    ? "warn"
-    : "success";
+  if (dataFreshness === "degraded" || dataFreshness === "stale") return "warn";
+  if (dataFreshness === "fresh") return "success";
+  return "neutral";
+}
+
+function getRefreshBannerBody(
+  directory: TenantAddressDirectoryResponse | null,
+  errors: string[],
+) {
+  if (!directory) {
+    return `T5 Tenant slow · 無法取得 refresh metadata · tenant ${DEMO_TENANT_ID}`;
+  }
+
+  const { refreshMetadata } = directory;
+  return `T5 Tenant slow · stale after ${Math.round(
+    refreshMetadata.staleAfterMs / 1000,
+  )}s · snapshot ${formatDateTime(refreshMetadata.generatedAt)} · freshness ${
+    refreshMetadata.dataFreshness
+  } · source ${refreshMetadata.source} · ${
+    errors.length > 0
+      ? "partial dependency failure"
+      : `tenant ${directory.tenantId}`
+  }`;
+}
+
+function getEmptyStateHref(
+  reason: AddressEmptyReason,
+  query: string,
+  selectedTab: AddressTabKey,
+  owner: string,
+  tag: string,
+) {
+  if (reason === "filtered_empty" || reason === "fetch_failed") {
+    return "/addresses";
+  }
+  if (reason === "not_provisioned") {
+    return "/settings";
+  }
+  if (reason === "permission_denied") {
+    return "/users";
+  }
+  if (reason === "external_unavailable") {
+    return "/integration-governance";
+  }
+  return buildScopedHref(query, selectedTab, owner, tag, {
+    mode: "create",
+    addressId: null,
+    notice: null,
+    tone: null,
+  });
+}
+
+function buildExternalHref(link: CrossAppResourceLink) {
+  const baseUrl =
+    link.targetApp === "platform-admin" ? PLATFORM_ADMIN_URL : OPS_CONSOLE_URL;
+  return `${baseUrl}${link.route}`;
+}
+
+function getSelectedAddress(rows: AddressRow[], addressId: string | undefined) {
+  if (!addressId) return null;
+  return rows.find((row) => row.addressId === addressId) ?? null;
+}
+
+function getFlashTone(rawTone: string | undefined): FlashTone {
+  return rawTone === "warning" ? "warning" : "default";
+}
+
+function getFlashMessage(rawNotice: string | undefined) {
+  return rawNotice?.trim() ? decodeURIComponent(rawNotice) : null;
+}
+
+function ActionFormCard({
+  mode,
+  selectedAddress,
+  passengers,
+  returnTo,
+}: {
+  mode: AddressMode | null;
+  selectedAddress: AddressRow | null;
+  passengers: TenantPassengerRecord[];
+  returnTo: string;
+}) {
+  if (!mode) {
+    return (
+      <CanvasCard
+        theme={th}
+        title="Action center"
+        subtitle="availableActions drives create / update / deactivate / reactivate"
+      >
+        <p style={emptyCopyStyle}>
+          從頁首或 row CTA 進入實際操作。create/update 會送到
+          `/api/tenant/addresses`；deactivate 會強制 reason；reactivate
+          會恢復可預填狀態。
+        </p>
+      </CanvasCard>
+    );
+  }
+
+  const config = ACTION_CONFIG[mode];
+  if (mode !== "create" && !selectedAddress) {
+    return (
+      <CanvasCard
+        theme={th}
+        title={config.title}
+        subtitle="Address selection required"
+      >
+        <p style={emptyCopyStyle}>
+          找不到指定 addressId，請從 Directory rows 重新選取。
+        </p>
+      </CanvasCard>
+    );
+  }
+
+  if (mode === "deactivate" || mode === "reactivate") {
+    return (
+      <CanvasCard theme={th} title={config.title} subtitle={config.body}>
+        <form action={changeAddressLifecycleAction} style={formStyle}>
+          <input type="hidden" name="returnTo" value={returnTo} />
+          <input
+            type="hidden"
+            name="addressId"
+            value={selectedAddress?.addressId ?? ""}
+          />
+          <input type="hidden" name="nextState" value={mode} />
+          <CanvasDL
+            theme={th}
+            cols={1}
+            items={[
+              { k: "address", v: selectedAddress?.addressName ?? "—" },
+              {
+                k: "addressId",
+                v: selectedAddress?.addressId ?? "—",
+                mono: true,
+              },
+              { k: "state", v: selectedAddress?.stateLabel ?? "—" },
+            ]}
+          />
+          {mode === "deactivate" ? (
+            <label style={fieldStackStyle}>
+              Reason note
+              <textarea
+                name="reasonNote"
+                required
+                rows={4}
+                placeholder="輸入停用原因，會寫入 audit receipt"
+                style={fieldInputStyle}
+              />
+            </label>
+          ) : (
+            <label style={fieldStackStyle}>
+              Reason note
+              <textarea
+                name="reasonNote"
+                rows={3}
+                placeholder="可選：補充重新啟用原因"
+                style={fieldInputStyle}
+              />
+            </label>
+          )}
+          <div style={actionRowStyle}>
+            <button type="submit" style={primaryActionLinkStyle}>
+              {config.submitLabel}
+            </button>
+            <Link href="/addresses" style={ghostActionLinkStyle}>
+              取消
+            </Link>
+          </div>
+        </form>
+      </CanvasCard>
+    );
+  }
+
+  const isCreate = mode === "create";
+  const ownerOptions = [...passengers].sort((left, right) =>
+    left.fullName.localeCompare(right.fullName, "zh-Hant"),
+  );
+
+  return (
+    <CanvasCard theme={th} title={config.title} subtitle={config.body}>
+      <form action={upsertAddressAction} style={formStyle}>
+        <input type="hidden" name="returnTo" value={returnTo} />
+        {!isCreate ? (
+          <input
+            type="hidden"
+            name="addressId"
+            value={selectedAddress?.addressId ?? ""}
+          />
+        ) : null}
+        <div style={formGridStyle}>
+          <label style={fieldStackStyle}>
+            Address name
+            <input
+              name="addressName"
+              required
+              defaultValue={
+                isCreate ? "" : (selectedAddress?.addressName ?? "")
+              }
+              style={fieldInputStyle}
+            />
+          </label>
+          <label style={fieldStackStyle}>
+            Owner passenger
+            <select
+              name="ownerPassengerId"
+              defaultValue={
+                isCreate ? "" : (selectedAddress?.ownerPassengerId ?? "")
+              }
+              style={fieldInputStyle}
+            >
+              <option value="">shared address</option>
+              {ownerOptions.map((passenger) => (
+                <option
+                  key={passenger.passengerId}
+                  value={passenger.passengerId}
+                >
+                  {passenger.fullName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={fullWidthFieldStyle}>
+            Address text
+            <textarea
+              name="addressText"
+              required
+              rows={4}
+              defaultValue={
+                isCreate ? "" : (selectedAddress?.addressText ?? "")
+              }
+              style={fieldInputStyle}
+            />
+          </label>
+          <label style={fieldStackStyle}>
+            Latitude
+            <input
+              name="lat"
+              type="number"
+              step="any"
+              defaultValue={isCreate ? "" : (selectedAddress?.lat ?? "")}
+              style={fieldInputStyle}
+            />
+          </label>
+          <label style={fieldStackStyle}>
+            Longitude
+            <input
+              name="lng"
+              type="number"
+              step="any"
+              defaultValue={isCreate ? "" : (selectedAddress?.lng ?? "")}
+              style={fieldInputStyle}
+            />
+          </label>
+          <label style={fullWidthFieldStyle}>
+            Tags
+            <input
+              name="tags"
+              placeholder="office, vip, warehouse"
+              defaultValue={
+                isCreate ? "" : (selectedAddress?.tags.join(", ") ?? "")
+              }
+              style={fieldInputStyle}
+            />
+          </label>
+          <label style={fieldStackStyle}>
+            Geocode source
+            <select
+              name="geocodeSource"
+              defaultValue={
+                isCreate ? "none" : (selectedAddress?.geocodeSource ?? "none")
+              }
+              style={fieldInputStyle}
+            >
+              <option value="none">none</option>
+              <option value="manual">manual</option>
+              <option value="provider">provider</option>
+            </select>
+          </label>
+          <label
+            style={{
+              ...fieldStackStyle,
+              justifyContent: "end",
+              minHeight: 76,
+              textTransform: "none",
+              letterSpacing: 0,
+            }}
+          >
+            <span style={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
+              Flags
+            </span>
+            <label style={{ color: th.text, display: "flex", gap: 8 }}>
+              <input
+                type="checkbox"
+                name="sensitiveFlag"
+                defaultChecked={
+                  isCreate ? false : Boolean(selectedAddress?.sensitiveFlag)
+                }
+              />
+              Sensitive / export masked
+            </label>
+            <label style={{ color: th.text, display: "flex", gap: 8 }}>
+              <input
+                type="checkbox"
+                name="activeFlag"
+                defaultChecked={
+                  isCreate ? true : (selectedAddress?.activeFlag ?? true)
+                }
+              />
+              Active
+            </label>
+          </label>
+        </div>
+        <div style={actionRowStyle}>
+          <button type="submit" style={primaryActionLinkStyle}>
+            {config.submitLabel}
+          </button>
+          <Link href="/addresses" style={ghostActionLinkStyle}>
+            取消
+          </Link>
+        </div>
+      </form>
+    </CanvasCard>
+  );
 }
 
 export default async function AddressesPage({
@@ -634,13 +984,18 @@ export default async function AddressesPage({
   const selectedOwner = resolvedSearchParams.owner?.trim() ?? "";
   const selectedTag = resolvedSearchParams.tag?.trim() ?? "";
   const selectedTab = getTab(resolvedSearchParams.tab);
-  const explicitEmptyReason = getEmptyReason(resolvedSearchParams.emptyReason);
-  const { addresses, exportRows, passengers, errors } =
-    await loadAddressPageData();
+  const mode = getMode(resolvedSearchParams.mode);
+  const flashMessage = getFlashMessage(resolvedSearchParams.notice);
+  const flashTone = getFlashTone(resolvedSearchParams.tone);
+
+  const { directory, passengers, errors } = await loadAddressPageData();
+  const addresses = [...(directory?.items ?? [])].sort(compareAddresses);
   const passengersById = new Map(
     passengers.map((row) => [row.passengerId, row]),
   );
-  const exportRowsById = new Map(exportRows.map((row) => [row.addressId, row]));
+  const exportRowsById = new Map(
+    (directory?.exportItems ?? []).map((row) => [row.addressId, row]),
+  );
   const rows = addresses
     .map((record) => toAddressRow(record, passengersById, exportRowsById))
     .filter((row) => matchesTab(row, selectedTab))
@@ -656,22 +1011,43 @@ export default async function AddressesPage({
   const allTags = [...new Set(addresses.flatMap((row) => row.tags))].sort(
     (left, right) => left.localeCompare(right, "zh-Hant"),
   );
-  const latestSnapshot = getLatestSnapshot(addresses, exportRows);
-  const refreshTone = getRefreshTone(errors, latestSnapshot);
-  const pageActions = buildPageActions();
+  const refreshTone = getRefreshTone(
+    directory?.refreshMetadata.dataFreshness ?? null,
+    errors,
+  );
   const emptyReason = getEmptyReasonForRows(
     rows,
     query,
     selectedOwner,
     selectedTag,
-    explicitEmptyReason,
-    addresses.length,
+    (directory?.emptyState?.reason as AddressEmptyReason | null) ?? null,
+    errors.length > 0,
   );
   const { tabs, activeTab } = buildTabs(
     selectedTab,
     query,
     selectedOwner,
     selectedTag,
+  );
+  const selectedAddress = getSelectedAddress(
+    rows.length > 0
+      ? rows
+      : addresses.map((record) =>
+          toAddressRow(record, passengersById, exportRowsById),
+        ),
+    resolvedSearchParams.addressId,
+  );
+  const returnTo = buildScopedHref(
+    query,
+    selectedTab,
+    selectedOwner,
+    selectedTag,
+    {
+      mode: null,
+      addressId: null,
+      notice: null,
+      tone: null,
+    },
   );
 
   const listColumns: CanvasTableColumn<AddressRow>[] = [
@@ -730,7 +1106,7 @@ export default async function AddressesPage({
       r: (row) => (
         <div style={pillWrapStyle}>
           {row.tags.length > 0 ? (
-            row.tags.map((tag: string) => (
+            row.tags.map((tag) => (
               <CanvasPill key={tag} theme={th} tone="info">
                 {tag}
               </CanvasPill>
@@ -749,7 +1125,7 @@ export default async function AddressesPage({
       r: (row) => (
         <div style={pillWrapStyle}>
           {row.qualitySummary.length > 0 ? (
-            row.qualitySummary.map((item: string) => (
+            row.qualitySummary.map((item) => (
               <CanvasPill key={item} theme={th} tone="warn">
                 {item}
               </CanvasPill>
@@ -776,13 +1152,25 @@ export default async function AddressesPage({
       w: 310,
       r: (row) => (
         <div style={actionRowStyle}>
-          {row.availableActions.map((action: ResourceActionDescriptor) =>
-            renderActionChip(action, buildActionHref(action, row)),
+          {row.availableActions.map((action) =>
+            renderActionChip(
+              action,
+              buildRowActionHref(
+                action,
+                row,
+                query,
+                selectedTab,
+                selectedOwner,
+                selectedTag,
+              ),
+              getActionLabel(action),
+            ),
           )}
         </div>
       ),
     },
   ];
+
   const exportColumns: CanvasTableColumn<AddressRow>[] = [
     listColumns[0]!,
     listColumns[1]!,
@@ -804,6 +1192,7 @@ export default async function AddressesPage({
     listColumns[6]!,
     listColumns[7]!,
   ];
+
   const columns = selectedTab === "export" ? exportColumns : listColumns;
   const emptyStateConfig = emptyReason ? EMPTY_STATE_CONFIG[emptyReason] : null;
 
@@ -812,28 +1201,45 @@ export default async function AddressesPage({
       <CanvasPageHeader
         theme={th}
         title="地址簿"
-        subtitle="Address book · T5 tenant slow · availableActions 驅動 create / export / edit / deactivate / reactivate"
+        subtitle="Address book · T5 tenant slow · backend availableActions / refreshMetadata / crossAppLinks"
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={
           <>
-            {pageActions.map((action) => (
-              <Link
-                key={action.action}
-                href={
-                  action.action === "create"
-                    ? "/addresses"
-                    : "/addresses?tab=export"
-                }
-                style={
-                  action.action === "create"
-                    ? primaryActionLinkStyle
-                    : actionLinkStyle
-                }
-              >
-                {action.action} · {action.riskLevel}
-              </Link>
-            ))}
+            {(directory?.availableActions ?? []).map((action) => {
+              const href = buildPageActionHref(
+                action,
+                query,
+                selectedTab,
+                selectedOwner,
+                selectedTag,
+              );
+              const label = getActionLabel(action);
+              if (!action.enabled || !href) {
+                return (
+                  <span
+                    key={action.action}
+                    style={disabledActionStyle}
+                    title={action.disabledReasonCode}
+                  >
+                    {label}
+                  </span>
+                );
+              }
+              return (
+                <Link
+                  key={action.action}
+                  href={href}
+                  style={
+                    action.action === "create"
+                      ? primaryActionLinkStyle
+                      : actionLinkStyle
+                  }
+                >
+                  {label}
+                </Link>
+              );
+            })}
           </>
         }
       />
@@ -844,13 +1250,27 @@ export default async function AddressesPage({
           tone={refreshTone === "success" ? "info" : "warn"}
           icon="clock"
           title="Refresh tier wired"
-          body={`T5 Tenant slow · 每 ${REFRESH_CADENCE_SECONDS}s 更新一次 · 最近快照 ${formatDateTime(latestSnapshot)} · tenant ${DEMO_TENANT_ID}`}
+          body={getRefreshBannerBody(directory, errors)}
           actions={
-            <Link href="/addresses" style={ghostActionLinkStyle}>
+            <Link href={returnTo} style={ghostActionLinkStyle}>
               refresh
             </Link>
           }
         />
+
+        {flashMessage ? (
+          <CanvasBanner
+            theme={th}
+            tone={flashTone === "warning" ? "warn" : "info"}
+            icon={flashTone === "warning" ? "warn" : "clock"}
+            title={
+              flashTone === "warning"
+                ? "Address action failed"
+                : "Address action completed"
+            }
+            body={flashMessage}
+          />
+        ) : null}
 
         {errors.length > 0 ? (
           <CanvasBanner
@@ -922,13 +1342,11 @@ export default async function AddressesPage({
                   style={fieldInputStyle}
                 >
                   <option value="">all owners</option>
-                  {passengers
-                    .filter((row) => row.activeFlag)
-                    .map((row) => (
-                      <option key={row.passengerId} value={row.passengerId}>
-                        {row.fullName}
-                      </option>
-                    ))}
+                  {passengers.map((row) => (
+                    <option key={row.passengerId} value={row.passengerId}>
+                      {row.fullName}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label style={fieldStackStyle}>
@@ -963,28 +1381,20 @@ export default async function AddressesPage({
             subtitle="Q-X03 / Q-TEN13"
           >
             <div style={cardStackStyle}>
-              <a
-                href={`${OPS_CONSOLE_URL}/complaints/CMP-2081?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}`}
-                rel="noreferrer"
-                style={externalLinkStyle}
-                target="_blank"
-              >
-                <span style={primaryTextStyle}>ops-console complaint</span>
-                <span style={secondaryTextStyle}>
-                  complaint reference opens in new tab
-                </span>
-              </a>
-              <a
-                href={`${PLATFORM_ADMIN_URL}/audit?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}&auditId=audit-address-reactivation`}
-                rel="noreferrer"
-                style={externalLinkStyle}
-                target="_blank"
-              >
-                <span style={primaryTextStyle}>platform-admin audit</span>
-                <span style={secondaryTextStyle}>
-                  tenant audit rows can deep-link across actor realms
-                </span>
-              </a>
+              {(directory?.crossAppLinks ?? []).map((link) => (
+                <a
+                  key={`${link.targetApp}-${link.resourceId}`}
+                  href={buildExternalHref(link)}
+                  rel="noreferrer"
+                  style={externalLinkStyle}
+                  target="_blank"
+                >
+                  <span style={primaryTextStyle}>{link.label}</span>
+                  <span style={secondaryTextStyle}>
+                    {link.targetApp} · {link.resourceType} · opens in new tab
+                  </span>
+                </a>
+              ))}
               <CanvasDL
                 theme={th}
                 cols={1}
@@ -995,8 +1405,8 @@ export default async function AddressesPage({
                     mono: true,
                   },
                   {
-                    k: "soft deactivate",
-                    v: "high risk · requires reason · historical bookings keep snapshot",
+                    k: "directory source",
+                    v: "GET /api/tenant/addresses returns items + exportItems + refreshMetadata",
                   },
                 ]}
               />
@@ -1010,7 +1420,7 @@ export default async function AddressesPage({
             title="Directory rows"
             subtitle={
               selectedTab === "export"
-                ? "Masked export view · owner reference · active flag · availableActions"
+                ? "Masked export view · owner reference · active flag · backend row availableActions"
                 : "Owner link · tags · lat/lng · geocode quality · row-level availableActions"
             }
             padding={0}
@@ -1023,7 +1433,13 @@ export default async function AddressesPage({
                 <h2 style={emptyTitleStyle}>{emptyStateConfig.title}</h2>
                 <p style={emptyCopyStyle}>{emptyStateConfig.body}</p>
                 <Link
-                  href={emptyStateConfig.href}
+                  href={getEmptyStateHref(
+                    emptyReason,
+                    query,
+                    selectedTab,
+                    selectedOwner,
+                    selectedTag,
+                  )}
                   style={primaryActionLinkStyle}
                 >
                   {emptyStateConfig.ctaLabel}
@@ -1040,27 +1456,12 @@ export default async function AddressesPage({
           </CanvasCard>
 
           <div style={cardStackStyle}>
-            <CanvasCard
-              theme={th}
-              title="EmptyReason preview"
-              subtitle="6 states rendered distinctly"
-            >
-              <div style={pillWrapStyle}>
-                {Object.keys(EMPTY_STATE_CONFIG).map((reason) => (
-                  <Link
-                    key={reason}
-                    href={`/addresses?emptyReason=${reason}`}
-                    style={
-                      reason === emptyReason
-                        ? primaryActionLinkStyle
-                        : actionLinkStyle
-                    }
-                  >
-                    {reason}
-                  </Link>
-                ))}
-              </div>
-            </CanvasCard>
+            <ActionFormCard
+              mode={mode}
+              selectedAddress={selectedAddress}
+              passengers={passengers}
+              returnTo={returnTo}
+            />
 
             <CanvasCard
               theme={th}
@@ -1093,10 +1494,7 @@ export default async function AddressesPage({
                           dropoff prefill
                         </Link>
                         {row.ownerPassengerId ? (
-                          <Link
-                            href={`/passengers?q=${encodeURIComponent(row.ownerPassengerId)}`}
-                            style={ghostActionLinkStyle}
-                          >
+                          <Link href="/passengers" style={ghostActionLinkStyle}>
                             owner passenger
                           </Link>
                         ) : null}
@@ -1106,25 +1504,39 @@ export default async function AddressesPage({
                 </div>
               ) : (
                 <p style={emptyCopyStyle}>
-                  empty state 時仍保留 distinct CTA，不假設 row actions 可用。
+                  empty state 時只顯示可用 CTA，不假設 row exits 仍可用。
                 </p>
               )}
             </CanvasCard>
 
             <CanvasCard
               theme={th}
-              title="Disabled reason codes"
-              subtitle="enabled=false affordances remain visible"
+              title="EmptyReason library"
+              subtitle="6 states rendered distinctly"
             >
               <div style={cardStackStyle}>
-                <div>
-                  <div style={actionRowStyle}>
-                    <span style={disabledActionStyle}>reactivate · medium</span>
-                    <span style={disabledActionStyle}>deactivate · high</span>
-                  </div>
-                </div>
-                <div style={actionMetaStyle}>already_active</div>
-                <div style={actionMetaStyle}>already_inactive</div>
+                {(Object.keys(EMPTY_STATE_CONFIG) as AddressEmptyReason[]).map(
+                  (reason) => (
+                    <div key={reason}>
+                      <div style={pillWrapStyle}>
+                        <CanvasPill
+                          theme={th}
+                          tone={EMPTY_STATE_CONFIG[reason].tone}
+                        >
+                          {reason}
+                        </CanvasPill>
+                      </div>
+                      <div style={{ marginTop: 6 }}>
+                        <div style={primaryTextStyle}>
+                          {EMPTY_STATE_CONFIG[reason].title}
+                        </div>
+                        <div style={secondaryTextStyle}>
+                          {EMPTY_STATE_CONFIG[reason].body}
+                        </div>
+                      </div>
+                    </div>
+                  ),
+                )}
               </div>
             </CanvasCard>
           </div>

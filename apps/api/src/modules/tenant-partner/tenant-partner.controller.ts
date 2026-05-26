@@ -25,6 +25,7 @@ import type {
   ListOpsPendingApprovalRequestsQuery,
   TenantBookingQuotaImpactPreview,
   TenantBookingQuotaImpactQuery,
+  TenantAddressDirectoryResponse,
   TenantCostCenterCoverageReport,
   IssueTenantApiKeyCommand,
   ListTenantBookingApprovalRequestsQuery,
@@ -426,6 +427,22 @@ export class TenantPartnerController {
   @Get("tenant/addresses")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listAddresses(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const directory: TenantAddressDirectoryResponse =
+      this.tenantPartnerService.getAddressDirectory(
+        this.requireTenantId(tenantId),
+        this.resolveTenantActorRoleCode(identity),
+        requestId,
+      );
+    return toApiSuccessEnvelope(directory, requestId);
+  }
+
+  @Get("tenant/address-records")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listAddressRecords(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {

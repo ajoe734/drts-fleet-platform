@@ -55,6 +55,9 @@ import type {
   ListTenantCostCentersQuery,
   ListTenantApprovalRulesQuery,
   RejectTenantBookingApprovalRequestCommand,
+  ResourceActionDescriptor,
+  TenantAddressDirectoryRecord,
+  TenantAddressDirectoryResponse,
   TenantAddressExportViewRecord,
   TenantAddressGeocodeSource,
   TenantAddressQualityIssue,
@@ -97,6 +100,7 @@ import type {
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
+  UiRefreshMetadata,
   UpsertTenantAddressCommand,
   UpsertTenantApprovalRuleCommand,
   UpsertTenantCostCenterCommand,
@@ -172,6 +176,7 @@ import {
 import { evaluateTenantApprovalRules } from "./tenant-approval-rule-evaluator";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
+const TENANT_SLOW_REFRESH_MS = 30_000;
 
 type WebhookSecretRotationRecord = TenantWebhookSecretRotationRecord;
 
@@ -1246,6 +1251,81 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePassenger(passenger);
   }
 
+  getAddressDirectory(
+    tenantId: string,
+    actorRoleCode: string | null,
+    requestId?: string,
+  ): TenantAddressDirectoryResponse {
+    const items = this.addresses
+      .filter((address) => address.tenantId === tenantId)
+      .map((address) =>
+        this.buildTenantAddressDirectoryRecord(address, actorRoleCode),
+      );
+    const generatedAt = new Date().toISOString();
+    const pageActions = this.buildTenantAddressPageActions(actorRoleCode);
+    const refreshMetadata: UiRefreshMetadata = {
+      generatedAt,
+      staleAfterMs: TENANT_SLOW_REFRESH_MS,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+    const createAction =
+      pageActions.find((action) => action.action === "create") ?? null;
+    const emptyState =
+      items.length === 0
+        ? {
+            reason: "no_data" as const,
+            messageCode: "tenant.addresses.empty.no_data",
+            ...(createAction ? { nextAction: createAction } : {}),
+          }
+        : null;
+
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "list_address_directory",
+        resourceType: "tenant_address_directory",
+        resourceId: tenantId,
+        newValuesSummary: {
+          generatedAt,
+          itemCount: items.length,
+          actorRoleCode,
+        },
+      },
+      requestId,
+    );
+
+    return {
+      tenantId,
+      items,
+      exportItems: this.listAddressExportView(tenantId),
+      availableActions: pageActions,
+      refreshMetadata,
+      emptyState,
+      crossAppLinks: [
+        {
+          targetApp: "ops-console",
+          route: `/complaints/CMP-2081?tenantId=${encodeURIComponent(tenantId)}`,
+          resourceType: "complaint_case",
+          resourceId: "CMP-2081",
+          openMode: "new_tab",
+          label: "ops-console complaint",
+        },
+        {
+          targetApp: "platform-admin",
+          route: `/audit?tenantId=${encodeURIComponent(tenantId)}&auditId=audit-address-reactivation`,
+          resourceType: "audit_log",
+          resourceId: "audit-address-reactivation",
+          openMode: "new_tab",
+          label: "platform-admin audit",
+        },
+      ],
+    };
+  }
+
   listAddresses(tenantId: string) {
     return this.addresses
       .filter((address) => address.tenantId === tenantId)
@@ -1270,6 +1350,94 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         activeFlag: address.activeFlag,
         exportGeneratedAt: generatedAt,
       }));
+  }
+
+  private canManageTenantAddresses(actorRoleCode: string | null) {
+    return actorRoleCode === "tc_admin" || actorRoleCode === "tc_operator";
+  }
+
+  private buildTenantAddressPageActions(
+    actorRoleCode: string | null,
+  ): ResourceActionDescriptor[] {
+    const canManage = this.canManageTenantAddresses(actorRoleCode);
+    return [
+      {
+        action: "create",
+        enabled: canManage,
+        ...(canManage
+          ? {}
+          : { disabledReasonCode: "role_read_only_for_addresses" }),
+        riskLevel: "medium",
+      },
+      {
+        action: "export",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
+  }
+
+  private buildTenantAddressRowActions(
+    address: TenantAddressRecord,
+    actorRoleCode: string | null,
+  ): ResourceActionDescriptor[] {
+    const canManage = this.canManageTenantAddresses(actorRoleCode);
+    const disabledReason = canManage
+      ? undefined
+      : "role_read_only_for_addresses";
+    const actions: ResourceActionDescriptor[] = [
+      {
+        action: "update",
+        enabled: canManage,
+        ...(disabledReason ? { disabledReasonCode: disabledReason } : {}),
+        riskLevel: "medium",
+      },
+    ];
+
+    if (address.activeFlag) {
+      actions.push({
+        action: "deactivate",
+        enabled: canManage,
+        ...(disabledReason ? { disabledReasonCode: disabledReason } : {}),
+        requiresReason: true,
+        riskLevel: "high",
+      });
+      actions.push({
+        action: "reactivate",
+        enabled: false,
+        disabledReasonCode: "already_active",
+        riskLevel: "medium",
+      });
+      return actions;
+    }
+
+    actions.push({
+      action: "deactivate",
+      enabled: false,
+      disabledReasonCode: "already_inactive",
+      requiresReason: true,
+      riskLevel: "high",
+    });
+    actions.push({
+      action: "reactivate",
+      enabled: canManage,
+      ...(disabledReason ? { disabledReasonCode: disabledReason } : {}),
+      riskLevel: "medium",
+    });
+    return actions;
+  }
+
+  private buildTenantAddressDirectoryRecord(
+    address: TenantAddressRecord,
+    actorRoleCode: string | null,
+  ): TenantAddressDirectoryRecord {
+    return {
+      ...this.cloneAddress(address),
+      availableActions: this.buildTenantAddressRowActions(
+        address,
+        actorRoleCode,
+      ),
+    };
   }
 
   getAddressMasterRecord(tenantId: string, addressId: string) {
@@ -1345,6 +1513,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             address.tenantId === tenantId && address.addressId === addressId,
         ) ?? null)
       : null;
+    const reasonNote = this.normalizeNullableText(command.reasonNote);
+    const nextActiveFlag = command.activeFlag ?? existing?.activeFlag ?? true;
+    if (existing?.activeFlag && !nextActiveFlag && reasonNote === null) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ADDRESS_DEACTIVATE_REASON_REQUIRED",
+        "Soft deactivating a tenant address requires a reason note.",
+      );
+    }
     const normalizedTags = this.normalizeAddressTags(
       command.tags ?? existing?.tags,
     );
@@ -1421,10 +1598,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actorType: "tenant_admin",
         tenantId,
         moduleName: "tenant-partner",
-        actionName: "upsert_address",
+        actionName:
+          existing?.activeFlag && !nextActiveFlag
+            ? "deactivate_address"
+            : !existing?.activeFlag && nextActiveFlag
+              ? "reactivate_address"
+              : existing
+                ? "update_address"
+                : "create_address",
         resourceType: "tenant_address",
         resourceId: address.addressId,
-        newValuesSummary: this.buildAddressAuditSummary(address),
+        newValuesSummary: {
+          ...this.buildAddressAuditSummary(address),
+          reasonNote,
+        },
       },
       requestId,
     );

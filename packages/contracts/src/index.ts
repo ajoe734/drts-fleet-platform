@@ -1,5 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -1017,6 +1023,7 @@ export interface UpsertTenantAddressCommand {
   lng?: number | null;
   tags?: string[];
   activeFlag?: boolean;
+  reasonNote?: string;
 }
 
 export interface TenantAddressExportViewRecord {
@@ -1031,6 +1038,20 @@ export interface TenantAddressExportViewRecord {
   tags: string[];
   activeFlag: boolean;
   exportGeneratedAt: string;
+}
+
+export interface TenantAddressDirectoryRecord extends TenantAddressRecord {
+  availableActions: ResourceActionDescriptor[];
+}
+
+export interface TenantAddressDirectoryResponse {
+  tenantId: string;
+  items: TenantAddressDirectoryRecord[];
+  exportItems: TenantAddressExportViewRecord[];
+  availableActions: ResourceActionDescriptor[];
+  refreshMetadata: UiRefreshMetadata;
+  emptyState: EmptyStateEnvelope | null;
+  crossAppLinks: CrossAppResourceLink[];
 }
 
 export interface TenantCostCenterRecord {
