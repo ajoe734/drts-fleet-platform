@@ -442,6 +442,11 @@ export default function ComplaintsPage() {
                   </div>
                   <p>{record.description}</p>
                   <small>{formatRelativeSla(record.slaDueAt, locale)}</small>
+                  <span className="table-subcopy">
+                    {locale === "en"
+                      ? "Open dedicated detail route below"
+                      : "下方可開啟獨立 detail route"}
+                  </span>
                 </button>
               ))}
             </div>
@@ -678,7 +683,25 @@ export default function ComplaintsPage() {
                         }
                         onClick={() => setSelectedCaseNo(record.caseNo)}
                       >
-                        <td>{record.caseNo}</td>
+                        <td>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "0.2rem",
+                              alignItems: "flex-start",
+                            }}
+                          >
+                            <strong>{record.caseNo}</strong>
+                            <Link
+                              className="inline-link"
+                              href={`/complaints/${encodeURIComponent(record.caseNo)}`}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {locale === "en" ? "Open detail" : "開啟詳情"}
+                            </Link>
+                          </div>
+                        </td>
                         <td>{formatOpsCodeLabel(locale, record.category)}</td>
                         <td>
                           <div>{formatOpsCodeLabel(locale, record.status)}</div>
