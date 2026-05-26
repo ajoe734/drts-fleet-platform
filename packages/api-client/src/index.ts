@@ -96,6 +96,7 @@ import type {
   IncidentRecord,
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
+  SearchResultRecord,
   ServiceRecoveryActionRecord,
   InitiateVehicleOffboardingCommand,
   InsurancePolicyRecord,
@@ -250,9 +251,26 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+export interface RealmSearchQuery {
+  q: string;
+  types?: string[];
+}
+
 interface ListEnvelope<T> {
   items: T[];
 }
+
+interface SearchResultGroup {
+  category: string;
+  items: SearchResultRecord[];
+}
+
+type SearchResultsResponse =
+  | SearchResultRecord[]
+  | SearchResultGroup[]
+  | ListEnvelope<SearchResultRecord>
+  | ListEnvelope<SearchResultGroup>
+  | { groups: SearchResultGroup[] };
 
 function snakeToCamelCase(key: string): string {
   return key.replace(/_([a-z])/g, (_match, letter: string) =>
@@ -291,6 +309,63 @@ function createRequestToken(): string {
 function hasHeader(headers: Record<string, string>, key: string): boolean {
   const target = key.toLowerCase();
   return Object.keys(headers).some((header) => header.toLowerCase() === target);
+}
+
+function isSearchResultGroup(
+  value: SearchResultRecord | SearchResultGroup,
+): value is SearchResultGroup {
+  return "items" in value;
+}
+
+function isSearchResultGroupArray(
+  value: SearchResultRecord[] | SearchResultGroup[],
+): value is SearchResultGroup[] {
+  return value.length > 0 && isSearchResultGroup(value[0]);
+}
+
+function normalizeSearchResults(
+  payload: SearchResultsResponse,
+): SearchResultRecord[] {
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) {
+      return [];
+    }
+
+    return isSearchResultGroupArray(payload)
+      ? payload.flatMap((group) => group.items)
+      : payload;
+  }
+
+  if ("groups" in payload) {
+    return payload.groups.flatMap((group) => group.items);
+  }
+
+  const { items } = payload;
+
+  if (items.length === 0) {
+    return [];
+  }
+
+  return isSearchResultGroupArray(items)
+    ? items.flatMap((group) => group.items)
+    : items;
+}
+
+function buildRealmSearchPath(
+  basePath: string,
+  query: RealmSearchQuery,
+): string {
+  const params = new URLSearchParams();
+  params.set("q", query.q);
+
+  const types = query.types
+    ?.map((type) => type.trim())
+    .filter((type) => type.length > 0);
+  if (types && types.length > 0) {
+    params.set("types", types.join(","));
+  }
+
+  return `${basePath}?${params.toString()}`;
 }
 
 export class ApiClient {
@@ -351,6 +426,16 @@ export class ApiClient {
   ): Promise<T[]> {
     const result = await this.get<T[] | ListEnvelope<T>>(path, options);
     return Array.isArray(result) ? result : (result.items ?? []);
+  }
+
+  private async searchRealm(
+    path: string,
+    query: RealmSearchQuery,
+  ): Promise<SearchResultRecord[]> {
+    const result = await this.get<SearchResultsResponse>(
+      buildRealmSearchPath(path, query),
+    );
+    return normalizeSearchResults(result);
   }
 
   private async request<T>(
@@ -549,6 +634,22 @@ export class ApiClient {
         body: command,
       },
     );
+  }
+
+  // ── Cross-Entity Search ──
+
+  async searchOps(query: RealmSearchQuery): Promise<SearchResultRecord[]> {
+    return this.searchRealm("/api/ops/search", query);
+  }
+
+  async searchPlatform(
+    query: RealmSearchQuery,
+  ): Promise<SearchResultRecord[]> {
+    return this.searchRealm("/api/platform/search", query);
+  }
+
+  async searchTenant(query: RealmSearchQuery): Promise<SearchResultRecord[]> {
+    return this.searchRealm("/api/tenant/search", query);
   }
 
   // ── Owned Mobility: Orders ──

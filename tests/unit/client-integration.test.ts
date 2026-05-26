@@ -279,6 +279,203 @@ describe("W8-001A shared api client list handling", () => {
     );
   });
 
+  it("targets realm search endpoints and flattens grouped search results", async () => {
+    const groupedResultsByPath = new Map<string, unknown>([
+      [
+        "/api/ops/search?q=alice&types=orders%2Cdrivers",
+        {
+          groups: [
+            {
+              category: "orders",
+              items: [
+                {
+                  category: "orders",
+                  resource_type: "order",
+                  resource_id: "order-001",
+                  primary_label: "Order 001",
+                  secondary_label: "Alice Rider",
+                  link: {
+                    target_app: "ops-console",
+                    route: "/orders/order-001",
+                    resource_type: "order",
+                    resource_id: "order-001",
+                    open_mode: "same_tab",
+                    label: "Open order",
+                  },
+                  matched_fields: ["passenger_name"],
+                },
+              ],
+            },
+            {
+              category: "drivers",
+              items: [
+                {
+                  category: "drivers",
+                  resource_type: "driver",
+                  resource_id: "drv-001",
+                  primary_label: "Alice Driver",
+                  link: {
+                    target_app: "ops-console",
+                    route: "/drivers/drv-001",
+                    resource_type: "driver",
+                    resource_id: "drv-001",
+                    open_mode: "same_tab",
+                    label: "Open driver",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      [
+        "/api/platform/search?q=tenant-demo",
+        {
+          groups: [
+            {
+              category: "tenants",
+              items: [
+                {
+                  category: "tenants",
+                  resource_type: "tenant",
+                  resource_id: "tenant-demo-001",
+                  primary_label: "Tenant Demo",
+                  link: {
+                    target_app: "platform-admin",
+                    route: "/tenants/tenant-demo-001",
+                    resource_type: "tenant",
+                    resource_id: "tenant-demo-001",
+                    open_mode: "same_tab",
+                    label: "Open tenant",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      [
+        "/api/tenant/search?q=invoice&types=invoices",
+        {
+          groups: [
+            {
+              category: "invoices",
+              items: [
+                {
+                  category: "invoices",
+                  resource_type: "invoice",
+                  resource_id: "inv-001",
+                  primary_label: "Invoice INV-001",
+                  link: {
+                    target_app: "tenant-console",
+                    route: "/invoices/inv-001",
+                    resource_type: "invoice",
+                    resource_id: "inv-001",
+                    open_mode: "same_tab",
+                    label: "Open invoice",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    ]);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      const pathWithQuery = `${new URL(url).pathname}${new URL(url).search}`;
+
+      return {
+        ok: true,
+        json: async () => ({
+          data: groupedResultsByPath.get(pathWithQuery) ?? { groups: [] },
+        }),
+        text: async () => "",
+      } as Response;
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await expect(
+      client.searchOps({ q: "alice", types: ["orders", "drivers"] }),
+    ).resolves.toEqual([
+      {
+        category: "orders",
+        resourceType: "order",
+        resourceId: "order-001",
+        primaryLabel: "Order 001",
+        secondaryLabel: "Alice Rider",
+        link: {
+          targetApp: "ops-console",
+          route: "/orders/order-001",
+          resourceType: "order",
+          resourceId: "order-001",
+          openMode: "same_tab",
+          label: "Open order",
+        },
+        matchedFields: ["passenger_name"],
+      },
+      {
+        category: "drivers",
+        resourceType: "driver",
+        resourceId: "drv-001",
+        primaryLabel: "Alice Driver",
+        link: {
+          targetApp: "ops-console",
+          route: "/drivers/drv-001",
+          resourceType: "driver",
+          resourceId: "drv-001",
+          openMode: "same_tab",
+          label: "Open driver",
+        },
+      },
+    ]);
+    await expect(client.searchPlatform({ q: "tenant-demo" })).resolves.toEqual(
+      [
+        {
+          category: "tenants",
+          resourceType: "tenant",
+          resourceId: "tenant-demo-001",
+          primaryLabel: "Tenant Demo",
+          link: {
+            targetApp: "platform-admin",
+            route: "/tenants/tenant-demo-001",
+            resourceType: "tenant",
+            resourceId: "tenant-demo-001",
+            openMode: "same_tab",
+            label: "Open tenant",
+          },
+        },
+      ],
+    );
+    await expect(
+      client.searchTenant({ q: "invoice", types: ["invoices"] }),
+    ).resolves.toEqual([
+      {
+        category: "invoices",
+        resourceType: "invoice",
+        resourceId: "inv-001",
+        primaryLabel: "Invoice INV-001",
+        link: {
+          targetApp: "tenant-console",
+          route: "/invoices/inv-001",
+          resourceType: "invoice",
+          resourceId: "inv-001",
+          openMode: "same_tab",
+          label: "Open invoice",
+        },
+      },
+    ]);
+  });
+
   it("uses the canonical /api/reports/jobs route for report creation", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
