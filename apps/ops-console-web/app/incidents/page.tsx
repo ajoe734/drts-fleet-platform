@@ -472,30 +472,32 @@ function renderEmptyState(
       actions={
         <>
           {emptyRefreshAction ? (
-            <Btn
-              theme={theme}
-              variant={getActionVariant(emptyRefreshAction)}
-              danger={isDangerAction(emptyRefreshAction)}
-              icon="more"
-              disabled={emptyRefreshAction.enabled === false}
-              title={getActionTitle(emptyRefreshAction, locale)}
-              onClick={onRefresh}
-            >
-              {locale === "en" ? "Refresh" : "重新整理"}
-            </Btn>
+            <span title={getActionTitle(emptyRefreshAction, locale)}>
+              <Btn
+                theme={theme}
+                variant={getActionVariant(emptyRefreshAction)}
+                danger={isDangerAction(emptyRefreshAction)}
+                icon="more"
+                disabled={emptyRefreshAction.enabled === false}
+                onClick={onRefresh}
+              >
+                {locale === "en" ? "Refresh" : "重新整理"}
+              </Btn>
+            </span>
           ) : null}
           {emptyCreateAction ? (
-            <Btn
-              theme={theme}
-              variant={getActionVariant(emptyCreateAction)}
-              danger={isDangerAction(emptyCreateAction)}
-              icon="plus"
-              disabled={emptyCreateAction.enabled === false}
-              title={getActionTitle(emptyCreateAction, locale)}
-              onClick={onCreate}
-            >
-              {locale === "en" ? "Create incident" : "建立事故"}
-            </Btn>
+            <span title={getActionTitle(emptyCreateAction, locale)}>
+              <Btn
+                theme={theme}
+                variant={getActionVariant(emptyCreateAction)}
+                danger={isDangerAction(emptyCreateAction)}
+                icon="plus"
+                disabled={emptyCreateAction.enabled === false}
+                onClick={onCreate}
+              >
+                {locale === "en" ? "Create incident" : "建立事故"}
+              </Btn>
+            </span>
           ) : null}
         </>
       }
