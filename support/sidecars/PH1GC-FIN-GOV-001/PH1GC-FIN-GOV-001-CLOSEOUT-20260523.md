@@ -1,15 +1,17 @@
 # PH1GC-FIN-GOV-001 — Closeout Report
 
-Date: 2026-05-23 (initial); 2026-05-25 (Codex2 review reconciliation refresh)
+Date: 2026-05-23 (initial); 2026-05-25 (Codex2 review reconciliation refresh); 2026-05-26 (chair-reassignment reviewer refresh)
 Task: `PH1GC-FIN-GOV-001`
 Owner: `Claude`
-Reviewer: `Codex2`
+Reviewer: `Claude2` (chair-reassigned from `Codex2` on 2026-05-26T18:14:08Z)
 Authority: directive §H `FIN-GOV-001` — `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
 Predecessor evidence pack: `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`
 
 This closeout follows the directive §7 format. It records what landed on `origin/dev` (and what is staged on the owner branch for the next merge) for the governance-aware billing/reporting slice, the canonical 13-field verification body coverage, the directive-mandated verification commands, and the external dependencies that remain on adjacent tasks.
 
 The 2026-05-25 refresh exists because reviewer `Codex2` reopened the prior closeout: the previous draft of this report counted `ownerName` + `approvalEvaluationId` as strict body fields and relegated `auditId` + `reportArtifactId` to "chain extras", which contradicts the spec's §3.8 directive-to-strict reconciliation now landing on this branch. The reconciliation aligns the closeout, the spec, the UAT, and the E2E script on the same canonical 13-field body.
+
+The 2026-05-26 refresh exists because the chairman reassigned the reviewer lane from `Codex2` to `Claude2` (see `ai-activity-log.jsonl` `chair_reassignment_applied` event at `2026-05-26T18:14:08Z`) after the prior owner lane (Codex2 then Codex) hit the 2/2 terminal worker-exit cap without finalizing the task. The content of the reconciliation is unchanged — only the reviewer pointer is updated so the closeout matches `ai-status.json`. Repo-local verification was rerun on 2026-05-26 against the same artifacts and still passes (see §3).
 
 ---
 
@@ -18,7 +20,7 @@ The 2026-05-25 refresh exists because reviewer `Codex2` reopened the prior close
 ```text
 Task ID:                       PH1GC-FIN-GOV-001
 Owner:                         Claude
-Reviewer:                      Codex2
+Reviewer:                      Claude2 (chair-reassigned from Codex2 on 2026-05-26T18:14:08Z)
 Branch:                        claude/ph1gc-fin-gov-001 (base: dev)
 PR:                            #237 (PH1GC-DOC-BATCH-1) merged the initial spec + UAT; #256 (PH1GC-E2E-010) merged the executable proof; the owner-lane reconciliation PR (the next push from `claude/ph1gc-fin-gov-001`) layers the canonical 13-field reconciliation (spec §3.8, UAT §4, E2E `VB_FIELD_NAMES`) on top. Codex draft PR `#290` is the parallel-lane source of the same reconciliation; the content adopted here is the canonical 13-field interpretation captured by that draft.
 Commit:                        Recorded by ai-status.sh done at closeout time (see machine truth COMMIT_HASH after push).
@@ -115,6 +117,8 @@ Repo-local verification was rerun on this branch on 2026-05-25 against the recon
 - `git cat-file -e origin/dev:tests/e2e/E2E-010-governance-aware-billing-reporting.sh` — passed (baseline file present; canonical `VB_FIELD_NAMES` lands when this PR merges).
 - `awk '/^readonly -a VB_FIELD_NAMES=\(/,/^\)/' tests/e2e/E2E-010-governance-aware-billing-reporting.sh | grep -cE '^[[:space:]]+"[a-zA-Z_]+"[[:space:]]*$'` — `13`.
 - `grep -nE '^readonly EXPECTED_VB_FIELD_COUNT=13$' tests/e2e/E2E-010-governance-aware-billing-reporting.sh` — present.
+
+The same set of repo-local checks was rerun by owner `Claude` from the isolated worker worktree on 2026-05-26 after the chair-reassignment (`claude/ph1gc-fin-gov-001`, 2 commits ahead of `origin/dev`: `7d2605f7` + `dcbde9c9`). All seven checks above still pass on the same content; only the closeout reviewer pointer was updated in this pass. No spec/UAT/E2E content was reshaped during the 2026-05-26 reverification.
 
 A live `WF-FIN-GOV-001` staging rerun was **not** executed by this closeout because the staging IAP/WIF token-mint path remains externally blocked (see §4).
 
