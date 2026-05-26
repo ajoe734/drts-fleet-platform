@@ -64,6 +64,8 @@ const ACTION_CREATE_FROM_DISPATCH_EXCEPTION =
 const ACTION_REFRESH_INCIDENTS = "refresh_incidents";
 const ACTION_OPEN_FEATURE_FLAGS = "open_feature_flags";
 const ACTION_OPEN_DASHBOARD = "open_dashboard";
+const ACTION_OPEN_INCIDENT_DETAIL = "open_incident_detail";
+const ACTION_ADD_SERVICE_RECOVERY = "add_service_recovery";
 
 const STATUSES: IncidentStatus[] = [...INCIDENT_STATUSES];
 const SEVERITIES: IncidentSeverity[] = [...INCIDENT_SEVERITIES];
@@ -99,11 +101,14 @@ type IncidentTableRow = Record<string, unknown> & {
   statusCell: ReactElement;
   coordinationCell: ReactElement;
   linksCell: ReactElement;
+  actionsCell: ReactElement;
   reportedBy: string;
   occurredCell: ReactElement;
   ageCell: ReactElement;
   _selected?: boolean;
 };
+
+type IncidentCreateMode = "manual" | "dispatch_exception";
 
 function formatDateTime(value: string | null | undefined, locale: "en" | "zh") {
   if (!value) {
@@ -323,6 +328,13 @@ function isRefreshActionName(action: string) {
   );
 }
 
+function getCreateModeForAction(action: string): IncidentCreateMode {
+  return action === ACTION_CREATE_FROM_DISPATCH_EXCEPTION ||
+    action === "createIncidentFromDispatchException"
+    ? "dispatch_exception"
+    : "manual";
+}
+
 function isRouteActionName(action: string) {
   return (
     action === ACTION_OPEN_FEATURE_FLAGS || action === ACTION_OPEN_DASHBOARD
@@ -334,6 +346,10 @@ function getActionLabel(
   locale: "en" | "zh",
 ) {
   switch (action?.action) {
+    case ACTION_ADD_SERVICE_RECOVERY:
+      return locale === "en" ? "Add recovery" : "新增 recovery";
+    case ACTION_OPEN_INCIDENT_DETAIL:
+      return locale === "en" ? "Open incident" : "開啟事件";
     case ACTION_CREATE_FROM_DISPATCH_EXCEPTION:
       return locale === "en"
         ? "Create from dispatch exception"
@@ -724,6 +740,7 @@ export default function IncidentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [createMode, setCreateMode] = useState<IncidentCreateMode>("manual");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | "all">(
     "all",
@@ -897,7 +914,10 @@ export default function IncidentsPage() {
       (record.status === "open" || record.status === "investigating"),
   );
 
-  const createAction = getActionDescriptor(pageActions, [
+  const createActions = pageActions.filter((action) =>
+    isCreateActionName(action.action),
+  );
+  const createAction = getActionDescriptor(createActions, [
     ...(dispatchExceptionOrderId
       ? [ACTION_CREATE_FROM_DISPATCH_EXCEPTION, ACTION_CREATE_INCIDENT]
       : [ACTION_CREATE_INCIDENT, ACTION_CREATE_FROM_DISPATCH_EXCEPTION]),
@@ -930,20 +950,20 @@ export default function IncidentsPage() {
           </Btn>
         </span>
       ) : null}
-      {createAction ? (
-        <span title={getActionTitle(createAction, locale)}>
+      {createActions.map((action) => (
+        <span key={action.action} title={getActionTitle(action, locale)}>
           <Btn
             theme={theme}
-            variant={getActionVariant(createAction)}
-            danger={isDangerAction(createAction)}
+            variant={getActionVariant(action)}
+            danger={isDangerAction(action)}
             icon="plus"
-            disabled={createAction.enabled === false}
-            onClick={() => handleAction(createAction)}
+            disabled={action.enabled === false}
+            onClick={() => handleAction(action)}
           >
-            {getActionLabel(createAction, locale)}
+            {getActionLabel(action, locale)}
           </Btn>
         </span>
-      ) : null}
+      ))}
     </>
   );
   const refreshIntervalMs = getRefreshIntervalMs(refreshTier);
@@ -951,6 +971,12 @@ export default function IncidentsPage() {
   const effectiveEmptyState = filteredEmpty
     ? buildFallbackEmptyState("filtered_empty")
     : emptyState;
+
+  useEffect(() => {
+    if (dispatchExceptionOrderId) {
+      setCreateMode("dispatch_exception");
+    }
+  }, [dispatchExceptionOrderId]);
 
   useEffect(() => {
     void loadRecords(false);
@@ -961,6 +987,7 @@ export default function IncidentsPage() {
       return;
     }
 
+    setCreateMode(getCreateModeForAction(createAction.action));
     setShowCreate(true);
   }, [createAction, createFromQuery]);
 
@@ -990,6 +1017,7 @@ export default function IncidentsPage() {
       case "create":
       case "createIncident":
       case "createIncidentFromDispatchException":
+        setCreateMode(getCreateModeForAction(action.action));
         setShowCreate(true);
         return;
       case ACTION_REFRESH_INCIDENTS:
@@ -1011,6 +1039,14 @@ export default function IncidentsPage() {
   });
 
   const tableRows: IncidentTableRow[] = filteredRecords.map((record) => {
+    const rowActions = record.availableActions ?? [];
+    const openDetailAction = getActionDescriptor(rowActions, [
+      ACTION_OPEN_INCIDENT_DETAIL,
+    ]);
+    const addRecoveryAction = getActionDescriptor(rowActions, [
+      ACTION_ADD_SERVICE_RECOVERY,
+    ]);
+
     return {
       incidentId: record.incidentId,
       incidentCell: (
@@ -1114,6 +1150,80 @@ export default function IncidentsPage() {
           ) : null}
         </div>
       ),
+      actionsCell: (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            minWidth: 150,
+          }}
+        >
+          {openDetailAction ? (
+            <span title={getActionTitle(openDetailAction, locale)}>
+              {openDetailAction.enabled === false ? (
+                <Btn
+                  theme={theme}
+                  variant={getActionVariant(openDetailAction)}
+                  danger={isDangerAction(openDetailAction)}
+                  icon="arrow"
+                  disabled
+                >
+                  {getActionLabel(openDetailAction, locale)}
+                </Btn>
+              ) : (
+                <Link
+                  href={`/incidents/${encodeURIComponent(record.incidentId)}`}
+                  style={{ textDecoration: "none" }}
+                >
+                  <Btn
+                    theme={theme}
+                    variant={getActionVariant(openDetailAction)}
+                    danger={isDangerAction(openDetailAction)}
+                    icon="arrow"
+                  >
+                    {getActionLabel(openDetailAction, locale)}
+                  </Btn>
+                </Link>
+              )}
+            </span>
+          ) : null}
+          {addRecoveryAction ? (
+            <span title={getActionTitle(addRecoveryAction, locale)}>
+              {addRecoveryAction.enabled === false ? (
+                <Btn
+                  theme={theme}
+                  variant={getActionVariant(addRecoveryAction)}
+                  danger={isDangerAction(addRecoveryAction)}
+                  icon="plus"
+                  disabled
+                >
+                  {getActionLabel(addRecoveryAction, locale)}
+                </Btn>
+              ) : (
+                <Link
+                  href={`/incidents/${encodeURIComponent(record.incidentId)}#service-recovery`}
+                  style={{ textDecoration: "none" }}
+                >
+                  <Btn
+                    theme={theme}
+                    variant={getActionVariant(addRecoveryAction)}
+                    danger={isDangerAction(addRecoveryAction)}
+                    icon="plus"
+                  >
+                    {getActionLabel(addRecoveryAction, locale)}
+                  </Btn>
+                </Link>
+              )}
+            </span>
+          ) : null}
+          {rowActions.length === 0 ? (
+            <span style={{ color: theme.textDim, fontSize: 11.5 }}>
+              {locale === "en" ? "Read only" : "唯讀"}
+            </span>
+          ) : null}
+        </div>
+      ),
       reportedBy: record.reportedBy,
       occurredCell: (
         <div style={{ display: "grid", gap: 3 }}>
@@ -1148,6 +1258,7 @@ export default function IncidentsPage() {
       r: (row) => row.coordinationCell,
     },
     { h: "RELATED", k: "linksCell", w: 250, r: (row) => row.linksCell },
+    { h: "ACTIONS", k: "actionsCell", w: 180, r: (row) => row.actionsCell },
     { h: "REPORTED BY", k: "reportedBy", w: 120, mono: true },
     { h: "OCCURRED", k: "occurredCell", w: 145, r: (row) => row.occurredCell },
     { h: "AGE", k: "ageCell", w: 90, r: (row) => row.ageCell },
@@ -1640,12 +1751,14 @@ export default function IncidentsPage() {
           {showCreate ? (
             <div style={{ marginBottom: 16 }}>
               <IncidentForm
+                createMode={createMode}
                 initialValues={createDefaults}
                 onCancel={() => setShowCreate(false)}
                 onSubmit={async (command) => {
                   try {
                     const client = getOpsClient();
                     if (
+                      createMode === "dispatch_exception" &&
                       "orderId" in command &&
                       typeof command.orderId === "string" &&
                       command.orderId.trim()
@@ -1722,10 +1835,12 @@ const loadingStyle: CSSProperties = {
 };
 
 function IncidentForm({
+  createMode,
   initialValues,
   onCancel,
   onSubmit,
 }: {
+  createMode: IncidentCreateMode;
   initialValues?: IncidentFormInitialValues;
   onCancel: () => void;
   onSubmit: (
@@ -1770,7 +1885,8 @@ function IncidentForm({
 
   const dispatchExceptionOrderId =
     initialValues?.dispatchExceptionOrderId?.trim() ?? "";
-  const isDispatchExceptionCreate = dispatchExceptionOrderId.length > 0;
+  const isDispatchExceptionCreate =
+    createMode === "dispatch_exception" && dispatchExceptionOrderId.length > 0;
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
