@@ -311,20 +311,57 @@ function normalizeListResponse<T>(
   };
 }
 
+function readNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readRecordValue(record: Record<string, unknown>, key: string) {
+  return readNonEmptyString(record[key]);
+}
+
 function getSubmittedByLabel(
   record: Partial<RuntimeReportJob> | Partial<RuntimeReportJobDetail> | null,
 ) {
   if (!record) {
     return "system";
   }
+  const rawRecord = record as Record<string, unknown>;
+  const filterRecord =
+    rawRecord.filters && typeof rawRecord.filters === "object"
+      ? (rawRecord.filters as Record<string, unknown>)
+      : null;
   const aliases = [
     record.submittedBy,
-    (record as Record<string, unknown>).submittedByDisplayName,
-    (record as Record<string, unknown>).submittedByName,
-    (record as Record<string, unknown>).submittedByUserName,
-    (record as Record<string, unknown>).submittedByUserId,
-    (record as Record<string, unknown>).createdByDisplayName,
-    (record as Record<string, unknown>).createdBy,
+    readRecordValue(rawRecord, "submittedByDisplayName"),
+    readRecordValue(rawRecord, "submittedByName"),
+    readRecordValue(rawRecord, "submittedByUserName"),
+    readRecordValue(rawRecord, "submittedByUserId"),
+    readRecordValue(rawRecord, "requestedByDisplayName"),
+    readRecordValue(rawRecord, "requestedByName"),
+    readRecordValue(rawRecord, "requestedByUserName"),
+    readRecordValue(rawRecord, "requestedByUserId"),
+    readRecordValue(rawRecord, "requestedBy"),
+    readRecordValue(rawRecord, "actorDisplayName"),
+    readRecordValue(rawRecord, "actorName"),
+    readRecordValue(rawRecord, "createdByDisplayName"),
+    readRecordValue(rawRecord, "createdBy"),
+    filterRecord
+      ? readRecordValue(filterRecord, "submittedByDisplayName")
+      : null,
+    filterRecord ? readRecordValue(filterRecord, "submittedByName") : null,
+    filterRecord ? readRecordValue(filterRecord, "submittedByUserName") : null,
+    filterRecord ? readRecordValue(filterRecord, "submittedByUserId") : null,
+    filterRecord
+      ? readRecordValue(filterRecord, "requestedByDisplayName")
+      : null,
+    filterRecord ? readRecordValue(filterRecord, "requestedByName") : null,
+    filterRecord ? readRecordValue(filterRecord, "requestedByUserName") : null,
+    filterRecord ? readRecordValue(filterRecord, "requestedByUserId") : null,
+    filterRecord ? readRecordValue(filterRecord, "requestedBy") : null,
+    filterRecord ? readRecordValue(filterRecord, "actorDisplayName") : null,
+    filterRecord ? readRecordValue(filterRecord, "actorName") : null,
+    filterRecord ? readRecordValue(filterRecord, "createdByDisplayName") : null,
+    filterRecord ? readRecordValue(filterRecord, "createdBy") : null,
   ];
 
   for (const candidate of aliases) {
@@ -361,20 +398,47 @@ function getPackageScopeSummary(
     | null,
   locale: "en" | "zh",
 ) {
+  const rawRecord = filingPackage as Record<string, unknown> | null;
   const summary =
     filingPackage?.scopeSummary ??
-    ((filingPackage as Record<string, unknown> | null)?.periodSummary as
-      | string
-      | undefined) ??
+    readRecordValue(rawRecord ?? {}, "scopeDisplayName") ??
+    readRecordValue(rawRecord ?? {}, "scopeLabel") ??
+    readRecordValue(rawRecord ?? {}, "periodSummary") ??
     null;
   if (summary && summary.trim().length > 0) {
     return summary;
   }
-  const periodSummary = (filingPackage as Record<string, unknown> | null)
-    ?.periodSummary;
-  if (typeof periodSummary === "string" && periodSummary.trim().length > 0) {
-    return periodSummary;
+
+  const scope =
+    rawRecord?.scope && typeof rawRecord.scope === "object"
+      ? (rawRecord.scope as Record<string, unknown>)
+      : null;
+  const period =
+    rawRecord?.period && typeof rawRecord.period === "object"
+      ? (rawRecord.period as Record<string, unknown>)
+      : null;
+
+  const canonicalParts = [
+    scope
+      ? summarizeFilters(
+          Object.fromEntries(
+            Object.entries(scope).filter(([, value]) => value != null),
+          ),
+        )
+      : null,
+    period
+      ? summarizeFilters(
+          Object.fromEntries(
+            Object.entries(period).filter(([, value]) => value != null),
+          ),
+        )
+      : null,
+  ].filter((candidate): candidate is string => !!candidate);
+
+  if (canonicalParts.length > 0) {
+    return canonicalParts.join(" · ");
   }
+
   return copyText(
     locale,
     "Scope not carried by current payload",
@@ -1078,14 +1142,14 @@ export default function ReportsPage() {
           : [
               filingPackage.packageId,
               filingPackage.packageType,
-              filingPackage.scopeSummary ?? "",
+              getPackageScopeSummary(filingPackage, locale),
             ]
               .join(" ")
               .toLowerCase()
               .includes(normalizedSearch);
       return matchesStatus && matchesSearch;
     });
-  }, [packages, normalizedSearch, statusFilter]);
+  }, [locale, packages, normalizedSearch, statusFilter]);
 
   const urlEmptyReason = searchParams.get("emptyReason") as EmptyReason | null;
   const activeEmptyReason = (() => {
