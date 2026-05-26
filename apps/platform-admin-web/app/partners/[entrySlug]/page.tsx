@@ -1406,14 +1406,6 @@ export default function PartnerDetailPage() {
               theme={theme}
               variant="secondary"
               size="xs"
-              title={
-                revokeCredentialAction.enabled
-                  ? undefined
-                  : disabledReasonLabel(
-                      revokeCredentialAction.disabledReasonCode,
-                      locale,
-                    )
-              }
               disabled={
                 !revokeCredentialAction.enabled ||
                 revokingCredentialId === row.keyId
@@ -1643,14 +1635,6 @@ export default function PartnerDetailPage() {
                   <Btn
                     theme={theme}
                     variant="primary"
-                    title={
-                      activateAction.enabled
-                        ? actionHelpText(activateAction, locale)
-                        : disabledReasonLabel(
-                            activateAction.disabledReasonCode,
-                            locale,
-                          )
-                    }
                     disabled={!activateAction.enabled || changingStatus === "activate"}
                     onClick={() =>
                       setPendingAction({
@@ -1666,14 +1650,6 @@ export default function PartnerDetailPage() {
                   <Btn
                     theme={theme}
                     variant="secondary"
-                    title={
-                      deactivateAction.enabled
-                        ? actionHelpText(deactivateAction, locale)
-                        : disabledReasonLabel(
-                            deactivateAction.disabledReasonCode,
-                            locale,
-                          )
-                    }
                     disabled={
                       !deactivateAction.enabled || changingStatus === "deactivate"
                     }
@@ -2200,14 +2176,6 @@ export default function PartnerDetailPage() {
                         <Btn
                           theme={theme}
                           variant="secondary"
-                          title={
-                            issueAction.enabled
-                              ? actionHelpText(issueAction, locale)
-                              : disabledReasonLabel(
-                                  issueAction.disabledReasonCode,
-                                  locale,
-                                )
-                          }
                           disabled={
                             !issueAction.enabled ||
                             changingStatus === "issue_credential"
@@ -2226,14 +2194,6 @@ export default function PartnerDetailPage() {
                         <Btn
                           theme={theme}
                           variant="secondary"
-                          title={
-                            rotateAction.enabled
-                              ? actionHelpText(rotateAction, locale)
-                              : disabledReasonLabel(
-                                  rotateAction.disabledReasonCode,
-                                  locale,
-                                )
-                          }
                           disabled={
                             !rotateAction.enabled ||
                             changingStatus === "rotate_credential"
@@ -2301,7 +2261,7 @@ export default function PartnerDetailPage() {
                   <div style={sectionStackStyle}>
                     {readinessItems.map((item) => (
                       <div
-                        key={item.id}
+                        key={`${item.label}-${item.value}`}
                         style={{
                           display: "flex",
                           justifyContent: "space-between",
