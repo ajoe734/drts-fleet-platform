@@ -16,6 +16,7 @@ import type {
   CreatePlatformTenantCommand,
   InviteTenantRoleCommand,
   PlatformAdminTenantRecord,
+  PlatformTenantAdvanceRolloutTargetStage,
   PlatformTenantBootstrapDefaults,
   PlatformTenantBootstrapRoleDefault,
   PlatformTenantGateStatus,
@@ -31,6 +32,7 @@ import type {
   UpdatePlatformTenantSettingsCommand,
 } from "@drts/contracts";
 import {
+  PLATFORM_TENANT_ADVANCE_ROLLOUT_TARGET_STAGES,
   PLATFORM_TENANT_GATE_STATUSES,
   PLATFORM_TENANT_MODULES,
   PLATFORM_TENANT_ROLLOUT_STAGES,
@@ -629,7 +631,9 @@ export class TenantsService implements OnModuleInit {
     requestId?: string,
   ): ActionReceipt {
     const tenant = this.requireTenant(tenantId);
-    const targetStage = this.normalizeRolloutStage(command.targetStage);
+    const targetStage = this.normalizeAdvanceRolloutTargetStage(
+      command.targetStage,
+    );
     const reason = this.normalizeNullableText(command.reason);
     const evidenceRefs =
       command.evidenceRefs === undefined
@@ -828,12 +832,12 @@ export class TenantsService implements OnModuleInit {
         pilotStatus: "approved",
         productionStatus: "approved",
         cutoverOwner: "Platform Launch Lead",
-      rollbackOwner: "Platform Operations",
-      rollbackPrepared: true,
-      lastPromotedAt: DEMO_CREATED_AT,
-      lastRollbackAt: null,
-      notes:
-        "Demo tenant already completed sandbox, pilot, and production promotion.",
+        rollbackOwner: "Platform Operations",
+        rollbackPrepared: true,
+        lastPromotedAt: DEMO_CREATED_AT,
+        lastRollbackAt: null,
+        notes:
+          "Demo tenant already completed sandbox, pilot, and production promotion.",
       },
       createdAt: DEMO_CREATED_AT,
       updatedAt: DEMO_CREATED_AT,
@@ -1038,6 +1042,20 @@ export class TenantsService implements OnModuleInit {
 
   private normalizeRolloutStage(stage: PlatformTenantRolloutStage) {
     if (!PLATFORM_TENANT_ROLLOUT_STAGES.includes(stage)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_ROLLOUT_STAGE_INVALID",
+        "Unknown rollout stage.",
+        { stage },
+      );
+    }
+    return stage;
+  }
+
+  private normalizeAdvanceRolloutTargetStage(
+    stage: PlatformTenantAdvanceRolloutTargetStage,
+  ) {
+    if (!PLATFORM_TENANT_ADVANCE_ROLLOUT_TARGET_STAGES.includes(stage)) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "TENANT_ROLLOUT_STAGE_INVALID",

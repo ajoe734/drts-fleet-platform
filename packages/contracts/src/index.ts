@@ -4515,6 +4515,13 @@ export const PLATFORM_TENANT_ROLLOUT_STAGES = [
 export type PlatformTenantRolloutStage =
   (typeof PLATFORM_TENANT_ROLLOUT_STAGES)[number];
 
+export const PLATFORM_TENANT_ADVANCE_ROLLOUT_TARGET_STAGES = [
+  ...PLATFORM_TENANT_ROLLOUT_STAGES,
+  "rollback_hold",
+] as const;
+export type PlatformTenantAdvanceRolloutTargetStage =
+  (typeof PLATFORM_TENANT_ADVANCE_ROLLOUT_TARGET_STAGES)[number];
+
 export const PLATFORM_TENANT_GATE_STATUSES = [
   "pending",
   "ready",
@@ -4641,7 +4648,7 @@ export interface SetPlatformTenantRolloutStageCommand {
 }
 
 export interface AdvanceTenantRolloutCommand {
-  targetStage: PlatformTenantRolloutStage;
+  targetStage: PlatformTenantAdvanceRolloutTargetStage;
   reason?: string | null;
   evidenceRefs?: string[];
 }

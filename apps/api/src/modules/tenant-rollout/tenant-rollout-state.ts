@@ -24,7 +24,10 @@ const PRODUCTION_EVIDENCE = [
   "required_roles_acknowledged",
 ];
 
-const ROLLBACK_EVIDENCE = ["rollback_reason", "incident_or_regression_reference"];
+const ROLLBACK_EVIDENCE = [
+  "rollback_reason",
+  "incident_or_regression_reference",
+];
 
 export function buildTenantRolloutStateMachineRecord(
   tenant: PlatformAdminTenantRecord,
@@ -83,7 +86,9 @@ export function buildTenantRolloutStateMachineRecord(
 function deriveCurrentStage(
   tenant: PlatformAdminTenantRecord,
 ): TenantRolloutStage {
-  return tenant.status === "rollback_hold" ? "rollback_hold" : tenant.rollout.stage;
+  return tenant.status === "rollback_hold"
+    ? "rollback_hold"
+    : tenant.rollout.stage;
 }
 
 function buildRefreshMetadata(): UiRefreshMetadata {
@@ -104,10 +109,9 @@ function buildNextActions(
       {
         action: "tenant.rollout.advance.pilot",
         enabled: tenant.rollout.sandboxStatus === "approved",
-        disabledReasonCode:
-          tenant.rollout.sandboxStatus === "approved"
-            ? undefined
-            : "sandbox_gate_not_approved",
+        ...(tenant.rollout.sandboxStatus === "approved"
+          ? {}
+          : { disabledReasonCode: "sandbox_gate_not_approved" }),
         riskLevel: "medium",
       },
       buildRollbackHoldAction(true),
@@ -119,11 +123,11 @@ function buildNextActions(
     return [
       {
         action: "tenant.rollout.advance.production",
-        enabled: blockers.length === 0 && tenant.rollout.pilotStatus === "approved",
-        disabledReasonCode:
-          blockers.length === 0 && tenant.rollout.pilotStatus === "approved"
-            ? undefined
-            : "production_gate_blocked",
+        enabled:
+          blockers.length === 0 && tenant.rollout.pilotStatus === "approved",
+        ...(blockers.length === 0 && tenant.rollout.pilotStatus === "approved"
+          ? {}
+          : { disabledReasonCode: "production_gate_blocked" }),
         requiresReason: true,
         riskLevel: "high",
       },
@@ -243,7 +247,9 @@ function buildRollbackBlockers(tenant: PlatformAdminTenantRecord): string[] {
     blockers.push("Rollback plan has not been prepared.");
   }
   if (tenant.status === "rollback_hold") {
-    blockers.push("Rollback hold is active until the tenant returns to a safe stage.");
+    blockers.push(
+      "Rollback hold is active until the tenant returns to a safe stage.",
+    );
   }
   return blockers;
 }
