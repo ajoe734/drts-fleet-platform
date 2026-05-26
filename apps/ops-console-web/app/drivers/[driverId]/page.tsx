@@ -99,6 +99,12 @@ const tripleGridStyle: CSSProperties = {
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
 };
 
+const pageSectionNavStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
 async function loadWithError<T>(
   loader: () => Promise<T>,
   locale: Locale,
@@ -356,6 +362,21 @@ function actionLinkStyle(
   } as const;
 }
 
+function buildCrossAppHref(path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const baseOrigin =
+    process.env.DRTS_PLATFORM_ADMIN_ORIGIN?.trim() ||
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN?.trim() ||
+    process.env.PROD_PLATFORM_ADMIN_ORIGIN?.trim() ||
+    "";
+
+  if (!baseOrigin) {
+    return normalizedPath;
+  }
+
+  return `${baseOrigin.replace(/\/$/, "")}${normalizedPath}`;
+}
+
 function buildPlatformActions(
   presence: PlatformPresenceRecord,
   hasActiveForwardedTask: boolean,
@@ -594,6 +615,11 @@ export default async function DriverDetailPage({
     driver.workState === "incident_hold" &&
     !presenceSummary?.notes?.length &&
     driverAuditLogs.length === 0;
+  const platformAdminAdapterHref = buildCrossAppHref(
+    `/adapter-registry?platform=${encodeURIComponent(
+      activeForwardedOrder?.platformCode ?? presences[0]?.platformCode ?? "",
+    )}`,
+  );
 
   const platformRows: TableRow[] = presences.map((presence) => {
     const adapter = adapterStatusByPlatform.get(presence.platformCode);
@@ -605,9 +631,11 @@ export default async function DriverDetailPage({
         <div style={{ display: "grid", gap: 4 }}>
           <strong>{platformName}</strong>
           <a
-            href={`/platform-admin/adapter-registry?platform=${encodeURIComponent(
-              presence.platformCode,
-            )}`}
+            href={buildCrossAppHref(
+              `/adapter-registry?platform=${encodeURIComponent(
+                presence.platformCode,
+              )}`,
+            )}
             target="_blank"
             rel="noreferrer"
             style={actionLinkStyle("ghost")}
@@ -900,7 +928,9 @@ export default async function DriverDetailPage({
     actor: entry.actorId ?? "system",
     requestId: (
       <a
-        href={`/platform-admin/audit?auditId=${encodeURIComponent(entry.auditId)}`}
+        href={buildCrossAppHref(
+          `/audit?auditId=${encodeURIComponent(entry.auditId)}`,
+        )}
         target="_blank"
         rel="noreferrer"
         style={actionLinkStyle("ghost")}
@@ -1077,6 +1107,21 @@ export default async function DriverDetailPage({
       />
 
       <div style={layoutStyle}>
+        <nav style={pageSectionNavStyle} aria-label="driver detail sections">
+          <a href="#overview" style={actionLinkStyle()}>
+            {locale === "zh" ? "總覽" : "Overview"}
+          </a>
+          <a href="#platform-binding" style={actionLinkStyle()}>
+            {locale === "zh" ? "平台綁定" : "Platform binding"}
+          </a>
+          <a href="#earnings" style={actionLinkStyle()}>
+            {locale === "zh" ? "收益" : "Earnings"}
+          </a>
+          <a href="#activity" style={actionLinkStyle()}>
+            {locale === "zh" ? "事件與稽核" : "Incidents / audit"}
+          </a>
+        </nav>
+
         {activeSosIncident ? (
           <Banner
             theme={theme}
@@ -1111,13 +1156,51 @@ export default async function DriverDetailPage({
                 : "Matching suppression active"
             }
             body={
-              hasReadModelGap
-                ? locale === "zh"
-                  ? "目前只有 workState 顯示為 incident_hold；suppression reason / TTL / linked incident 尚未由 read model 帶出。"
-                  : "The current read model only exposes incident_hold via workState; suppression reason, TTL, and linked incident are not yet exposed."
-                : locale === "zh"
-                  ? "此司機目前處於媒合抑制狀態，請在解除前確認 incident / compliance 上下文。"
-                  : "This driver is currently suppressed from matching. Confirm incident/compliance context before lifting."
+              <DL
+                theme={theme}
+                cols={3}
+                items={[
+                  {
+                    k: locale === "zh" ? "Reason" : "Reason",
+                    v: hasReadModelGap
+                      ? locale === "zh"
+                        ? "contract 未提供"
+                        : "Not exposed by the current contract"
+                      : locale === "zh"
+                        ? "事故 / 合規檢查中"
+                        : "Incident / compliance hold",
+                  },
+                  {
+                    k: locale === "zh" ? "TTL" : "TTL",
+                    v: hasReadModelGap
+                      ? locale === "zh"
+                        ? "未提供 expiresAt"
+                        : "expiresAt not exposed"
+                      : locale === "zh"
+                        ? "依來源事件自動解除"
+                        : "Auto-lifts with source incident",
+                  },
+                  {
+                    k: locale === "zh" ? "Linked incident" : "Linked incident",
+                    v: activeSosIncident ? (
+                      <Link
+                        href={`/incidents/${encodeURIComponent(activeSosIncident.incidentId)}`}
+                        style={{ color: theme.accent, textDecoration: "none" }}
+                      >
+                        {activeSosIncident.incidentId}
+                      </Link>
+                    ) : hasReadModelGap ? (
+                      locale === "zh" ? (
+                        "read model 未提供"
+                      ) : (
+                        "Read model not provisioned"
+                      )
+                    ) : (
+                      "—"
+                    ),
+                  },
+                ]}
+              />
             }
           />
         ) : null}
@@ -1156,7 +1239,7 @@ export default async function DriverDetailPage({
           </Card>
         ) : null}
 
-        <section style={heroGridStyle}>
+        <section id="overview" style={heroGridStyle}>
           <Card
             theme={theme}
             title={locale === "zh" ? "Driver identity" : "Driver identity"}
@@ -1397,7 +1480,7 @@ export default async function DriverDetailPage({
           />
         </section>
 
-        <section style={pairGridStyle}>
+        <section id="platform-binding" style={pairGridStyle}>
           <Card
             theme={theme}
             title={locale === "zh" ? "Platform binding" : "Platform binding"}
@@ -1519,6 +1602,15 @@ export default async function DriverDetailPage({
                     <span style={{ color: theme.textMuted }}>
                       {activeForwardedOrder.externalOrderId}
                     </span>
+                    <a
+                      href={platformAdminAdapterHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={actionLinkStyle("ghost")}
+                    >
+                      <CanvasIcon name="ext" size={12} />
+                      {locale === "zh" ? "檢查 adapter" : "Inspect adapter"}
+                    </a>
                   </div>
                 </div>
               ) : null}
@@ -1526,7 +1618,7 @@ export default async function DriverDetailPage({
           </Card>
         </section>
 
-        <section style={tripleGridStyle}>
+        <section id="activity" style={tripleGridStyle}>
           <Card
             theme={theme}
             title={locale === "zh" ? "Operational notes" : "Operational notes"}
@@ -1597,7 +1689,7 @@ export default async function DriverDetailPage({
           </Card>
         </section>
 
-        <section style={pairGridStyle}>
+        <section id="earnings" style={pairGridStyle}>
           <Card
             theme={theme}
             title={locale === "zh" ? "Earnings" : "Earnings"}
