@@ -7,7 +7,7 @@ Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `blocked` (acceptance still blocked by trunk visibility + live staging evidence)
 Machine-truth status on `2026-05-26`: canonical `ai-status.json` is currently `in_progress` under `owner=Codex2`, but this closeout remains blocker-oriented because the repo-local artifact chain still has not landed on `origin/dev` and the governed live uplift still lacks a green strict-mode rerun. The downstream repo-local deliverables remain represented by `WF-FIN-GOV-001-MATRIX`, `FIN-GOV-UAT-001`, and `WF-FIN-GOV-001-E2E`, all `done`, but the parent closeout cannot advance because task-level acceptance still depends on trunk absorption plus live-uplift evidence.
-Current branch head after the latest dispatch revalidation: `05b9c190` (`wip(PH1GC-FIN-GOV-001): anchor dispatch evidence refresh`)
+Current branch head after the latest dispatch revalidation: `4f205da8` (`wip(PH1GC-FIN-GOV-001): anchor dispatch blocker sidecars`)
 Files changed:
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
@@ -227,3 +227,19 @@ Until the corrected branch artifacts are merged onto `origin/dev` and a valid st
 - `git show origin/dev:docs/03-runbooks/phase1-workflow-acceptance-release-gates.md | grep -n 'WF-FIN-GOV-001'` now shows the row on trunk, but the row still reads `PASS (static evidence)`; acceptance item 5 remains unsatisfied because no fresh reviewer-readable invoice/report artifact and no green live `STRICT_VERIFICATION_BODY=1` run exist.
 - Canonical machine truth now records `owner=Codex2`, `reviewer=Claude2`, `status=in_progress`, so the dispatch/control-plane ownership drift has been repaired.
 - No governed staging rerun was executed from this workspace during this dispatch, so there is still no fresh live evidence to justify a `PASS (live staging evidence)` uplift.
+
+## 2026-05-26 Dispatch Revalidation (head `4f205da8`)
+
+- Dispatch remained on the isolated worker worktree on branch `codex2/ph1gc-fin-gov-001` after the blocker-sidecar anchor commit.
+- `git rev-parse HEAD` = `4f205da881e3925bcb4cd29d7a910e4376304d76`.
+- `git rev-parse origin/codex2/ph1gc-fin-gov-001` = `4f205da881e3925bcb4cd29d7a910e4376304d76`.
+- `git rev-parse origin/dev` = `070f9aea91e066ffce138b321e16dd8cda10828d`.
+- `git rev-list --left-right --count origin/dev...HEAD` = `0 41`, confirming the branch still contains the full reachable `origin/dev` plus 41 task commits.
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` still lists `E2E-010-governance-aware-billing-reporting.sh`.
+- `git diff --check` passed from the isolated worktree.
+- `git show origin/dev:docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md | grep -n 'ownerName\|approvalEvaluationId\|verification body'` still returns the pre-fix verification-body lines, so acceptance item 1 remains open on trunk.
+- `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md | grep -n 'ownerName\|approvalEvaluationId\|13-field\|coverage matrix'` still returns only the older assertions and no explicit 13-field coverage matrix, so acceptance item 2 remains open on trunk.
+- `git show origin/dev:docs/03-runbooks/phase1-workflow-acceptance-release-gates.md | grep -n 'WF-FIN-GOV-001'` still shows the row as `PASS (static evidence)`, so acceptance item 5 remains unsatisfied absent a fresh governed live rerun.
+- No governed staging rerun was executed from this workspace during this refresh, so there is still no reviewer-readable invoice/report artifact and no green live `STRICT_VERIFICATION_BODY=1` run to justify a `PASS (live staging evidence)` uplift.

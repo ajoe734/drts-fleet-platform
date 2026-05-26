@@ -252,3 +252,24 @@ This addendum therefore does not upgrade the evidence classification. The
 honest read is still `PARTIAL / static evidence consolidated` until trunk
 absorbs the corrected artifact chain and a fresh strict-mode governed staging
 rerun yields reviewer-readable invoice/report artifacts.
+
+## 8. 2026-05-26 Blocker-Sidecar Refresh
+
+The owner-lane dispatch advanced the branch to `4f205da8` only to refresh the
+blocker evidence; it did not collect new governed staging artifacts.
+
+- `git rev-parse HEAD` = `4f205da881e3925bcb4cd29d7a910e4376304d76`
+- `git rev-list --left-right --count origin/dev...HEAD` = `0 41`
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` still lists `E2E-010-governance-aware-billing-reporting.sh`
+- `git diff --check` passed
+- `origin/dev` still exposes the pre-fix spec/UAT field set (`ownerName`,
+  `approvalEvaluationId`) instead of the corrected directive-`§H` body carried
+  on this branch
+- `origin/dev` still shows `WF-FIN-GOV-001` only as `PASS (static evidence)`
+
+This refresh leaves the evidence classification unchanged: `PARTIAL / static
+evidence consolidated`, still blocked on both trunk absorption of the corrected
+artifact chain and a green governed staging rerun with reviewer-readable
+invoice/report outputs.
