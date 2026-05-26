@@ -113,6 +113,7 @@ type IncidentTableRow = Record<string, unknown> & {
 };
 
 type IncidentCreateMode = "manual" | "dispatch_exception";
+type IncidentLaneFilter = "active" | "resolved" | "closed";
 
 type IncidentDraftCommand =
   | CreateIncidentCommand
@@ -542,6 +543,22 @@ function hasLinkedEntities(record: IncidentRecordRuntime) {
   );
 }
 
+function matchesLaneFilter(
+  record: IncidentRecordRuntime,
+  laneFilter: IncidentLaneFilter,
+) {
+  switch (laneFilter) {
+    case "active":
+      return record.status === "open" || record.status === "investigating";
+    case "resolved":
+      return record.status === "resolved";
+    case "closed":
+      return record.status === "closed";
+    default:
+      return true;
+  }
+}
+
 function getPrimaryIncidentHref(record: IncidentRecordRuntime) {
   return `/incidents/${encodeURIComponent(record.incidentId)}`;
 }
@@ -869,6 +886,7 @@ export default function IncidentsPage() {
   const [activeCreateAction, setActiveCreateAction] =
     useState<ResourceActionDescriptor | null>(null);
   const [query, setQuery] = useState("");
+  const [laneFilter, setLaneFilter] = useState<IncidentLaneFilter>("active");
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | "all">(
     "all",
   );
@@ -972,6 +990,9 @@ export default function IncidentsPage() {
   const filteredRecords = useMemo(() => {
     return records
       .filter((record) => {
+        if (!matchesLaneFilter(record, laneFilter)) {
+          return false;
+        }
         if (statusFilter !== "all" && record.status !== statusFilter) {
           return false;
         }
@@ -1002,7 +1023,14 @@ export default function IncidentsPage() {
         return haystack.includes(deferredQuery);
       })
       .sort(compareIncidentPriority);
-  }, [records, statusFilter, severityFilter, categoryFilter, deferredQuery]);
+  }, [
+    records,
+    laneFilter,
+    statusFilter,
+    severityFilter,
+    categoryFilter,
+    deferredQuery,
+  ]);
 
   const priorityQueue = useMemo(
     () =>
@@ -1124,6 +1152,7 @@ export default function IncidentsPage() {
 
   const resetFilters = useEffectEvent(() => {
     setQuery("");
+    setLaneFilter("active");
     setStatusFilter("all");
     setSeverityFilter("all");
     setCategoryFilter("all");
@@ -1362,11 +1391,11 @@ export default function IncidentsPage() {
           locale === "en" ? "Closed" : "已結案",
         ]}
         activeTab={
-          statusFilter === "resolved"
+          laneFilter === "resolved"
             ? locale === "en"
               ? "Resolved"
               : "已受控"
-            : statusFilter === "closed"
+            : laneFilter === "closed"
               ? locale === "en"
                 ? "Closed"
                 : "已結案"
@@ -1593,9 +1622,8 @@ export default function IncidentsPage() {
                 key: "active" as const,
                 label: locale === "en" ? "Active lane" : "進行中",
                 count: openCount,
-                selected:
-                  statusFilter !== "resolved" && statusFilter !== "closed",
-                onClick: () => setStatusFilter("all"),
+                selected: laneFilter === "active",
+                onClick: () => setLaneFilter("active"),
                 tone: "danger" as const,
               },
               {
@@ -1603,8 +1631,8 @@ export default function IncidentsPage() {
                 label: locale === "en" ? "Resolved lane" : "已受控",
                 count: records.filter((record) => record.status === "resolved")
                   .length,
-                selected: statusFilter === "resolved",
-                onClick: () => setStatusFilter("resolved"),
+                selected: laneFilter === "resolved",
+                onClick: () => setLaneFilter("resolved"),
                 tone: "success" as const,
               },
               {
@@ -1612,8 +1640,8 @@ export default function IncidentsPage() {
                 label: locale === "en" ? "Closed lane" : "已結案",
                 count: records.filter((record) => record.status === "closed")
                   .length,
-                selected: statusFilter === "closed",
-                onClick: () => setStatusFilter("closed"),
+                selected: laneFilter === "closed",
+                onClick: () => setLaneFilter("closed"),
                 tone: "neutral" as const,
               },
             ].map((lane) => (
