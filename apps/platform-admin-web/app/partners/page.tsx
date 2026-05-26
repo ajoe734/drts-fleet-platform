@@ -44,6 +44,23 @@ import {
 type PartnerFilter = "all" | "active" | "inactive" | "revoked" | "attention";
 type PartnerRow = PartnerChannelEntryRecord & ActionableResourceRuntimeFields;
 type PartnerTableRow = PartnerRow & Record<string, unknown>;
+type PartnerMutationKind = "create" | "activate" | "deactivate" | "revoke";
+
+interface PendingPartnerAction {
+  kind: PartnerMutationKind;
+  descriptor: ResourceActionDescriptor;
+  entrySlug?: string;
+  displayName?: string;
+  command?: ReturnType<typeof toPartnerCreateCommand>;
+}
+
+interface PartnerActionReceiptState {
+  tone: "success" | "warn";
+  title: string;
+  body: string;
+  href?: string;
+  hrefLabel?: string;
+}
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -163,6 +180,33 @@ const attentionBoardStyle = {
   display: "grid",
   gap: 10,
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+} satisfies CSSProperties;
+
+const modalScrimStyle = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.62)",
+  display: "grid",
+  placeItems: "center",
+  padding: 24,
+  zIndex: 40,
+} satisfies CSSProperties;
+
+const modalCardStyle = {
+  width: "min(680px, 100%)",
+  borderRadius: 24,
+  border: `1px solid ${theme.border}`,
+  background: theme.bg,
+  boxShadow: "0 28px 90px rgba(15, 23, 42, 0.34)",
+  padding: 22,
+  display: "grid",
+  gap: 16,
+} satisfies CSSProperties;
+
+const textareaStyle = {
+  ...inputStyle(),
+  minHeight: 108,
+  resize: "vertical",
 } satisfies CSSProperties;
 
 function emptyStateStyle(reason: EmptyReason): CSSProperties {
@@ -399,6 +443,33 @@ function formatRefreshTierLabel(refreshTier: RefreshTier) {
   }
 }
 
+function detectMutationKind(
+  descriptor: ResourceActionDescriptor,
+): PartnerMutationKind | null {
+  const action = descriptor.action.toLowerCase();
+  if (action.includes("deactivate")) {
+    return "deactivate";
+  }
+  if (action.includes("activate")) {
+    return "activate";
+  }
+  if (action.includes("revoke")) {
+    return "revoke";
+  }
+  if (action.includes("create") || action.includes("new")) {
+    return "create";
+  }
+  return null;
+}
+
+function humanizeActionLabel(action: string) {
+  return action
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (segment) => segment.toUpperCase());
+}
+
 export default function PartnersPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -414,6 +485,11 @@ export default function PartnersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [pendingRowAction, setPendingRowAction] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] =
+    useState<PendingPartnerAction | null>(null);
+  const [actionReason, setActionReason] = useState("");
+  const [actionReceipt, setActionReceipt] =
+    useState<PartnerActionReceiptState | null>(null);
   const [filter, setFilter] = useState<PartnerFilter>("all");
   const [search, setSearch] = useState("");
   const [tenantFilter, setTenantFilter] = useState("all");
@@ -452,6 +528,25 @@ export default function PartnersPage() {
           clearFilters: "Clear filters",
           readOnly: "Read-only",
           noActionReason: "No state-changing actions returned for this row",
+          confirmTitle: "Confirm partner action",
+          confirmReasonLabel: "Audit reason",
+          confirmReasonPlaceholder:
+            "Explain the governance reason for this state change.",
+          confirmImpact: "Impact",
+          confirmActionsLabel: "Action contract",
+          confirmCancel: "Cancel",
+          confirmProceed: "Confirm and continue",
+          viewAudit: "View audit",
+          auditPending:
+            "Audit trail recorded on the backend. Open audit for the full event.",
+          receiptTitle: "Partner action recorded",
+          receiptFallback:
+            "The partner entry changed and the roster has been refreshed.",
+          riskCopy: {
+            low: "Direct action with immediate receipt.",
+            medium: "Confirmation required before the write is sent.",
+            high: "High-risk action. Confirmation is required and a non-empty reason must be captured.",
+          },
           metrics: {
             active: "Active entries",
             attention: "Needs attention",
@@ -523,6 +618,22 @@ export default function PartnersPage() {
           clearFilters: "清除篩選",
           readOnly: "唯讀",
           noActionReason: "此 row 沒有任何可變更狀態的後端動作",
+          confirmTitle: "確認 partner 動作",
+          confirmReasonLabel: "稽核原因",
+          confirmReasonPlaceholder: "說明這次治理變更的原因。",
+          confirmImpact: "影響",
+          confirmActionsLabel: "動作契約",
+          confirmCancel: "取消",
+          confirmProceed: "確認並執行",
+          viewAudit: "查看 audit",
+          auditPending: "後端已記錄稽核事件；可前往 audit 查看完整紀錄。",
+          receiptTitle: "Partner 動作已記錄",
+          receiptFallback: "partner entry 已變更，且 roster 已重新整理。",
+          riskCopy: {
+            low: "直接執行，完成後立即提供 receipt。",
+            medium: "送出前必須先確認。",
+            high: "高風險動作，必須確認且需填寫非空原因。",
+          },
           metrics: {
             active: "啟用 entry",
             attention: "待補 readiness",
@@ -591,35 +702,6 @@ export default function PartnersPage() {
       setLoading(false);
     }
   }, [client]);
-
-  const handleRowAction = useCallback(
-    async (entrySlug: string, action: ResourceActionDescriptor) => {
-      if (!action.enabled) {
-        return;
-      }
-
-      const normalizedAction = action.action.toLowerCase();
-      setPendingRowAction(`${entrySlug}:${action.action}`);
-      setError(null);
-
-      try {
-        if (normalizedAction.includes("deactivate")) {
-          await client.deactivatePlatformPartnerEntry(entrySlug);
-        } else if (normalizedAction.includes("activate")) {
-          await client.activatePlatformPartnerEntry(entrySlug);
-        } else {
-          return;
-        }
-
-        await loadEntries();
-      } catch (cause: unknown) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        setPendingRowAction(null);
-      }
-    },
-    [client, loadEntries],
-  );
 
   useEffect(() => {
     void loadEntries();
@@ -737,22 +819,110 @@ export default function PartnersPage() {
     !createForm.entrySlug.trim() ||
     !createForm.displayName.trim();
 
+  const executeAction = useCallback(
+    async (action: PendingPartnerAction, reason: string) => {
+      const pendingKey = action.entrySlug
+        ? `${action.entrySlug}:${action.descriptor.action}`
+        : null;
+      if (pendingKey) {
+        setPendingRowAction(pendingKey);
+      }
+      setCreating(action.kind === "create");
+      setError(null);
+      setActionReceipt(null);
+
+      try {
+        let result: PartnerChannelEntryRecord | null = null;
+
+        if (action.kind === "create" && action.command) {
+          result = await client.createPlatformPartnerEntry(action.command);
+          setCreateForm(EMPTY_ENTRY_FORM);
+          setShowCreate(false);
+        } else if (action.kind === "activate" && action.entrySlug) {
+          result = await client.activatePlatformPartnerEntry(action.entrySlug);
+        } else if (action.kind === "deactivate" && action.entrySlug) {
+          result = await client.deactivatePlatformPartnerEntry(
+            action.entrySlug,
+          );
+        } else if (action.kind === "revoke" && action.entrySlug) {
+          result = await client.revokePlatformPartnerEntry(action.entrySlug);
+        }
+
+        await loadEntries();
+
+        const requestId = result?.auditMetadata.requestId?.trim() || null;
+        const subject =
+          action.displayName || result?.displayName || action.entrySlug;
+        const reasonSuffix = reason.trim()
+          ? locale === "en"
+            ? ` Reason: ${reason.trim()}`
+            : ` 原因：${reason.trim()}`
+          : "";
+
+        setActionReceipt({
+          tone: action.descriptor.riskLevel === "high" ? "warn" : "success",
+          title: copy.receiptTitle,
+          body:
+            requestId !== null
+              ? `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"} • request ${requestId}.${reasonSuffix}`
+              : `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"}. ${copy.receiptFallback}${reasonSuffix}`,
+          href: "/audit",
+          hrefLabel: copy.viewAudit,
+        });
+      } catch (cause: unknown) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setPendingRowAction(null);
+        setCreating(false);
+        setPendingAction(null);
+        setActionReason("");
+      }
+    },
+    [
+      client,
+      copy.receiptFallback,
+      copy.receiptTitle,
+      copy.viewAudit,
+      loadEntries,
+      locale,
+    ],
+  );
+
+  const stageRowAction = useCallback(
+    (entry: PartnerRow, descriptor: ResourceActionDescriptor) => {
+      if (!descriptor.enabled) {
+        return;
+      }
+
+      const kind = detectMutationKind(descriptor);
+      if (!kind) {
+        return;
+      }
+
+      setPendingAction({
+        kind,
+        descriptor,
+        entrySlug: entry.entrySlug,
+        displayName: entry.displayName,
+      });
+      setActionReason("");
+    },
+    [],
+  );
+
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setCreating(true);
-    setError(null);
-    try {
-      await client.createPlatformPartnerEntry(
-        toPartnerCreateCommand(createForm),
-      );
-      setCreateForm(EMPTY_ENTRY_FORM);
-      setShowCreate(false);
-      await loadEntries();
-    } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setCreating(false);
+    if (createDisabled || !createAction) {
+      return;
     }
+
+    setPendingAction({
+      kind: "create",
+      descriptor: createAction,
+      displayName: createForm.displayName.trim(),
+      command: toPartnerCreateCommand(createForm),
+    });
+    setActionReason("");
   };
 
   const clearFilters = () => {
@@ -813,6 +983,22 @@ export default function PartnersPage() {
             tone="danger"
             title={copy.emptyStates.fetch_failed.title}
             body={error}
+          />
+        ) : null}
+
+        {actionReceipt ? (
+          <CanvasBanner
+            theme={theme}
+            tone={actionReceipt.tone}
+            title={actionReceipt.title}
+            body={actionReceipt.body}
+            actions={
+              actionReceipt.href ? (
+                <Link href={actionReceipt.href} style={secondaryLinkStyle}>
+                  {actionReceipt.hrefLabel}
+                </Link>
+              ) : undefined
+            }
           />
         ) : null}
 
@@ -1220,7 +1406,8 @@ export default function PartnersPage() {
                           <span
                             style={{ color: theme.textMuted, fontSize: 12 }}
                           >
-                            {entry.tenantId}
+                            {entry.tenantId} · {entry.partnerCode} ·{" "}
+                            {entry.partnerType}
                           </span>
                         </div>
                       </div>
@@ -1320,9 +1507,8 @@ export default function PartnersPage() {
                         <div style={{ display: "grid", gap: 8 }}>
                           <div style={toolbarClusterStyle}>
                             {rowActions.length > 0 ? (
-                              rowActions
-                                .slice(0, 2)
-                                .map((action: ResourceActionDescriptor) => (
+                              rowActions.map(
+                                (action: ResourceActionDescriptor) => (
                                   <button
                                     key={action.action}
                                     type="button"
@@ -1341,10 +1527,7 @@ export default function PartnersPage() {
                                           `${entry.entrySlug}:${action.action}`,
                                     )}
                                     onClick={() =>
-                                      void handleRowAction(
-                                        entry.entrySlug,
-                                        action,
-                                      )
+                                      stageRowAction(entry, action)
                                     }
                                   >
                                     {pendingRowAction ===
@@ -1352,7 +1535,8 @@ export default function PartnersPage() {
                                       ? t("common.saving")
                                       : action.action}
                                   </button>
-                                ))
+                                ),
+                              )
                             ) : (
                               <span
                                 style={chipButtonStyle(true)}
@@ -1409,6 +1593,117 @@ export default function PartnersPage() {
           </div>
         </CanvasCard>
       </div>
+
+      {pendingAction ? (
+        <div style={modalScrimStyle}>
+          <div style={modalCardStyle}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <CanvasPill
+                theme={theme}
+                tone={
+                  pendingAction.descriptor.riskLevel === "high"
+                    ? "danger"
+                    : pendingAction.descriptor.riskLevel === "medium"
+                      ? "warn"
+                      : "accent"
+                }
+              >
+                {pendingAction.descriptor.riskLevel}
+              </CanvasPill>
+              <strong style={{ fontSize: 20 }}>{copy.confirmTitle}</strong>
+              <span style={{ color: theme.textMuted, fontSize: 13 }}>
+                {humanizeActionLabel(pendingAction.descriptor.action)} ·{" "}
+                {pendingAction.displayName ||
+                  pendingAction.entrySlug ||
+                  copy.title}
+              </span>
+            </div>
+
+            <CanvasBanner
+              theme={theme}
+              tone={
+                pendingAction.descriptor.riskLevel === "high"
+                  ? "danger"
+                  : "warn"
+              }
+              title={copy.confirmImpact}
+              body={copy.riskCopy[pendingAction.descriptor.riskLevel]}
+            />
+
+            <div style={{ display: "grid", gap: 8 }}>
+              <strong style={{ fontSize: 13 }}>
+                {copy.confirmActionsLabel}
+              </strong>
+              <div style={toolbarClusterStyle}>
+                <CanvasPill theme={theme} tone="neutral">
+                  {pendingAction.descriptor.action}
+                </CanvasPill>
+                <CanvasPill theme={theme} tone="neutral">
+                  {pendingAction.descriptor.riskLevel}
+                </CanvasPill>
+                <CanvasPill
+                  theme={theme}
+                  tone={
+                    pendingAction.descriptor.requiresReason ? "warn" : "neutral"
+                  }
+                >
+                  {pendingAction.descriptor.requiresReason
+                    ? "reason required"
+                    : "reason optional"}
+                </CanvasPill>
+              </div>
+              <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                {copy.auditPending}
+              </span>
+            </div>
+
+            {pendingAction.descriptor.requiresReason ||
+            pendingAction.descriptor.riskLevel === "high" ? (
+              <label style={{ display: "grid", gap: 8 }}>
+                <span style={{ fontSize: 12, color: theme.textMuted }}>
+                  {copy.confirmReasonLabel}
+                </span>
+                <textarea
+                  value={actionReason}
+                  onChange={(event) => setActionReason(event.target.value)}
+                  placeholder={copy.confirmReasonPlaceholder}
+                  style={textareaStyle}
+                />
+              </label>
+            ) : null}
+
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}
+            >
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={() => {
+                  setPendingAction(null);
+                  setActionReason("");
+                }}
+                disabled={creating || pendingRowAction !== null}
+              >
+                {copy.confirmCancel}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                disabled={
+                  creating ||
+                  pendingRowAction !== null ||
+                  ((pendingAction.descriptor.requiresReason ||
+                    pendingAction.descriptor.riskLevel === "high") &&
+                    !actionReason.trim())
+                }
+                onClick={() => void executeAction(pendingAction, actionReason)}
+              >
+                {copy.confirmProceed}
+              </CanvasBtn>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </CanvasShell>
   );
 }
