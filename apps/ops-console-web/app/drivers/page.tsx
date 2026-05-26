@@ -740,6 +740,21 @@ function getDriverActionPresentation(
   };
 }
 
+function getPrimaryDriverDetailPresentation(
+  row: DriverRowModel,
+  locale: Locale,
+) {
+  const action = row.availableActions.find(
+    (candidate) =>
+      candidate.enabled &&
+      (candidate.action === "open_driver_detail" ||
+        candidate.action === "open_driver" ||
+        candidate.action === "view_driver_detail"),
+  );
+
+  return action ? getDriverActionPresentation(row, action, locale) : null;
+}
+
 function getLocationTone(state: DriverRowModel["locationState"]): CanvasTone {
   if (state === "live") return "success";
   if (state === "unknown") return "neutral";
@@ -1021,11 +1036,6 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   const presenceErrorCount = presenceResults.filter(
     (entry) => entry.result.error,
   ).length;
-  const forceExternalUnavailable =
-    filters.platform !== "all" &&
-    filteredRows.length === 0 &&
-    presenceErrorCount > 0 &&
-    !driversResult.error;
 
   const backendEmptyState =
     rows.length === 0 ? (driversEnvelope?.emptyState ?? null) : null;
@@ -1033,14 +1043,12 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     ? filters.emptyReason
     : driversResult.error
       ? "fetch_failed"
-      : forceExternalUnavailable
-        ? "external_unavailable"
-        : (backendEmptyState?.reason ??
-          (rows.length === 0
-            ? "no_data"
-            : filteredRows.length === 0
-              ? "filtered_empty"
-              : null));
+      : (backendEmptyState?.reason ??
+        (rows.length === 0
+          ? "no_data"
+          : filteredRows.length === 0
+            ? "filtered_empty"
+            : null));
   const emptyStateModel = emptyReason
     ? buildEmptyStateModel(emptyReason, locale, filters, backendEmptyState)
     : null;
@@ -1074,38 +1082,59 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     {
       h: t("drivers.col.driver", locale),
       w: 250,
-      r: ({ row }) => (
-        <div style={stackStyle}>
-          <Link
-            href={`/drivers/${encodeURIComponent(row.driver.driverId)}`}
-            style={driverPrimaryStyle}
-          >
-            {row.driver.name}
-          </Link>
-          <span style={driverSecondaryStyle}>
-            {row.driver.driverId}
-            {row.driver.phone ? ` · ${row.driver.phone}` : ""}
-          </span>
-          <div style={chipRowStyle}>
-            <Pill theme={theme} tone={getStatusTone(row.driver.workState)} dot>
-              {formatOpsCodeLabel(locale, row.driver.workState)}
-            </Pill>
-            <Pill
-              theme={theme}
-              tone={row.driver.licensesValid ? "success" : "warn"}
-            >
-              {row.driver.licensesValid
-                ? t("common.valid", locale)
-                : t("common.invalid", locale)}
-            </Pill>
-            {row.suppressionActive ? (
-              <Pill theme={theme} tone="danger">
-                {t("drivers.list.suppressionActive", locale)}
+      r: ({ row }) => {
+        const detailPresentation = getPrimaryDriverDetailPresentation(
+          row,
+          locale,
+        );
+
+        return (
+          <div style={stackStyle}>
+            {detailPresentation?.href ? (
+              <Link
+                href={detailPresentation.href}
+                target={detailPresentation.target}
+                rel={
+                  detailPresentation.target === "_blank"
+                    ? "noreferrer"
+                    : undefined
+                }
+                style={driverPrimaryStyle}
+              >
+                {row.driver.name}
+              </Link>
+            ) : (
+              <span style={driverPrimaryStyle}>{row.driver.name}</span>
+            )}
+            <span style={driverSecondaryStyle}>
+              {row.driver.driverId}
+              {row.driver.phone ? ` · ${row.driver.phone}` : ""}
+            </span>
+            <div style={chipRowStyle}>
+              <Pill
+                theme={theme}
+                tone={getStatusTone(row.driver.workState)}
+                dot
+              >
+                {formatOpsCodeLabel(locale, row.driver.workState)}
               </Pill>
-            ) : null}
+              <Pill
+                theme={theme}
+                tone={row.driver.licensesValid ? "success" : "warn"}
+              >
+                {row.driver.licensesValid
+                  ? t("common.valid", locale)
+                  : t("common.invalid", locale)}
+              </Pill>
+              {row.suppressionActive ? (
+                <Pill theme={theme} tone="danger">
+                  {t("drivers.list.suppressionActive", locale)}
+                </Pill>
+              ) : null}
+            </div>
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       h: t("drivers.col.shift", locale),
@@ -1151,15 +1180,22 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
               </span>
             ) : null}
           </div>
+        ) : row.presenceLoadFailed ? (
+          <div style={stackStyle}>
+            <span style={{ fontWeight: 600, color: theme.text }}>
+              {t("drivers.list.platformStatusUnknown", locale)}
+            </span>
+            <span style={signalDetailStyle}>
+              {t("drivers.list.platformStatusUnknownBody", locale)}
+            </span>
+          </div>
         ) : (
           <div style={stackStyle}>
             <span style={{ fontWeight: 600, color: theme.text }}>
               {t("drivers.list.noPlatformBindings", locale)}
             </span>
             <span style={signalDetailStyle}>
-              {row.presenceLoadFailed
-                ? t("drivers.list.platformStatusPartial", locale)
-                : t("drivers.list.bindingMissing", locale)}
+              {t("drivers.list.bindingMissing", locale)}
             </span>
           </div>
         ),

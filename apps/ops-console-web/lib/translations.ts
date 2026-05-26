@@ -218,6 +218,9 @@ const en = {
   "drivers.list.platformStatusUnavailableBody":
     "Presence rows remain partially visible, but adapter-level inspection may be required.",
   "drivers.list.platformStatusPartial": "Platform status partially unavailable",
+  "drivers.list.platformStatusUnknown": "Platform status unavailable",
+  "drivers.list.platformStatusUnknownBody":
+    "Binding state is unknown until the latest platform presence snapshot loads.",
   "drivers.list.noPlatformBindings": "No platform binding",
   "drivers.list.bindingMissing": "Account binding not configured",
   "drivers.list.noActiveOrders": "No active orders",
@@ -1780,6 +1783,9 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.list.platformStatusUnavailableBody":
     "目前仍顯示部分 presence 資料，但可能需要到 adapter 名冊做進一步排查。",
   "drivers.list.platformStatusPartial": "平台狀態部分缺失",
+  "drivers.list.platformStatusUnknown": "平台狀態暫不可用",
+  "drivers.list.platformStatusUnknownBody":
+    "待最新平台 presence 快照載入前，暫時無法判定綁定狀態。",
   "drivers.list.noPlatformBindings": "尚無平台綁定",
   "drivers.list.bindingMissing": "尚未設定帳號綁定",
   "drivers.list.noActiveOrders": "目前沒有進行中訂單",
