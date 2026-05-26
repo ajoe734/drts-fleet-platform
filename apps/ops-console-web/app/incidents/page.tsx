@@ -620,7 +620,7 @@ export default function IncidentsPage() {
                             {record.relatedComplaintCaseNo && (
                               <Link
                                 className="inline-link"
-                                href={`/complaints?caseNo=${encodeURIComponent(
+                                href={`/complaints/${encodeURIComponent(
                                   record.relatedComplaintCaseNo,
                                 )}`}
                               >
@@ -784,7 +784,7 @@ export default function IncidentsPage() {
                     {selectedIncident.relatedComplaintCaseNo && (
                       <Link
                         className="inline-link"
-                        href={`/complaints?caseNo=${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
+                        href={`/complaints/${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
                       >
                         {locale === "en"
                           ? `Open complaint ${selectedIncident.relatedComplaintCaseNo}`
