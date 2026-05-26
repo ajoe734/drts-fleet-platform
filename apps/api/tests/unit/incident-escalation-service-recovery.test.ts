@@ -10,6 +10,26 @@ function createServices() {
   return { auditNotificationService, incidentService };
 }
 
+function createPersistedIncidentService(state: {
+  incidents: any[];
+  timelines: any[];
+}) {
+  const auditNotificationService = new AuditNotificationService();
+  const incidentRepository = {
+    async loadState() {
+      return state;
+    },
+    reportPersistenceFailure() {},
+    persistChanges() {
+      return Promise.resolve();
+    },
+  };
+  return new IncidentService(
+    auditNotificationService,
+    incidentRepository as any,
+  );
+}
+
 describe("Incident escalation, service recovery, and dispatch-exception handoff", () => {
   describe("createFromDispatchException", () => {
     it("creates an incident from a dispatch exception with order trace", () => {
@@ -494,6 +514,90 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
       expect(incident.escalationTarget).toBeNull();
       expect(incident.sourceDispatchExceptionOrderId).toBeNull();
       expect(incident.serviceRecoveryActions).toEqual([]);
+    });
+  });
+
+  describe("runtime incident decoration", () => {
+    it("returns available actions and refresh metadata on detail responses", () => {
+      const { incidentService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Runtime decoration",
+        description: "Ensure UI runtime contract fields are present.",
+        category: "operational",
+        severity: "high",
+        relatedDriverId: "DRV-001",
+        reportedBy: "ops-user-001",
+      });
+
+      const detail = incidentService.getIncident(incident.incidentId);
+      expect(detail.availableActions.length).toBeGreaterThan(0);
+      expect(
+        detail.availableActions.some((action) =>
+          action.action.includes("lift_driver_matching_suppression"),
+        ),
+      ).toBe(true);
+      expect(detail.refreshMetadata).toMatchObject({
+        dataFreshness: "fresh",
+        source: "live",
+        staleAfterMs: 15_000,
+      });
+      expect(detail.driverMatchingSuppression).toBeNull();
+    });
+  });
+
+  describe("service recovery rehydration", () => {
+    it("rebuilds recovery actions from persisted incident state on module init", async () => {
+      const service = createPersistedIncidentService({
+        incidents: [
+          {
+            incidentId: "INC-000123",
+            title: "Persisted incident",
+            description: "Recovered from repository",
+            category: "operational",
+            severity: "medium",
+            status: "open",
+            relatedOrderId: null,
+            relatedVehicleId: null,
+            relatedDriverId: null,
+            relatedComplaintCaseNo: null,
+            reportedBy: "ops-user-001",
+            assignedTo: "ops-user-002",
+            assignmentAcknowledgedAt: null,
+            escalationTarget: null,
+            sourceDispatchExceptionOrderId: null,
+            occurredAt: "2026-05-26T10:00:00.000Z",
+            location: null,
+            resolutionNote: null,
+            serviceRecoveryActions: [
+              {
+                actionId: "sra-123",
+                incidentId: "INC-000123",
+                actionType: "voucher_issued",
+                note: "Issued goodwill voucher.",
+                actor: "ops-user-002",
+                createdAt: "2026-05-26T10:05:00.000Z",
+              },
+            ],
+            createdAt: "2026-05-26T10:00:00.000Z",
+            updatedAt: "2026-05-26T10:05:00.000Z",
+          },
+        ],
+        timelines: [],
+      });
+
+      await service.onModuleInit();
+
+      expect(service.getServiceRecoveryActions("INC-000123")).toEqual([
+        {
+          actionId: "sra-123",
+          incidentId: "INC-000123",
+          actionType: "voucher_issued",
+          note: "Issued goodwill voucher.",
+          actor: "ops-user-002",
+          createdAt: "2026-05-26T10:05:00.000Z",
+        },
+      ]);
     });
   });
 });

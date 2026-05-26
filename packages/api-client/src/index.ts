@@ -93,8 +93,9 @@ import type {
   GenerateFilingPackageCommand,
   GeneratePlacardVersionCommand,
   GenerateTenantInvoiceCommand,
-  IncidentRecord,
   IncidentMutationResult,
+  IncidentRecord,
+  IncidentRuntimeRecord,
   IncidentServiceRecoveryActionResult,
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
@@ -2331,16 +2332,18 @@ export class ApiClient {
 
   // ── W8-001E: Ops & Driver Domain ──
 
-  async listIncidents(): Promise<IncidentRecord[]> {
-    return this.getList<IncidentRecord>("/api/incidents");
+  async listIncidents(): Promise<IncidentRuntimeRecord[]> {
+    return this.getList<IncidentRuntimeRecord>("/api/incidents");
   }
 
   async createIncident(command: CreateIncidentCommand) {
-    return this.post<IncidentRecord>("/api/incidents", { body: command });
+    return this.post<IncidentRuntimeRecord>("/api/incidents", {
+      body: command,
+    });
   }
 
   async getIncident(incidentId: string) {
-    return this.get<IncidentRecord>(`/api/incidents/${incidentId}`);
+    return this.get<IncidentRuntimeRecord>(`/api/incidents/${incidentId}`);
   }
 
   async getIncidentTimeline(
@@ -2358,7 +2361,7 @@ export class ApiClient {
   }
 
   async linkIncidentToComplaint(incidentId: string, complaintCaseNo: string) {
-    return this.post<IncidentRecord>(
+    return this.post<IncidentRuntimeRecord>(
       `/api/incidents/${encodeURIComponent(incidentId)}/link-complaint`,
       { body: { complaintCaseNo } },
     );
@@ -2367,9 +2370,12 @@ export class ApiClient {
   async createIncidentFromDispatchException(
     command: CreateIncidentFromDispatchExceptionCommand,
   ) {
-    return this.post<IncidentRecord>("/api/incidents/from-dispatch-exception", {
-      body: command,
-    });
+    return this.post<IncidentRuntimeRecord>(
+      "/api/incidents/from-dispatch-exception",
+      {
+        body: command,
+      },
+    );
   }
 
   async recordServiceRecoveryAction(

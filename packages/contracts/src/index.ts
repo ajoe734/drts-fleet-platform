@@ -1,6 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-import type { ActionReceipt } from "./ui-runtime";
+import type {
+  ActionReceipt,
+  DriverMatchingSuppression,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4314,8 +4319,14 @@ export interface IncidentRecord {
   updatedAt: string;
 }
 
+export interface IncidentRuntimeRecord extends IncidentRecord {
+  availableActions: ResourceActionDescriptor[];
+  refreshMetadata: UiRefreshMetadata;
+  driverMatchingSuppression: DriverMatchingSuppression | null;
+}
+
 export interface IncidentMutationResult {
-  incident: IncidentRecord;
+  incident: IncidentRuntimeRecord;
   receipt: ActionReceipt;
 }
 

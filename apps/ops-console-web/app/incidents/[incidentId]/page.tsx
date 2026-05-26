@@ -6,12 +6,12 @@ import type {
   DriverRegistryRecord,
   EmptyReason,
   IncidentRecord,
+  IncidentRuntimeRecord,
   IncidentTimelineEntry,
   OwnedOrderRecord,
   RefreshTier,
   ResourceActionDescriptor,
   ServiceRecoveryActionRecord,
-  UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
@@ -42,13 +42,6 @@ type IncidentDetailPageProps = {
 };
 
 type IncidentDetailSearchParams = Record<string, string | string[] | undefined>;
-
-type IncidentRuntimeRecord = IncidentRecord & {
-  availableActions?: ResourceActionDescriptor[];
-  refreshMetadata?: UiRefreshMetadata;
-  driverMatchingSuppression?: DriverMatchingSuppression | null;
-  assignmentAcknowledgedAt?: string | null;
-};
 
 type EmptyStateConfig = {
   tone: CanvasTone;
@@ -702,7 +695,7 @@ export default async function IncidentDetailPage({
   const refreshMetadata = incident.refreshMetadata ?? null;
   const availableActions = incident.availableActions ?? [];
   const serviceRecoveryAction =
-    availableActions.find((action) =>
+    availableActions.find((action: ResourceActionDescriptor) =>
       action.action.toLowerCase().includes("recovery"),
     ) ?? null;
   const incidentAuditLogs = [...auditLogsResult.data]
@@ -1161,6 +1154,7 @@ export default async function IncidentDetailPage({
 
             <IncidentDetailActionPanel
               incidentId={incident.incidentId}
+              relatedDriverId={incident.relatedDriverId}
               locale={locale}
               availableActions={availableActions}
               initialIntent={initialIntent}

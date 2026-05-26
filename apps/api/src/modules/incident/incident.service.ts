@@ -8,12 +8,15 @@ import type {
   CreateIncidentCommand,
   CreateIncidentFromDispatchExceptionCommand,
   IncidentRecord,
+  IncidentRuntimeRecord,
   IncidentMutationResult,
   IncidentServiceRecoveryActionResult,
   IncidentStatus,
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
+  ResourceActionDescriptor,
   ServiceRecoveryActionRecord,
+  UiRefreshMetadata,
   UpdateIncidentCommand,
 } from "@drts/contracts";
 
@@ -74,6 +77,8 @@ const TIMELINE_ACTIONS = {
   serviceRecoveryAction: "service_recovery_action",
 } as const;
 
+const INCIDENT_REFRESH_STALE_AFTER_MS = 15_000;
+
 @Injectable()
 export class IncidentService implements OnModuleInit {
   private incidentSequence = 1;
@@ -93,6 +98,7 @@ export class IncidentService implements OnModuleInit {
       if (state.incidents.length === 0 && state.timelines.length === 0) return;
       this.incidents = state.incidents.map((i) => this.clone(i));
       this.timelines = this.buildTimelineMap(state.timelines);
+      this.recoveryActions = this.buildRecoveryActionMap(state.incidents);
       this.incidentSequence = this.deriveNextSequence(state.incidents);
     } catch (error) {
       this.incidentRepository.reportPersistenceFailure(error, "module init");
@@ -167,15 +173,15 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
-    return this.clone(incident);
+    return this.decorateIncident(incident);
   }
 
   listIncidents() {
-    return this.incidents.map((i) => this.clone(i));
+    return this.incidents.map((i) => this.decorateIncident(i));
   }
 
   getIncident(incidentId: string) {
-    return this.clone(this.require(incidentId));
+    return this.decorateIncident(this.require(incidentId));
   }
 
   updateIncident(
@@ -333,7 +339,7 @@ export class IncidentService implements OnModuleInit {
     );
 
     return {
-      incident: this.clone(updated),
+      incident: this.decorateIncident(updated),
       receipt: this.buildActionReceipt({
         auditId: auditLog.auditId,
         message: "Incident updated.",
@@ -366,7 +372,7 @@ export class IncidentService implements OnModuleInit {
       );
     }
     if (incident.relatedComplaintCaseNo === normalizedComplaintCaseNo) {
-      return this.clone(incident);
+      return this.decorateIncident(incident);
     }
 
     const updated = {
@@ -397,7 +403,7 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
-    return this.clone(updated);
+    return this.decorateIncident(updated);
   }
 
   getTimeline(incidentId: string) {
@@ -489,7 +495,7 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
-    return this.clone(incident);
+    return this.decorateIncident(incident);
   }
 
   recordServiceRecoveryAction(
@@ -674,8 +680,104 @@ export class IncidentService implements OnModuleInit {
     return entries[entries.length - 1]!;
   }
 
-  private clone(incident: IncidentRecord) {
-    return { ...incident };
+  private clone(incident: IncidentRecord): IncidentRecord {
+    return {
+      ...incident,
+      serviceRecoveryActions: incident.serviceRecoveryActions.map((action) => ({
+        ...action,
+      })),
+    };
+  }
+
+  private decorateIncident(incident: IncidentRecord): IncidentRuntimeRecord {
+    const cloned = this.clone(incident);
+    return {
+      ...cloned,
+      availableActions: this.buildAvailableActions(cloned),
+      refreshMetadata: this.buildRefreshMetadata(cloned.updatedAt),
+      driverMatchingSuppression: null,
+    };
+  }
+
+  private buildAvailableActions(
+    incident: IncidentRecord,
+  ): ResourceActionDescriptor[] {
+    const isReadOnly =
+      incident.status === "resolved" || incident.status === "closed";
+    const readOnlyReason = isReadOnly ? "read_only_state" : undefined;
+    const hasAssignedOwner = Boolean(incident.assignedTo);
+
+    const actions: ResourceActionDescriptor[] = [
+      {
+        action: "update_incident",
+        enabled: !isReadOnly,
+        disabledReasonCode: readOnlyReason,
+        riskLevel: "medium",
+      },
+      {
+        action: "resolve_incident",
+        enabled: !isReadOnly,
+        disabledReasonCode: readOnlyReason,
+        riskLevel: "medium",
+      },
+      {
+        action: "close_incident",
+        enabled: !isReadOnly,
+        disabledReasonCode: readOnlyReason,
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "record_service_recovery_action",
+        enabled: !isReadOnly,
+        disabledReasonCode: readOnlyReason,
+        riskLevel: "medium",
+      },
+      {
+        action: "acknowledge_escalation",
+        enabled: !isReadOnly && hasAssignedOwner,
+        disabledReasonCode: isReadOnly
+          ? readOnlyReason
+          : hasAssignedOwner
+            ? undefined
+            : "assignment_missing",
+        riskLevel: "medium",
+      },
+    ];
+
+    if (incident.relatedDriverId) {
+      actions.push({
+        action: "lift_driver_matching_suppression",
+        enabled: !isReadOnly,
+        disabledReasonCode: readOnlyReason,
+        requiresReason: true,
+        riskLevel: "high",
+      });
+    }
+
+    return actions;
+  }
+
+  private buildRefreshMetadata(updatedAt: string): UiRefreshMetadata {
+    return {
+      generatedAt: updatedAt,
+      staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+  }
+
+  private buildRecoveryActionMap(
+    incidents: readonly IncidentRecord[],
+  ): Map<string, ServiceRecoveryActionRecord[]> {
+    return new Map(
+      incidents
+        .filter((incident) => incident.serviceRecoveryActions.length > 0)
+        .map((incident) => [
+          incident.incidentId,
+          incident.serviceRecoveryActions.map((action) => ({ ...action })),
+        ]),
+    );
   }
 
   private persist(

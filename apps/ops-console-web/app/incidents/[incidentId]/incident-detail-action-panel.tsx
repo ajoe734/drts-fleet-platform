@@ -49,6 +49,7 @@ const SERVICE_RECOVERY_TYPES: RecordServiceRecoveryActionCommand["actionType"][]
 
 type IncidentDetailActionPanelProps = {
   incidentId: string;
+  relatedDriverId: string | null;
   locale: Locale;
   availableActions: ResourceActionDescriptor[];
   initialIntent: string | null;
@@ -134,6 +135,10 @@ function actionSummary(intent: string, locale: Locale) {
       return locale === "en"
         ? "Record that the escalation target accepted the handoff."
         : "記錄升級對象已接受此次 handoff。";
+    case "lift_suppression":
+      return locale === "en"
+        ? "Release the linked driver's incident hold from this incident workspace."
+        : "直接在 incident 工作區解除關聯司機的事故抑制。";
     default:
       return locale === "en"
         ? "This action stays in the incident workspace."
@@ -182,6 +187,7 @@ function buildAuditHref(
 
 export function IncidentDetailActionPanel({
   incidentId,
+  relatedDriverId,
   locale,
   availableActions,
   initialIntent,
@@ -252,44 +258,6 @@ export function IncidentDetailActionPanel({
     return null;
   }
 
-  if (currentIntent === "lift_suppression") {
-    const href = buildBasePath(incidentId, searchParams);
-    return (
-      <Card
-        theme={theme}
-        title={locale === "en" ? "Lift suppression" : "解除抑制"}
-      >
-        <Banner
-          theme={theme}
-          tone="warn"
-          icon="warn"
-          title={
-            locale === "en"
-              ? "Driver-side suppression lift is not writable from this incident form"
-              : "這個 incident 表單目前不能直接寫入司機抑制解除"
-          }
-          body={
-            locale === "en"
-              ? "The deep link now lands correctly. Continue in Driver detail for contextual review, then return here after the driver state is updated."
-              : "deep link 現在會正確落點。請先到 Driver detail 做情境確認，再回到此頁追蹤司機狀態更新。"
-          }
-        />
-        <div
-          style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}
-        >
-          <Btn
-            theme={theme}
-            size="sm"
-            icon="arrow"
-            onClick={() => router.replace(href)}
-          >
-            {locale === "en" ? "Dismiss" : "關閉"}
-          </Btn>
-        </div>
-      </Card>
-    );
-  }
-
   const basePath = buildBasePath(incidentId, searchParams);
 
   async function handleSubmit() {
@@ -337,6 +305,29 @@ export function IncidentDetailActionPanel({
             created.receipt.auditId,
             platformAdminAuditBaseUrl,
           ),
+        };
+      } else if (currentIntent === "lift_suppression") {
+        if (!relatedDriverId) {
+          throw new Error(
+            locale === "en"
+              ? "This incident is not linked to a driver."
+              : "這筆 incident 沒有關聯司機。",
+          );
+        }
+
+        await client.updateDriverWorkState(relatedDriverId, {
+          workState: "available",
+        });
+        receiptBody =
+          locale === "en"
+            ? `Released incident hold for driver ${relatedDriverId}. Refreshing suppression state.`
+            : `已解除司機 ${relatedDriverId} 的事故 hold，正在刷新抑制狀態。`;
+        nextReceipt = {
+          actionId: `act-lift-${incidentId}`,
+          auditId: "driver-work-state-updated",
+          title: receiptTitle,
+          body: receiptBody,
+          auditHref: latestAuditHref,
         };
       } else {
         const payload: UpdateIncidentCommand =
@@ -689,10 +680,25 @@ export function IncidentDetailActionPanel({
             </div>
           ) : null}
 
+          {currentIntent === "lift_suppression" ? (
+            <Field
+              theme={theme}
+              label={locale === "en" ? "Release note" : "解除說明"}
+            >
+              <textarea
+                value={reasonText}
+                onChange={(event) => setReasonText(event.target.value)}
+                rows={3}
+                style={textareaStyle}
+              />
+            </Field>
+          ) : null}
+
           {selectedAction.requiresReason &&
           currentIntent !== "close" &&
           currentIntent !== "acknowledge" &&
-          currentIntent !== "resolve" ? (
+          currentIntent !== "resolve" &&
+          currentIntent !== "lift_suppression" ? (
             <Field
               theme={theme}
               label={locale === "en" ? "Required reason" : "必填原因"}
