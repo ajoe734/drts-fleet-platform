@@ -425,6 +425,10 @@ function buildComplaintDetailLink(caseNo: string) {
   return `/complaints/${encodeURIComponent(caseNo)}`;
 }
 
+function buildVehicleRegistryLink(vehicleId: string) {
+  return `/vehicles?vehicleId=${encodeURIComponent(vehicleId)}`;
+}
+
 function getActionIntent(action: string) {
   const normalized = action.toLowerCase();
   if (normalized.includes("update")) {
@@ -808,7 +812,7 @@ export default async function IncidentDetailPage({
       k: locale === "en" ? "Vehicle" : "車輛",
       v: incident.relatedVehicleId ? (
         <Link
-          href={`/vehicles/${encodeURIComponent(incident.relatedVehicleId)}`}
+          href={buildVehicleRegistryLink(incident.relatedVehicleId)}
           style={actionLinkStyle(theme, "secondary")}
         >
           <CanvasIcon name="ext" size={12} />
@@ -921,6 +925,11 @@ export default async function IncidentDetailPage({
           {formatOpsCodeLabel(locale, incident.severity)}
         </Pill>
       ),
+    },
+    {
+      k: locale === "en" ? "Acknowledged at" : "確認時間",
+      v: formatDateTime(locale, incident.assignmentAcknowledgedAt),
+      mono: true,
     },
     {
       k: locale === "en" ? "Status" : "狀態",
@@ -1156,6 +1165,7 @@ export default async function IncidentDetailPage({
               availableActions={availableActions}
               initialIntent={initialIntent}
               initialStatus={incident.status}
+              initialCategory={incident.category}
               initialSeverity={incident.severity}
               initialAssignedTo={incident.assignedTo}
               initialEscalationTarget={incident.escalationTarget}
@@ -1402,7 +1412,7 @@ export default async function IncidentDetailPage({
                 ) : null}
                 {incident.relatedVehicleId ? (
                   <Link
-                    href={`/vehicles/${encodeURIComponent(incident.relatedVehicleId)}`}
+                    href={buildVehicleRegistryLink(incident.relatedVehicleId)}
                     style={actionLinkStyle(theme, "ghost")}
                   >
                     <CanvasIcon name="ext" size={12} />

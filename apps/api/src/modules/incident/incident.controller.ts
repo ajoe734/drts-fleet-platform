@@ -12,7 +12,8 @@ import {
 import type {
   CreateIncidentCommand,
   CreateIncidentFromDispatchExceptionCommand,
-  ExtendDriverMatchingSuppressionCommand,
+  IncidentMutationResult,
+  IncidentServiceRecoveryActionResult,
   LinkComplaintToIncidentCommand,
   RecordServiceRecoveryActionCommand,
   UpdateIncidentCommand,
@@ -94,12 +95,11 @@ export class IncidentController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.updateIncident(
+      this.incidentService.updateIncidentWithReceipt(
         incidentId,
         command,
         requestId,
-        identity,
-      ),
+      ) satisfies IncidentMutationResult,
       requestId,
     );
   }
@@ -141,11 +141,11 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.recordServiceRecoveryAction(
+      this.incidentService.recordServiceRecoveryActionWithReceipt(
         incidentId,
         command,
         requestId,
-      ),
+      ) satisfies IncidentServiceRecoveryActionResult,
       requestId,
     );
   }

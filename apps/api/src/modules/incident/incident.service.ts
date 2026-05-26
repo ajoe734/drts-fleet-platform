@@ -3,12 +3,15 @@ import { randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   AuditLogRecord,
   CreateIncidentCommand,
   CreateIncidentFromDispatchExceptionCommand,
   DriverMatchingSuppression,
   ExtendDriverMatchingSuppressionCommand,
   IncidentRecord,
+  IncidentMutationResult,
+  IncidentServiceRecoveryActionResult,
   IncidentStatus,
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
@@ -61,6 +64,8 @@ const TIMELINE_ACTIONS = {
   created: "incident_created",
   statusChanged: "status_changed",
   assigned: "incident_assigned",
+  assignmentAcknowledged: "incident_assignment_acknowledged",
+  categoryUpdated: "incident_category_updated",
   resolved: "incident_resolved",
   closed: "incident_closed",
   complaintLinked: "complaint_linked",
@@ -144,6 +149,7 @@ export class IncidentService implements OnModuleInit {
       relatedComplaintCaseNo: null,
       reportedBy: command.reportedBy,
       assignedTo: null,
+      assignmentAcknowledgedAt: null,
       escalationTarget: null,
       sourceDispatchExceptionOrderId: null,
       occurredAt: command.occurredAt ?? null,
@@ -236,11 +242,34 @@ export class IncidentService implements OnModuleInit {
     requestId?: string,
     identity: BootstrapRequestIdentity | null = null,
   ) {
+    return this.updateIncidentWithReceipt(incidentId, command, requestId)
+      .incident;
+  }
+
+  updateIncidentWithReceipt(
+    incidentId: string,
+    command: UpdateIncidentCommand,
+    requestId?: string,
+  ): IncidentMutationResult {
     const incident = this.require(incidentId);
-    const now = new Date().toISOString();
-    const updated: IncidentRecord = { ...incident, updatedAt: now };
-    const timelineEntries: IncidentTimelineEntry[] = [];
-    let suppressionWrite: PersistSuppressionRecord | null = null;
+
+    const updated = { ...incident, updatedAt: new Date().toISOString() };
+    let timelineChanged = false;
+
+    if (command.category !== undefined) {
+      this.assertValidCategory(command.category);
+      if (updated.category !== command.category) {
+        const previousCategory = updated.category;
+        updated.category = command.category;
+        this.appendTimelineEntry(
+          incidentId,
+          TIMELINE_ACTIONS.categoryUpdated,
+          `Category changed from ${previousCategory} to ${command.category}.`,
+          "ops_user",
+        );
+        timelineChanged = true;
+      }
+    }
 
     if (command.status !== undefined) {
       this.assertValidStatus(command.status);
@@ -254,41 +283,22 @@ export class IncidentService implements OnModuleInit {
           now,
         ),
       );
-      if (command.status === "resolved") {
-        timelineEntries.push(
-          this.createTimelineEntry(
-            incidentId,
-            TIMELINE_ACTIONS.resolved,
-            "Incident resolved.",
-            this.resolveActorId(identity, "ops_user"),
-            now,
-          ),
-        );
-      }
-      if (command.status === "closed") {
-        timelineEntries.push(
-          this.createTimelineEntry(
-            incidentId,
-            TIMELINE_ACTIONS.closed,
-            "Incident closed.",
-            this.resolveActorId(identity, "ops_user"),
-            now,
-          ),
-        );
-      }
+      timelineChanged = true;
     }
 
     if (command.assignedTo !== undefined) {
+      const previousAssignedTo = incident.assignedTo ?? null;
       updated.assignedTo = command.assignedTo;
-      timelineEntries.push(
-        this.createTimelineEntry(
-          incidentId,
-          TIMELINE_ACTIONS.assigned,
-          `Assigned to ${command.assignedTo}.`,
-          this.resolveActorId(identity, "ops_user"),
-          now,
-        ),
+      if ((command.assignedTo ?? null) !== previousAssignedTo) {
+        updated.assignmentAcknowledgedAt = null;
+      }
+      this.appendTimelineEntry(
+        incidentId,
+        TIMELINE_ACTIONS.assigned,
+        `Assigned to ${command.assignedTo}.`,
+        "ops_user",
       );
+      timelineChanged = true;
     }
 
     if (command.severity !== undefined) {
@@ -305,6 +315,7 @@ export class IncidentService implements OnModuleInit {
             now,
           ),
         );
+        timelineChanged = true;
       }
     }
 
@@ -334,45 +345,42 @@ export class IncidentService implements OnModuleInit {
           now,
         ),
       );
+      timelineChanged = true;
+    }
+
+    if (command.assignmentAcknowledgedAt !== undefined) {
+      const acknowledgedAt =
+        command.assignmentAcknowledgedAt ?? new Date().toISOString();
+      const acknowledgedBy =
+        command.assignmentAcknowledgedBy?.trim() ||
+        updated.assignedTo ||
+        "ops_user";
+      updated.assignmentAcknowledgedAt = acknowledgedAt;
+      this.appendTimelineEntry(
+        incidentId,
+        TIMELINE_ACTIONS.assignmentAcknowledged,
+        `Assignment acknowledged by ${acknowledgedBy}.`,
+        acknowledgedBy,
+        acknowledgedAt,
+      );
+      timelineChanged = true;
     }
 
     if (command.resolutionNote !== undefined) {
       updated.resolutionNote = command.resolutionNote;
     }
 
-    if (
-      (updated.status === "resolved" || updated.status === "closed") &&
-      updated.matchingSuppression?.active
-    ) {
-      suppressionWrite = this.liftSuppression(updated, now);
-      timelineEntries.push(
-        this.createTimelineEntry(
-          incidentId,
-          TIMELINE_ACTIONS.suppressionLifted,
-          `Driver matching suppression lifted because incident ${updated.status}.`,
-          this.resolveActorId(identity, "system.incident"),
-          now,
-        ),
-      );
-    }
-
-    const decorated = this.decorateIncident(updated, identity);
-    this.replace(decorated);
-    if (timelineEntries.length > 0) {
-      this.timelines.set(incidentId, [
-        ...(this.timelines.get(incidentId) ?? []),
-        ...timelineEntries,
-      ]);
-    }
+    this.replace(updated);
     this.persist(
       {
-        incidents: [decorated],
-        timelines: timelineEntries,
-        ...(suppressionWrite ? { suppressions: [suppressionWrite] } : {}),
+        incidents: [updated],
+        timelines: timelineChanged
+          ? (this.timelines.get(incidentId)?.slice(-1) ?? [])
+          : undefined,
       },
       "update_incident",
     );
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: identity?.actorId ?? null,
         actorType: this.resolveAuditActorType(identity, "ops_user"),
@@ -382,16 +390,24 @@ export class IncidentService implements OnModuleInit {
         resourceType: "incident",
         resourceId: incidentId,
         newValuesSummary: {
-          status: decorated.status,
-          assignedTo: decorated.assignedTo,
-          resolutionNote: decorated.resolutionNote,
-          matchingSuppression: decorated.matchingSuppression,
+          category: updated.category,
+          status: updated.status,
+          assignedTo: updated.assignedTo,
+          assignmentAcknowledgedAt: updated.assignmentAcknowledgedAt,
+          resolutionNote: updated.resolutionNote,
         },
       },
       requestId,
     );
 
-    return this.cloneIncident(decorated);
+    return {
+      incident: this.clone(updated),
+      receipt: this.buildActionReceipt({
+        auditId: auditLog.auditId,
+        message: "Incident updated.",
+        resourceId: incidentId,
+      }),
+    };
   }
 
   linkComplaint(
@@ -513,6 +529,7 @@ export class IncidentService implements OnModuleInit {
       relatedComplaintCaseNo: null,
       reportedBy: command.reportedBy,
       assignedTo: null,
+      assignmentAcknowledgedAt: null,
       escalationTarget: command.escalationTarget ?? null,
       sourceDispatchExceptionOrderId: command.orderId,
       occurredAt: now,
@@ -567,6 +584,18 @@ export class IncidentService implements OnModuleInit {
     command: RecordServiceRecoveryActionCommand,
     requestId?: string,
   ) {
+    return this.recordServiceRecoveryActionWithReceipt(
+      incidentId,
+      command,
+      requestId,
+    ).action;
+  }
+
+  recordServiceRecoveryActionWithReceipt(
+    incidentId: string,
+    command: RecordServiceRecoveryActionCommand,
+    requestId?: string,
+  ): IncidentServiceRecoveryActionResult {
     this.assertNonBlank(command.actionType, "actionType");
     this.assertNonBlank(command.note, "note");
     this.assertNonBlank(command.actor, "actor");
@@ -615,10 +644,13 @@ export class IncidentService implements OnModuleInit {
     ]);
 
     this.persist(
-      { incidents: [updated], timelines: [timelineEntry] },
+      {
+        incidents: [updated],
+        timelines: [this.getLatestTimelineEntry(incidentId)],
+      },
       "record_service_recovery_action",
     );
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: command.actor,
         actorType: "ops_user",
@@ -635,95 +667,14 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
-    return { ...action };
-  }
-
-  extendMatchingSuppression(
-    incidentId: string,
-    command: ExtendDriverMatchingSuppressionCommand,
-    identity: BootstrapRequestIdentity | null = null,
-    requestId?: string,
-  ) {
-    this.requireOpsManager(identity);
-    this.assertNonBlank(command.reason, "reason");
-
-    const incident = this.require(incidentId);
-    const activeSuppression = incident.matchingSuppression;
-    if (!incident.relatedDriverId || !activeSuppression?.active) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "MATCHING_SUPPRESSION_NOT_ACTIVE",
-        "This incident does not have an active driver matching suppression.",
-        { incidentId },
-      );
-    }
-
-    const nextExpiry = this.resolveSuppressionExpiry(
-      activeSuppression,
-      command,
-    );
-    const now = new Date().toISOString();
-    const updatedSuppression: DriverMatchingSuppression = {
-      ...activeSuppression,
-      expiresAt: nextExpiry,
-    };
-
-    this.suppressions.set(incidentId, { ...updatedSuppression });
-    const updated = this.decorateIncident(
-      {
-        ...incident,
-        matchingSuppression: updatedSuppression,
-        updatedAt: now,
-      },
-      identity,
-    );
-    this.replace(updated);
-
-    const timelineEntry = this.createTimelineEntry(
-      incidentId,
-      TIMELINE_ACTIONS.suppressionExtended,
-      `Driver matching suppression extended until ${nextExpiry}: ${command.reason}`,
-      this.resolveActorId(identity, "ops_manager"),
-      now,
-    );
-    this.timelines.set(incidentId, [
-      ...(this.timelines.get(incidentId) ?? []),
-      timelineEntry,
-    ]);
-
-    this.persist(
-      {
-        incidents: [updated],
-        timelines: [timelineEntry],
-        suppressions: [
-          {
-            incidentId,
-            driverId: incident.relatedDriverId,
-            updatedAt: now,
-            suppression: updatedSuppression,
-          },
-        ],
-      },
-      "extend_matching_suppression",
-    );
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType: this.resolveAuditActorType(identity, "ops_user"),
-        tenantId: identity?.tenantId ?? null,
-        moduleName: "incident",
-        actionName: "extend_matching_suppression",
-        resourceType: "incident",
+    return {
+      action,
+      receipt: this.buildActionReceipt({
+        auditId: auditLog.auditId,
+        message: "Service recovery action recorded.",
         resourceId: incidentId,
-        newValuesSummary: {
-          expiresAt: nextExpiry,
-          reason: command.reason,
-        },
-      },
-      requestId,
-    );
-
-    return this.cloneIncident(updated);
+      }),
+    };
   }
 
   getServiceRecoveryActions(incidentId: string) {
@@ -843,201 +794,13 @@ export class IncidentService implements OnModuleInit {
     };
   }
 
-  private decorateIncident(
-    incident: IncidentRecord,
-    identity: BootstrapRequestIdentity | null = null,
-  ): IncidentRecord {
-    const recoveryActions =
-      this.recoveryActions.get(incident.incidentId)?.map((action) => ({
-        ...action,
-      })) ?? incident.serviceRecoveryActions.map((action) => ({ ...action }));
-    const suppression = this.resolveSuppression(incident);
-    return {
-      ...incident,
-      serviceRecoveryActions: recoveryActions,
-      matchingSuppression: suppression,
-      ...(() => {
-        const availableActions = this.buildAvailableActions(
-          suppression,
-          identity,
-        );
-        return availableActions.length > 0 ? { availableActions } : {};
-      })(),
-    };
+  private getLatestTimelineEntry(incidentId: string) {
+    const entries = this.timelines.get(incidentId) ?? [];
+    return entries[entries.length - 1]!;
   }
 
-  private resolveSuppression(
-    incident: IncidentRecord,
-  ): DriverMatchingSuppression | null {
-    const suppression =
-      incident.matchingSuppression ??
-      this.suppressions.get(incident.incidentId) ??
-      null;
-    if (!suppression) {
-      return null;
-    }
-
-    const active =
-      suppression.active &&
-      suppression.liftedAt === null &&
-      new Date(suppression.expiresAt).getTime() > Date.now();
-    const next = { ...suppression, active };
-    this.suppressions.set(incident.incidentId, next);
-    return next;
-  }
-
-  private buildAvailableActions(
-    suppression: DriverMatchingSuppression | null,
-    identity: BootstrapRequestIdentity | null,
-  ): ResourceActionDescriptor[] {
-    if (!suppression?.active) {
-      return [];
-    }
-
-    const isOpsManager = this.hasRole(identity, "ops_manager");
-    return [
-      {
-        action: "extend_matching_suppression",
-        enabled: isOpsManager,
-        requiresReason: true,
-        riskLevel: "high",
-        ...(isOpsManager ? {} : { disabledReasonCode: "ops_manager_required" }),
-      },
-    ];
-  }
-
-  private maybeActivateSuppression(
-    incident: IncidentRecord,
-    nowIso: string,
-  ): PersistSuppressionRecord | null {
-    if (!incident.relatedDriverId) {
-      return null;
-    }
-
-    const suppression: DriverMatchingSuppression = {
-      active: true,
-      reasonCode: "incident",
-      sourceIncidentId: incident.incidentId,
-      expiresAt: new Date(
-        new Date(nowIso).getTime() + DRIVER_MATCHING_SUPPRESSION_DEFAULT_TTL_MS,
-      ).toISOString(),
-      liftedAt: null,
-    };
-    this.suppressions.set(incident.incidentId, { ...suppression });
-    incident.matchingSuppression = { ...suppression };
-    return {
-      incidentId: incident.incidentId,
-      driverId: incident.relatedDriverId,
-      updatedAt: nowIso,
-      suppression,
-    };
-  }
-
-  private liftSuppression(
-    incident: IncidentRecord,
-    nowIso: string,
-  ): PersistSuppressionRecord | null {
-    if (!incident.relatedDriverId || !incident.matchingSuppression) {
-      return null;
-    }
-    const suppression: DriverMatchingSuppression = {
-      ...incident.matchingSuppression,
-      active: false,
-      liftedAt: nowIso,
-    };
-    this.suppressions.set(incident.incidentId, { ...suppression });
-    incident.matchingSuppression = { ...suppression };
-    return {
-      incidentId: incident.incidentId,
-      driverId: incident.relatedDriverId,
-      updatedAt: nowIso,
-      suppression,
-    };
-  }
-
-  private resolveSuppressionExpiry(
-    suppression: DriverMatchingSuppression,
-    command: ExtendDriverMatchingSuppressionCommand,
-  ) {
-    if (command.expiresAt) {
-      const timestamp = Date.parse(command.expiresAt);
-      if (Number.isNaN(timestamp)) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "VALIDATION_ERROR",
-          "expiresAt must be a valid ISO timestamp.",
-          { expiresAt: command.expiresAt },
-        );
-      }
-      if (timestamp <= Date.now()) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "VALIDATION_ERROR",
-          "expiresAt must be in the future.",
-          { expiresAt: command.expiresAt },
-        );
-      }
-      return new Date(timestamp).toISOString();
-    }
-
-    if (
-      command.extendByHours === undefined ||
-      !Number.isFinite(command.extendByHours) ||
-      command.extendByHours <= 0
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        "extendByHours must be a positive number when expiresAt is not provided.",
-        { extendByHours: command.extendByHours },
-      );
-    }
-
-    const base = Date.parse(suppression.expiresAt);
-    return new Date(
-      base + command.extendByHours * 60 * 60 * 1000,
-    ).toISOString();
-  }
-
-  private requireOpsManager(identity: BootstrapRequestIdentity | null) {
-    if (this.hasRole(identity, "ops_manager")) {
-      return;
-    }
-    throw new ApiRequestError(
-      HttpStatus.FORBIDDEN,
-      "OPS_MANAGER_REQUIRED",
-      "Only ops_manager can extend driver matching suppression.",
-    );
-  }
-
-  private hasRole(
-    identity: BootstrapRequestIdentity | null,
-    role: string,
-  ): boolean {
-    return identity?.roles?.includes(role) ?? false;
-  }
-
-  private resolveActorId(
-    identity: BootstrapRequestIdentity | null,
-    fallback: string,
-  ) {
-    return identity?.actorId ?? fallback;
-  }
-
-  private resolveAuditActorType(
-    identity: BootstrapRequestIdentity | null,
-    fallback: AuditLogRecord["actorType"],
-  ): AuditLogRecord["actorType"] {
-    switch (identity?.actorType) {
-      case "system":
-      case "platform_admin":
-      case "tenant_admin":
-      case "ops_user":
-      case "partner_api_key":
-        return identity.actorType;
-      default:
-        return fallback;
-    }
+  private clone(incident: IncidentRecord) {
+    return { ...incident };
   }
 
   private persist(
@@ -1082,10 +845,23 @@ export class IncidentService implements OnModuleInit {
     requestId?: string,
   ) {
     const log = { ...input };
-    if (requestId) {
-      (log as { requestId?: string }).requestId = requestId;
-    }
-    this.auditNotificationService.recordAuditLog(log);
+    if (requestId) (log as any).requestId = requestId;
+    return this.auditNotificationService.recordAuditLog(log);
+  }
+
+  private buildActionReceipt(input: {
+    auditId: string;
+    message: string;
+    resourceId: string;
+  }): ActionReceipt {
+    return {
+      actionId: `act-${randomUUID()}`,
+      auditId: input.auditId,
+      resourceType: "incident",
+      resourceId: input.resourceId,
+      status: "completed",
+      message: input.message,
+    };
   }
 
   private assertValidCategory(

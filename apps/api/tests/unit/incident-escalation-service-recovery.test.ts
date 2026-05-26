@@ -461,6 +461,79 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
     });
   });
 
+  describe("assignment acknowledgement and category updates", () => {
+    it("records assignment acknowledgement timestamp and receipt", () => {
+      const { incidentService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Ack test",
+        description: "Needs explicit handoff acknowledgement.",
+        category: "operational",
+        severity: "medium",
+        reportedBy: "ops-user-001",
+      });
+
+      incidentService.updateIncident(incident.incidentId, {
+        assignedTo: "ops-user-009",
+      });
+
+      const result = incidentService.updateIncidentWithReceipt(
+        incident.incidentId,
+        {
+          assignmentAcknowledgedAt: "2026-05-26T12:00:00.000Z",
+          assignmentAcknowledgedBy: "ops-user-009",
+        },
+      );
+
+      expect(result.incident.assignmentAcknowledgedAt).toBe(
+        "2026-05-26T12:00:00.000Z",
+      );
+      expect(result.receipt.auditId).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i);
+      expect(result.receipt.resourceId).toBe(incident.incidentId);
+
+      const timeline = incidentService.getTimeline(incident.incidentId);
+      const ackEntry = timeline.find(
+        (entry) => entry.action === "incident_assignment_acknowledged",
+      );
+      expect(ackEntry).toBeDefined();
+      expect(ackEntry!.actor).toBe("ops-user-009");
+    });
+
+    it("resets assignment acknowledgement when owner changes and updates category", () => {
+      const { incidentService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Reassign test",
+        description: "Changing owner should require new acknowledgement.",
+        category: "operational",
+        severity: "high",
+        reportedBy: "ops-user-001",
+      });
+
+      incidentService.updateIncident(incident.incidentId, {
+        assignedTo: "ops-user-010",
+        assignmentAcknowledgedAt: "2026-05-26T08:00:00.000Z",
+      });
+
+      const updated = incidentService.updateIncident(incident.incidentId, {
+        assignedTo: "ops-user-011",
+        category: "safety",
+      });
+
+      expect(updated.assignedTo).toBe("ops-user-011");
+      expect(updated.assignmentAcknowledgedAt).toBeNull();
+      expect(updated.category).toBe("safety");
+
+      const timeline = incidentService.getTimeline(incident.incidentId);
+      const categoryEntry = timeline.find(
+        (entry) => entry.action === "incident_category_updated",
+      );
+      expect(categoryEntry).toBeDefined();
+      expect(categoryEntry!.note).toContain("operational");
+      expect(categoryEntry!.note).toContain("safety");
+    });
+  });
+
   describe("service recovery actions", () => {
     it("records a service recovery action on an incident", () => {
       const { incidentService } = createServices();
