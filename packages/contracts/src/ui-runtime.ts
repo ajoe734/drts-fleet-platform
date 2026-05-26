@@ -306,22 +306,39 @@ export interface SearchResultRecord {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Ops-issued instruction surfaced to the driver, primarily for
- * manual-fallback scenarios when a forwarded order needs human
- * coordination (Q-DRV04). The driver app shows this as an in-app banner
- * + optional push, NOT as a static label — the message is operator-
- * authored and tied to a specific task.
- *
- * Consumed by: driver-app `/trip` (forwarded mode, manual fallback
- * state).
+ * Backend-authored instruction surfaced to the driver whenever Ops needs
+ * the driver to reauth, go offline, wait on a manual-fallback flow, or
+ * acknowledge a platform-side state transition. The record carries the
+ * authoritative action descriptors the UI may offer back to the driver.
  */
+export type DriverOpsInstructionKind =
+  | "none"
+  | "reauth_required"
+  | "go_offline_required"
+  | "matching_suppressed"
+  | "incident_hold"
+  | "manual_fallback_pending"
+  | "sync_failed"
+  | "lost_race"
+  | "cancelled_by_platform"
+  | "proof_required"
+  | "contact_ops"
+  | "device_rebind_required";
+
 export interface DriverOpsInstruction {
   instructionId: string;
-  taskId: string;
+  kind: DriverOpsInstructionKind;
+  severity: UiSeverity;
+  title: string;
   message: string;
-  issuedBy: string;
-  issuedAt: string;
+  driverId: string;
+  platformCode?: string | null;
+  taskId?: string | null;
+  orderId?: string | null;
+  effectiveAt: string;
   expiresAt?: string | null;
+  availableActions: ResourceActionDescriptor[];
+  links?: CrossAppResourceLink[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -329,21 +346,42 @@ export interface DriverOpsInstruction {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * State record showing whether driver matching is currently suppressed
- * for a given driver, and why. Created by ops actions during an incident
- * or compliance hold; auto-lifted when the source incident resolves;
- * has a default 24h TTL unless extended by `ops_manager`.
- *
- * Consumed by: ops-console `/incidents/[id]` (visible state),
- * `/drivers/[id]` (banner + lift CTA), driver-app eligibility
- * computation (reflected in `eligibleServiceBuckets` + reasons).
+ * Backend-authored record showing a temporary or persistent reason a
+ * driver is excluded from matching globally, for a platform, or for a
+ * service bucket. Ops may create and release the record; driver surfaces
+ * may display it but may not author it.
  */
+export type DriverMatchingSuppressionReason =
+  | "shift_offline"
+  | "platform_offline"
+  | "platform_reauth_required"
+  | "driver_cert_invalid"
+  | "vehicle_ineligible"
+  | "incident_hold"
+  | "manual_ops_hold"
+  | "external_platform_suspension"
+  | "compliance_hold";
+
 export interface DriverMatchingSuppression {
-  active: boolean;
-  reasonCode: "incident" | "compliance_hold" | "manual_ops_hold";
-  sourceIncidentId?: string | null;
-  expiresAt: string;
-  liftedAt: string | null;
+  suppressionId: string;
+  driverId: string;
+  platformCode: string | null;
+  serviceBucket?: string | null;
+  reason: DriverMatchingSuppressionReason;
+  reasonMessage: string;
+  status: "active" | "released";
+  createdAt: string;
+  releasedAt: string | null;
+  createdByActorId: string | null;
+  releaseAction?: ResourceActionDescriptor | null;
+  auditId?: string | null;
+}
+
+export interface CreateDriverMatchingSuppressionCommand {
+  platformCode?: string | null;
+  serviceBucket?: string | null;
+  reason: DriverMatchingSuppressionReason;
+  reasonMessage: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

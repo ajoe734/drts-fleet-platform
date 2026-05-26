@@ -24,6 +24,7 @@ import { BillingSettlementModule } from "./modules/billing-settlement/billing-se
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
 import { ComplaintModule } from "./modules/complaint/complaint.module";
 import { DriverProfileModule } from "./modules/driver-profile/driver-profile.module";
+import { DriverMatchingSuppressionModule } from "./modules/driver-matching-suppression/driver-matching-suppression.module";
 import { DriverSettingsModule } from "./modules/driver-settings/driver-settings.module";
 import { FeatureFlagsModule } from "./modules/feature-flags/feature-flags.module";
 import { FoundationModule } from "./modules/foundation/foundation.module";
@@ -58,6 +59,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     CallcenterModule,
     ComplaintModule,
     DriverProfileModule,
+    DriverMatchingSuppressionModule,
     OwnedMobilityModule,
     OperationalObservabilityModule,
     PlatformAdminModule,
