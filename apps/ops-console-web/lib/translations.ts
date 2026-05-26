@@ -360,9 +360,9 @@ const en = {
   "contractDetail.meta.approvedAt": "Approved at",
   "contractDetail.authorityRedirect.title": "Authority redirect",
   "contractDetail.authorityRedirect.bannerTitle":
-    "Mutation lives in Platform Admin · cross-app",
+    "Mutation lives in {ownerApp} · cross-app",
   "contractDetail.authorityRedirect.bannerBody":
-    "Contract clauses, version bumps, and termination flows are owned by Platform Admin /partners. Open the contract there to make changes.",
+    "Contract clauses, version bumps, and termination flows are owned by {ownerApp}. Open that surface in a new tab to make changes.",
   "contractDetail.linkage.title": "Linked tenant / partner",
   "contractDetail.linkage.tenant": "Tenant",
   "contractDetail.linkage.partnerEntry": "Partner entry",
@@ -399,11 +399,11 @@ const en = {
     "No history rows match the current filters. Widen the filter or clear it to see all versions.",
   "contractDetail.actions.confirmTitle": "Confirm {action}",
   "contractDetail.actions.confirmBodyLow":
-    "This action is read-only at ops and will open Platform Admin in a new tab.",
+    "This action is read-only at ops and opens the owner app in a new tab.",
   "contractDetail.actions.confirmBodyMedium":
-    "Mutation runs in Platform Admin. Confirming opens the partner contract page in a new tab so the action can be completed there.",
+    "Mutation runs in the owner app. Confirming opens that surface in a new tab so the action can be completed there.",
   "contractDetail.actions.confirmBodyHigh":
-    "High-risk action. Provide a written reason; the reason is forwarded with the deep link so Platform Admin can record it on the audit trail.",
+    "High-risk action. Provide a written reason; the reason is forwarded with the deep link so the owner app can record it on the audit trail.",
   "contractDetail.actions.reasonLabel": "Reason (required)",
   "contractDetail.actions.reasonPlaceholder":
     "Why is this action needed? Will be recorded on the audit log.",
@@ -412,10 +412,45 @@ const en = {
   "contractDetail.actions.confirm": "Confirm & open",
   "contractDetail.actions.cancel": "Cancel",
   "contractDetail.actions.disabledTooltip": "Disabled · {code}",
-  "contractDetail.actions.toastTitle": "{action} forwarded to Platform Admin",
+  "contractDetail.actions.action.open_contract_registry":
+    "Open contract registry",
+  "contractDetail.actions.action.open_partner_entry": "Open partner entry",
+  "contractDetail.actions.action.open_tenant_sla": "Open tenant SLA",
+  "contractDetail.actions.toastTitle": "{action} forwarded to owner app",
   "contractDetail.actions.toastBody":
     "Opened a new tab to complete the mutation. The audit record is created when you confirm there.",
   "contractDetail.actions.toastDismiss": "Dismiss",
+  "contractDetail.ownerApp.platformAdmin": "Open in Platform Admin →",
+  "contractDetail.ownerApp.tenantConsole": "Open in Tenant Console →",
+  "contractDetail.links.openTenant": "Open tenant settings",
+  "contractDetail.links.openPartner": "Open partner entry",
+  "contractDetail.values.modifiableWindow":
+    "Editable until {minutes} min before the service window starts",
+  "contractDetail.values.proofRequirements":
+    "{photos} photo min · signoff {signoff} · expense proof {expense}",
+  "contractDetail.values.waitingRule":
+    "Wait threshold {minutes} min before SLA breach handling",
+  "contractDetail.values.noShowRule":
+    "Arrival grace {minutes} min before no-show handling",
+  "contractDetail.values.slaProfile":
+    "wait {wait}m · arrive {arrival}m · complete {completion}m",
+  "contractDetail.values.flag.required": "required",
+  "contractDetail.values.flag.notRequired": "not required",
+  "contractDetail.refreshBanner.staleTitle": "Snapshot is stale",
+  "contractDetail.refreshBanner.staleBody":
+    "This detail was generated at {generatedAt}. Use refresh before making a cross-app decision.",
+  "contractDetail.refreshBanner.degradedTitle": "Snapshot is degraded",
+  "contractDetail.refreshBanner.degradedBody":
+    "Freshness is degraded; validate the owner app before acting on this contract.",
+  "contractDetail.refreshBanner.unknownTitle": "Snapshot freshness unknown",
+  "contractDetail.refreshBanner.unknownBody":
+    "This endpoint does not yet emit a fresh/stale signal. Use refresh and confirm in the owner app.",
+  "contractDetail.health.degradedTitle": "Page-critical dependency degraded",
+  "contractDetail.health.degradedBody":
+    "One or more upstream services are degraded: {services}. Read carefully before taking action.",
+  "contractDetail.health.downTitle": "Page-critical dependency down",
+  "contractDetail.health.downBody":
+    "The registry dependency for this contract detail is currently down. Retry after service recovery.",
   "contractDetail.refresh.manualLabel": "Refresh now",
   "contractDetail.refresh.refreshingLabel": "Refreshing…",
   "contractDetail.refresh.autoCadence": "auto · every {cadence}",
@@ -1923,9 +1958,9 @@ const zh: Record<keyof typeof en, string> = {
   "contractDetail.meta.approvedAt": "核准時間",
   "contractDetail.authorityRedirect.title": "權責導向",
   "contractDetail.authorityRedirect.bannerTitle":
-    "變更請至 Platform Admin · 跨 app",
+    "變更請至 {ownerApp} · 跨 app",
   "contractDetail.authorityRedirect.bannerBody":
-    "合約條款編輯、版本升級、終止流程由 Platform Admin /partners 負責，請於該系統開啟此合約。",
+    "合約條款編輯、版本升級與終止流程由 {ownerApp} 負責，請於新分頁開啟對應畫面進行變更。",
   "contractDetail.linkage.title": "關聯租戶 / 合作夥伴",
   "contractDetail.linkage.tenant": "租戶",
   "contractDetail.linkage.partnerEntry": "Partner entry",
@@ -1959,11 +1994,11 @@ const zh: Record<keyof typeof en, string> = {
     "目前篩選條件無符合的歷程；請放寬或清除篩選以檢視全部版本。",
   "contractDetail.actions.confirmTitle": "確認執行 {action}",
   "contractDetail.actions.confirmBodyLow":
-    "ops 端為唯讀；確認後將於新分頁開啟 Platform Admin 完成此動作。",
+    "ops 端為唯讀；確認後將於新分頁開啟 owner app 完成此動作。",
   "contractDetail.actions.confirmBodyMedium":
-    "變更於 Platform Admin 執行；確認後於新分頁開啟合約頁面以完成動作。",
+    "變更於 owner app 執行；確認後於新分頁開啟對應畫面以完成動作。",
   "contractDetail.actions.confirmBodyHigh":
-    "高風險動作；請輸入文字原因，原因會隨深連結傳遞至 Platform Admin 以寫入稽核紀錄。",
+    "高風險動作；請輸入文字原因，原因會隨深連結傳遞至 owner app 以寫入稽核紀錄。",
   "contractDetail.actions.reasonLabel": "原因（必填）",
   "contractDetail.actions.reasonPlaceholder":
     "為什麼需要此動作？將寫入稽核紀錄。",
@@ -1971,10 +2006,44 @@ const zh: Record<keyof typeof en, string> = {
   "contractDetail.actions.confirm": "確認並開啟",
   "contractDetail.actions.cancel": "取消",
   "contractDetail.actions.disabledTooltip": "停用 · {code}",
-  "contractDetail.actions.toastTitle": "{action} 已轉至 Platform Admin",
+  "contractDetail.actions.action.open_contract_registry": "開啟合約登記",
+  "contractDetail.actions.action.open_partner_entry": "開啟合作夥伴入口",
+  "contractDetail.actions.action.open_tenant_sla": "開啟租戶 SLA",
+  "contractDetail.actions.toastTitle": "{action} 已轉至 owner app",
   "contractDetail.actions.toastBody":
     "已開啟新分頁以完成變更；於該系統按下確認後將建立稽核紀錄。",
   "contractDetail.actions.toastDismiss": "關閉",
+  "contractDetail.ownerApp.platformAdmin": "在 Platform Admin 開啟 →",
+  "contractDetail.ownerApp.tenantConsole": "在 Tenant Console 開啟 →",
+  "contractDetail.links.openTenant": "開啟租戶設定",
+  "contractDetail.links.openPartner": "開啟合作夥伴入口",
+  "contractDetail.values.modifiableWindow":
+    "於服務時窗開始前 {minutes} 分鐘仍可修改",
+  "contractDetail.values.proofRequirements":
+    "至少 {photos} 張照片 · 簽收 {signoff} · 費用憑證 {expense}",
+  "contractDetail.values.waitingRule":
+    "等候 {minutes} 分鐘後進入 SLA breach 處理",
+  "contractDetail.values.noShowRule":
+    "抵達後保留 {minutes} 分鐘再進入 no-show 處理",
+  "contractDetail.values.slaProfile":
+    "等候 {wait} 分 · 抵達 {arrival} 分 · 完成 {completion} 分",
+  "contractDetail.values.flag.required": "需要",
+  "contractDetail.values.flag.notRequired": "不需要",
+  "contractDetail.refreshBanner.staleTitle": "快照已過期",
+  "contractDetail.refreshBanner.staleBody":
+    "此 detail 於 {generatedAt} 產生；跨 app 決策前請先重新整理。",
+  "contractDetail.refreshBanner.degradedTitle": "快照處於降級狀態",
+  "contractDetail.refreshBanner.degradedBody":
+    "新鮮度已降級；採取動作前請先於 owner app 再次確認。",
+  "contractDetail.refreshBanner.unknownTitle": "快照新鮮度未知",
+  "contractDetail.refreshBanner.unknownBody":
+    "此 endpoint 尚未提供 fresh/stale 訊號；請重新整理並在 owner app 再次確認。",
+  "contractDetail.health.degradedTitle": "頁面關鍵依賴已降級",
+  "contractDetail.health.degradedBody":
+    "一個以上上游服務已降級：{services}。採取動作前請謹慎判讀。",
+  "contractDetail.health.downTitle": "頁面關鍵依賴不可用",
+  "contractDetail.health.downBody":
+    "此合約 detail 依賴的登記服務目前不可用；請待恢復後重試。",
   "contractDetail.refresh.manualLabel": "立即重新整理",
   "contractDetail.refresh.refreshingLabel": "重新整理中…",
   "contractDetail.refresh.autoCadence": "自動 · 每 {cadence}",

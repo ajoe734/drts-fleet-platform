@@ -1,12 +1,20 @@
 import { randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  OnModuleInit,
+  Optional,
+  forwardRef,
+} from "@nestjs/common";
 
 import type {
   ActivateInsurancePolicyCommand,
   ActivateVehicleContractCommand,
   ApproveExclusivityCommand,
   AuditLogRecord,
+  BusinessDispatchSubtype,
   CompleteVehicleDebrandingCommand,
   CreateDriverMasterCommand,
   CreateInsurancePolicyCommand,
@@ -23,7 +31,12 @@ import type {
   InitiateVehicleOffboardingCommand,
   InsurancePolicyLifecycleStatus,
   InsurancePolicyRecord,
+  OpsContractActionLink,
+  OpsContractDetailRecord,
+  OpsContractVersionHistoryEntry,
+  PartnerChannelEntryRecord,
   Phase1ServiceBucket,
+  RefreshTier,
   RejectExclusivityCommand,
   SupplyDispatchBlockReason,
   SupplyLifecycleTraceRecord,
@@ -41,6 +54,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
+import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import {
   RegulatoryRegistryRepository,
   type PersistRegulatoryRegistryChanges,
@@ -50,6 +64,38 @@ import {
 const EARTH_RADIUS_KM = 6371;
 const AVERAGE_SPEED_KMH = 30;
 const SEED_TIMESTAMP = "2026-01-01T00:00:00.000Z";
+const CONTRACT_DETAIL_REFRESH_TIER: RefreshTier = "medium";
+
+type ContractDetailRule = {
+  modifiableWindowMinutes: number;
+  proofRequirements: {
+    minPhotoCount: number;
+    signoffRequired: boolean;
+    expenseProofRequired: boolean;
+  };
+};
+
+const CONTRACT_DETAIL_RULES: Record<
+  BusinessDispatchSubtype,
+  ContractDetailRule
+> = {
+  enterprise_dispatch: {
+    modifiableWindowMinutes: 30,
+    proofRequirements: {
+      minPhotoCount: 1,
+      signoffRequired: false,
+      expenseProofRequired: false,
+    },
+  },
+  credit_card_airport_transfer: {
+    modifiableWindowMinutes: 60,
+    proofRequirements: {
+      minPhotoCount: 1,
+      signoffRequired: false,
+      expenseProofRequired: false,
+    },
+  },
+};
 
 type EtaDestination = {
   lat: number;
@@ -182,6 +228,17 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     updatedAt: "2026-03-31T23:59:59.000Z",
     supplyLifecycle: createEmptySupplyLifecycle("2026-03-31T23:59:59.000Z"),
   },
+  {
+    vehicleId: "veh-demo-004",
+    plateNo: "AIR-4310",
+    operatingArea: "taoyuan-airport",
+    supportedServiceBuckets: ["business_dispatch"],
+    dispatchableFlag: false,
+    exclusivityApproved: false,
+    insuranceStatus: "valid",
+    updatedAt: "2026-05-20T00:00:00.000Z",
+    supplyLifecycle: createEmptySupplyLifecycle("2026-05-20T00:00:00.000Z"),
+  },
 ];
 
 const DRIVER_SEED: DriverRegistryRecord[] = [
@@ -225,6 +282,57 @@ const CONTRACT_SEED: VehicleContractRecord[] = [
     approvedAt: "2026-01-01T00:00:00.000Z",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    contractId: "CTR-309",
+    vehicleId: "veh-demo-004",
+    partnerId: "partner-bank-demo-001",
+    partnerType: "bank_partner",
+    contractType: "service_fleet_contract",
+    operatingAreaId: "taoyuan-airport",
+    serviceScope: "business_dispatch",
+    startAt: "2025-07-01T00:00:00.000Z",
+    endAt: "2025-12-31T23:59:59.000Z",
+    status: "terminated",
+    lifecycleStatus: "terminated",
+    approvedBy: "platform-admin-demo-004",
+    approvedAt: "2025-06-20T00:00:00.000Z",
+    createdAt: "2025-06-15T00:00:00.000Z",
+    updatedAt: "2025-12-31T23:59:59.000Z",
+  },
+  {
+    contractId: "CTR-310",
+    vehicleId: "veh-demo-004",
+    partnerId: "partner-bank-demo-001",
+    partnerType: "bank_partner",
+    contractType: "service_fleet_contract",
+    operatingAreaId: "taoyuan-airport",
+    serviceScope: "business_dispatch",
+    startAt: "2026-01-01T00:00:00.000Z",
+    endAt: "2026-06-30T23:59:59.000Z",
+    status: "active",
+    lifecycleStatus: "active",
+    approvedBy: "platform-admin-demo-004",
+    approvedAt: "2025-12-20T00:00:00.000Z",
+    createdAt: "2025-12-15T00:00:00.000Z",
+    updatedAt: "2026-04-15T00:00:00.000Z",
+  },
+  {
+    contractId: "CTR-311",
+    vehicleId: "veh-demo-004",
+    partnerId: "partner-bank-demo-001",
+    partnerType: "bank_partner",
+    contractType: "service_fleet_contract",
+    operatingAreaId: "taoyuan-airport",
+    serviceScope: "business_dispatch",
+    startAt: "2026-07-01T00:00:00.000Z",
+    endAt: "2027-06-30T23:59:59.000Z",
+    status: "draft",
+    lifecycleStatus: "draft",
+    approvedBy: null,
+    approvedAt: null,
+    createdAt: "2026-05-20T00:00:00.000Z",
+    updatedAt: "2026-05-20T00:00:00.000Z",
   },
 ];
 
@@ -332,6 +440,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
     private readonly driverProfileService: DriverProfileService,
     @Optional()
     private readonly regulatoryRegistryRepository?: RegulatoryRegistryRepository,
+    @Optional()
+    @Inject(forwardRef(() => TenantPartnerService))
+    private readonly tenantPartnerService?: TenantPartnerService,
   ) {
     this.reconcileSupplyLifecycleForAll({
       emitEvent: false,
@@ -673,6 +784,60 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return this.contracts.map((contract) =>
       this.cloneContract(this.applyContractLifecycle(contract, evaluatedAt)),
     );
+  }
+
+  getContractDetail(contractId: string): OpsContractDetailRecord {
+    const evaluatedAt = new Date().toISOString();
+    const contract = this.cloneContract(
+      this.applyContractLifecycle(
+        this.requireContract(contractId),
+        evaluatedAt,
+      ),
+    );
+    const partnerEntry = this.findContractPartnerEntry(contract);
+    const tenantId = partnerEntry?.tenantId ?? null;
+    const slaProfile =
+      tenantId && this.tenantPartnerService
+        ? this.tenantPartnerService.getSlaProfile(tenantId)
+        : null;
+    const contractFamily = this.listContractFamily(contract, evaluatedAt);
+    const mutationLink = this.buildContractMutationLink(contract, partnerEntry);
+    const availableActions = this.buildContractAvailableActions(partnerEntry);
+    const actionLinks = this.buildContractActionLinks(contract, partnerEntry);
+
+    return {
+      ...contract,
+      refreshTier: CONTRACT_DETAIL_REFRESH_TIER,
+      availableActions,
+      actionLinks,
+      operationalTerms: {
+        ...this.resolveContractTerms(partnerEntry),
+        waitingThresholdMinutes: slaProfile?.waitThresholdMin ?? null,
+        noShowGraceMinutes: slaProfile?.arrivalThresholdMin ?? null,
+        slaProfile,
+        currentEffectiveVersion: contract.contractId,
+      },
+      tenantLinkage: {
+        tenantId,
+        tenantDisplayName: tenantId,
+        partnerEntrySlug: partnerEntry?.entrySlug ?? null,
+        programId: partnerEntry?.programId ?? null,
+        authMode: partnerEntry?.authMode ?? null,
+        eligibilityMode: partnerEntry?.eligibilityMode ?? null,
+        tenantLink: tenantId ? this.buildTenantGovernanceLink(tenantId) : null,
+        partnerLink: partnerEntry
+          ? this.buildPartnerEntryLink(partnerEntry)
+          : null,
+      },
+      versionHistory: this.buildContractVersionHistory(contractFamily),
+      pendingVersion: this.buildPendingContractVersion(
+        contract,
+        contractFamily,
+      ),
+      counterpartyDisplayName:
+        partnerEntry?.displayName ?? contract.partnerId ?? null,
+      mutationLink,
+    };
   }
 
   createContract(command: CreateVehicleContractCommand) {
@@ -1614,7 +1779,8 @@ export class RegulatoryRegistryService implements OnModuleInit {
       .map((contract) => this.applyContractLifecycle(contract, evaluatedAt))
       .sort((left, right) => {
         const priorityDelta =
-          priority[right.lifecycleStatus] - priority[left.lifecycleStatus];
+          (priority[right.lifecycleStatus] ?? 0) -
+          (priority[left.lifecycleStatus] ?? 0);
         if (priorityDelta !== 0) {
           return priorityDelta;
         }
@@ -1644,7 +1810,8 @@ export class RegulatoryRegistryService implements OnModuleInit {
       .map((policy) => this.applyPolicyLifecycle(policy, evaluatedAt))
       .sort((left, right) => {
         const priorityDelta =
-          priority[right.lifecycleStatus] - priority[left.lifecycleStatus];
+          (priority[right.lifecycleStatus] ?? 0) -
+          (priority[left.lifecycleStatus] ?? 0);
         if (priorityDelta !== 0) {
           return priorityDelta;
         }
@@ -1677,7 +1844,8 @@ export class RegulatoryRegistryService implements OnModuleInit {
       )
       .sort((left, right) => {
         const priorityDelta =
-          priority[right.lifecycleStatus] - priority[left.lifecycleStatus];
+          (priority[right.lifecycleStatus] ?? 0) -
+          (priority[left.lifecycleStatus] ?? 0);
         if (priorityDelta !== 0) {
           return priorityDelta;
         }
@@ -1950,6 +2118,200 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return {
       ...contract,
     };
+  }
+
+  private findContractPartnerEntry(
+    contract: VehicleContractRecord,
+  ): PartnerChannelEntryRecord | null {
+    if (!this.tenantPartnerService) {
+      return null;
+    }
+
+    const entries = this.tenantPartnerService.listPartnerEntries();
+    return (
+      entries.find((entry) => entry.partnerId === contract.partnerId) ?? null
+    );
+  }
+
+  private resolveContractTerms(
+    partnerEntry: PartnerChannelEntryRecord | null,
+  ): Pick<
+    OpsContractDetailRecord["operationalTerms"],
+    "modifiableWindowMinutes" | "proofRequirements"
+  > {
+    const subtype: BusinessDispatchSubtype =
+      partnerEntry?.businessDispatchSubtype ?? "enterprise_dispatch";
+    const template = CONTRACT_DETAIL_RULES[subtype];
+
+    return {
+      modifiableWindowMinutes: template.modifiableWindowMinutes,
+      proofRequirements: { ...template.proofRequirements },
+    };
+  }
+
+  private listContractFamily(
+    contract: VehicleContractRecord,
+    evaluatedAt: string,
+  ): VehicleContractRecord[] {
+    return this.contracts
+      .filter(
+        (candidate) =>
+          candidate.vehicleId === contract.vehicleId &&
+          candidate.partnerId === contract.partnerId &&
+          candidate.contractType === contract.contractType &&
+          candidate.serviceScope === contract.serviceScope,
+      )
+      .map((candidate) =>
+        this.cloneContract(this.applyContractLifecycle(candidate, evaluatedAt)),
+      );
+  }
+
+  private buildContractVersionHistory(
+    contractFamily: VehicleContractRecord[],
+  ): OpsContractVersionHistoryEntry[] {
+    return contractFamily
+      .sort((left, right) => right.startAt.localeCompare(left.startAt))
+      .map((entry) => ({
+        version: entry.contractId,
+        publishedAt: entry.approvedAt ?? entry.createdAt,
+        status:
+          entry.lifecycleStatus === "active"
+            ? "active"
+            : entry.lifecycleStatus === "draft"
+              ? "pending"
+              : "retired",
+        actor: entry.approvedBy,
+        actorRealm: entry.approvedBy ? "platform" : null,
+        note: null,
+      }));
+  }
+
+  private buildPendingContractVersion(
+    currentContract: VehicleContractRecord,
+    contractFamily: VehicleContractRecord[],
+  ): OpsContractDetailRecord["pendingVersion"] {
+    const nextVersion =
+      contractFamily.find(
+        (candidate) =>
+          candidate.contractId !== currentContract.contractId &&
+          candidate.lifecycleStatus === "draft" &&
+          candidate.startAt > currentContract.startAt,
+      ) ?? null;
+    if (!nextVersion) {
+      return null;
+    }
+
+    return {
+      version: nextVersion.contractId,
+      effectiveAt: nextVersion.startAt,
+      note: null,
+    };
+  }
+
+  private buildContractRegistryLink(
+    contract: VehicleContractRecord,
+  ): OpsContractDetailRecord["mutationLink"] {
+    return {
+      targetApp: "platform-admin",
+      route: `/fleet?contractId=${encodeURIComponent(contract.contractId)}`,
+      resourceType: "vehicle_contract",
+      resourceId: contract.contractId,
+      openMode: "new_tab",
+      label: "contract_registry",
+    };
+  }
+
+  private buildPartnerEntryLink(
+    partnerEntry: PartnerChannelEntryRecord,
+  ): NonNullable<OpsContractDetailRecord["tenantLinkage"]["partnerLink"]> {
+    return {
+      targetApp: "platform-admin",
+      route: `/partners/${encodeURIComponent(partnerEntry.entrySlug)}`,
+      resourceType: "partner_entry",
+      resourceId: partnerEntry.entrySlug,
+      openMode: "new_tab",
+      label: "partner_entry",
+    };
+  }
+
+  private buildTenantGovernanceLink(
+    tenantId: string,
+  ): NonNullable<OpsContractDetailRecord["tenantLinkage"]["tenantLink"]> {
+    return {
+      targetApp: "tenant-console",
+      route: "/settings",
+      resourceType: "tenant_sla",
+      resourceId: tenantId,
+      openMode: "new_tab",
+      label: "tenant_governance",
+    };
+  }
+
+  private buildContractMutationLink(
+    contract: VehicleContractRecord,
+    partnerEntry: PartnerChannelEntryRecord | null,
+  ): OpsContractDetailRecord["mutationLink"] {
+    if (
+      contract.serviceScope === "business_dispatch" &&
+      partnerEntry?.tenantId
+    ) {
+      return this.buildTenantGovernanceLink(partnerEntry.tenantId);
+    }
+
+    return this.buildContractRegistryLink(contract);
+  }
+
+  private buildContractActionLinks(
+    contract: VehicleContractRecord,
+    partnerEntry: PartnerChannelEntryRecord | null,
+  ): OpsContractActionLink[] {
+    const links: OpsContractActionLink[] = [
+      {
+        action: "open_contract_registry",
+        link: this.buildContractRegistryLink(contract),
+      },
+    ];
+    if (partnerEntry) {
+      links.push({
+        action: "open_partner_entry",
+        link: this.buildPartnerEntryLink(partnerEntry),
+      });
+    }
+    if (partnerEntry?.tenantId) {
+      links.push({
+        action: "open_tenant_sla",
+        link: this.buildTenantGovernanceLink(partnerEntry.tenantId),
+      });
+    }
+    return links;
+  }
+
+  private buildContractAvailableActions(
+    partnerEntry: PartnerChannelEntryRecord | null,
+  ): OpsContractDetailRecord["availableActions"] {
+    return [
+      {
+        action: "open_contract_registry",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "open_partner_entry",
+        enabled: Boolean(partnerEntry),
+        ...(!partnerEntry
+          ? { disabledReasonCode: "partner_reference_missing" }
+          : {}),
+        riskLevel: "low",
+      },
+      {
+        action: "open_tenant_sla",
+        enabled: Boolean(partnerEntry?.tenantId),
+        ...(!partnerEntry?.tenantId
+          ? { disabledReasonCode: "tenant_link_missing" }
+          : {}),
+        riskLevel: "low",
+      },
+    ];
   }
 
   private clonePolicy(policy: InsurancePolicyRecord): InsurancePolicyRecord {

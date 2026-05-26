@@ -1,5 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  CrossAppResourceLink,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiActorRealm,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -2845,6 +2851,62 @@ export interface VehicleContractRecord {
   approvedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface OpsContractActionLink {
+  action: string;
+  link: CrossAppResourceLink;
+}
+
+export interface OpsContractOperationalTerms {
+  modifiableWindowMinutes: number | null;
+  proofRequirements: {
+    minPhotoCount: number;
+    signoffRequired: boolean;
+    expenseProofRequired: boolean;
+  } | null;
+  waitingThresholdMinutes: number | null;
+  noShowGraceMinutes: number | null;
+  slaProfile: TenantSlaProfile | null;
+  currentEffectiveVersion: string;
+}
+
+export interface OpsContractTenantLinkage {
+  tenantId: string | null;
+  tenantDisplayName: string | null;
+  partnerEntrySlug: string | null;
+  programId: string | null;
+  authMode: PartnerEntryAuthMode | null;
+  eligibilityMode: PartnerEligibilityMode | null;
+  tenantLink: CrossAppResourceLink | null;
+  partnerLink: CrossAppResourceLink | null;
+}
+
+export interface OpsContractPendingVersion {
+  version: string;
+  effectiveAt: string;
+  note: string | null;
+}
+
+export interface OpsContractVersionHistoryEntry {
+  version: string;
+  publishedAt: string;
+  status: "active" | "retired" | "pending";
+  actor: string | null;
+  actorRealm: UiActorRealm | null;
+  note: string | null;
+}
+
+export interface OpsContractDetailRecord extends VehicleContractRecord {
+  refreshTier: RefreshTier;
+  availableActions: ResourceActionDescriptor[];
+  actionLinks: OpsContractActionLink[];
+  operationalTerms: OpsContractOperationalTerms;
+  tenantLinkage: OpsContractTenantLinkage;
+  versionHistory: OpsContractVersionHistoryEntry[];
+  pendingVersion: OpsContractPendingVersion | null;
+  counterpartyDisplayName: string | null;
+  mutationLink: CrossAppResourceLink;
 }
 
 export interface CreateVehicleContractCommand {
