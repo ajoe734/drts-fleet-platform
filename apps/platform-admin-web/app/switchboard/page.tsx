@@ -33,6 +33,7 @@ import type {
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
   PublicInfoVersionRecord,
+  RefreshTier,
   ResourceActionDescriptor,
 } from "@drts/contracts";
 import { getPlacardVersionCodePrecheckMessage } from "./placard-version-code";
@@ -59,7 +60,7 @@ type SwitchboardListPayload<T> = {
   items: T[];
   availableActions: ResourceActionDescriptor[];
   emptyState: EmptyStateEnvelope | null;
-  refreshTier: string | null;
+  refreshTier: RefreshTier | null;
   lastUpdatedAt: string | null;
   crossAppLinks: CrossAppResourceLink[];
 };
@@ -90,7 +91,7 @@ const EMPTY_PLACARD_FORM: PlacardFormState = {
   artifactFileId: "",
 };
 
-const REFRESH_TIER_FALLBACK = "T4";
+const REFRESH_TIER_FALLBACK: RefreshTier = "medium_slow";
 
 function cleanNullable(value: string) {
   const normalized = value.trim();
@@ -133,6 +134,7 @@ function isEmptyReason(value: unknown): value is EmptyReason {
     value === "fetch_failed" ||
     value === "permission_denied" ||
     value === "external_unavailable" ||
+    value === "driver_not_eligible" ||
     value === "filtered_empty"
   );
 }
@@ -210,21 +212,60 @@ function normalizeListPayload<T extends object>(
           })
         : emptyState,
     refreshTier:
-      typeof value.refreshTier === "string" ? value.refreshTier : null,
+      typeof value.refreshTier === "string"
+        ? (value.refreshTier as RefreshTier)
+        : null,
     lastUpdatedAt:
       typeof value.lastUpdatedAt === "string" ? value.lastUpdatedAt : null,
     crossAppLinks,
   };
 }
 
-function getRefreshIntervalMs(refreshTier: string) {
-  if (refreshTier === "T4") {
-    return 30_000;
+function getRefreshIntervalMs(refreshTier: RefreshTier) {
+  switch (refreshTier) {
+    case "urgent":
+      return 5_000;
+    case "fast":
+      return 3_000;
+    case "dispatch":
+      return 5_000;
+    case "medium":
+      return 15_000;
+    case "medium_slow":
+    case "slow":
+      return 30_000;
+    case "manual":
+      return null;
+    default:
+      return 30_000;
   }
-  if (refreshTier === "T6") {
-    return 120_000;
+}
+
+function getRefreshTierCadenceLabel(refreshTier: RefreshTier) {
+  const intervalMs = getRefreshIntervalMs(refreshTier);
+  if (intervalMs === null) {
+    return "Manual refresh";
   }
-  return 30_000;
+  return `${Math.round(intervalMs / 1000)}s auto-refresh`;
+}
+
+function dedupeActionDescriptors(
+  descriptors: ResourceActionDescriptor[],
+): ResourceActionDescriptor[] {
+  const seen = new Set<string>();
+  return descriptors.filter((descriptor) => {
+    const key = [
+      descriptor.action,
+      descriptor.enabled ? "enabled" : "disabled",
+      descriptor.riskLevel,
+      descriptor.disabledReasonCode ?? "",
+    ].join("|");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function publicInfoStatusTone(status: PublicInfoVersionRecord["status"]) {
@@ -265,6 +306,7 @@ function actionLabel(action: string, locale: string, fallback: string) {
       en: "Generate placard version",
     },
     publish: { zh: "發布", en: "Publish" },
+    publish_public_info: { zh: "發布公開資訊", en: "Publish public info" },
     refresh: { zh: "重新整理", en: "Refresh" },
     view_audit: { zh: "查看稽核", en: "View audit" },
   };
@@ -690,9 +732,15 @@ export default function SwitchboardPage() {
     REFRESH_TIER_FALLBACK;
 
   useEffect(() => {
+    const intervalMs = getRefreshIntervalMs(refreshTier);
+    if (intervalMs === null) {
+      return;
+    }
+    const pollingDelay = intervalMs;
+
     const intervalId = window.setInterval(() => {
       void loadData();
-    }, getRefreshIntervalMs(refreshTier));
+    }, pollingDelay);
 
     return () => window.clearInterval(intervalId);
   }, [loadData, refreshTier]);
@@ -752,33 +800,64 @@ export default function SwitchboardPage() {
   }, [placardForm.publicInfoVersionId, publicInfo]);
 
   const pageActions = useMemo(() => {
-    const fallback: ResourceActionDescriptor[] = [
-      {
-        action: "create_version",
-        enabled: true,
-        riskLevel: "medium",
-      },
-      {
-        action: "generate_placard_version",
-        enabled: publicInfo.length > 0,
-        riskLevel: "medium",
-      },
-      {
-        action: "refresh",
-        enabled: true,
-        riskLevel: "low",
-      },
-    ];
-    const merged = [
+    const merged = dedupeActionDescriptors([
       ...publicInfoPayload.availableActions,
       ...placardPayload.availableActions,
-    ];
-    return merged.length > 0 ? merged : fallback;
+    ]);
+    if (merged.length > 0) {
+      return merged;
+    }
+
+    const fallback: ResourceActionDescriptor[] = [];
+    if (draftVersions.length > 0) {
+      fallback.push({
+        action: "publish_public_info",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      });
+    }
+    fallback.push({
+      action: "create_version",
+      enabled: true,
+      riskLevel: "medium",
+    });
+    fallback.push(
+      publicInfo.length > 0
+        ? {
+            action: "generate_placard_version",
+            enabled: true,
+            riskLevel: "medium",
+          }
+        : {
+            action: "generate_placard_version",
+            enabled: false,
+            disabledReasonCode: "switchboard.public_info_required",
+            riskLevel: "medium",
+          },
+    );
+    fallback.push({
+      action: "refresh",
+      enabled: true,
+      riskLevel: "low",
+    });
+    return fallback;
   }, [
+    draftVersions.length,
     placardPayload.availableActions,
     publicInfo.length,
     publicInfoPayload.availableActions,
   ]);
+
+  const generatePlacardAction = useMemo(
+    () =>
+      pageActions.find(
+        (descriptor) =>
+          descriptor.action === "generate_placard" ||
+          descriptor.action === "generate_placard_version",
+      ) ?? null,
+    [pageActions],
+  );
 
   const deepLinks = useMemo(() => {
     const payloadLinks = [
@@ -1052,7 +1131,10 @@ export default function SwitchboardPage() {
       setActiveTab("versions");
       return;
     }
-    if (descriptor.action === "publish") {
+    if (
+      descriptor.action === "publish" ||
+      descriptor.action === "publish_public_info"
+    ) {
       const draft = draftVersions[0];
       if (draft) {
         await handlePublishVersion(draft.versionId, descriptor);
@@ -1113,7 +1195,7 @@ export default function SwitchboardPage() {
             {copy.refreshLabel} {refreshTier}
           </span>
           <span style={statusBadgeStyle("neutral")}>
-            {refreshTier === "T6" ? "120s auto-refresh" : "30s auto-refresh"}
+            {getRefreshTierCadenceLabel(refreshTier)}
           </span>
         </div>
         <p style={pageHeaderSubtitleStyle}>{copy.subtitle}</p>
@@ -1696,17 +1778,22 @@ export default function SwitchboardPage() {
                     {copy.labels.download}
                   </a>
                 ) : null}
-                <button
-                  type="button"
-                  style={actionButtonStyle({ tone: "primary" })}
-                  onClick={() => {
-                    setShowPlacardForm(true);
-                    setShowPublicInfoForm(false);
-                    setActiveTab("placards");
-                  }}
-                >
-                  {copy.topActions.generatePlacard}
-                </button>
+                {generatePlacardAction ? (
+                  <button
+                    type="button"
+                    title={generatePlacardAction.disabledReasonCode}
+                    disabled={!generatePlacardAction.enabled}
+                    style={mergeStyles(
+                      actionButtonStyle({ tone: "primary" }),
+                      disabledActionStyle(!generatePlacardAction.enabled),
+                    )}
+                    onClick={() =>
+                      void handleActionDescriptor(generatePlacardAction)
+                    }
+                  >
+                    {copy.topActions.generatePlacard}
+                  </button>
+                ) : null}
               </div>
             </section>
 
