@@ -39,6 +39,7 @@ import { PlatformEarningsModule } from "./modules/platform-earnings/platform-ear
 import { ProductRuleModule } from "./modules/product-rule/product-rule.module";
 import { RegulatoryRegistryModule } from "./modules/regulatory-registry/regulatory-registry.module";
 import { ReportingFilingModule } from "./modules/reporting-filing/reporting-filing.module";
+import { PlatformSearchModule } from "./modules/search/platform-search.module";
 import { ShiftAttendanceModule } from "./modules/shift-attendance/shift-attendance.module";
 import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.module";
 import { AuthModule } from "./modules/auth/auth.module";
@@ -54,6 +55,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     TenantPartnerModule,
     RegulatoryRegistryModule,
     ProductRuleModule,
+    PlatformSearchModule,
     AuditNotificationModule,
     CallcenterModule,
     ComplaintModule,
