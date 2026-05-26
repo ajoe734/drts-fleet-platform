@@ -867,12 +867,20 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   );
 
   const settlementChannels = sortSettlementMatrix(settlementMatrix);
-  const openReconCount = financeIssues.filter(
-    (issue) => issue.status === "open" || issue.status === "assigned",
-  ).length;
   const filteredForwarderIssues = forwarderIssues.filter((issue) =>
     matchRevenueWindow(issue.createdAt, filters.period),
   );
+  const filteredForwarderJobIds = new Set(
+    filteredForwarderIssues.map(
+      (issue) => issue.reconciliationJob.reconciliationJobId,
+    ),
+  );
+  const openReconCount = financeIssues.filter(
+    (issue) =>
+      issue.issueType === "forwarder_status_mismatch" &&
+      filteredForwarderJobIds.has(issue.linkedReconciliationJobId ?? "") &&
+      (issue.status === "open" || issue.status === "assigned"),
+  ).length;
   const recognisedRevenueMinor = insights.totalRevenueMinor;
   const matrixEvidenceByChannel = {
     tenant_enterprise: t("revenue.matrix.evidence.tenant_enterprise", locale, {
@@ -1489,7 +1497,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
   function renderChannelMix() {
     const channelEmpty = resolveEmptyReason({
-      ok: ordersOutcome.ok,
+      ok: ordersOutcome.ok && tasksOutcome.ok,
       itemCount: channelBuckets.length,
       filtersActive,
     });
@@ -1548,7 +1556,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       ok: matrixOutcome.ok,
       itemCount: settlementChannels.length,
       filtersActive: false,
-      provisioned: matrixOutcome.ok,
     });
 
     if (matrixEmpty) {
@@ -1718,7 +1725,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
   function renderMismatch() {
     const mismatchEmpty = resolveEmptyReason({
-      ok: forwarderIssuesOutcome.ok,
+      ok: forwarderIssuesOutcome.ok && financeIssuesOutcome.ok,
       itemCount: filteredForwarderIssues.length,
       filtersActive,
       externalAvailable: forwardedOutcome.ok,
