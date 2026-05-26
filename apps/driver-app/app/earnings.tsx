@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
   ActivityIndicator,
@@ -498,11 +498,15 @@ export default function EarningsScreen() {
   const [statementSheetVisible, setStatementSheetVisible] = useState(false);
   const [statementDetail, setStatementDetail] =
     useState<DriverStatementRecord | null>(null);
+  const activeDashboardRequestIdRef = useRef(0);
 
   const isProvisioned = isDriverIdentityProvisioned();
 
   const loadDashboard = useCallback(
     async (nextPeriod: DriverEarningsPeriod, silent = false) => {
+      const requestId = activeDashboardRequestIdRef.current + 1;
+      activeDashboardRequestIdRef.current = requestId;
+
       if (!isProvisioned) {
         setDashboard(null);
         setLoading(false);
@@ -513,12 +517,19 @@ export default function EarningsScreen() {
       const client = getDriverClient();
       if (!silent) {
         setLoading(true);
+        setDashboard((currentDashboard) =>
+          currentDashboard?.period === nextPeriod ? currentDashboard : null,
+        );
       }
+      setError(null);
 
       try {
         const enabled = await client
           .isFeatureEnabled("driver-app.earnings")
           .catch(() => true);
+        if (activeDashboardRequestIdRef.current !== requestId) {
+          return;
+        }
         setFeatureEnabled(enabled);
 
         if (!enabled) {
@@ -529,13 +540,24 @@ export default function EarningsScreen() {
 
         const nextDashboard =
           await client.getDriverEarningsDashboard(nextPeriod);
+        if (activeDashboardRequestIdRef.current !== requestId) {
+          return;
+        }
         setDashboard(nextDashboard);
         setError(null);
       } catch (nextError) {
+        if (activeDashboardRequestIdRef.current !== requestId) {
+          return;
+        }
+        setDashboard((currentDashboard) =>
+          currentDashboard?.period === nextPeriod ? currentDashboard : null,
+        );
         setError(toErrorMessage(nextError));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (activeDashboardRequestIdRef.current === requestId) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [isProvisioned],
