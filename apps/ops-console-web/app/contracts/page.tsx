@@ -52,6 +52,11 @@ type PartnerRelationView = RuntimePartnerChannelEntryRecord & {
   links: CrossAppResourceLink[];
 };
 
+type ActionRenderTarget = {
+  href?: string;
+  target?: "_blank";
+};
+
 const REFRESH_TIER: RefreshTier = "medium";
 const REFRESH_TIER_MS = 15_000;
 const EMPTY_REASON_VALUES = new Set<EmptyReason>([
@@ -315,6 +320,78 @@ function renderActionDescriptor(
       {label}
     </span>
   );
+}
+
+function buildContractDetailHref(contractId: string) {
+  return `/contracts/${encodeURIComponent(contractId)}`;
+}
+
+function resolveContractActionTarget(
+  action: ResourceActionDescriptor,
+  contract: ContractListView,
+): ActionRenderTarget {
+  if (action.action === "open_contract_detail") {
+    return { href: buildContractDetailHref(contract.contractId) };
+  }
+
+  return {};
+}
+
+function resolveRelationActionTarget(
+  action: ResourceActionDescriptor,
+  entry: PartnerRelationView,
+): ActionRenderTarget {
+  if (action.action === "open_platform_admin") {
+    const link =
+      entry.links.find((current) => current.targetApp === "platform-admin") ??
+      entry.links[0];
+    return link
+      ? {
+          href: buildCrossAppUrl(link),
+          target: link.openMode === "new_tab" ? "_blank" : undefined,
+        }
+      : {};
+  }
+
+  if (action.action === "open_tenant_console") {
+    const link = entry.links.find(
+      (current) => current.targetApp === "tenant-console",
+    );
+    return link
+      ? {
+          href: buildCrossAppUrl(link),
+          target: link.openMode === "new_tab" ? "_blank" : undefined,
+        }
+      : {};
+  }
+
+  return {};
+}
+
+function renderActionList<T>({
+  actions,
+  locale,
+  resolveTarget,
+  fallback,
+  keyPrefix,
+}: {
+  actions: ResourceActionDescriptor[];
+  locale: "en" | "zh";
+  resolveTarget: (
+    action: ResourceActionDescriptor,
+    record: T,
+  ) => ActionRenderTarget;
+  fallback: T;
+  keyPrefix: string;
+}) {
+  return actions.map((action) => {
+    const { href, target } = resolveTarget(action, fallback);
+    return (
+      <div key={`${keyPrefix}-${action.action}`}>
+        {renderActionDescriptor(action, locale, href, target)}
+      </div>
+    );
+  });
 }
 
 function renderEmptyState({
@@ -821,7 +898,7 @@ export default async function ContractsPage({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
           gap: "12px",
           marginBottom: "18px",
         }}
@@ -872,7 +949,14 @@ export default async function ContractsPage({
           nextAction: emptyState.nextAction,
         })
       ) : (
-        <div style={{ display: "grid", gap: "18px" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.65fr) minmax(320px, 0.95fr)",
+            gap: "18px",
+            alignItems: "start",
+          }}
+        >
           <DataViewCard
             title={copyText(locale, "Contracts registry", "合約清單")}
             subtitle={copyText(
@@ -887,7 +971,39 @@ export default async function ContractsPage({
               "Must-show: id, parties, effective window, status, key terms summary. Expiring contracts stay visually urgent.",
               "必備欄位：id、雙方、效期、狀態、關鍵條款摘要；即將到期要保留明顯提醒。",
             )}
-            actions={renderActionDescriptor(searchAction, locale)}
+            actions={
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{
+                    borderRadius: "999px",
+                    border: "1px solid #fecaca",
+                    background: "#fff7f7",
+                    color: "#b91c1c",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    padding: "6px 10px",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {copyText(locale, "ops read-only", "ops 唯讀")}
+                </span>
+                {renderActionDescriptor(
+                  searchAction,
+                  locale,
+                  query
+                    ? `/contracts?q=${encodeURIComponent(query)}`
+                    : "/contracts",
+                )}
+              </div>
+            }
             footer={copyText(
               locale,
               "Opening a contract detail stays in ops. Any mutation continues in Platform Admin or tenant governance via cross-app new-tab links.",
@@ -899,10 +1015,13 @@ export default async function ContractsPage({
               tone="info"
               columns={[
                 { label: copyText(locale, "Contract", "合約"), width: "160px" },
-                { label: copyText(locale, "Parties", "雙方"), width: "260px" },
-                { label: copyText(locale, "Type", "類型"), width: "150px" },
                 {
-                  label: copyText(locale, "Effective", "效期"),
+                  label: copyText(locale, "Counterparty", "合作對象"),
+                  width: "260px",
+                },
+                { label: copyText(locale, "Kind", "類型"), width: "150px" },
+                {
+                  label: copyText(locale, "Term", "效期"),
                   width: "210px",
                 },
                 {
@@ -910,7 +1029,7 @@ export default async function ContractsPage({
                   width: "260px",
                 },
                 { label: copyText(locale, "Status", "狀態"), width: "150px" },
-                { label: copyText(locale, "Actions", "動作"), width: "140px" },
+                { label: copyText(locale, "Actions", "動作"), width: "152px" },
               ]}
               empty={copyText(locale, "No contracts found.", "查無合約。")}
             >
@@ -919,9 +1038,16 @@ export default async function ContractsPage({
                   <Td density="compact">
                     <DataCellStack
                       primary={
-                        <strong style={{ color: "#0f172a" }}>
+                        <Link
+                          href={buildContractDetailHref(contract.contractId)}
+                          style={{
+                            color: "#0f172a",
+                            fontWeight: 700,
+                            textDecoration: "none",
+                          }}
+                        >
                           {contract.contractId}
-                        </strong>
+                        </Link>
                       }
                       secondary={contract.vehicleId}
                       tertiary={
@@ -987,52 +1113,13 @@ export default async function ContractsPage({
                   </Td>
                   <Td density="compact">
                     <div style={{ display: "grid", gap: "8px" }}>
-                      {contract.availableActions.map(
-                        (action: ResourceActionDescriptor) => {
-                          const detailHref =
-                            action.action === "open_contract_detail"
-                              ? `/contracts/${encodeURIComponent(contract.contractId)}`
-                              : undefined;
-                          const disabledTitle = action.disabledReasonCode
-                            ? formatOpsCodeLabel(
-                                locale,
-                                action.disabledReasonCode,
-                              )
-                            : undefined;
-
-                          if (detailHref) {
-                            return action.enabled ? (
-                              <Link
-                                key={`${contract.contractId}-${action.action}`}
-                                href={detailHref}
-                                style={buttonStyle({ emphasis: "secondary" })}
-                                title={disabledTitle}
-                              >
-                                {copyText(locale, "Open detail", "開啟詳情")}
-                              </Link>
-                            ) : (
-                              <span
-                                key={`${contract.contractId}-${action.action}`}
-                                style={buttonStyle({
-                                  disabled: true,
-                                  emphasis: "secondary",
-                                })}
-                                title={disabledTitle}
-                              >
-                                {copyText(locale, "Open detail", "開啟詳情")}
-                              </span>
-                            );
-                          }
-
-                          return (
-                            <div
-                              key={`${contract.contractId}-${action.action}`}
-                            >
-                              {renderActionDescriptor(action, locale)}
-                            </div>
-                          );
-                        },
-                      )}
+                      {renderActionList({
+                        actions: contract.availableActions,
+                        locale,
+                        resolveTarget: resolveContractActionTarget,
+                        fallback: contract,
+                        keyPrefix: contract.contractId,
+                      })}
                     </div>
                   </Td>
                 </Tr>
@@ -1040,107 +1127,163 @@ export default async function ContractsPage({
             </DataTable>
           </DataViewCard>
 
-          <DataViewCard
-            title={copyText(
-              locale,
-              "Partner relations panel",
-              "合作夥伴關聯面板",
-            )}
-            subtitle={copyText(
-              locale,
-              "Partner entry slug, program, relation status, and owner-app deep links.",
-              "顯示 partner entry slug、program、關聯狀態，以及 owner app deep link。",
-            )}
-            tone="warning"
-            density="compact"
-            summary={copyText(
-              locale,
-              "Cross-app navigation opens a new tab by default. Mutation remains outside ops.",
-              "跨 app 導航預設開新分頁；mutation 不在 ops 內進行。",
-            )}
-          >
-            <DataTable
-              density="compact"
-              tone="warning"
-              columns={[
-                { label: copyText(locale, "Entry", "入口"), width: "220px" },
-                { label: copyText(locale, "Program", "方案"), width: "220px" },
-                { label: copyText(locale, "Status", "狀態"), width: "200px" },
-                { label: copyText(locale, "Owner links", "Owner links") },
-              ]}
-              empty={copyText(
+          <div style={{ display: "grid", gap: "18px" }}>
+            <DataViewCard
+              title={copyText(
                 locale,
-                "No partner relations found.",
-                "查無合作夥伴關聯。",
+                "Partner relations panel",
+                "合作夥伴關聯面板",
+              )}
+              subtitle={copyText(
+                locale,
+                "Partner entry slug, program, relation status, and owner-app deep links.",
+                "顯示 partner entry slug、program、關聯狀態，以及 owner app deep link。",
+              )}
+              tone="warning"
+              density="compact"
+              summary={copyText(
+                locale,
+                "Cross-app navigation opens a new tab by default. Mutation remains outside ops.",
+                "跨 app 導航預設開新分頁；mutation 不在 ops 內進行。",
               )}
             >
-              {filteredRelations.map((entry) => (
-                <Tr key={entry.entrySlug}>
-                  <Td density="compact">
-                    <DataCellStack
-                      primary={<strong>{entry.displayName}</strong>}
-                      secondary={entry.entrySlug}
-                      tertiary={`${entry.partnerId} · ${entry.tenantId}`}
-                    />
-                  </Td>
-                  <Td density="compact">
-                    <DataCellStack
-                      primary={entry.programId}
-                      secondary={formatOpsCodeLabel(
-                        locale,
-                        entry.businessDispatchSubtype,
-                      )}
-                      tertiary={`${copyText(locale, "Linked contracts", "關聯合約")} · ${entry.linkedContracts}`}
-                    />
-                  </Td>
-                  <Td density="compact">
-                    <div style={{ display: "grid", gap: "6px" }}>
-                      <StatusChip
-                        tone={entry.activeFlag ? "success" : "warning"}
-                        authorityLabel={copyText(locale, "relation", "關聯")}
-                        label={formatOpsCodeLabel(locale, entry.status)}
+              <DataTable
+                density="compact"
+                tone="warning"
+                columns={[
+                  { label: copyText(locale, "Entry", "入口"), width: "200px" },
+                  {
+                    label: copyText(locale, "Program", "方案"),
+                    width: "180px",
+                  },
+                  { label: copyText(locale, "Status", "狀態"), width: "150px" },
+                  { label: copyText(locale, "Links", "連結") },
+                ]}
+                empty={copyText(
+                  locale,
+                  "No partner relations found.",
+                  "查無合作夥伴關聯。",
+                )}
+              >
+                {filteredRelations.map((entry) => (
+                  <Tr key={entry.entrySlug}>
+                    <Td density="compact">
+                      <DataCellStack
+                        primary={<strong>{entry.displayName}</strong>}
+                        secondary={entry.entrySlug}
+                        tertiary={`${entry.partnerId} · ${entry.tenantId}`}
                       />
-                      <span style={{ fontSize: "12px", color: "#64748b" }}>
-                        {formatOpsCodeLabel(locale, entry.eligibilityMode)}
-                      </span>
-                    </div>
-                  </Td>
-                  <Td density="compact">
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: "8px",
-                      }}
-                    >
-                      {renderActionDescriptor(
-                        entry.availableActions[0] ?? {
-                          action: "open_platform_admin",
-                          enabled: false,
-                          disabledReasonCode: "action_unavailable",
-                          riskLevel: "low",
-                        },
-                        locale,
-                        buildCrossAppUrl(entry.links[0]),
-                        "_blank",
-                      )}
-                      {renderActionDescriptor(
-                        entry.availableActions[1] ?? {
-                          action: "open_tenant_console",
-                          enabled: false,
-                          disabledReasonCode: "action_unavailable",
-                          riskLevel: "low",
-                        },
-                        locale,
-                        buildCrossAppUrl(entry.links[1]),
-                        "_blank",
-                      )}
-                    </div>
-                  </Td>
-                </Tr>
-              ))}
-            </DataTable>
-          </DataViewCard>
+                    </Td>
+                    <Td density="compact">
+                      <DataCellStack
+                        primary={entry.programId}
+                        secondary={formatOpsCodeLabel(
+                          locale,
+                          entry.businessDispatchSubtype,
+                        )}
+                        tertiary={`${copyText(locale, "Linked contracts", "關聯合約")} · ${entry.linkedContracts}`}
+                      />
+                    </Td>
+                    <Td density="compact">
+                      <div style={{ display: "grid", gap: "6px" }}>
+                        <StatusChip
+                          tone={entry.activeFlag ? "success" : "warning"}
+                          authorityLabel={copyText(locale, "relation", "關聯")}
+                          label={formatOpsCodeLabel(locale, entry.status)}
+                        />
+                        <span style={{ fontSize: "12px", color: "#64748b" }}>
+                          {formatOpsCodeLabel(locale, entry.eligibilityMode)}
+                        </span>
+                      </div>
+                    </Td>
+                    <Td density="compact">
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: "8px",
+                        }}
+                      >
+                        {renderActionList({
+                          actions: entry.availableActions,
+                          locale,
+                          resolveTarget: resolveRelationActionTarget,
+                          fallback: entry,
+                          keyPrefix: entry.entrySlug,
+                        })}
+                      </div>
+                    </Td>
+                  </Tr>
+                ))}
+              </DataTable>
+            </DataViewCard>
+
+            <div
+              style={{
+                ...cardSurfaceStyle("neutral"),
+                borderRadius: "16px",
+                padding: "18px",
+                display: "grid",
+                gap: "12px",
+              }}
+            >
+              <strong style={{ fontSize: "14px", color: "#0f172a" }}>
+                {copyText(locale, "Operational read scope", "營運端可讀範圍")}
+              </strong>
+              <div style={{ fontSize: "13px", lineHeight: 1.6 }}>
+                {copyText(
+                  locale,
+                  "This workspace is for dispatch and billing confirmation only. Contract mutation, version upgrades, and partner governance stay in Platform Admin or Tenant Console.",
+                  "這個工作面只用來確認派遣與結算上下文。合約異動、版本升級、partner governance 仍在 Platform Admin 或 Tenant Console 執行。",
+                )}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "8px",
+                }}
+              >
+                <a
+                  href={buildCrossAppUrl({
+                    targetApp: "platform-admin",
+                    route: "/partners",
+                    resourceType: "partner_entry",
+                    resourceId: "contracts",
+                    openMode: "new_tab",
+                    label: "Platform Admin",
+                  })}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={buttonStyle({ emphasis: "secondary" })}
+                >
+                  {copyText(
+                    locale,
+                    "Open Platform Admin",
+                    "前往 Platform Admin",
+                  )}
+                </a>
+                <a
+                  href={buildCrossAppUrl({
+                    targetApp: "tenant-console",
+                    route: "/slas",
+                    resourceType: "tenant",
+                    resourceId: "contract-ops-scope",
+                    openMode: "new_tab",
+                    label: "Tenant Console",
+                  })}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={buttonStyle({ emphasis: "ghost" })}
+                >
+                  {copyText(
+                    locale,
+                    "Open Tenant Console",
+                    "前往 Tenant Console",
+                  )}
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </>
