@@ -69,6 +69,7 @@ const REVENUE_STALE_AFTER_MS =
   STALE_AFTER_MS_BY_TIER[REVENUE_REFRESH_TIER] ?? 15_000;
 
 type RevenueTab = "insight" | "channel" | "matrix" | "mismatch";
+const DEFAULT_REVENUE_PERIOD: RevenuePeriod = "yesterday";
 const TAB_KEYS: readonly RevenueTab[] = [
   "insight",
   "channel",
@@ -140,7 +141,7 @@ function resolveFilters(
     rawPeriod === "30d" ||
     rawPeriod === "all"
       ? rawPeriod
-      : "7d";
+      : DEFAULT_REVENUE_PERIOD;
   const serviceBucket = firstParam(searchParams?.serviceBucket) ?? "all";
   const vehicleId = firstParam(searchParams?.vehicleId) ?? "all";
   return {
@@ -155,7 +156,7 @@ function resolveFilters(
 
 function filtersAreDefault(filters: RevenueFilters): boolean {
   return (
-    filters.period === "7d" &&
+    filters.period === DEFAULT_REVENUE_PERIOD &&
     filters.serviceBucket === "all" &&
     filters.vehicleId === "all"
   );
@@ -172,7 +173,7 @@ function buildHref(
   const nextTab = overrides.tab ?? tab;
   const params = new URLSearchParams();
   if (nextTab !== "matrix") params.set("tab", nextTab);
-  if (next.period !== "7d") params.set("period", next.period);
+  if (next.period !== DEFAULT_REVENUE_PERIOD) params.set("period", next.period);
   if (next.serviceBucket !== "all")
     params.set("serviceBucket", next.serviceBucket);
   if (next.vehicleId !== "all") params.set("vehicleId", next.vehicleId);
@@ -258,6 +259,18 @@ function dataFreshnessSummary(metadata: UiRefreshMetadata): {
     secondsUntilNextTick,
     isStale: metadata.dataFreshness !== "fresh",
   };
+}
+
+function actionReasonLabel(
+  descriptor: ResourceActionDescriptor,
+  locale: Locale,
+): string | undefined {
+  switch (descriptor.disabledReasonCode) {
+    case "phase1_no_export":
+      return t("revenue.action.exportDisabled", locale);
+    default:
+      return descriptor.disabledReasonCode;
+  }
 }
 
 function relativeAgeLabel(timestamp: string, locale: Locale): string {
@@ -1006,8 +1019,8 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       riskLevel: "low",
     },
   ];
-  const enabledActions = new Set(
-    pageActions.filter((descriptor) => descriptor.enabled).map((d) => d.action),
+  const actionById = new Map(
+    pageActions.map((descriptor) => [descriptor.action, descriptor] as const),
   );
 
   const renderTabBody = () => {
@@ -1146,12 +1159,22 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         {pageActions
           .filter(
             (descriptor) =>
-              descriptor.enabled &&
-              (descriptor.action === "refresh" ||
-                descriptor.action === "export"),
+              descriptor.action === "refresh" || descriptor.action === "export",
           )
           .map((descriptor) => {
             if (descriptor.action === "refresh") {
+              if (!descriptor.enabled) {
+                return (
+                  <span
+                    key={descriptor.action}
+                    title={actionReasonLabel(descriptor, locale)}
+                  >
+                    <Btn theme={theme} icon="arrow" disabled>
+                      {t(`revenue.action.${descriptor.action}`, locale)}
+                    </Btn>
+                  </span>
+                );
+              }
               return (
                 <Link
                   key={descriptor.action}
@@ -1164,10 +1187,19 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                 </Link>
               );
             }
-            return (
+            return descriptor.enabled ? (
               <Btn key={descriptor.action} theme={theme} icon="ext">
                 {t(`revenue.action.${descriptor.action}`, locale)}
               </Btn>
+            ) : (
+              <span
+                key={descriptor.action}
+                title={actionReasonLabel(descriptor, locale)}
+              >
+                <Btn theme={theme} icon="ext" disabled>
+                  {t(`revenue.action.${descriptor.action}`, locale)}
+                </Btn>
+              </span>
             );
           })}
       </>
@@ -1175,33 +1207,65 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   }
 
   function renderFilterChips() {
+    const periodAction = actionById.get("filterPeriod");
+    const serviceBucketAction = actionById.get("filterServiceBucket");
+    const vehicleAction = actionById.get("filterVehicle");
+
+    const renderStaticPill = (
+      key: string,
+      label: string,
+      isActive = false,
+      title?: string,
+    ) => (
+      <span key={key} title={title}>
+        <Pill
+          theme={theme}
+          tone={isActive ? "accent" : "neutral"}
+          dot={isActive}
+        >
+          {label}
+        </Pill>
+      </span>
+    );
+
     return (
       <div style={filterRowStyle}>
-        {enabledActions.has("filterPeriod") ? (
+        {periodAction ? (
           <>
             <span style={{ fontSize: 11.5, color: theme.textMuted }}>
               {t("revenue.action.filterPeriod", locale)}
             </span>
             {(["today", "yesterday", "7d", "30d"] as RevenuePeriod[]).map(
-              (p) => (
-                <Link
-                  key={`period-${p}`}
-                  href={buildHref(filters, tab, { period: p, mismatch: null })}
-                  style={{ textDecoration: "none" }}
-                >
-                  <Pill
-                    theme={theme}
-                    tone={p === filters.period ? "accent" : "neutral"}
-                    dot={p === filters.period}
+              (p) =>
+                periodAction.enabled ? (
+                  <Link
+                    key={`period-${p}`}
+                    href={buildHref(filters, tab, {
+                      period: p,
+                      mismatch: null,
+                    })}
+                    style={{ textDecoration: "none" }}
                   >
-                    {t(`revenue.period.${p}`, locale)}
-                  </Pill>
-                </Link>
-              ),
+                    <Pill
+                      theme={theme}
+                      tone={p === filters.period ? "accent" : "neutral"}
+                      dot={p === filters.period}
+                    >
+                      {t(`revenue.period.${p}`, locale)}
+                    </Pill>
+                  </Link>
+                ) : (
+                  renderStaticPill(
+                    `period-${p}`,
+                    t(`revenue.period.${p}`, locale),
+                    p === filters.period,
+                    actionReasonLabel(periodAction, locale),
+                  )
+                ),
             )}
           </>
         ) : null}
-        {enabledActions.has("filterServiceBucket") ? (
+        {serviceBucketAction ? (
           <>
             <span
               style={{
@@ -1213,30 +1277,41 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               {t("revenue.action.filterServiceBucket", locale)}
             </span>
             {(["all", "standard_taxi", "business_dispatch"] as const).map(
-              (sb) => (
-                <Link
-                  key={`bucket-${sb}`}
-                  href={buildHref(filters, tab, {
-                    serviceBucket: sb,
-                    mismatch: null,
-                  })}
-                  style={{ textDecoration: "none" }}
-                >
-                  <Pill
-                    theme={theme}
-                    tone={sb === filters.serviceBucket ? "accent" : "neutral"}
-                    dot={sb === filters.serviceBucket}
+              (sb) => {
+                const label =
+                  sb === "all"
+                    ? t("revenue.bucket.all", locale)
+                    : t(`revenue.bucket.${sb}`, locale);
+                return serviceBucketAction.enabled ? (
+                  <Link
+                    key={`bucket-${sb}`}
+                    href={buildHref(filters, tab, {
+                      serviceBucket: sb,
+                      mismatch: null,
+                    })}
+                    style={{ textDecoration: "none" }}
                   >
-                    {sb === "all"
-                      ? t("revenue.bucket.all", locale)
-                      : t(`revenue.bucket.${sb}`, locale)}
-                  </Pill>
-                </Link>
-              ),
+                    <Pill
+                      theme={theme}
+                      tone={sb === filters.serviceBucket ? "accent" : "neutral"}
+                      dot={sb === filters.serviceBucket}
+                    >
+                      {label}
+                    </Pill>
+                  </Link>
+                ) : (
+                  renderStaticPill(
+                    `bucket-${sb}`,
+                    label,
+                    sb === filters.serviceBucket,
+                    actionReasonLabel(serviceBucketAction, locale),
+                  )
+                );
+              },
             )}
           </>
         ) : null}
-        {enabledActions.has("filterVehicle") && vehicleOptions.length > 0 ? (
+        {vehicleAction && vehicleOptions.length > 0 ? (
           <>
             <span
               style={{
@@ -1247,41 +1322,68 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             >
               {t("revenue.action.filterVehicle", locale)}
             </span>
-            <Link
-              href={buildHref(filters, tab, {
-                vehicleId: "all",
-                mismatch: null,
-              })}
-              style={{ textDecoration: "none" }}
-            >
-              <Pill
-                theme={theme}
-                tone={filters.vehicleId === "all" ? "accent" : "neutral"}
-              >
-                {t("revenue.vehicle.all", locale)}
-              </Pill>
-            </Link>
-            {vehicleOptions.slice(0, 8).map((vid) => (
+            {vehicleAction.enabled ? (
               <Link
-                key={`vehicle-${vid}`}
                 href={buildHref(filters, tab, {
-                  vehicleId: vid,
+                  vehicleId: "all",
                   mismatch: null,
                 })}
                 style={{ textDecoration: "none" }}
               >
                 <Pill
                   theme={theme}
-                  tone={vid === filters.vehicleId ? "accent" : "neutral"}
+                  tone={filters.vehicleId === "all" ? "accent" : "neutral"}
                 >
-                  {vid}
+                  {t("revenue.vehicle.all", locale)}
                 </Pill>
               </Link>
-            ))}
+            ) : (
+              renderStaticPill(
+                "vehicle-all",
+                t("revenue.vehicle.all", locale),
+                filters.vehicleId === "all",
+                actionReasonLabel(vehicleAction, locale),
+              )
+            )}
+            {vehicleOptions.slice(0, 8).map((vid) =>
+              vehicleAction.enabled ? (
+                <Link
+                  key={`vehicle-${vid}`}
+                  href={buildHref(filters, tab, {
+                    vehicleId: vid,
+                    mismatch: null,
+                  })}
+                  style={{ textDecoration: "none" }}
+                >
+                  <Pill
+                    theme={theme}
+                    tone={vid === filters.vehicleId ? "accent" : "neutral"}
+                  >
+                    {vid}
+                  </Pill>
+                </Link>
+              ) : (
+                renderStaticPill(
+                  `vehicle-${vid}`,
+                  vid,
+                  vid === filters.vehicleId,
+                  actionReasonLabel(vehicleAction, locale),
+                )
+              ),
+            )}
           </>
         ) : null}
       </div>
     );
+  }
+
+  function canOpenMismatchDrawer() {
+    return actionById.get("openMismatchDrawer")?.enabled ?? false;
+  }
+
+  function openMismatchDisabledReason() {
+    const descriptor = actionById.get("openMismatchDrawer");
+    return descriptor ? actionReasonLabel(descriptor, locale) : undefined;
   }
 
   function renderInsight() {
@@ -1787,7 +1889,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         w: 220,
         align: "right",
         r: (row) =>
-          enabledActions.has("openMismatchDrawer") ? (
+          canOpenMismatchDrawer() ? (
             <Link
               href={buildHref(filters, "mismatch", { mismatch: row.jobId })}
               style={{ textDecoration: "none" }}
@@ -1801,7 +1903,10 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               </Btn>
             </Link>
           ) : (
-            <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+            <span
+              style={{ color: theme.textMuted, fontSize: 11.5 }}
+              title={openMismatchDisabledReason()}
+            >
               {t("revenue.action.requestAccess", locale)}
             </span>
           ),
