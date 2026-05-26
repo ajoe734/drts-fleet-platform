@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listDriverTasks: vi.fn(),
   createIncident: vi.fn(),
   updateIncident: vi.fn(),
+  localSearchParams: {} as Record<string, string | undefined>,
 }));
 
 vi.mock("react-native", () => ({
@@ -24,6 +25,7 @@ vi.mock("expo-router", () => ({
   useRouter: () => ({
     replace: mocks.replace,
   }),
+  useLocalSearchParams: () => mocks.localSearchParams,
 }));
 
 vi.mock("@/components/ui/ActionButton", () => ({
@@ -59,6 +61,11 @@ vi.mock("@/components/ui/FormField", () => ({
 vi.mock("@/components/ui/PageHeader", () => ({
   PageHeader: (props: Record<string, unknown>) =>
     React.createElement("PageHeader", props),
+}));
+
+vi.mock("@/components/ui/PlatformBadge", () => ({
+  PlatformBadge: (props: Record<string, unknown>) =>
+    React.createElement("PlatformBadge", props),
 }));
 
 vi.mock("@/components/ui/StatusChip", () => ({
@@ -112,6 +119,7 @@ describe("IncidentScreen", () => {
       .mockReset()
       .mockResolvedValue({ incidentId: "INC-001" });
     mocks.updateIncident.mockReset().mockResolvedValue(undefined);
+    mocks.localSearchParams = {};
   });
 
   it("requires long press plus confirmation before creating a critical SOS incident", async () => {
@@ -137,6 +145,7 @@ describe("IncidentScreen", () => {
 
     expect(mocks.confirmDangerAction).not.toHaveBeenCalled();
     expect(mocks.createIncident).not.toHaveBeenCalled();
+    expect(findLongPressButton(renderer).props.delayLongPress).toBe(2000);
 
     await act(async () => {
       findLongPressButton(renderer).props.onLongPress();
@@ -171,6 +180,21 @@ describe("IncidentScreen", () => {
       escalationTarget: "safety_officer",
     });
     expect(mocks.replace).toHaveBeenCalledWith("/trip");
+  });
+
+  it("renders a distinct driver_not_eligible empty state", async () => {
+    mocks.localSearchParams = { emptyReason: "driver_not_eligible" };
+
+    let renderer: any;
+
+    await act(async () => {
+      renderer = create(React.createElement(IncidentScreen));
+      await flushEffects();
+    });
+
+    const emptyState = renderer.root.findByType("EmptyState");
+    expect(emptyState.props.title).toBe("目前狀態不可送出 SOS");
+    expect(emptyState.props.description).toContain("司機資格");
   });
 
   it("preserves forwarded task context in the SOS incident payload", async () => {
