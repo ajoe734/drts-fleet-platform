@@ -28,7 +28,7 @@ A billing or report record is **governance-aware** if any of the following are t
 
 If none are set, the record falls back to `WF-FIN-001` baseline shape only.
 
-If any one is set, **all 13 verification-body fields below are required** (with the legacy fallback in §3.3).
+If any one is set, **all 13 verification-body fields below are required** (with the legacy fallback in §3.7).
 
 ---
 
@@ -41,7 +41,7 @@ If any one is set, **all 13 verification-body fields below are required** (with 
 | `costCenterCode`  | string  | `WF-TGV-001` cost-center registry                                     | governance-aware |
 | `costCenterName`  | string  | resolved at billing time from the cost-center registry snapshot       | governance-aware |
 | `ownerUserId`     | uuid    | the user (driver dispatcher / requester) attributed to the booking    | governance-aware |
-| `legacy_unmapped` | boolean | `true` only when the booking pre-dates the cost-center mapping window | see §3.3         |
+| `legacy_unmapped` | boolean | `true` only when the booking pre-dates the cost-center mapping window | see §3.7         |
 
 `costCenterName` is resolved at _billing time_ (not booking time) so historical renames do not corrupt the bill. The booking record retains the IDs; the billing record carries the rendered name snapshot. Human-facing display names such as `ownerName` may still be rendered by downstream reporting, but they are not part of the 13-field verification body for this Phase 1 acceptance slice.
 
