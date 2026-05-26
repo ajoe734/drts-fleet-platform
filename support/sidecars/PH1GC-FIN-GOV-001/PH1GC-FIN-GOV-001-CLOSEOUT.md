@@ -1,8 +1,8 @@
 # PH1GC-FIN-GOV-001 — Closeout Report
 
 **Task:** `PH1GC-FIN-GOV-001` — Phase 1 gap closure: governance-aware billing/reporting spec + UAT
-**Owner:** `Claude2` (reassigned 2026-05-22 from `Codex2`; resumed 2026-05-25 after the `PH1GC-FIN-GOV-001-UNBLOCK-HISTORY-REPAIR` helper closed and the supervisor chair_parent_resume action put the dependency-ready parent back on the active queue)
-**Reviewer:** `Codex2`
+**Owner:** `Claude2` (reassigned 2026-05-22 from `Codex2`; resumed 2026-05-25 after the `PH1GC-FIN-GOV-001-UNBLOCK-HISTORY-REPAIR` helper closed and the supervisor chair_parent_resume action put the dependency-ready parent back on the active queue; re-resumed 2026-05-26 after supervisor re-dispatched the still-`todo` task under canonical reviewer `Codex`)
+**Reviewer:** `Codex`
 **Branch:** `claude2/ph1gc-fin-gov-001`
 **Directive:** `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (`WF-FIN-GOV-001`)
 **Planning ref:** `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md`
@@ -17,9 +17,11 @@ This closeout reports the reviewable artifact state delivered on `claude2/ph1gc-
 
 **The closeout does not claim a `PASS (live staging evidence)` uplift for `WF-FIN-GOV-001`.** The live-staging uplift remains gated on the same external blockers documented by the predecessor `FIN-GOV-001` evidence pack and the prior `PH1GC-FIN-GOV-001-UNBLOCK-HISTORY-REPAIR` helper: IAP credential / ingress access for the governed staging rerun, and a reviewer-readable invoice/report artifact carrying the governance enrichment body. Until that upstream unblock lands, the matrix row for `WF-FIN-GOV-001` honestly carries `PASS (static evidence)` with an explicit "live staging uplift blocked" note.
 
-### 1.1 Resume note (2026-05-25)
+### 1.1 Resume note (2026-05-25; refreshed 2026-05-26)
 
-After the supervisor's repeated `chair_parent_resume_applied` actions returned this task from `blocked` back to `todo`/`in_progress`, the owner replayed the branch state against the now-current `origin/dev` (tip `5e76ec58`). Most of the spec/UAT/E2E content this task was originally going to add has already landed on `origin/dev` via independent PRs:
+After the supervisor's repeated `chair_parent_resume_applied` actions returned this task from `blocked` back to `todo`/`in_progress`, the owner replayed the branch state against `origin/dev` at tip `5e76ec58` on 2026-05-25.
+
+On the 2026-05-26 re-dispatch (reason `owned_ready_dispatch`) the owner re-merged the now-current `origin/dev` (tip `070f9aea`) into this branch. The seven new dev commits since `5e76ec58` are all out-of-scope infra/docs (`UI-IMPL-WAVE-DISPATCH-001`, `OPS-HANDOFF-PRUNE-001`, `OPS-DISPATCH-COOLDOWN-001`, `OPS-CANONICAL-ROOT-LOCK-001`, `OPS-OAUTH-LANE-HARDENING-001`, `OPS-CLAUDE2-KEEPALIVE-CRON`, `PACK-DOCS-LAND-202605`) and touch no governance-billing surface. The merge was clean (no conflicts) and left the task-owned delta unchanged: the same 6 additive files in §4 below. Most of the spec/UAT/E2E content this task was originally going to add has already landed on `origin/dev` via independent PRs:
 
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` and `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` landed via `PH1GC-DOC-BATCH-1` (commit `6607dea8`, PR #237).
 - `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` landed via `PH1GC-E2E-010` (commit `49b49a25`, PR #256). That script asserts every directive §H verification-body field on the billing record with a `jq has(<key>)` check and exits non-zero on any missing key — i.e. the hard-fail discipline required by acceptance item 4.
@@ -64,10 +66,11 @@ After the merge with `origin/dev`, the task-owned delta narrows to additive matr
 
 ## 5. Verification executed locally
 
-- `git fetch origin` and `git merge origin/dev` (no force-push); resolved the only two conflicting files (`docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` — kept the §2.14 refresh that matches current reality; `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` — took `origin/dev`'s canonical PR #256 version verbatim).
+- `git fetch origin` and `git merge origin/dev` (no force-push); the 2026-05-25 merge resolved the only two conflicting files (`docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` — kept the §2.14 refresh that matches current reality; `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` — took `origin/dev`'s canonical PR #256 version verbatim). The 2026-05-26 re-merge against tip `070f9aea` was conflict-free.
 - `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` — no syntax errors (this is `origin/dev`'s script unchanged).
 - `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` — suite filter resolves `E2E-010` cleanly.
-- `grep -nE '"REQUIRED_KEYS"|has\(' tests/e2e/E2E-010-governance-aware-billing-reporting.sh` — confirms the 13-field `has()` loop and hard exit-1 on any missing key.
+- `grep -nE 'REQUIRED_KEYS|has\(' tests/e2e/E2E-010-governance-aware-billing-reporting.sh` — confirms the 13-field `has()` loop and hard exit-1 on any missing key.
+- `git diff --stat origin/dev..HEAD` — task-owned delta is the 6 files in §4 below (124 insertions, 6 deletions); no out-of-scope file touched.
 - Live-staging IAP-token probe was correctly denied by the sandbox classifier (it refused `bash scripts/print-staging-iap-token.sh` on credential-exfiltration grounds), confirming the `FIN-GOV-001` evidence-pack §4 blocker still holds from this workspace. No live execution was attempted; the §7 rule 6 non-claim posture is preserved.
 
 ## 6. What this closeout does NOT claim
