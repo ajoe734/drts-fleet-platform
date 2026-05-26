@@ -77,6 +77,7 @@ type FocusTarget = {
 
 type DispatchActionContext = {
   board: BoardId;
+  filter: string;
   order?: OwnedOrderRecord;
   forwarded?: ForwardedOrderRecord;
   adapterHealth?: AdapterHealthRecord | null;
@@ -869,6 +870,31 @@ function getActionDisabledReason(
   return descriptor.disabledReasonCode;
 }
 
+function buildDispatchDetailHref(
+  dispatchId: string,
+  options: {
+    board: BoardId;
+    filter?: string | undefined;
+    orderId?: string | undefined;
+    bookingId?: string | undefined;
+  },
+) {
+  const params = new URLSearchParams();
+  params.set("board", options.board);
+  if (options.filter && options.filter !== "all") {
+    params.set("filter", options.filter);
+  }
+  if (options.orderId) {
+    params.set("orderId", options.orderId);
+  }
+  if (options.bookingId) {
+    params.set("bookingId", options.bookingId);
+  }
+  const query = params.toString();
+  const path = `/dispatch/${encodeURIComponent(dispatchId)}`;
+  return query ? `${path}?${query}` : path;
+}
+
 function getActionHref(
   descriptor: ResourceActionDescriptor,
   context: DispatchActionContext,
@@ -899,7 +925,14 @@ function getActionHref(
 
   if (context.order) {
     return {
-      href: `/dispatch/${encodeURIComponent(context.order.orderId)}`,
+      href: buildDispatchDetailHref(context.order.orderId, {
+        board: context.board,
+        filter: context.filter,
+        orderId: context.order.orderId,
+        ...(context.order.bookingId
+          ? { bookingId: context.order.bookingId }
+          : {}),
+      }),
     };
   }
 
@@ -908,7 +941,11 @@ function getActionHref(
   }
 
   return {
-    href: `/dispatch/${encodeURIComponent(context.forwarded.mirrorOrderId)}`,
+    href: buildDispatchDetailHref(context.forwarded.mirrorOrderId, {
+      board: context.board,
+      filter: context.filter,
+      orderId: context.forwarded.mirrorOrderId,
+    }),
   };
 }
 
@@ -1939,6 +1976,7 @@ function buildReadyBoardRows(
   items: OwnedWorkItem[],
   locale: Locale,
   focus: FocusTarget,
+  activeFilter: string,
   candidateCountsByJobId: Map<string, number>,
 ) {
   const rows: TableRow[] = items.map((item) => {
@@ -1947,12 +1985,18 @@ function buildReadyBoardRows(
       ? (candidateCountsByJobId.get(item.job.dispatchJobId) ??
         item.order.dispatchAttemptCount)
       : item.order.dispatchAttemptCount;
+    const orderHref = buildDispatchDetailHref(item.order.orderId, {
+      board: "ready",
+      filter: activeFilter,
+      orderId: item.order.orderId,
+      ...(item.order.bookingId ? { bookingId: item.order.bookingId } : {}),
+    });
 
     return {
       orderCell: (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
-            href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
+            href={orderHref}
             style={{
               color: theme.accent,
               fontWeight: 700,
@@ -1995,7 +2039,7 @@ function buildReadyBoardRows(
       ),
       actions: renderActionLinks(
         item.order.availableActions,
-        { board: "ready", order: item.order },
+        { board: "ready", filter: activeFilter, order: item.order },
         locale,
       ),
       _selected:
@@ -2023,16 +2067,23 @@ function buildAssignedBoardRows(
   items: OwnedWorkItem[],
   locale: Locale,
   focus: FocusTarget,
+  activeFilter: string,
 ) {
   const rows: TableRow[] = items.map((item) => {
     const gate = getOwnedGateSummary(item.order);
     const taskTone = item.visibleState === "proof_pending" ? "warn" : "success";
+    const orderHref = buildDispatchDetailHref(item.order.orderId, {
+      board: "assigned",
+      filter: activeFilter,
+      orderId: item.order.orderId,
+      ...(item.order.bookingId ? { bookingId: item.order.bookingId } : {}),
+    });
 
     return {
       orderCell: (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
-            href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
+            href={orderHref}
             style={{
               color: theme.accent,
               fontWeight: 700,
@@ -2070,7 +2121,7 @@ function buildAssignedBoardRows(
       ),
       actions: renderActionLinks(
         item.order.availableActions,
-        { board: "assigned", order: item.order },
+        { board: "assigned", filter: activeFilter, order: item.order },
         locale,
       ),
       _selected:
@@ -2096,6 +2147,7 @@ function buildExceptionBoardRows(
   items: OwnedWorkItem[],
   locale: Locale,
   focus: FocusTarget,
+  activeFilter: string,
 ) {
   const rows: TableRow[] = items.map((item) => {
     const hold = item.order.exceptionHold;
@@ -2109,12 +2161,18 @@ function buildExceptionBoardRows(
     const relatedHref = hold?.reasonCode.includes("incident")
       ? `/incidents?orderId=${encodeURIComponent(item.order.orderId)}`
       : `/complaints?orderId=${encodeURIComponent(item.order.orderId)}`;
+    const orderHref = buildDispatchDetailHref(item.order.orderId, {
+      board: "exception",
+      filter: activeFilter,
+      orderId: item.order.orderId,
+      ...(item.order.bookingId ? { bookingId: item.order.bookingId } : {}),
+    });
 
     return {
       orderCell: (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
-            href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
+            href={orderHref}
             style={{
               color: theme.accent,
               fontWeight: 700,
@@ -2146,7 +2204,7 @@ function buildExceptionBoardRows(
       ),
       actions: renderActionLinks(
         item.order.availableActions,
-        { board: "exception", order: item.order },
+        { board: "exception", filter: activeFilter, order: item.order },
         locale,
       ),
       _selected:
@@ -2172,6 +2230,7 @@ function buildNoSupplyBoardRows(
   items: OwnedWorkItem[],
   locale: Locale,
   focus: FocusTarget,
+  activeFilter: string,
 ) {
   const rows: TableRow[] = items.map((item) => {
     const escalation = item.order.noSupplyEscalation;
@@ -2180,12 +2239,18 @@ function buildNoSupplyBoardRows(
       item.order.dispatchTimeout?.timeoutReasonCode ??
       escalation?.escalationAction ??
       "no_supply";
+    const orderHref = buildDispatchDetailHref(item.order.orderId, {
+      board: "no_supply",
+      filter: activeFilter,
+      orderId: item.order.orderId,
+      ...(item.order.bookingId ? { bookingId: item.order.bookingId } : {}),
+    });
 
     return {
       orderCell: (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
-            href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
+            href={orderHref}
             style={{
               color: theme.accent,
               fontWeight: 700,
@@ -2212,7 +2277,7 @@ function buildNoSupplyBoardRows(
       age: formatAge(locale, escalation?.escalatedAt ?? item.order.updatedAt),
       actions: renderActionLinks(
         item.order.availableActions,
-        { board: "no_supply", order: item.order },
+        { board: "no_supply", filter: activeFilter, order: item.order },
         locale,
       ),
       _selected:
@@ -2237,6 +2302,7 @@ function buildGovernanceBoardRows(
   items: OwnedWorkItem[],
   locale: Locale,
   focus: FocusTarget,
+  activeFilter: string,
 ) {
   const rows: TableRow[] = items.map((item) => {
     const requestId =
@@ -2257,12 +2323,18 @@ function buildGovernanceBoardRows(
     const approvalHref = requestId
       ? `/approval-requests?approvalRequestId=${encodeURIComponent(requestId)}`
       : "/approval-requests";
+    const orderHref = buildDispatchDetailHref(item.order.orderId, {
+      board: "governance",
+      filter: activeFilter,
+      orderId: item.order.orderId,
+      ...(item.order.bookingId ? { bookingId: item.order.bookingId } : {}),
+    });
 
     return {
       orderCell: (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
-            href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
+            href={orderHref}
             style={{
               color: theme.accent,
               fontWeight: 700,
@@ -2294,7 +2366,7 @@ function buildGovernanceBoardRows(
       ),
       actions: renderActionLinks(
         item.order.availableActions,
-        { board: "governance", order: item.order },
+        { board: "governance", filter: activeFilter, order: item.order },
         locale,
       ),
       _selected:
@@ -2320,15 +2392,21 @@ function buildForwardedBoardRows(
   items: ForwardedWorkItem[],
   locale: Locale,
   focus: FocusTarget,
+  activeFilter: string,
 ) {
   const rows: TableRow[] = items.map((item) => {
     const mismatch = getMismatchSummary(item.order, item.issue);
+    const mirrorHref = buildDispatchDetailHref(item.order.mirrorOrderId, {
+      board: "forwarded",
+      filter: activeFilter,
+      orderId: item.order.mirrorOrderId,
+    });
 
     return {
       mirrorCell: (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
-            href={`/dispatch/${encodeURIComponent(item.order.mirrorOrderId)}`}
+            href={mirrorHref}
             style={{
               color: theme.accent,
               fontWeight: 700,
@@ -2402,6 +2480,7 @@ function buildForwardedBoardRows(
         item.order.availableActions,
         {
           board: "forwarded",
+          filter: activeFilter,
           forwarded: item.order,
           ...(item.adapterHealth ? { adapterHealth: item.adapterHealth } : {}),
         },
@@ -2612,6 +2691,7 @@ export default async function DispatchPage({
       ownedVisibleItems,
       locale,
       focus,
+      activeFilter,
       candidateCountsByJobId,
     );
     rows = built.rows;
@@ -2624,7 +2704,12 @@ export default async function DispatchPage({
       emptyReason = "filtered_empty";
     }
   } else if (activeBoard === "assigned") {
-    const built = buildAssignedBoardRows(ownedVisibleItems, locale, focus);
+    const built = buildAssignedBoardRows(
+      ownedVisibleItems,
+      locale,
+      focus,
+      activeFilter,
+    );
     rows = built.rows;
     columns = built.columns;
     if (
@@ -2635,19 +2720,39 @@ export default async function DispatchPage({
       emptyReason = "filtered_empty";
     }
   } else if (activeBoard === "exception") {
-    const built = buildExceptionBoardRows(ownedVisibleItems, locale, focus);
+    const built = buildExceptionBoardRows(
+      ownedVisibleItems,
+      locale,
+      focus,
+      activeFilter,
+    );
     rows = built.rows;
     columns = built.columns;
   } else if (activeBoard === "no_supply") {
-    const built = buildNoSupplyBoardRows(ownedVisibleItems, locale, focus);
+    const built = buildNoSupplyBoardRows(
+      ownedVisibleItems,
+      locale,
+      focus,
+      activeFilter,
+    );
     rows = built.rows;
     columns = built.columns;
   } else if (activeBoard === "governance") {
-    const built = buildGovernanceBoardRows(ownedVisibleItems, locale, focus);
+    const built = buildGovernanceBoardRows(
+      ownedVisibleItems,
+      locale,
+      focus,
+      activeFilter,
+    );
     rows = built.rows;
     columns = built.columns;
   } else {
-    const built = buildForwardedBoardRows(forwardedVisibleItems, locale, focus);
+    const built = buildForwardedBoardRows(
+      forwardedVisibleItems,
+      locale,
+      focus,
+      activeFilter,
+    );
     rows = built.rows;
     columns = built.columns;
     if (
