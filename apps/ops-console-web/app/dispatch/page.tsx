@@ -14,6 +14,7 @@ import type {
   UiHealthEnvelope,
   UiRefreshMetadata,
 } from "@drts/contracts";
+import { DispatchAutoRefresh } from "@/components/dispatch-auto-refresh";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatCompactNumber, formatMinorCurrency } from "@/lib/ops-analytics";
@@ -711,28 +712,52 @@ function resolveActionLabel(action: string, locale: Locale) {
   const zh = locale === "zh";
   switch (action) {
     case "assign":
+    case "assign_dispatch":
+    case "dispatch_order":
       return zh ? "指派候選司機" : "Assign candidate";
+    case "release":
+    case "release_driver":
+    case "reassign_dispatch":
+      return zh ? "釋放 / 改派司機" : "Release / reassign driver";
     case "redispatch":
+    case "redispatch_order":
+    case "redispatch_with_reason":
       return zh ? "重新派送" : "Redispatch";
     case "cancel":
+    case "cancel_owned_order":
       return zh ? "取消訂單" : "Cancel order";
+    case "manual_fare_override":
+    case "fare_override":
+    case "request_fare_override":
+      return zh ? "申請車資覆寫" : "Request fare override";
     case "resolve_hold":
     case "resolve_exception_hold":
       return zh ? "解除保留" : "Resolve hold";
+    case "request_exception_override":
+      return zh ? "申請例外覆核" : "Request override";
+    case "approve_exception_override":
+      return zh ? "核准 override" : "Approve override";
+    case "reject_exception_override":
+      return zh ? "拒絕 override" : "Reject override";
     case "escalate_incident":
     case "createIncidentFromDispatchException":
       return zh ? "升級為事件" : "Escalate to incident";
     case "extend_search":
       return zh ? "延展搜尋" : "Extend search";
+    case "cancel_no_supply":
+      return zh ? "取消 no-supply 訂單" : "Cancel no-supply order";
     case "resolve_no_supply":
       return zh ? "人工處理 no-supply" : "Resolve no-supply";
     case "jump_approval_request":
       return zh ? "前往 approval request" : "Open approval request";
     case "trigger_reconciliation":
+    case "complete_forwarder_reconciliation":
       return zh ? "觸發 reconciliation" : "Trigger reconciliation";
     case "engage_manual_fallback":
       return zh ? "啟動 manual fallback" : "Engage manual fallback";
     case "force_refresh":
+    case "sync_forwarded_order_status":
+    case "mark_forwarder_sync_failed":
       return zh ? "強制刷新" : "Force refresh";
     case "inspect_adapter":
       return zh ? "查看 adapter ↗" : "Inspect adapter ↗";
@@ -785,13 +810,14 @@ function buildActionHref(
           `/adapter-registry?platformCode=${encodeURIComponent(record.platformCode)}`,
         );
       case "force_refresh":
+      case "sync_forwarded_order_status":
         return buildDispatchHref({
           board,
           facet: selectedFacet,
           workItemId: record.mirrorOrderId,
         });
       default:
-        return `/dispatch/${encodeURIComponent(record.mirrorOrderId)}`;
+        return `/dispatch/${encodeURIComponent(record.mirrorOrderId)}?board=${board}&intent=${encodeURIComponent(action.action)}`;
     }
   }
 
@@ -802,11 +828,18 @@ function buildActionHref(
       : "/approval-requests";
   }
 
+  if (
+    action.action === "createIncidentFromDispatchException" ||
+    action.action === "escalate_incident"
+  ) {
+    return `/incidents?sourceOrderId=${encodeURIComponent(record.orderId)}`;
+  }
+
   return `/dispatch/${encodeURIComponent(record.orderId)}?board=${board}${
     selectedService !== "all"
       ? `&service=${encodeURIComponent(selectedService)}`
       : ""
-  }`;
+  }&intent=${encodeURIComponent(action.action)}`;
 }
 
 function buildActionContexts(
@@ -1082,6 +1115,59 @@ function renderActionList(actions: BoardActionContext[], locale: Locale) {
           </Link>
         );
       })}
+    </div>
+  );
+}
+
+function renderInlineActionPills(
+  actions: BoardActionContext[],
+  locale: Locale,
+) {
+  if (actions.length === 0) {
+    return (
+      <span style={{ color: theme.textDim, fontSize: 11 }}>
+        {locale === "zh" ? "無動作" : "No actions"}
+      </span>
+    );
+  }
+
+  const visible = actions.slice(0, 3);
+  const overflowCount = actions.length - visible.length;
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {visible.map((action) => {
+        const pill = (
+          <Pill
+            theme={theme}
+            tone={actionTone(action.riskLevel, action.disabled)}
+            dot={!action.disabled}
+          >
+            {action.label}
+          </Pill>
+        );
+
+        if (action.disabled) {
+          return <span key={`${action.href}-${action.label}`}>{pill}</span>;
+        }
+
+        return (
+          <Link
+            key={`${action.href}-${action.label}`}
+            href={action.href}
+            target={action.external ? "_blank" : undefined}
+            rel={action.external ? "noreferrer" : undefined}
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            {pill}
+          </Link>
+        );
+      })}
+      {overflowCount > 0 ? (
+        <Pill theme={theme} tone="neutral">
+          +{overflowCount}
+        </Pill>
+      ) : null}
     </div>
   );
 }
@@ -1406,6 +1492,16 @@ export default async function DispatchPage({
       const adapter = adapterByPlatform.get(order.platformCode);
       const mismatch = getMismatchSummary(order, issue);
       return {
+        actions: renderInlineActionPills(
+          buildActionContexts(
+            board,
+            order,
+            locale,
+            selectedService,
+            selectedFacet,
+          ),
+          locale,
+        ),
         mirror: (
           <div style={{ display: "grid", gap: 2 }}>
             <Link
@@ -1484,6 +1580,7 @@ export default async function DispatchPage({
       { h: "STATUS", k: "status", w: 160 },
       { h: "ADAPTER", k: "adapter", w: 170 },
       { h: "MISMATCH", k: "mismatch", w: 190 },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "assigned") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -1491,6 +1588,16 @@ export default async function DispatchPage({
       const job = jobByOrderId.get(order.orderId);
       const gate = getOwnedGateSummary(order);
       return {
+        actions: renderInlineActionPills(
+          buildActionContexts(
+            board,
+            order,
+            locale,
+            selectedService,
+            selectedFacet,
+          ),
+          locale,
+        ),
         order: (
           <div style={{ display: "grid", gap: 2 }}>
             <Link
@@ -1546,9 +1653,20 @@ export default async function DispatchPage({
       { h: "TASK STATE", k: "taskState", w: 150 },
       { h: "ETA", k: "eta", w: 90, mono: true },
       { h: "GATE", k: "gate", w: 180 },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "exception") {
     boardRows = visibleOwnedByBoard.map((order) => ({
+      actions: renderInlineActionPills(
+        buildActionContexts(
+          board,
+          order,
+          locale,
+          selectedService,
+          selectedFacet,
+        ),
+        locale,
+      ),
       order: (
         <div style={{ display: "grid", gap: 2 }}>
           <Link
@@ -1588,6 +1706,7 @@ export default async function DispatchPage({
       { h: "HOLD OWNER", k: "owner", w: 150, mono: true },
       { h: "AGE", k: "age", w: 120, mono: true },
       { h: "RELATED", k: "related", w: 160, mono: true },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "no_supply") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -1596,6 +1715,16 @@ export default async function DispatchPage({
         ? (candidatesByJobId.get(job.dispatchJobId) ?? [])
         : [];
       return {
+        actions: renderInlineActionPills(
+          buildActionContexts(
+            board,
+            order,
+            locale,
+            selectedService,
+            selectedFacet,
+          ),
+          locale,
+        ),
         order: (
           <div style={{ display: "grid", gap: 2 }}>
             <Link
@@ -1635,6 +1764,7 @@ export default async function DispatchPage({
       { h: "ATTEMPTS", k: "attempts", w: 120, mono: true, align: "right" },
       { h: "REASON CODE", k: "reason", w: 180, mono: true },
       { h: "TIME IN STATE", k: "age", w: 140, mono: true },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "governance") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -1643,6 +1773,16 @@ export default async function DispatchPage({
         ? `/approval-requests?approvalRequestId=${encodeURIComponent(order.approvalRequestIds[0])}`
         : "/approval-requests";
       return {
+        actions: renderInlineActionPills(
+          buildActionContexts(
+            board,
+            order,
+            locale,
+            selectedService,
+            selectedFacet,
+          ),
+          locale,
+        ),
         order: (
           <div style={{ display: "grid", gap: 2 }}>
             <Link
@@ -1687,6 +1827,7 @@ export default async function DispatchPage({
       { h: "REQUESTER", k: "requester", w: 150, mono: true },
       { h: "AGE", k: "age", w: 120, mono: true },
       { h: "APPROVAL", k: "approval", w: 180, mono: true },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -1697,6 +1838,16 @@ export default async function DispatchPage({
         ? (candidatesByJobId.get(job.dispatchJobId) ?? [])
         : [];
       return {
+        actions: renderInlineActionPills(
+          buildActionContexts(
+            board,
+            order,
+            locale,
+            selectedService,
+            selectedFacet,
+          ),
+          locale,
+        ),
         order: (
           <div style={{ display: "grid", gap: 2 }}>
             <Link
@@ -1754,11 +1905,15 @@ export default async function DispatchPage({
       { h: "ETA", k: "eta", w: 80, mono: true },
       { h: "CAND", k: "candidates", w: 70, mono: true, align: "right" },
       { h: "GATE", k: "gate", w: 210 },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   }
 
   return (
     <>
+      <DispatchAutoRefresh
+        intervalMs={Math.max(currentRefresh.staleAfterMs || 5000, 5000)}
+      />
       <PageHeader
         theme={theme}
         title={t("dispatch.title", locale)}
