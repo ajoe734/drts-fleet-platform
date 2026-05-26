@@ -13,7 +13,15 @@ import { TenantBookingCreateForm } from "./tenant-booking-create-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewBookingPage() {
+export default async function NewBookingPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{
+    pickupAddressId?: string;
+    dropoffAddressId?: string;
+  }>;
+}) {
+  const resolvedSearchParams = (await searchParams) ?? {};
   const client = getTenantClient();
   const [passengers, addresses, costCenters] = await Promise.all([
     client.listPassengers() as Promise<TenantPassengerRecord[]>,
@@ -59,6 +67,12 @@ export default async function NewBookingPage() {
         addresses={activeAddresses}
         costCenters={activeCostCenters}
         passengers={activePassengers}
+        {...(resolvedSearchParams.dropoffAddressId
+          ? { initialDropoffAddressId: resolvedSearchParams.dropoffAddressId }
+          : {})}
+        {...(resolvedSearchParams.pickupAddressId
+          ? { initialPickupAddressId: resolvedSearchParams.pickupAddressId }
+          : {})}
       />
 
       <section className="surface-grid">

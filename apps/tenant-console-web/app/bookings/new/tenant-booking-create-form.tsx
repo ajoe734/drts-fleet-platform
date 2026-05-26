@@ -100,16 +100,29 @@ export function TenantBookingCreateForm({
   passengers,
   addresses,
   costCenters,
+  initialPickupAddressId,
+  initialDropoffAddressId,
 }: {
   passengers: TenantPassengerRecord[];
   addresses: TenantAddressRecord[];
   costCenters: TenantCostCenterRecord[];
+  initialPickupAddressId?: string;
+  initialDropoffAddressId?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  const initialPickupAddress = addresses[0] ?? null;
-  const initialDropoffAddress = addresses[1] ?? addresses[0] ?? null;
+  const initialPickupAddress =
+    addresses.find((row) => row.addressId === initialPickupAddressId) ??
+    addresses[0] ??
+    null;
+  const initialDropoffAddress =
+    addresses.find((row) => row.addressId === initialDropoffAddressId) ??
+    addresses.find(
+      (row) => row.addressId !== initialPickupAddress?.addressId,
+    ) ??
+    initialPickupAddress ??
+    null;
 
   const [businessDispatchSubtype, setBusinessDispatchSubtype] =
     useState<BusinessDispatchSubtype>("credit_card_airport_transfer");
