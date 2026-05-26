@@ -19,6 +19,7 @@ type TenantNavIcon =
   | "reports"
   | "apiKeys"
   | "webhooks"
+  | "notifications"
   | "audit"
   | "users";
 
@@ -106,6 +107,12 @@ export const tenantNavEntries: TenantNavEntry[] = [
     href: "/webhooks",
     icon: "webhooks",
     label: "Webhook",
+  },
+  {
+    key: "notifications",
+    href: "/notifications",
+    icon: "notifications",
+    label: "通知偏好",
   },
   {
     key: "audit",
