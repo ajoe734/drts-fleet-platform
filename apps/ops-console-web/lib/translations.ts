@@ -162,6 +162,100 @@ const en = {
   "dashboard.dispatchBoards.openOwned": "Open owned workflow",
   "dashboard.dispatchBoards.openForwarded": "Open forwarded board",
 
+  // ── Dashboard · refresh / health / cross-app affordances ──
+  "dashboard.refreshTier.medium": "T3 · 15s",
+  "dashboard.refreshTier.label": "Refresh tier",
+  "dashboard.refreshTier.medium.sub":
+    "Snapshot polls every 15s — use refresh for a force-update.",
+  "dashboard.refresh": "Refresh",
+  "dashboard.refresh.staleAt": "Snapshot {when} · {freshness}",
+  "dashboard.refresh.fresh": "fresh",
+  "dashboard.refresh.stale": "stale",
+  "dashboard.refresh.degraded": "degraded",
+  "dashboard.refresh.unknown": "unknown",
+  "dashboard.healthBanner.title.degraded": "Backend dependencies degraded",
+  "dashboard.healthBanner.title.down": "Backend unreachable",
+  "dashboard.healthBanner.body.degraded":
+    "{count} service(s) reporting impact — data on this page may be stale or partial.",
+  "dashboard.healthBanner.body.down":
+    "Ops API responded {status}. Showing the last known snapshot.",
+  "dashboard.healthBanner.lastChecked": "Last checked {value}",
+  "dashboard.identity.environment": "Environment",
+  "dashboard.identity.realm": "Realm",
+  "dashboard.identity.actor": "Actor",
+  "dashboard.identity.tenant": "Tenant",
+  "dashboard.crossApp.newTab": "Opens in a new tab",
+  "dashboard.attention.title": "Today's Attention",
+  "dashboard.attention.subtitle":
+    "Critical first, then SLA breach, then blocking queue",
+  "dashboard.attention.expandAll": "Open all",
+  "dashboard.healthSignals.title": "Health Signals",
+  "dashboard.healthSignals.subtitle":
+    "API health + adapter dependencies (UiHealthEnvelope · cross-app deps)",
+  "dashboard.healthSignals.allHealthy":
+    "All dependencies are reporting healthy.",
+  "dashboard.healthSignals.adapterRegistry": "Adapter registry",
+  "dashboard.queueCard.title": "Current Dispatch Queue · top 5",
+  "dashboard.queueCard.openDispatch": "Open dispatch",
+  "dashboard.openCallSession": "Open call session",
+  "dashboard.openCallSession.disabled": "Need call-center scope",
+  "dashboard.openCallSession.hint":
+    "Opens a new session in the call center workspace.",
+  "dashboard.dutyHandbook": "Duty handbook",
+  "dashboard.attention.criticalIncident.title":
+    "{incidentId} · critical incident in flight",
+  "dashboard.attention.criticalIncident.body":
+    "{count} critical incident(s) need coordination right now.",
+  "dashboard.attention.openIncident": "Coordinate incident",
+
+  // ── Secondary KPI strip (must-show data per packet §5.1) ──
+  "dashboard.secondaryKpi.dispatchableVehicles": "Dispatchable Vehicles",
+  "dashboard.secondaryKpi.dispatchableVehiclesSub": "{count} offline · supply",
+  "dashboard.secondaryKpi.overdueMaintenance": "Overdue Maintenance",
+  "dashboard.secondaryKpi.overdueMaintenanceSub":
+    "Removes vehicles from dispatchable pool",
+  "dashboard.secondaryKpi.todayRevenue": "Today's Revenue",
+  "dashboard.secondaryKpi.todayRevenueSub": "{trips} completed trips",
+  "dashboard.secondaryKpi.completedTrips": "Completed Trips Today",
+  "dashboard.secondaryKpi.completedTripsSub": "Across all service buckets",
+
+  // ── KPI canvas alignment (additions to the existing strip) ──
+  "dashboard.kpi.staleLocation": "Stale Location",
+  "dashboard.kpi.staleLocationSub":
+    "Drivers with no fresh location signal — investigate before dispatching",
+  "dashboard.kpi.staleLocationDelta": "{value} stale",
+  "dashboard.kpi.openComplaints": "Open Complaints",
+  "dashboard.kpi.openComplaintsSub": "Cases assigned + unassigned",
+  "dashboard.kpi.openComplaintsDelta": "{count} SLA breach",
+  "dashboard.kpi.activeIncidents": "Active Incidents",
+  "dashboard.kpi.activeIncidentsSub": "Open + investigating",
+  "dashboard.kpi.activeIncidentsDelta": "{count} critical",
+  "dashboard.kpi.broadcastingDelta": "{count} broadcasting",
+  "dashboard.kpi.redispatchDelta": "{count} redispatch",
+  "dashboard.kpi.onShiftHint": "{count} on shift",
+
+  // ── EmptyState (six EmptyReason treatments per packet §3.6) ──
+  "dashboard.empty.no_data.title": "All clear",
+  "dashboard.empty.no_data.body":
+    "Nothing to act on right now. The snapshot is current.",
+  "dashboard.empty.not_provisioned.title": "Not provisioned",
+  "dashboard.empty.not_provisioned.body":
+    "This signal is not turned on for the current realm.",
+  "dashboard.empty.fetch_failed.title": "Service unreachable",
+  "dashboard.empty.fetch_failed.body":
+    "We could not reach this backend dependency. The last known snapshot is shown above.",
+  "dashboard.empty.permission_denied.title": "No permission",
+  "dashboard.empty.permission_denied.body":
+    "Your current role does not have read scope on this signal.",
+  "dashboard.empty.external_unavailable.title": "External adapter down",
+  "dashboard.empty.external_unavailable.body":
+    "An external dependency is unreachable. Forwarded data may be stale.",
+  "dashboard.empty.filtered_empty.title": "Filtered to empty",
+  "dashboard.empty.filtered_empty.body": "No items match the current filters.",
+  "dashboard.empty.action.retry": "Retry",
+  "dashboard.empty.action.reviewAdapters": "Review adapter registry",
+  "dashboard.empty.action.adjustFilters": "Adjust filters",
+
   // ── Vehicles ──
   "vehicles.title": "Vehicles Registry",
   "vehicles.subtitle": "{count} vehicle(s) registered",
@@ -1625,6 +1719,92 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.platformOps.signal.reason": "原因",
   "dashboard.platformOps.signal.lastChecked": "最後檢查",
   "dashboard.platformOps.signal.lastError": "最後錯誤",
+
+  // ── Dashboard · refresh / health / cross-app affordances ──
+  "dashboard.refreshTier.medium": "T3 · 15s",
+  "dashboard.refreshTier.label": "更新頻率",
+  "dashboard.refreshTier.medium.sub":
+    "快照每 15 秒更新一次；點「重新整理」立即拉取最新資料。",
+  "dashboard.refresh": "重新整理",
+  "dashboard.refresh.staleAt": "快照 {when} · {freshness}",
+  "dashboard.refresh.fresh": "新鮮",
+  "dashboard.refresh.stale": "已過期",
+  "dashboard.refresh.degraded": "降級",
+  "dashboard.refresh.unknown": "未知",
+  "dashboard.healthBanner.title.degraded": "後端依賴降級",
+  "dashboard.healthBanner.title.down": "後端無法連線",
+  "dashboard.healthBanner.body.degraded":
+    "目前有 {count} 個服務回報影響中——此頁資料可能過舊或不完整。",
+  "dashboard.healthBanner.body.down":
+    "Ops API 回報 {status}，顯示最後一次成功的快照。",
+  "dashboard.healthBanner.lastChecked": "最後檢查 {value}",
+  "dashboard.identity.environment": "環境",
+  "dashboard.identity.realm": "領域",
+  "dashboard.identity.actor": "操作者",
+  "dashboard.identity.tenant": "租戶",
+  "dashboard.crossApp.newTab": "在新分頁開啟",
+  "dashboard.attention.title": "今日待處理",
+  "dashboard.attention.subtitle": "排序：critical → SLA breach → blocking",
+  "dashboard.attention.expandAll": "展開所有",
+  "dashboard.healthSignals.title": "健康訊號",
+  "dashboard.healthSignals.subtitle":
+    "API 健康與 adapter 依賴（UiHealthEnvelope · cross-app deps）",
+  "dashboard.healthSignals.allHealthy": "所有依賴皆回報為健康。",
+  "dashboard.healthSignals.adapterRegistry": "Adapter registry",
+  "dashboard.queueCard.title": "當前 dispatch 隊列 · top 5",
+  "dashboard.queueCard.openDispatch": "前往派遣",
+  "dashboard.openCallSession": "開新 call session",
+  "dashboard.openCallSession.disabled": "需要客服中心權限",
+  "dashboard.openCallSession.hint": "在客服中心工作區開啟新 session。",
+  "dashboard.dutyHandbook": "值班手冊",
+  "dashboard.attention.criticalIncident.title": "{incidentId} · 嚴重事故進行中",
+  "dashboard.attention.criticalIncident.body":
+    "目前有 {count} 件嚴重事故需要協調。",
+  "dashboard.attention.openIncident": "前往事故",
+
+  // ── Secondary KPI strip (must-show data per packet §5.1) ──
+  "dashboard.secondaryKpi.dispatchableVehicles": "可派車輛",
+  "dashboard.secondaryKpi.dispatchableVehiclesSub": "{count} 輛離線 · 供給",
+  "dashboard.secondaryKpi.overdueMaintenance": "逾期保養",
+  "dashboard.secondaryKpi.overdueMaintenanceSub": "逾期車輛應移出可派遣池",
+  "dashboard.secondaryKpi.todayRevenue": "今日收益",
+  "dashboard.secondaryKpi.todayRevenueSub": "{trips} 趟已完成",
+  "dashboard.secondaryKpi.completedTrips": "今日完成行程",
+  "dashboard.secondaryKpi.completedTripsSub": "跨所有 service bucket",
+
+  // ── KPI canvas alignment (additions to the existing strip) ──
+  "dashboard.kpi.staleLocation": "位置失聯",
+  "dashboard.kpi.staleLocationSub": "司機位置訊號過舊——派遣前先確認",
+  "dashboard.kpi.staleLocationDelta": "{value} 已過期",
+  "dashboard.kpi.openComplaints": "客訴未結",
+  "dashboard.kpi.openComplaintsSub": "已指派 + 未指派的案件",
+  "dashboard.kpi.openComplaintsDelta": "{count} 件 SLA breach",
+  "dashboard.kpi.activeIncidents": "事故進行中",
+  "dashboard.kpi.activeIncidentsSub": "open + investigating",
+  "dashboard.kpi.activeIncidentsDelta": "{count} 件 critical",
+  "dashboard.kpi.broadcastingDelta": "{count} broadcasting",
+  "dashboard.kpi.redispatchDelta": "{count} 重派",
+  "dashboard.kpi.onShiftHint": "{count} 在班",
+
+  // ── EmptyState (六種 EmptyReason 治療方式 / packet §3.6) ──
+  "dashboard.empty.no_data.title": "目前一切正常",
+  "dashboard.empty.no_data.body": "目前沒有需要處理的項目，快照為最新狀態。",
+  "dashboard.empty.not_provisioned.title": "尚未啟用",
+  "dashboard.empty.not_provisioned.body": "目前 realm 尚未開啟此資料源。",
+  "dashboard.empty.fetch_failed.title": "服務無法連線",
+  "dashboard.empty.fetch_failed.body":
+    "無法連線後端依賴，畫面上顯示最後一次成功的快照。",
+  "dashboard.empty.permission_denied.title": "權限不足",
+  "dashboard.empty.permission_denied.body":
+    "您的角色目前沒有此資料的讀取權限。",
+  "dashboard.empty.external_unavailable.title": "外部 adapter 停擺",
+  "dashboard.empty.external_unavailable.body":
+    "外部依賴目前無法連線，forwarded 資料可能過舊。",
+  "dashboard.empty.filtered_empty.title": "過濾結果為空",
+  "dashboard.empty.filtered_empty.body": "目前的過濾條件沒有符合的項目。",
+  "dashboard.empty.action.retry": "重試",
+  "dashboard.empty.action.reviewAdapters": "檢視 adapter registry",
+  "dashboard.empty.action.adjustFilters": "調整過濾條件",
 
   // ── Vehicles ──
   "vehicles.title": "車輛登記",

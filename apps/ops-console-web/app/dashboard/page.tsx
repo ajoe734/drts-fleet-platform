@@ -1,13 +1,13 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type {
+  ComplaintCaseRecord,
   CrossAppResourceLink,
   DispatchJobRecord,
   DriverRegistryRecord,
   DriverStatementRecord,
   DriverTaskRecord,
   EmptyReason,
-  EmptyStateEnvelope,
   IncidentRecord,
   MaintenanceRecord,
   OperationalAdapterDetailRecord,
@@ -21,7 +21,6 @@ import type {
   ResourceActionDescriptor,
   ShiftRecord,
   UiHealthEnvelope,
-  UiRefreshMetadata,
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
@@ -48,8 +47,10 @@ import {
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
+import { RefreshControl } from "./refresh-control";
 
-type IdentitySummary = { realm?: string; actorType?: string } | null;
+// `/api/health` envelope is bespoke (per-app); the canonical UiHealthEnvelope
+// (Q-X12) is derived from it together with per-source fetch outcomes below.
 type HealthPayload = {
   service: string;
   status: string;
@@ -58,17 +59,29 @@ type HealthPayload = {
   timestamp: string;
 };
 
-type ApiEnvelope<T> = {
-  data: T;
-  meta: {
-    requestId: string;
-    timestamp: string;
-  };
-};
+type IdentitySummary = {
+  realm?: string;
+  actorType?: string;
+  tenantId?: string;
+} | null;
 
-type ApiListPayload<T> = {
-  items: T[];
-};
+// A backend-emitted EmptyStateEnvelope (per ui-runtime contracts §3.6) is not
+// yet attached to the read responses consumed here. Until those land, we tag
+// each load outcome so the page can still classify zero-item views as either
+// `fetch_failed` (network/proc error) or `no_data` (legit empty).
+type Loaded<T> = { ok: true; value: T } | { ok: false; reason: EmptyReason };
+
+async function loadOrFlag<T>(loader: () => Promise<T>): Promise<Loaded<T>> {
+  try {
+    return { ok: true, value: await loader() };
+  } catch {
+    return { ok: false, reason: "fetch_failed" };
+  }
+}
+
+function valueOr<T>(loaded: Loaded<T>, fallback: T): T {
+  return loaded.ok ? loaded.value : fallback;
+}
 
 type QueueRow = Record<string, unknown> & {
   orderId: string;
@@ -141,6 +154,12 @@ const kpiGridStyle = {
   gap: 10,
 };
 
+const secondaryKpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 10,
+};
+
 const splitGridStyle = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1.5fr) minmax(280px, 1fr)",
@@ -193,78 +212,29 @@ const queueLinkStyle = {
   fontWeight: 700,
 };
 
-const refreshCardStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.6fr) minmax(300px, 1fr)",
-  gap: 16,
-  alignItems: "stretch",
-};
-
-const metaStackStyle = {
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: 12,
-};
-
-const metaRowStyle = {
+const identityChipRowStyle = {
   display: "flex",
   flexWrap: "wrap" as const,
-  gap: 8,
-};
-
-const metaLabelStyle = {
-  fontSize: 11,
-  color: theme.textDim,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.06em",
-};
-
-const summaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 10,
-};
-
-const summaryBoxStyle = {
-  border: `1px solid ${theme.border}`,
-  borderRadius: 10,
-  padding: 12,
-  background: theme.surfaceLo,
-  display: "flex",
-  flexDirection: "column" as const,
+  alignItems: "center",
   gap: 6,
-};
-
-const summaryValueStyle = {
-  fontSize: 22,
-  fontWeight: 700,
-  color: theme.text,
-};
-
-const summaryCaptionStyle = {
-  fontSize: 12,
-  color: theme.textDim,
-};
-
-const actionStackStyle = {
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: 6,
-  alignItems: "flex-start",
+  marginTop: 8,
 };
 
 const emptyStateStyle = {
-  border: `1px dashed ${theme.border}`,
-  borderRadius: 10,
-  background: theme.surfaceLo,
-  padding: 16,
   display: "flex",
   flexDirection: "column" as const,
-  gap: 10,
+  alignItems: "flex-start",
+  gap: 6,
+  padding: "16px 4px",
+  color: theme.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.5,
 };
 
-const externalLinkStyle = {
-  textDecoration: "none",
+const emptyStateTitleStyle = {
+  color: theme.text,
+  fontWeight: 600,
+  fontSize: 13,
 };
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
@@ -931,17 +901,6 @@ function getAlertSummary(
   }
 }
 
-async function resolveOrFallback<T>(
-  loader: () => Promise<T>,
-  fallback: T,
-): Promise<T> {
-  try {
-    return await loader();
-  } catch {
-    return fallback;
-  }
-}
-
 function createFallbackObservabilitySnapshot(
   referenceDate = new Date(),
 ): OperationalObservabilitySnapshot {
@@ -1030,102 +989,199 @@ async function loadHealthPayload(): Promise<HealthPayload> {
   return (await response.json()) as HealthPayload;
 }
 
+function normalizeHealthStatus(
+  status: string | null | undefined,
+): UiHealthEnvelope["status"] {
+  if (!status) {
+    return "down";
+  }
+  if (status === "healthy" || status === "ok") {
+    return "healthy";
+  }
+  if (status === "down" || status === "critical") {
+    return "down";
+  }
+  return "degraded";
+}
+
+interface DerivedDegradedSource {
+  service: string;
+  reason: EmptyReason;
+}
+
+function buildDegradedServices(
+  health: HealthPayload,
+  healthOk: boolean,
+  observability: OperationalObservabilitySnapshot,
+  sources: DerivedDegradedSource[],
+): UiHealthEnvelope["degradedServices"] {
+  const entries: UiHealthEnvelope["degradedServices"] = [];
+  const healthStatus = normalizeHealthStatus(healthOk ? health.status : "down");
+
+  if (!healthOk || healthStatus === "down") {
+    entries.push({
+      service: health.service || "ops-api",
+      impact: "Ops API unreachable; data may be stale",
+      severity: "critical",
+    });
+  } else if (healthStatus === "degraded") {
+    entries.push({
+      service: health.service || "ops-api",
+      impact: `Ops API status: ${health.status}`,
+      severity: "warning",
+    });
+  }
+
+  for (const source of sources) {
+    if (source.reason === "fetch_failed") {
+      entries.push({
+        service: source.service,
+        impact: "Backend read failed; using fallback data",
+        severity: "warning",
+      });
+    }
+  }
+
+  for (const adapter of observability.adapterDetails) {
+    if (adapter.status === "degraded" || adapter.status === "down") {
+      entries.push({
+        service: `forwarder:${adapter.platformCode}`,
+        impact: adapter.lastError ?? `adapter ${adapter.status}`,
+        severity: adapter.status === "down" ? "critical" : "warning",
+      });
+    }
+  }
+
+  return entries;
+}
+
+function resolveFreshnessTone(
+  freshness: "fresh" | "stale" | "degraded" | "unknown",
+): CanvasTone {
+  if (freshness === "fresh") return "success";
+  if (freshness === "stale") return "info";
+  if (freshness === "degraded") return "warn";
+  return "neutral";
+}
+
+function deriveFreshness(
+  healthStatus: UiHealthEnvelope["status"],
+  degradedCount: number,
+): "fresh" | "stale" | "degraded" | "unknown" {
+  if (healthStatus === "down") return "degraded";
+  if (healthStatus === "degraded" || degradedCount > 0) return "stale";
+  return "fresh";
+}
+
+function renderEmptyState(
+  locale: Locale,
+  reason: EmptyReason,
+  action?: { label: string; href: string; newTab?: boolean },
+): ReactNode {
+  const title = t(`dashboard.empty.${reason}.title`, locale);
+  const body = t(`dashboard.empty.${reason}.body`, locale);
+  return (
+    <div style={emptyStateStyle}>
+      <div style={emptyStateTitleStyle}>{title}</div>
+      <div>{body}</div>
+      {action ? (
+        <Link
+          href={action.href}
+          {...(action.newTab ? { target: "_blank", rel: "noreferrer" } : {})}
+          style={{ textDecoration: "none" }}
+        >
+          <Btn theme={theme} variant="ghost">
+            {action.label}
+          </Btn>
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+// Cross-app deep link to platform-admin's adapter registry. Encoded as a
+// CrossAppResourceLink so renderers can surface the new-tab affordance (§3.10).
+function buildAdapterRegistryLink(locale: Locale): CrossAppResourceLink {
+  return {
+    targetApp: "platform-admin",
+    route: "/adapter-registry",
+    resourceType: "adapter_registry",
+    resourceId: "all",
+    openMode: "new_tab",
+    label: t("dashboard.healthSignals.adapterRegistry", locale),
+  };
+}
+
+function resolveCrossAppHref(link: CrossAppResourceLink): string {
+  // Phase 1 keeps apps as separate deployments. With no shared origin map yet,
+  // we deep-link to the route path and rely on the host gateway / reverse
+  // proxy to route based on the targetApp.
+  return `/${link.targetApp}${link.route}`;
+}
+
 export default async function DashboardPage() {
   const client = await getServerOpsClient();
   const locale = await getServerLocale();
   const [
-    identity,
-    health,
-    ordersResponse,
-    dispatchJobsResponse,
-    driverTasksResponse,
-    vehiclesResponse,
-    driversResponse,
-    shiftsResponse,
-    incidentsResponse,
-    maintenanceResponse,
-    reportJobsResponse,
-    driverStatementsResponse,
-    observabilityResponse,
+    identityResult,
+    healthResult,
+    ordersResult,
+    dispatchJobsResult,
+    driverTasksResult,
+    vehiclesResult,
+    driversResult,
+    shiftsResult,
+    incidentsResult,
+    maintenanceResult,
+    reportJobsResult,
+    driverStatementsResult,
+    observabilityResult,
+    complaintsResult,
   ] = await Promise.all([
-    resolveOrFallback<IdentitySummary>(
+    loadOrFlag<IdentitySummary>(
       () => client.getIdentityContext() as Promise<IdentitySummary>,
-      null,
     ),
-    resolveOrFallback(loadHealthPayload, {
-      service: "api",
-      status: "degraded",
-      mode: "unknown",
-      execution_mode: "unknown",
-      timestamp: new Date().toISOString(),
-    }),
-    resolveOrFallback(
-      () => client.getListEnvelope<OwnedOrderRecord>("/api/orders"),
-      createFallbackListEnvelope([] as OwnedOrderRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<DispatchJobRecord>("/api/dispatch/tasks"),
-      createFallbackListEnvelope([] as DispatchJobRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<DriverTaskRecord>("/api/driver/tasks"),
-      createFallbackListEnvelope([] as DriverTaskRecord[]),
-    ),
-    resolveOrFallback(
-      () =>
-        client.getListEnvelope<VehicleRegistryRecord>(
-          "/api/regulatory-registry/vehicles",
-        ),
-      createFallbackListEnvelope([] as VehicleRegistryRecord[]),
-    ),
-    resolveOrFallback(
-      () =>
-        client.getListEnvelope<DriverRegistryRecord>(
-          "/api/regulatory-registry/drivers",
-        ),
-      createFallbackListEnvelope([] as DriverRegistryRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<ShiftRecord>("/api/shift-attendance/shifts"),
-      createFallbackListEnvelope([] as ShiftRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<IncidentRecord>("/api/incidents"),
-      createFallbackListEnvelope([] as IncidentRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<MaintenanceRecord>("/api/maintenance"),
-      createFallbackListEnvelope([] as MaintenanceRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<ReportJobRecord>("/api/reports/jobs"),
-      createFallbackListEnvelope([] as ReportJobRecord[]),
-    ),
-    resolveOrFallback(
-      () =>
-        client.getListEnvelope<DriverStatementRecord>("/api/driver-statements"),
-      createFallbackListEnvelope([] as DriverStatementRecord[]),
-    ),
-    resolveOrFallback(
-      () =>
-        client.getEnvelope<OperationalObservabilitySnapshot>(
-          "/api/operational-observability",
-        ),
-      createFallbackEnvelope(createFallbackObservabilitySnapshot()),
-    ),
+    loadOrFlag(loadHealthPayload),
+    loadOrFlag(() => client.listOrders()),
+    loadOrFlag(() => client.listDispatchJobs()),
+    loadOrFlag(() => client.listDriverTasks()),
+    loadOrFlag(() => client.listVehicles()),
+    loadOrFlag(() => client.listDrivers()),
+    loadOrFlag(() => client.listShifts()),
+    loadOrFlag(() => client.listIncidents()),
+    loadOrFlag(() => client.listMaintenance()),
+    loadOrFlag(() => client.listReportJobs()),
+    loadOrFlag(() => client.listDriverStatements()),
+    loadOrFlag(() => client.getOperationalObservability()),
+    loadOrFlag(() => client.listComplaints()),
   ]);
 
-  const orders = ordersResponse.data.items;
-  const dispatchJobs = dispatchJobsResponse.data.items;
-  const driverTasks = driverTasksResponse.data.items;
-  const vehicles = vehiclesResponse.data.items;
-  const drivers = driversResponse.data.items;
-  const shifts = shiftsResponse.data.items;
-  const incidents = incidentsResponse.data.items;
-  const maintenance = maintenanceResponse.data.items;
-  const reportJobs = reportJobsResponse.data.items;
-  const driverStatements = driverStatementsResponse.data.items;
-  const observability = observabilityResponse.data;
+  const identity = valueOr<IdentitySummary>(identityResult, null);
+  const health = valueOr<HealthPayload>(healthResult, {
+    service: "ops-api",
+    status: "down",
+    mode: "unknown",
+    execution_mode: "unknown",
+    timestamp: new Date().toISOString(),
+  });
+  const orders = valueOr(ordersResult, [] as OwnedOrderRecord[]);
+  const dispatchJobs = valueOr(dispatchJobsResult, [] as DispatchJobRecord[]);
+  const driverTasks = valueOr(driverTasksResult, [] as DriverTaskRecord[]);
+  const vehicles = valueOr(vehiclesResult, [] as VehicleRegistryRecord[]);
+  const drivers = valueOr(driversResult, [] as DriverRegistryRecord[]);
+  const shifts = valueOr(shiftsResult, [] as ShiftRecord[]);
+  const incidents = valueOr(incidentsResult, [] as IncidentRecord[]);
+  const maintenance = valueOr(maintenanceResult, [] as MaintenanceRecord[]);
+  const reportJobs = valueOr(reportJobsResult, [] as ReportJobRecord[]);
+  const driverStatements = valueOr(
+    driverStatementsResult,
+    [] as DriverStatementRecord[],
+  );
+  const observability = valueOr(
+    observabilityResult,
+    createFallbackObservabilitySnapshot(),
+  );
+  const complaints = valueOr(complaintsResult, [] as ComplaintCaseRecord[]);
 
   const dispatch = buildDispatchInsights(orders, dispatchJobs);
   const operations = buildOperationsOverview({
@@ -1146,11 +1202,27 @@ export default async function DashboardPage() {
       vehicleId: "all",
     },
   );
-  const criticalIncidentCount = incidents.filter(
-    (incident: IncidentRecord) =>
-      (incident.status === "open" || incident.status === "investigating") &&
-      incident.severity === "critical",
-  ).length;
+
+  const activeIncidents = incidents.filter(
+    (incident) =>
+      incident.status === "open" || incident.status === "investigating",
+  );
+  const criticalIncidents = activeIncidents.filter(
+    (incident) => incident.severity === "critical",
+  );
+  const firstCriticalIncident = criticalIncidents[0] ?? null;
+
+  const OPEN_COMPLAINT_STATUSES = new Set<ComplaintCaseRecord["status"]>([
+    "new",
+    "assigned",
+    "under_investigation",
+    "reopened",
+  ]);
+  const openComplaints = complaints.filter((c) =>
+    OPEN_COMPLAINT_STATUSES.has(c.status),
+  );
+  const slaBreachComplaints = openComplaints.filter((c) => c.slaBreach);
+
   const dispatchEligibleDrivers =
     observability.driverState.dispatchEligibleDrivers ||
     operations.onlineDrivers;
@@ -1272,7 +1344,50 @@ export default async function DashboardPage() {
     observability.adapterDetails[0] ??
     null;
 
-  const headerSubtitle = [
+  // UiHealthEnvelope (Q-X12). Derived locally until the backend emits it
+  // directly on every response.
+  const healthEnvelope: UiHealthEnvelope = {
+    status: normalizeHealthStatus(healthResult.ok ? health.status : "down"),
+    degradedServices: buildDegradedServices(
+      health,
+      healthResult.ok,
+      observability,
+      [
+        {
+          service: "orders",
+          reason: ordersResult.ok ? "no_data" : "fetch_failed",
+        },
+        {
+          service: "dispatch_jobs",
+          reason: dispatchJobsResult.ok ? "no_data" : "fetch_failed",
+        },
+        {
+          service: "driver_tasks",
+          reason: driverTasksResult.ok ? "no_data" : "fetch_failed",
+        },
+        {
+          service: "incidents",
+          reason: incidentsResult.ok ? "no_data" : "fetch_failed",
+        },
+        {
+          service: "complaints",
+          reason: complaintsResult.ok ? "no_data" : "fetch_failed",
+        },
+        {
+          service: "observability",
+          reason: observabilityResult.ok ? "no_data" : "fetch_failed",
+        },
+      ],
+    ),
+    lastCheckedAt: health.timestamp,
+  };
+
+  const freshness = deriveFreshness(
+    healthEnvelope.status,
+    healthEnvelope.degradedServices.length,
+  );
+
+  const headerSubtitleParts: string[] = [
     formatTimestamp(health.timestamp, locale),
     locale === "en"
       ? `mode ${health.mode}`
@@ -1280,120 +1395,143 @@ export default async function DashboardPage() {
     locale === "en"
       ? `execution ${health.execution_mode}`
       : `執行 ${formatOpsCodeLabel(locale, health.execution_mode)}`,
-  ].join(" · ");
+    t("dashboard.refreshTier.medium.sub", locale),
+  ];
+  const headerSubtitle = headerSubtitleParts.join(" · ");
 
-  const banners = [
-    topAlert
-      ? {
-          key: topAlert.key,
-          tone: getAlertTone(topAlert.state),
-          title: t(`dashboard.alert.${topAlert.key}.title`, locale),
-          body: `${getAlertSummary(topAlert.key, observability, locale)} · ${t(
-            "dashboard.operational.thresholds",
+  const identityChips: Array<{
+    label: string;
+    value: string;
+    tone: CanvasTone;
+  }> = [];
+  if (identity?.realm) {
+    identityChips.push({
+      label: t("dashboard.identity.realm", locale),
+      value: identity.realm,
+      tone: "neutral",
+    });
+  }
+  if (identity?.actorType) {
+    identityChips.push({
+      label: t("dashboard.identity.actor", locale),
+      value: identity.actorType,
+      tone: "neutral",
+    });
+  }
+  if (identity?.tenantId) {
+    identityChips.push({
+      label: t("dashboard.identity.tenant", locale),
+      value: identity.tenantId,
+      tone: "neutral",
+    });
+  }
+
+  // Attention banners — sorted critical → SLA → blocking, with explicit
+  // cross-app affordances pointing to spec'd `?board=` deep links.
+  type AttentionBanner = {
+    key: string;
+    tone: Exclude<CanvasTone, "neutral">;
+    title: ReactNode;
+    body: ReactNode;
+    href: string;
+    cta: string;
+    newTab?: boolean;
+  };
+
+  const banners: AttentionBanner[] = [];
+
+  if (firstCriticalIncident) {
+    banners.push({
+      key: "critical-incident",
+      tone: "danger",
+      title: t("dashboard.attention.criticalIncident.title", locale, {
+        incidentId: firstCriticalIncident.incidentId,
+      }),
+      body: t("dashboard.attention.criticalIncident.body", locale, {
+        count: criticalIncidents.length,
+      }),
+      href: `/incidents/${encodeURIComponent(firstCriticalIncident.incidentId)}`,
+      cta: t("dashboard.attention.openIncident", locale),
+    });
+  }
+
+  if (topAlert) {
+    banners.push({
+      key: `alert-${topAlert.key}`,
+      tone: getAlertTone(topAlert.state) as Exclude<CanvasTone, "neutral">,
+      title: t(`dashboard.alert.${topAlert.key}.title`, locale),
+      body: `${getAlertSummary(topAlert.key, observability, locale)} · ${t(
+        "dashboard.operational.thresholds",
+        locale,
+        {
+          warning: formatAlertValue(
+            topAlert.thresholds.warning,
+            topAlert.thresholds.unit,
             locale,
-            {
-              warning: formatAlertValue(
-                topAlert.thresholds.warning,
-                topAlert.thresholds.unit,
-                locale,
-              ),
-              critical: formatAlertValue(
-                topAlert.thresholds.critical,
-                topAlert.thresholds.unit,
-                locale,
-              ),
-            },
-          )}`,
-          actions: [
-            topAlert.key === "adapter_degradation"
-              ? {
-                  descriptor: buildAction("open_forwarded_dispatch", "low"),
-                  label: t("dashboard.platformOps.openDispatch", locale),
-                  href: buildDashboardDispatchHref("forwarded_mirror"),
-                }
-              : {
-                  descriptor: buildAction("open_incidents", "medium"),
-                  label: t("dashboard.quicklink.incidents", locale),
-                  href: "/incidents",
-                },
-          ],
-        }
-      : null,
-    criticalIncidentCount > 0
-      ? {
-          key: "critical-incident",
-          tone: "danger" as const,
-          title:
-            locale === "en"
-              ? `${criticalIncidentCount} critical incident${criticalIncidentCount > 1 ? "s" : ""} need immediate review`
-              : `${criticalIncidentCount} 件重大事故待立即處理`,
-          body:
-            locale === "en"
-              ? "Critical incident banners must interrupt the shift handover. Review incident recovery before touching lower-priority queue work."
-              : "重大事故必須在交接時第一時間被看見。請先處理 incident recovery，再回到較低優先派遣佇列。",
-          actions: [
-            {
-              descriptor: buildAction("open_incidents", "medium"),
-              label: getActionButtonLabel("open_incidents", locale),
-              href: "/incidents",
-            },
-          ],
-        }
-      : null,
-    queueAttentionCount > 0
-      ? {
-          key: "dispatch-queue",
-          tone: queueAttentionCount > dispatch.queueDepth ? "danger" : "warn",
-          title: t("dashboard.dispatchBoards.title", locale),
-          body:
-            locale === "en"
-              ? `${noSupplyCount} no-supply · ${exceptionHoldCount} exception hold · ${overridePendingCount} override pending`
-              : `${noSupplyCount} 筆 no_supply · ${exceptionHoldCount} 筆 exception_hold · ${overridePendingCount} 筆 override_pending`,
-          actions: [
-            {
-              descriptor: buildAction("open_dispatch", "low"),
-              label: t("dashboard.dispatchBoards.openOwned", locale),
-              href:
-                noSupplyCount > 0
-                  ? buildDashboardDispatchHref("no_eligible_supply")
-                  : exceptionHoldCount > 0
-                    ? buildDashboardDispatchHref("exception_hold")
-                    : buildDashboardDispatchHref("governance_blocked"),
-            },
-          ],
-        }
-      : null,
-    adapterAttentionCount > 0
-      ? {
-          key: "platform-ops",
-          tone: "warn" as const,
-          title: t("dashboard.platformOps.metrics.adapters", locale),
-          body: t("dashboard.platformOps.degradedBanner", locale, {
-            count: adapterAttentionCount,
-          }),
-          actions: [
-            {
-              descriptor: buildAction("open_forwarded_dispatch", "low"),
-              label: t("dashboard.dispatchBoards.openForwarded", locale),
-              href: buildDashboardDispatchHref("forwarded_mirror"),
-            },
-            {
-              descriptor: buildAction("inspect_adapter_registry", "low"),
-              label: getActionButtonLabel("inspect_adapter_registry", locale),
-              link: {
-                targetApp: "platform-admin",
-                route: "/adapter-registry",
-                resourceType: "adapter_registry",
-                resourceId: topAdapter?.platformCode ?? "all",
-                openMode: "new_tab",
-                label: "Adapter registry",
-              },
-            },
-          ],
-        }
-      : null,
-  ].filter(Boolean) as AttentionBanner[];
+          ),
+          critical: formatAlertValue(
+            topAlert.thresholds.critical,
+            topAlert.thresholds.unit,
+            locale,
+          ),
+        },
+      )}`,
+      href:
+        topAlert.key === "adapter_degradation"
+          ? "/dispatch?board=forwarded"
+          : "/incidents",
+      cta:
+        topAlert.key === "adapter_degradation"
+          ? t("dashboard.dispatchBoards.openForwarded", locale)
+          : t("dashboard.quicklink.incidents", locale),
+    });
+  }
 
+  if (slaBreachComplaints.length > 0) {
+    const firstBreach = slaBreachComplaints[0];
+    banners.push({
+      key: "complaint-sla",
+      tone: "warn",
+      title: t("dashboard.alert.recording_backlog.title", locale),
+      body: t("dashboard.kpi.openComplaintsDelta", locale, {
+        count: slaBreachComplaints.length,
+      }),
+      href: firstBreach
+        ? `/complaints/${encodeURIComponent(firstBreach.caseNo)}`
+        : "/complaints",
+      cta: t("nav.complaints", locale),
+    });
+  }
+
+  if (queueAttentionCount > 0) {
+    banners.push({
+      key: "dispatch-queue",
+      tone: queueAttentionCount > dispatch.queueDepth ? "danger" : "warn",
+      title: t("dashboard.dispatchBoards.title", locale),
+      body: t("dashboard.dispatchBoards.ownedSummary", locale, {
+        redispatch: dispatch.redispatchOrders,
+        exceptions: dispatch.exceptionOrders,
+      }),
+      href: "/dispatch?board=exception_hold",
+      cta: t("dashboard.dispatchBoards.openOwned", locale),
+    });
+  }
+
+  if (adapterAttentionCount > 0) {
+    banners.push({
+      key: "adapter-degradation",
+      tone: "warn",
+      title: t("dashboard.platformOps.metrics.adapters", locale),
+      body: t("dashboard.platformOps.degradedBanner", locale, {
+        count: adapterAttentionCount,
+      }),
+      href: "/dispatch?board=forwarded",
+      cta: t("dashboard.dispatchBoards.openForwarded", locale),
+    });
+  }
+
+  // Health signals (right side of split). Always lists API + queue depth +
+  // dispatch lag, then up to 2 adapter rows, then a cross-app jump-out.
   const healthSignals: Array<{
     label: string;
     value: string;
@@ -1442,6 +1580,26 @@ export default async function DashboardPage() {
       value: health.status,
       tone: getHealthTone(health.status),
     },
+    {
+      label: t("dashboard.queueDepth", locale),
+      value: formatCompactNumber(dispatch.queueDepth),
+      tone: dispatch.queueDepth > 0 ? "info" : "success",
+    },
+    {
+      label: t("dashboard.alert.dispatch_lag.title", locale),
+      value: formatCompactNumber(observability.dispatch.laggedOrders),
+      tone:
+        observability.dispatch.laggedOrders > 0
+          ? "warn"
+          : ("success" as CanvasTone),
+    },
+    ...observability.adapterDetails
+      .slice(0, 2)
+      .map((adapter: OperationalAdapterDetailRecord) => ({
+        label: formatOpsCodeLabel(locale, adapter.platformCode),
+        value: adapter.status,
+        tone: getHealthTone(adapter.status),
+      })),
   ];
 
   const jobByOrderId = new Map<string, DispatchJobRecord>(
@@ -1590,227 +1748,113 @@ export default async function DashboardPage() {
           messageCode: "dashboard.attention.no_data",
         };
 
+  // EmptyReason resolution for queue table.
+  const queueEmptyReason: EmptyReason | null =
+    queueRows.length > 0
+      ? null
+      : !ordersResult.ok || !dispatchJobsResult.ok
+        ? "fetch_failed"
+        : "no_data";
+
+  const adapterRegistryLink = buildAdapterRegistryLink(locale);
+  const showHealthBanner =
+    healthEnvelope.status !== "healthy" ||
+    healthEnvelope.degradedServices.length > 0;
+
   return (
     <>
       <PageHeader
         theme={theme}
         title={t("dashboard.title", locale)}
-        subtitle={headerSubtitle}
+        subtitle={
+          <>
+            <span>{headerSubtitle}</span>
+            {identityChips.length > 0 ? (
+              <span style={identityChipRowStyle}>
+                {identityChips.map((chip) => (
+                  <Pill
+                    key={`${chip.label}-${chip.value}`}
+                    theme={theme}
+                    tone={chip.tone}
+                  >
+                    {chip.label}: {chip.value}
+                  </Pill>
+                ))}
+              </span>
+            ) : null}
+          </>
+        }
         actions={
           <>
-            <ActionLinkButton action={handbookAction} locale={locale} />
-            <ActionLinkButton
-              action={callSessionAction}
-              locale={locale}
-              variant="primary"
+            <RefreshControl
+              tierLabel={t("dashboard.refreshTier.medium", locale)}
+              refreshLabel={t("dashboard.refresh", locale)}
+              generatedAt={observability.generatedAt}
+              freshnessLabel={t(`dashboard.refresh.${freshness}`, locale)}
+              freshnessTone={resolveFreshnessTone(freshness)}
+              staleAtTemplate={t("dashboard.refresh.staleAt", locale)}
             />
+            <Btn theme={theme} icon="ext">
+              {t("dashboard.dutyHandbook", locale)}
+            </Btn>
+            <Link href="/callcenter" style={{ textDecoration: "none" }}>
+              <Btn theme={theme} variant="primary" icon="phone">
+                {t("dashboard.openCallSession", locale)}
+              </Btn>
+            </Link>
           </>
         }
       />
 
       <div style={pageBodyStyle}>
-        {healthEnvelope.status !== "healthy" ? (
+        {showHealthBanner ? (
           <Banner
             theme={theme}
             tone={healthEnvelope.status === "down" ? "danger" : "warn"}
             icon={<CanvasIcon name="warn" size={16} />}
             title={
-              locale === "en"
-                ? "Critical dependency degraded"
-                : "關鍵依賴已降級"
+              healthEnvelope.status === "down"
+                ? t("dashboard.healthBanner.title.down", locale)
+                : t("dashboard.healthBanner.title.degraded", locale)
             }
             body={
-              healthEnvelope.degradedServices
-                .map(
-                  (service: UiHealthEnvelope["degradedServices"][number]) =>
-                    `${service.service} · ${service.impact}`,
-                )
-                .join(" · ") ||
-              (locale === "en"
-                ? "Dashboard data may be stale."
-                : "儀表板資料可能已過舊。")
-            }
-            actions={
-              <ActionLinkButton action={refreshAction} locale={locale} />
+              <>
+                <div>
+                  {healthEnvelope.status === "down"
+                    ? t("dashboard.healthBanner.body.down", locale, {
+                        status: health.status,
+                      })
+                    : t("dashboard.healthBanner.body.degraded", locale, {
+                        count: healthEnvelope.degradedServices.length,
+                      })}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 11.5 }}>
+                  {t("dashboard.healthBanner.lastChecked", locale, {
+                    value: formatTimestamp(
+                      healthEnvelope.lastCheckedAt,
+                      locale,
+                    ),
+                  })}
+                </div>
+              </>
             }
           />
         ) : null}
 
-        <div style={refreshCardStyle}>
-          <Card
-            theme={theme}
-            title={locale === "en" ? "Shift readiness" : "班次就緒狀態"}
-            subtitle={
-              locale === "en"
-                ? "Identity, refresh tier, and stale-data affordance for the T3 dashboard."
-                : "T3 dashboard 的身份摘要、refresh tier 與 stale-data 提示。"
-            }
-            actions={
-              <ActionLinkButton action={refreshAction} locale={locale} />
-            }
-          >
-            <div style={metaStackStyle}>
-              <div style={metaRowStyle}>
-                <Pill
-                  theme={theme}
-                  tone={getFreshnessTone(refreshMetadata.dataFreshness)}
-                  dot
-                >
-                  {getFreshnessLabel(refreshMetadata.dataFreshness, locale)}
-                </Pill>
-                <Pill theme={theme} tone="info" dot>
-                  {getRefreshTierLabel(DASHBOARD_REFRESH_TIER, locale)}
-                </Pill>
-                <Pill theme={theme} tone="neutral">
-                  {identity?.realm ?? "ops"} /{" "}
-                  {identity?.actorType ?? "ops_user"}
-                </Pill>
-              </div>
-              <div style={summaryGridStyle}>
-                <div style={summaryBoxStyle}>
-                  <span style={metaLabelStyle}>
-                    {locale === "en" ? "Generated" : "產生時間"}
-                  </span>
-                  <span style={summaryValueStyle}>
-                    {formatTimestamp(refreshMetadata.generatedAt, locale)}
-                  </span>
-                  <span style={summaryCaptionStyle}>
-                    {locale === "en" ? "Source" : "來源"}:{" "}
-                    {formatOpsCodeLabel(locale, refreshMetadata.source)}
-                  </span>
-                </div>
-                <div style={summaryBoxStyle}>
-                  <span style={metaLabelStyle}>
-                    {locale === "en" ? "Health checked" : "健康檢查"}
-                  </span>
-                  <span style={summaryValueStyle}>
-                    {formatTimestamp(healthEnvelope.lastCheckedAt, locale)}
-                  </span>
-                  <span style={summaryCaptionStyle}>
-                    {locale === "en" ? "Service state" : "服務狀態"}:{" "}
-                    {formatOpsCodeLabel(locale, healthEnvelope.status)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          <Card
-            theme={theme}
-            title={locale === "en" ? "Adapter summary" : "Adapter 摘要"}
-            subtitle={
-              locale === "en"
-                ? "Dashboard-level visibility into forwarded dependency health."
-                : "在 Dashboard 即可看到 forwarded 依賴健康狀態。"
-            }
-            actions={
-              topAdapter ? (
-                <ActionLinkButton
-                  action={{
-                    descriptor: buildAction("inspect_adapter_registry", "low"),
-                    label: getActionButtonLabel(
-                      "inspect_adapter_registry",
-                      locale,
-                    ),
-                    link: {
-                      targetApp: "platform-admin",
-                      route: "/adapter-registry",
-                      resourceType: "adapter_registry",
-                      resourceId: topAdapter.platformCode,
-                      openMode: "new_tab",
-                      label: "Adapter registry",
-                    },
-                  }}
-                  locale={locale}
-                />
-              ) : null
-            }
-          >
-            {topAdapter ? (
-              <div style={signalListStyle}>
-                <div style={signalRowStyle}>
-                  <Pill
-                    theme={theme}
-                    tone={getHealthTone(topAdapter.status)}
-                    dot
-                  >
-                    {formatOpsCodeLabel(locale, topAdapter.status)}
-                  </Pill>
-                  <span style={signalLabelStyle}>
-                    {formatOpsCodeLabel(locale, topAdapter.platformCode)} ·{" "}
-                    {formatOpsCodeLabel(locale, topAdapter.reason)}
-                  </span>
-                </div>
-                <div style={signalRowStyle}>
-                  <Pill theme={theme} tone="neutral">
-                    {formatOpsCodeLabel(locale, topAdapter.credentialStatus)}
-                  </Pill>
-                  <span style={signalLabelStyle}>
-                    {locale === "en"
-                      ? "Credential / auth"
-                      : "Credential / auth"}
-                  </span>
-                </div>
-                <div style={signalRowStyle}>
-                  <Pill theme={theme} tone="neutral">
-                    {formatOpsCodeLabel(locale, topAdapter.webhookStatus)}
-                  </Pill>
-                  <span style={signalLabelStyle}>
-                    {locale === "en"
-                      ? "Webhook / rate limit"
-                      : "Webhook / rate limit"}
-                  </span>
-                </div>
-                <div style={signalRowStyle}>
-                  <Pill
-                    theme={theme}
-                    tone={getHealthTone(topAdapter.rateLimitStatus)}
-                  >
-                    {formatOpsCodeLabel(locale, topAdapter.rateLimitStatus)}
-                  </Pill>
-                  <span style={signalLabelStyle}>
-                    {locale === "en"
-                      ? `Last checked ${formatTimestamp(topAdapter.lastCheckedAt, locale)}`
-                      : `最後檢查 ${formatTimestamp(topAdapter.lastCheckedAt, locale)}`}
-                  </span>
-                </div>
-                <div style={signalRowStyle}>
-                  <Pill theme={theme} tone="info">
-                    {locale === "en" ? "error" : "錯誤"}
-                  </Pill>
-                  <span style={signalLabelStyle}>
-                    {topAdapter.lastError ??
-                      (locale === "en"
-                        ? "No current adapter error."
-                        : "目前沒有 adapter 錯誤。")}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <EmptyStateCard
-                locale={locale}
-                emptyState={{
-                  reason: "not_provisioned",
-                  messageCode: "dashboard.adapters.not_provisioned",
-                }}
-              />
-            )}
-          </Card>
-        </div>
-
+        {/* Primary KPI strip — canvas-aligned 6 tiles */}
         <div style={kpiGridStyle}>
           <KPI
             theme={theme}
             label={t("dashboard.activeOrders", locale)}
             value={formatCompactNumber(dispatch.activeOrders)}
             delta={
-              dispatch.queueDepth > 0
-                ? locale === "en"
-                  ? `${formatCompactNumber(dispatch.queueDepth)} in queue`
-                  : `${formatCompactNumber(dispatch.queueDepth)} 筆在隊列`
+              dispatch.redispatchOrders > 0
+                ? t("dashboard.kpi.redispatchDelta", locale, {
+                    count: formatCompactNumber(dispatch.redispatchOrders),
+                  })
                 : undefined
             }
-            deltaTone={dispatch.queueDepth > 0 ? "down" : "neutral"}
+            deltaTone={dispatch.redispatchOrders > 0 ? "down" : "neutral"}
             sub={t("dashboard.activeOrdersSub", locale)}
           />
           <KPI
@@ -1819,7 +1863,9 @@ export default async function DashboardPage() {
             value={formatCompactNumber(dispatch.queueDepth)}
             delta={
               broadcastingCount > 0
-                ? `${formatCompactNumber(broadcastingCount)} broadcasting`
+                ? t("dashboard.kpi.broadcastingDelta", locale, {
+                    count: formatCompactNumber(broadcastingCount),
+                  })
                 : undefined
             }
             sub={
@@ -1832,83 +1878,101 @@ export default async function DashboardPage() {
           />
           <KPI
             theme={theme}
-            label={locale === "en" ? "Dispatch-Eligible Drivers" : "可派司機"}
+            label={t("dashboard.onlineDrivers", locale)}
             value={formatCompactNumber(dispatchEligibleDrivers)}
             sub={t("dashboard.onlineDriversSub", locale)}
-            hint={
-              locale === "en"
-                ? `${formatCompactNumber(onlineDrivers)} online`
-                : `${formatCompactNumber(onlineDrivers)} 在線`
-            }
+            hint={t("dashboard.kpi.onShiftHint", locale, {
+              count: formatCompactNumber(operations.onlineDrivers),
+            })}
           />
           <KPI
             theme={theme}
-            label={locale === "en" ? "Stale Location" : "位置失聯"}
+            label={t("dashboard.kpi.staleLocation", locale)}
             value={formatCompactNumber(staleLocationDrivers)}
             delta={
-              staleLocationDrivers > 0
-                ? locale === "en"
-                  ? `${formatCompactNumber(staleLocationDrivers)} stale`
-                  : `${formatCompactNumber(staleLocationDrivers)} 筆 stale`
+              staleLocationDelta
+                ? t("dashboard.kpi.staleLocationDelta", locale, {
+                    value: staleLocationDelta,
+                  })
                 : undefined
             }
-            deltaTone={
-              staleLocationDrivers > 0 || operations.offlineVehicles > 0
-                ? "down"
-                : "neutral"
-            }
-            sub={t("dashboard.dispatchableVehiclesSub", locale, {
-              count: operations.offlineVehicles,
-            })}
-            hint={staleLocationDelta}
+            deltaTone={staleLocationDrivers > 0 ? "down" : "neutral"}
+            sub={t("dashboard.kpi.staleLocationSub", locale)}
           />
           <KPI
             theme={theme}
-            label={t("dashboard.openIncidents", locale)}
-            value={formatCompactNumber(operations.openIncidents)}
+            label={t("dashboard.kpi.openComplaints", locale)}
+            value={formatCompactNumber(openComplaints.length)}
             delta={
-              criticalIncidentCount > 0
-                ? locale === "en"
-                  ? `${formatCompactNumber(criticalIncidentCount)} critical`
-                  : `${formatCompactNumber(criticalIncidentCount)} 重大`
+              slaBreachComplaints.length > 0
+                ? t("dashboard.kpi.openComplaintsDelta", locale, {
+                    count: formatCompactNumber(slaBreachComplaints.length),
+                  })
                 : undefined
             }
-            deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
-            sub={t("dashboard.openIncidentsSub", locale, {
-              count: operations.overdueMaintenance,
+            deltaTone={slaBreachComplaints.length > 0 ? "down" : "neutral"}
+            sub={t("dashboard.kpi.openComplaintsSub", locale)}
+          />
+          <KPI
+            theme={theme}
+            label={t("dashboard.kpi.activeIncidents", locale)}
+            value={formatCompactNumber(activeIncidents.length)}
+            delta={
+              criticalIncidents.length > 0
+                ? t("dashboard.kpi.activeIncidentsDelta", locale, {
+                    count: formatCompactNumber(criticalIncidents.length),
+                  })
+                : undefined
+            }
+            deltaTone={criticalIncidents.length > 0 ? "down" : "neutral"}
+            sub={t("dashboard.kpi.activeIncidentsSub", locale)}
+          />
+        </div>
+
+        {/* Secondary KPI strip — covers remaining packet §5.1 must-show data */}
+        <div style={secondaryKpiGridStyle}>
+          <KPI
+            theme={theme}
+            label={t("dashboard.secondaryKpi.dispatchableVehicles", locale)}
+            value={formatCompactNumber(operations.dispatchableVehicles)}
+            sub={t("dashboard.secondaryKpi.dispatchableVehiclesSub", locale, {
+              count: formatCompactNumber(operations.offlineVehicles),
             })}
           />
           <KPI
             theme={theme}
-            label={t("dashboard.todayRevenue", locale)}
+            label={t("dashboard.secondaryKpi.overdueMaintenance", locale)}
+            value={formatCompactNumber(operations.overdueMaintenance)}
+            deltaTone={operations.overdueMaintenance > 0 ? "down" : "neutral"}
+            sub={t("dashboard.secondaryKpi.overdueMaintenanceSub", locale)}
+          />
+          <KPI
+            theme={theme}
+            label={t("dashboard.secondaryKpi.todayRevenue", locale)}
             value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
-            delta={
-              criticalIncidentCount > 0
-                ? locale === "en"
-                  ? `${formatCompactNumber(criticalIncidentCount)} critical`
-                  : `${formatCompactNumber(criticalIncidentCount)} 重大`
-                : undefined
-            }
-            deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
-            sub={t("dashboard.todayRevenueSub", locale, {
+            sub={t("dashboard.secondaryKpi.todayRevenueSub", locale, {
               trips: formatCompactNumber(todayRevenue.completedTrips),
             })}
+          />
+          <KPI
+            theme={theme}
+            label={t("dashboard.secondaryKpi.completedTrips", locale)}
+            value={formatCompactNumber(todayRevenue.completedTrips)}
+            sub={t("dashboard.secondaryKpi.completedTripsSub", locale)}
           />
         </div>
 
         <div style={splitGridStyle}>
           <Card
             theme={theme}
-            title={locale === "en" ? "Today's Attention" : "今日待處理"}
-            subtitle={
-              locale === "en"
-                ? "Critical first, then SLA breach, then blocking queue"
-                : "排序：critical → SLA breach → blocking"
-            }
+            title={t("dashboard.attention.title", locale)}
+            subtitle={t("dashboard.attention.subtitle", locale)}
             actions={
-              <Btn theme={theme} variant="ghost">
-                {locale === "en" ? "Open all" : "展開所有"}
-              </Btn>
+              <Link href="/incidents" style={{ textDecoration: "none" }}>
+                <Btn theme={theme} variant="ghost">
+                  {t("dashboard.attention.expandAll", locale)}
+                </Btn>
+              </Link>
             }
           >
             <div style={bannerStackStyle}>
@@ -1922,43 +1986,77 @@ export default async function DashboardPage() {
                       title={banner.title}
                       body={banner.body}
                       actions={
-                        <div style={metaRowStyle}>
-                          {banner.actions.map((action, index) => (
-                            <ActionLinkButton
-                              key={`${banner.key}-${index}`}
-                              action={action}
-                              locale={locale}
-                              variant={
-                                index === 0 && banner.tone === "danger"
-                                  ? "primary"
-                                  : "secondary"
-                              }
-                            />
-                          ))}
-                        </div>
+                        <Link
+                          href={banner.href}
+                          {...(banner.newTab
+                            ? { target: "_blank", rel: "noreferrer" }
+                            : {})}
+                          style={{ textDecoration: "none" }}
+                        >
+                          <Btn
+                            theme={theme}
+                            variant={
+                              banner.tone === "danger" ? "primary" : "secondary"
+                            }
+                          >
+                            {banner.cta}
+                          </Btn>
+                        </Link>
                       }
                     />
                   ))
-                : bannerEmptyState && (
-                    <EmptyStateCard
-                      emptyState={bannerEmptyState}
-                      locale={locale}
-                    />
-                  )}
+                : !incidentsResult.ok ||
+                    !complaintsResult.ok ||
+                    !observabilityResult.ok
+                  ? renderEmptyState(locale, "fetch_failed", {
+                      label: t("dashboard.empty.action.retry", locale),
+                      href: "/dashboard",
+                    })
+                  : renderEmptyState(locale, "no_data")}
             </div>
           </Card>
 
           <Card
             theme={theme}
-            title={locale === "en" ? "Health Signals" : "健康訊號"}
-            subtitle={
-              locale === "en"
-                ? "Supply vs demand, fleet readiness, and runtime context."
-                : "供需、車隊就緒度與執行情境。"
+            title={t("dashboard.healthSignals.title", locale)}
+            subtitle={t("dashboard.healthSignals.subtitle", locale)}
+            actions={
+              <Link
+                href={resolveCrossAppHref(adapterRegistryLink)}
+                target="_blank"
+                rel="noreferrer"
+                style={{ textDecoration: "none" }}
+                title={t("dashboard.crossApp.newTab", locale)}
+              >
+                <Btn theme={theme} variant="ghost" icon="ext">
+                  {adapterRegistryLink.label}
+                </Btn>
+              </Link>
             }
           >
-            {signalEmptyState ? (
-              <EmptyStateCard emptyState={signalEmptyState} locale={locale} />
+            {!observabilityResult.ok ? (
+              renderEmptyState(locale, "fetch_failed", {
+                label: t("dashboard.empty.action.reviewAdapters", locale),
+                href: resolveCrossAppHref(adapterRegistryLink),
+                newTab: true,
+              })
+            ) : observability.adapterDetails.length === 0 &&
+              healthEnvelope.status === "healthy" ? (
+              <div style={signalListStyle}>
+                {healthSignals.map((signal, index) => (
+                  <div key={`${signal.label}-${index}`} style={signalRowStyle}>
+                    <Pill theme={theme} tone={signal.tone} dot>
+                      {signal.value}
+                    </Pill>
+                    <span style={signalLabelStyle}>{signal.label}</span>
+                  </div>
+                ))}
+                <div style={{ ...signalRowStyle, background: "transparent" }}>
+                  <span style={signalLabelStyle}>
+                    {t("dashboard.healthSignals.allHealthy", locale)}
+                  </span>
+                </div>
+              </div>
             ) : (
               <div style={signalListStyle}>
                 {healthSignals.map((signal, index) => (
@@ -1969,6 +2067,21 @@ export default async function DashboardPage() {
                     <span style={signalLabelStyle}>{signal.label}</span>
                   </div>
                 ))}
+                {healthEnvelope.degradedServices.length > 0 ? (
+                  <div style={{ ...signalRowStyle, background: theme.warnBg }}>
+                    <Pill theme={theme} tone="warn" dot>
+                      {formatCompactNumber(
+                        healthEnvelope.degradedServices.length,
+                      )}
+                    </Pill>
+                    <span style={signalLabelStyle}>
+                      {healthEnvelope.degradedServices
+                        .slice(0, 3)
+                        .map((s) => s.service)
+                        .join(" · ")}
+                    </span>
+                  </div>
+                ) : null}
               </div>
             )}
           </Card>
@@ -1976,25 +2089,28 @@ export default async function DashboardPage() {
 
         <Card
           theme={theme}
-          title={
-            locale === "en" ? "Current Dispatch Queue" : "當前 dispatch 隊列"
-          }
+          title={t("dashboard.queueCard.title", locale)}
           padding={0}
           actions={
-            <ActionLinkButton
-              action={{
-                descriptor: buildAction("open_dispatch", "low"),
-                label: getActionButtonLabel("open_dispatch", locale),
-                href: buildDashboardDispatchHref("ready_queue"),
-              }}
-              locale={locale}
-              variant="ghost"
-            />
+            <Link href="/dispatch" style={{ textDecoration: "none" }}>
+              <Btn theme={theme} variant="ghost">
+                {t("dashboard.queueCard.openDispatch", locale)}
+              </Btn>
+            </Link>
           }
         >
-          {queueEmptyState ? (
+          {queueEmptyReason ? (
             <div style={{ padding: 16 }}>
-              <EmptyStateCard emptyState={queueEmptyState} locale={locale} />
+              {renderEmptyState(
+                locale,
+                queueEmptyReason,
+                queueEmptyReason === "fetch_failed"
+                  ? {
+                      label: t("dashboard.empty.action.retry", locale),
+                      href: "/dashboard",
+                    }
+                  : undefined,
+              )}
             </div>
           ) : (
             <Table theme={theme} columns={queueColumns} rows={queueRows} />
