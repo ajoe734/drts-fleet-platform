@@ -25,12 +25,7 @@ import {
   type CanvasTone,
   type TimelineItem,
 } from "@drts/ui-web";
-import {
-  ContractActionBar,
-  ContractRefreshIndicator,
-  type ContractActionLinkTarget,
-  type ContractPrimaryLinkTarget,
-} from "./contract-detail-controls";
+import { ContractRefreshIndicator } from "./contract-detail-controls";
 
 type ContractDetailPageProps = {
   params: Promise<{ contractId: string }>;
@@ -71,9 +66,11 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
   return `${resolveAppBaseUrl(link.targetApp)}${link.route}`;
 }
 
-function toLinkTarget(
-  link: CrossAppResourceLink,
-): ContractPrimaryLinkTarget & { label: string } {
+function toLinkTarget(link: CrossAppResourceLink): {
+  href: string;
+  openMode: CrossAppResourceLink["openMode"];
+  label: string;
+} {
   return {
     href: resolveCrossAppHref(link),
     openMode: link.openMode,
@@ -339,8 +336,6 @@ function EmptyStatePanel({
       data-empty-reason={reason}
       style={{
         padding: 24,
-        display: "grid",
-        gap: 12,
       }}
     >
       <Banner
@@ -351,15 +346,6 @@ function EmptyStatePanel({
         body={content.body}
         actions={cta}
       />
-      <div
-        style={{
-          color: theme.textMuted,
-          fontSize: 11.5,
-          fontFamily: theme.monoFamily,
-        }}
-      >
-        empty_reason · {reason}
-      </div>
     </div>
   );
 }
@@ -510,19 +496,41 @@ function getOwnerAppLabel(
 
 function renderReferenceLink(
   locale: Locale,
-  label: string,
+  descriptor: OpsContractDetailRecord["availableActions"][number],
   link: CrossAppResourceLink | null,
 ) {
-  if (!link) {
+  const label = t(
+    `contractDetail.actions.action.${descriptor.action}` as never,
+    locale,
+  );
+  const disabledReason =
+    !descriptor.enabled && descriptor.disabledReasonCode
+      ? t("contractDetail.actions.disabledTooltip", locale, {
+          code: descriptor.disabledReasonCode,
+        })
+      : undefined;
+
+  if (!descriptor.enabled || !link) {
     return (
       <span
+        title={disabledReason}
         style={{
           color: theme.textMuted,
+          background: theme.surfaceLo,
+          border: `1px solid ${theme.border}`,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "6px",
+          height: "28px",
+          padding: "5px 10px",
+          borderRadius: "7px",
           fontSize: 11.5,
-          fontFamily: theme.monoFamily,
+          lineHeight: 1,
         }}
       >
-        {t("common.dash", locale)}
+        <CanvasIcon name="warn" size={12} />
+        <span>{label}</span>
       </span>
     );
   }
@@ -584,14 +592,17 @@ export default async function ContractDetailPage({
   const tierLabel = refreshTierLabel(locale, detail.refreshTier);
   const cadenceLabel = refreshTierCadenceLabel(detail.refreshTier);
   const ownerAppLabel = getOwnerAppLabel(locale, detail.mutationLink.targetApp);
-  const actionLinks: ContractActionLinkTarget[] = detail.actionLinks.map(
-    ({ action, link }) => ({
-      action,
-      href: resolveCrossAppHref(link),
-      openMode: link.openMode,
-    }),
-  );
   const mutationLinkTarget = toLinkTarget(detail.mutationLink);
+  const actionLinkByAction = new Map(
+    detail.actionLinks.map(({ action, link }) => [action, link]),
+  );
+  const referenceActions = detail.availableActions.filter((descriptor) => {
+    const link = actionLinkByAction.get(descriptor.action);
+    if (!descriptor.enabled || !link) {
+      return true;
+    }
+    return resolveCrossAppHref(link) !== mutationLinkTarget.href;
+  });
 
   const operationalTermItems: CanvasDLItem[] = [
     {
@@ -659,45 +670,6 @@ export default async function ContractDetailPage({
     },
   ];
 
-  const metaItems: CanvasDLItem[] = [
-    {
-      k: t("contractDetail.meta.contractType", locale),
-      v: formatOpsCodeLabel(locale, detail.contractType),
-    },
-    {
-      k: t("contractDetail.meta.partnerType", locale),
-      v: formatOpsCodeLabel(locale, detail.partnerType),
-    },
-    {
-      k: t("contractDetail.meta.vehicleId", locale),
-      v: detail.vehicleId,
-      mono: true,
-    },
-    {
-      k: t("contractDetail.meta.operatingArea", locale),
-      v: detail.operatingAreaId ?? t("common.dash", locale),
-      mono: Boolean(detail.operatingAreaId),
-    },
-    {
-      k: t("contractDetail.meta.serviceScope", locale),
-      v: detail.serviceScope,
-    },
-    {
-      k: t("contractDetail.meta.term", locale),
-      v: formatDateRange(locale, detail.startAt, detail.endAt),
-      mono: true,
-    },
-    {
-      k: t("contractDetail.meta.approvedBy", locale),
-      v: detail.approvedBy ?? t("common.dash", locale),
-    },
-    {
-      k: t("contractDetail.meta.approvedAt", locale),
-      v: formatDateTime(locale, detail.approvedAt),
-      mono: Boolean(detail.approvedAt),
-    },
-  ];
-
   const headerSubtitle = [
     detail.counterpartyDisplayName ?? detail.partnerId ?? "—",
     formatOpsCodeLabel(locale, detail.contractType),
@@ -747,19 +719,6 @@ export default async function ContractDetailPage({
               theme={theme}
             />
           </span>
-        }
-        actions={
-          <ContractActionBar
-            locale={locale}
-            availableActions={detail.availableActions}
-            actionLinks={actionLinks}
-            primaryLink={{
-              href: mutationLinkTarget.href,
-              openMode: mutationLinkTarget.openMode,
-            }}
-            primaryLinkLabel={ownerAppLabel}
-            theme={theme}
-          />
         }
       />
 
@@ -817,20 +776,13 @@ export default async function ContractDetailPage({
           gap: 16,
         }}
       >
-        <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+        <div style={{ alignContent: "start" }}>
           <Card
             theme={theme}
             title={t("contractDetail.operationalTermsTitle", locale)}
             subtitle={t("contractDetail.operationalTermsSubtitle", locale)}
           >
             <DL theme={theme} cols={2} items={operationalTermItems} />
-          </Card>
-          <Card
-            theme={theme}
-            title={t("contractDetail.metaTitle", locale)}
-            subtitle={t("contractDetail.metaSubtitle", locale)}
-          >
-            <DL theme={theme} cols={2} items={metaItems} />
           </Card>
         </div>
 
@@ -881,15 +833,26 @@ export default async function ContractDetailPage({
                 marginTop: 12,
               }}
             >
-              {renderReferenceLink(
-                locale,
-                t("contractDetail.links.openTenant", locale),
-                detail.tenantLinkage.tenantLink,
-              )}
-              {renderReferenceLink(
-                locale,
-                t("contractDetail.links.openPartner", locale),
-                detail.tenantLinkage.partnerLink,
+              {referenceActions.length === 0 ? (
+                <span
+                  style={{
+                    color: theme.textMuted,
+                    fontSize: 11.5,
+                    fontFamily: theme.monoFamily,
+                  }}
+                >
+                  {t("contractDetail.readOnlyHint", locale)}
+                </span>
+              ) : (
+                referenceActions.map((descriptor) => (
+                  <span key={descriptor.action}>
+                    {renderReferenceLink(
+                      locale,
+                      descriptor,
+                      actionLinkByAction.get(descriptor.action) ?? null,
+                    )}
+                  </span>
+                ))
               )}
             </div>
           </Card>

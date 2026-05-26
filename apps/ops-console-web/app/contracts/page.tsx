@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type {
   PartnerChannelEntryRecord,
   PartnerEligibilityReviewQueueItem,
@@ -79,6 +80,13 @@ function formatDateTime(value: string | null, locale: "en" | "zh") {
     minute: "2-digit",
     timeZone: "UTC",
   });
+}
+
+function contractDetailLinkStyle() {
+  return {
+    color: "inherit",
+    textDecoration: "none",
+  } as const;
 }
 
 export default async function ContractsPage() {
@@ -270,7 +278,14 @@ export default async function ContractsPage() {
               <Tr key={contract.contractId}>
                 <Td density="compact">
                   <DataCellStack
-                    primary={<strong>{contract.contractId}</strong>}
+                    primary={
+                      <Link
+                        href={`/contracts/${encodeURIComponent(contract.contractId)}`}
+                        style={contractDetailLinkStyle()}
+                      >
+                        <strong>{contract.contractId}</strong>
+                      </Link>
+                    }
                     secondary={contract.serviceScope}
                     tertiary={
                       contract.operatingAreaId ?? t("common.dash", locale)
