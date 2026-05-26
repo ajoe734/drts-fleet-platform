@@ -39,7 +39,7 @@ describe("HealthController routing", () => {
         degradedServices: [
           {
             service: "sandbox",
-            impact: "Platform forwarding delayed",
+            impact: "Forwarded webhook delivery",
             severity: "warning",
           },
         ],
@@ -50,7 +50,7 @@ describe("HealthController routing", () => {
         degraded_services: [
           {
             service: "sandbox",
-            impact: "Platform forwarding delayed",
+            impact: "Forwarded webhook delivery",
             severity: "warning",
           },
         ],
@@ -64,7 +64,7 @@ describe("HealthController routing", () => {
         degradedServices: [
           {
             service: "sandbox",
-            impact: "Platform forwarding unavailable",
+            impact: "Forwarder credentials",
             severity: "critical",
           },
         ],
@@ -75,7 +75,7 @@ describe("HealthController routing", () => {
         degraded_services: [
           {
             service: "sandbox",
-            impact: "Platform forwarding unavailable",
+            impact: "Forwarder credentials",
             severity: "critical",
           },
         ],
