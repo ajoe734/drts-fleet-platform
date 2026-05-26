@@ -397,6 +397,34 @@ const en = {
   "contractDetail.empty.filtered_empty.title": "Filters too narrow",
   "contractDetail.empty.filtered_empty.body":
     "No history rows match the current filters. Widen the filter or clear it to see all versions.",
+  "contractDetail.actions.confirmTitle": "Confirm {action}",
+  "contractDetail.actions.confirmBodyLow":
+    "This action is read-only at ops and will open Platform Admin in a new tab.",
+  "contractDetail.actions.confirmBodyMedium":
+    "Mutation runs in Platform Admin. Confirming opens the partner contract page in a new tab so the action can be completed there.",
+  "contractDetail.actions.confirmBodyHigh":
+    "High-risk action. Provide a written reason; the reason is forwarded with the deep link so Platform Admin can record it on the audit trail.",
+  "contractDetail.actions.reasonLabel": "Reason (required)",
+  "contractDetail.actions.reasonPlaceholder":
+    "Why is this action needed? Will be recorded on the audit log.",
+  "contractDetail.actions.reasonRequired":
+    "Reason is required for high-risk actions.",
+  "contractDetail.actions.confirm": "Confirm & open",
+  "contractDetail.actions.cancel": "Cancel",
+  "contractDetail.actions.disabledTooltip": "Disabled · {code}",
+  "contractDetail.actions.toastTitle": "{action} forwarded to Platform Admin",
+  "contractDetail.actions.toastBody":
+    "Opened a new tab to complete the mutation. The audit record is created when you confirm there.",
+  "contractDetail.actions.toastDismiss": "Dismiss",
+  "contractDetail.refresh.manualLabel": "Refresh now",
+  "contractDetail.refresh.refreshingLabel": "Refreshing…",
+  "contractDetail.refresh.autoCadence": "auto · every {cadence}",
+  "contractDetail.refresh.manualOnly": "manual only",
+  "contractDetail.refresh.lastRefreshed": "last refreshed {time}",
+  "contractDetail.refresh.never": "never",
+  "contractDetail.refresh.justNow": "just now",
+  "contractDetail.refresh.secondsAgo": "{seconds}s ago",
+  "contractDetail.refresh.minutesAgo": "{minutes}m ago",
 
   // ── Feature Flags ──
   "flags.title": "Feature Flags",
@@ -1929,6 +1957,33 @@ const zh: Record<keyof typeof en, string> = {
   "contractDetail.empty.filtered_empty.title": "篩選條件過窄",
   "contractDetail.empty.filtered_empty.body":
     "目前篩選條件無符合的歷程；請放寬或清除篩選以檢視全部版本。",
+  "contractDetail.actions.confirmTitle": "確認執行 {action}",
+  "contractDetail.actions.confirmBodyLow":
+    "ops 端為唯讀；確認後將於新分頁開啟 Platform Admin 完成此動作。",
+  "contractDetail.actions.confirmBodyMedium":
+    "變更於 Platform Admin 執行；確認後於新分頁開啟合約頁面以完成動作。",
+  "contractDetail.actions.confirmBodyHigh":
+    "高風險動作；請輸入文字原因，原因會隨深連結傳遞至 Platform Admin 以寫入稽核紀錄。",
+  "contractDetail.actions.reasonLabel": "原因（必填）",
+  "contractDetail.actions.reasonPlaceholder":
+    "為什麼需要此動作？將寫入稽核紀錄。",
+  "contractDetail.actions.reasonRequired": "高風險動作必須填寫原因。",
+  "contractDetail.actions.confirm": "確認並開啟",
+  "contractDetail.actions.cancel": "取消",
+  "contractDetail.actions.disabledTooltip": "停用 · {code}",
+  "contractDetail.actions.toastTitle": "{action} 已轉至 Platform Admin",
+  "contractDetail.actions.toastBody":
+    "已開啟新分頁以完成變更；於該系統按下確認後將建立稽核紀錄。",
+  "contractDetail.actions.toastDismiss": "關閉",
+  "contractDetail.refresh.manualLabel": "立即重新整理",
+  "contractDetail.refresh.refreshingLabel": "重新整理中…",
+  "contractDetail.refresh.autoCadence": "自動 · 每 {cadence}",
+  "contractDetail.refresh.manualOnly": "僅手動",
+  "contractDetail.refresh.lastRefreshed": "上次更新於 {time}",
+  "contractDetail.refresh.never": "尚未",
+  "contractDetail.refresh.justNow": "剛剛",
+  "contractDetail.refresh.secondsAgo": "{seconds} 秒前",
+  "contractDetail.refresh.minutesAgo": "{minutes} 分前",
 
   // ── Feature Flags ──
   "flags.title": "功能旗標",
