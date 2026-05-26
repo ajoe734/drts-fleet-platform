@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  ArchiveNotificationsCommand,
   AuditLogRecord,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
@@ -13,6 +14,7 @@ import type {
   EvidenceSubjectGovernanceRecord,
   IdentityContext,
   MarkNotificationsReadCommand,
+  NotificationSummary,
   NotificationRecord,
   ReleaseEvidenceLegalHoldCommand,
   ResolveEvidenceDeletionExceptionCommand,
@@ -47,6 +49,18 @@ import {
 } from "./templates/approval-notification.templates";
 
 const MAX_IN_MEMORY_AUDIT_LOGS = 1000;
+
+const DEFAULT_NOTIFICATION_SEVERITY: Record<
+  NotificationRecord["channel"],
+  NotificationRecord["severity"]
+> = {
+  ops_notice: "warning",
+  tenant_sla: "warning",
+  driver_task: "info",
+  tenant_approval: "warning",
+  platform_admin: "critical",
+  partner_booking: "info",
+};
 
 type OperationalIdentity = Pick<
   IdentityContext,
@@ -88,6 +102,7 @@ export class AuditNotificationService implements OnModuleInit {
       tenantId: "tenant-demo-001",
       recipientUserId: null,
       channel: "tenant_sla",
+      severity: "warning",
       title: "Reservation window approaching",
       message: "Enterprise dispatch booking needs pre-assignment review.",
       status: "unread",
@@ -99,6 +114,7 @@ export class AuditNotificationService implements OnModuleInit {
       tenantId: null,
       recipientUserId: null,
       channel: "ops_notice",
+      severity: "warning",
       title: "Foundation bootstrap running",
       message:
         "Wave 1 foundation modules are scaffolded for Phase 1 execution.",
@@ -148,6 +164,33 @@ export class AuditNotificationService implements OnModuleInit {
 
   listNotifications() {
     return this.notifications.map((notification) => ({ ...notification }));
+  }
+
+  getNotificationSummary(): NotificationSummary {
+    const unreadBySeverity: NotificationSummary["unreadBySeverity"] = {
+      info: 0,
+      warning: 0,
+      critical: 0,
+    };
+    const unreadByChannel: NotificationSummary["unreadByChannel"] = {};
+
+    for (const notification of this.notifications) {
+      if (notification.status !== "unread") {
+        continue;
+      }
+      unreadBySeverity[notification.severity] += 1;
+      unreadByChannel[notification.channel] =
+        (unreadByChannel[notification.channel] ?? 0) + 1;
+    }
+
+    return {
+      unreadTotal: Object.values(unreadBySeverity).reduce(
+        (total, count) => total + count,
+        0,
+      ),
+      unreadBySeverity,
+      unreadByChannel,
+    };
   }
 
   listEmailDeliveries() {
@@ -702,14 +745,21 @@ export class AuditNotificationService implements OnModuleInit {
   recordNotification(
     input: Omit<
       NotificationRecord,
-      "notificationId" | "createdAt" | "readAt" | "recipientUserId"
+      | "notificationId"
+      | "createdAt"
+      | "readAt"
+      | "recipientUserId"
+      | "severity"
     > & {
       recipientUserId?: string | null;
+      severity?: NotificationRecord["severity"];
     },
   ) {
     const notification: NotificationRecord = {
       ...input,
       recipientUserId: input.recipientUserId ?? null,
+      severity:
+        input.severity ?? DEFAULT_NOTIFICATION_SEVERITY[input.channel] ?? "info",
       notificationId: `notif-${randomUUID()}`,
       createdAt: new Date().toISOString(),
       readAt: null,
@@ -763,6 +813,59 @@ export class AuditNotificationService implements OnModuleInit {
         tenantId: null,
         moduleName: "audit-notification",
         actionName: "mark_notifications_read",
+        resourceType: "notification_batch",
+        resourceId: null,
+        newValuesSummary: {
+          notificationIds: [...notificationIds],
+          updated,
+        },
+      };
+      if (requestId) {
+        auditLogInput.requestId = requestId;
+      }
+      this.recordAuditLog(auditLogInput);
+    }
+
+    return {
+      updated,
+    };
+  }
+
+  archiveNotifications(
+    command: ArchiveNotificationsCommand,
+    requestId?: string,
+  ) {
+    const notificationIds = new Set(command.ids);
+    const archivedAt = new Date().toISOString();
+    let updated = 0;
+
+    this.notifications = this.notifications.map((notification) => {
+      if (!notificationIds.has(notification.notificationId)) {
+        return notification;
+      }
+      if (notification.status === "archived") {
+        return notification;
+      }
+      updated += 1;
+      return {
+        ...notification,
+        status: "archived",
+        readAt: notification.readAt ?? archivedAt,
+      };
+    });
+
+    if (updated > 0) {
+      const auditLogInput: Omit<
+        AuditLogRecord,
+        "auditId" | "createdAt" | "requestId"
+      > & {
+        requestId?: string;
+      } = {
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "audit-notification",
+        actionName: "archive_notifications",
         resourceType: "notification_batch",
         resourceId: null,
         newValuesSummary: {

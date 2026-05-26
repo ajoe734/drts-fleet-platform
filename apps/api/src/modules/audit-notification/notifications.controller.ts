@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Headers, Post } from "@nestjs/common";
 
-import type { MarkNotificationsReadCommand } from "@drts/contracts";
+import type {
+  ArchiveNotificationsCommand,
+  MarkNotificationsReadCommand,
+} from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { AuditNotificationService } from "./audit-notification.service";
@@ -28,6 +31,25 @@ export class NotificationsController {
   ) {
     return toApiSuccessEnvelope(
       this.auditNotificationService.markNotificationsRead(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("archive")
+  archiveNotifications(
+    @Body() command: ArchiveNotificationsCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.auditNotificationService.archiveNotifications(command, requestId),
+      requestId,
+    );
+  }
+
+  @Get("summary")
+  getNotificationSummary(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      this.auditNotificationService.getNotificationSummary(),
       requestId,
     );
   }

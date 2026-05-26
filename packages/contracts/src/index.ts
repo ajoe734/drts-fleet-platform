@@ -793,16 +793,33 @@ export interface NotificationRecord {
   notificationId: string;
   tenantId: string | null;
   recipientUserId: string | null;
-  channel: "ops_notice" | "tenant_sla" | "driver_task" | "tenant_approval";
+  channel:
+    | "ops_notice"
+    | "tenant_sla"
+    | "driver_task"
+    | "tenant_approval"
+    | "platform_admin"
+    | "partner_booking";
+  severity: "info" | "warning" | "critical";
   title: string;
   message: string;
-  status: "unread" | "read";
+  status: "unread" | "read" | "archived";
   createdAt: string;
   readAt: string | null;
 }
 
 export interface MarkNotificationsReadCommand {
   notificationIds: string[];
+}
+
+export interface ArchiveNotificationsCommand {
+  ids: string[];
+}
+
+export interface NotificationSummary {
+  unreadTotal: number;
+  unreadBySeverity: Record<NotificationRecord["severity"], number>;
+  unreadByChannel: Partial<Record<NotificationRecord["channel"], number>>;
 }
 
 export interface TenantNotificationSubscription {

@@ -20,6 +20,93 @@ const PLATFORM_IDENTITY = {
 };
 
 describe("AuditNotificationService evidence governance workflows", () => {
+  it("archives notifications idempotently and excludes them from unread summary counts", () => {
+    const service = new AuditNotificationService();
+    const archived = service.recordNotification({
+      tenantId: "tenant-demo-001",
+      recipientUserId: "tenant-user-001",
+      channel: "tenant_approval",
+      severity: "critical",
+      title: "Approval escalation",
+      message: "Escalated approval requires review.",
+      status: "unread",
+    });
+
+    const firstPass = service.archiveNotifications(
+      { ids: [archived.notificationId] },
+      "req-archive-001",
+    );
+    const secondPass = service.archiveNotifications(
+      { ids: [archived.notificationId] },
+      "req-archive-002",
+    );
+
+    expect(firstPass).toEqual({ updated: 1 });
+    expect(secondPass).toEqual({ updated: 0 });
+    expect(
+      service
+        .listNotifications()
+        .find(
+          (notification) => notification.notificationId === archived.notificationId,
+        ),
+    ).toMatchObject({
+      notificationId: archived.notificationId,
+      status: "archived",
+      readAt: expect.any(String),
+    });
+    expect(service.getNotificationSummary().unreadBySeverity.critical).toBe(0);
+  });
+
+  it("aggregates unread notifications by severity and channel", () => {
+    const service = new AuditNotificationService();
+    const readNotification = service.recordNotification({
+      tenantId: "tenant-demo-001",
+      recipientUserId: "tenant-user-001",
+      channel: "driver_task",
+      severity: "info",
+      title: "Task opened",
+      message: "A driver task is available.",
+      status: "unread",
+    });
+    service.markNotificationsRead(
+      { notificationIds: [readNotification.notificationId] },
+      "req-read-001",
+    );
+    service.recordNotification({
+      tenantId: "tenant-demo-001",
+      recipientUserId: "tenant-user-001",
+      channel: "platform_admin",
+      severity: "critical",
+      title: "Rollout blocked",
+      message: "A tenant rollout is blocked.",
+      status: "unread",
+    });
+    service.recordNotification({
+      tenantId: "tenant-demo-001",
+      recipientUserId: "tenant-user-001",
+      channel: "partner_booking",
+      severity: "info",
+      title: "Booking updated",
+      message: "A partner booking changed.",
+      status: "unread",
+    });
+
+    expect(service.getNotificationSummary()).toEqual({
+      unreadTotal: 4,
+      unreadBySeverity: {
+        info: 1,
+        warning: 2,
+        critical: 1,
+      },
+      unreadByChannel: {
+        tenant_sla: 1,
+        ops_notice: 1,
+        platform_admin: 1,
+        partner_booking: 1,
+      },
+    });
+  });
+
   it("tracks legal holds and deletion exceptions on the evidence subject view", () => {
     const service = new AuditNotificationService();
 

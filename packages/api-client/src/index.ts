@@ -97,13 +97,16 @@ import type {
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
   ServiceRecoveryActionRecord,
+  ArchiveNotificationsCommand,
   InitiateVehicleOffboardingCommand,
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
   LinkCallOrderCommand,
   MaintenanceRecord,
+  MarkNotificationsReadCommand,
   MarkReimbursementPaidCommand,
   NotificationRecord,
+  NotificationSummary,
   OpenCallSessionCommand,
   OperationalObservabilitySnapshot,
   OwnedOrderRecord,
@@ -1616,6 +1619,22 @@ export class ApiClient {
 
   async listNotifications(): Promise<NotificationRecord[]> {
     return this.getList<NotificationRecord>("/api/notifications");
+  }
+
+  async markNotificationsRead(command: MarkNotificationsReadCommand) {
+    return this.post<{ updated: number }>("/api/notifications/read", {
+      body: command,
+    });
+  }
+
+  async archiveNotifications(command: ArchiveNotificationsCommand) {
+    return this.post<{ updated: number }>("/api/notifications/archive", {
+      body: command,
+    });
+  }
+
+  async getNotificationSummary(): Promise<NotificationSummary> {
+    return this.get<NotificationSummary>("/api/notifications/summary");
   }
 
   async listTenantNotificationFeed(): Promise<NotificationRecord[]> {
