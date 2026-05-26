@@ -16,7 +16,7 @@ type MoneyLike = {
   currency: string;
 } | null;
 
-export type RevenuePeriod = "today" | "7d" | "30d" | "all";
+export type RevenuePeriod = "today" | "yesterday" | "7d" | "30d" | "all";
 
 export type RevenueFilters = {
   period: RevenuePeriod;
@@ -103,9 +103,21 @@ function periodStart(
 ): Date | null {
   if (period === "all") return null;
   const base = startOfToday(reference);
-  const days = period === "today" ? 0 : period === "7d" ? 6 : 29;
+  const days =
+    period === "today"
+      ? 0
+      : period === "yesterday"
+        ? 1
+        : period === "7d"
+          ? 6
+          : 29;
   base.setDate(base.getDate() - days);
   return base;
+}
+
+function periodEnd(period: RevenuePeriod, reference = new Date()): Date | null {
+  if (period !== "yesterday") return null;
+  return startOfToday(reference);
 }
 
 function matchesPeriod(
@@ -115,8 +127,20 @@ function matchesPeriod(
 ): boolean {
   if (!timestamp) return false;
   const start = periodStart(period, reference);
+  const end = periodEnd(period, reference);
+  const value = new Date(timestamp).getTime();
   if (!start) return true;
-  return new Date(timestamp).getTime() >= start.getTime();
+  if (value < start.getTime()) return false;
+  if (end && value >= end.getTime()) return false;
+  return true;
+}
+
+export function matchesRevenuePeriod(
+  timestamp: string | null | undefined,
+  period: RevenuePeriod,
+  reference = new Date(),
+): boolean {
+  return matchesPeriod(timestamp, period, reference);
 }
 
 function normalizeRevenueTask(

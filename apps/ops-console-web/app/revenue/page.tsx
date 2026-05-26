@@ -10,6 +10,7 @@ import type {
   OwnedOrderRecord,
   ReconciliationIssueRecord,
   ResourceActionDescriptor,
+  RefreshTier,
   SettlementMatrixRecord,
   UiHealthEnvelope,
   UiRefreshMetadata,
@@ -36,6 +37,7 @@ import {
   buildRevenueInsights,
   formatCompactNumber,
   formatMinorCurrency,
+  matchesRevenuePeriod,
   type RevenueFilters,
   type RevenuePeriod,
 } from "@/lib/ops-analytics";
@@ -53,8 +55,18 @@ import {
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 
-// Refresh tier T3 per packet §5.11 — RefreshTier "medium" == 15s polling.
-const REVENUE_STALE_AFTER_MS = 15_000;
+const REVENUE_REFRESH_TIER: RefreshTier = "medium";
+const STALE_AFTER_MS_BY_TIER: Record<RefreshTier, number> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 60_000,
+};
+const REVENUE_STALE_AFTER_MS =
+  STALE_AFTER_MS_BY_TIER[REVENUE_REFRESH_TIER] ?? 15_000;
 
 type RevenueTab = "insight" | "channel" | "matrix" | "mismatch";
 const TAB_KEYS: readonly RevenueTab[] = [
@@ -123,6 +135,7 @@ function resolveFilters(
   const rawPeriod = firstParam(searchParams?.period);
   const period: RevenuePeriod =
     rawPeriod === "today" ||
+    rawPeriod === "yesterday" ||
     rawPeriod === "7d" ||
     rawPeriod === "30d" ||
     rawPeriod === "all"
@@ -221,8 +234,8 @@ function buildRefreshMetadata(anyFetchFailed: boolean): UiRefreshMetadata {
   return {
     generatedAt: isoMinusMs(REVENUE_STALE_AFTER_MS / 5),
     staleAfterMs: REVENUE_STALE_AFTER_MS,
-    dataFreshness: anyFetchFailed ? "degraded" : "stale",
-    source: "cache",
+    dataFreshness: anyFetchFailed ? "degraded" : "fresh",
+    source: anyFetchFailed ? "cache" : "live",
   };
 }
 
@@ -245,6 +258,19 @@ function dataFreshnessSummary(metadata: UiRefreshMetadata): {
     secondsUntilNextTick,
     isStale: metadata.dataFreshness !== "fresh",
   };
+}
+
+function relativeAgeLabel(timestamp: string, locale: Locale): string {
+  const deltaMs = Math.max(0, Date.now() - new Date(timestamp).getTime());
+  const days = Math.floor(deltaMs / 86_400_000);
+  if (days >= 1) return t("revenue.mismatch.age.days", locale, { count: days });
+  const hours = Math.floor(deltaMs / 3_600_000);
+  if (hours >= 1) {
+    return t("revenue.mismatch.age.hours", locale, { count: hours });
+  }
+  return t("revenue.mismatch.age.minutes", locale, {
+    count: Math.max(1, Math.floor(deltaMs / 60_000)),
+  });
 }
 
 function buildHealthEnvelope(args: {
@@ -800,31 +826,50 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const settlementMatrix = matrixOutcome.data;
   const forwarderIssues = forwarderIssuesOutcome.data;
   const financeIssues = financeIssuesOutcome.data;
+  const ordersById = new Map(orders.map((order) => [order.orderId, order]));
 
   const insights = buildRevenueInsights(orders, tasks, statements, filters);
   const vehicleOptions = vehicles
     .map((vehicle) => vehicle.vehicleId)
     .sort((left, right) => left.localeCompare(right));
 
-  const completedOrders = orders.filter(
-    (order) => order.status === "completed",
-  );
-  const periodOrders = completedOrders.filter((order) => {
-    if (filters.period === "all") return true;
-    const days =
-      filters.period === "today" ? 0 : filters.period === "7d" ? 6 : 29;
-    const threshold = new Date();
-    threshold.setHours(0, 0, 0, 0);
-    threshold.setDate(threshold.getDate() - days);
-    return new Date(order.updatedAt).getTime() >= threshold.getTime();
-  });
+  const relevantCompletedTasks = tasks
+    .filter((task) => task.status === "completed")
+    .map((task) => ({ task, order: ordersById.get(task.orderId) ?? null }))
+    .filter(
+      (entry): entry is { task: DriverTaskRecord; order: OwnedOrderRecord } => {
+        if (!entry.order) return false;
+        if (!matchesRevenuePeriod(entry.task.completedAt, filters.period)) {
+          return false;
+        }
+        if (
+          filters.serviceBucket !== "all" &&
+          entry.order.serviceBucket !== filters.serviceBucket
+        ) {
+          return false;
+        }
+        if (
+          filters.vehicleId !== "all" &&
+          entry.task.vehicleId !== filters.vehicleId
+        ) {
+          return false;
+        }
+        return true;
+      },
+    );
 
-  const ownedTrips = periodOrders.filter((order) => !order.partnerId).length;
-  const totalTrips = periodOrders.length;
-  const forwardedSyncFailedCount = forwardedOrders.filter(
-    (order) => order.status === "sync_failed",
+  const ownedTrips = relevantCompletedTasks.filter(
+    ({ order }) => !order.partnerId,
   ).length;
-  const forwardedActiveCount = forwardedOrders.length;
+  const totalTrips = relevantCompletedTasks.length;
+  const forwardedSyncFailedCount = forwardedOrders.filter(
+    (order) =>
+      order.status === "sync_failed" &&
+      matchesRevenuePeriod(order.createdAt, filters.period),
+  ).length;
+  const forwardedActiveCount = forwardedOrders.filter((order) =>
+    matchesRevenuePeriod(order.createdAt, filters.period),
+  ).length;
   const forwardedSyncFailedPct = pctLabel(
     forwardedSyncFailedCount,
     Math.max(forwardedActiveCount, 1),
@@ -834,7 +879,10 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const openReconCount = financeIssues.filter(
     (issue) => issue.status === "open" || issue.status === "assigned",
   ).length;
-  const mismatchCount = forwarderIssues.length;
+  const filteredForwarderIssues = forwarderIssues.filter((issue) =>
+    matchesRevenuePeriod(issue.createdAt, filters.period),
+  );
+  const mismatchCount = filteredForwarderIssues.length;
   const recognisedRevenueMinor = insights.totalRevenueMinor;
 
   const financeIssueByJobId = new Map(
@@ -849,7 +897,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
   const selectedMismatch =
     mismatchId !== null
-      ? (forwarderIssues.find(
+      ? (filteredForwarderIssues.find(
           (issue) => issue.reconciliationJob.reconciliationJobId === mismatchId,
         ) ?? null)
       : null;
@@ -862,26 +910,31 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
   const channelBuckets = (() => {
     const counts = new Map<string, { trips: number; revenueMinor: number }>();
-    for (const order of periodOrders) {
-      const key = classifyOrderChannel(order);
+    for (const entry of relevantCompletedTasks) {
+      const key = classifyOrderChannel(entry.order);
       const previous = counts.get(key) ?? { trips: 0, revenueMinor: 0 };
       counts.set(key, {
         trips: previous.trips + 1,
         revenueMinor:
-          previous.revenueMinor + (order.quotedFare?.amountMinor ?? 0),
+          previous.revenueMinor +
+          (entry.task.fare?.amountMinor ??
+            entry.order.quotedFare?.amountMinor ??
+            0),
       });
     }
     const totalRevenue = Array.from(counts.values()).reduce(
       (sum, item) => sum + item.revenueMinor,
       0,
     );
-    return Array.from(counts.entries()).map(([key, value]) => ({
-      key,
-      label: t(`revenue.channelMix.channel.${key}`, locale),
-      trips: value.trips,
-      revenueMinor: value.revenueMinor,
-      shareLabel: pctLabel(value.revenueMinor, Math.max(totalRevenue, 1)),
-    }));
+    return Array.from(counts.entries())
+      .map(([key, value]) => ({
+        key,
+        label: t(`revenue.channelMix.channel.${key}`, locale),
+        trips: value.trips,
+        revenueMinor: value.revenueMinor,
+        shareLabel: pctLabel(value.revenueMinor, Math.max(totalRevenue, 1)),
+      }))
+      .sort((left, right) => right.revenueMinor - left.revenueMinor);
   })();
 
   const tabs = TAB_KEYS.map((key) => {
@@ -927,6 +980,21 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       riskLevel: "low",
     },
     {
+      action: "filterServiceBucket",
+      enabled: true,
+      riskLevel: "low",
+    },
+    {
+      action: "filterVehicle",
+      enabled: vehicleOptions.length > 0,
+      riskLevel: "low",
+    },
+    {
+      action: "openMismatchDrawer",
+      enabled: true,
+      riskLevel: "low",
+    },
+    {
       action: "refresh",
       enabled: true,
       riskLevel: "low",
@@ -938,6 +1006,9 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       riskLevel: "low",
     },
   ];
+  const enabledActions = new Set(
+    pageActions.filter((descriptor) => descriptor.enabled).map((d) => d.action),
+  );
 
   const renderTabBody = () => {
     switch (tab) {
@@ -988,7 +1059,10 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             icon="warn"
             title={`API health: ${healthEnvelope.status}`}
             body={healthEnvelope.degradedServices
-              .map((service) => `${service.service} (${service.severity})`)
+              .map(
+                (service: UiHealthEnvelope["degradedServices"][number]) =>
+                  `${service.service} (${service.severity})`,
+              )
               .join(" · ")}
           />
         ) : null}
@@ -1070,7 +1144,12 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     return (
       <>
         {pageActions
-          .filter((descriptor) => descriptor.enabled)
+          .filter(
+            (descriptor) =>
+              descriptor.enabled &&
+              (descriptor.action === "refresh" ||
+                descriptor.action === "export"),
+          )
           .map((descriptor) => {
             if (descriptor.action === "refresh") {
               return (
@@ -1086,11 +1165,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               );
             }
             return (
-              <Btn
-                key={descriptor.action}
-                theme={theme}
-                icon={descriptor.action === "filterPeriod" ? "filter" : "ext"}
-              >
+              <Btn key={descriptor.action} theme={theme} icon="ext">
                 {t(`revenue.action.${descriptor.action}`, locale)}
               </Btn>
             );
@@ -1102,48 +1177,66 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   function renderFilterChips() {
     return (
       <div style={filterRowStyle}>
-        <span style={{ fontSize: 11.5, color: theme.textMuted }}>
-          {t("revenue.action.filterPeriod", locale)}
-        </span>
-        {(["today", "7d", "30d", "all"] as RevenuePeriod[]).map((p) => (
-          <Link
-            key={`period-${p}`}
-            href={buildHref(filters, tab, { period: p, mismatch: null })}
-            style={{ textDecoration: "none" }}
-          >
-            <Pill
-              theme={theme}
-              tone={p === filters.period ? "accent" : "neutral"}
-              dot={p === filters.period}
+        {enabledActions.has("filterPeriod") ? (
+          <>
+            <span style={{ fontSize: 11.5, color: theme.textMuted }}>
+              {t("revenue.action.filterPeriod", locale)}
+            </span>
+            {(["today", "yesterday", "7d", "30d"] as RevenuePeriod[]).map(
+              (p) => (
+                <Link
+                  key={`period-${p}`}
+                  href={buildHref(filters, tab, { period: p, mismatch: null })}
+                  style={{ textDecoration: "none" }}
+                >
+                  <Pill
+                    theme={theme}
+                    tone={p === filters.period ? "accent" : "neutral"}
+                    dot={p === filters.period}
+                  >
+                    {t(`revenue.period.${p}`, locale)}
+                  </Pill>
+                </Link>
+              ),
+            )}
+          </>
+        ) : null}
+        {enabledActions.has("filterServiceBucket") ? (
+          <>
+            <span
+              style={{
+                fontSize: 11.5,
+                color: theme.textMuted,
+                marginLeft: 8,
+              }}
             >
-              {t(`revenue.period.${p}`, locale)}
-            </Pill>
-          </Link>
-        ))}
-        <span style={{ fontSize: 11.5, color: theme.textMuted, marginLeft: 8 }}>
-          {t("revenue.action.filterServiceBucket", locale)}
-        </span>
-        {(["all", "standard_taxi", "business_dispatch"] as const).map((sb) => (
-          <Link
-            key={`bucket-${sb}`}
-            href={buildHref(filters, tab, {
-              serviceBucket: sb,
-              mismatch: null,
-            })}
-            style={{ textDecoration: "none" }}
-          >
-            <Pill
-              theme={theme}
-              tone={sb === filters.serviceBucket ? "accent" : "neutral"}
-              dot={sb === filters.serviceBucket}
-            >
-              {sb === "all"
-                ? t("revenue.bucket.all", locale)
-                : t(`revenue.bucket.${sb}`, locale)}
-            </Pill>
-          </Link>
-        ))}
-        {vehicleOptions.length > 0 ? (
+              {t("revenue.action.filterServiceBucket", locale)}
+            </span>
+            {(["all", "standard_taxi", "business_dispatch"] as const).map(
+              (sb) => (
+                <Link
+                  key={`bucket-${sb}`}
+                  href={buildHref(filters, tab, {
+                    serviceBucket: sb,
+                    mismatch: null,
+                  })}
+                  style={{ textDecoration: "none" }}
+                >
+                  <Pill
+                    theme={theme}
+                    tone={sb === filters.serviceBucket ? "accent" : "neutral"}
+                    dot={sb === filters.serviceBucket}
+                  >
+                    {sb === "all"
+                      ? t("revenue.bucket.all", locale)
+                      : t(`revenue.bucket.${sb}`, locale)}
+                  </Pill>
+                </Link>
+              ),
+            )}
+          </>
+        ) : null}
+        {enabledActions.has("filterVehicle") && vehicleOptions.length > 0 ? (
           <>
             <span
               style={{
@@ -1541,7 +1634,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   function renderMismatch() {
     const mismatchEmpty = resolveEmptyReason({
       ok: forwarderIssuesOutcome.ok,
-      itemCount: forwarderIssues.length,
+      itemCount: filteredForwarderIssues.length,
       filtersActive,
       externalAvailable: forwardedOutcome.ok,
     });
@@ -1566,46 +1659,68 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
     type MismatchRow = {
       jobId: string;
+      issueId: string | null;
       mirrorOrderId: string;
       externalOrderId: string;
       platform: string;
       reason: string;
-      status: ForwarderReconciliationIssue["status"];
+      forwarderStatus: ForwarderReconciliationIssue["status"];
+      financeStatusLabel: string;
+      financeStatusTone: CanvasTone;
       ownerLabel: string;
-      ownerTone: CanvasTone;
+      ageLabel: string;
+      sortOwner: string;
+      sortTimestamp: number;
       isSelected: boolean;
     };
 
-    const rows: MismatchRow[] = forwarderIssues.map((issue) => {
-      const jobId = issue.reconciliationJob.reconciliationJobId;
-      const financeIssue = financeIssueByJobId.get(jobId);
-      const ownerLabel = financeIssue
-        ? `${formatOpsCodeLabel(locale, financeIssue.status)} · ${financeIssue.ownerId ?? t("revenue.reconciliation.unassigned", locale)}`
-        : t("revenue.reconciliation.notCreated", locale);
-      const ownerTone: CanvasTone = financeIssue
-        ? financeIssue.status === "resolved"
-          ? "success"
-          : financeIssue.status === "assigned"
-            ? "warn"
-            : "danger"
-        : "neutral";
-      return {
-        jobId,
-        mirrorOrderId: issue.mirrorOrderId,
-        externalOrderId: issue.externalOrderId,
-        platform: formatOpsCodeLabel(locale, issue.platformCode),
-        reason: formatOpsCodeLabel(locale, issue.reconciliationJob.reason),
-        status: issue.status,
-        ownerLabel,
-        ownerTone,
-        isSelected: jobId === mismatchId,
-      };
-    });
+    const rows: MismatchRow[] = filteredForwarderIssues
+      .map((issue) => {
+        const jobId = issue.reconciliationJob.reconciliationJobId;
+        const financeIssue = financeIssueByJobId.get(jobId);
+        const financeStatusTone: CanvasTone = financeIssue
+          ? financeIssue.status === "resolved"
+            ? "success"
+            : financeIssue.status === "assigned"
+              ? "warn"
+              : "danger"
+          : "neutral";
+        return {
+          jobId,
+          issueId: financeIssue?.issueId ?? null,
+          mirrorOrderId: issue.mirrorOrderId,
+          externalOrderId: issue.externalOrderId,
+          platform: formatOpsCodeLabel(locale, issue.platformCode),
+          reason: formatOpsCodeLabel(locale, issue.reconciliationJob.reason),
+          forwarderStatus: issue.status,
+          financeStatusLabel: financeIssue
+            ? formatOpsCodeLabel(locale, financeIssue.status)
+            : t("revenue.reconciliation.notCreated", locale),
+          financeStatusTone,
+          ownerLabel:
+            financeIssue?.ownerId ??
+            t("revenue.reconciliation.unassigned", locale),
+          ageLabel: relativeAgeLabel(
+            financeIssue?.createdAt ?? issue.createdAt,
+            locale,
+          ),
+          sortOwner: financeIssue?.ownerId ?? "zzzz-unassigned",
+          sortTimestamp: new Date(
+            financeIssue?.createdAt ?? issue.createdAt,
+          ).getTime(),
+          isSelected: jobId === mismatchId,
+        };
+      })
+      .sort((left, right) => {
+        const ownerCompare = left.sortOwner.localeCompare(right.sortOwner);
+        if (ownerCompare !== 0) return ownerCompare;
+        return left.sortTimestamp - right.sortTimestamp;
+      });
 
     const columns: CanvasTableColumn<MismatchRow>[] = [
       {
         h: t("revenue.mismatch.col.mirror", locale),
-        w: 240,
+        w: 220,
         r: (row) => (
           <div>
             <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
@@ -1617,6 +1732,20 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           </div>
         ),
       },
+      {
+        h: t("revenue.mismatch.col.issue", locale),
+        w: 170,
+        r: (row) => (
+          <div>
+            <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+              {row.issueId ?? t("revenue.reconciliation.notCreated", locale)}
+            </div>
+            <div style={{ color: theme.textMuted, fontSize: 11 }}>
+              {row.ageLabel}
+            </div>
+          </div>
+        ),
+      },
       { h: t("revenue.mismatch.col.platform", locale), k: "platform" },
       {
         h: t("revenue.mismatch.col.reason", locale),
@@ -1624,10 +1753,10 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           <div>
             <Pill
               theme={theme}
-              tone={row.status === "sync_failed" ? "danger" : "warn"}
+              tone={row.forwarderStatus === "sync_failed" ? "danger" : "warn"}
               dot
             >
-              {formatOpsCodeLabel(locale, row.status)}
+              {formatOpsCodeLabel(locale, row.forwarderStatus)}
             </Pill>
             <div
               style={{
@@ -1643,9 +1772,13 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       },
       {
         h: t("revenue.mismatch.col.owner", locale),
+        r: (row) => <span style={{ color: theme.text }}>{row.ownerLabel}</span>,
+      },
+      {
+        h: t("revenue.mismatch.col.status", locale),
         r: (row) => (
-          <Pill theme={theme} tone={row.ownerTone} dot>
-            {row.ownerLabel}
+          <Pill theme={theme} tone={row.financeStatusTone} dot>
+            {row.financeStatusLabel}
           </Pill>
         ),
       },
@@ -1653,20 +1786,25 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         h: t("revenue.mismatch.col.cta", locale),
         w: 220,
         align: "right",
-        r: (row) => (
-          <Link
-            href={buildHref(filters, "mismatch", { mismatch: row.jobId })}
-            style={{ textDecoration: "none" }}
-          >
-            <Btn
-              theme={theme}
-              variant={row.isSelected ? "primary" : "secondary"}
-              icon="arrow"
+        r: (row) =>
+          enabledActions.has("openMismatchDrawer") ? (
+            <Link
+              href={buildHref(filters, "mismatch", { mismatch: row.jobId })}
+              style={{ textDecoration: "none" }}
             >
-              {t("revenue.mismatch.openDrawer", locale)}
-            </Btn>
-          </Link>
-        ),
+              <Btn
+                theme={theme}
+                variant={row.isSelected ? "primary" : "secondary"}
+                icon="arrow"
+              >
+                {t("revenue.mismatch.openDrawer", locale)}
+              </Btn>
+            </Link>
+          ) : (
+            <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+              {t("revenue.action.requestAccess", locale)}
+            </span>
+          ),
       },
     ];
 
