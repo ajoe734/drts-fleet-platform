@@ -1,6 +1,13 @@
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
-import type { AuditLogRecord } from "@drts/contracts";
+import type {
+  AuditLogRecord,
+  EmptyStateEnvelope,
+  MaintenanceListItem,
+  MaintenanceListResponse,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -93,6 +100,21 @@ export class MaintenanceService implements OnModuleInit {
       result = result.filter((r) => r.vehicleId === vehicleId);
     }
     return result;
+  }
+
+  listMaintenanceView(vehicleId?: string): MaintenanceListResponse {
+    const items = this.listMaintenanceLogs(vehicleId).map((record) =>
+      this.toMaintenanceListItem(record),
+    );
+
+    return {
+      items,
+      availableActions: this.getBoardActions(),
+      refresh: this.createRefreshMetadata(),
+      ...(items.length === 0
+        ? { emptyState: this.createEmptyStateEnvelope(vehicleId) }
+        : {}),
+    };
   }
 
   getMaintenanceLog(maintenanceId: string) {
@@ -268,6 +290,77 @@ export class MaintenanceService implements OnModuleInit {
     return {
       ...record,
       status: nextStatus,
+    };
+  }
+
+  private toMaintenanceListItem(
+    record: MaintenanceLogRecord,
+  ): MaintenanceListItem {
+    const normalized = this.normalizeStatus(record);
+    return {
+      ...normalized,
+      availableActions: this.getRecordActions(normalized),
+    };
+  }
+
+  private getBoardActions(): ResourceActionDescriptor[] {
+    return [
+      {
+        action: "create_record",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      {
+        action: "search_records",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "filter_records",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "refresh_records",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
+  }
+
+  private getRecordActions(
+    record: MaintenanceLogRecord,
+  ): ResourceActionDescriptor[] {
+    const closed =
+      record.status === "completed" || record.status === "cancelled";
+    return [
+      {
+        action: "edit_record",
+        enabled: !closed,
+        ...(closed ? { disabledReasonCode: "record_closed" } : {}),
+        riskLevel: "medium",
+      },
+    ];
+  }
+
+  private createRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: 20_000,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+  }
+
+  private createEmptyStateEnvelope(vehicleId?: string): EmptyStateEnvelope {
+    return {
+      reason: vehicleId ? "filtered_empty" : "no_data",
+      messageCode: vehicleId
+        ? "maintenance.empty.filtered_empty"
+        : "maintenance.empty.no_data",
+      nextAction: this.getBoardActions().find(
+        (action) => action.action === "create_record",
+      ),
     };
   }
 

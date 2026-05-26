@@ -53,6 +53,35 @@ describe("maintenance service", () => {
     expect(service.listMaintenanceLogs()).toHaveLength(2);
   });
 
+  it("returns maintenance view envelopes with backend-owned actions", () => {
+    const { service } = createService();
+
+    const emptyView = service.listMaintenanceView();
+    expect(emptyView.availableActions.map((action) => action.action)).toEqual([
+      "create_record",
+      "search_records",
+      "filter_records",
+      "refresh_records",
+    ]);
+    expect(emptyView.emptyState?.reason).toBe("no_data");
+
+    service.createMaintenanceLog({
+      vehicleId: "VEH-010",
+      type: "repair",
+      description: "Mirror replacement",
+    });
+
+    const populatedView = service.listMaintenanceView();
+    expect(populatedView.items[0]?.availableActions).toEqual([
+      expect.objectContaining({
+        action: "edit_record",
+        enabled: true,
+        riskLevel: "medium",
+      }),
+    ]);
+    expect(populatedView.refresh.dataFreshness).toBe("fresh");
+  });
+
   it("updates maintenance log status", () => {
     const { service } = createService();
 

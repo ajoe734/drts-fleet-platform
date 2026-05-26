@@ -39,7 +39,7 @@ export class MaintenanceController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      { items: this.maintenanceService.listMaintenanceLogs(vehicleId) },
+      this.maintenanceService.listMaintenanceView(vehicleId),
       requestId,
     );
   }

@@ -101,7 +101,7 @@ import type {
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
   LinkCallOrderCommand,
-  MaintenanceRecord,
+  MaintenanceListResponse,
   MarkReimbursementPaidCommand,
   NotificationRecord,
   OpenCallSessionCommand,
@@ -2386,11 +2386,11 @@ export class ApiClient {
     );
   }
 
-  async listMaintenance(vehicleId?: string): Promise<MaintenanceRecord[]> {
+  async listMaintenance(vehicleId?: string): Promise<MaintenanceListResponse> {
     const path = vehicleId
       ? `/api/maintenance?vehicleId=${encodeURIComponent(vehicleId)}`
       : "/api/maintenance";
-    return this.getList<MaintenanceRecord>(path);
+    return this.get<MaintenanceListResponse>(path);
   }
 
   async createMaintenance(command: CreateMaintenanceRecordCommand) {
