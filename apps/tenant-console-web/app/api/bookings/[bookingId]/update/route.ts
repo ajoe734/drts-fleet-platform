@@ -12,8 +12,8 @@ export async function PATCH(
   try {
     const body = (await request.json()) as UpdateTenantBookingCommand;
     const client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
-    await client.updateTenantBooking(bookingId, body);
-    return NextResponse.json({ ok: true, bookingId });
+    const result = await client.updateTenantBooking(bookingId, body);
+    return NextResponse.json({ ok: true, bookingId, result });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },

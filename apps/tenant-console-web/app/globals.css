@@ -510,6 +510,129 @@ textarea {
   align-items: start;
 }
 
+.booking-detail-hero,
+.booking-detail-layout,
+.booking-command-stack,
+.booking-action-group,
+.booking-detail-main,
+.booking-detail-side {
+  display: grid;
+  gap: 1rem;
+}
+
+.booking-detail-hero {
+  padding: 1.4rem 1.5rem;
+  border-radius: 28px;
+  border: 1px solid var(--panel-border);
+  background:
+    radial-gradient(circle at top right, rgba(28, 181, 148, 0.16), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(246, 251, 250, 0.96));
+  box-shadow: 0 18px 42px rgba(16, 35, 58, 0.08);
+}
+
+.booking-detail-title-row,
+.booking-detail-link-row,
+.booking-detail-meta-row,
+.booking-activity-header,
+.booking-command-receipt-header,
+.booking-command-receipt-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.booking-detail-layout {
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.95fr);
+  align-items: start;
+}
+
+.booking-detail-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.booking-activity-list {
+  display: grid;
+  gap: 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.booking-activity-item,
+.booking-action-card,
+.booking-command-receipt {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem 1.05rem;
+  border-radius: 20px;
+  border: 1px solid rgba(16, 35, 58, 0.1);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.booking-activity-item p,
+.booking-action-card p,
+.booking-command-receipt p {
+  margin: 0;
+}
+
+.booking-activity-tone {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.24rem 0.58rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.booking-activity-tone-tenant {
+  background: rgba(18, 120, 98, 0.14);
+  color: #127862;
+}
+
+.booking-activity-tone-system {
+  background: rgba(16, 35, 58, 0.08);
+  color: var(--shell);
+}
+
+.booking-activity-tone-ops {
+  background: rgba(184, 92, 56, 0.12);
+  color: var(--accent);
+}
+
+.booking-activity-tone-driver {
+  background: rgba(53, 111, 194, 0.12);
+  color: #356fc2;
+}
+
+.booking-command-receipt-completed {
+  border-color: rgba(29, 107, 87, 0.22);
+  background: rgba(232, 247, 240, 0.92);
+}
+
+.booking-command-receipt-accepted {
+  border-color: rgba(184, 92, 56, 0.24);
+  background: rgba(255, 247, 238, 0.96);
+}
+
+.booking-command-receipt-failed {
+  border-color: rgba(185, 28, 28, 0.25);
+  background: rgba(254, 242, 242, 0.96);
+}
+
+.booking-command-receipt-header span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.booking-action-card-copy {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .booking-create-main,
 .booking-create-side {
   display: grid;
@@ -1032,6 +1155,11 @@ textarea {
 @media (max-width: 980px) {
   .tenant-shell,
   .partner-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-detail-layout,
+  .booking-create-layout {
     grid-template-columns: 1fr;
   }
 
