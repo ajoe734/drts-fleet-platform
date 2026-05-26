@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import type {
   DriverLocationSnapshot,
   DriverMatchingSuppression,
@@ -17,17 +17,19 @@ import type {
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { RefreshOnInterval } from "@/components/refresh-on-interval";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import { getRefreshIntervalMs } from "@/lib/refresh-tier";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { getRefreshIntervalMs } from "@/lib/refresh-tier";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import {
-  DataCellStack,
-  DataTable,
-  PageHeader,
-  StatusChip,
-  Td,
-  Tr,
+  CanvasCard as Card,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTheme,
+  type CanvasTone,
 } from "@drts/ui-web";
 
 const STALE_LOCATION_THRESHOLD_MS = 5 * 60 * 1000;
@@ -36,6 +38,13 @@ const DRIVERS_REFRESH_INTERVAL_MS =
   getRefreshIntervalMs(DRIVERS_REFRESH_TIER) ?? 15_000;
 const PAGE_SIZE = 12;
 const PLATFORM_ADMIN_ADAPTER_REGISTRY_ROUTE = "/adapter-registry";
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: false,
+  density: "compact",
+});
+
+type Locale = "en" | "zh";
 
 type DriversPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -94,145 +103,140 @@ type LoadedListEnvelope<T> = {
   refreshMetadata: UiRefreshMetadata | null;
 };
 
-const shellStyle: CSSProperties = {
+type DriverTableRow = Record<string, unknown> & {
+  _selected?: boolean;
+  row: DriverRowModel;
+};
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
   display: "grid",
-  gap: "1rem",
+  gap: 16,
 };
 
-const panelStyle: CSSProperties = {
-  border: "1px solid #d7dde6",
-  borderRadius: "1rem",
-  background:
-    "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)",
-  boxShadow: "0 18px 40px rgba(15, 23, 42, 0.06)",
-};
-
-const alertBaseStyle: CSSProperties = {
-  borderRadius: "0.95rem",
-  padding: "0.9rem 1rem",
-  fontSize: "0.9rem",
-  lineHeight: 1.55,
-};
-
-const filterBarStyle: CSSProperties = {
+const signalGridStyle: CSSProperties = {
   display: "grid",
-  gap: "0.9rem",
-  padding: "1rem 1.1rem 1.1rem",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
 };
 
-const filterRowStyle: CSSProperties = {
+const signalCardStyle: CSSProperties = {
+  padding: "14px 16px",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  display: "grid",
+  gap: 6,
+};
+
+const signalValueStyle: CSSProperties = {
+  fontSize: 24,
+  fontWeight: 700,
+  color: theme.text,
+  letterSpacing: -0.3,
+};
+
+const signalLabelStyle: CSSProperties = {
+  fontSize: 11,
+  textTransform: "uppercase",
+  letterSpacing: 0.45,
+  color: theme.textMuted,
+};
+
+const signalDetailStyle: CSSProperties = {
+  fontSize: 12,
+  color: theme.textDim,
+  lineHeight: 1.45,
+};
+
+const bannerStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const filterGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns:
+    "minmax(240px, 1.4fr) repeat(3, minmax(140px, 0.8fr)) auto auto",
+  gap: 10,
+  alignItems: "end",
+};
+
+const fieldLabelStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  fontSize: 11,
+  textTransform: "uppercase",
+  letterSpacing: 0.45,
+  color: theme.textMuted,
+};
+
+const filterControlStyle: CSSProperties = {
+  minHeight: 34,
+  borderRadius: 8,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  color: theme.text,
+  padding: "0 10px",
+  fontSize: 12.5,
+  fontFamily: theme.fontFamily,
+};
+
+const filterActionsStyle: CSSProperties = {
   display: "flex",
-  gap: "0.75rem",
-  flexWrap: "wrap",
+  gap: 8,
   alignItems: "center",
+  justifyContent: "flex-end",
 };
 
-const tabsRowStyle: CSSProperties = {
+const chipRowStyle: CSSProperties = {
   display: "flex",
-  gap: "0.55rem",
   flexWrap: "wrap",
+  gap: 6,
 };
 
-const tabBaseStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "0.45rem",
-  padding: "0.6rem 0.85rem",
-  borderRadius: "999px",
-  border: "1px solid #dbe4ee",
+const driverPrimaryStyle: CSSProperties = {
+  color: theme.text,
   textDecoration: "none",
-  color: "#334155",
-  background: "#fff",
-  fontSize: "0.88rem",
+  fontWeight: 700,
+};
+
+const driverSecondaryStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: theme.textDim,
+  fontFamily: theme.monoFamily,
+};
+
+const stackStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
+};
+
+const inlineLinkStyle: CSSProperties = {
+  color: theme.accent,
+  textDecoration: "none",
   fontWeight: 600,
 };
 
-const filterInputStyle: CSSProperties = {
-  minHeight: "42px",
-  borderRadius: "0.8rem",
-  border: "1px solid #cbd5e1",
-  background: "#fff",
-  padding: "0 0.9rem",
-  fontSize: "0.92rem",
-  color: "#0f172a",
-};
-
-const searchInputStyle: CSSProperties = {
-  ...filterInputStyle,
-  minWidth: "280px",
-  flex: "1 1 280px",
-};
-
-const selectStyle: CSSProperties = {
-  ...filterInputStyle,
-  minWidth: "160px",
-};
-
-const primaryButtonStyle: CSSProperties = {
-  minHeight: "42px",
-  borderRadius: "999px",
-  border: "1px solid #0f172a",
-  background: "#0f172a",
-  color: "#fff",
-  padding: "0 1rem",
-  fontSize: "0.9rem",
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
-const subtleButtonStyle: CSSProperties = {
-  ...primaryButtonStyle,
-  border: "1px solid #d7dde6",
-  background: "#fff",
-  color: "#334155",
-  textDecoration: "none",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
-
-const bannerStrongStyle: CSSProperties = {
-  display: "block",
-  fontWeight: 700,
-  marginBottom: "0.1rem",
-};
-
-const actionListStyle: CSSProperties = {
+const actionsWrapStyle: CSSProperties = {
   display: "flex",
-  gap: "0.45rem",
   flexWrap: "wrap",
+  gap: 6,
 };
 
-const actionLinkStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: "34px",
-  padding: "0 0.8rem",
-  borderRadius: "999px",
-  border: "1px solid #bfdbfe",
-  color: "#1d4ed8",
-  background: "#eff6ff",
-  textDecoration: "none",
-  fontSize: "0.82rem",
-  fontWeight: 700,
-};
-
-const disabledActionStyle: CSSProperties = {
-  ...actionLinkStyle,
-  color: "#94a3b8",
-  borderColor: "#e2e8f0",
-  background: "#f8fafc",
-  cursor: "not-allowed",
-};
-
-const pageFooterStyle: CSSProperties = {
+const footerStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  gap: "0.75rem",
+  gap: 12,
   flexWrap: "wrap",
-  padding: "0 1.1rem 1.1rem",
+};
+
+const footerTextStyle: CSSProperties = {
+  fontSize: 12,
+  color: theme.textDim,
+  lineHeight: 1.45,
 };
 
 function firstParam(value: string | string[] | undefined): string | undefined {
@@ -279,7 +283,7 @@ function resolveFilters(
 
 async function loadWithError<T>(
   loader: () => Promise<T>,
-  locale: "en" | "zh",
+  locale: Locale,
 ): Promise<LoadResult<T>> {
   try {
     return { data: await loader(), error: null };
@@ -416,34 +420,18 @@ function resolveLocationState(
   return isLocationStale(snapshot) ? "stale" : "live";
 }
 
-function workStateTone(workState: DriverRegistryRecord["workState"]) {
-  if (workState === "available") return "success" as const;
-  if (workState === "incident_hold" || workState === "suspended") {
-    return "danger" as const;
-  }
-  if (workState === "offline") return "neutral" as const;
-  if (workState === "on_trip") return "info" as const;
-  return "warning" as const;
-}
-
-function locationTone(state: DriverRowModel["locationState"]) {
-  if (state === "live") return "success" as const;
-  if (state === "unknown") return "neutral" as const;
-  return "warning" as const;
-}
-
-function presenceTone(presence: PlatformPresenceRecord) {
-  if (presence.reauthRequired) return "warning" as const;
+function presenceTone(presence: PlatformPresenceRecord): CanvasTone {
+  if (presence.reauthRequired) return "warn";
   if (presence.status === "online" && presence.eligibility === "eligible") {
-    return "success" as const;
+    return "success";
   }
-  if (presence.status === "online") return "info" as const;
-  return "neutral" as const;
+  if (presence.status === "online") return "info";
+  return "neutral";
 }
 
 function presenceLabel(
   presence: PlatformPresenceRecord,
-  locale: "en" | "zh",
+  locale: Locale,
 ): string {
   const name = PLATFORM_CODE_REGISTRY[presence.platformCode]?.displayName;
   const binding = presence.accountId
@@ -454,35 +442,17 @@ function presenceLabel(
       ? "未綁定"
       : "unbound";
   const status = presence.reauthRequired
-    ? locale === "zh"
-      ? "reauth"
-      : "reauth"
+    ? "reauth"
     : formatOpsCodeLabel(locale, presence.status);
   return `${name ?? presence.platformCode} · ${status} · ${binding}`;
 }
 
-function resolveDriverActions(
-  row: Omit<DriverRowModel, "availableActions">,
-): ResourceActionDescriptor[] {
-  return row.driver.availableActions ?? [];
-}
-
 function matchesView(row: DriverRowModel, view: DriversViewKey): boolean {
-  if (view === "available") {
-    return row.driver.dispatchEligible;
-  }
-  if (view === "on_trip") {
-    return row.driver.workState === "on_trip";
-  }
-  if (view === "offline") {
-    return row.driver.workState === "offline";
-  }
-  if (view === "license_warn") {
-    return !row.driver.licensesValid;
-  }
-  if (view === "suppression") {
-    return row.suppressionActive;
-  }
+  if (view === "available") return row.driver.dispatchEligible;
+  if (view === "on_trip") return row.driver.workState === "on_trip";
+  if (view === "offline") return row.driver.workState === "offline";
+  if (view === "license_warn") return !row.driver.licensesValid;
+  if (view === "suppression") return row.suppressionActive;
   return true;
 }
 
@@ -493,11 +463,9 @@ function matchesFilters(
   if (!matchesView(row, filters.view)) {
     return false;
   }
-
   if (filters.shift !== "all" && row.driver.workState !== filters.shift) {
     return false;
   }
-
   if (filters.platform !== "all") {
     const targetPlatform = filters.platform as PlatformCode;
     if (
@@ -508,14 +476,12 @@ function matchesFilters(
       return false;
     }
   }
-
   if (filters.eligibility === "eligible" && !row.driver.dispatchEligible) {
     return false;
   }
   if (filters.eligibility === "blocked" && row.driver.dispatchEligible) {
     return false;
   }
-
   if (filters.query) {
     const normalized = filters.query.toLowerCase();
     const haystack = [
@@ -533,7 +499,6 @@ function matchesFilters(
       return false;
     }
   }
-
   return true;
 }
 
@@ -567,14 +532,10 @@ function getEmptyStateActionPresentation(
   filters: DriverListFilters,
 ) {
   if (action.action === "clear_filters") {
-    return {
-      href: "/drivers",
-    };
+    return { href: "/drivers" };
   }
   if (action.action === "refresh_list") {
-    return {
-      href: buildHref(filters, { page: 1 }),
-    };
+    return { href: buildHref(filters, { page: 1 }) };
   }
   if (
     action.action === "open_adapter_registry" ||
@@ -582,20 +543,14 @@ function getEmptyStateActionPresentation(
     action.action === "open_platform_admin_adapter_registry"
   ) {
     const href = buildPlatformAdminHref(PLATFORM_ADMIN_ADAPTER_REGISTRY_ROUTE);
-    return href
-      ? {
-          href,
-          target: "_blank" as const,
-        }
-      : {};
+    return href ? { href, target: "_blank" as const } : {};
   }
-
   return {};
 }
 
 function buildEmptyStateModel(
   reason: EmptyReason,
-  locale: "en" | "zh",
+  locale: Locale,
   filters: DriverListFilters,
   emptyStateEnvelope?: EmptyStateEnvelope | null,
 ): EmptyStateModel {
@@ -627,9 +582,9 @@ function buildEmptyStateModel(
     reason === "fetch_failed" || reason === "permission_denied"
       ? "#b91c1c"
       : reason === "external_unavailable"
-        ? "#9a3412"
+        ? "#b45309"
         : reason === "filtered_empty"
-          ? "#1d4ed8"
+          ? theme.accent
           : "#0f766e";
   const background =
     reason === "fetch_failed" || reason === "permission_denied"
@@ -637,17 +592,13 @@ function buildEmptyStateModel(
       : reason === "external_unavailable"
         ? "#fff7ed"
         : reason === "filtered_empty"
-          ? "#eff6ff"
-          : "#f0fdf4";
+          ? "#eef6ff"
+          : "#ecfdf5";
 
   const nextAction =
     emptyStateEnvelope?.nextAction ??
     (reason === "filtered_empty"
-      ? {
-          action: "clear_filters",
-          enabled: true,
-          riskLevel: "low" as const,
-        }
+      ? { action: "clear_filters", enabled: true, riskLevel: "low" as const }
       : reason === "external_unavailable"
         ? {
             action: "open_adapter_registry",
@@ -655,11 +606,7 @@ function buildEmptyStateModel(
             riskLevel: "low" as const,
           }
         : reason === "fetch_failed"
-          ? {
-              action: "refresh_list",
-              enabled: true,
-              riskLevel: "low" as const,
-            }
+          ? { action: "refresh_list", enabled: true, riskLevel: "low" as const }
           : undefined);
   const nextActionPresentation = nextAction
     ? getEmptyStateActionPresentation(nextAction, filters)
@@ -711,7 +658,7 @@ function isRefreshMetadataStale(
 
 function getRefreshBannerModel(
   refreshMetadata: UiRefreshMetadata | null,
-  locale: "en" | "zh",
+  locale: Locale,
 ) {
   if (!refreshMetadata) {
     return null;
@@ -722,18 +669,14 @@ function getRefreshBannerModel(
     return {
       title: t("drivers.refreshBanner.degradedTitle", locale),
       body: t("drivers.refreshBanner.degradedBody", locale),
-      background: "#fff7ed",
-      border: "#fdba74",
-      color: "#9a3412",
+      tone: "warn" as const,
     };
   }
   if (refreshMetadata.dataFreshness === "unknown") {
     return {
       title: t("drivers.refreshBanner.unknownTitle", locale),
       body: t("drivers.refreshBanner.unknownBody", locale),
-      background: "#f8fafc",
-      border: "#cbd5e1",
-      color: "#475569",
+      tone: "neutral" as const,
     };
   }
   if (refreshMetadata.dataFreshness === "stale" || stale) {
@@ -742,19 +685,16 @@ function getRefreshBannerModel(
       body: t("drivers.refreshBanner.staleBody", locale, {
         source: refreshMetadata.source,
       }),
-      background: "#fffbeb",
-      border: "#fcd34d",
-      color: "#92400e",
+      tone: "warn" as const,
     };
   }
-
   return null;
 }
 
 function getDriverActionPresentation(
   row: DriverRowModel,
   action: ResourceActionDescriptor,
-  locale: "en" | "zh",
+  locale: Locale,
 ) {
   if (
     action.action === "open_driver_detail" ||
@@ -769,7 +709,6 @@ function getDriverActionPresentation(
       }),
     };
   }
-
   if (
     action.action === "open_active_dispatch" ||
     action.action === "open_dispatch" ||
@@ -780,11 +719,8 @@ function getDriverActionPresentation(
           href: `/dispatch/${encodeURIComponent(row.activeForwardedOrders[0].mirrorOrderId)}`,
           label: t("drivers.list.openDispatch", locale),
         }
-      : {
-          label: t("drivers.list.openDispatch", locale),
-        };
+      : { label: t("drivers.list.openDispatch", locale) };
   }
-
   if (
     action.action === "open_adapter_registry" ||
     action.action === "inspect_adapter_registry" ||
@@ -797,74 +733,181 @@ function getDriverActionPresentation(
           target: "_blank" as const,
           label: t("drivers.list.openAdapterRegistry", locale),
         }
-      : {
-          label: t("drivers.list.openAdapterRegistry", locale),
-        };
+      : { label: t("drivers.list.openAdapterRegistry", locale) };
   }
-
   return {
     label: formatOpsCodeLabel(locale, action.action),
   };
 }
 
-function renderEmptyState(
-  model: EmptyStateModel,
-  locale: "en" | "zh",
-): ReactNode {
+function getLocationTone(state: DriverRowModel["locationState"]): CanvasTone {
+  if (state === "live") return "success";
+  if (state === "unknown") return "neutral";
+  return "warn";
+}
+
+function getStatusTone(
+  workState: DriverRegistryRecord["workState"],
+): CanvasTone {
+  if (workState === "available") return "success";
+  if (workState === "on_trip") return "info";
+  if (workState === "incident_hold" || workState === "suspended") {
+    return "danger";
+  }
+  if (workState === "offline") return "neutral";
+  return "warn";
+}
+
+function buttonLinkStyle(
+  currentTheme: CanvasTheme,
+  variant: "primary" | "secondary" = "secondary",
+  disabled = false,
+): CSSProperties {
+  const styles =
+    variant === "primary"
+      ? {
+          background: currentTheme.accent,
+          color: "#fff",
+          borderColor: currentTheme.accent,
+        }
+      : {
+          background: currentTheme.surface,
+          color: currentTheme.text,
+          borderColor: currentTheme.border,
+        };
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    minHeight: 28,
+    padding: "5px 10px",
+    fontSize: 12,
+    fontWeight: 500,
+    textDecoration: "none",
+    borderRadius: 7,
+    border: `1px solid ${styles.borderColor}`,
+    background: styles.background,
+    color: styles.color,
+    lineHeight: 1,
+    opacity: disabled ? 0.5 : 1,
+    pointerEvents: disabled ? "none" : "auto",
+  };
+}
+
+function toneBannerStyle(tone: "neutral" | "warn" | "danger" | "success") {
+  if (tone === "danger") {
+    return {
+      background: "#fff1f2",
+      borderColor: "#fecdd3",
+      color: "#9f1239",
+    };
+  }
+  if (tone === "warn") {
+    return {
+      background: "#fff7ed",
+      borderColor: "#fdba74",
+      color: "#9a3412",
+    };
+  }
+  if (tone === "success") {
+    return {
+      background: "#ecfdf5",
+      borderColor: "#86efac",
+      color: "#166534",
+    };
+  }
+  return {
+    background: "#f8fafc",
+    borderColor: "#cbd5e1",
+    color: "#475569",
+  };
+}
+
+function renderBanner(
+  title: string,
+  body: string,
+  tone: "neutral" | "warn" | "danger" | "success",
+) {
+  const style = toneBannerStyle(tone);
   return (
     <div
       style={{
-        borderRadius: "1rem",
-        border: `1px dashed ${model.accent}`,
+        ...style,
+        border: `1px solid ${style.borderColor}`,
+        borderRadius: 10,
+        padding: "12px 14px",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{body}</div>
+    </div>
+  );
+}
+
+function renderEmptyState(model: EmptyStateModel, locale: Locale) {
+  return (
+    <Card
+      theme={theme}
+      padding={20}
+      style={{
         background: model.background,
-        color: "#0f172a",
-        padding: "1.5rem",
-        margin: "0 1.1rem 1.1rem",
-        display: "grid",
-        gap: "0.9rem",
+        borderColor: model.accent,
       }}
     >
       <div
-        style={{ display: "flex", gap: "0.85rem", alignItems: "flex-start" }}
+        style={{
+          display: "grid",
+          gap: 14,
+          gridTemplateColumns: "40px minmax(0, 1fr)",
+          alignItems: "start",
+        }}
       >
         <div
           aria-hidden
           style={{
-            width: "2rem",
-            height: "2rem",
-            borderRadius: "999px",
+            width: 40,
+            height: 40,
+            borderRadius: 999,
             display: "grid",
             placeItems: "center",
+            background: model.accent,
             color: "#fff",
             fontWeight: 800,
-            background: model.accent,
-            flex: "0 0 auto",
           }}
         >
           {model.icon}
         </div>
-        <div style={{ display: "grid", gap: "0.35rem" }}>
-          <strong style={{ display: "block", color: model.accent }}>
-            {t(model.titleKey, locale)}
-          </strong>
-          <span style={{ fontSize: "0.92rem", lineHeight: 1.55 }}>
-            {t(model.bodyKey, locale)}
-          </span>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gap: 4 }}>
+            <strong style={{ color: model.accent, fontSize: 14 }}>
+              {t(model.titleKey, locale)}
+            </strong>
+            <span
+              style={{ color: theme.text, fontSize: 12.5, lineHeight: 1.6 }}
+            >
+              {t(model.bodyKey, locale)}
+            </span>
+          </div>
+          {model.nextAction?.enabled && model.nextHref ? (
+            <div>
+              <Link
+                href={model.nextHref}
+                target={model.nextTarget}
+                rel={model.nextTarget === "_blank" ? "noreferrer" : undefined}
+                style={buttonLinkStyle(theme)}
+              >
+                {t(
+                  `drivers.emptyState.action.${model.nextAction.action}`,
+                  locale,
+                )}
+              </Link>
+            </div>
+          ) : null}
         </div>
       </div>
-      {model.nextAction?.enabled && model.nextHref ? (
-        <div>
-          <Link
-            href={model.nextHref}
-            target={model.nextTarget}
-            rel={model.nextTarget === "_blank" ? "noreferrer" : undefined}
-            style={subtleButtonStyle}
-          >
-            {t(`drivers.emptyState.action.${model.nextAction.action}`, locale)}
-          </Link>
-        </div>
-      ) : null}
-    </div>
+    </Card>
   );
 }
 
@@ -875,7 +918,6 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     getServerOpsClient(),
     getServerLocale(),
   ]);
-
   const generatedAt = new Date().toISOString();
 
   const [driversResult, locationsResult, forwardedResult] = await Promise.all([
@@ -903,9 +945,9 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     const parsed = readDriverRegistryListItem(driver);
     return parsed ? [parsed] : [];
   });
-  const locations = locationsResult.data ?? [];
+
   const locationByDriver = new Map<string, DriverLocationSnapshot>();
-  for (const snapshot of locations) {
+  for (const snapshot of locationsResult.data ?? []) {
     locationByDriver.set(snapshot.driverId, snapshot);
   }
 
@@ -918,9 +960,11 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
       ),
     })),
   );
+
   const presenceByDriver = new Map(
     presenceResults.map((entry) => [entry.driverId, entry.result]),
   );
+
   const activeForwardedStatuses = new Set<ForwardedOrderRecord["status"]>([
     "broadcasted",
     "accept_pending",
@@ -931,7 +975,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   const rows = drivers.map<DriverRowModel>((driver) => {
     const presenceResult = presenceByDriver.get(driver.driverId);
     const presences = presenceResult?.data?.presences ?? [];
-    const baseRow = {
+    return {
       driver,
       location: locationByDriver.get(driver.driverId),
       locationState: resolveLocationState(
@@ -947,10 +991,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
       ),
       matchingSuppression: driver.matchingSuppression ?? null,
       suppressionActive: driver.matchingSuppression?.active === true,
-    };
-    return {
-      ...baseRow,
-      availableActions: resolveDriverActions(baseRow),
+      availableActions: driver.availableActions ?? [],
     };
   });
 
@@ -972,6 +1013,11 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   const staleLocationCount = rows.filter(
     (row) => row.locationState === "stale",
   ).length;
+  const suppressedCount = rows.filter((row) => row.suppressionActive).length;
+  const eligibleCount = rows.filter(
+    (row) => row.driver.dispatchEligible,
+  ).length;
+  const blockedCount = rows.length - eligibleCount;
   const presenceErrorCount = presenceResults.filter(
     (entry) => entry.result.error,
   ).length;
@@ -1019,193 +1065,433 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     ),
   ).sort();
 
+  const tableRows: DriverTableRow[] = pagedRows.map((row) => ({
+    row,
+    _selected: row.suppressionActive,
+  }));
+
+  const tableColumns: CanvasTableColumn<DriverTableRow>[] = [
+    {
+      h: t("drivers.col.driver", locale),
+      w: 250,
+      r: ({ row }) => (
+        <div style={stackStyle}>
+          <Link
+            href={`/drivers/${encodeURIComponent(row.driver.driverId)}`}
+            style={driverPrimaryStyle}
+          >
+            {row.driver.name}
+          </Link>
+          <span style={driverSecondaryStyle}>
+            {row.driver.driverId}
+            {row.driver.phone ? ` · ${row.driver.phone}` : ""}
+          </span>
+          <div style={chipRowStyle}>
+            <Pill theme={theme} tone={getStatusTone(row.driver.workState)} dot>
+              {formatOpsCodeLabel(locale, row.driver.workState)}
+            </Pill>
+            <Pill
+              theme={theme}
+              tone={row.driver.licensesValid ? "success" : "warn"}
+            >
+              {row.driver.licensesValid
+                ? t("common.valid", locale)
+                : t("common.invalid", locale)}
+            </Pill>
+            {row.suppressionActive ? (
+              <Pill theme={theme} tone="danger">
+                {t("drivers.list.suppressionActive", locale)}
+              </Pill>
+            ) : null}
+          </div>
+        </div>
+      ),
+    },
+    {
+      h: t("drivers.col.shift", locale),
+      w: 150,
+      r: ({ row }) => (
+        <div style={stackStyle}>
+          <Pill theme={theme} tone={getStatusTone(row.driver.workState)} dot>
+            {formatOpsCodeLabel(locale, row.driver.workState)}
+          </Pill>
+          <span style={signalDetailStyle}>
+            {formatOpsCodeLabel(locale, row.driver.lifecycleStatus)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("drivers.col.platformsOnline", locale),
+      w: 270,
+      r: ({ row }) =>
+        row.presences.length > 0 ? (
+          <div style={stackStyle}>
+            <div style={chipRowStyle}>
+              {row.presences.map((presence) => (
+                <Pill
+                  key={`${row.driver.driverId}:${presence.platformCode}`}
+                  theme={theme}
+                  tone={presenceTone(presence)}
+                  dot
+                >
+                  {PLATFORM_CODE_REGISTRY[presence.platformCode]?.displayName ??
+                    presence.platformCode}
+                </Pill>
+              ))}
+            </div>
+            <span style={signalDetailStyle}>
+              {row.presences
+                .map((presence) => presenceLabel(presence, locale))
+                .join(" · ")}
+            </span>
+            {row.presenceLoadFailed ? (
+              <span style={{ ...signalDetailStyle, color: "#b45309" }}>
+                {t("drivers.list.platformStatusPartial", locale)}
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <div style={stackStyle}>
+            <span style={{ fontWeight: 600, color: theme.text }}>
+              {t("drivers.list.noPlatformBindings", locale)}
+            </span>
+            <span style={signalDetailStyle}>
+              {row.presenceLoadFailed
+                ? t("drivers.list.platformStatusPartial", locale)
+                : t("drivers.list.bindingMissing", locale)}
+            </span>
+          </div>
+        ),
+    },
+    {
+      h: t("drivers.col.eligibilityBuckets", locale),
+      w: 230,
+      r: ({ row }) => (
+        <div style={stackStyle}>
+          <Pill
+            theme={theme}
+            tone={row.driver.dispatchEligible ? "success" : "warn"}
+          >
+            {row.driver.dispatchEligible
+              ? t("drivers.list.eligibilityClear", locale)
+              : row.driver.eligibilityBlockedReasons
+                  .map((reason) => formatOpsCodeLabel(locale, reason))
+                  .join("、")}
+          </Pill>
+          <span style={signalDetailStyle}>
+            {row.driver.supportedServiceBuckets.join(" · ")}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("drivers.col.activeOrders", locale),
+      w: 220,
+      r: ({ row }) =>
+        row.activeForwardedOrders.length > 0 ? (
+          <div style={stackStyle}>
+            {row.activeForwardedOrders.slice(0, 2).map((order) => (
+              <Link
+                key={order.mirrorOrderId}
+                href={`/dispatch/${encodeURIComponent(order.mirrorOrderId)}`}
+                style={inlineLinkStyle}
+              >
+                {PLATFORM_CODE_REGISTRY[order.platformCode]?.displayName ??
+                  order.platformCode}
+                {" · "}
+                {order.mirrorOrderId}
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div style={stackStyle}>
+            <span style={{ fontWeight: 600, color: theme.text }}>
+              {t("drivers.list.noActiveOrders", locale)}
+            </span>
+            <span style={signalDetailStyle}>
+              {t("drivers.list.activeOrdersFallback", locale)}
+            </span>
+          </div>
+        ),
+    },
+    {
+      h: t("drivers.col.locationSignal", locale),
+      w: 170,
+      r: ({ row }) => {
+        const locationLabel =
+          row.locationState === "unknown"
+            ? t("drivers.list.locationUnknown", locale)
+            : row.locationState === "missing"
+              ? t("drivers.list.locationMissing", locale)
+              : row.locationState === "stale"
+                ? t("drivers.list.locationStale", locale)
+                : t("drivers.list.locationLive", locale);
+
+        return (
+          <div style={stackStyle}>
+            <Pill theme={theme} tone={getLocationTone(row.locationState)} dot>
+              {locationLabel}
+            </Pill>
+            <span style={signalDetailStyle}>
+              {row.location?.recordedAt
+                ? t("driverDetail.summary.locationRecordedAt", locale, {
+                    recordedAt: row.location.recordedAt,
+                  })
+                : t("driverDetail.summary.locationNoSample", locale)}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
+      h: t("common.actions", locale),
+      w: 230,
+      r: ({ row }) => (
+        <div style={actionsWrapStyle}>
+          {row.availableActions.length === 0 ? (
+            <span style={signalDetailStyle}>{t("common.dash", locale)}</span>
+          ) : (
+            row.availableActions.map((action) => {
+              const presentation = getDriverActionPresentation(
+                row,
+                action,
+                locale,
+              );
+
+              if (action.enabled && presentation.href) {
+                return (
+                  <Link
+                    key={action.action}
+                    href={presentation.href}
+                    target={presentation.target}
+                    rel={
+                      presentation.target === "_blank"
+                        ? "noreferrer"
+                        : undefined
+                    }
+                    style={buttonLinkStyle(theme)}
+                    aria-label={presentation.ariaLabel}
+                  >
+                    {presentation.label}
+                  </Link>
+                );
+              }
+
+              return (
+                <span
+                  key={action.action}
+                  style={buttonLinkStyle(theme, "secondary", true)}
+                  title={
+                    action.disabledReasonCode
+                      ? formatOpsCodeLabel(locale, action.disabledReasonCode)
+                      : action.enabled
+                        ? action.action
+                        : undefined
+                  }
+                >
+                  {presentation.label}
+                </span>
+              );
+            })
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  const headerTabDefs: Array<[DriversViewKey, string]> = [
+    ["all", "drivers.tabs.all"],
+    ["available", "drivers.tabs.available"],
+    ["on_trip", "drivers.tabs.onTrip"],
+    ["offline", "drivers.tabs.offline"],
+    ["license_warn", "drivers.tabs.licenseWarn"],
+    ["suppression", "drivers.tabs.suppression"],
+  ];
+  const headerTabs = headerTabDefs.map(([viewKey, labelKey]) => (
+    <Link
+      key={viewKey}
+      href={buildHref(filters, {
+        view: viewKey,
+        page: 1,
+      })}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        textDecoration: "none",
+        color: filters.view === viewKey ? theme.text : theme.textMuted,
+      }}
+    >
+      <span>{t(labelKey, locale)}</span>
+      <Pill
+        theme={theme}
+        tone={
+          viewKey === "available"
+            ? "accent"
+            : viewKey === "license_warn"
+              ? "warn"
+              : viewKey === "suppression"
+                ? "danger"
+                : "neutral"
+        }
+      >
+        {tabCounts[viewKey]}
+      </Pill>
+    </Link>
+  ));
+
   return (
     <>
       <RefreshOnInterval intervalMs={DRIVERS_REFRESH_INTERVAL_MS} />
 
       <PageHeader
+        theme={theme}
         title={locale === "zh" ? "司機" : "Drivers"}
-        eyebrow={locale === "zh" ? "主資料" : "Registry"}
         subtitle={t("drivers.pageSubtitle", locale, {
           count: filteredRows.length,
           total: rows.length,
         })}
+        tabs={headerTabs}
+        activeTab={
+          headerTabs[
+            headerTabDefs.findIndex(([viewKey]) => viewKey === filters.view)
+          ]
+        }
         actions={
-          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
+          <>
+            <Link href="#drivers-filters" style={buttonLinkStyle(theme)}>
+              {t("drivers.actions.filter", locale)}
+            </Link>
             <Link
               href={buildHref(filters, { page: 1 })}
-              style={subtleButtonStyle}
+              style={buttonLinkStyle(theme, "primary")}
             >
               {t("drivers.actions.refresh", locale)}
             </Link>
-            <Link href="#drivers-filters" style={subtleButtonStyle}>
-              {t("drivers.actions.filter", locale)}
-            </Link>
-          </div>
+          </>
         }
-        meta={[
-          {
-            label: t("drivers.meta.refreshTier", locale),
-            value: t("drivers.meta.refreshValue", locale),
-            tone: "info",
-          },
-          {
-            label: t("drivers.meta.generatedAt", locale),
-            value: refreshMetadata?.generatedAt ?? generatedAt,
-            tone: isRefreshMetadataStale(refreshMetadata)
-              ? "warning"
-              : "neutral",
-          },
-          {
-            label: t("drivers.meta.visible", locale),
-            value: t("common.visible", locale, { count: filteredRows.length }),
-            tone: "ops",
-          },
-        ]}
       />
 
-      <div style={shellStyle}>
-        {driversResult.error ? (
-          <div
-            style={{
-              ...alertBaseStyle,
-              background: "#fff1f2",
-              border: "1px solid #fecdd3",
-              color: "#9f1239",
-            }}
-          >
-            <span style={bannerStrongStyle}>
-              {t("drivers.list.registryUnavailable", locale)}
+      <div style={pageBodyStyle}>
+        <div style={signalGridStyle}>
+          <div style={signalCardStyle}>
+            <span style={signalLabelStyle}>
+              {t("drivers.signals.total", locale)}
             </span>
-            {driversResult.error}
-          </div>
-        ) : null}
-
-        {locationsResult.error ? (
-          <div
-            style={{
-              ...alertBaseStyle,
-              background: "#fff7ed",
-              border: "1px solid #fdba74",
-              color: "#9a3412",
-            }}
-          >
-            <span style={bannerStrongStyle}>
-              {t("drivers.list.locationsUnavailable", locale)}
-            </span>
-            {locationsResult.error}
-          </div>
-        ) : null}
-
-        {presenceErrorCount > 0 ? (
-          <div
-            style={{
-              ...alertBaseStyle,
-              background: "#fff7ed",
-              border: "1px solid #fed7aa",
-              color: "#9a3412",
-            }}
-          >
-            <span style={bannerStrongStyle}>
-              {t("drivers.list.platformStatusUnavailable", locale, {
-                count: presenceErrorCount,
+            <span style={signalValueStyle}>{rows.length}</span>
+            <span style={signalDetailStyle}>
+              {t("drivers.signals.totalDetail", locale, {
+                visible: filteredRows.length,
               })}
             </span>
-            {t("drivers.list.platformStatusUnavailableBody", locale)}
           </div>
-        ) : null}
-
-        {refreshBanner ? (
-          <div
-            style={{
-              ...alertBaseStyle,
-              background: refreshBanner.background,
-              border: `1px solid ${refreshBanner.border}`,
-              color: refreshBanner.color,
-            }}
-          >
-            <span style={bannerStrongStyle}>{refreshBanner.title}</span>
-            {refreshBanner.body}
-          </div>
-        ) : null}
-
-        {staleSurge ? (
-          <div
-            style={{
-              ...alertBaseStyle,
-              background: "#fffbeb",
-              border: "1px solid #fcd34d",
-              color: "#92400e",
-            }}
-          >
-            <span style={bannerStrongStyle}>
-              {t("drivers.list.staleSurgeTitle", locale)}
+          <div style={signalCardStyle}>
+            <span style={signalLabelStyle}>
+              {t("drivers.signals.eligible", locale)}
             </span>
-            {t("drivers.list.staleSurgeBody", locale, {
-              stale: staleLocationCount,
-              total: rows.length,
-            })}
-          </div>
-        ) : null}
-
-        <section style={panelStyle}>
-          <div id="drivers-filters" style={filterBarStyle}>
-            <div style={tabsRowStyle}>
-              {(
-                [
-                  ["all", "drivers.tabs.all"],
-                  ["available", "drivers.tabs.available"],
-                  ["on_trip", "drivers.tabs.onTrip"],
-                  ["offline", "drivers.tabs.offline"],
-                  ["license_warn", "drivers.tabs.licenseWarn"],
-                  ["suppression", "drivers.tabs.suppression"],
-                ] as const
-              ).map(([viewKey, labelKey]) => {
-                const active = filters.view === viewKey;
-                return (
-                  <Link
-                    key={viewKey}
-                    href={buildHref(filters, { view: viewKey, page: 1 })}
-                    style={{
-                      ...tabBaseStyle,
-                      borderColor: active ? "#0f172a" : "#dbe4ee",
-                      background: active ? "#0f172a" : "#fff",
-                      color: active ? "#fff" : "#334155",
-                    }}
-                  >
-                    <span>{t(labelKey, locale)}</span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        minWidth: "1.6rem",
-                        justifyContent: "center",
-                        padding: "0.1rem 0.35rem",
-                        borderRadius: "999px",
-                        background: active
-                          ? "rgba(255,255,255,0.16)"
-                          : "#f1f5f9",
-                        color: active ? "#fff" : "#475569",
-                        fontSize: "0.8rem",
-                      }}
-                    >
-                      {tabCounts[viewKey]}
-                    </span>
-                  </Link>
-                );
+            <span style={signalValueStyle}>{eligibleCount}</span>
+            <span style={signalDetailStyle}>
+              {t("drivers.signals.eligibleDetail", locale, {
+                blocked: blockedCount,
               })}
+            </span>
+          </div>
+          <div style={signalCardStyle}>
+            <span style={signalLabelStyle}>
+              {t("drivers.signals.location", locale)}
+            </span>
+            <span style={signalValueStyle}>{liveLocationCount}</span>
+            <span style={signalDetailStyle}>
+              {t("drivers.signals.locationDetail", locale, {
+                stale: staleLocationCount,
+              })}
+            </span>
+          </div>
+          <div style={signalCardStyle}>
+            <span style={signalLabelStyle}>
+              {t("drivers.signals.suppression", locale)}
+            </span>
+            <span style={signalValueStyle}>{suppressedCount}</span>
+            <span style={signalDetailStyle}>
+              {t("drivers.signals.suppressionDetail", locale, {
+                degraded: presenceErrorCount,
+              })}
+            </span>
+          </div>
+        </div>
+
+        <div style={bannerStackStyle}>
+          {driversResult.error
+            ? renderBanner(
+                t("drivers.list.registryUnavailable", locale),
+                driversResult.error,
+                "danger",
+              )
+            : null}
+          {locationsResult.error
+            ? renderBanner(
+                t("drivers.list.locationsUnavailable", locale),
+                locationsResult.error,
+                "warn",
+              )
+            : null}
+          {presenceErrorCount > 0
+            ? renderBanner(
+                t("drivers.list.platformStatusUnavailable", locale, {
+                  count: presenceErrorCount,
+                }),
+                t("drivers.list.platformStatusUnavailableBody", locale),
+                "warn",
+              )
+            : null}
+          {refreshBanner
+            ? renderBanner(
+                refreshBanner.title,
+                refreshBanner.body,
+                refreshBanner.tone,
+              )
+            : null}
+          {staleSurge
+            ? renderBanner(
+                t("drivers.list.staleSurgeTitle", locale),
+                t("drivers.list.staleSurgeBody", locale, {
+                  stale: staleLocationCount,
+                  total: rows.length,
+                }),
+                "warn",
+              )
+            : null}
+        </div>
+
+        <Card
+          theme={theme}
+          title={t("drivers.filters.title", locale)}
+          subtitle={t("drivers.filters.subtitle", locale)}
+          actions={
+            <div style={footerTextStyle}>
+              {t("drivers.meta.refreshValue", locale)}
+              {" · "}
+              {refreshMetadata?.generatedAt ?? generatedAt}
             </div>
-
-            <form method="get" style={filterRowStyle}>
+          }
+        >
+          <form id="drivers-filters" method="get" style={filterGridStyle}>
+            <label style={fieldLabelStyle}>
+              <span>{t("drivers.filters.searchLabel", locale)}</span>
               <input
                 name="q"
                 defaultValue={filters.query}
                 placeholder={t("drivers.filters.searchPlaceholder", locale)}
-                style={searchInputStyle}
+                style={filterControlStyle}
               />
+            </label>
+            <label style={fieldLabelStyle}>
+              <span>{t("drivers.filters.shiftLabel", locale)}</span>
               <select
                 name="shift"
                 defaultValue={filters.shift}
-                style={selectStyle}
+                style={filterControlStyle}
               >
                 <option value="all">
                   {t("drivers.filters.allShift", locale)}
@@ -1216,10 +1502,13 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                   </option>
                 ))}
               </select>
+            </label>
+            <label style={fieldLabelStyle}>
+              <span>{t("drivers.filters.platformLabel", locale)}</span>
               <select
                 name="platform"
                 defaultValue={filters.platform}
-                style={selectStyle}
+                style={filterControlStyle}
               >
                 <option value="all">
                   {t("drivers.filters.allPlatforms", locale)}
@@ -1231,10 +1520,13 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                   </option>
                 ))}
               </select>
+            </label>
+            <label style={fieldLabelStyle}>
+              <span>{t("drivers.filters.eligibilityLabel", locale)}</span>
               <select
                 name="eligibility"
                 defaultValue={filters.eligibility}
-                style={selectStyle}
+                style={filterControlStyle}
               >
                 <option value="all">
                   {t("drivers.filters.allEligibility", locale)}
@@ -1246,355 +1538,54 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                   {t("drivers.filters.blockedOnly", locale)}
                 </option>
               </select>
-              <button type="submit" style={primaryButtonStyle}>
+            </label>
+            <div style={filterActionsStyle}>
+              <button type="submit" style={buttonLinkStyle(theme, "primary")}>
                 {t("common.search", locale)}
               </button>
-              <Link href="/drivers" style={subtleButtonStyle}>
+            </div>
+            <div style={filterActionsStyle}>
+              <Link href="/drivers" style={buttonLinkStyle(theme)}>
                 {t("drivers.filters.reset", locale)}
               </Link>
-            </form>
-          </div>
+            </div>
+          </form>
+        </Card>
 
+        <Card
+          theme={theme}
+          title={t("drivers.registry.title", locale)}
+          subtitle={t("drivers.registry.subtitle", locale)}
+        >
           {emptyStateModel ? (
             renderEmptyState(emptyStateModel, locale)
           ) : (
-            <>
-              <DataTable
-                density="compact"
-                tone="ops"
-                minWidth={1220}
-                columns={[
-                  { label: t("drivers.col.driver", locale), width: "220px" },
-                  { label: t("drivers.col.shift", locale), width: "140px" },
-                  {
-                    label: t("drivers.col.platformsOnline", locale),
-                    width: "260px",
-                  },
-                  {
-                    label: t("drivers.col.eligibilityBuckets", locale),
-                    width: "200px",
-                  },
-                  {
-                    label: t("drivers.col.activeOrders", locale),
-                    width: "180px",
-                  },
-                  {
-                    label: t("drivers.col.locationSignal", locale),
-                    width: "150px",
-                  },
-                  { label: t("common.actions", locale), width: "220px" },
-                ]}
-              >
-                {pagedRows.map((row) => {
-                  const locationLabel =
-                    row.locationState === "unknown"
-                      ? t("drivers.list.locationUnknown", locale)
-                      : row.locationState === "missing"
-                        ? t("drivers.list.locationMissing", locale)
-                        : row.locationState === "stale"
-                          ? t("drivers.list.locationStale", locale)
-                          : t("drivers.list.locationLive", locale);
+            <div style={{ display: "grid", gap: 14 }}>
+              <Table theme={theme} columns={tableColumns} rows={tableRows} />
 
-                  return (
-                    <Tr
-                      key={row.driver.driverId}
-                      highlighted={row.suppressionActive}
-                    >
-                      <Td density="compact">
-                        <DataCellStack
-                          primary={
-                            <Link
-                              href={`/drivers/${encodeURIComponent(row.driver.driverId)}`}
-                              style={{
-                                color: "#0f172a",
-                                textDecoration: "none",
-                                fontWeight: 700,
-                              }}
-                            >
-                              {row.driver.name}
-                            </Link>
-                          }
-                          secondary={`${row.driver.driverId} · ${formatOpsCodeLabel(
-                            locale,
-                            row.driver.lifecycleStatus,
-                          )}${row.driver.phone ? ` · ${row.driver.phone}` : ""}`}
-                          tertiary={
-                            row.suppressionActive ? (
-                              row.matchingSuppression?.sourceIncidentId ? (
-                                <Link
-                                  href={`/incidents/${encodeURIComponent(row.matchingSuppression.sourceIncidentId)}`}
-                                  style={{
-                                    color: "#b45309",
-                                    textDecoration: "none",
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  {t("drivers.list.suppressionActive", locale)}
-                                </Link>
-                              ) : (
-                                t("drivers.list.suppressionActive", locale)
-                              )
-                            ) : (
-                              row.driver.supportedServiceBuckets.join(" · ")
-                            )
-                          }
-                        />
-                      </Td>
-                      <Td density="compact">
-                        <div style={{ display: "grid", gap: "0.35rem" }}>
-                          <StatusChip
-                            tone={workStateTone(row.driver.workState)}
-                            authorityLabel={locale === "zh" ? "班次" : "shift"}
-                            label={formatOpsCodeLabel(
-                              locale,
-                              row.driver.workState,
-                            )}
-                          />
-                          <StatusChip
-                            tone={
-                              row.driver.licensesValid ? "success" : "warning"
-                            }
-                            authorityLabel={
-                              locale === "zh" ? "license" : "license"
-                            }
-                            label={
-                              row.driver.licensesValid
-                                ? t("common.valid", locale)
-                                : t("common.invalid", locale)
-                            }
-                          />
-                        </div>
-                      </Td>
-                      <Td density="compact">
-                        {row.presences.length > 0 ? (
-                          <DataCellStack
-                            primary={
-                              <div style={actionListStyle}>
-                                {row.presences.map((presence) => (
-                                  <StatusChip
-                                    key={`${row.driver.driverId}:${presence.platformCode}`}
-                                    tone={presenceTone(presence)}
-                                    authorityLabel={
-                                      PLATFORM_CODE_REGISTRY[
-                                        presence.platformCode
-                                      ]?.displayName ?? presence.platformCode
-                                    }
-                                    label={
-                                      presence.reauthRequired
-                                        ? locale === "zh"
-                                          ? "reauth"
-                                          : "reauth"
-                                        : formatOpsCodeLabel(
-                                            locale,
-                                            presence.status,
-                                          )
-                                    }
-                                  />
-                                ))}
-                              </div>
-                            }
-                            secondary={row.presences
-                              .map((presence) =>
-                                presenceLabel(presence, locale),
-                              )
-                              .join(" · ")}
-                            tertiary={
-                              row.presenceLoadFailed
-                                ? t(
-                                    "drivers.list.platformStatusPartial",
-                                    locale,
-                                  )
-                                : undefined
-                            }
-                          />
-                        ) : (
-                          <DataCellStack
-                            primary={t(
-                              "drivers.list.noPlatformBindings",
-                              locale,
-                            )}
-                            secondary={
-                              row.presenceLoadFailed
-                                ? t(
-                                    "drivers.list.platformStatusPartial",
-                                    locale,
-                                  )
-                                : t("drivers.list.bindingMissing", locale)
-                            }
-                          />
-                        )}
-                      </Td>
-                      <Td density="compact" muted={row.driver.dispatchEligible}>
-                        <DataCellStack
-                          primary={
-                            row.driver.dispatchEligible
-                              ? t("drivers.list.eligibilityClear", locale)
-                              : row.driver.eligibilityBlockedReasons
-                                  .map(
-                                    (
-                                      reason: DriverRegistryRecord["eligibilityBlockedReasons"][number],
-                                    ) => formatOpsCodeLabel(locale, reason),
-                                  )
-                                  .join("、")
-                          }
-                          secondary={row.driver.supportedServiceBuckets.join(
-                            " · ",
-                          )}
-                        />
-                      </Td>
-                      <Td density="compact">
-                        {row.activeForwardedOrders.length > 0 ? (
-                          <div style={{ display: "grid", gap: "0.35rem" }}>
-                            {row.activeForwardedOrders
-                              .slice(0, 2)
-                              .map((order) => (
-                                <Link
-                                  key={order.mirrorOrderId}
-                                  href={`/dispatch/${encodeURIComponent(order.mirrorOrderId)}`}
-                                  style={{
-                                    color: "#1d4ed8",
-                                    textDecoration: "none",
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  {PLATFORM_CODE_REGISTRY[order.platformCode]
-                                    ?.displayName ?? order.platformCode}
-                                  {" · "}
-                                  {order.mirrorOrderId}
-                                </Link>
-                              ))}
-                          </div>
-                        ) : (
-                          <DataCellStack
-                            primary={t("drivers.list.noActiveOrders", locale)}
-                            secondary={t(
-                              "drivers.list.activeOrdersFallback",
-                              locale,
-                            )}
-                          />
-                        )}
-                      </Td>
-                      <Td density="compact">
-                        <DataCellStack
-                          primary={
-                            <StatusChip
-                              tone={locationTone(row.locationState)}
-                              authorityLabel={
-                                locale === "zh" ? "定位" : "location"
-                              }
-                              label={locationLabel}
-                            />
-                          }
-                          secondary={
-                            row.location?.recordedAt
-                              ? t(
-                                  "driverDetail.summary.locationRecordedAt",
-                                  locale,
-                                  {
-                                    recordedAt: row.location.recordedAt,
-                                  },
-                                )
-                              : undefined
-                          }
-                        />
-                      </Td>
-                      <Td density="compact">
-                        <div style={actionListStyle}>
-                          {row.availableActions.map((action) => {
-                            const presentation = getDriverActionPresentation(
-                              row,
-                              action,
-                              locale,
-                            );
-
-                            if (action.enabled && presentation.href) {
-                              return (
-                                <Link
-                                  key={action.action}
-                                  href={presentation.href}
-                                  target={presentation.target}
-                                  rel={
-                                    presentation.target === "_blank"
-                                      ? "noreferrer"
-                                      : undefined
-                                  }
-                                  style={actionLinkStyle}
-                                  aria-label={presentation.ariaLabel}
-                                >
-                                  {presentation.label}
-                                </Link>
-                              );
-                            }
-
-                            return (
-                              <span
-                                key={action.action}
-                                style={disabledActionStyle}
-                                title={
-                                  action.disabledReasonCode
-                                    ? formatOpsCodeLabel(
-                                        locale,
-                                        action.disabledReasonCode,
-                                      )
-                                    : action.enabled
-                                      ? action.action
-                                      : undefined
-                                }
-                              >
-                                {presentation.label}
-                              </span>
-                            );
-                          })}
-                          {row.availableActions.length === 0 ? (
-                            <span style={disabledActionStyle}>
-                              {t("common.dash", locale)}
-                            </span>
-                          ) : null}
-                        </div>
-                      </Td>
-                    </Tr>
-                  );
-                })}
-              </DataTable>
-
-              <div style={pageFooterStyle}>
-                <span style={{ color: "#64748b", fontSize: "0.88rem" }}>
+              <div style={footerStyle}>
+                <span style={footerTextStyle}>
                   {t("drivers.registrySummary", locale, {
-                    eligible: rows.filter((row) => row.driver.dispatchEligible)
-                      .length,
-                    blocked:
-                      rows.length -
-                      rows.filter((row) => row.driver.dispatchEligible).length,
+                    eligible: eligibleCount,
+                    blocked: blockedCount,
                     live: liveLocationCount,
                     stale: staleLocationCount,
                   })}
                 </span>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "0.6rem",
-                    alignItems: "center",
-                  }}
-                >
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <Link
                     href={buildHref(filters, {
                       page: Math.max(1, currentPage - 1),
                     })}
-                    style={{
-                      ...subtleButtonStyle,
-                      pointerEvents: currentPage === 1 ? "none" : "auto",
-                      opacity: currentPage === 1 ? 0.45 : 1,
-                    }}
+                    style={buttonLinkStyle(
+                      theme,
+                      "secondary",
+                      currentPage === 1,
+                    )}
                   >
                     {t("drivers.pagination.prev", locale)}
                   </Link>
-                  <span
-                    style={{
-                      color: "#334155",
-                      fontSize: "0.88rem",
-                      fontWeight: 600,
-                    }}
-                  >
+                  <span style={footerTextStyle}>
                     {t("drivers.pagination.summary", locale, {
                       page: currentPage,
                       totalPages,
@@ -1604,20 +1595,19 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                     href={buildHref(filters, {
                       page: Math.min(totalPages, currentPage + 1),
                     })}
-                    style={{
-                      ...subtleButtonStyle,
-                      pointerEvents:
-                        currentPage === totalPages ? "none" : "auto",
-                      opacity: currentPage === totalPages ? 0.45 : 1,
-                    }}
+                    style={buttonLinkStyle(
+                      theme,
+                      "secondary",
+                      currentPage === totalPages,
+                    )}
                   >
                     {t("drivers.pagination.next", locale)}
                   </Link>
                 </div>
               </div>
-            </>
+            </div>
           )}
-        </section>
+        </Card>
       </div>
     </>
   );
