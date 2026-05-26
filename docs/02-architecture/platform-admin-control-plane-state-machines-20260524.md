@@ -138,6 +138,7 @@ GET  /api/admin/tenants/{tenantId}/readiness
 GET  /api/admin/partners/{entrySlug}/actions
 POST /api/admin/partners/{entrySlug}/credentials/issue
 POST /api/admin/partners/{entrySlug}/credentials/revoke
+POST /api/admin/pricing/{versionId}/request-review
 POST /api/admin/pricing/{versionId}/publish
 ```
 

@@ -239,6 +239,22 @@ export class PlatformAdminController {
     );
   }
 
+  @Post("pricing-rules/:ruleId/request-review")
+  requestPlatformPricingRuleReview(
+    @Param("ruleId") ruleId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.requestPlatformPricingRuleReview(
+        ruleId,
+        requestId,
+        this.requireActorId(identity),
+      ),
+      requestId,
+    );
+  }
+
   @Post("pricing-rules/:ruleId/publish")
   publishPlatformPricingRule(
     @Param("ruleId") ruleId: string,

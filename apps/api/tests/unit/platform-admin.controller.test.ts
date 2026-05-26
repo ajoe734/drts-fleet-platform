@@ -18,6 +18,42 @@ function platformAdminIdentity(actorId: string): BootstrapRequestIdentity {
 }
 
 describe("PlatformAdminController", () => {
+  it("routes pricing draft review requests through the authenticated actor", () => {
+    const platformAdminService = {
+      requestPlatformPricingRuleReview: vi.fn(() => ({
+        ruleId: "rule-001",
+        status: "review_required",
+      })),
+    };
+    const controller = new PlatformAdminController(
+      platformAdminService as never,
+    );
+
+    const response = controller.requestPlatformPricingRuleReview(
+      "rule-001",
+      platformAdminIdentity("platform-admin-jwt-200"),
+      "req-pricing-controller-review-001",
+    );
+
+    expect(
+      platformAdminService.requestPlatformPricingRuleReview,
+    ).toHaveBeenCalledWith(
+      "rule-001",
+      "req-pricing-controller-review-001",
+      "platform-admin-jwt-200",
+    );
+    expect(response).toEqual({
+      data: {
+        ruleId: "rule-001",
+        status: "review_required",
+      },
+      meta: {
+        requestId: "req-pricing-controller-review-001",
+        timestamp: expect.any(String),
+      },
+    });
+  });
+
   it("returns an ActionReceipt envelope when publishing a pricing rule", () => {
     const platformAdminService = {
       publishPlatformPricingRule: vi.fn(() => ({

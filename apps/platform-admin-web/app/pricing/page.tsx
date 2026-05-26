@@ -52,6 +52,7 @@ type FeePlanFormState = {
 type PublishRuleFormState = {
   effectiveFrom: string;
   effectiveTo: string;
+  reason: string;
 };
 
 type PricingRuleRow = PlatformPricingRuleRecord &
@@ -80,6 +81,7 @@ const EMPTY_FEE_PLAN_FORM: FeePlanFormState = {
 const EMPTY_PUBLISH_RULE_FORM: PublishRuleFormState = {
   effectiveFrom: "",
   effectiveTo: "",
+  reason: "",
 };
 
 const th = buildCanvasTheme({
@@ -417,6 +419,9 @@ export default function PricingPage() {
   >(null);
   const [creatingPricingRule, setCreatingPricingRule] = useState(false);
   const [publishingRuleId, setPublishingRuleId] = useState<string | null>(null);
+  const [requestingReviewRuleId, setRequestingReviewRuleId] = useState<
+    string | null
+  >(null);
   const [publishingFeePlan, setPublishingFeePlan] = useState(false);
 
   const copy =
@@ -433,14 +438,24 @@ export default function PricingPage() {
             "Platform-owned pricing rules remain the only fare authority for quoted fare.",
           governanceTitle: "Override governance",
           governanceSubtitle:
-            "Quoted-fare authority, manual override scope, and draft publish windows.",
+            "Quoted-fare authority, manual override scope, and pricing publish gates.",
           governanceEmpty:
-            "Select a draft pricing rule to configure effective dates before publish.",
-          governanceNoDrafts: "No draft pricing rules are waiting for publish.",
-          governanceDraftQueue: "Draft publish queue",
+            "Select a review-required pricing rule to configure effective dates before publish.",
+          governanceNoDrafts:
+            "No draft pricing rules are waiting for review submission.",
+          governanceDraftQueue: "Draft review queue",
+          governanceDraftQueueCopy:
+            "Draft rules must enter review_required before any publish action.",
+          governanceReviewQueue: "Ready-to-publish queue",
+          governanceReviewQueueCopy:
+            "Only review_required rules can be scheduled or published.",
           governancePublishWindow: "Publish window",
           governancePublishWindowCopy:
             "Leave either field blank to keep the draft's stored effective window.",
+          governancePublishReason: "Publish reason",
+          governancePublishReasonCopy:
+            "High-risk publish actions require a reason and always write audit evidence.",
+          governancePublishReasonRequired: "A publish reason is required.",
           feePlansTitle: "Driver fee plans",
           feePlansSubtitle:
             "Immutable settlement plans used when generating driver statements and payout trails.",
@@ -452,6 +467,9 @@ export default function PricingPage() {
           refresh: "Refresh",
           configureDraft: "Configure draft",
           draftSelected: "Selected",
+          requestReview: "Request review",
+          requestingReview: "Requesting review...",
+          publishReadyRule: "Publish reviewed rule",
           openEnded: "open-ended",
           notAllowed: "Not allowed",
           bucketCards: [
@@ -522,13 +540,23 @@ export default function PricingPage() {
             "平台自有 pricing rule 是 quoted fare 的唯一規則真值。",
           governanceTitle: "覆寫治理",
           governanceSubtitle:
-            "quoted fare authority、manual override 範圍與 draft 發布視窗。",
-          governanceEmpty: "請先選一條 draft pricing rule，再設定發布時間。",
-          governanceNoDrafts: "目前沒有待發布的定價草稿。",
-          governanceDraftQueue: "待發布草稿",
+            "quoted fare authority、manual override 範圍與 pricing 發布關卡。",
+          governanceEmpty:
+            "請先選一條 review_required pricing rule，再設定發布時間。",
+          governanceNoDrafts: "目前沒有待送審的定價草稿。",
+          governanceDraftQueue: "待送審草稿",
+          governanceDraftQueueCopy:
+            "所有 draft 規則都必須先進入 review_required 才能發布。",
+          governanceReviewQueue: "待發布規則",
+          governanceReviewQueueCopy:
+            "只有 review_required 規則可以排程或立即發布。",
           governancePublishWindow: "發布視窗",
           governancePublishWindowCopy:
             "任一欄位留空時，會沿用草稿原本儲存的生效區間。",
+          governancePublishReason: "發布原因",
+          governancePublishReasonCopy:
+            "高風險發布動作必須填寫原因，並會寫入 audit 證據。",
+          governancePublishReasonRequired: "必須填寫發布原因。",
           feePlansTitle: "司機費用方案",
           feePlansSubtitle:
             "發布後不可變更，供 driver statement 與 payout trail 使用。",
@@ -538,6 +566,9 @@ export default function PricingPage() {
           refresh: "重新整理",
           configureDraft: "設定發布",
           draftSelected: "已選取",
+          requestReview: "送審",
+          requestingReview: "送審中...",
+          publishReadyRule: "發布已送審規則",
           openEnded: "未設定截止",
           notAllowed: "不允許",
           bucketCards: [
@@ -638,6 +669,11 @@ export default function PricingPage() {
   }, [filter, sortedRules]);
 
   const draftRules = useMemo(
+    () => sortedRules.filter((rule) => rule.status === "draft"),
+    [sortedRules],
+  );
+
+  const reviewRequiredRules = useMemo(
     () => sortedRules.filter((rule) => rule.status === "review_required"),
     [sortedRules],
   );
@@ -647,10 +683,11 @@ export default function PricingPage() {
     [sortedRules],
   );
 
-  const selectedDraftRule = useMemo(
+  const selectedReviewRule = useMemo(
     () =>
-      draftRules.find((rule) => rule.ruleId === publishRuleFormRuleId) ?? null,
-    [draftRules, publishRuleFormRuleId],
+      reviewRequiredRules.find((rule) => rule.ruleId === publishRuleFormRuleId) ??
+      null,
+    [reviewRequiredRules, publishRuleFormRuleId],
   );
 
   const ruleCounts = useMemo(
@@ -725,6 +762,7 @@ export default function PricingPage() {
     setPublishRuleForm({
       effectiveFrom: normalizedEffectiveFrom.localValue,
       effectiveTo: normalizedEffectiveTo.localValue,
+      reason: "",
     });
   }
 
@@ -764,6 +802,12 @@ export default function PricingPage() {
       return;
     }
 
+    const normalizedReason = publishRuleForm.reason.trim();
+    if (!normalizedReason) {
+      setPublishRuleFormError(copy.governancePublishReasonRequired);
+      return;
+    }
+
     setPublishingRuleId(ruleId);
     setError(null);
     setPublishRuleFormError(null);
@@ -771,7 +815,7 @@ export default function PricingPage() {
       await client.publishPlatformPricingRule(ruleId, {
         effectiveFrom: normalizedEffectiveFrom.isoValue,
         effectiveTo: normalizedEffectiveTo.isoValue,
-        publishedBy: "platform-admin-web",
+        reason: normalizedReason,
       });
       closePublishRuleForm();
       await loadData();
@@ -779,6 +823,19 @@ export default function PricingPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setPublishingRuleId(null);
+    }
+  }
+
+  async function handleRequestReview(ruleId: string) {
+    setRequestingReviewRuleId(ruleId);
+    setError(null);
+    try {
+      await client.requestPlatformPricingRuleReview(ruleId);
+      await loadData();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRequestingReviewRuleId(null);
     }
   }
 
@@ -1013,15 +1070,15 @@ export default function PricingPage() {
               theme={th}
               variant="primary"
               icon="check"
-              disabled={draftRules.length === 0}
+              disabled={reviewRequiredRules.length === 0}
               onClick={() => {
-                const nextDraft = selectedDraftRule ?? draftRules[0];
+                const nextDraft = selectedReviewRule ?? reviewRequiredRules[0];
                 if (nextDraft) {
                   openPublishRuleForm(nextDraft);
                 }
               }}
             >
-              {t("pricing.publishDraft")}
+              {copy.publishReadyRule}
             </CanvasBtn>
           </>
         }
@@ -1302,7 +1359,7 @@ export default function PricingPage() {
 
               <div style={sectionIntroStyle}>
                 <h3 style={sectionTitleStyle}>{copy.governanceDraftQueue}</h3>
-                <p style={sectionCopyStyle}>{copy.governanceSubtitle}</p>
+                <p style={sectionCopyStyle}>{copy.governanceDraftQueueCopy}</p>
               </div>
 
               <div style={{ height: 10 }} />
@@ -1310,6 +1367,36 @@ export default function PricingPage() {
               {draftRules.length > 0 ? (
                 <div style={draftSelectorStyle}>
                   {draftRules.map((rule) => (
+                    <CanvasBtn
+                      key={rule.ruleId}
+                      theme={th}
+                      size="xs"
+                      variant="secondary"
+                      disabled={requestingReviewRuleId === rule.ruleId}
+                      onClick={() => void handleRequestReview(rule.ruleId)}
+                    >
+                      {requestingReviewRuleId === rule.ruleId
+                        ? copy.requestingReview
+                        : `${rule.version} · ${copy.requestReview}`}
+                    </CanvasBtn>
+                  ))}
+                </div>
+              ) : (
+                <p style={helperTextStyle}>{copy.governanceNoDrafts}</p>
+              )}
+
+              <div style={{ height: 16 }} />
+
+              <div style={sectionIntroStyle}>
+                <h3 style={sectionTitleStyle}>{copy.governanceReviewQueue}</h3>
+                <p style={sectionCopyStyle}>{copy.governanceReviewQueueCopy}</p>
+              </div>
+
+              <div style={{ height: 10 }} />
+
+              {reviewRequiredRules.length > 0 ? (
+                <div style={draftSelectorStyle}>
+                  {reviewRequiredRules.map((rule) => (
                     <CanvasBtn
                       key={rule.ruleId}
                       theme={th}
@@ -1326,7 +1413,7 @@ export default function PricingPage() {
                   ))}
                 </div>
               ) : (
-                <p style={helperTextStyle}>{copy.governanceNoDrafts}</p>
+                <p style={helperTextStyle}>{copy.governanceEmpty}</p>
               )}
 
               <div style={{ height: 16 }} />
@@ -1344,14 +1431,14 @@ export default function PricingPage() {
                 </>
               ) : null}
 
-              {selectedDraftRule ? (
+              {selectedReviewRule ? (
                 <div style={composerStyle}>
                   <div style={sectionIntroStyle}>
                     <h3 style={sectionTitleStyle}>
                       {copy.governancePublishWindow}
                     </h3>
                     <p style={sectionCopyStyle}>
-                      {selectedDraftRule.ruleName} · {selectedDraftRule.version}
+                      {selectedReviewRule.ruleName} · {selectedReviewRule.version}
                     </p>
                   </div>
 
@@ -1398,12 +1485,36 @@ export default function PricingPage() {
                     {copy.governancePublishWindowCopy}
                   </p>
 
+                  <CanvasField
+                    theme={th}
+                    label={copy.governancePublishReason}
+                    required
+                  >
+                    <textarea
+                      value={publishRuleForm.reason}
+                      onChange={(event) => {
+                        setPublishRuleFormError(null);
+                        setPublishRuleForm((current) => ({
+                          ...current,
+                          reason: event.target.value,
+                        }));
+                      }}
+                      rows={3}
+                      required
+                      style={textAreaStyle}
+                    />
+                  </CanvasField>
+
+                  <p style={helperTextStyle}>
+                    {copy.governancePublishReasonCopy}
+                  </p>
+
                   <div style={formActionsStyle}>
                     <CanvasBtn
                       theme={th}
                       variant="secondary"
                       onClick={closePublishRuleForm}
-                      disabled={publishingRuleId === selectedDraftRule.ruleId}
+                      disabled={publishingRuleId === selectedReviewRule.ruleId}
                     >
                       {t("common.cancel")}
                     </CanvasBtn>
@@ -1411,12 +1522,12 @@ export default function PricingPage() {
                       theme={th}
                       variant="primary"
                       icon="check"
-                      disabled={publishingRuleId === selectedDraftRule.ruleId}
+                      disabled={publishingRuleId === selectedReviewRule.ruleId}
                       onClick={() =>
-                        void handlePublishRule(selectedDraftRule.ruleId)
+                        void handlePublishRule(selectedReviewRule.ruleId)
                       }
                     >
-                      {publishingRuleId === selectedDraftRule.ruleId
+                      {publishingRuleId === selectedReviewRule.ruleId
                         ? t("pricing.publishing")
                         : t("pricing.confirmPublish")}
                     </CanvasBtn>

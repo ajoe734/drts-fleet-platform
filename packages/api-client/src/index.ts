@@ -2090,6 +2090,14 @@ export class ApiClient {
     );
   }
 
+  async requestPlatformPricingRuleReview(
+    ruleId: string,
+  ): Promise<PlatformPricingRuleRecord> {
+    return this.post<PlatformPricingRuleRecord>(
+      `/api/platform-admin/pricing-rules/${ruleId}/request-review`,
+    );
+  }
+
   async publishPlatformPricingRule(
     ruleId: string,
     command: PublishPlatformPricingRuleCommand,
