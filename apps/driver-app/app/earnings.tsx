@@ -402,6 +402,25 @@ function DetailMetric({
   );
 }
 
+function EarningsTopBar({ onBack }: { onBack: () => void }) {
+  return (
+    <View style={styles.topBar}>
+      <Btn
+        theme={THEME}
+        variant="ghost"
+        size="xs"
+        icon={<Ionicons name="chevron-back" size={14} color={THEME.text} />}
+        onPress={onBack}
+      >
+        返回
+      </Btn>
+      <Pill theme={THEME} tone="warn">
+        refresh tier · manual
+      </Pill>
+    </View>
+  );
+}
+
 export default function EarningsScreen() {
   const router = useRouter();
   const [period, setPeriod] = useState<DriverEarningsPeriod>("today");
@@ -522,6 +541,53 @@ export default function EarningsScreen() {
     );
   };
 
+  const goBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/");
+  };
+
+  const runDashboardAction = async (
+    action: ResourceActionDescriptor | null,
+    options?: {
+      statement?: DriverEarningsStatementListItem;
+      managerLink?: CrossAppResourceLink;
+    },
+  ) => {
+    if (!action) {
+      return;
+    }
+
+    if (!action.enabled) {
+      explainDisabledAction(action);
+      return;
+    }
+
+    switch (action.action) {
+      case "refresh_earnings":
+        await onRefresh();
+        return;
+      case "view_statement_detail":
+        if (options?.statement) {
+          await openStatementDetail(options.statement);
+          return;
+        }
+        break;
+      case "open_manager_review":
+        if (options?.managerLink) {
+          await openManagerReview(options.managerLink);
+          return;
+        }
+        break;
+      default:
+        break;
+    }
+
+    Alert.alert("動作尚未連線", "這個收益頁操作目前沒有對應的執行流程。");
+  };
+
   const refreshAction = findAction(
     dashboard?.availableActions,
     "refresh_earnings",
@@ -536,6 +602,7 @@ export default function EarningsScreen() {
   if (loading && dashboard === null && error === null) {
     return (
       <Shell theme={THEME} contentContainerStyle={styles.loadingShellContent}>
+        <EarningsTopBar onBack={goBack} />
         <PageHeader
           theme={THEME}
           title={driverStrings.earnings.title}
@@ -586,6 +653,7 @@ export default function EarningsScreen() {
           />
         }
       >
+        <EarningsTopBar onBack={goBack} />
         <PageHeader
           theme={THEME}
           title={driverStrings.earnings.title}
@@ -647,17 +715,11 @@ export default function EarningsScreen() {
             size="sm"
             disabled={!emptyAction.enabled}
             onPress={() => {
-              if (!emptyAction.enabled) {
-                explainDisabledAction(emptyAction);
-                return;
-              }
-              if (emptyAction.action === "refresh_earnings") {
-                void onRefresh();
-                return;
-              }
               if (emptyReason === "not_provisioned") {
                 router.push("/settings");
+                return;
               }
+              void runDashboardAction(emptyAction);
             }}
           >
             {emptyContent.actionLabel}
@@ -703,6 +765,7 @@ export default function EarningsScreen() {
           />
         }
       >
+        <EarningsTopBar onBack={goBack} />
         <PageHeader
           theme={THEME}
           title={driverStrings.earnings.title}
@@ -714,7 +777,7 @@ export default function EarningsScreen() {
               size="sm"
               disabled={!refreshEnabled || refreshing}
               icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
-              onPress={() => void onRefresh()}
+              onPress={() => void runDashboardAction(refreshAction)}
             >
               重新整理
             </Btn>
@@ -1035,7 +1098,7 @@ export default function EarningsScreen() {
                             variant="ghost"
                             size="xs"
                             disabled={!action.enabled}
-                            onPress={() => explainDisabledAction(action)}
+                            onPress={() => void runDashboardAction(action)}
                           >
                             {getActionLabel(action)}
                           </Btn>
@@ -1105,11 +1168,9 @@ export default function EarningsScreen() {
               size="sm"
               disabled={!reconciliationAction?.enabled}
               onPress={() =>
-                reconciliationAction?.enabled
-                  ? void openManagerReview(
-                      dashboard.reconciliationIssue!.managerReviewLink,
-                    )
-                  : explainDisabledAction(reconciliationAction)
+                void runDashboardAction(reconciliationAction, {
+                  managerLink: dashboard.reconciliationIssue!.managerReviewLink,
+                })
               }
             >
               {getActionLabel(reconciliationAction)}
@@ -1154,7 +1215,15 @@ export default function EarningsScreen() {
                     <Pressable
                       key={statement.statementId}
                       disabled={!canView}
-                      onPress={() => void openStatementDetail(statement)}
+                      onPress={() =>
+                        void runDashboardAction(
+                          findAction(
+                            statement.availableActions,
+                            "view_statement_detail",
+                          ),
+                          { statement },
+                        )
+                      }
                       style={({ pressed }) => [
                         styles.statementRow,
                         index < dashboard.statements.length - 1
@@ -1318,6 +1387,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
     minHeight: 220,
+  },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
   },
   loadingLabel: {
     fontSize: 13,
