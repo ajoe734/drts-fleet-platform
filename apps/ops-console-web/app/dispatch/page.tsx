@@ -464,6 +464,21 @@ function formatWindow(order: OwnedOrderRecord, locale: Locale) {
   return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
 }
 
+function formatDispatchCode(
+  locale: Locale,
+  value: string | null | undefined,
+  fallback = "—",
+) {
+  return value ? formatOpsCodeLabel(locale, value) : fallback;
+}
+
+function formatRefreshSummary(refresh: UiRefreshMetadata, locale: Locale) {
+  return `${formatDispatchCode(locale, refresh.dataFreshness)} · ${formatDateTime(
+    locale,
+    refresh.generatedAt,
+  )} · ${formatDispatchCode(locale, refresh.source)}`;
+}
+
 function getAddressLabel(
   address: OwnedOrderRecord["pickup"] | OwnedOrderRecord["dropoff"],
 ) {
@@ -717,27 +732,46 @@ function getAdapterTone(status: AdapterHealthRecord["status"]): CanvasTone {
 function getMismatchSummary(
   order: ForwardedOrderRecord,
   issue: ForwarderReconciliationIssue | undefined,
+  locale: Locale,
 ) {
   const mismatchCount =
     issue?.reconciliationJob.mismatchCount ??
     order.reconciliationJob?.mismatchCount ??
     0;
   if (mismatchCount > 0) {
-    return { label: `${mismatchCount} mismatch`, tone: "warn" as CanvasTone };
+    return {
+      label:
+        locale === "zh"
+          ? `${mismatchCount} 筆不一致`
+          : `${mismatchCount} mismatch`,
+      tone: "warn" as CanvasTone,
+    };
   }
   if (order.manualFallback.required) {
     return {
-      label: order.manualFallback.reason ?? "manual_fallback",
+      label: formatDispatchCode(
+        locale,
+        order.manualFallback.reason ?? "manual_fallback",
+      ),
       tone: "warn" as CanvasTone,
     };
   }
   if (order.lastSyncError) {
-    return { label: order.lastSyncError.code, tone: "danger" as CanvasTone };
+    return {
+      label: formatDispatchCode(locale, order.lastSyncError.code),
+      tone: "danger" as CanvasTone,
+    };
   }
   if (order.reconciliationJob?.status === "queued") {
-    return { label: "reconciliation", tone: "info" as CanvasTone };
+    return {
+      label: formatDispatchCode(locale, "reconciliation"),
+      tone: "info" as CanvasTone,
+    };
   }
-  return { label: "clear", tone: "success" as CanvasTone };
+  return {
+    label: formatDispatchCode(locale, "clear"),
+    tone: "success" as CanvasTone,
+  };
 }
 
 function resolveActionLabel(action: string, locale: Locale) {
@@ -1168,8 +1202,8 @@ function renderBoardSignalBanner({
         icon="warn"
         title={
           zh
-            ? `${degradedAdapters[0]?.platformCode ?? "adapter"} degraded · Forwarded mirror 影響中`
-            : `${degradedAdapters[0]?.platformCode ?? "adapter"} degraded · forwarded mirror impacted`
+            ? `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "Adapter")} 降級 · Forwarded mirror 受影響`
+            : `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "Adapter")} degraded · forwarded mirror impacted`
         }
         body={
           zh
@@ -1201,11 +1235,11 @@ function renderBoardSignalBanner({
         theme={theme}
         tone={selectedRecord.status === "sync_failed" ? "danger" : "warn"}
         icon="warn"
-        title={`${selectedRecord.mirrorOrderId} · ${selectedRecord.platformCode}`}
+        title={`${selectedRecord.mirrorOrderId} · ${formatDispatchCode(locale, selectedRecord.platformCode)}`}
         body={
           zh
-            ? `狀態 ${selectedRecord.status}；外部單號 ${selectedRecord.externalOrderId}。`
-            : `Status ${selectedRecord.status}; external order ${selectedRecord.externalOrderId}.`
+            ? `狀態 ${formatDispatchCode(locale, selectedRecord.status)}；外部單號 ${selectedRecord.externalOrderId}。`
+            : `Status ${formatDispatchCode(locale, selectedRecord.status)}; external order ${selectedRecord.externalOrderId}.`
         }
         actions={renderActionButton(primary, locale)}
       />
@@ -1275,8 +1309,8 @@ function renderBoardSignalBanner({
         }
         body={
           zh
-            ? `${title} · 已嘗試 ${selectedRecord.dispatchAttemptCount} 次，最後原因 ${selectedRecord.lastDispatchFailureReason ?? "unknown"}。`
-            : `${title} · ${selectedRecord.dispatchAttemptCount} attempts, last reason ${selectedRecord.lastDispatchFailureReason ?? "unknown"}.`
+            ? `${title} · 已嘗試 ${selectedRecord.dispatchAttemptCount} 次，最後原因 ${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}。`
+            : `${title} · ${selectedRecord.dispatchAttemptCount} attempts, last reason ${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}.`
         }
         actions={renderActionButton(
           pickPrimaryAction(selectedActions, [
@@ -1369,14 +1403,17 @@ function renderActionList(actions: BoardActionContext[], locale: Locale) {
                 tone={actionTone(action.riskLevel, action.disabled)}
                 dot={!action.disabled}
               >
-                {action.riskLevel}
+                {formatDispatchCode(locale, action.riskLevel)}
               </Pill>
             </div>
             <div
               style={{ color: theme.textDim, fontSize: 12, lineHeight: 1.45 }}
             >
               {action.disabled
-                ? (action.disabledReason ?? "disabled")
+                ? formatDispatchCode(
+                    locale,
+                    action.disabledReason ?? "disabled",
+                  )
                 : locale === "zh"
                   ? "由 availableActions 驅動的可執行 CTA。"
                   : "CTA emitted from availableActions."}
@@ -1479,8 +1516,8 @@ function freshnessBanner(refresh: UiRefreshMetadata, locale: Locale) {
       title={title}
       body={
         zh
-          ? `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${refresh.source}`
-          : `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${refresh.source}`
+          ? `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${formatDispatchCode(locale, refresh.source)}`
+          : `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${formatDispatchCode(locale, refresh.source)}`
       }
     />
   );
@@ -1508,7 +1545,7 @@ function healthBanner(health: UiHealthEnvelope | null, locale: Locale) {
       }
       body={
         firstService
-          ? `${firstService.service} · ${firstService.impact}`
+          ? `${formatDispatchCode(locale, firstService.service)} · ${formatDispatchCode(locale, firstService.impact)}`
           : formatDateTime(locale, health.lastCheckedAt)
       }
     />
@@ -1761,7 +1798,7 @@ export default async function DispatchPage({
     boardRows = visibleForwardedOrders.map((order) => {
       const issue = issueByMirrorId.get(order.mirrorOrderId);
       const adapter = adapterByPlatform.get(order.platformCode);
-      const mismatch = getMismatchSummary(order, issue);
+      const mismatch = getMismatchSummary(order, issue, locale);
       return {
         actions: renderInlineActionPills(
           buildActionContexts(
@@ -1815,7 +1852,7 @@ export default async function DispatchPage({
         window: formatForwardedWindow(order, locale),
         status: (
           <Pill theme={theme} tone={getForwardedStateTone(order.status)} dot>
-            {order.status}
+            {formatDispatchCode(locale, order.status)}
           </Pill>
         ),
         adapter: (
@@ -1825,8 +1862,8 @@ export default async function DispatchPage({
             dot={Boolean(adapter && adapter.status !== "healthy")}
           >
             {adapter
-              ? `${order.platformCode} · ${adapter.status}`
-              : order.platformCode}
+              ? `${formatDispatchCode(locale, order.platformCode)} · ${formatDispatchCode(locale, adapter.status)}`
+              : formatDispatchCode(locale, order.platformCode)}
           </Pill>
         ),
         mismatch: (
@@ -1901,7 +1938,7 @@ export default async function DispatchPage({
             tone={task?.status === "on_trip" ? "success" : "info"}
             dot={Boolean(task)}
           >
-            {task?.status ?? "assigned"}
+            {formatDispatchCode(locale, task?.status ?? "assigned")}
           </Pill>
         ),
         eta:
@@ -1910,7 +1947,7 @@ export default async function DispatchPage({
             : "—",
         gate: (
           <Pill theme={theme} tone={gate.tone} dot={gate.tone !== "success"}>
-            {gate.label}
+            {formatDispatchCode(locale, gate.label)}
           </Pill>
         ),
         _selected: selectedRecord === order,
@@ -2017,10 +2054,11 @@ export default async function DispatchPage({
         attempts: String(
           Math.max(order.dispatchAttemptCount, candidates.length),
         ),
-        reason:
+        reason: formatDispatchCode(
+          locale,
           order.lastDispatchFailureReason ??
-          order.dispatchTimeout?.timeoutReasonCode ??
-          "—",
+            order.dispatchTimeout?.timeoutReasonCode,
+        ),
         age: formatDurationSince(
           locale,
           order.noSupplyEscalation?.escalatedAt ?? order.updatedAt,
@@ -2072,7 +2110,7 @@ export default async function DispatchPage({
           </div>
         ),
         tenant: getTenantLabel(order),
-        overrideType: request?.overrideType ?? "—",
+        overrideType: formatDispatchCode(locale, request?.overrideType),
         requester: request?.requestedBy.actorId ?? "—",
         age: formatDurationSince(
           locale,
@@ -2146,7 +2184,7 @@ export default async function DispatchPage({
           </div>
         ),
         window: formatWindow(order, locale),
-        service: order.serviceBucket,
+        service: formatDispatchCode(locale, order.serviceBucket),
         eta:
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== null &&
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== undefined
@@ -2156,10 +2194,10 @@ export default async function DispatchPage({
         gate: (
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <Pill theme={theme} tone={getStateTone(state)} dot>
-              {state}
+              {formatDispatchCode(locale, state)}
             </Pill>
             <Pill theme={theme} tone={gate.tone} dot={gate.tone !== "success"}>
-              {gate.label}
+              {formatDispatchCode(locale, gate.label)}
             </Pill>
           </div>
         ),
@@ -2306,11 +2344,11 @@ export default async function DispatchPage({
                         ],
                         [
                           "sync_failed",
-                          `sync_failed ${sortedForwardedOrders.filter((item) => item.status === "sync_failed").length}`,
+                          `${formatDispatchCode(locale, "sync_failed")} ${sortedForwardedOrders.filter((item) => item.status === "sync_failed").length}`,
                         ],
                         [
                           "manual_fallback",
-                          `manual_fallback ${sortedForwardedOrders.filter((item) => item.manualFallback.required).length}`,
+                          `${formatDispatchCode(locale, "manual_fallback")} ${sortedForwardedOrders.filter((item) => item.manualFallback.required).length}`,
                         ],
                         [
                           "terminal",
@@ -2339,7 +2377,10 @@ export default async function DispatchPage({
                     ))
                   : [
                       ["all", zh ? "全部服務" : "All services"],
-                      ...serviceBuckets.map((item) => [item, item]),
+                      ...serviceBuckets.map((item) => [
+                        item,
+                        formatDispatchCode(locale, item),
+                      ]),
                     ].map(([serviceKey, label]) => (
                       <Link
                         key={serviceKey}
@@ -2379,12 +2420,7 @@ export default async function DispatchPage({
                     ? `${zh ? "顯示" : "Showing"} ${visibleForwardedOrders.length} / ${forwardedBaseCount}`
                     : `${zh ? "顯示" : "Showing"} ${visibleOwnedByBoard.length} / ${boardCounts[board]}`}
                 </span>
-                <span>
-                  {`${currentRefresh.dataFreshness} · ${formatDateTime(
-                    locale,
-                    currentRefresh.generatedAt,
-                  )} · ${currentRefresh.source}`}
-                </span>
+                <span>{formatRefreshSummary(currentRefresh, locale)}</span>
               </div>
             </div>
 
