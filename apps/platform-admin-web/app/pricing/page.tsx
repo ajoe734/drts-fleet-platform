@@ -21,7 +21,6 @@ import {
 } from "@drts/ui-web";
 import type {
   CrossAppResourceLink,
-  EmptyReason,
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "@drts/contracts";
@@ -69,16 +68,29 @@ type VersionRow = {
 
 const TAB_IDS: PricingTabId[] = ["passenger", "driver", "subsidy", "history"];
 
-const EMPTY_REASON_OPTIONS: Array<{ value: "live" | EmptyReason; label: string }> =
-  [
-    { value: "live", label: "Live data" },
-    { value: "no_data", label: "No data" },
-    { value: "not_provisioned", label: "Not provisioned" },
-    { value: "fetch_failed", label: "Fetch failed" },
-    { value: "permission_denied", label: "Permission denied" },
-    { value: "external_unavailable", label: "External unavailable" },
-    { value: "filtered_empty", label: "Filtered empty" },
-  ];
+const PRICING_EMPTY_REASONS = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "filtered_empty",
+] as const;
+
+type PricingEmptyReason = (typeof PRICING_EMPTY_REASONS)[number];
+
+const EMPTY_REASON_OPTIONS: Array<{
+  value: "live" | PricingEmptyReason;
+  label: string;
+}> = [
+  { value: "live", label: "Live data" },
+  { value: "no_data", label: "No data" },
+  { value: "not_provisioned", label: "Not provisioned" },
+  { value: "fetch_failed", label: "Fetch failed" },
+  { value: "permission_denied", label: "Permission denied" },
+  { value: "external_unavailable", label: "External unavailable" },
+  { value: "filtered_empty", label: "Filtered empty" },
+];
 
 const PASSENGER_RULES: PricingItem[] = [
   {
@@ -358,8 +370,18 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
     { key: "home", href: "/", label: labels.home, icon: "dashboard" },
     { key: "health", href: "/health", label: labels.health, icon: "health" },
     { divider: labels.tenant },
-    { key: "tenants", href: "/tenants", label: labels.tenants, icon: "tenants" },
-    { key: "partners", href: "/partners", label: labels.partners, icon: "partners" },
+    {
+      key: "tenants",
+      href: "/tenants",
+      label: labels.tenants,
+      icon: "tenants",
+    },
+    {
+      key: "partners",
+      href: "/partners",
+      label: labels.partners,
+      icon: "partners",
+    },
     { key: "users", href: "/users", label: labels.users, icon: "users" },
     { divider: labels.fleetGroup },
     { key: "fleet", href: "/fleet", label: labels.fleet, icon: "fleet" },
@@ -384,9 +406,19 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       icon: "payments",
     },
     { divider: labels.platform },
-    { key: "notices", href: "/notices", label: labels.notices, icon: "notices" },
+    {
+      key: "notices",
+      href: "/notices",
+      label: labels.notices,
+      icon: "notices",
+    },
     { key: "audit", href: "/audit", label: labels.audit, icon: "audit" },
-    { key: "featureFlags", href: "/feature-flags", label: labels.flags, icon: "flags" },
+    {
+      key: "featureFlags",
+      href: "/feature-flags",
+      label: labels.flags,
+      icon: "flags",
+    },
     {
       key: "adapterRegistry",
       href: "/adapter-registry",
@@ -409,6 +441,8 @@ function pageCopy(locale: string) {
         filtersTitle: "State controls",
         emptyPreview: "Empty state preview",
         historyFilter: "Version lane",
+        historyScope: "Scope",
+        historyPeriod: "Period",
         lastRefresh: "Last generated",
         freshness: "Freshness",
         source: "Source",
@@ -429,10 +463,18 @@ function pageCopy(locale: string) {
           "Cross-tab chronology for passenger pricing, fee plans, and subsidy rules.",
         rowHistory: "History",
         rowPublishedBy: "Published by",
+        rowPublishedAt: "Published at",
         rowSupersedes: "Supersedes",
         createDraft: "Create draft",
         manualRefresh: "Refresh now",
         auditLink: "Audit trail",
+        allScopes: "All scopes",
+        allPeriods: "All time",
+        period30Days: "Last 30 days",
+        period90Days: "Last 90 days",
+        publishInProgress: "Atomic publish in progress",
+        publishInProgressBody:
+          "The version transition is being applied. Wait for the receipt before re-running publish or retire.",
         emptyLabels: {
           no_data: "No published data",
           not_provisioned: "Provisioning required",
@@ -453,6 +495,8 @@ function pageCopy(locale: string) {
         filtersTitle: "狀態控制",
         emptyPreview: "Empty state 預覽",
         historyFilter: "版本類型",
+        historyScope: "適用範圍",
+        historyPeriod: "期間",
         lastRefresh: "資料產生時間",
         freshness: "新鮮度",
         source: "來源",
@@ -469,13 +513,22 @@ function pageCopy(locale: string) {
         conflictBody:
           "同 scope 發布採原子替換；草稿先顯示 scope conflict 與 in-flight trip overlap 警告，再進入高風險發布。",
         historyTitle: "已發布版本",
-        historySubtitle: "乘客計價、司機費用方案、補貼規則的跨 tab 發布時間線。",
+        historySubtitle:
+          "乘客計價、司機費用方案、補貼規則的跨 tab 發布時間線。",
         rowHistory: "版本歷程",
         rowPublishedBy: "發布人",
+        rowPublishedAt: "發布時間",
         rowSupersedes: "取代版本",
         createDraft: "建立草稿",
         manualRefresh: "立即刷新",
         auditLink: "稽核軌跡",
+        allScopes: "全部 scope",
+        allPeriods: "全部期間",
+        period30Days: "近 30 天",
+        period90Days: "近 90 天",
+        publishInProgress: "原子發布進行中",
+        publishInProgressBody:
+          "版本替換正在進行，請等待回執後再重試 publish 或 retire。",
         emptyLabels: {
           no_data: "尚無資料",
           not_provisioned: "尚未完成配置",
@@ -487,13 +540,17 @@ function pageCopy(locale: string) {
       };
 }
 
-function toneForStatus(status: PricingStatus | "published" | "retired"): CanvasTone {
+function toneForStatus(
+  status: PricingStatus | "published" | "retired",
+): CanvasTone {
   if (status === "published") return "success";
   if (status === "draft") return "warn";
   return "neutral";
 }
 
-function toneForRisk(riskLevel: ResourceActionDescriptor["riskLevel"]): CanvasTone {
+function toneForRisk(
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+): CanvasTone {
   if (riskLevel === "high") return "danger";
   if (riskLevel === "medium") return "warn";
   return "info";
@@ -506,12 +563,15 @@ function formatActionLabel(action: string) {
     .join(" ");
 }
 
-function emptyStateDescriptor(reason: EmptyReason, locale: string) {
+function emptyStateDescriptor(
+  reason: PricingEmptyReason,
+  locale: string,
+): { tone: Exclude<CanvasTone, "neutral">; title: string; body: string } {
   const zh = locale !== "en";
   switch (reason) {
     case "no_data":
       return {
-        tone: "neutral" as CanvasTone,
+        tone: "info" as const,
         title: zh ? "此版本區段目前沒有資料" : "No versions are available yet",
         body: zh
           ? "系統已連線，但這個 tab 尚未建立任何版本。"
@@ -519,7 +579,7 @@ function emptyStateDescriptor(reason: EmptyReason, locale: string) {
       };
     case "not_provisioned":
       return {
-        tone: "info" as CanvasTone,
+        tone: "info",
         title: zh ? "租戶或方案尚未完成配置" : "Provisioning is still required",
         body: zh
           ? "先完成 partner / tenant / settlement provision，再建立 pricing draft。"
@@ -527,31 +587,37 @@ function emptyStateDescriptor(reason: EmptyReason, locale: string) {
       };
     case "fetch_failed":
       return {
-        tone: "danger" as CanvasTone,
-        title: zh ? "讀取 pricing read model 失敗" : "Pricing read model failed to load",
+        tone: "danger",
+        title: zh
+          ? "讀取 pricing read model 失敗"
+          : "Pricing read model failed to load",
         body: zh
           ? "請使用 refresh 或查看 audit / adapter health 追蹤原因。"
           : "Use refresh or inspect audit and adapter health to trace the failure.",
       };
     case "permission_denied":
       return {
-        tone: "warn" as CanvasTone,
-        title: zh ? "你目前只能檢視，不能操作" : "You can see this view but cannot act",
+        tone: "warn",
+        title: zh
+          ? "你目前只能檢視，不能操作"
+          : "You can see this view but cannot act",
         body: zh
           ? "此資源沒有可用 action，UI 以 read-only 呈現而非灑滿 disabled 按鈕。"
           : "This resource exposes no available actions, so the UI stays cleanly read-only.",
       };
     case "external_unavailable":
       return {
-        tone: "warn" as CanvasTone,
-        title: zh ? "外部結算依賴暫時不可用" : "External settlement dependency unavailable",
+        tone: "warn",
+        title: zh
+          ? "外部結算依賴暫時不可用"
+          : "External settlement dependency unavailable",
         body: zh
           ? "可先查看已發布版本與 audit；發布與 retire 先暫停。"
           : "Published history remains visible, but publish and retire flows are paused.",
       };
     case "filtered_empty":
       return {
-        tone: "info" as CanvasTone,
+        tone: "info",
         title: zh ? "篩選後沒有符合資料" : "No items match the active filters",
         body: zh
           ? "調整狀態、scope 或版本類型後再試。"
@@ -570,12 +636,20 @@ function RefreshMeta({
   theme: CanvasTheme;
 }) {
   return (
-    <CanvasCard theme={theme} title={copy.refreshLabel} subtitle={copy.refreshBody}>
+    <CanvasCard
+      theme={theme}
+      title={copy.refreshLabel}
+      subtitle={copy.refreshBody}
+    >
       <CanvasDL
         theme={theme}
         cols={2}
         items={[
-          { label: copy.lastRefresh, value: formatDateTime(metadata.generatedAt), mono: true },
+          {
+            label: copy.lastRefresh,
+            value: formatDateTime(metadata.generatedAt),
+            mono: true,
+          },
           { label: copy.freshness, value: metadata.dataFreshness },
           { label: copy.source, value: metadata.source },
           {
@@ -597,14 +671,23 @@ export default function PricingPage() {
   const nav = useMemo(() => buildPlatformNav(locale), [locale]);
   const [refreshTick, setRefreshTick] = useState(0);
   const [manualRefreshNonce, setManualRefreshNonce] = useState(0);
-  const [generatedAt, setGeneratedAt] = useState(() => new Date().toISOString());
-  const [emptyPreview, setEmptyPreview] = useState<"live" | EmptyReason>("live");
+  const [generatedAt, setGeneratedAt] = useState(() =>
+    new Date().toISOString(),
+  );
+  const [emptyPreview, setEmptyPreview] = useState<"live" | PricingEmptyReason>(
+    "live",
+  );
   const [historyFilter, setHistoryFilter] = useState("all");
+  const [historyScopeFilter, setHistoryScopeFilter] = useState("all");
+  const [historyPeriodFilter, setHistoryPeriodFilter] = useState("all");
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
 
   const activeTab = useMemo<PricingTabId>(() => {
     const raw = searchParams.get("tab");
-    return TAB_IDS.includes(raw as PricingTabId) ? (raw as PricingTabId) : "passenger";
+    return TAB_IDS.includes(raw as PricingTabId)
+      ? (raw as PricingTabId)
+      : "passenger";
   }, [searchParams]);
 
   useEffect(() => {
@@ -631,10 +714,27 @@ export default function PricingPage() {
     };
   }, [generatedAt, manualRefreshNonce, refreshTick]);
 
+  const historyScopeOptions = useMemo(
+    () => Array.from(new Set(VERSION_HISTORY.map((row) => row.scope))),
+    [],
+  );
+
   const visibleHistory = useMemo(() => {
-    if (historyFilter === "all") return VERSION_HISTORY;
-    return VERSION_HISTORY.filter((row) => row.versionType === historyFilter);
-  }, [historyFilter]);
+    return VERSION_HISTORY.filter((row) => {
+      if (historyFilter !== "all" && row.versionType !== historyFilter)
+        return false;
+      if (historyScopeFilter !== "all" && row.scope !== historyScopeFilter)
+        return false;
+      if (historyPeriodFilter === "all") return true;
+
+      const ageMs = Date.now() - Date.parse(row.publishedAt);
+      if (historyPeriodFilter === "30d")
+        return ageMs <= 30 * 24 * 60 * 60 * 1000;
+      if (historyPeriodFilter === "90d")
+        return ageMs <= 90 * 24 * 60 * 60 * 1000;
+      return true;
+    });
+  }, [historyFilter, historyPeriodFilter, historyScopeFilter]);
 
   const visibleItems = useMemo(() => {
     switch (activeTab) {
@@ -652,7 +752,9 @@ export default function PricingPage() {
 
   const topLevelActions = useMemo<ResourceActionDescriptor[]>(() => {
     if (activeTab === "history") {
-      return [{ action: "view_version_history", enabled: true, riskLevel: "low" }];
+      return [
+        { action: "view_version_history", enabled: true, riskLevel: "low" },
+      ];
     }
     return [
       { action: "create_draft", enabled: true, riskLevel: "medium" },
@@ -701,11 +803,18 @@ export default function PricingPage() {
         );
         return;
       }
-      setActionMessage(
-        locale === "en"
-          ? `${formatActionLabel(action.action)} accepted for ${subject}. Audit reference issued.`
-          : `${subject} 已送出 ${formatActionLabel(action.action)}，並產生 audit reference。`,
-      );
+      const pendingKey = `${subject}-${action.action}`;
+      setPendingActionKey(pendingKey);
+      window.setTimeout(() => {
+        setPendingActionKey((current) =>
+          current === pendingKey ? null : current,
+        );
+        setActionMessage(
+          locale === "en"
+            ? `${formatActionLabel(action.action)} accepted for ${subject}. Audit reference issued.`
+            : `${subject} 已送出 ${formatActionLabel(action.action)}，並產生 audit reference。`,
+        );
+      }, 900);
       return;
     }
 
@@ -721,21 +830,28 @@ export default function PricingPage() {
     subject: string,
   ) => (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-      {actions.map((action) => (
-        <button
-          key={`${subject}-${action.action}`}
-          type="button"
-          onClick={() => handleAction(action, subject)}
-          disabled={!action.enabled}
-          title={action.disabledReasonCode}
-          style={actionButtonStyle(theme, action)}
-        >
-          <CanvasPill theme={theme} tone={toneForRisk(action.riskLevel)}>
-            {action.riskLevel}
-          </CanvasPill>
-          <span>{formatActionLabel(action.action)}</span>
-        </button>
-      ))}
+      {actions.map((action) => {
+        const actionKey = `${subject}-${action.action}`;
+        const isPending = pendingActionKey === actionKey;
+        return (
+          <button
+            key={actionKey}
+            type="button"
+            onClick={() => handleAction(action, subject)}
+            disabled={!action.enabled || isPending}
+            title={action.disabledReasonCode}
+            style={actionButtonStyle(theme, action, isPending)}
+          >
+            <CanvasPill
+              theme={theme}
+              tone={isPending ? "accent" : toneForRisk(action.riskLevel)}
+            >
+              {isPending ? "pending" : action.riskLevel}
+            </CanvasPill>
+            <span>{formatActionLabel(action.action)}</span>
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -752,7 +868,11 @@ export default function PricingPage() {
       active="pricing"
       currentPath="/pricing"
       breadcrumb={[copy.breadcrumbRoot, copy.title]}
-      searchPlaceholder={locale === "en" ? "Search pricing, versions, scope" : "搜尋定價、版本、scope"}
+      searchPlaceholder={
+        locale === "en"
+          ? "Search pricing, versions, scope"
+          : "搜尋定價、版本、scope"
+      }
       avatarLabel="PA"
       env="production"
     >
@@ -772,7 +892,11 @@ export default function PricingPage() {
                 icon="plus"
                 onClick={() =>
                   handleAction(
-                    { action: "create_draft", enabled: true, riskLevel: "medium" },
+                    {
+                      action: "create_draft",
+                      enabled: true,
+                      riskLevel: "medium",
+                    },
                     copy.title,
                   )
                 }
@@ -803,7 +927,10 @@ export default function PricingPage() {
               style={tabButtonStyle(theme, activeTab === tab)}
             >
               <span>{tabLabel(tab, locale)}</span>
-              <CanvasPill theme={theme} tone={activeTab === tab ? "accent" : "neutral"}>
+              <CanvasPill
+                theme={theme}
+                tone={activeTab === tab ? "accent" : "neutral"}
+              >
                 {String(counts[tab])}
               </CanvasPill>
             </button>
@@ -816,24 +943,40 @@ export default function PricingPage() {
               <CanvasKPI
                 theme={theme}
                 label={tabLabel(activeTab, locale)}
-                value={String(activeTab === "history" ? visibleHistory.length : visibleItems.length)}
+                value={String(
+                  activeTab === "history"
+                    ? visibleHistory.length
+                    : visibleItems.length,
+                )}
                 sub={locale === "en" ? "visible rows" : "目前可見資料列"}
               />
               <CanvasKPI
                 theme={theme}
                 label={copy.actionsLabel}
-                value={String(topLevelActions.filter((action) => action.enabled).length)}
-                sub={locale === "en" ? "enabled top-level actions" : "目前啟用的頂層 action"}
+                value={String(
+                  topLevelActions.filter((action) => action.enabled).length,
+                )}
+                sub={
+                  locale === "en"
+                    ? "enabled top-level actions"
+                    : "目前啟用的頂層 action"
+                }
               />
               <CanvasKPI
                 theme={theme}
                 label="Published"
                 value={String(
-                  [...PASSENGER_RULES, ...DRIVER_PLANS, ...SUBSIDY_RULES].filter(
-                    (item) => item.status === "published",
-                  ).length,
+                  [
+                    ...PASSENGER_RULES,
+                    ...DRIVER_PLANS,
+                    ...SUBSIDY_RULES,
+                  ].filter((item) => item.status === "published").length,
                 )}
-                sub={locale === "en" ? "cross-tab active versions" : "跨 tab 生效版本"}
+                sub={
+                  locale === "en"
+                    ? "cross-tab active versions"
+                    : "跨 tab 生效版本"
+                }
               />
             </div>
 
@@ -843,7 +986,9 @@ export default function PricingPage() {
                   <select
                     value={emptyPreview}
                     onChange={(event) =>
-                      setEmptyPreview(event.target.value as "live" | EmptyReason)
+                      setEmptyPreview(
+                        event.target.value as "live" | PricingEmptyReason,
+                      )
                     }
                     style={selectStyle(theme)}
                   >
@@ -863,9 +1008,46 @@ export default function PricingPage() {
                       style={selectStyle(theme)}
                     >
                       <option value="all">All</option>
-                      <option value="Passenger pricing">Passenger pricing</option>
+                      <option value="Passenger pricing">
+                        Passenger pricing
+                      </option>
                       <option value="Driver fee plan">Driver fee plan</option>
                       <option value="Subsidy rule">Subsidy rule</option>
+                    </select>
+                  </CanvasField>
+                ) : null}
+
+                {activeTab === "history" ? (
+                  <CanvasField theme={theme} label={copy.historyScope}>
+                    <select
+                      value={historyScopeFilter}
+                      onChange={(event) =>
+                        setHistoryScopeFilter(event.target.value)
+                      }
+                      style={selectStyle(theme)}
+                    >
+                      <option value="all">{copy.allScopes}</option>
+                      {historyScopeOptions.map((scope) => (
+                        <option key={scope} value={scope}>
+                          {scope}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                ) : null}
+
+                {activeTab === "history" ? (
+                  <CanvasField theme={theme} label={copy.historyPeriod}>
+                    <select
+                      value={historyPeriodFilter}
+                      onChange={(event) =>
+                        setHistoryPeriodFilter(event.target.value)
+                      }
+                      style={selectStyle(theme)}
+                    >
+                      <option value="all">{copy.allPeriods}</option>
+                      <option value="30d">{copy.period30Days}</option>
+                      <option value="90d">{copy.period90Days}</option>
                     </select>
                   </CanvasField>
                 ) : null}
@@ -876,23 +1058,52 @@ export default function PricingPage() {
               <CanvasBanner
                 theme={theme}
                 tone="warn"
-                title={locale === "en" ? "Pricing view is stale" : "Pricing 視圖已 stale"}
-                body={locale === "en" ? "Use refresh before publishing or retiring a version." : "發布或 retire 前請先手動 refresh。"}
+                title={
+                  locale === "en"
+                    ? "Pricing view is stale"
+                    : "Pricing 視圖已 stale"
+                }
+                body={
+                  locale === "en"
+                    ? "Use refresh before publishing or retiring a version."
+                    : "發布或 retire 前請先手動 refresh。"
+                }
               />
             ) : null}
 
-            <CanvasCard theme={theme} title={copy.conflictTitle} subtitle={copy.conflictBody}>
+            {pendingActionKey ? (
+              <CanvasBanner
+                theme={theme}
+                tone="info"
+                title={copy.publishInProgress}
+                body={copy.publishInProgressBody}
+              />
+            ) : null}
+
+            <CanvasCard
+              theme={theme}
+              title={copy.conflictTitle}
+              subtitle={copy.conflictBody}
+            >
               {renderActions(topLevelActions, copy.title)}
             </CanvasCard>
 
             {activeTab === "history" ? (
-              <CanvasCard theme={theme} title={copy.historyTitle} subtitle={copy.historySubtitle}>
+              <CanvasCard
+                theme={theme}
+                title={copy.historyTitle}
+                subtitle={copy.historySubtitle}
+              >
                 {visibleHistory.length === 0 ? (
                   <CanvasBanner
                     theme={theme}
-                    tone="neutral"
+                    tone="info"
                     title={copy.emptyLabels.filtered_empty}
-                    body={locale === "en" ? "No published versions match the selected version lane." : "目前的版本類型篩選沒有符合資料。"}
+                    body={
+                      locale === "en"
+                        ? "No published versions match the selected version lane."
+                        : "目前的版本類型篩選沒有符合資料。"
+                    }
                   />
                 ) : (
                   <table style={tableStyle(theme)}>
@@ -901,31 +1112,58 @@ export default function PricingPage() {
                         <th style={tableHeadStyle(theme)}>Version lane</th>
                         <th style={tableHeadStyle(theme)}>Name</th>
                         <th style={tableHeadStyle(theme)}>{copy.scope}</th>
-                        <th style={tableHeadStyle(theme)}>{copy.rowPublishedBy}</th>
-                        <th style={tableHeadStyle(theme)}>{copy.rowSupersedes}</th>
-                        <th style={tableHeadStyle(theme)}>{copy.actionsLabel}</th>
+                        <th style={tableHeadStyle(theme)}>
+                          {copy.rowPublishedAt}
+                        </th>
+                        <th style={tableHeadStyle(theme)}>
+                          {copy.rowPublishedBy}
+                        </th>
+                        <th style={tableHeadStyle(theme)}>
+                          {copy.rowSupersedes}
+                        </th>
+                        <th style={tableHeadStyle(theme)}>
+                          {copy.actionsLabel}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {visibleHistory.map((row) => (
                         <tr key={row.id}>
                           <td style={tableCellStyle(theme)}>
-                            <CanvasPill theme={theme} tone={toneForStatus(row.status)}>
+                            <CanvasPill
+                              theme={theme}
+                              tone={toneForStatus(row.status)}
+                            >
                               {row.versionType}
                             </CanvasPill>
                           </td>
                           <td style={tableCellStyle(theme)}>
                             <div style={rowTitleStyle}>{row.name}</div>
-                            <div style={rowSubtleStyle}>{formatDateTime(row.publishedAt)}</div>
+                            <div style={rowSubtleStyle}>
+                              {formatDateTime(row.publishedAt)}
+                            </div>
                           </td>
                           <td style={tableCellStyle(theme)}>{row.scope}</td>
                           <td style={tableCellStyle(theme)}>
+                            {formatDateTime(row.publishedAt)}
+                          </td>
+                          <td style={tableCellStyle(theme)}>
                             {row.publishedBy}
                           </td>
-                          <td style={tableCellStyle(theme)}>{row.supersedes}</td>
+                          <td style={tableCellStyle(theme)}>
+                            {row.supersedes}
+                          </td>
                           <td style={tableCellStyle(theme)}>
                             <div style={{ display: "grid", gap: 8 }}>
                               {renderActions(row.availableActions, row.name)}
+                              <a
+                                href={`/audit?resourceType=pricing&resourceId=${row.id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={linkStyle(theme)}
+                              >
+                                {copy.auditLink}
+                              </a>
                               {row.crossLinks?.map((link) => (
                                 <a
                                   key={link.route}
@@ -961,7 +1199,10 @@ export default function PricingPage() {
                     title={item.name}
                     subtitle={`${item.version} · ${item.summary}`}
                     actions={
-                      <CanvasPill theme={theme} tone={toneForStatus(item.status)}>
+                      <CanvasPill
+                        theme={theme}
+                        tone={toneForStatus(item.status)}
+                      >
                         {item.status}
                       </CanvasPill>
                     }
@@ -984,58 +1225,67 @@ export default function PricingPage() {
 
                       <div style={detailGridStyle}>
                         <section style={policyCardStyle(theme)}>
-                          <div style={sectionEyebrowStyle(theme)}>{copy.policy}</div>
+                          <div style={sectionEyebrowStyle(theme)}>
+                            {copy.policy}
+                          </div>
                           <div style={detailListStyle}>
                             {item.quotedFareAuthority ? (
                               <div>
-                                <strong>{copy.quotedFareAuthority}:</strong> {item.quotedFareAuthority}
+                                <strong>{copy.quotedFareAuthority}:</strong>{" "}
+                                {item.quotedFareAuthority}
                               </div>
                             ) : null}
                             {item.overrideActorTypes?.length ? (
                               <div>
-                                <strong>{copy.overrideActors}:</strong> {item.overrideActorTypes.join(", ")}
+                                <strong>{copy.overrideActors}:</strong>{" "}
+                                {item.overrideActorTypes.join(", ")}
                               </div>
                             ) : null}
                             {item.overrideRequiredFields?.length ? (
                               <div>
-                                <strong>{copy.overrideFields}:</strong> {item.overrideRequiredFields.join(", ")}
+                                <strong>{copy.overrideFields}:</strong>{" "}
+                                {item.overrideRequiredFields.join(", ")}
                               </div>
                             ) : null}
                           </div>
                         </section>
 
                         <section style={policyCardStyle(theme)}>
-                          <div style={sectionEyebrowStyle(theme)}>{copy.actionsLabel}</div>
+                          <div style={sectionEyebrowStyle(theme)}>
+                            {copy.actionsLabel}
+                          </div>
                           {renderActions(item.availableActions, item.name)}
                         </section>
                       </div>
 
-                      {item.crossLinks?.length ? (
-                        <div style={{ display: "grid", gap: 8 }}>
-                          <div style={sectionEyebrowStyle(theme)}>{copy.links}</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                            {item.crossLinks.map((link) => (
-                              <a
-                                key={link.route}
-                                href={link.route}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={linkStyle(theme)}
-                              >
-                                {link.label}
-                              </a>
-                            ))}
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <div style={sectionEyebrowStyle(theme)}>
+                          {copy.links}
+                        </div>
+                        <div
+                          style={{ display: "flex", flexWrap: "wrap", gap: 10 }}
+                        >
+                          {(item.crossLinks ?? []).map((link) => (
                             <a
-                              href="/audit?resourceType=pricing"
+                              key={link.route}
+                              href={link.route}
                               target="_blank"
                               rel="noreferrer"
                               style={linkStyle(theme)}
                             >
-                              {copy.auditLink}
+                              {link.label}
                             </a>
-                          </div>
+                          ))}
+                          <a
+                            href="/audit?resourceType=pricing"
+                            target="_blank"
+                            rel="noreferrer"
+                            style={linkStyle(theme)}
+                          >
+                            {copy.auditLink}
+                          </a>
                         </div>
-                      ) : null}
+                      </div>
                     </div>
                   </CanvasCard>
                 ))}
@@ -1048,22 +1298,24 @@ export default function PricingPage() {
 
             <CanvasCard
               theme={theme}
-              title={locale === "en" ? "EmptyReason contract" : "EmptyReason contract"}
-              subtitle={locale === "en" ? "All six packet-required states render distinctly." : "依 packet 要求，六種狀態需各自獨立呈現。"}
+              title={
+                locale === "en"
+                  ? "EmptyReason contract"
+                  : "EmptyReason contract"
+              }
+              subtitle={
+                locale === "en"
+                  ? "All six packet-required states render distinctly."
+                  : "依 packet 要求，六種狀態需各自獨立呈現。"
+              }
             >
               <div style={{ display: "grid", gap: 8 }}>
-                {(
-                  [
-                    "no_data",
-                    "not_provisioned",
-                    "fetch_failed",
-                    "permission_denied",
-                    "external_unavailable",
-                    "filtered_empty",
-                  ] as EmptyReason[]
-                ).map((reason) => (
+                {PRICING_EMPTY_REASONS.map((reason) => (
                   <div key={reason} style={legendRowStyle}>
-                    <CanvasPill theme={theme} tone={emptyStateDescriptor(reason, locale).tone}>
+                    <CanvasPill
+                      theme={theme}
+                      tone={emptyStateDescriptor(reason, locale).tone}
+                    >
                       {reason}
                     </CanvasPill>
                     <span style={{ color: theme.textMuted }}>
@@ -1098,7 +1350,11 @@ function tabLabel(tab: PricingTabId, locale: string) {
   return labels[tab];
 }
 
-function actionButtonStyle(theme: CanvasTheme, action: ResourceActionDescriptor) {
+function actionButtonStyle(
+  theme: CanvasTheme,
+  action: ResourceActionDescriptor,
+  pending = false,
+) {
   return {
     display: "inline-flex",
     alignItems: "center",
@@ -1106,11 +1362,19 @@ function actionButtonStyle(theme: CanvasTheme, action: ResourceActionDescriptor)
     minHeight: 34,
     padding: "6px 10px",
     borderRadius: 10,
-    border: `1px solid ${action.enabled ? theme.border : theme.neutralBorder}`,
-    background: action.enabled ? theme.surfaceHi : theme.neutralBg,
-    color: action.enabled ? theme.text : theme.textDim,
-    cursor: action.enabled ? "pointer" : "not-allowed",
-    opacity: action.enabled ? 1 : 0.68,
+    border: `1px solid ${pending ? theme.accent : action.enabled ? theme.border : theme.neutralBorder}`,
+    background: pending
+      ? theme.accentBg
+      : action.enabled
+        ? theme.surfaceHi
+        : theme.neutralBg,
+    color: pending
+      ? theme.accentHi
+      : action.enabled
+        ? theme.text
+        : theme.textDim,
+    cursor: action.enabled && !pending ? "pointer" : "not-allowed",
+    opacity: action.enabled || pending ? 1 : 0.68,
   } as const;
 }
 
