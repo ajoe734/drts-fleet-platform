@@ -222,6 +222,31 @@ describe("Complaint reopen with SLA recalculation", () => {
 });
 
 describe("SLA breach evaluation sweep", () => {
+  it("emits the Q-X06 complaint.sla_breached notification when a case crosses SLA", () => {
+    const { complaintService, auditNotificationService } = createServices();
+
+    const complaint = complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "safety_concern",
+      severity: "high",
+      description: "Complaint awaiting triage",
+    });
+
+    complaintService.markComplaintSlaBreach(complaint.caseNo);
+
+    expect(
+      auditNotificationService
+        .listUserNotifications({
+          actorType: "ops_user",
+          actorId: "ops-user-001",
+          realm: "ops",
+          scopes: ["notifications:read"],
+          tenantId: null,
+        })
+        .map((notification) => notification.eventType),
+    ).toContain("complaint.sla_breached");
+  });
+
   it("marks overdue open cases as breached", () => {
     const { complaintService } = createServices();
 
