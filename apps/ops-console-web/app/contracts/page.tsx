@@ -326,6 +326,14 @@ function buildContractDetailHref(contractId: string) {
   return `/contracts/${encodeURIComponent(contractId)}`;
 }
 
+function buildActionRenderTarget(
+  link: CrossAppResourceLink,
+): ActionRenderTarget {
+  return link.openMode === "new_tab"
+    ? { href: buildCrossAppUrl(link), target: "_blank" }
+    : { href: buildCrossAppUrl(link) };
+}
+
 function resolveContractActionTarget(
   action: ResourceActionDescriptor,
   contract: ContractListView,
@@ -343,26 +351,18 @@ function resolveRelationActionTarget(
 ): ActionRenderTarget {
   if (action.action === "open_platform_admin") {
     const link =
-      entry.links.find((current) => current.targetApp === "platform-admin") ??
-      entry.links[0];
-    return link
-      ? {
-          href: buildCrossAppUrl(link),
-          target: link.openMode === "new_tab" ? "_blank" : undefined,
-        }
-      : {};
+      entry.links.find(
+        (current: CrossAppResourceLink) =>
+          current.targetApp === "platform-admin",
+      ) ?? entry.links[0];
+    return link ? buildActionRenderTarget(link) : {};
   }
 
   if (action.action === "open_tenant_console") {
     const link = entry.links.find(
-      (current) => current.targetApp === "tenant-console",
+      (current: CrossAppResourceLink) => current.targetApp === "tenant-console",
     );
-    return link
-      ? {
-          href: buildCrossAppUrl(link),
-          target: link.openMode === "new_tab" ? "_blank" : undefined,
-        }
-      : {};
+    return link ? buildActionRenderTarget(link) : {};
   }
 
   return {};
