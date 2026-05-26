@@ -37,12 +37,6 @@ import { formatOpsCodeLabel } from "@/lib/localized-labels";
 
 type ApprovalQueueRecord = OpsPendingApprovalRequestRecord & {
   availableActions?: ResourceActionDescriptor[];
-  requestType?: string | null;
-  justification?: string | null;
-  requesterName?: string | null;
-  requestedBy?: string | null;
-  requestedByName?: string | null;
-  requestedByLabel?: string | null;
 };
 
 type StatusFilter = TenantBookingApprovalRequestStatus | "all";
@@ -59,10 +53,12 @@ type QueueRow = Record<string, unknown> & {
   typeCell: ReactNode;
   tenantCell: ReactNode;
   requesterCell: ReactNode;
+  requestedCell: ReactNode;
   orderCell: ReactNode;
   justificationCell: ReactNode;
   ageCell: ReactNode;
   timeoutCell: ReactNode;
+  statusCell: ReactNode;
   actionsCell: ReactNode;
   _selected?: boolean;
 };
@@ -103,6 +99,8 @@ const REJECT_REASON_OPTIONS = [
   "tenant_scope_mismatch",
   "ops_triage_rejected",
 ] as const;
+const REFRESH_INTERVAL_MS = 5000;
+const STALE_AFTER_MS = REFRESH_INTERVAL_MS * 2;
 
 const pageStyle = {
   padding: 24,
@@ -283,8 +281,7 @@ function getActionLabel(intent: ActionIntent, locale: "en" | "zh") {
 }
 
 function getRequestType(row: ApprovalQueueRecord) {
-  const explicitType =
-    row.requestType ?? (row as { type?: string | null }).type;
+  const explicitType = (row as { type?: string | null }).type;
   if (explicitType) {
     return explicitType;
   }
@@ -300,13 +297,12 @@ function getRequestType(row: ApprovalQueueRecord) {
 }
 
 function getRequesterLabel(row: ApprovalQueueRecord, locale: "en" | "zh") {
-  const direct =
-    row.requesterName ??
-    row.requestedByName ??
-    row.requestedByLabel ??
-    row.requestedBy;
-  if (direct) {
-    return direct;
+  const matchedApproverName =
+    row.approvers.find((approver) => approver.displayName)?.displayName ?? null;
+  if (matchedApproverName) {
+    return locale === "en"
+      ? `Requested for ${matchedApproverName}`
+      : `送交 ${matchedApproverName}`;
   }
   const passengerId = row.evaluationSnapshot.inputSnapshot?.passengerId;
   if (passengerId) {
@@ -318,10 +314,6 @@ function getRequesterLabel(row: ApprovalQueueRecord, locale: "en" | "zh") {
 }
 
 function getJustification(row: ApprovalQueueRecord, locale: "en" | "zh") {
-  const direct = row.justification;
-  if (direct) {
-    return direct;
-  }
   const warning = row.evaluationSnapshot.warnings?.[0]?.message;
   if (warning) {
     return warning;
@@ -400,21 +392,8 @@ function hasQueueFilters(
   );
 }
 
-function getDeepLinkHref(
-  target: "dispatch" | "tenant_booking" | "platform_audit",
-  row: ApprovalQueueRecord,
-  auditId?: string,
-) {
-  switch (target) {
-    case "dispatch":
-      return `/dispatch/${encodeURIComponent(row.orderId)}`;
-    case "tenant_booking":
-      return `/bookings/${encodeURIComponent(row.bookingId)}?tenantId=${encodeURIComponent(row.tenantId)}&approvalRequestId=${encodeURIComponent(row.approvalRequestId)}`;
-    case "platform_audit":
-      return `/audit?auditId=${encodeURIComponent(auditId ?? row.approvalRequestId)}`;
-    default:
-      return "/";
-  }
+function getDispatchHref(row: ApprovalQueueRecord) {
+  return `/dispatch/${encodeURIComponent(row.orderId)}`;
 }
 
 export default function ApprovalRequestsPage() {
@@ -494,7 +473,7 @@ export default function ApprovalRequestsPage() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       void loadRows(true);
-    }, 5000);
+    }, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadRows]);
 
@@ -543,6 +522,12 @@ export default function ApprovalRequestsPage() {
     filteredItems.length === 0,
     items.length > 0,
   );
+  const isStale = useMemo(() => {
+    if (!lastRefreshedAt) {
+      return false;
+    }
+    return Date.now() - Date.parse(lastRefreshedAt) > STALE_AFTER_MS;
+  }, [lastRefreshedAt]);
 
   const pendingCount = items.filter((row) => row.status === "pending").length;
   const breachedCount = items.filter((row) => row.slaBreached).length;
@@ -738,7 +723,7 @@ export default function ApprovalRequestsPage() {
       ),
       orderCell: (
         <Link
-          href={getDeepLinkHref("dispatch", row)}
+          href={getDispatchHref(row)}
           style={{
             color: theme.accent,
             textDecoration: "none",
@@ -923,6 +908,22 @@ export default function ApprovalRequestsPage() {
             }
             title={flash.title}
             body={flash.body}
+          />
+        ) : null}
+
+        {isStale ? (
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title={
+              locale === "en" ? "Queue snapshot is stale" : "佇列快照已過舊"
+            }
+            body={
+              locale === "en"
+                ? "This surface expects a T2 refresh every 5 seconds. Trigger a manual refresh before acting on borderline timeout cases."
+                : "此頁預期以 T2 每 5 秒更新。遇到接近逾時的案件前，請先手動重新整理。"
+            }
           />
         ) : null}
 
@@ -1131,8 +1132,8 @@ export default function ApprovalRequestsPage() {
                 title={locale === "en" ? "Justification" : "申請理由"}
                 subtitle={
                   locale === "en"
-                    ? "Derived from evaluation warnings / rules when explicit packet text is absent."
-                    : "若 contract 沒有直接提供文字，會退回 evaluation warning / 規則摘要。"
+                    ? "Sourced from evaluation warnings, outcome reason codes, and matched-rule summaries in the request snapshot."
+                    : "內容來自 request snapshot 內的 evaluation warning、outcome reason code 與命中規則摘要。"
                 }
               >
                 <p
@@ -1149,7 +1150,7 @@ export default function ApprovalRequestsPage() {
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 <Link
-                  href={getDeepLinkHref("dispatch", selectedRow)}
+                  href={getDispatchHref(selectedRow)}
                   style={{ color: theme.accent, textDecoration: "none" }}
                 >
                   {locale === "en"
@@ -1157,24 +1158,11 @@ export default function ApprovalRequestsPage() {
                     : "回到 dispatch 情境"}{" "}
                   →
                 </Link>
-                <Link
-                  href={getDeepLinkHref("tenant_booking", selectedRow)}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: theme.accent, textDecoration: "none" }}
-                >
-                  {locale === "en" ? "Open tenant booking" : "開啟租戶 booking"}{" "}
-                  <CanvasIcon name="ext" size={12} />
-                </Link>
-                <Link
-                  href={getDeepLinkHref("platform_audit", selectedRow)}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: theme.accent, textDecoration: "none" }}
-                >
-                  {locale === "en" ? "View audit trail" : "檢視稽核軌跡"}{" "}
-                  <CanvasIcon name="ext" size={12} />
-                </Link>
+                <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                  {locale === "en"
+                    ? "Cross-app audit deep links appear from action receipts once the backend returns audit ids."
+                    : "跨 app 的 audit deep link 會在後端回傳 audit id 後，隨 action receipt 顯示。"}
+                </span>
               </div>
             </div>
           ) : (
