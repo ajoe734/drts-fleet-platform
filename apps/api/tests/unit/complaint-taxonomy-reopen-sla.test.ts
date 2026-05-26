@@ -223,32 +223,92 @@ describe("Complaint reopen with SLA recalculation", () => {
 });
 
 describe("SLA breach evaluation sweep", () => {
-  it("marks overdue open cases as breached", () => {
-    const { complaintService } = createServices();
+  it("records overdue open cases that are computed breached but not yet marked", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-13T08:00:00.000Z"));
+      const { auditNotificationService, complaintService } = createServices();
 
-    const c1 = complaintService.createComplaintCase({
-      caseSource: "ops",
-      category: "safety_concern",
-      severity: "high",
-      description: "Case 1 - will be overdue",
-    });
-    const c2 = complaintService.createComplaintCase({
-      caseSource: "ops",
-      category: "lost_and_found",
-      severity: "normal",
-      description: "Case 2 - not overdue yet",
-    });
+      const complaint = complaintService.createComplaintCase({
+        caseSource: "ops",
+        category: "safety_concern",
+        severity: "high",
+        description: "Overdue open case should emit breach side effects",
+      });
 
-    // Manually mark SLA breach on c1 to verify idempotency
-    complaintService.markComplaintSlaBreach(c1.caseNo);
+      vi.setSystemTime(new Date("2026-05-13T10:01:00.000Z"));
 
-    // Both already breached and non-breached should be handled
-    complaintService.evaluateAllSlaBreach();
+      expect(
+        complaintService.getComplaintCase(complaint.caseNo).slaStatus,
+      ).toBe("breached");
+      expect(
+        complaintService
+          .getComplaintTimeline(complaint.caseNo)
+          .map((entry) => entry.action),
+      ).toEqual(["case_created"]);
 
-    // c1 was already breached so won't be double-processed
-    // c2 has 72h SLA, so it should NOT be breached yet
-    const c2After = complaintService.getComplaintCase(c2.caseNo);
-    expect(c2After.slaStatus).toBe("within_sla");
+      const breached = complaintService.evaluateAllSlaBreach();
+      expect(breached).toHaveLength(1);
+      expect(breached[0]?.caseNo).toBe(complaint.caseNo);
+      expect(breached[0]?.slaBreachedAt).toBe("2026-05-13T10:01:00.000Z");
+
+      expect(
+        complaintService
+          .getComplaintTimeline(complaint.caseNo)
+          .map((entry) => entry.action),
+      ).toEqual(["case_created", "sla_breached"]);
+      expect(
+        auditNotificationService
+          .listNotifications()
+          .filter(
+            (notification) =>
+              notification.title === "Complaint SLA breached" &&
+              notification.message.includes(complaint.caseNo),
+          ),
+      ).toHaveLength(1);
+
+      const secondSweep = complaintService.evaluateAllSlaBreach();
+      expect(secondSweep).toHaveLength(0);
+      expect(
+        complaintService
+          .getComplaintTimeline(complaint.caseNo)
+          .map((entry) => entry.action),
+      ).toEqual(["case_created", "sla_breached"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips already-recorded breaches and non-overdue cases", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-13T08:00:00.000Z"));
+      const { complaintService } = createServices();
+
+      const breachedCase = complaintService.createComplaintCase({
+        caseSource: "ops",
+        category: "safety_concern",
+        severity: "high",
+        description: "Already recorded breach",
+      });
+      const withinSlaCase = complaintService.createComplaintCase({
+        caseSource: "ops",
+        category: "lost_and_found",
+        severity: "normal",
+        description: "Still within SLA",
+      });
+
+      vi.setSystemTime(new Date("2026-05-13T10:01:00.000Z"));
+      complaintService.markComplaintSlaBreach(breachedCase.caseNo);
+
+      const breached = complaintService.evaluateAllSlaBreach();
+      expect(breached).toHaveLength(0);
+      expect(
+        complaintService.getComplaintCase(withinSlaCase.caseNo).slaStatus,
+      ).toBe("within_sla");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not breach resolved or closed cases", () => {
