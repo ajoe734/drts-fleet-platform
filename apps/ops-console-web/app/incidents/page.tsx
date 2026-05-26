@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, ReactElement } from "react";
 import {
   useDeferredValue,
@@ -56,6 +56,12 @@ const theme = buildCanvasTheme({
 
 const REFRESH_TIER: RefreshTier = "medium";
 const REFRESH_INTERVAL_MS = 15_000;
+const ACTION_CREATE_INCIDENT = "create_incident";
+const ACTION_CREATE_FROM_DISPATCH_EXCEPTION =
+  "create_incident_from_dispatch_exception";
+const ACTION_REFRESH_INCIDENTS = "refresh_incidents";
+const ACTION_OPEN_FEATURE_FLAGS = "open_feature_flags";
+const ACTION_OPEN_DASHBOARD = "open_dashboard";
 
 const STATUSES: IncidentStatus[] = [...INCIDENT_STATUSES];
 const SEVERITIES: IncidentSeverity[] = [...INCIDENT_SEVERITIES];
@@ -90,6 +96,7 @@ type IncidentListRuntimeEnvelope = {
   availableActions?: ResourceActionDescriptor[];
   emptyState?: EmptyStateEnvelope;
   refresh?: UiRefreshMetadata;
+  refreshMetadata?: UiRefreshMetadata;
   refreshTier?: RefreshTier;
 };
 
@@ -233,12 +240,12 @@ function getRefreshIntervalMs(tier: RefreshTier) {
 function buildDefaultPageActions(): ResourceActionDescriptor[] {
   return [
     {
-      action: "create_incident",
+      action: ACTION_CREATE_INCIDENT,
       enabled: true,
       riskLevel: "medium",
     },
     {
-      action: "refresh",
+      action: ACTION_REFRESH_INCIDENTS,
       enabled: true,
       riskLevel: "low",
     },
@@ -286,7 +293,8 @@ function getActionDescriptor(
 
 function isCreateActionName(action: string) {
   return [
-    "create_incident",
+    ACTION_CREATE_INCIDENT,
+    ACTION_CREATE_FROM_DISPATCH_EXCEPTION,
     "create",
     "createIncident",
     "createIncidentFromDispatchException",
@@ -294,7 +302,41 @@ function isCreateActionName(action: string) {
 }
 
 function isRefreshActionName(action: string) {
-  return action === "refresh" || action === "reload";
+  return (
+    action === ACTION_REFRESH_INCIDENTS ||
+    action === "refresh" ||
+    action === "reload"
+  );
+}
+
+function isRouteActionName(action: string) {
+  return (
+    action === ACTION_OPEN_FEATURE_FLAGS || action === ACTION_OPEN_DASHBOARD
+  );
+}
+
+function getActionLabel(
+  action: ResourceActionDescriptor | null | undefined,
+  locale: "en" | "zh",
+) {
+  switch (action?.action) {
+    case ACTION_CREATE_FROM_DISPATCH_EXCEPTION:
+      return locale === "en"
+        ? "Create from dispatch exception"
+        : "從派遣異常建立";
+    case ACTION_CREATE_INCIDENT:
+      return locale === "en" ? "Create incident" : "建立事故";
+    case ACTION_OPEN_FEATURE_FLAGS:
+      return locale === "en" ? "Open feature flags" : "前往功能旗標";
+    case ACTION_OPEN_DASHBOARD:
+      return locale === "en" ? "Open dashboard" : "前往儀表板";
+    case ACTION_REFRESH_INCIDENTS:
+    case "refresh":
+    case "reload":
+      return locale === "en" ? "Refresh" : "重新整理";
+    default:
+      return locale === "en" ? "Open" : "開啟";
+  }
 }
 
 function getActionTitle(
@@ -447,22 +489,26 @@ function renderEmptyState(
   locale: "en" | "zh",
   refreshAction: ResourceActionDescriptor | null,
   createAction: ResourceActionDescriptor | null,
-  onRefresh: () => void,
-  onCreate: () => void,
+  onAction: (action: ResourceActionDescriptor) => void,
+  onResetFilters: () => void,
 ) {
   const copy = getEmptyStateCopy(emptyState.reason, locale);
   const tone = copy.tone;
   const nextAction = emptyState.nextAction;
-  const emptyRefreshAction = isRefreshActionName(nextAction?.action ?? "")
-    ? nextAction
-    : emptyState.reason === "permission_denied"
+  const primaryAction =
+    nextAction ??
+    (emptyState.reason === "no_data" ? createAction : null) ??
+    (emptyState.reason === "fetch_failed" ||
+    emptyState.reason === "external_unavailable"
+      ? refreshAction
+      : null);
+  const secondaryAction =
+    nextAction && isRefreshActionName(nextAction.action)
       ? null
-      : refreshAction;
-  const emptyCreateAction = isCreateActionName(nextAction?.action ?? "")
-    ? nextAction
-    : emptyState.reason === "no_data" || emptyState.reason === "not_provisioned"
-      ? createAction
-      : null;
+      : emptyState.reason === "fetch_failed" ||
+          emptyState.reason === "external_unavailable"
+        ? refreshAction
+        : null;
 
   return (
     <Card
@@ -471,31 +517,44 @@ function renderEmptyState(
       subtitle={copy.body}
       actions={
         <>
-          {emptyRefreshAction ? (
-            <span title={getActionTitle(emptyRefreshAction, locale)}>
+          {emptyState.reason === "filtered_empty" ? (
+            <Btn
+              theme={theme}
+              variant="secondary"
+              icon="filter"
+              onClick={onResetFilters}
+            >
+              {locale === "en" ? "Clear filters" : "清除篩選"}
+            </Btn>
+          ) : null}
+          {primaryAction ? (
+            <span title={getActionTitle(primaryAction, locale)}>
               <Btn
                 theme={theme}
-                variant={getActionVariant(emptyRefreshAction)}
-                danger={isDangerAction(emptyRefreshAction)}
-                icon="more"
-                disabled={emptyRefreshAction.enabled === false}
-                onClick={onRefresh}
+                variant={getActionVariant(primaryAction)}
+                danger={isDangerAction(primaryAction)}
+                icon={
+                  isCreateActionName(primaryAction.action) ? "plus" : "arrow"
+                }
+                disabled={primaryAction.enabled === false}
+                onClick={() => onAction(primaryAction)}
               >
-                {locale === "en" ? "Refresh" : "重新整理"}
+                {getActionLabel(primaryAction, locale)}
               </Btn>
             </span>
           ) : null}
-          {emptyCreateAction ? (
-            <span title={getActionTitle(emptyCreateAction, locale)}>
+          {secondaryAction &&
+          primaryAction?.action !== secondaryAction.action ? (
+            <span title={getActionTitle(secondaryAction, locale)}>
               <Btn
                 theme={theme}
-                variant={getActionVariant(emptyCreateAction)}
-                danger={isDangerAction(emptyCreateAction)}
-                icon="plus"
-                disabled={emptyCreateAction.enabled === false}
-                onClick={onCreate}
+                variant={getActionVariant(secondaryAction)}
+                danger={isDangerAction(secondaryAction)}
+                icon="more"
+                disabled={secondaryAction.enabled === false}
+                onClick={() => onAction(secondaryAction)}
               >
-                {locale === "en" ? "Create incident" : "建立事故"}
+                {getActionLabel(secondaryAction, locale)}
               </Btn>
             </span>
           ) : null}
@@ -637,6 +696,7 @@ function getEmptyStateCopy(reason: EmptyReason, locale: "en" | "zh") {
 
 export default function IncidentsPage() {
   const { t, locale } = useTranslation();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [records, setRecords] = useState<IncidentRecordRuntime[]>([]);
   const [pageActions, setPageActions] = useState<ResourceActionDescriptor[]>(
@@ -716,7 +776,11 @@ export default function IncidentsPage() {
       setPageActions(
         normalizedEnvelope?.availableActions ?? buildDefaultPageActions(),
       );
-      setRefresh(normalizedEnvelope?.refresh ?? buildDefaultRefresh());
+      setRefresh(
+        normalizedEnvelope?.refreshMetadata ??
+          normalizedEnvelope?.refresh ??
+          buildDefaultRefresh(),
+      );
       setRefreshTier(normalizedEnvelope?.refreshTier ?? REFRESH_TIER);
       setEmptyState(
         normalizedItems.length === 0
@@ -816,12 +880,18 @@ export default function IncidentsPage() {
   );
 
   const createAction = getActionDescriptor(pageActions, [
-    "create_incident",
+    ...(dispatchExceptionOrderId
+      ? [ACTION_CREATE_FROM_DISPATCH_EXCEPTION, ACTION_CREATE_INCIDENT]
+      : [ACTION_CREATE_INCIDENT, ACTION_CREATE_FROM_DISPATCH_EXCEPTION]),
     "create",
     "createIncident",
     "createIncidentFromDispatchException",
   ]);
-  const refreshAction = getActionDescriptor(pageActions, ["refresh", "reload"]);
+  const refreshAction = getActionDescriptor(pageActions, [
+    ACTION_REFRESH_INCIDENTS,
+    "refresh",
+    "reload",
+  ]);
   const refreshIntervalMs = getRefreshIntervalMs(refreshTier);
   const filteredEmpty = filteredRecords.length === 0 && records.length > 0;
   const effectiveEmptyState = filteredEmpty
@@ -851,6 +921,40 @@ export default function IncidentsPage() {
 
     return () => window.clearInterval(handle);
   }, [loadRecords, refreshIntervalMs]);
+
+  const resetFilters = useEffectEvent(() => {
+    setQuery("");
+    setStatusFilter("all");
+    setSeverityFilter("all");
+    setCategoryFilter("all");
+  });
+
+  const handleAction = useEffectEvent((action: ResourceActionDescriptor) => {
+    switch (action.action) {
+      case ACTION_CREATE_INCIDENT:
+      case ACTION_CREATE_FROM_DISPATCH_EXCEPTION:
+      case "create":
+      case "createIncident":
+      case "createIncidentFromDispatchException":
+        setShowCreate(true);
+        return;
+      case ACTION_REFRESH_INCIDENTS:
+      case "refresh":
+      case "reload":
+        void loadRecords(true);
+        return;
+      case ACTION_OPEN_FEATURE_FLAGS:
+        router.push("/feature-flags");
+        return;
+      case ACTION_OPEN_DASHBOARD:
+        router.push("/dashboard");
+        return;
+      default:
+        if (isRouteActionName(action.action)) {
+          router.push("/dashboard");
+        }
+    }
+  });
 
   const tableRows: IncidentTableRow[] = filteredRecords.map((record) => {
     return {
@@ -1049,9 +1153,9 @@ export default function IncidentsPage() {
                 danger={isDangerAction(refreshAction)}
                 icon="more"
                 disabled={refreshAction?.enabled === false}
-                onClick={() => void loadRecords(true)}
+                onClick={() => refreshAction && handleAction(refreshAction)}
               >
-                {locale === "en" ? "Refresh" : "重新整理"}
+                {getActionLabel(refreshAction, locale)}
               </Btn>
             </span>
             <span title={getActionTitle(createAction, locale)}>
@@ -1061,9 +1165,9 @@ export default function IncidentsPage() {
                 danger={isDangerAction(createAction)}
                 icon="plus"
                 disabled={createAction?.enabled === false}
-                onClick={() => setShowCreate(true)}
+                onClick={() => createAction && handleAction(createAction)}
               >
-                {locale === "en" ? "Create incident" : "建立事故"}
+                {getActionLabel(createAction, locale)}
               </Btn>
             </span>
           </>
@@ -1142,7 +1246,7 @@ export default function IncidentsPage() {
                     danger={isDangerAction(refreshAction)}
                     icon="more"
                     disabled={refreshAction.enabled === false}
-                    onClick={() => void loadRecords(true)}
+                    onClick={() => handleAction(refreshAction)}
                   >
                     {locale === "en" ? "Refresh now" : "立即刷新"}
                   </Btn>
@@ -1503,10 +1607,7 @@ export default function IncidentsPage() {
               theme={theme}
               variant="ghost"
               onClick={() => {
-                setQuery("");
-                setStatusFilter("all");
-                setSeverityFilter("all");
-                setCategoryFilter("all");
+                resetFilters();
               }}
             >
               {locale === "en" ? "Reset" : "重設"}
@@ -1564,8 +1665,8 @@ export default function IncidentsPage() {
               locale,
               refreshAction,
               createAction,
-              () => void loadRecords(true),
-              () => setShowCreate(true),
+              handleAction,
+              resetFilters,
             )
           ) : (
             <Table theme={theme} columns={tableColumns} rows={tableRows} />
