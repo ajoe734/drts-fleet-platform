@@ -52,6 +52,11 @@ type EmptyStateConfig = {
   body: Record<Locale, string>;
 };
 
+type SectionLoadResult<T> = {
+  data: T;
+  error: Error | null;
+};
+
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: true,
@@ -131,6 +136,23 @@ async function resolveOrFallback<T>(
     return await loader();
   } catch {
     return fallback;
+  }
+}
+
+async function resolveSection<T>(
+  loader: () => Promise<T>,
+  fallback: T,
+): Promise<SectionLoadResult<T>> {
+  try {
+    return {
+      data: await loader(),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      data: fallback,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
   }
 }
 
@@ -309,37 +331,33 @@ function inferSuppression(
   return null;
 }
 
-function buildFallbackActions(
-  incident: IncidentRuntimeRecord,
-): ResourceActionDescriptor[] {
-  const readOnly =
-    incident.status === "resolved" || incident.status === "closed";
-  return [
-    {
-      action: "update_incident",
-      enabled: !readOnly,
-      riskLevel: "medium",
-      ...(readOnly ? { disabledReasonCode: "incident_read_only" } : {}),
-    },
-    {
-      action: "resolve_incident",
-      enabled: incident.status !== "resolved" && incident.status !== "closed",
-      riskLevel: "medium",
-      ...(readOnly ? { disabledReasonCode: "incident_already_closed" } : {}),
-    },
-    {
-      action: "close_incident",
-      enabled: incident.status !== "closed",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "add_service_recovery_action",
-      enabled: !readOnly,
-      riskLevel: "medium",
-      ...(readOnly ? { disabledReasonCode: "incident_read_only" } : {}),
-    },
-  ];
+function inferEmptyReason(
+  error: Error | null,
+  fallbackReason: Exclude<EmptyReason, "driver_not_eligible"> = "no_data",
+): Exclude<EmptyReason, "driver_not_eligible"> {
+  if (!error) {
+    return fallbackReason;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("403")) {
+    return "permission_denied";
+  }
+  if (message.includes("404")) {
+    return "no_data";
+  }
+  if (message.includes("501")) {
+    return "not_provisioned";
+  }
+  if (
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("504")
+  ) {
+    return "external_unavailable";
+  }
+
+  return "fetch_failed";
 }
 
 function getActionCopy(action: string, locale: Locale) {
@@ -440,7 +458,16 @@ function EmptyStateBlock({
 }
 
 function buildAuditLink(auditId: string) {
-  return `/audit?auditId=${encodeURIComponent(auditId)}`;
+  const route = `/audit?auditId=${encodeURIComponent(auditId)}`;
+  const platformAdminBaseUrl =
+    process.env.PLATFORM_ADMIN_BASE_URL ??
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_BASE_URL;
+
+  if (!platformAdminBaseUrl) {
+    return route;
+  }
+
+  return new URL(route, platformAdminBaseUrl).toString();
 }
 
 export default async function IncidentDetailPage({
@@ -492,31 +519,35 @@ export default async function IncidentDetailPage({
     );
   }
 
-  const [timelineEntries, recoveryEntries, relatedOrder, auditLogs, drivers] =
-    await Promise.all([
-      resolveOrFallback(
-        () => client.getIncidentTimeline(incidentId),
-        [] as IncidentTimelineEntry[],
-      ),
-      resolveOrFallback(
-        () => client.getServiceRecoveryActions(incidentId),
-        incident.serviceRecoveryActions ??
-          ([] as ServiceRecoveryActionRecord[]),
-      ),
-      incident.relatedOrderId
-        ? resolveOrFallback(
-            () => client.getOrder(incident.relatedOrderId as string),
-            null as OwnedOrderRecord | null,
-          )
-        : Promise.resolve(null as OwnedOrderRecord | null),
-      resolveOrFallback(() => client.listAuditLogs(), [] as AuditLogRecord[]),
-      incident.relatedDriverId
-        ? resolveOrFallback(
-            () => client.listDrivers(),
-            [] as DriverRegistryRecord[],
-          )
-        : Promise.resolve([] as DriverRegistryRecord[]),
-    ]);
+  const [
+    timelineResult,
+    recoveryResult,
+    relatedOrder,
+    auditLogsResult,
+    drivers,
+  ] = await Promise.all([
+    resolveSection(
+      () => client.getIncidentTimeline(incidentId),
+      [] as IncidentTimelineEntry[],
+    ),
+    resolveSection(
+      () => client.getServiceRecoveryActions(incidentId),
+      incident.serviceRecoveryActions ?? ([] as ServiceRecoveryActionRecord[]),
+    ),
+    incident.relatedOrderId
+      ? resolveOrFallback(
+          () => client.getOrder(incident.relatedOrderId as string),
+          null as OwnedOrderRecord | null,
+        )
+      : Promise.resolve(null as OwnedOrderRecord | null),
+    resolveSection(() => client.listAuditLogs(), [] as AuditLogRecord[]),
+    incident.relatedDriverId
+      ? resolveOrFallback(
+          () => client.listDrivers(),
+          [] as DriverRegistryRecord[],
+        )
+      : Promise.resolve([] as DriverRegistryRecord[]),
+  ]);
 
   const relatedDriver =
     drivers.find(
@@ -531,11 +562,12 @@ export default async function IncidentDetailPage({
     dataFreshness: "fresh",
     source: "live",
   };
-  const availableActions =
-    incident.availableActions && incident.availableActions.length > 0
-      ? incident.availableActions
-      : buildFallbackActions(incident);
-  const incidentAuditLogs = [...auditLogs]
+  const availableActions = incident.availableActions ?? [];
+  const serviceRecoveryAction =
+    availableActions.find((action) =>
+      action.action.toLowerCase().includes("recovery"),
+    ) ?? null;
+  const incidentAuditLogs = [...auditLogsResult.data]
     .filter(
       (entry) =>
         entry.resourceType === "incident" &&
@@ -548,7 +580,7 @@ export default async function IncidentDetailPage({
   const isReadOnly =
     incident.status === "resolved" || incident.status === "closed";
 
-  const timelineItems: TimelineItem[] = [...timelineEntries]
+  const timelineItems: TimelineItem[] = [...timelineResult.data]
     .sort(
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -563,8 +595,8 @@ export default async function IncidentDetailPage({
     }));
 
   const recoveryItems =
-    recoveryEntries.length > 0
-      ? [...recoveryEntries]
+    recoveryResult.data.length > 0
+      ? [...recoveryResult.data]
           .sort(
             (a, b) =>
               new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -831,41 +863,49 @@ export default async function IncidentDetailPage({
                 maxWidth: 620,
               }}
             >
-              {availableActions.map(
-                (action: ResourceActionDescriptor, index: number) => (
-                  <Link
-                    key={`${action.action}:${index}`}
-                    href={actionTarget(incident, action)}
-                    title={
-                      action.enabled ? undefined : action.disabledReasonCode
-                    }
-                    style={actionLinkStyle(
-                      theme,
-                      action.riskLevel === "high"
-                        ? "primary"
-                        : action.riskLevel === "medium"
-                          ? "secondary"
-                          : "ghost",
-                      !action.enabled,
-                    )}
-                  >
-                    <CanvasIcon
-                      name={
-                        action.action.includes("close")
-                          ? "audit"
-                          : action.action.includes("resolve")
-                            ? "check"
-                            : action.action.includes("recovery")
-                              ? "plus"
-                              : action.action.includes("lift")
-                                ? "clock"
-                                : "copy"
+              {availableActions.length > 0 ? (
+                availableActions.map(
+                  (action: ResourceActionDescriptor, index: number) => (
+                    <Link
+                      key={`${action.action}:${index}`}
+                      href={actionTarget(incident, action)}
+                      title={
+                        action.enabled ? undefined : action.disabledReasonCode
                       }
-                      size={12}
-                    />
-                    <span>{getActionCopy(action.action, locale)}</span>
-                  </Link>
-                ),
+                      style={actionLinkStyle(
+                        theme,
+                        action.riskLevel === "high"
+                          ? "primary"
+                          : action.riskLevel === "medium"
+                            ? "secondary"
+                            : "ghost",
+                        !action.enabled,
+                      )}
+                    >
+                      <CanvasIcon
+                        name={
+                          action.action.includes("close")
+                            ? "audit"
+                            : action.action.includes("resolve")
+                              ? "check"
+                              : action.action.includes("recovery")
+                                ? "plus"
+                                : action.action.includes("lift")
+                                  ? "clock"
+                                  : "copy"
+                        }
+                        size={12}
+                      />
+                      <span>{getActionCopy(action.action, locale)}</span>
+                    </Link>
+                  ),
+                )
+              ) : (
+                <Pill theme={theme} tone="neutral">
+                  {locale === "en"
+                    ? "Read-only by contract"
+                    : "依 contract 唯讀"}
+                </Pill>
               )}
             </div>
           </div>
@@ -960,7 +1000,10 @@ export default async function IncidentDetailPage({
                   emptyState={t("incidents.timelineEmpty", locale)}
                 />
               ) : (
-                <EmptyStateBlock reason="no_data" locale={locale} />
+                <EmptyStateBlock
+                  reason={inferEmptyReason(timelineResult.error, "no_data")}
+                  locale={locale}
+                />
               )}
             </Card>
 
@@ -971,7 +1014,10 @@ export default async function IncidentDetailPage({
               {auditItems ? (
                 <DL theme={theme} cols={1} items={auditItems} />
               ) : (
-                <EmptyStateBlock reason="permission_denied" locale={locale} />
+                <EmptyStateBlock
+                  reason={inferEmptyReason(auditLogsResult.error, "no_data")}
+                  locale={locale}
+                />
               )}
             </Card>
           </div>
@@ -981,27 +1027,40 @@ export default async function IncidentDetailPage({
               theme={theme}
               title={t("incidents.serviceRecovery.title", locale)}
               actions={
-                <Link
-                  href={`/incidents?incidentId=${encodeURIComponent(incident.incidentId)}`}
-                  style={actionLinkStyle(theme, "primary", isReadOnly)}
-                >
-                  <CanvasIcon name="plus" size={12} />
-                  <span>{t("incidents.serviceRecovery.add", locale)}</span>
-                </Link>
+                serviceRecoveryAction ? (
+                  <Link
+                    href={actionTarget(incident, serviceRecoveryAction)}
+                    title={
+                      serviceRecoveryAction.enabled
+                        ? undefined
+                        : serviceRecoveryAction.disabledReasonCode
+                    }
+                    style={actionLinkStyle(
+                      theme,
+                      "primary",
+                      !serviceRecoveryAction.enabled,
+                    )}
+                  >
+                    <CanvasIcon name="plus" size={12} />
+                    <span>{t("incidents.serviceRecovery.add", locale)}</span>
+                  </Link>
+                ) : undefined
               }
             >
               {recoveryItems ? (
                 <DL theme={theme} cols={1} items={recoveryItems} />
               ) : (
                 <EmptyStateBlock
-                  reason="no_data"
+                  reason={inferEmptyReason(recoveryResult.error, "no_data")}
                   locale={locale}
                   nextAction={
-                    <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
-                      {locale === "en"
-                        ? "This is the pre-recovery variant. Log the first recovery action from Incident Center."
-                        : "這是 pre-recovery 狀態；請從 Incident Center 記錄第一筆補救動作。"}
-                    </span>
+                    recoveryResult.error ? undefined : (
+                      <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                        {locale === "en"
+                          ? "This is the pre-recovery variant. Record the first recovery action from the Incident Center action flow."
+                          : "這是 pre-recovery 狀態；請透過 Incident Center 的既有動作流程記錄第一筆補救。"}
+                      </span>
+                    )
                   }
                 />
               )}
@@ -1051,7 +1110,7 @@ export default async function IncidentDetailPage({
                   />
                 </div>
               ) : (
-                <EmptyStateBlock reason="filtered_empty" locale={locale} />
+                <EmptyStateBlock reason="no_data" locale={locale} />
               )}
             </Card>
 
