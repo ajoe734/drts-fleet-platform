@@ -512,7 +512,7 @@ export class ComplaintService implements OnModuleInit {
 
   markComplaintSlaBreach(caseNo: string, requestId?: string) {
     const complaintCase = this.requireComplaintCase(caseNo);
-    if (this.computeSlaStatus(complaintCase) === "breached") {
+    if (this.hasRecordedSlaBreach(complaintCase)) {
       return this.cloneComplaintCase(complaintCase);
     }
 
@@ -692,13 +692,13 @@ export class ComplaintService implements OnModuleInit {
     const now = new Date();
     const results: ComplaintCaseRecord[] = [];
     for (const complaintCase of this.complaintCases) {
-      if (this.computeSlaStatus(complaintCase, now) === "breached") {
-        continue;
-      }
       if (
         complaintCase.status === "resolved" ||
         complaintCase.status === "closed"
       ) {
+        continue;
+      }
+      if (this.hasRecordedSlaBreach(complaintCase)) {
         continue;
       }
       if (new Date(complaintCase.slaDueAt) <= now) {
@@ -879,7 +879,7 @@ export class ComplaintService implements OnModuleInit {
     complaintCase: PersistedComplaintCaseRecord,
     now = new Date(),
   ): ComplaintSlaStatus {
-    if (complaintCase.slaBreachedAt || complaintCase.slaBreach === true) {
+    if (this.hasRecordedSlaBreach(complaintCase)) {
       return "breached";
     }
 
@@ -904,6 +904,12 @@ export class ComplaintService implements OnModuleInit {
     }
 
     return "within_sla";
+  }
+
+  private hasRecordedSlaBreach(complaintCase: PersistedComplaintCaseRecord) {
+    return (
+      complaintCase.slaBreachedAt != null || complaintCase.slaBreach === true
+    );
   }
 
   private computeSlaBreachedAt(
