@@ -13,6 +13,14 @@ import {
   Tr,
 } from "@drts/ui-web";
 
+type VehiclesPageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function lifecycleTone(status: string) {
   if (status === "active") return "success" as const;
   if (
@@ -27,10 +35,14 @@ function lifecycleTone(status: string) {
   return "warning" as const;
 }
 
-export default async function VehiclesPage() {
-  const [client, locale] = await Promise.all([
+export default async function VehiclesPage({
+  searchParams,
+}: VehiclesPageProps) {
+  const [client, locale, resolvedSearchParams] = await Promise.all([
     getServerOpsClient(),
     getServerLocale(),
+    searchParams ??
+      Promise.resolve({} as Record<string, string | string[] | undefined>),
   ]);
   let vehicles: VehicleRegistryRecord[] = [];
   let error: string | null = null;
@@ -41,16 +53,22 @@ export default async function VehiclesPage() {
     error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
 
-  const warningVehicles = vehicles.filter(
+  const linkedVehicleId =
+    firstParam(resolvedSearchParams.vehicleId)?.trim() ?? "";
+  const scopedVehicles = linkedVehicleId
+    ? vehicles.filter((vehicle) => vehicle.vehicleId === linkedVehicleId)
+    : vehicles;
+
+  const warningVehicles = scopedVehicles.filter(
     (vehicle) => vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
   );
-  const dispatchableCount = vehicles.filter(
+  const dispatchableCount = scopedVehicles.filter(
     (vehicle) => vehicle.dispatchableFlag,
   ).length;
-  const offboardingCount = vehicles.filter(
+  const offboardingCount = scopedVehicles.filter(
     (vehicle) => vehicle.supplyLifecycle.offboarding.status !== "none",
   ).length;
-  const debrandingPendingCount = vehicles.filter(
+  const debrandingPendingCount = scopedVehicles.filter(
     (vehicle) =>
       vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending",
   ).length;
@@ -59,8 +77,32 @@ export default async function VehiclesPage() {
     <>
       <PageHeader
         title={t("vehicles.title", locale)}
-        subtitle={t("vehicles.subtitle", locale, { count: vehicles.length })}
+        subtitle={t("vehicles.subtitle", locale, {
+          count: scopedVehicles.length,
+        })}
       />
+
+      {linkedVehicleId ? (
+        <div
+          style={{
+            background: scopedVehicles.length > 0 ? "#dbeafe" : "#fef3c7",
+            border: `1px solid ${scopedVehicles.length > 0 ? "#93c5fd" : "#fcd34d"}`,
+            borderRadius: "8px",
+            padding: "12px 16px",
+            color: scopedVehicles.length > 0 ? "#1d4ed8" : "#92400e",
+            fontSize: "13.5px",
+            marginBottom: "20px",
+          }}
+        >
+          {scopedVehicles.length > 0
+            ? locale === "en"
+              ? `Showing vehicle ${linkedVehicleId} from an incident deep link.`
+              : `目前顯示來自 incident deep link 的車輛 ${linkedVehicleId}。`
+            : locale === "en"
+              ? `Vehicle ${linkedVehicleId} was not found in the current registry snapshot.`
+              : `目前的名冊快照中找不到車輛 ${linkedVehicleId}。`}
+        </div>
+      ) : null}
 
       {error && (
         <div
@@ -80,7 +122,9 @@ export default async function VehiclesPage() {
 
       <DataViewCard
         title={t("vehicles.title", locale)}
-        subtitle={t("vehicles.subtitle", locale, { count: vehicles.length })}
+        subtitle={t("vehicles.subtitle", locale, {
+          count: scopedVehicles.length,
+        })}
         tone="info"
         density="compact"
         summary={t("vehicles.registrySummary", locale, {
@@ -102,7 +146,7 @@ export default async function VehiclesPage() {
           ]}
           empty={t("vehicles.empty", locale)}
         >
-          {vehicles.map((vehicle) => (
+          {scopedVehicles.map((vehicle) => (
             <Tr key={vehicle.vehicleId}>
               <Td density="compact">
                 <DataCellStack

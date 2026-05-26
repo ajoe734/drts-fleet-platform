@@ -12,6 +12,8 @@ import {
 import type {
   CreateIncidentCommand,
   CreateIncidentFromDispatchExceptionCommand,
+  IncidentMutationResult,
+  IncidentServiceRecoveryActionResult,
   LinkComplaintToIncidentCommand,
   RecordServiceRecoveryActionCommand,
   UpdateIncidentCommand,
@@ -68,7 +70,11 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.updateIncident(incidentId, command, requestId),
+      this.incidentService.updateIncidentWithReceipt(
+        incidentId,
+        command,
+        requestId,
+      ) satisfies IncidentMutationResult,
       requestId,
     );
   }
@@ -102,11 +108,11 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.recordServiceRecoveryAction(
+      this.incidentService.recordServiceRecoveryActionWithReceipt(
         incidentId,
         command,
         requestId,
-      ),
+      ) satisfies IncidentServiceRecoveryActionResult,
       requestId,
     );
   }

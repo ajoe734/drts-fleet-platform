@@ -139,6 +139,14 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   immutable: { en: "Immutable", zh: "不可變" },
   in_progress: { en: "In Progress", zh: "進行中" },
   incident_assigned: { en: "Incident Assigned", zh: "事故已指派" },
+  incident_assignment_acknowledged: {
+    en: "Incident Assignment Acknowledged",
+    zh: "事故指派已確認",
+  },
+  incident_category_updated: {
+    en: "Incident Category Updated",
+    zh: "事故分類已更新",
+  },
   incident_closed: { en: "Incident Closed", zh: "事故已關閉" },
   incident_created: { en: "Incident Created", zh: "事故已建立" },
   incident_hold: { en: "Incident Hold", zh: "事故暫停" },

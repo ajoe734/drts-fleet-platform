@@ -3,10 +3,13 @@ import { randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   AuditLogRecord,
   CreateIncidentCommand,
   CreateIncidentFromDispatchExceptionCommand,
   IncidentRecord,
+  IncidentMutationResult,
+  IncidentServiceRecoveryActionResult,
   IncidentStatus,
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
@@ -60,6 +63,8 @@ const TIMELINE_ACTIONS = {
   created: "incident_created",
   statusChanged: "status_changed",
   assigned: "incident_assigned",
+  assignmentAcknowledged: "incident_assignment_acknowledged",
+  categoryUpdated: "incident_category_updated",
   resolved: "incident_resolved",
   closed: "incident_closed",
   complaintLinked: "complaint_linked",
@@ -116,6 +121,7 @@ export class IncidentService implements OnModuleInit {
       relatedComplaintCaseNo: null,
       reportedBy: command.reportedBy,
       assignedTo: null,
+      assignmentAcknowledgedAt: null,
       escalationTarget: null,
       sourceDispatchExceptionOrderId: null,
       occurredAt: command.occurredAt ?? null,
@@ -177,9 +183,34 @@ export class IncidentService implements OnModuleInit {
     command: UpdateIncidentCommand,
     requestId?: string,
   ) {
+    return this.updateIncidentWithReceipt(incidentId, command, requestId)
+      .incident;
+  }
+
+  updateIncidentWithReceipt(
+    incidentId: string,
+    command: UpdateIncidentCommand,
+    requestId?: string,
+  ): IncidentMutationResult {
     const incident = this.require(incidentId);
 
     const updated = { ...incident, updatedAt: new Date().toISOString() };
+    let timelineChanged = false;
+
+    if (command.category !== undefined) {
+      this.assertValidCategory(command.category);
+      if (updated.category !== command.category) {
+        const previousCategory = updated.category;
+        updated.category = command.category;
+        this.appendTimelineEntry(
+          incidentId,
+          TIMELINE_ACTIONS.categoryUpdated,
+          `Category changed from ${previousCategory} to ${command.category}.`,
+          "ops_user",
+        );
+        timelineChanged = true;
+      }
+    }
 
     if (command.status !== undefined) {
       this.assertValidStatus(command.status);
@@ -190,16 +221,22 @@ export class IncidentService implements OnModuleInit {
         `Status changed to ${command.status}.`,
         "ops_user",
       );
+      timelineChanged = true;
     }
 
     if (command.assignedTo !== undefined) {
+      const previousAssignedTo = incident.assignedTo ?? null;
       updated.assignedTo = command.assignedTo;
+      if ((command.assignedTo ?? null) !== previousAssignedTo) {
+        updated.assignmentAcknowledgedAt = null;
+      }
       this.appendTimelineEntry(
         incidentId,
         TIMELINE_ACTIONS.assigned,
         `Assigned to ${command.assignedTo}.`,
         "ops_user",
       );
+      timelineChanged = true;
     }
 
     if (command.severity !== undefined) {
@@ -213,6 +250,7 @@ export class IncidentService implements OnModuleInit {
           `Severity changed from ${oldSeverity} to ${command.severity}.`,
           "ops_user",
         );
+        timelineChanged = true;
       }
     }
 
@@ -239,6 +277,25 @@ export class IncidentService implements OnModuleInit {
           : "Escalation target cleared.",
         "ops_user",
       );
+      timelineChanged = true;
+    }
+
+    if (command.assignmentAcknowledgedAt !== undefined) {
+      const acknowledgedAt =
+        command.assignmentAcknowledgedAt ?? new Date().toISOString();
+      const acknowledgedBy =
+        command.assignmentAcknowledgedBy?.trim() ||
+        updated.assignedTo ||
+        "ops_user";
+      updated.assignmentAcknowledgedAt = acknowledgedAt;
+      this.appendTimelineEntry(
+        incidentId,
+        TIMELINE_ACTIONS.assignmentAcknowledged,
+        `Assignment acknowledged by ${acknowledgedBy}.`,
+        acknowledgedBy,
+        acknowledgedAt,
+      );
+      timelineChanged = true;
     }
 
     if (command.resolutionNote !== undefined) {
@@ -246,8 +303,16 @@ export class IncidentService implements OnModuleInit {
     }
 
     this.replace(updated);
-    this.persist({ incidents: [updated] }, "update_incident");
-    this.recordAudit(
+    this.persist(
+      {
+        incidents: [updated],
+        timelines: timelineChanged
+          ? (this.timelines.get(incidentId)?.slice(-1) ?? [])
+          : undefined,
+      },
+      "update_incident",
+    );
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "ops_user",
@@ -257,15 +322,24 @@ export class IncidentService implements OnModuleInit {
         resourceType: "incident",
         resourceId: incidentId,
         newValuesSummary: {
+          category: updated.category,
           status: updated.status,
           assignedTo: updated.assignedTo,
+          assignmentAcknowledgedAt: updated.assignmentAcknowledgedAt,
           resolutionNote: updated.resolutionNote,
         },
       },
       requestId,
     );
 
-    return this.clone(updated);
+    return {
+      incident: this.clone(updated),
+      receipt: this.buildActionReceipt({
+        auditId: auditLog.auditId,
+        message: "Incident updated.",
+        resourceId: incidentId,
+      }),
+    };
   }
 
   linkComplaint(
@@ -371,6 +445,7 @@ export class IncidentService implements OnModuleInit {
       relatedComplaintCaseNo: null,
       reportedBy: command.reportedBy,
       assignedTo: null,
+      assignmentAcknowledgedAt: null,
       escalationTarget: command.escalationTarget ?? null,
       sourceDispatchExceptionOrderId: command.orderId,
       occurredAt: now,
@@ -422,6 +497,18 @@ export class IncidentService implements OnModuleInit {
     command: RecordServiceRecoveryActionCommand,
     requestId?: string,
   ) {
+    return this.recordServiceRecoveryActionWithReceipt(
+      incidentId,
+      command,
+      requestId,
+    ).action;
+  }
+
+  recordServiceRecoveryActionWithReceipt(
+    incidentId: string,
+    command: RecordServiceRecoveryActionCommand,
+    requestId?: string,
+  ): IncidentServiceRecoveryActionResult {
     this.assertNonBlank(command.actionType, "actionType");
     this.assertNonBlank(command.note, "note");
     this.assertNonBlank(command.actor, "actor");
@@ -465,8 +552,14 @@ export class IncidentService implements OnModuleInit {
       now,
     );
 
-    this.persist({ incidents: [updated] }, "record_service_recovery_action");
-    this.recordAudit(
+    this.persist(
+      {
+        incidents: [updated],
+        timelines: [this.getLatestTimelineEntry(incidentId)],
+      },
+      "record_service_recovery_action",
+    );
+    const auditLog = this.recordAudit(
       {
         actorId: command.actor,
         actorType: "ops_user",
@@ -483,7 +576,14 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
-    return action;
+    return {
+      action,
+      receipt: this.buildActionReceipt({
+        auditId: auditLog.auditId,
+        message: "Service recovery action recorded.",
+        resourceId: incidentId,
+      }),
+    };
   }
 
   getServiceRecoveryActions(incidentId: string) {
@@ -569,6 +669,11 @@ export class IncidentService implements OnModuleInit {
     this.timelines.set(incidentId, [...current, entry]);
   }
 
+  private getLatestTimelineEntry(incidentId: string) {
+    const entries = this.timelines.get(incidentId) ?? [];
+    return entries[entries.length - 1]!;
+  }
+
   private clone(incident: IncidentRecord) {
     return { ...incident };
   }
@@ -604,7 +709,22 @@ export class IncidentService implements OnModuleInit {
   ) {
     const log = { ...input };
     if (requestId) (log as any).requestId = requestId;
-    this.auditNotificationService.recordAuditLog(log);
+    return this.auditNotificationService.recordAuditLog(log);
+  }
+
+  private buildActionReceipt(input: {
+    auditId: string;
+    message: string;
+    resourceId: string;
+  }): ActionReceipt {
+    return {
+      actionId: `act-${randomUUID()}`,
+      auditId: input.auditId,
+      resourceType: "incident",
+      resourceId: input.resourceId,
+      status: "completed",
+      message: input.message,
+    };
   }
 
   private assertValidCategory(

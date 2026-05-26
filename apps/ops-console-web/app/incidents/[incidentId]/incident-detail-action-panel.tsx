@@ -3,15 +3,18 @@
 import { startTransition, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
+  IncidentCategory,
   IncidentEscalationTarget,
+  IncidentMutationResult,
   IncidentSeverity,
+  IncidentServiceRecoveryActionResult,
   IncidentStatus,
   RecordServiceRecoveryActionCommand,
   ResourceActionDescriptor,
-  ServiceRecoveryActionRecord,
   UpdateIncidentCommand,
 } from "@drts/contracts";
 import {
+  INCIDENT_CATEGORIES,
   INCIDENT_ESCALATION_TARGETS,
   INCIDENT_SEVERITIES,
   INCIDENT_STATUSES,
@@ -50,6 +53,7 @@ type IncidentDetailActionPanelProps = {
   availableActions: ResourceActionDescriptor[];
   initialIntent: string | null;
   initialStatus: IncidentStatus;
+  initialCategory: IncidentCategory;
   initialSeverity: IncidentSeverity;
   initialAssignedTo: string | null;
   initialEscalationTarget: IncidentEscalationTarget | null;
@@ -59,6 +63,8 @@ type IncidentDetailActionPanelProps = {
 };
 
 type ReceiptState = {
+  actionId: string;
+  auditId: string;
   title: string;
   body: string;
   auditHref: string | null;
@@ -110,8 +116,8 @@ function actionSummary(intent: string, locale: Locale) {
   switch (intent) {
     case "update":
       return locale === "en"
-        ? "Adjust severity, owner, escalation target, status, and resolution note."
-        : "調整嚴重程度、負責人、升級對象、狀態與結案備註。";
+        ? "Adjust category, severity, owner, escalation target, status, and resolution note."
+        : "調整分類、嚴重程度、負責人、升級對象、狀態與結案備註。";
     case "resolve":
       return locale === "en"
         ? "Mark the incident resolved after recovery is complete."
@@ -180,6 +186,7 @@ export function IncidentDetailActionPanel({
   availableActions,
   initialIntent,
   initialStatus,
+  initialCategory,
   initialSeverity,
   initialAssignedTo,
   initialEscalationTarget,
@@ -190,6 +197,7 @@ export function IncidentDetailActionPanel({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<IncidentStatus>(initialStatus);
+  const [category, setCategory] = useState<IncidentCategory>(initialCategory);
   const [severity, setSeverity] = useState<IncidentSeverity>(initialSeverity);
   const [assignedTo, setAssignedTo] = useState(initialAssignedTo ?? "");
   const [escalationTarget, setEscalationTarget] = useState<
@@ -221,6 +229,7 @@ export function IncidentDetailActionPanel({
 
   useEffect(() => {
     setStatus(initialStatus);
+    setCategory(initialCategory);
     setSeverity(initialSeverity);
     setAssignedTo(initialAssignedTo ?? "");
     setEscalationTarget(initialEscalationTarget ?? "");
@@ -231,6 +240,7 @@ export function IncidentDetailActionPanel({
     setError(null);
   }, [
     initialAssignedTo,
+    initialCategory,
     initialEscalationTarget,
     initialResolutionNote,
     initialSeverity,
@@ -306,23 +316,34 @@ export function IncidentDetailActionPanel({
         locale === "en"
           ? "Mutation completed. Refreshing timeline and audit subset."
           : "動作已送出，正在刷新 timeline 與 audit 摘要。";
-      let auditHref = latestAuditHref;
+      let nextReceipt: ReceiptState | null = null;
 
       if (currentIntent === "service_recovery") {
         const created = (await client.recordServiceRecoveryAction(incidentId, {
           actionType: recoveryType,
           actor: recoveryActor.trim() || "ops-user-001",
           note: recoveryNote.trim(),
-        })) as ServiceRecoveryActionRecord;
+        })) as IncidentServiceRecoveryActionResult;
         receiptBody =
           locale === "en"
-            ? `Recorded ${formatOpsCodeLabel(locale, created.actionType)} by ${created.actor}.`
-            : `已由 ${created.actor} 記錄 ${formatOpsCodeLabel(locale, created.actionType)}。`;
+            ? `Recorded ${formatOpsCodeLabel(locale, created.action.actionType)} by ${created.action.actor}.`
+            : `已由 ${created.action.actor} 記錄 ${formatOpsCodeLabel(locale, created.action.actionType)}。`;
+        nextReceipt = {
+          actionId: created.receipt.actionId,
+          auditId: created.receipt.auditId,
+          title: receiptTitle,
+          body: receiptBody,
+          auditHref: buildAuditHref(
+            created.receipt.auditId,
+            platformAdminAuditBaseUrl,
+          ),
+        };
       } else {
         const payload: UpdateIncidentCommand =
           currentIntent === "update"
             ? {
                 status,
+                category,
                 severity,
                 escalationTarget: escalationTarget || null,
                 ...withOptionalString(assignedTo, (trimmed) => ({
@@ -343,8 +364,9 @@ export function IncidentDetailActionPanel({
                     resolutionNote: reasonText.trim(),
                   }
                 : {
+                    assignmentAcknowledgedAt: new Date().toISOString(),
                     ...withOptionalString(ackActor, (trimmed) => ({
-                      assignedTo: trimmed,
+                      assignmentAcknowledgedBy: trimmed,
                     })),
                     resolutionNote:
                       reasonText.trim() ||
@@ -353,25 +375,31 @@ export function IncidentDetailActionPanel({
                         : "已在 incident 工作區確認升級。"),
                   };
 
-        const updated = await client.updateIncident(incidentId, payload);
-        if (
-          updated &&
-          typeof updated === "object" &&
-          "auditId" in updated &&
-          typeof updated.auditId === "string"
-        ) {
-          auditHref = buildAuditHref(
-            updated.auditId,
+        const updated = (await client.updateIncident(
+          incidentId,
+          payload,
+        )) as IncidentMutationResult;
+        nextReceipt = {
+          actionId: updated.receipt.actionId,
+          auditId: updated.receipt.auditId,
+          title: receiptTitle,
+          body: receiptBody,
+          auditHref: buildAuditHref(
+            updated.receipt.auditId,
             platformAdminAuditBaseUrl,
-          );
-        }
+          ),
+        };
       }
 
-      setReceipt({
-        title: receiptTitle,
-        body: receiptBody,
-        auditHref,
-      });
+      setReceipt(
+        nextReceipt ?? {
+          actionId: "act-unavailable",
+          auditId: "audit-unavailable",
+          title: receiptTitle,
+          body: receiptBody,
+          auditHref: latestAuditHref,
+        },
+      );
       startTransition(() => {
         router.replace(basePath);
         router.refresh();
@@ -414,6 +442,11 @@ export function IncidentDetailActionPanel({
             body={receipt.body}
           />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+              {locale === "en"
+                ? `Action ${receipt.actionId} · Audit ${receipt.auditId}`
+                : `動作 ${receipt.actionId} · 審計 ${receipt.auditId}`}
+            </span>
             {receipt.auditHref ? (
               <a
                 href={receipt.auditHref}
@@ -492,6 +525,24 @@ export function IncidentDetailActionPanel({
                   style={inputStyle}
                 >
                   {INCIDENT_SEVERITIES.map((value) => (
+                    <option key={value} value={value}>
+                      {formatOpsCodeLabel(locale, value)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field
+                theme={theme}
+                label={locale === "en" ? "Category" : "分類"}
+              >
+                <select
+                  value={category}
+                  onChange={(event) =>
+                    setCategory(event.target.value as IncidentCategory)
+                  }
+                  style={inputStyle}
+                >
+                  {INCIDENT_CATEGORIES.map((value) => (
                     <option key={value} value={value}>
                       {formatOpsCodeLabel(locale, value)}
                     </option>

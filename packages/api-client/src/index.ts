@@ -94,6 +94,8 @@ import type {
   GeneratePlacardVersionCommand,
   GenerateTenantInvoiceCommand,
   IncidentRecord,
+  IncidentMutationResult,
+  IncidentServiceRecoveryActionResult,
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
   ServiceRecoveryActionRecord,
@@ -2350,7 +2352,9 @@ export class ApiClient {
   }
 
   async updateIncident(incidentId: string, command: UpdateIncidentCommand) {
-    return this.patch(`/api/incidents/${incidentId}`, { body: command });
+    return this.patch<IncidentMutationResult>(`/api/incidents/${incidentId}`, {
+      body: command,
+    });
   }
 
   async linkIncidentToComplaint(incidentId: string, complaintCaseNo: string) {
@@ -2372,7 +2376,7 @@ export class ApiClient {
     incidentId: string,
     command: RecordServiceRecoveryActionCommand,
   ) {
-    return this.post<ServiceRecoveryActionRecord>(
+    return this.post<IncidentServiceRecoveryActionResult>(
       `/api/incidents/${encodeURIComponent(incidentId)}/service-recovery`,
       { body: command },
     );

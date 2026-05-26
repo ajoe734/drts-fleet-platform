@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ActionReceipt } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4249,7 +4250,10 @@ export type IncidentEscalationTarget =
 
 export interface UpdateIncidentCommand {
   status?: IncidentStatus;
+  category?: IncidentCategory;
   assignedTo?: string;
+  assignmentAcknowledgedAt?: string | null;
+  assignmentAcknowledgedBy?: string;
   resolutionNote?: string;
   escalationTarget?: IncidentEscalationTarget | null;
   severity?: IncidentSeverity;
@@ -4299,6 +4303,7 @@ export interface IncidentRecord {
   relatedComplaintCaseNo: string | null;
   reportedBy: string;
   assignedTo: string | null;
+  assignmentAcknowledgedAt: string | null;
   escalationTarget: IncidentEscalationTarget | null;
   sourceDispatchExceptionOrderId: string | null;
   occurredAt: string | null;
@@ -4307,6 +4312,16 @@ export interface IncidentRecord {
   serviceRecoveryActions: ServiceRecoveryActionRecord[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface IncidentMutationResult {
+  incident: IncidentRecord;
+  receipt: ActionReceipt;
+}
+
+export interface IncidentServiceRecoveryActionResult {
+  action: ServiceRecoveryActionRecord;
+  receipt: ActionReceipt;
 }
 
 export interface IncidentTimelineEntry {
