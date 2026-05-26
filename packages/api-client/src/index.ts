@@ -9,7 +9,6 @@ import type {
   AcknowledgeOpsApprovalRequestBreachCommand,
   AddComplaintCaseNoteCommand,
   AddReconciliationIssueCommentCommand,
-  ActionReceipt,
   ApplyManualFareOverrideCommand,
   ApproveExceptionOverrideCommand,
   AnnounceCallAgentIdentityCommand,
@@ -1621,16 +1620,18 @@ export class ApiClient {
     return this.getList<UserNotificationRecord>("/api/notifications");
   }
 
-  async markNotificationRead(notificationId: string): Promise<ActionReceipt> {
-    return this.post<ActionReceipt>(
+  async markNotificationRead(
+    notificationId: string,
+  ): Promise<{ updated: number }> {
+    return this.post<{ updated: number }>(
       `/api/notifications/${encodeURIComponent(notificationId)}/read`,
     );
   }
 
   async markNotificationsBulkRead(
     command: MarkNotificationsReadCommand,
-  ): Promise<ActionReceipt> {
-    return this.post<ActionReceipt>("/api/notifications/read-bulk", {
+  ): Promise<{ updated: number }> {
+    return this.post<{ updated: number }>("/api/notifications/read-bulk", {
       body: command,
     });
   }
