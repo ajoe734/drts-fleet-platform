@@ -1037,6 +1037,8 @@ def normalize_state_agents(state: dict[str, Any]) -> None:
     for blocker in state.get("blockers", []):
         blocker["owner"] = canonical_agent_name(blocker.get("owner"))
         blocker["waiting_for"] = canonical_agent_name(blocker.get("waiting_for"))
+        if not blocker.get("message") and blocker.get("reason"):
+            blocker["message"] = blocker["reason"]
 
     for handoff in state.get("handoffs", []):
         handoff["from"] = canonical_agent_name(handoff.get("from"))
@@ -1430,8 +1432,9 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     open_blockers = [blocker for blocker in state.get("blockers", []) if blocker.get("status") == "open"]
     if open_blockers:
         for blocker in open_blockers:
+            blocker_message = blocker.get("message") or blocker.get("reason") or "-"
             lines.append(
-                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {blocker['message']} | {blocker['status']} |"
+                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {blocker_message} | {blocker['status']} |"
             )
     else:
         lines.append("| _(none)_ | - | - | - | - |")
