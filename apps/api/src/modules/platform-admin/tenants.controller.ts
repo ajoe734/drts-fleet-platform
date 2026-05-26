@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type {
   AcknowledgeTenantRoleCommand,
+  AdvanceTenantRolloutCommand,
   CreatePlatformTenantCommand,
   InviteTenantRoleCommand,
   SetPlatformTenantRolloutStageCommand,
@@ -10,12 +11,16 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { TenantRolloutService } from "../tenant-rollout/tenant-rollout.service";
 import { TenantsService } from "./tenants.service";
 import type { TenantSummary } from "./tenants.service";
 
 @Controller("platform-admin")
 export class TenantsController {
-  constructor(private readonly tenants: TenantsService) {}
+  constructor(
+    private readonly tenants: TenantsService,
+    private readonly tenantRollout: TenantRolloutService,
+  ) {}
 
   @Get("tenants")
   list(@Headers("x-request-id") requestId?: string) {
@@ -50,6 +55,14 @@ export class TenantsController {
     return toApiSuccessEnvelope(this.tenants.get(tenantId), requestId);
   }
 
+  @Get("tenants/:tenantId/rollout-state")
+  getRolloutState(
+    @Param("tenantId") tenantId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(this.tenantRollout.getState(tenantId), requestId);
+  }
+
   @Post("tenants/:tenantId/onboarding")
   updateOnboarding(
     @Param("tenantId") tenantId: string,
@@ -68,6 +81,18 @@ export class TenantsController {
   ) {
     const updated = this.tenants.setRolloutStage(tenantId, body, requestId);
     return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("tenants/:tenantId/rollout/advance")
+  advanceRollout(
+    @Param("tenantId") tenantId: string,
+    @Body() body: AdvanceTenantRolloutCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantRollout.advance(tenantId, body, requestId),
+      requestId,
+    );
   }
 
   @Post("tenants/:tenantId/roles/invite")

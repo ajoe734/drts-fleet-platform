@@ -420,16 +420,23 @@ export type TenantRolloutGateStatus =
  */
 export interface TenantRolloutStateMachineRecord {
   tenantId: string;
-  stage: TenantRolloutStage;
-  gateStatus: TenantRolloutGateStatus;
-  cutoverOwnerUserId: string | null;
-  cutoverOwnerDisplayName: string | null;
-  rollbackOwnerUserId: string | null;
-  rollbackOwnerDisplayName: string | null;
-  rollbackPrepared: boolean;
-  enteredStageAt: string;
-  enteredGateAt: string;
-  lastUpdatedBy: string;
-  lastUpdatedAt: string;
-  availableActions: ResourceActionDescriptor[];
+  currentStage: TenantRolloutStage;
+  gates: Array<{
+    gateCode: string;
+    label: string;
+    status: TenantRolloutGateStatus;
+    requiredEvidence: string[];
+    blockers: string[];
+    approvedByActorId?: string | null;
+    approvedAt?: string | null;
+  }>;
+  nextActions: ResourceActionDescriptor[];
+  rollback: {
+    rollbackPrepared: boolean;
+    cutoverOwner: string | null;
+    rollbackOwner: string | null;
+    lastRollbackAt?: string | null;
+    rollbackActions: ResourceActionDescriptor[];
+  };
+  refresh: UiRefreshMetadata;
 }

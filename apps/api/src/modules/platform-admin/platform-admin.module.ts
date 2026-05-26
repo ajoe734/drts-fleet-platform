@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
+import { TenantRolloutService } from "../tenant-rollout/tenant-rollout.service";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { PlatformAdminController } from "./platform-admin.controller";
 import { PlatformTenantGovernanceController } from "./tenant-governance.controller";
@@ -22,6 +23,7 @@ import { PlatformAdminService } from "./platform-admin.service";
     PlatformAdminRepository,
     PlatformAdminService,
     TenantsService,
+    TenantRolloutService,
     PlatformTenantGovernanceService,
   ],
 })

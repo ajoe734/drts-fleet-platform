@@ -4583,6 +4583,7 @@ export interface PlatformTenantRolloutState {
   rollbackOwner: string | null;
   rollbackPrepared: boolean;
   lastPromotedAt: string | null;
+  lastRollbackAt: string | null;
   notes: string | null;
 }
 
@@ -4650,6 +4651,12 @@ export interface UpdatePlatformTenantOnboardingCommand {
 export interface SetPlatformTenantRolloutStageCommand {
   stage: PlatformTenantRolloutStage;
   notes?: string | null;
+}
+
+export interface AdvanceTenantRolloutCommand {
+  targetStage: PlatformTenantRolloutStage;
+  reason?: string | null;
+  evidenceRefs?: string[];
 }
 
 export interface InviteTenantRoleCommand {
