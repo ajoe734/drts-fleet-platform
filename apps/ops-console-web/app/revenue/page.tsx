@@ -9,7 +9,9 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type {
+import {
+  OPS_REVENUE_REVIEW_DATASET_KEYS,
+  REFRESH_TIER_CADENCE_MS,
   CrossAppResourceLink,
   DriverStatementRecord,
   DriverTaskRecord,
@@ -17,8 +19,11 @@ import type {
   EmptyStateEnvelope,
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
+  type OpsRevenueReviewDatasetState,
+  type OpsRevenueReviewSnapshot,
   OwnedOrderRecord,
   ReconciliationIssueRecord,
+  type RefreshTier,
   ResourceActionDescriptor,
   SettlementMatrixRecord,
   UiHealthEnvelope,
@@ -55,26 +60,20 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const REFRESH_INTERVAL_MS = 15_000;
+const DEFAULT_REFRESH_TIER: RefreshTier = "medium";
+const DEFAULT_REFRESH_INTERVAL_MS =
+  REFRESH_TIER_CADENCE_MS[DEFAULT_REFRESH_TIER];
 const DEFAULT_PERIOD: RevenuePeriod = "7d";
 const VISIBLE_PERIODS: RevenuePeriod[] = ["today", "yesterday", "7d", "30d"];
 type CanvasIconKey = Parameters<typeof CanvasIcon>[0]["name"];
+type CanvasButtonIcon = NonNullable<Parameters<typeof CanvasBtn>[0]["icon"]>;
 const MATRIX_CHANNEL_ORDER = [
   "tenant_enterprise",
   "partner_airport",
   "phone_dispatch",
   "forwarded_shadow",
 ];
-
-type RevenueDatasetKey =
-  | "orders"
-  | "tasks"
-  | "statements"
-  | "vehicles"
-  | "forwardedOrders"
-  | "settlementMatrix"
-  | "reconciliationIssues"
-  | "forwarderIssues";
+type RevenueDatasetKey = (typeof OPS_REVENUE_REVIEW_DATASET_KEYS)[number];
 
 type DatasetFailure = {
   key: RevenueDatasetKey;
@@ -84,14 +83,26 @@ type DatasetFailure = {
   external: boolean;
 };
 
+type RevenueReconciliationIssue = ReconciliationIssueRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  ownerAppLink?: CrossAppResourceLink;
+};
+
 type RevenueSnapshot = {
+  source: "contract" | "legacy";
+  refreshTier: RefreshTier;
+  refreshMetadata: UiRefreshMetadata | null;
+  healthEnvelope: UiHealthEnvelope | null;
+  availableActions: ResourceActionDescriptor[];
+  paymentsLink: CrossAppResourceLink | null;
+  datasets: Record<RevenueDatasetKey, OpsRevenueReviewDatasetState>;
   orders: OwnedOrderRecord[];
   tasks: DriverTaskRecord[];
   statements: DriverStatementRecord[];
   vehicles: VehicleRegistryRecord[];
   forwardedOrders: ForwardedOrderRecord[];
   settlementMatrix: SettlementMatrixRecord[];
-  reconciliationIssues: ReconciliationIssueRecord[];
+  reconciliationIssues: RevenueReconciliationIssue[];
   forwarderIssues: ForwarderReconciliationIssue[];
   failures: DatasetFailure[];
   loadedAt: string | null;
@@ -112,7 +123,8 @@ type ChannelMixRow = {
   share: string;
 };
 
-type MatrixViewRow = SettlementMatrixRecord & {
+type MatrixViewRow = SettlementMatrixRecord &
+  Record<string, unknown> & {
   channelLabel: string;
   payerLabel: string;
   receiptLabel: string;
@@ -122,7 +134,8 @@ type MatrixViewRow = SettlementMatrixRecord & {
   ledgerLabel: string;
 };
 
-type RevenueIssueView = ReconciliationIssueRecord & {
+type RevenueIssueView = ReconciliationIssueRecord &
+  Record<string, unknown> & {
   platformLabel: string;
   ownerLabel: string;
   reasonLabel: string;
@@ -132,10 +145,31 @@ type RevenueIssueView = ReconciliationIssueRecord & {
   mirrorLine: string;
   financeLine: string;
   availableActions: ResourceActionDescriptor[];
-  deepLink: CrossAppResourceLink;
+  ownerAppLink: CrossAppResourceLink;
 };
 
+function buildEmptyDatasetStates(): Record<
+  RevenueDatasetKey,
+  OpsRevenueReviewDatasetState
+> {
+  const entries = OPS_REVENUE_REVIEW_DATASET_KEYS.map((key) => [
+    key,
+    { key },
+  ]);
+  return Object.fromEntries(entries) as Record<
+    RevenueDatasetKey,
+    OpsRevenueReviewDatasetState
+  >;
+}
+
 const EMPTY_SNAPSHOT: RevenueSnapshot = {
+  source: "legacy",
+  refreshTier: DEFAULT_REFRESH_TIER,
+  refreshMetadata: null,
+  healthEnvelope: null,
+  availableActions: [],
+  paymentsLink: null,
+  datasets: buildEmptyDatasetStates(),
   orders: [],
   tasks: [],
   statements: [],
@@ -308,7 +342,8 @@ function revenueEntriesForFilters(
         order,
         task,
         completedAt: task.completedAt,
-        revenueMinor: amountMinor(task.fare) || amountMinor(order?.quotedFare),
+        revenueMinor:
+          amountMinor(task.fare) || amountMinor(order?.quotedFare ?? null),
       } satisfies RevenueEntry;
     })
     .filter((entry) => {
@@ -450,6 +485,7 @@ function buildHealthEnvelope(snapshot: RevenueSnapshot): UiHealthEnvelope {
 function buildRefreshMetadata(
   snapshot: RevenueSnapshot,
   health: UiHealthEnvelope,
+  staleAfterMs: number,
   now: number,
 ): UiRefreshMetadata {
   const generatedAt = snapshot.loadedAt ?? new Date(now).toISOString();
@@ -459,7 +495,7 @@ function buildRefreshMetadata(
     dataFreshness = "degraded";
   } else if (snapshot.loadedAt) {
     dataFreshness =
-      ageMs > REFRESH_INTERVAL_MS
+      ageMs > staleAfterMs
         ? "stale"
         : health.status === "degraded"
           ? "degraded"
@@ -467,7 +503,7 @@ function buildRefreshMetadata(
   }
   return {
     generatedAt,
-    staleAfterMs: REFRESH_INTERVAL_MS,
+    staleAfterMs,
     dataFreshness,
     source: "live",
   };
@@ -493,6 +529,39 @@ function actionDescriptor(
   };
 }
 
+function resolveAvailableAction(
+  actions: ResourceActionDescriptor[],
+  candidates: string[],
+  fallback: ResourceActionDescriptor,
+) {
+  for (const candidate of candidates) {
+    const exact = actions.find((descriptor) => descriptor.action === candidate);
+    if (exact) {
+      return exact;
+    }
+  }
+  for (const candidate of candidates) {
+    const partial = actions.find((descriptor) =>
+      descriptor.action.startsWith(candidate),
+    );
+    if (partial) {
+      return partial;
+    }
+  }
+  return fallback;
+}
+
+function revenuePaymentsLink(locale: "en" | "zh"): CrossAppResourceLink {
+  return {
+    targetApp: "platform-admin",
+    route: "/payments",
+    resourceType: "reconciliation_queue",
+    resourceId: "payments",
+    openMode: "new_tab",
+    label: copy(locale, "Platform Admin /payments", "Platform Admin /payments"),
+  };
+}
+
 function issueDeepLink(
   issueId: string,
   locale: "en" | "zh",
@@ -505,6 +574,61 @@ function issueDeepLink(
     openMode: "new_tab",
     label: copy(locale, "Open in Platform Admin", "前往 Platform Admin"),
   };
+}
+
+function refreshTierLabel(tier: RefreshTier, locale: "en" | "zh") {
+  switch (tier) {
+    case "dispatch":
+      return copy(locale, "T2 / 5s", "T2 / 5 秒");
+    case "manual":
+      return copy(locale, "T6 / manual", "T6 / 手動");
+    case "urgent":
+      return copy(locale, "T1 / urgent", "T1 / 緊急");
+    case "fast":
+      return copy(locale, "T1 / 3s", "T1 / 3 秒");
+    case "medium_slow":
+      return copy(locale, "T4 / 30s", "T4 / 30 秒");
+    case "slow":
+      return copy(locale, "T5 / 30s", "T5 / 30 秒");
+    case "medium":
+    default:
+      return copy(locale, "T3 / 15s", "T3 / 15 秒");
+  }
+}
+
+function actionButtonIcon(action: string): CanvasButtonIcon {
+  if (action.includes("refresh")) {
+    return "refresh";
+  }
+  if (action.includes("open_platform_admin")) {
+    return "ext";
+  }
+  if (action.includes("drawer")) {
+    return "arrow";
+  }
+  if (action.includes("filter") || action.includes("clear")) {
+    return "filter";
+  }
+  return "arrow";
+}
+
+function actionButtonLabel(action: string, locale: "en" | "zh") {
+  switch (action) {
+    case "clear_filters":
+      return copy(locale, "Clear filters", "清除篩選");
+    case "open_platform_admin_payments":
+      return copy(locale, "Open Platform Admin", "打開 Platform Admin");
+    case "open_platform_admin_reconciliation":
+      return copy(locale, "Owner app", "Owner app");
+    case "open_mismatch_drawer":
+      return copy(locale, "Drawer", "Drawer");
+    case "refresh_snapshot":
+      return copy(locale, "Refresh", "重新整理");
+    default:
+      return action.startsWith("filter_")
+        ? copy(locale, "Apply filter", "套用篩選")
+        : copy(locale, "Continue", "繼續");
+  }
 }
 
 function compareIssuePriority(left: RevenueIssueView, right: RevenueIssueView) {
@@ -523,6 +647,47 @@ function compareIssuePriority(left: RevenueIssueView, right: RevenueIssueView) {
   return (
     new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
   );
+}
+
+function datasetEmptyState(
+  snapshot: RevenueSnapshot,
+  keys: RevenueDatasetKey[],
+): EmptyStateEnvelope | null {
+  for (const key of keys) {
+    const emptyState = snapshot.datasets[key]?.emptyState;
+    if (emptyState) {
+      return emptyState;
+    }
+  }
+  return null;
+}
+
+function normalizeRevenueSnapshot(
+  snapshot: OpsRevenueReviewSnapshot,
+): RevenueSnapshot {
+  const datasets = buildEmptyDatasetStates();
+  for (const key of OPS_REVENUE_REVIEW_DATASET_KEYS) {
+    datasets[key] = snapshot.datasets[key] ?? { key };
+  }
+  return {
+    source: "contract",
+    refreshTier: snapshot.refreshTier,
+    refreshMetadata: snapshot.refreshMetadata,
+    healthEnvelope: snapshot.healthEnvelope,
+    availableActions: snapshot.availableActions,
+    paymentsLink: snapshot.paymentsLink,
+    datasets,
+    orders: snapshot.orders,
+    tasks: snapshot.tasks,
+    statements: snapshot.statements,
+    vehicles: snapshot.vehicles,
+    forwardedOrders: snapshot.forwardedOrders,
+    settlementMatrix: snapshot.settlementMatrix,
+    reconciliationIssues: snapshot.reconciliationIssues,
+    forwarderIssues: snapshot.forwarderIssues,
+    failures: [],
+    loadedAt: snapshot.refreshMetadata.generatedAt,
+  };
 }
 
 function buildIssueViews(
@@ -589,6 +754,13 @@ function buildIssueViews(
             issue.forwardedFinanceContext.settlementAuthority,
           )}`
         : (issue.resolutionSummary ?? issue.summary);
+      const availableActions =
+        issue.availableActions && issue.availableActions.length > 0
+          ? issue.availableActions
+          : [
+              actionDescriptor("open_mismatch_drawer"),
+              actionDescriptor("open_platform_admin_reconciliation"),
+            ];
       return {
         ...issue,
         platformLabel: formatOpsCodeLabel(locale, platformCode),
@@ -604,11 +776,8 @@ function buildIssueViews(
             ? `${issue.mirrorOrderId ?? "—"} / ${issue.externalOrderId ?? "—"}`
             : copy(locale, "No order linkage", "無訂單關聯"),
         financeLine,
-        deepLink: issueDeepLink(issue.issueId, locale),
-        availableActions: [
-          actionDescriptor("open_mismatch_drawer"),
-          actionDescriptor("open_platform_admin_reconciliation"),
-        ],
+        ownerAppLink: issue.ownerAppLink ?? issueDeepLink(issue.issueId, locale),
+        availableActions,
       } satisfies RevenueIssueView;
     })
     .sort(compareIssuePriority);
@@ -843,20 +1012,12 @@ function EmptyStateCard({
           <CanvasBtn
             theme={theme}
             size="xs"
-            icon={
-              emptyState.nextAction.action.includes("refresh")
-                ? "refresh"
-                : "filter"
-            }
+            icon={actionButtonIcon(emptyState.nextAction.action)}
             disabled={!emptyState.nextAction.enabled}
             onClick={() => onAction(emptyState.nextAction!)}
             style={{ minWidth: 0 }}
           >
-            {emptyState.nextAction.action === "clear_filters"
-              ? copy(locale, "Clear filters", "清除篩選")
-              : emptyState.nextAction.action === "open_platform_admin_payments"
-                ? copy(locale, "Open Platform Admin", "打開 Platform Admin")
-                : copy(locale, "Refresh", "重新整理")}
+            {actionButtonLabel(emptyState.nextAction.action, locale)}
           </CanvasBtn>
         </div>
       ) : null}
@@ -864,7 +1025,15 @@ function EmptyStateCard({
   );
 }
 
-function RefreshTierBadge({ refresh }: { refresh: UiRefreshMetadata }) {
+function RefreshTierBadge({
+  refresh,
+  refreshTier,
+  locale,
+}: {
+  refresh: UiRefreshMetadata;
+  refreshTier: RefreshTier;
+  locale: "en" | "zh";
+}) {
   const tone =
     refresh.dataFreshness === "degraded"
       ? { fg: theme.danger, bg: theme.dangerBg, bd: theme.dangerBorder }
@@ -895,7 +1064,7 @@ function RefreshTierBadge({ refresh }: { refresh: UiRefreshMetadata }) {
           background: tone.fg,
         }}
       />
-      T3 / 15s
+      {refreshTierLabel(refreshTier, locale)}
       {refresh.dataFreshness !== "fresh" ? ` · ${refresh.dataFreshness}` : ""}
     </div>
   );
@@ -986,10 +1155,12 @@ function StaleBanner({
 function RuntimeStrip({
   locale,
   refresh,
+  refreshTier,
   health,
 }: {
   locale: "en" | "zh";
   refresh: UiRefreshMetadata;
+  refreshTier: RefreshTier;
   health: UiHealthEnvelope;
 }) {
   const healthTone =
@@ -1020,7 +1191,11 @@ function RuntimeStrip({
         </CanvasPill>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <RefreshTierBadge refresh={refresh} />
+        <RefreshTierBadge
+          refresh={refresh}
+          refreshTier={refreshTier}
+          locale={locale}
+        />
         <span
           style={{
             fontSize: 11,
@@ -1036,7 +1211,7 @@ function RuntimeStrip({
   );
 }
 
-async function loadRevenueSnapshot(
+async function loadLegacyRevenueSnapshot(
   previous: RevenueSnapshot | null,
 ): Promise<RevenueSnapshot> {
   const client = getOpsClient();
@@ -1110,6 +1285,7 @@ async function loadRevenueSnapshot(
   );
   const next: RevenueSnapshot = {
     ...EMPTY_SNAPSHOT,
+    source: "legacy",
     loadedAt: new Date().toISOString(),
     failures: [],
   };
@@ -1139,6 +1315,17 @@ async function loadRevenueSnapshot(
   return next;
 }
 
+async function loadRevenueSnapshot(
+  previous: RevenueSnapshot | null,
+): Promise<RevenueSnapshot> {
+  const client = getOpsClient();
+  try {
+    return normalizeRevenueSnapshot(await client.getOpsRevenueReview());
+  } catch {
+    return loadLegacyRevenueSnapshot(previous);
+  }
+}
+
 export default function RevenuePage() {
   const { locale } = useTranslation();
   const router = useRouter();
@@ -1156,6 +1343,10 @@ export default function RevenuePage() {
   const [routing, startRoutingTransition] = useTransition();
   const snapshotRef = useRef<RevenueSnapshot | null>(null);
   const loadTokenRef = useRef(0);
+  const data = snapshot ?? EMPTY_SNAPSHOT;
+  const refreshTier = data.refreshTier;
+  const refreshCadenceMs =
+    REFRESH_TIER_CADENCE_MS[refreshTier] || DEFAULT_REFRESH_INTERVAL_MS;
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -1163,17 +1354,22 @@ export default function RevenuePage() {
 
   useEffect(() => {
     void refreshRevenue("initial");
-    const pollId = window.setInterval(() => {
-      void refreshRevenue("poll");
-    }, REFRESH_INTERVAL_MS);
+    const pollId =
+      refreshCadenceMs > 0
+        ? window.setInterval(() => {
+            void refreshRevenue("poll");
+          }, refreshCadenceMs)
+        : null;
     const clockId = window.setInterval(() => {
       setNow(Date.now());
     }, 1_000);
     return () => {
-      window.clearInterval(pollId);
+      if (pollId !== null) {
+        window.clearInterval(pollId);
+      }
       window.clearInterval(clockId);
     };
-  }, []);
+  }, [refreshCadenceMs]);
 
   async function refreshRevenue(mode: "initial" | "poll" | "manual") {
     const token = loadTokenRef.current + 1;
@@ -1204,9 +1400,10 @@ export default function RevenuePage() {
     });
   }
 
-  const data = snapshot ?? EMPTY_SNAPSHOT;
-  const health = buildHealthEnvelope(data);
-  const refresh = buildRefreshMetadata(data, health, now);
+  const health = data.healthEnvelope ?? buildHealthEnvelope(data);
+  const refresh =
+    data.refreshMetadata ??
+    buildRefreshMetadata(data, health, refreshCadenceMs, now);
   const filteredEntries = revenueEntriesForFilters(
     data.orders,
     data.tasks,
@@ -1256,63 +1453,122 @@ export default function RevenuePage() {
     filters.serviceBucket !== "all" ||
     filters.vehicleId !== "all";
 
-  const refreshAction = actionDescriptor("refresh_snapshot");
-  const clearFiltersAction = actionDescriptor("clear_filters", {
-    enabled: hasFilters,
-    disabledReasonCode: hasFilters ? undefined : "already_default_filters",
-  });
-  const openPaymentsAction = actionDescriptor("open_platform_admin_payments");
+  const refreshAction = resolveAvailableAction(
+    data.availableActions,
+    ["refresh_snapshot", "refresh"],
+    actionDescriptor("refresh_snapshot"),
+  );
+  const clearFiltersAction = resolveAvailableAction(
+    data.availableActions,
+    ["clear_filters"],
+    actionDescriptor("clear_filters", {
+      enabled: hasFilters,
+      ...(hasFilters ? {} : { disabledReasonCode: "already_default_filters" }),
+    }),
+  );
+  const openPaymentsAction = resolveAvailableAction(
+    data.availableActions,
+    ["open_platform_admin_payments", "open_payments"],
+    actionDescriptor("open_platform_admin_payments"),
+  );
+  const periodFilterAction = resolveAvailableAction(
+    data.availableActions,
+    [`filter_period_${filters.period}`, "filter_period"],
+    actionDescriptor(`filter_period_${filters.period}`),
+  );
+  const serviceBucketFilterAction = resolveAvailableAction(
+    data.availableActions,
+    [
+      `filter_service_bucket_${filters.serviceBucket}`,
+      "filter_service_bucket",
+      "filter_serviceBucket",
+    ],
+    actionDescriptor(`filter_service_bucket_${filters.serviceBucket}`),
+  );
+  const vehicleFilterAction = resolveAvailableAction(
+    data.availableActions,
+    [`filter_vehicle_${filters.vehicleId}`, "filter_vehicle"],
+    actionDescriptor(`filter_vehicle_${filters.vehicleId}`),
+  );
+  const paymentsLink = data.paymentsLink ?? revenuePaymentsLink(locale);
+  const ordersTasksEmptyState = datasetEmptyState(data, ["orders", "tasks"]);
+  const vehicleDatasetEmptyState = datasetEmptyState(data, [
+    "vehicles",
+    "tasks",
+  ]);
+  const matrixDatasetEmptyState = datasetEmptyState(data, ["settlementMatrix"]);
+  const statementDatasetEmptyState = datasetEmptyState(data, ["statements"]);
+  const mismatchDatasetEmptyState = datasetEmptyState(data, [
+    "reconciliationIssues",
+    "forwarderIssues",
+  ]);
 
   const serviceBucketEmptyState =
     insights.serviceBuckets.length > 0
       ? null
-      : sectionEmptyState(
-          data.failures.some(
-            (failure) => failure.key === "orders" || failure.key === "tasks",
+      : hasFilters && allEntries.length > 0
+        ? sectionEmptyState(
+            "filtered_empty",
+            "revenue.breakdown.service_bucket",
+            clearFiltersAction,
           )
-            ? "fetch_failed"
-            : hasFilters && allEntries.length > 0
-              ? "filtered_empty"
+        : ordersTasksEmptyState ??
+          sectionEmptyState(
+            data.failures.some(
+              (failure) => failure.key === "orders" || failure.key === "tasks",
+            )
+              ? "fetch_failed"
               : allEntries.length === 0 && data.settlementMatrix.length === 0
                 ? "not_provisioned"
                 : "no_data",
-          "revenue.breakdown.service_bucket",
-          hasFilters ? clearFiltersAction : refreshAction,
-        );
+            "revenue.breakdown.service_bucket",
+            refreshAction,
+          );
 
   const vehicleEmptyState =
     insights.vehicles.length > 0
       ? null
-      : sectionEmptyState(
-          data.failures.some((failure) => failure.key === "vehicles")
-            ? "fetch_failed"
-            : hasFilters && data.tasks.length > 0
-              ? "filtered_empty"
+      : hasFilters && data.tasks.length > 0
+        ? sectionEmptyState(
+            "filtered_empty",
+            "revenue.breakdown.vehicle",
+            clearFiltersAction,
+          )
+        : vehicleDatasetEmptyState ??
+          sectionEmptyState(
+            data.failures.some((failure) => failure.key === "vehicles")
+              ? "fetch_failed"
               : data.vehicles.length === 0 && data.tasks.length === 0
                 ? "not_provisioned"
                 : "no_data",
-          "revenue.breakdown.vehicle",
-          hasFilters ? clearFiltersAction : undefined,
-        );
+            "revenue.breakdown.vehicle",
+            undefined,
+          );
 
   const channelEmptyState = channelMixRows.some((row) => row.trips > 0)
     ? null
-    : sectionEmptyState(
-        data.failures.some(
-          (failure) => failure.key === "orders" || failure.key === "tasks",
+    : hasFilters && allEntries.length > 0
+      ? sectionEmptyState(
+          "filtered_empty",
+          "revenue.channel_mix",
+          clearFiltersAction,
         )
-          ? "fetch_failed"
-          : hasFilters && allEntries.length > 0
-            ? "filtered_empty"
+      : ordersTasksEmptyState ??
+        sectionEmptyState(
+          data.failures.some(
+            (failure) => failure.key === "orders" || failure.key === "tasks",
+          )
+            ? "fetch_failed"
             : "no_data",
-        "revenue.channel_mix",
-        hasFilters ? clearFiltersAction : refreshAction,
-      );
+          "revenue.channel_mix",
+          refreshAction,
+        );
 
   const matrixEmptyState =
     matrixRows.length > 0
       ? null
-      : sectionEmptyState(
+      : matrixDatasetEmptyState ??
+        sectionEmptyState(
           data.failures.some((failure) => failure.key === "settlementMatrix")
             ? data.failures.some(
                 (failure) =>
@@ -1333,37 +1589,40 @@ export default function RevenuePage() {
   const mismatchEmptyState =
     issueViews.length > 0
       ? null
-      : sectionEmptyState(
-          data.failures.some(
-            (failure) =>
-              failure.key === "reconciliationIssues" &&
-              failure.statusCode === 403,
+      : hasFilters && data.reconciliationIssues.length > 0
+        ? sectionEmptyState(
+            "filtered_empty",
+            "revenue.mismatch_queue",
+            clearFiltersAction,
           )
-            ? "permission_denied"
-            : data.failures.some(
-                  (failure) => failure.key === "reconciliationIssues",
-                )
-              ? "fetch_failed"
+        : mismatchDatasetEmptyState ??
+          sectionEmptyState(
+            data.failures.some(
+              (failure) =>
+                failure.key === "reconciliationIssues" &&
+                failure.statusCode === 403,
+            )
+              ? "permission_denied"
               : data.failures.some(
-                    (failure) =>
-                      failure.key === "forwardedOrders" ||
-                      failure.key === "forwarderIssues",
+                    (failure) => failure.key === "reconciliationIssues",
                   )
-                ? "external_unavailable"
-                : hasFilters && data.reconciliationIssues.length > 0
-                  ? "filtered_empty"
+                ? "fetch_failed"
+                : data.failures.some(
+                      (failure) =>
+                        failure.key === "forwardedOrders" ||
+                        failure.key === "forwarderIssues",
+                    )
+                  ? "external_unavailable"
                   : "no_data",
-          "revenue.mismatch_queue",
-          hasFilters
-            ? clearFiltersAction
-            : data.failures.some(
-                  (failure) =>
-                    failure.key === "reconciliationIssues" ||
-                    failure.key === "forwarderIssues",
-                )
+            "revenue.mismatch_queue",
+            data.failures.some(
+              (failure) =>
+                failure.key === "reconciliationIssues" ||
+                failure.key === "forwarderIssues",
+            )
               ? refreshAction
               : openPaymentsAction,
-        );
+          );
 
   const payoutRows = insights.payoutStatuses.map((item) => ({
     key: item.status,
@@ -1459,14 +1718,7 @@ export default function RevenuePage() {
         return;
       case "open_platform_admin_payments":
         window.open(
-          openPlatformAdminHref({
-            targetApp: "platform-admin",
-            route: "/payments",
-            resourceType: "reconciliation_queue",
-            resourceId: "payments",
-            openMode: "new_tab",
-            label: "Platform Admin /payments",
-          }),
+          openPlatformAdminHref(paymentsLink),
           "_blank",
           "noopener,noreferrer",
         );
@@ -1502,7 +1754,7 @@ export default function RevenuePage() {
             <CanvasBtn
               theme={theme}
               icon="refresh"
-              disabled={refreshing}
+              disabled={refreshing || !refreshAction.enabled}
               onClick={() => void refreshRevenue("manual")}
             >
               {refreshing
@@ -1513,20 +1765,22 @@ export default function RevenuePage() {
               theme={theme}
               variant="primary"
               icon="ext"
+              disabled={!openPaymentsAction.enabled}
               onClick={() => runEmptyStateAction(openPaymentsAction)}
             >
-              {copy(
-                locale,
-                "Platform Admin /payments",
-                "Platform Admin /payments",
-              )}
+              {paymentsLink.label}
             </CanvasBtn>
           </>
         }
       />
 
       <div style={pageBodyStyle(theme)}>
-        <RuntimeStrip locale={locale} refresh={refresh} health={health} />
+        <RuntimeStrip
+          locale={locale}
+          refresh={refresh}
+          refreshTier={refreshTier}
+          health={health}
+        />
         <HealthBanner locale={locale} health={health} />
         <StaleBanner
           locale={locale}
@@ -1557,8 +1811,10 @@ export default function RevenuePage() {
               </div>
               <div style={chipRowStyle()}>
                 {VISIBLE_PERIODS.map((period) => {
-                  const descriptor = actionDescriptor(
-                    `filter_period_${period}`,
+                  const descriptor = resolveAvailableAction(
+                    data.availableActions,
+                    [`filter_period_${period}`, "filter_period"],
+                    periodFilterAction,
                   );
                   return (
                     <CanvasBtn
@@ -1592,8 +1848,14 @@ export default function RevenuePage() {
               <div style={chipRowStyle()}>
                 {(["all", "standard_taxi", "business_dispatch"] as const).map(
                   (serviceBucket) => {
-                    const descriptor = actionDescriptor(
-                      `filter_service_bucket_${serviceBucket}`,
+                    const descriptor = resolveAvailableAction(
+                      data.availableActions,
+                      [
+                        `filter_service_bucket_${serviceBucket}`,
+                        "filter_service_bucket",
+                        "filter_serviceBucket",
+                      ],
+                      serviceBucketFilterAction,
                     );
                     return (
                       <CanvasBtn
@@ -1627,6 +1889,7 @@ export default function RevenuePage() {
               </div>
               <select
                 value={filters.vehicleId}
+                disabled={!vehicleFilterAction.enabled}
                 onChange={(event) =>
                   applyFilters({
                     ...filters,
@@ -1726,9 +1989,10 @@ export default function RevenuePage() {
               variant="secondary"
               size="xs"
               icon="ext"
+              disabled={!openPaymentsAction.enabled}
               onClick={() => runEmptyStateAction(openPaymentsAction)}
             >
-              {copy(locale, "Open Platform Admin", "開啟 Platform Admin")}
+              {paymentsLink.label}
             </CanvasBtn>
           }
         />
@@ -1745,7 +2009,7 @@ export default function RevenuePage() {
             padding={0}
           >
             {matrixRows.length > 0 ? (
-              <CanvasTable
+              <CanvasTable<MatrixViewRow>
                 theme={theme}
                 columns={[
                   {
@@ -2049,17 +2313,21 @@ export default function RevenuePage() {
               ) : (
                 <EmptyStateCard
                   locale={locale}
-                  emptyState={sectionEmptyState(
-                    data.failures.some(
-                      (failure) => failure.key === "statements",
+                  emptyState={
+                    statementDatasetEmptyState ??
+                    sectionEmptyState(
+                      data.failures.some(
+                        (failure) => failure.key === "statements",
+                      )
+                        ? "fetch_failed"
+                        : data.statements.length === 0 &&
+                            data.orders.length === 0
+                          ? "not_provisioned"
+                          : "no_data",
+                      "revenue.settlement_pulse",
+                      refreshAction,
                     )
-                      ? "fetch_failed"
-                      : data.statements.length === 0 && data.orders.length === 0
-                        ? "not_provisioned"
-                        : "no_data",
-                    "revenue.settlement_pulse",
-                    refreshAction,
-                  )}
+                  }
                   onAction={runEmptyStateAction}
                 />
               )}
@@ -2169,11 +2437,7 @@ export default function RevenuePage() {
                                   ? "secondary"
                                   : "ghost"
                               }
-                              icon={
-                                descriptor.action === "open_mismatch_drawer"
-                                  ? "arrow"
-                                  : "ext"
-                              }
+                              icon={actionButtonIcon(descriptor.action)}
                               disabled={!descriptor.enabled}
                               onClick={() => {
                                 if (
@@ -2183,15 +2447,13 @@ export default function RevenuePage() {
                                   return;
                                 }
                                 window.open(
-                                  openPlatformAdminHref(row.deepLink),
+                                  openPlatformAdminHref(row.ownerAppLink),
                                   "_blank",
                                   "noopener,noreferrer",
                                 );
                               }}
                             >
-                              {descriptor.action === "open_mismatch_drawer"
-                                ? copy(locale, "Drawer", "Drawer")
-                                : copy(locale, "Owner app", "Owner app")}
+                              {actionButtonLabel(descriptor.action, locale)}
                             </CanvasBtn>
                           ),
                         )}
@@ -2349,13 +2611,13 @@ export default function RevenuePage() {
                     icon="ext"
                     onClick={() =>
                       window.open(
-                        openPlatformAdminHref(selectedIssue.deepLink),
+                        openPlatformAdminHref(selectedIssue.ownerAppLink),
                         "_blank",
                         "noopener,noreferrer",
                       )
                     }
                   >
-                    {selectedIssue.deepLink.label}
+                    {selectedIssue.ownerAppLink.label}
                   </CanvasBtn>
                 }
               />

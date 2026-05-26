@@ -105,6 +105,7 @@ import type {
   MarkReimbursementPaidCommand,
   NotificationRecord,
   OpenCallSessionCommand,
+  OpsRevenueReviewSnapshot,
   OperationalObservabilitySnapshot,
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
@@ -1842,6 +1843,10 @@ export class ApiClient {
     return this.get<OperationalObservabilitySnapshot>(
       "/api/operational-observability",
     );
+  }
+
+  async getOpsRevenueReview(): Promise<OpsRevenueReviewSnapshot> {
+    return this.get<OpsRevenueReviewSnapshot>("/api/ops/revenue-review");
   }
 
   // ── Forwarder ──
