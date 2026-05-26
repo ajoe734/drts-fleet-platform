@@ -1,20 +1,115 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  ActionReceipt,
   BookingRecord,
+  ResourceActionDescriptor,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
-import { formatDateTime, isFutureIso } from "@/lib/formatters";
+import { formatDateTime } from "@/lib/formatters";
 
 type Mode = "update" | "cancel" | null;
 
-export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
+type BookingCommandPanelProps = {
+  availableActions: ResourceActionDescriptor[];
+  booking: BookingRecord;
+  editableUntil: string | null;
+  readOnlyReasonCode: string | null;
+};
+
+type CommandResponseEnvelope = {
+  bookingId?: string;
+  error?: string;
+  ok?: boolean;
+  result?: unknown;
+};
+
+function getActionLabel(action: string) {
+  switch (action) {
+    case "update":
+      return "Update booking";
+    case "cancel":
+      return "Cancel booking";
+    case "resubmit_approval":
+      return "Resubmit approval";
+    default:
+      return action.replaceAll("_", " ");
+  }
+}
+
+function getDisabledReasonText(
+  code: string | null | undefined,
+  editableUntil: string | null,
+) {
+  switch (code) {
+    case "past_editable_until":
+      return editableUntil
+        ? `Edit window closed at ${formatDateTime(editableUntil)}.`
+        : "Edit window has already closed.";
+    case "past_cancelable_until":
+      return "Cancellation window has already closed.";
+    case "terminal_order":
+      return "Completed and cancelled bookings cannot be changed here.";
+    case "in_fulfillment":
+      return "Dispatch execution is active, so tenant edits are locked.";
+    default:
+      return code ? code.replaceAll("_", " ") : null;
+  }
+}
+
+function buildFallbackReceipt(
+  action: string,
+  bookingId: string,
+  status: ActionReceipt["status"] = "completed",
+): ActionReceipt {
+  return {
+    actionId: `${action}-${bookingId}`,
+    auditId: `${action}-audit-${bookingId}`,
+    resourceType: "booking",
+    resourceId: bookingId,
+    status,
+    message:
+      status === "accepted"
+        ? `${getActionLabel(action)} accepted and is waiting on external confirmation.`
+        : `${getActionLabel(action)} completed.`,
+  };
+}
+
+function parseActionReceipt(
+  payload: unknown,
+  action: string,
+  bookingId: string,
+): ActionReceipt {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "status" in payload &&
+    "message" in payload &&
+    "resourceId" in payload &&
+    "resourceType" in payload &&
+    "actionId" in payload &&
+    "auditId" in payload
+  ) {
+    return payload as ActionReceipt;
+  }
+
+  return buildFallbackReceipt(action, bookingId);
+}
+
+export function BookingCommandPanel({
+  availableActions,
+  booking,
+  editableUntil,
+  readOnlyReasonCode,
+}: BookingCommandPanelProps) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
   const [pickupAddress, setPickupAddress] = useState(booking.pickup.address);
   const [dropoffAddress, setDropoffAddress] = useState(booking.dropoff.address);
   const [notes, setNotes] = useState(booking.notes ?? "");
@@ -24,33 +119,13 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
   );
   const [cancelReason, setCancelReason] = useState("");
 
-  const commandState = useMemo(() => {
-    const isTerminal =
-      booking.orderStatus === "completed" ||
-      booking.orderStatus === "cancelled";
-    const isOnTrip = booking.orderStatus === "on_trip";
-    const withinUpdateWindow =
-      booking.modifiableUntil == null || isFutureIso(booking.modifiableUntil);
-    const withinCancelWindow =
-      booking.cancelableUntil == null || isFutureIso(booking.cancelableUntil);
-
-    return {
-      canUpdate: !isTerminal && !isOnTrip && withinUpdateWindow,
-      canCancel: !isTerminal && withinCancelWindow,
-      updateReason: isTerminal
-        ? "Completed and cancelled bookings are read-only."
-        : isOnTrip
-          ? "On-trip bookings can no longer be edited from tenant control."
-          : withinUpdateWindow
-            ? null
-            : `Update window closed at ${formatDateTime(booking.modifiableUntil)}.`,
-      cancelReason: isTerminal
-        ? "Completed and cancelled bookings cannot be cancelled again."
-        : withinCancelWindow
-          ? null
-          : `Cancellation window closed at ${formatDateTime(booking.cancelableUntil)}.`,
-    };
-  }, [booking]);
+  const updateAction =
+    availableActions.find((item) => item.action === "update") ?? null;
+  const cancelAction =
+    availableActions.find((item) => item.action === "cancel") ?? null;
+  const additionalActions = availableActions.filter(
+    (item) => item.action !== "update" && item.action !== "cancel",
+  );
 
   async function submitUpdate() {
     setLoading(true);
@@ -74,10 +149,14 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
           body: JSON.stringify(payload),
         },
       );
+      const result = (await response.json()) as CommandResponseEnvelope;
       if (!response.ok) {
-        throw new Error(await response.text());
+        throw new Error(result.error ?? "Unknown update failure.");
       }
 
+      setReceipt(
+        parseActionReceipt(result.result, "update", booking.bookingId),
+      );
       setMode(null);
       router.refresh();
     } catch (submissionError) {
@@ -105,10 +184,14 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
           }),
         },
       );
+      const result = (await response.json()) as CommandResponseEnvelope;
       if (!response.ok) {
-        throw new Error(await response.text());
+        throw new Error(result.error ?? "Unknown cancel failure.");
       }
 
+      setReceipt(
+        parseActionReceipt(result.result, "cancel", booking.bookingId),
+      );
       setMode(null);
       router.refresh();
     } catch (submissionError) {
@@ -123,54 +206,143 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
   }
 
   return (
-    <div className="action-panel">
-      <div className="action-stack">
-        <div className="action-copy">
-          <strong>Allowed tenant actions</strong>
-          <p>
-            Tenant users can only call supported booking commands. They cannot
-            override dispatch state, fare authority, or fulfillment ownership.
-          </p>
-        </div>
-        <div className="action-row">
-          <button
-            className="action-button action-button-secondary"
-            disabled={!commandState.canUpdate}
-            type="button"
-            onClick={() => {
-              setError(null);
-              setMode("update");
-            }}
-          >
-            Update booking
-          </button>
-          <button
-            className="action-button action-button-danger"
-            disabled={!commandState.canCancel}
-            type="button"
-            onClick={() => {
-              setError(null);
-              setMode("cancel");
-            }}
-          >
-            Cancel booking
-          </button>
-        </div>
-        {commandState.updateReason ? (
-          <p className="action-note">{commandState.updateReason}</p>
-        ) : null}
-        {commandState.cancelReason ? (
-          <p className="action-note">{commandState.cancelReason}</p>
-        ) : null}
+    <div className="booking-command-stack">
+      <div className="action-copy">
+        <strong>Command pattern</strong>
+        <p>
+          Booking detail honors backend-provided action descriptors. Disabled
+          affordances remain visible with reasons; tenant role alone does not
+          decide CTA visibility.
+        </p>
       </div>
+
+      {receipt ? (
+        <div
+          className={`booking-command-receipt booking-command-receipt-${receipt.status}`}
+        >
+          <div className="booking-command-receipt-header">
+            <strong>
+              {receipt.status === "accepted"
+                ? "Command accepted + pending"
+                : "Command completed"}
+            </strong>
+            <span>{receipt.actionId}</span>
+          </div>
+          <p>{receipt.message}</p>
+          <div className="booking-command-receipt-links">
+            <Link
+              className="text-link"
+              href={`/audit?resourceId=${booking.orderId}`}
+            >
+              View audit trail
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="booking-action-group">
+        {updateAction ? (
+          <div className="booking-action-card">
+            <div className="booking-action-card-copy">
+              <strong>{getActionLabel(updateAction.action)}</strong>
+              <p>
+                Medium-risk update command against the tenant booking record.
+              </p>
+            </div>
+            <button
+              className="action-button action-button-secondary"
+              disabled={!updateAction.enabled}
+              type="button"
+              onClick={() => {
+                setError(null);
+                setMode("update");
+              }}
+            >
+              {getActionLabel(updateAction.action)}
+            </button>
+            {!updateAction.enabled ? (
+              <p className="action-note">
+                {getDisabledReasonText(
+                  updateAction.disabledReasonCode ?? readOnlyReasonCode,
+                  editableUntil,
+                )}
+              </p>
+            ) : editableUntil ? (
+              <p className="action-note">
+                Editable until {formatDateTime(editableUntil)}.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {cancelAction ? (
+          <div className="booking-action-card">
+            <div className="booking-action-card-copy">
+              <strong>{getActionLabel(cancelAction.action)}</strong>
+              <p>
+                High-risk command. A reason is required whenever cancellation is
+                available.
+              </p>
+            </div>
+            <button
+              className="action-button action-button-danger"
+              disabled={!cancelAction.enabled}
+              type="button"
+              onClick={() => {
+                setError(null);
+                setMode("cancel");
+              }}
+            >
+              {getActionLabel(cancelAction.action)}
+            </button>
+            {!cancelAction.enabled ? (
+              <p className="action-note">
+                {getDisabledReasonText(
+                  cancelAction.disabledReasonCode ?? readOnlyReasonCode,
+                  editableUntil,
+                )}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {additionalActions.map((action) => (
+          <div className="booking-action-card" key={action.action}>
+            <div className="booking-action-card-copy">
+              <strong>{getActionLabel(action.action)}</strong>
+              <p>
+                Additional action published by the backend descriptor set for
+                this booking.
+              </p>
+            </div>
+            <button
+              className="action-button action-button-secondary"
+              disabled
+              type="button"
+            >
+              {getActionLabel(action.action)}
+            </button>
+            <p className="action-note">
+              {action.enabled
+                ? "This demo route does not yet implement the published command."
+                : getDisabledReasonText(
+                    action.disabledReasonCode ?? readOnlyReasonCode,
+                    editableUntil,
+                  )}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {error ? <div className="form-error">{error}</div> : null}
 
       {mode ? (
         <div className="modal-overlay" role="presentation">
           <div
+            aria-label={mode === "update" ? "Update booking" : "Cancel booking"}
             aria-modal="true"
             className="modal-panel"
             role="dialog"
-            aria-label={mode === "update" ? "Update booking" : "Cancel booking"}
           >
             <div className="modal-header">
               <div>
@@ -243,7 +415,7 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
                     type="button"
                     onClick={() => void submitUpdate()}
                   >
-                    {loading ? "Saving..." : "Save changes"}
+                    {loading ? "Saving..." : "Submit update"}
                   </button>
                 </div>
               </div>
@@ -260,7 +432,7 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
                 <div className="action-row">
                   <button
                     className="action-button action-button-danger"
-                    disabled={loading}
+                    disabled={loading || cancelReason.trim().length === 0}
                     type="button"
                     onClick={() => void submitCancel()}
                   >

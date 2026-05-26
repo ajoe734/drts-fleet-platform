@@ -1,407 +1,199 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
 import { notFound } from "next/navigation";
 import type {
   BookingRecord,
-  OwnedOrderStatus,
+  ResourceActionDescriptor,
   TenantInvoiceRecord,
+  UiRefreshMetadata,
 } from "@drts/contracts";
-import {
-  CanvasBanner,
-  CanvasBtn,
-  CanvasCard,
-  CanvasDL,
-  CanvasField,
-  CanvasInput,
-  CanvasPageHeader,
-  CanvasPill,
-  CanvasTable,
-  Stepper,
-  Timeline,
-  buildCanvasTheme,
-} from "@drts/ui-web";
-import type {
-  CanvasTableColumn,
-  CanvasTone,
-  ManagementTone,
-  StepperItem,
-  TimelineItem,
-} from "@drts/ui-web";
 import { BookingCommandPanel } from "@/components/booking-command-panel";
+import {
+  CalloutPanel,
+  PageHero,
+  SurfaceCard,
+} from "@/components/page-primitives";
 import { getTenantClient } from "@/lib/api-client";
-import { formatDateTime, formatMoney } from "@/lib/formatters";
-import { getBookingSourceVisibility } from "@/lib/source-domain";
+import { formatDateTime, formatMoney, isFutureIso } from "@/lib/formatters";
+import {
+  getBookingSourceVisibility,
+  getSourceToneClassName,
+} from "@/lib/source-domain";
 
 export const dynamic = "force-dynamic";
 
-const th = buildCanvasTheme({
-  surface: "tenant",
-  dark: true,
-  density: "compact",
-});
-
-const pageBodyStyle: CSSProperties = {
-  padding: 24,
-  display: "grid",
-  gap: 16,
+type BookingDetailRecord = BookingRecord & {
+  editableUntil?: string | null;
+  readOnlyReasonCode?: string | null;
+  availableActions?: ResourceActionDescriptor[];
+  refreshMetadata?: UiRefreshMetadata | null;
+  assignment?: {
+    driverName?: string | null;
+    driverId?: string | null;
+    vehicleLabel?: string | null;
+    etaMinutes?: number | null;
+    contactMode?: string | null;
+  } | null;
 };
 
-const summaryStackStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
-};
-
-const pillRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-};
-
-const metaCopyStyle: CSSProperties = {
-  fontSize: 12,
-  lineHeight: 1.45,
-  color: th.textMuted,
-};
-
-const mainGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
-  gap: 16,
-  alignItems: "start",
-};
-
-const laneStackStyle: CSSProperties = {
-  display: "grid",
-  gap: 16,
-  alignContent: "start",
-};
-
-const linkStyle: CSSProperties = {
-  textDecoration: "none",
-};
-
-const mutedNoteStyle: CSSProperties = {
-  marginTop: 12,
-  fontSize: 11.5,
-  lineHeight: 1.5,
-  color: th.textMuted,
-};
-
-const emptyStateStyle: CSSProperties = {
-  padding: 24,
-  textAlign: "center",
-  color: th.textMuted,
-  fontSize: 12.5,
-};
-
-const invoicePrimaryStyle: CSSProperties = {
-  color: th.accent,
-  fontWeight: 600,
-  fontFamily: th.monoFamily,
-};
-
-const invoiceMetaStyle: CSSProperties = {
-  display: "block",
-  marginTop: 4,
-  color: th.textDim,
-  fontSize: 11,
-  fontFamily: th.monoFamily,
-};
-
-const fieldGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
-  gap: 12,
-};
-
-const readOnlyBlockStyle: CSSProperties = {
-  minHeight: 36,
-  boxSizing: "border-box",
-  background: th.bgRaised,
-  border: `1px solid ${th.border}`,
-  borderRadius: 7,
-  padding: "8px 10px",
-  color: th.text,
-  fontSize: 12.5,
-  lineHeight: 1.45,
-  whiteSpace: "pre-wrap",
-};
-
-const bannerBodyStyle: CSSProperties = {
-  display: "grid",
-  gap: 4,
-};
-
-type InvoiceRow = TenantInvoiceRecord &
-  Record<string, unknown> & {
-    orderLineCount: number;
-  };
-
-type StatusPresentation = {
-  stepIndex: number;
-  blocked: boolean;
-  pillTone: CanvasTone;
-  workflowTone: ManagementTone;
+type TimelineRow = {
   label: string;
+  at: string | null;
+  detail: string;
 };
 
-const ASSIGNED_ORDER_STATUSES = new Set<OwnedOrderStatus>([
-  "assigned",
-  "driver_accepted",
-  "enroute_pickup",
-  "arrived_pickup",
-  "on_trip",
-  "proof_pending",
-  "completed",
-]);
+type BookingActivityRow = {
+  label: string;
+  at: string | null;
+  detail: string;
+  realm: "tenant" | "system" | "ops" | "driver";
+};
 
-function displayDateTime(value: string | null | undefined) {
-  if (!value) {
-    return "未發布";
+type RefreshSummary = {
+  tierLabel: string;
+  cadenceLabel: string;
+  freshness: NonNullable<UiRefreshMetadata["dataFreshness"]>;
+  generatedAt: string;
+  source: NonNullable<UiRefreshMetadata["source"]>;
+  staleAfterMs: number;
+};
+
+function getEditableUntil(booking: BookingDetailRecord) {
+  return booking.editableUntil ?? booking.modifiableUntil ?? null;
+}
+
+function getReadOnlyReasonCode(booking: BookingDetailRecord) {
+  if (booking.readOnlyReasonCode) {
+    return booking.readOnlyReasonCode;
   }
 
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return "未發布";
+  const editableUntil = getEditableUntil(booking);
+  if (editableUntil && !isFutureIso(editableUntil)) {
+    return "past_editable_until";
   }
 
-  return formatDateTime(value);
-}
-
-function displayMoney(
-  value: BookingRecord["quotedFare"] | TenantInvoiceRecord["amount"] | null,
-) {
-  return value ? formatMoney(value) : "未發布";
-}
-
-function displayText(
-  value: string | null | undefined,
-  fallback = "未提供",
-): string {
-  return value && value.trim().length > 0 ? value : fallback;
-}
-
-function describeManualOverride(booking: BookingRecord) {
-  if (!booking.manualFareOverride) {
-    return "無";
+  if (
+    booking.orderStatus === "completed" ||
+    booking.orderStatus === "cancelled"
+  ) {
+    return "terminal_order";
   }
 
-  return `${booking.manualFareOverride.actorType} / ${booking.manualFareOverride.reason}`;
-}
-
-function sourcePillTone(booking: BookingRecord): CanvasTone {
-  if (booking.issuerAuthorizationRef) {
-    return "warn";
+  if (booking.orderStatus === "on_trip") {
+    return "in_fulfillment";
   }
 
-  if (booking.partnerEntrySlug || booking.partnerId) {
-    return "info";
-  }
-
-  return "success";
+  return null;
 }
 
-function invoiceStatusTone(status: TenantInvoiceRecord["status"]): CanvasTone {
-  switch (status) {
-    case "paid":
-      return "success";
-    case "issued":
-      return "info";
-    case "draft":
-    default:
-      return "neutral";
-  }
-}
-
-function describeOrderStatus(status: OwnedOrderStatus): StatusPresentation {
-  switch (status) {
-    case "completed":
-      return {
-        stepIndex: 5,
-        blocked: false,
-        pillTone: "success",
-        workflowTone: "success",
-        label: "completed",
-      };
-    case "cancelled":
-      return {
-        stepIndex: 5,
-        blocked: true,
-        pillTone: "danger",
-        workflowTone: "danger",
-        label: "cancelled",
-      };
-    case "on_trip":
-    case "proof_pending":
-      return {
-        stepIndex: 4,
-        blocked: false,
-        pillTone: "accent",
-        workflowTone: "accent",
-        label: status,
-      };
-    case "assigned":
-    case "driver_accepted":
-    case "enroute_pickup":
-    case "arrived_pickup":
-      return {
-        stepIndex: 3,
-        blocked: false,
-        pillTone: "info",
-        workflowTone: "info",
-        label: status,
-      };
-    case "dispatch_failed":
-      return {
-        stepIndex: 2,
-        blocked: true,
-        pillTone: "danger",
-        workflowTone: "danger",
-        label: "dispatch_failed",
-      };
-    case "dispatch_timeout":
-    case "no_supply":
-    case "redispatch_required":
-    case "delayed_queue":
-    case "exception_hold":
-      return {
-        stepIndex: 2,
-        blocked: true,
-        pillTone: "warn",
-        workflowTone: "warning",
-        label: status,
-      };
-    case "ready_for_dispatch":
-    case "preassigned":
-      return {
-        stepIndex: 2,
-        blocked: false,
-        pillTone: "info",
-        workflowTone: "info",
-        label: status,
-      };
-    case "recording_pending":
-      return {
-        stepIndex: 1,
-        blocked: false,
-        pillTone: "neutral",
-        workflowTone: "neutral",
-        label: status,
-      };
-    case "created":
-    default:
-      return {
-        stepIndex: 0,
-        blocked: false,
-        pillTone: "neutral",
-        workflowTone: "neutral",
-        label: status,
-      };
-  }
-}
-
-function buildWorkflowItems(booking: BookingRecord): StepperItem[] {
-  const status = describeOrderStatus(booking.orderStatus);
-  const steps = [
-    { id: "created", title: "建立" },
-    { id: "queued", title: "進入佇列" },
-    { id: "dispatching", title: "派遣中" },
-    { id: "assigned", title: "已指派" },
-    { id: "trip", title: "行程中" },
-    { id: "completed", title: "完成" },
-  ] as const;
-
-  return steps.map((step, index) => {
-    if (index < status.stepIndex) {
-      return {
-        id: step.id,
-        title: step.title,
-        state: "complete",
-        tone: "success",
-        stateLabel: "完成",
-      } satisfies StepperItem;
-    }
-
-    if (index === status.stepIndex) {
-      return {
-        id: step.id,
-        title: step.title,
-        state: status.blocked ? "blocked" : "current",
-        tone: status.workflowTone,
-        stateLabel: status.label,
-        timestamp: displayDateTime(booking.updatedAt),
-      } satisfies StepperItem;
-    }
-
-    return {
-      id: step.id,
-      title: step.title,
-      state: "upcoming",
-      tone: "neutral",
-      stateLabel: "待續",
-    } satisfies StepperItem;
-  });
-}
-
-function buildTimelineItems(booking: BookingRecord): TimelineItem[] {
-  const status = describeOrderStatus(booking.orderStatus);
+function getFallbackActions(
+  booking: BookingDetailRecord,
+): ResourceActionDescriptor[] {
+  const editableUntil = getEditableUntil(booking);
+  const canUpdate =
+    booking.orderStatus !== "completed" &&
+    booking.orderStatus !== "cancelled" &&
+    booking.orderStatus !== "on_trip" &&
+    (editableUntil == null || isFutureIso(editableUntil));
+  const canCancel =
+    booking.orderStatus !== "completed" &&
+    booking.orderStatus !== "cancelled" &&
+    (booking.cancelableUntil == null || isFutureIso(booking.cancelableUntil));
 
   return [
     {
-      id: "created",
-      eyebrow: "booking",
-      title: "建立預約",
-      timestamp: displayDateTime(booking.createdAt),
-      tone: "accent",
-      detail: booking.bookedBy
-        ? `由 ${booking.bookedBy.name} 建立，並寫入 tenant booking ledger。`
-        : "租戶端已接受此次預約並建立 booking record。",
+      action: "update",
+      enabled: canUpdate,
+      disabledReasonCode: canUpdate
+        ? undefined
+        : getReadOnlyReasonCode(booking),
+      riskLevel: "medium",
     },
     {
-      id: "window-open",
-      eyebrow: "service window",
-      title: "服務窗口開始",
-      timestamp: displayDateTime(booking.reservationWindowStart),
-      tone: "info",
-      detail: `${booking.businessDispatchSubtype} 履約窗口開始。`,
-      meta: `booking type: ${booking.bookingType}`,
+      action: "cancel",
+      enabled: canCancel,
+      disabledReasonCode: canCancel
+        ? undefined
+        : booking.cancelableUntil && !isFutureIso(booking.cancelableUntil)
+          ? "past_cancelable_until"
+          : "terminal_order",
+      requiresReason: true,
+      riskLevel: "high",
+    },
+  ];
+}
+
+function getAvailableActions(booking: BookingDetailRecord) {
+  return booking.availableActions?.length
+    ? booking.availableActions
+    : getFallbackActions(booking);
+}
+
+function buildTimeline(booking: BookingDetailRecord): TimelineRow[] {
+  return [
+    {
+      label: "Booking created",
+      at: booking.createdAt,
+      detail: "Tenant intake entered the owned-mobility booking ledger.",
     },
     {
-      id: "window-close",
-      eyebrow: "service window",
-      title: "服務窗口結束",
-      timestamp: displayDateTime(booking.reservationWindowEnd),
-      tone: "neutral",
-      detail: "此次行程的 tenant-visible reservation window 結束。",
+      label: "Reservation window opens",
+      at: booking.reservationWindowStart,
+      detail: "Primary service commitment window begins.",
     },
     {
-      id: "modify-cutoff",
-      eyebrow: "tenant policy",
-      title: "可修改截止",
-      timestamp: displayDateTime(booking.modifiableUntil),
-      tone: "neutral",
-      detail: booking.modifiableUntil
-        ? "超過此時間後，租戶更新需轉交其他權責面處理。"
-        : "目前沒有發布租戶修改截止時間。",
+      label: "Reservation window closes",
+      at: booking.reservationWindowEnd,
+      detail: "Requested pickup or dropoff commitment window ends.",
     },
     {
-      id: "cancel-cutoff",
-      eyebrow: "tenant policy",
-      title: "可取消截止",
-      timestamp: displayDateTime(booking.cancelableUntil),
-      tone: "neutral",
+      label: "Workflow last updated",
+      at: booking.updatedAt,
+      detail: `Current order status is ${booking.orderStatus}.`,
+    },
+    {
+      label: "Tenant edit cutoff",
+      at: getEditableUntil(booking),
+      detail: getEditableUntil(booking)
+        ? "Further tenant edits follow this backend-driven cutoff."
+        : "No explicit tenant edit cutoff was published.",
+    },
+    {
+      label: "Tenant cancellation cutoff",
+      at: booking.cancelableUntil,
       detail: booking.cancelableUntil
-        ? "超過此時間後，取消行為需依既有政策升級處理。"
-        : "目前沒有發布租戶取消截止時間。",
+        ? "Further tenant cancellation follows this cutoff."
+        : "No explicit tenant cancellation cutoff was published.",
+    },
+  ];
+}
+
+function buildActivity(booking: BookingDetailRecord): BookingActivityRow[] {
+  return [
+    {
+      label: "Booking created",
+      at: booking.createdAt,
+      detail: booking.bookedBy
+        ? `${booking.bookedBy.name} created the booking from tenant console.`
+        : "Tenant console created the booking.",
+      realm: "tenant",
     },
     {
-      id: "current-state",
-      eyebrow: "dispatch state",
-      title: "目前工作流狀態",
-      timestamp: displayDateTime(booking.updatedAt),
-      tone: status.workflowTone,
-      detail: `目前訂單狀態為 ${booking.orderStatus}。`,
-      meta: `booking status: ${booking.status}`,
+      label: "Policy and approval evaluation",
+      at: booking.createdAt,
+      detail:
+        booking.approvalState === "not_required"
+          ? "No tenant approval gate blocked creation."
+          : `Approval state is ${booking.approvalState}.`,
+      realm: "system",
+    },
+    {
+      label: "Dispatch execution",
+      at: booking.updatedAt,
+      detail:
+        booking.orderStatus === "assigned" || booking.orderStatus === "on_trip"
+          ? "Driver assignment is active; tenant surface shows only published summary."
+          : "Dispatch state remains readable without exposing ops-only trace internals.",
+      realm: booking.orderStatus === "assigned" ? "driver" : "ops",
     },
   ];
 }
@@ -411,12 +203,95 @@ function findRelatedInvoices(
   orderId: string,
 ): TenantInvoiceRecord[] {
   return invoices.filter((invoice) =>
-    invoice.lines.some((line: { orderId: string }) => line.orderId === orderId),
+    invoice.lines.some(
+      (line: { orderId?: string | null }) => line.orderId === orderId,
+    ),
   );
 }
 
-function toInvoicePeriod(value: string | null | undefined) {
-  return value ? value.slice(0, 7) : "—";
+function formatDurationMinutes(minutes: number) {
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function describeReadOnlyReason(
+  code: string | null,
+  booking: BookingDetailRecord,
+) {
+  if (!code) {
+    return "Editing remains available while the backend keeps update action enabled.";
+  }
+
+  switch (code) {
+    case "past_editable_until":
+      return getEditableUntil(booking)
+        ? `Editing window closed at ${formatDateTime(getEditableUntil(booking))}.`
+        : "Editing window is no longer open.";
+    case "past_cancelable_until":
+      return booking.cancelableUntil
+        ? `Cancellation window closed at ${formatDateTime(booking.cancelableUntil)}.`
+        : "Cancellation window is no longer open.";
+    case "terminal_order":
+      return "Completed and cancelled bookings are read-only.";
+    case "in_fulfillment":
+      return "Active fulfillment keeps tenant edits locked while dispatch execution is underway.";
+    default:
+      return code.replaceAll("_", " ");
+  }
+}
+
+function describeApprovalState(approvalState: BookingRecord["approvalState"]) {
+  switch (approvalState) {
+    case "approved":
+      return "Approved";
+    case "pending":
+      return "Pending approval";
+    case "rejected":
+      return "Rejected";
+    case "blocked":
+      return "Blocked";
+    case "cancelled_by_re_evaluation":
+      return "Cancelled by re-evaluation";
+    case "not_required":
+    default:
+      return "No approval required";
+  }
+}
+
+function buildRefreshSummary(booking: BookingDetailRecord): RefreshSummary {
+  const refreshMetadata = booking.refreshMetadata ?? {
+    generatedAt: booking.updatedAt,
+    staleAfterMs: 30_000,
+    dataFreshness: "fresh" as const,
+    source: "live" as const,
+  };
+
+  return {
+    tierLabel: "T5",
+    cadenceLabel: "slow / 30s cadence",
+    freshness: refreshMetadata.dataFreshness,
+    generatedAt: refreshMetadata.generatedAt,
+    source: refreshMetadata.source,
+    staleAfterMs: refreshMetadata.staleAfterMs,
+  };
+}
+
+function getActivityToneClassName(realm: BookingActivityRow["realm"]) {
+  switch (realm) {
+    case "tenant":
+      return "booking-activity-tone booking-activity-tone-tenant";
+    case "driver":
+      return "booking-activity-tone booking-activity-tone-driver";
+    case "ops":
+      return "booking-activity-tone booking-activity-tone-ops";
+    default:
+      return "booking-activity-tone booking-activity-tone-system";
+  }
 }
 
 export default async function BookingDetailPage({
@@ -427,7 +302,7 @@ export default async function BookingDetailPage({
   const { bookingId } = await params;
   const client = getTenantClient();
   const [bookingResult, invoicesResult] = await Promise.allSettled([
-    client.getTenantBooking(bookingId) as Promise<BookingRecord>,
+    client.getTenantBooking(bookingId) as Promise<BookingDetailRecord>,
     client.listInvoices(),
   ]);
 
@@ -437,417 +312,401 @@ export default async function BookingDetailPage({
 
   const booking = bookingResult.value;
   const source = getBookingSourceVisibility(booking);
-  const status = describeOrderStatus(booking.orderStatus);
-  const workflowItems = buildWorkflowItems(booking);
-  const timelineItems = buildTimelineItems(booking);
+  const timeline = buildTimeline(booking);
+  const activity = buildActivity(booking);
+  const availableActions = getAvailableActions(booking);
+  const editableUntil = getEditableUntil(booking);
+  const readOnlyReasonCode = getReadOnlyReasonCode(booking);
+  const refreshSummary = buildRefreshSummary(booking);
   const relatedInvoices =
     invoicesResult.status === "fulfilled"
       ? findRelatedInvoices(invoicesResult.value, booking.orderId)
       : [];
-  const invoiceWarning =
-    invoicesResult.status === "rejected"
-      ? invoicesResult.reason instanceof Error
-        ? invoicesResult.reason.message
-        : "Invoice context unavailable."
-      : null;
-  const paymentSummary =
-    relatedInvoices.length > 0
-      ? "企業帳務 / 已關聯 invoice"
-      : "企業帳務 / 待出帳";
-  const assignedDriverProjection = ASSIGNED_ORDER_STATUSES.has(
-    booking.orderStatus,
-  );
-  const invoiceRows: InvoiceRow[] = relatedInvoices.map((invoice) => ({
-    ...invoice,
-    orderLineCount: invoice.lines.filter(
-      (line: { orderId: string }) => line.orderId === booking.orderId,
-    ).length,
-  }));
-
-  const invoiceColumns: CanvasTableColumn<InvoiceRow>[] = [
-    {
-      h: "INVOICE",
-      w: 210,
-      mono: true,
-      r: (row) => (
-        <span style={invoicePrimaryStyle}>
-          {row.invoiceId}
-          <span style={invoiceMetaStyle}>
-            {row.orderLineCount} line(s) for this order
-          </span>
-        </span>
-      ),
-    },
-    {
-      h: "PERIOD",
-      w: 110,
-      mono: true,
-      r: (row) => toInvoicePeriod(row.periodStart),
-    },
-    {
-      h: "AMOUNT",
-      w: 150,
-      mono: true,
-      align: "right",
-      r: (row) => displayMoney(row.amount),
-    },
-    {
-      h: "STATUS",
-      w: 110,
-      r: (row) => (
-        <CanvasPill theme={th} tone={invoiceStatusTone(row.status)} dot>
-          {row.status}
-        </CanvasPill>
-      ),
-    },
-  ];
+  const assignment = booking.assignment ?? null;
+  const approvalState = describeApprovalState(booking.approvalState);
+  const isApprovalWaiting = booking.approvalState === "pending";
 
   return (
-    <div>
-      <CanvasPageHeader
-        theme={th}
-        title={`${booking.bookingId} / ${booking.businessDispatchSubtype}`}
-        subtitle={`${booking.pickup.address} -> ${booking.dropoff.address} | ${displayDateTime(
-          booking.reservationWindowStart,
-        )} - ${displayDateTime(booking.reservationWindowEnd)}`}
-        actions={
-          <>
-            <Link href="/bookings" style={linkStyle}>
-              <CanvasBtn theme={th} icon="arrow" size="sm">
-                返回叫車
-              </CanvasBtn>
-            </Link>
-            {relatedInvoices.length > 0 ? (
-              <Link href="/invoices" style={linkStyle}>
-                <CanvasBtn theme={th} icon="billing" size="sm">
-                  查看對帳單
-                </CanvasBtn>
-              </Link>
-            ) : null}
-            <Link href="/bookings/new" style={linkStyle}>
-              <CanvasBtn theme={th} icon="plus" variant="primary" size="sm">
-                新增預約
-              </CanvasBtn>
-            </Link>
-          </>
-        }
+    <div className="page-shell">
+      <PageHero
+        eyebrow="Booking detail"
+        title={`${booking.bookingId} · ${booking.businessDispatchSubtype}`}
+        description={`${booking.pickup.address} -> ${booking.dropoff.address} · ${formatDateTime(booking.reservationWindowStart)} to ${formatDateTime(booking.reservationWindowEnd)}`}
       />
 
-      <div style={pageBodyStyle}>
-        <div style={summaryStackStyle}>
-          <div style={pillRowStyle}>
-            <CanvasPill theme={th} tone={status.pillTone} dot>
-              {booking.orderStatus}
-            </CanvasPill>
-            <CanvasPill theme={th} tone="neutral">
-              booking {booking.status}
-            </CanvasPill>
-            <CanvasPill theme={th} tone={sourcePillTone(booking)}>
+      <section className="booking-detail-hero">
+        <div className="booking-detail-title-row">
+          <div className="chip-row">
+            <span className="status-badge">{booking.orderStatus}</span>
+            <span
+              className={`status-chip${readOnlyReasonCode ? " is-warning" : ""}`}
+            >
+              {readOnlyReasonCode ? "Read-only" : "Editable"}
+            </span>
+            <span className="status-chip">{approvalState}</span>
+            <span className={getSourceToneClassName(source.tone)}>
               {source.badge}
-            </CanvasPill>
-            <CanvasPill theme={th} tone="neutral">
-              approval {booking.approvalState}
-            </CanvasPill>
+            </span>
           </div>
-          <div style={metaCopyStyle}>
-            Order {booking.orderId} | 建立 {displayDateTime(booking.createdAt)}{" "}
-            | 更新 {displayDateTime(booking.updatedAt)}
-          </div>
-        </div>
-
-        {source.domain !== "owned" ? (
-          <CanvasBanner
-            theme={th}
-            tone={source.domain === "forwarded_authority" ? "warn" : "info"}
-            icon="warn"
-            title="租戶可見性邊界"
-            body={
-              <div style={bannerBodyStyle}>
-                <span>{source.detail}</span>
-                <span>{source.statusBoundary}</span>
-                <span>{source.escalationHint}</span>
-              </div>
-            }
-          />
-        ) : null}
-
-        <div style={mainGridStyle}>
-          <div style={laneStackStyle}>
-            <CanvasCard
-              theme={th}
-              title="行程資訊"
-              subtitle="booking / order / passenger / route / payment"
-            >
-              <CanvasDL
-                theme={th}
-                cols={2}
-                items={[
-                  { k: "BOOKING", v: booking.bookingId, mono: true },
-                  { k: "ORDER", v: booking.orderId, mono: true },
-                  {
-                    k: "PASSENGER",
-                    v: `${booking.passenger.name} / ${displayText(
-                      booking.passenger.phone,
-                    )}`,
-                  },
-                  {
-                    k: "COST CENTER",
-                    v: displayText(booking.costCenter),
-                    mono: true,
-                  },
-                  { k: "PICKUP", v: booking.pickup.address },
-                  { k: "DROP", v: booking.dropoff.address },
-                  {
-                    k: "WINDOW",
-                    v: `${displayDateTime(booking.reservationWindowStart)} - ${displayDateTime(
-                      booking.reservationWindowEnd,
-                    )}`,
-                    mono: true,
-                  },
-                  {
-                    k: "SERVICE",
-                    v: booking.businessDispatchSubtype,
-                    mono: true,
-                  },
-                  {
-                    k: "QUOTED FARE",
-                    v: displayMoney(booking.quotedFare),
-                    mono: true,
-                  },
-                  { k: "PAYMENT", v: paymentSummary },
-                ]}
-              />
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title="行程時間軸"
-              subtitle="建立 -> 佇列 -> 派遣 -> 指派 -> 行程 -> 完成"
-            >
-              <Stepper
-                items={workflowItems}
-                density="compact"
-                orientation="horizontal"
-              />
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title="活動"
-              subtitle="tenant-visible booking checkpoints"
-            >
-              <Timeline items={timelineItems} density="compact" />
-            </CanvasCard>
-          </div>
-
-          <div style={laneStackStyle}>
-            <CanvasCard
-              theme={th}
-              title="駕駛"
-              subtitle="tenant-safe published view"
-            >
-              <CanvasDL
-                theme={th}
-                cols={1}
-                items={[
-                  {
-                    k: "DRIVER",
-                    v: assignedDriverProjection
-                      ? "未發布 / tenant read model 尚未投影"
-                      : "尚未指派",
-                  },
-                  {
-                    k: "VEHICLE",
-                    v: assignedDriverProjection ? "未發布" : "待派遣",
-                  },
-                  {
-                    k: "DISPATCH",
-                    v: `${source.badge} / ${booking.orderStatus}`,
-                  },
-                  {
-                    k: "CONTACT",
-                    v: "已遮罩 / 透過平台轉接",
-                  },
-                ]}
-              />
-              <div style={mutedNoteStyle}>
-                司機身份、車牌、即時 ETA 與候選供給狀態目前不會投影到 tenant
-                surface。
-              </div>
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title="計費"
-              subtitle="quoted fare / invoice"
-            >
-              <CanvasDL
-                theme={th}
-                cols={2}
-                items={[
-                  {
-                    k: "方案",
-                    v: displayText(booking.quotedFareRuleVersion, "未發布"),
-                    mono: true,
-                  },
-                  {
-                    k: "核價來源",
-                    v: displayText(booking.quotedFareSource, "未發布"),
-                    mono: true,
-                  },
-                  {
-                    k: "覆核",
-                    v: describeManualOverride(booking),
-                  },
-                  {
-                    k: "總額",
-                    v: displayMoney(booking.quotedFare),
-                    mono: true,
-                  },
-                  {
-                    k: "對帳單",
-                    v:
-                      relatedInvoices.length > 0
-                        ? relatedInvoices
-                            .map((invoice) => invoice.invoiceId)
-                            .join(", ")
-                        : "待出帳",
-                    mono: relatedInvoices.length > 0,
-                  },
-                  {
-                    k: "權責",
-                    v: source.financeAuthority,
-                  },
-                ]}
-              />
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title="關聯對帳單"
-              subtitle="invoice rows already published for this order"
-              padding={0}
-            >
-              {invoiceWarning ? (
-                <div style={{ padding: 14 }}>
-                  <CanvasBanner
-                    theme={th}
-                    tone="warn"
-                    icon="warn"
-                    title="對帳單內容暫時無法完整載入"
-                    body={invoiceWarning}
-                  />
-                </div>
-              ) : null}
-
-              {invoiceRows.length > 0 ? (
-                <CanvasTable<InvoiceRow>
-                  theme={th}
-                  columns={invoiceColumns}
-                  rows={invoiceRows}
-                />
-              ) : (
-                <div style={emptyStateStyle}>
-                  目前沒有與此 order 關聯的 tenant invoice line。
-                </div>
-              )}
-            </CanvasCard>
+          <div className="booking-detail-meta-row">
+            <span className="metric-label">
+              Refresh {refreshSummary.tierLabel}
+            </span>
+            <span className="muted-copy">
+              {refreshSummary.cadenceLabel} · {refreshSummary.freshness} ·{" "}
+              {refreshSummary.source}
+            </span>
           </div>
         </div>
+        <div className="booking-detail-link-row">
+          <Link
+            className="text-link"
+            href={`/audit?resourceId=${booking.orderId}`}
+          >
+            Open tenant audit trail
+          </Link>
+          <Link className="text-link" href="/invoices">
+            Open invoice ledger
+          </Link>
+          {booking.partnerEntrySlug ? (
+            <Link
+              className="text-link"
+              href={`/partner/booking/${booking.bookingId}`}
+              target="_blank"
+            >
+              Open partner booking view
+            </Link>
+          ) : null}
+        </div>
+      </section>
 
-        <CanvasCard
-          theme={th}
-          title="補充資訊"
-          subtitle="cost center / flight / notes"
+      {source.domain === "forwarded_authority" ? (
+        <CalloutPanel
+          title="Forwarded-authority boundary"
+          description={source.statusBoundary}
+          tone="warning"
         >
-          <div style={fieldGridStyle}>
-            <CanvasField theme={th} label="成本中心">
-              <CanvasInput
-                theme={th}
-                value={displayText(booking.costCenter)}
-                mono
-              />
-            </CanvasField>
-            <CanvasField theme={th} label="偏好車型">
-              <CanvasInput
-                theme={th}
-                value={displayText(booking.vehiclePreference)}
-              />
-            </CanvasField>
-            <CanvasField theme={th} label="benefit reference">
-              <CanvasInput
-                theme={th}
-                value={displayText(booking.benefitReference)}
-                mono
-              />
-            </CanvasField>
-            <CanvasField theme={th} label="方向">
-              <CanvasInput theme={th} value={displayText(booking.direction)} />
-            </CanvasField>
-            <CanvasField theme={th} label="航班">
-              <CanvasInput
-                theme={th}
-                value={displayText(booking.flightNo)}
-                mono
-              />
-            </CanvasField>
-            <CanvasField theme={th} label="航廈">
-              <CanvasInput theme={th} value={displayText(booking.terminal)} />
-            </CanvasField>
-            <CanvasField theme={th} label="行李">
-              <CanvasInput
-                theme={th}
-                value={
-                  booking.luggageCount == null
-                    ? "未提供"
-                    : `${booking.luggageCount} bag(s)`
-                }
-              />
-            </CanvasField>
-            <CanvasField theme={th} label="申請人">
-              <CanvasInput
-                theme={th}
-                value={
-                  booking.bookedBy
-                    ? `${booking.bookedBy.name} / ${booking.bookedBy.email}`
-                    : "未提供"
-                }
-              />
-            </CanvasField>
-            <CanvasField theme={th} label="現場聯絡">
-              <CanvasInput
-                theme={th}
-                value={
-                  booking.onsiteContact
-                    ? `${booking.onsiteContact.name} / ${booking.onsiteContact.phone}`
-                    : "未提供"
-                }
-              />
-            </CanvasField>
-            <CanvasField theme={th} label="審批請求">
-              <CanvasInput
-                theme={th}
-                value={
-                  booking.approvalRequestIds.length > 0
-                    ? booking.approvalRequestIds.join(", ")
-                    : "無"
-                }
-                mono
-              />
-            </CanvasField>
-            <CanvasField theme={th} label="備註">
-              <div style={readOnlyBlockStyle}>{displayText(booking.notes)}</div>
-            </CanvasField>
-          </div>
-        </CanvasCard>
+          <p>{source.escalationHint}</p>
+        </CalloutPanel>
+      ) : null}
 
-        <CanvasCard
-          theme={th}
-          title="租戶操作"
-          subtitle="僅保留 tenant-safe commands"
+      {readOnlyReasonCode ? (
+        <CalloutPanel
+          title="Read-only reason"
+          description={describeReadOnlyReason(readOnlyReasonCode, booking)}
+          tone="warning"
+        />
+      ) : null}
+
+      {isApprovalWaiting ? (
+        <CalloutPanel
+          title="Approval gate still open"
+          description="This booking is waiting on the tenant approval flow; action availability still comes from backend descriptors."
         >
-          <BookingCommandPanel booking={booking} />
-        </CanvasCard>
+          <p>
+            Approval request IDs:{" "}
+            {booking.approvalRequestIds.length > 0
+              ? booking.approvalRequestIds.join(", ")
+              : "Not published"}
+          </p>
+        </CalloutPanel>
+      ) : null}
+
+      <section className="booking-detail-layout">
+        <div className="booking-detail-main">
+          <SurfaceCard
+            kicker="Trip context"
+            title="Booking facts and editability"
+            description="Booking detail follows Q-TEN05: editable state comes from backend action descriptors plus the published cutoff window, not from status text alone."
+          >
+            <dl className="definition-grid booking-detail-grid">
+              <div>
+                <dt>Booking ID</dt>
+                <dd>{booking.bookingId}</dd>
+              </div>
+              <div>
+                <dt>Order ID</dt>
+                <dd>{booking.orderId}</dd>
+              </div>
+              <div>
+                <dt>Passenger</dt>
+                <dd>{booking.passenger.name}</dd>
+              </div>
+              <div>
+                <dt>Passenger phone</dt>
+                <dd>{booking.passenger.phone}</dd>
+              </div>
+              <div>
+                <dt>Pickup</dt>
+                <dd>{booking.pickup.address}</dd>
+              </div>
+              <div>
+                <dt>Dropoff</dt>
+                <dd>{booking.dropoff.address}</dd>
+              </div>
+              <div>
+                <dt>Window</dt>
+                <dd>
+                  {formatDateTime(booking.reservationWindowStart)} to{" "}
+                  {formatDateTime(booking.reservationWindowEnd)}
+                </dd>
+              </div>
+              <div>
+                <dt>Subtype</dt>
+                <dd>{booking.businessDispatchSubtype}</dd>
+              </div>
+              <div>
+                <dt>Editable until</dt>
+                <dd>
+                  {editableUntil
+                    ? formatDateTime(editableUntil)
+                    : "Not published"}
+                </dd>
+              </div>
+              <div>
+                <dt>Read-only reason</dt>
+                <dd>{readOnlyReasonCode ?? "Active action window"}</dd>
+              </div>
+              <div>
+                <dt>Cost center</dt>
+                <dd>{booking.costCenter ?? "Not provided"}</dd>
+              </div>
+              <div>
+                <dt>Onsite contact</dt>
+                <dd>
+                  {booking.onsiteContact
+                    ? `${booking.onsiteContact.name} · ${booking.onsiteContact.phone}`
+                    : "Not provided"}
+                </dd>
+              </div>
+            </dl>
+          </SurfaceCard>
+
+          <SurfaceCard
+            kicker="Lifecycle"
+            title="Current state and timeline"
+            description="The tenant surface shows published milestones, approval state, and recent booking updates without leaking dispatch-only traces."
+          >
+            <ol className="timeline-list">
+              {timeline.map((item) => (
+                <li className="timeline-item" key={item.label}>
+                  <strong>{item.label}</strong>
+                  <span>
+                    {item.at ? formatDateTime(item.at) : "Not published"}
+                  </span>
+                  <p>{item.detail}</p>
+                </li>
+              ))}
+            </ol>
+          </SurfaceCard>
+
+          <SurfaceCard
+            kicker="Activity"
+            title="Recent booking updates"
+            description="Cross-actor timeline stays concise here: tenant, system, ops, and driver contributions share one audit-safe lane."
+          >
+            <ul className="booking-activity-list">
+              {activity.map((item) => (
+                <li
+                  className="booking-activity-item"
+                  key={`${item.label}-${item.at}`}
+                >
+                  <div className="booking-activity-header">
+                    <span className={getActivityToneClassName(item.realm)}>
+                      {item.realm}
+                    </span>
+                    <strong>{item.label}</strong>
+                    <span className="muted-copy">
+                      {item.at ? formatDateTime(item.at) : "Not published"}
+                    </span>
+                  </div>
+                  <p>{item.detail}</p>
+                </li>
+              ))}
+            </ul>
+          </SurfaceCard>
+        </div>
+
+        <div className="booking-detail-side">
+          <SurfaceCard
+            kicker="Commands"
+            title="Available actions"
+            description="CTAs stay backend-driven. Disabled actions remain visible with a reason instead of disappearing by role."
+          >
+            <BookingCommandPanel
+              availableActions={availableActions}
+              booking={booking}
+              editableUntil={editableUntil}
+              readOnlyReasonCode={readOnlyReasonCode}
+            />
+          </SurfaceCard>
+
+          <SurfaceCard
+            kicker="Assignment"
+            title="Driver and service execution"
+            description="Driver and vehicle details remain tenant-safe summaries only when the read model publishes them."
+          >
+            <dl className="definition-grid">
+              <div>
+                <dt>Driver</dt>
+                <dd>
+                  {assignment?.driverName
+                    ? `${assignment.driverName}${assignment.driverId ? ` · ${assignment.driverId}` : ""}`
+                    : "Not published"}
+                </dd>
+              </div>
+              <div>
+                <dt>Vehicle</dt>
+                <dd>{assignment?.vehicleLabel ?? "Not published"}</dd>
+              </div>
+              <div>
+                <dt>ETA</dt>
+                <dd>
+                  {assignment?.etaMinutes != null
+                    ? formatDurationMinutes(assignment.etaMinutes)
+                    : booking.orderStatus === "assigned" ||
+                        booking.orderStatus === "on_trip"
+                      ? "Live ETA not published"
+                      : "Not active"}
+                </dd>
+              </div>
+              <div>
+                <dt>Contact mode</dt>
+                <dd>{assignment?.contactMode ?? "Platform-mediated only"}</dd>
+              </div>
+            </dl>
+          </SurfaceCard>
+
+          <SurfaceCard
+            kicker="Finance"
+            title="Fare, invoice, and governance"
+            description="Quoted fare authority and invoice linkage stay adjacent so a tenant user can reconcile the booking without leaving the detail flow."
+          >
+            <dl className="definition-grid">
+              <div>
+                <dt>Quoted fare</dt>
+                <dd>{formatMoney(booking.quotedFare)}</dd>
+              </div>
+              <div>
+                <dt>Fare source</dt>
+                <dd>{booking.quotedFareSource ?? "Not published"}</dd>
+              </div>
+              <div>
+                <dt>Pricing version</dt>
+                <dd>{booking.quotedFareRuleVersion ?? "Not published"}</dd>
+              </div>
+              <div>
+                <dt>Finance authority</dt>
+                <dd>{source.financeAuthority}</dd>
+              </div>
+            </dl>
+            {relatedInvoices.length > 0 ? (
+              <ul className="panel-list">
+                {relatedInvoices.map((invoice) => (
+                  <li key={invoice.invoiceId}>
+                    <strong>{invoice.invoiceId}</strong>
+                    <span className="list-note">
+                      {invoice.status} · {formatMoney(invoice.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted-copy">
+                No tenant invoice row is currently linked to this order.
+              </p>
+            )}
+          </SurfaceCard>
+
+          <SurfaceCard
+            kicker="Snapshot"
+            title="Refresh and routing metadata"
+            description="Q-X01 freshness metadata and cross-app routing hints keep the operator honest about how live this snapshot is."
+          >
+            <dl className="definition-grid">
+              <div>
+                <dt>Generated at</dt>
+                <dd>{formatDateTime(refreshSummary.generatedAt)}</dd>
+              </div>
+              <div>
+                <dt>Stale after</dt>
+                <dd>
+                  {formatDurationMinutes(
+                    Math.max(
+                      1,
+                      Math.floor(refreshSummary.staleAfterMs / 60_000),
+                    ),
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Freshness</dt>
+                <dd>{refreshSummary.freshness}</dd>
+              </div>
+              <div>
+                <dt>Source</dt>
+                <dd>{refreshSummary.source}</dd>
+              </div>
+            </dl>
+          </SurfaceCard>
+        </div>
+      </section>
+
+      <section className="surface-grid surface-grid-wide">
+        <SurfaceCard
+          kicker="Business fields"
+          title="Additional reservation context"
+          description="Optional business-travel fields remain visible here so tenant users can inspect the full reservation payload without mutating workflow state directly."
+        >
+          <dl className="definition-grid">
+            <div>
+              <dt>Vehicle preference</dt>
+              <dd>{booking.vehiclePreference ?? "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Benefit reference</dt>
+              <dd>{booking.benefitReference ?? "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Direction</dt>
+              <dd>{booking.direction ?? "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Flight</dt>
+              <dd>{booking.flightNo ?? "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Terminal</dt>
+              <dd>{booking.terminal ?? "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Luggage</dt>
+              <dd>
+                {booking.luggageCount == null
+                  ? "Not provided"
+                  : `${booking.luggageCount} bag(s)`}
+              </dd>
+            </div>
+            <div>
+              <dt>Notes</dt>
+              <dd>{booking.notes ?? "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Compliance gates</dt>
+              <dd>
+                {booking.complianceGates?.length
+                  ? `${booking.complianceGates.length} published`
+                  : "None published"}
+              </dd>
+            </div>
+          </dl>
+        </SurfaceCard>
+      </section>
+
+      <div className="link-row">
+        <Link className="text-link" href="/bookings">
+          Back to booking list
+        </Link>
       </div>
     </div>
   );

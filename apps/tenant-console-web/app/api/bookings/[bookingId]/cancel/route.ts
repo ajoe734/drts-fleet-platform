@@ -11,11 +11,11 @@ export async function POST(
   try {
     const body = (await request.json()) as { reason?: string };
     const client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
-    await client.cancelTenantBooking(
+    const result = await client.cancelTenantBooking(
       bookingId,
       body.reason ? { reason: body.reason } : {},
     );
-    return NextResponse.json({ ok: true, bookingId });
+    return NextResponse.json({ ok: true, bookingId, result });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
