@@ -18,7 +18,12 @@ function expectApiError(fn: () => unknown, errorCode: string) {
 
 function createService() {
   const auditNotificationService = {
-    recordAuditLog: vi.fn(),
+    recordAuditLog: vi.fn((input) => ({
+      auditId: "audit-test-id",
+      createdAt: "2026-05-26T00:00:00.000Z",
+      requestId: input?.requestId ?? "request-test-id",
+      ...input,
+    })),
   };
   const platformAdminRepository = {
     loadState: vi.fn().mockResolvedValue({
