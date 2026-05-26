@@ -5577,6 +5577,70 @@ def build_chair_review_message(
     )
 
 
+def paused_owner_reassignment_candidates(
+    state: dict[str, Any],
+    status: dict[str, Any] | None,
+    config: dict[str, Any] | None,
+    *,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    """Return tasks whose explicit owner (or reviewer) sits on a currently
+    paused provider lane.
+
+    The default chair-review reason logic only fires reassignment_triage
+    when a task has a *failure streak* — but a paused-lane owner produces
+    no failures (the task simply never gets dispatched). Without this
+    trigger, an entire backlog can stall because chair never recognises
+    that the owner side is structurally unavailable.
+
+    Tasks already done / review_approved are skipped — those are out of
+    the dispatch pool. Reviewer reassignment is included because a
+    paused-lane reviewer blocks `review` and `review_approved` handoffs
+    just as effectively as a paused owner blocks `backlog` / `todo`.
+    """
+    if status is None or config is None:
+        return []
+    pauses = state.get("provider_pauses", {}) or {}
+    if not pauses:
+        return []
+    paused_agent_keys = set()
+    for lane in pauses.keys():
+        # provider_pauses keys are lane IDs ('gemini', 'claude2'), which
+        # match the normalized form of the owner display names ('Gemini',
+        # 'Claude2'). normalize_agent_id is idempotent so feeding the lane
+        # ID through it produces the comparison key we need directly.
+        key = normalize_agent_id(lane)
+        if key:
+            paused_agent_keys.add(key)
+    if not paused_agent_keys:
+        return []
+    tasks = status.get("tasks", []) if isinstance(status, dict) else []
+    if not isinstance(tasks, list):
+        return []
+    pool: list[dict[str, Any]] = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        st = str(task.get("status") or "").lower()
+        if st in {"done", "review_approved"}:
+            continue
+        owner = normalize_agent_id(task.get("owner")) if task.get("owner") else None
+        reviewer = normalize_agent_id(task.get("reviewer")) if task.get("reviewer") else None
+        owner_blocked = owner in paused_agent_keys and st in {"backlog", "todo", "in_progress"}
+        reviewer_blocked = reviewer in paused_agent_keys and st in {"review"}
+        if owner_blocked or reviewer_blocked:
+            pool.append({
+                "task_id": str(task.get("id") or ""),
+                "owner": task.get("owner"),
+                "reviewer": task.get("reviewer"),
+                "status": st,
+                "role": "owner" if owner_blocked else "reviewer",
+            })
+            if len(pool) >= limit:
+                break
+    return pool
+
+
 def chair_review_reason(
     state: dict[str, Any],
     approval_state: dict[str, Any],
@@ -5586,6 +5650,14 @@ def chair_review_reason(
     if pending_approval_items(approval_state):
         return "approval_triage"
     if repeated_failure_records(state):
+        return "reassignment_triage"
+    # A paused-lane owner is a structural reassignment trigger too — the
+    # task can never dispatch as long as the lane is down, even though no
+    # `repeated_failure_records` accumulate (the worker never starts, so
+    # no failures to count). Routes the chair into reassignment_triage
+    # so it can move ownership to a healthy lane via reassignment_actions
+    # instead of just observing the pause in provider_health_triage.
+    if paused_owner_reassignment_candidates(state, status, config, limit=1):
         return "reassignment_triage"
     if config is not None and dependency_ready_blocked_task_records(config, status, include_sidecars=False, limit=1):
         return "blocked_task_triage"
