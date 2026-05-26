@@ -66,6 +66,10 @@ const ACTION_OPEN_FEATURE_FLAGS = "open_feature_flags";
 const ACTION_OPEN_DASHBOARD = "open_dashboard";
 const ACTION_OPEN_INCIDENT_DETAIL = "open_incident_detail";
 const ACTION_ADD_SERVICE_RECOVERY = "add_service_recovery";
+const ACTION_OPEN_DISPATCH_DETAIL = "open_dispatch_detail";
+const ACTION_OPEN_DRIVER_DETAIL = "open_driver_detail";
+const ACTION_OPEN_VEHICLE_DETAIL = "open_vehicle_detail";
+const ACTION_OPEN_COMPLAINT_DETAIL = "open_complaint_detail";
 
 const STATUSES: IncidentStatus[] = [...INCIDENT_STATUSES];
 const SEVERITIES: IncidentSeverity[] = [...INCIDENT_SEVERITIES];
@@ -364,12 +368,22 @@ function getActionLabel(
       return locale === "en" ? "Open feature flags" : "前往功能旗標";
     case ACTION_OPEN_DASHBOARD:
       return locale === "en" ? "Open dashboard" : "前往儀表板";
+    case ACTION_OPEN_DISPATCH_DETAIL:
+      return locale === "en" ? "Open dispatch" : "前往派遣";
+    case ACTION_OPEN_DRIVER_DETAIL:
+      return locale === "en" ? "Open driver" : "前往司機";
+    case ACTION_OPEN_VEHICLE_DETAIL:
+      return locale === "en" ? "Open vehicle" : "前往車輛";
+    case ACTION_OPEN_COMPLAINT_DETAIL:
+      return locale === "en" ? "Open complaint" : "前往客訴";
     case ACTION_REFRESH_INCIDENTS:
     case "refresh":
     case "reload":
       return locale === "en" ? "Refresh" : "重新整理";
     default:
-      return locale === "en" ? "Open" : "開啟";
+      return locale === "en"
+        ? action?.action.replace(/_/g, " ") || "Open"
+        : action?.action.replace(/_/g, " ") || "開啟";
   }
 }
 
@@ -408,6 +422,36 @@ function getActionVariant(action: ResourceActionDescriptor | null | undefined) {
 
 function isDangerAction(action: ResourceActionDescriptor | null | undefined) {
   return action?.riskLevel === "high";
+}
+
+function getActionIconName(
+  action: ResourceActionDescriptor | null | undefined,
+) {
+  switch (action?.action) {
+    case ACTION_CREATE_INCIDENT:
+    case ACTION_CREATE_FROM_DISPATCH_EXCEPTION:
+    case ACTION_ADD_SERVICE_RECOVERY:
+      return "plus";
+    case ACTION_REFRESH_INCIDENTS:
+    case "refresh":
+    case "reload":
+      return "more";
+    case ACTION_OPEN_DASHBOARD:
+      return "dashboard";
+    case ACTION_OPEN_FEATURE_FLAGS:
+      return "flags";
+    case ACTION_OPEN_DISPATCH_DETAIL:
+      return "dispatch";
+    case ACTION_OPEN_DRIVER_DETAIL:
+      return "users";
+    case ACTION_OPEN_VEHICLE_DETAIL:
+      return "vehicles";
+    case ACTION_OPEN_COMPLAINT_DETAIL:
+      return "complaints";
+    case ACTION_OPEN_INCIDENT_DETAIL:
+    default:
+      return "arrow";
+  }
 }
 
 function getRefreshTone(
@@ -495,6 +539,87 @@ function hasLinkedEntities(record: IncidentRecordRuntime) {
     record.relatedVehicleId ||
     record.relatedDriverId ||
     record.relatedComplaintCaseNo,
+  );
+}
+
+function getPrimaryIncidentHref(record: IncidentRecordRuntime) {
+  return `/incidents/${encodeURIComponent(record.incidentId)}`;
+}
+
+function getActionHref(
+  action: ResourceActionDescriptor,
+  record?: IncidentRecordRuntime,
+): string | null {
+  switch (action.action) {
+    case ACTION_OPEN_INCIDENT_DETAIL:
+      return record ? getPrimaryIncidentHref(record) : null;
+    case ACTION_ADD_SERVICE_RECOVERY:
+      return record
+        ? `${getPrimaryIncidentHref(record)}#service-recovery`
+        : null;
+    case ACTION_OPEN_DASHBOARD:
+      return "/dashboard";
+    case ACTION_OPEN_FEATURE_FLAGS:
+      return "/feature-flags";
+    case ACTION_OPEN_DISPATCH_DETAIL:
+      return record?.relatedOrderId
+        ? `/dispatch/${encodeURIComponent(record.relatedOrderId)}`
+        : null;
+    case ACTION_OPEN_DRIVER_DETAIL:
+      return record?.relatedDriverId
+        ? `/drivers/${encodeURIComponent(record.relatedDriverId)}`
+        : null;
+    case ACTION_OPEN_VEHICLE_DETAIL:
+      return record?.relatedVehicleId
+        ? `/vehicles/${encodeURIComponent(record.relatedVehicleId)}`
+        : null;
+    case ACTION_OPEN_COMPLAINT_DETAIL:
+      return record?.relatedComplaintCaseNo
+        ? `/complaints/${encodeURIComponent(record.relatedComplaintCaseNo)}`
+        : null;
+    default:
+      return null;
+  }
+}
+
+function renderActionButton(
+  action: ResourceActionDescriptor,
+  locale: "en" | "zh",
+  onAction: (
+    action: ResourceActionDescriptor,
+    record?: IncidentRecordRuntime,
+  ) => void,
+  record?: IncidentRecordRuntime,
+) {
+  const href = getActionHref(action, record);
+  const button = (
+    <Btn
+      theme={theme}
+      variant={getActionVariant(action)}
+      danger={isDangerAction(action)}
+      icon={getActionIconName(action)}
+      disabled={action.enabled === false}
+      {...(href || action.enabled === false
+        ? {}
+        : { onClick: () => onAction(action, record) })}
+    >
+      {getActionLabel(action, locale)}
+    </Btn>
+  );
+
+  return (
+    <span
+      key={`${record?.incidentId ?? "page"}:${action.action}`}
+      title={getActionTitle(action, locale)}
+    >
+      {href && action.enabled !== false ? (
+        <Link href={href} style={{ textDecoration: "none" }}>
+          {button}
+        </Link>
+      ) : (
+        button
+      )}
+    </span>
   );
 }
 
@@ -919,6 +1044,9 @@ export default function IncidentsPage() {
   const createActions = pageActions.filter((action) =>
     isCreateActionName(action.action),
   );
+  const nonCreatePageActions = pageActions.filter(
+    (action) => !isCreateActionName(action.action),
+  );
   const createAction = getActionDescriptor(createActions, [
     ...(dispatchExceptionOrderId
       ? [ACTION_CREATE_FROM_DISPATCH_EXCEPTION, ACTION_CREATE_INCIDENT]
@@ -938,34 +1066,16 @@ export default function IncidentsPage() {
       <Pill theme={theme} tone={getRefreshTone(refresh)}>
         {refreshLabel}
       </Pill>
-      {refreshAction ? (
-        <span title={getActionTitle(refreshAction, locale)}>
-          <Btn
-            theme={theme}
-            variant={getActionVariant(refreshAction)}
-            danger={isDangerAction(refreshAction)}
-            icon="more"
-            disabled={refreshAction.enabled === false}
-            onClick={() => handleAction(refreshAction)}
-          >
-            {getActionLabel(refreshAction, locale)}
-          </Btn>
-        </span>
-      ) : null}
-      {createActions.map((action) => (
-        <span key={action.action} title={getActionTitle(action, locale)}>
-          <Btn
-            theme={theme}
-            variant={getActionVariant(action)}
-            danger={isDangerAction(action)}
-            icon="plus"
-            disabled={action.enabled === false}
-            onClick={() => handleAction(action)}
-          >
-            {getActionLabel(action, locale)}
-          </Btn>
-        </span>
-      ))}
+      {nonCreatePageActions.map((action) =>
+        renderActionButton(action, locale, (nextAction, nextRecord) =>
+          handleAction(nextAction, nextRecord),
+        ),
+      )}
+      {createActions.map((action) =>
+        renderActionButton(action, locale, (nextAction, nextRecord) =>
+          handleAction(nextAction, nextRecord),
+        ),
+      )}
     </>
   );
   const refreshIntervalMs = getRefreshIntervalMs(refreshTier);
@@ -1019,43 +1129,47 @@ export default function IncidentsPage() {
     setCategoryFilter("all");
   });
 
-  const handleAction = useEffectEvent((action: ResourceActionDescriptor) => {
-    switch (action.action) {
-      case ACTION_CREATE_INCIDENT:
-      case ACTION_CREATE_FROM_DISPATCH_EXCEPTION:
-      case "create":
-      case "createIncident":
-      case "createIncidentFromDispatchException":
-        setCreateMode(getCreateModeForAction(action.action));
-        setActiveCreateAction(action);
-        setShowCreate(true);
-        return;
-      case ACTION_REFRESH_INCIDENTS:
-      case "refresh":
-      case "reload":
-        void loadRecords(true);
-        return;
-      case ACTION_OPEN_FEATURE_FLAGS:
-        router.push("/feature-flags");
-        return;
-      case ACTION_OPEN_DASHBOARD:
-        router.push("/dashboard");
-        return;
-      default:
-        if (isRouteActionName(action.action)) {
-          router.push("/dashboard");
+  const handleAction = useEffectEvent(
+    (action: ResourceActionDescriptor, record?: IncidentRecordRuntime) => {
+      switch (action.action) {
+        case ACTION_CREATE_INCIDENT:
+        case ACTION_CREATE_FROM_DISPATCH_EXCEPTION:
+        case "create":
+        case "createIncident":
+        case "createIncidentFromDispatchException":
+          setCreateMode(getCreateModeForAction(action.action));
+          setActiveCreateAction(action);
+          setShowCreate(true);
+          return;
+        case ACTION_REFRESH_INCIDENTS:
+        case "refresh":
+        case "reload":
+          void loadRecords(true);
+          return;
+        case ACTION_OPEN_FEATURE_FLAGS:
+        case ACTION_OPEN_DASHBOARD:
+        case ACTION_OPEN_INCIDENT_DETAIL:
+        case ACTION_ADD_SERVICE_RECOVERY:
+        case ACTION_OPEN_DISPATCH_DETAIL:
+        case ACTION_OPEN_DRIVER_DETAIL:
+        case ACTION_OPEN_VEHICLE_DETAIL:
+        case ACTION_OPEN_COMPLAINT_DETAIL: {
+          const href = getActionHref(action, record);
+          if (href) {
+            router.push(href);
+          }
+          return;
         }
-    }
-  });
+        default:
+          if (isRouteActionName(action.action)) {
+            router.push("/dashboard");
+          }
+      }
+    },
+  );
 
   const tableRows: IncidentTableRow[] = filteredRecords.map((record) => {
     const rowActions = record.availableActions ?? [];
-    const openDetailAction = getActionDescriptor(rowActions, [
-      ACTION_OPEN_INCIDENT_DETAIL,
-    ]);
-    const addRecoveryAction = getActionDescriptor(rowActions, [
-      ACTION_ADD_SERVICE_RECOVERY,
-    ]);
 
     return {
       incidentId: record.incidentId,
@@ -1166,67 +1280,12 @@ export default function IncidentsPage() {
             display: "flex",
             flexWrap: "wrap",
             gap: 6,
-            minWidth: 150,
+            minWidth: 220,
           }}
         >
-          {openDetailAction ? (
-            <span title={getActionTitle(openDetailAction, locale)}>
-              {openDetailAction.enabled === false ? (
-                <Btn
-                  theme={theme}
-                  variant={getActionVariant(openDetailAction)}
-                  danger={isDangerAction(openDetailAction)}
-                  icon="arrow"
-                  disabled
-                >
-                  {getActionLabel(openDetailAction, locale)}
-                </Btn>
-              ) : (
-                <Link
-                  href={`/incidents/${encodeURIComponent(record.incidentId)}`}
-                  style={{ textDecoration: "none" }}
-                >
-                  <Btn
-                    theme={theme}
-                    variant={getActionVariant(openDetailAction)}
-                    danger={isDangerAction(openDetailAction)}
-                    icon="arrow"
-                  >
-                    {getActionLabel(openDetailAction, locale)}
-                  </Btn>
-                </Link>
-              )}
-            </span>
-          ) : null}
-          {addRecoveryAction ? (
-            <span title={getActionTitle(addRecoveryAction, locale)}>
-              {addRecoveryAction.enabled === false ? (
-                <Btn
-                  theme={theme}
-                  variant={getActionVariant(addRecoveryAction)}
-                  danger={isDangerAction(addRecoveryAction)}
-                  icon="plus"
-                  disabled
-                >
-                  {getActionLabel(addRecoveryAction, locale)}
-                </Btn>
-              ) : (
-                <Link
-                  href={`/incidents/${encodeURIComponent(record.incidentId)}#service-recovery`}
-                  style={{ textDecoration: "none" }}
-                >
-                  <Btn
-                    theme={theme}
-                    variant={getActionVariant(addRecoveryAction)}
-                    danger={isDangerAction(addRecoveryAction)}
-                    icon="plus"
-                  >
-                    {getActionLabel(addRecoveryAction, locale)}
-                  </Btn>
-                </Link>
-              )}
-            </span>
-          ) : null}
+          {rowActions.map((action) =>
+            renderActionButton(action, locale, handleAction, record),
+          )}
           {rowActions.length === 0 ? (
             <span style={{ color: theme.textDim, fontSize: 11.5 }}>
               {locale === "en" ? "Read only" : "唯讀"}
@@ -1268,7 +1327,7 @@ export default function IncidentsPage() {
       r: (row) => row.coordinationCell,
     },
     { h: "RELATED", k: "linksCell", w: 250, r: (row) => row.linksCell },
-    { h: "ACTIONS", k: "actionsCell", w: 180, r: (row) => row.actionsCell },
+    { h: "ACTIONS", k: "actionsCell", w: 260, r: (row) => row.actionsCell },
     { h: "REPORTED BY", k: "reportedBy", w: 120, mono: true },
     { h: "OCCURRED", k: "occurredCell", w: 145, r: (row) => row.occurredCell },
     { h: "AGE", k: "ageCell", w: 90, r: (row) => row.ageCell },
@@ -1515,6 +1574,111 @@ export default function IncidentsPage() {
 
         <Card
           theme={theme}
+          title={locale === "en" ? "Incident lanes" : "事故分流"}
+          subtitle={
+            locale === "en"
+              ? "Canvas-style quick lanes for active, resolved, and closed work. These buttons drive the list filter below."
+              : "以 canvas 版型呈現的快捷分流，直接驅動下方列表篩選。"
+          }
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: 10,
+            }}
+          >
+            {[
+              {
+                key: "active" as const,
+                label: locale === "en" ? "Active lane" : "進行中",
+                count: openCount,
+                selected:
+                  statusFilter !== "resolved" && statusFilter !== "closed",
+                onClick: () => setStatusFilter("all"),
+                tone: "danger" as const,
+              },
+              {
+                key: "resolved" as const,
+                label: locale === "en" ? "Resolved lane" : "已受控",
+                count: records.filter((record) => record.status === "resolved")
+                  .length,
+                selected: statusFilter === "resolved",
+                onClick: () => setStatusFilter("resolved"),
+                tone: "success" as const,
+              },
+              {
+                key: "closed" as const,
+                label: locale === "en" ? "Closed lane" : "已結案",
+                count: records.filter((record) => record.status === "closed")
+                  .length,
+                selected: statusFilter === "closed",
+                onClick: () => setStatusFilter("closed"),
+                tone: "neutral" as const,
+              },
+            ].map((lane) => (
+              <button
+                key={lane.key}
+                type="button"
+                onClick={lane.onClick}
+                style={{
+                  borderRadius: 12,
+                  border: `1px solid ${lane.selected ? theme.accentBorder : theme.border}`,
+                  background: lane.selected ? theme.accentBg : theme.surface,
+                  color: theme.text,
+                  padding: "14px 16px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                  }}
+                >
+                  <Pill theme={theme} tone={lane.tone} dot>
+                    {lane.label}
+                  </Pill>
+                  <span
+                    style={{
+                      fontFamily: theme.monoFamily,
+                      fontSize: 20,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {lane.count}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    marginTop: 10,
+                    color: theme.textMuted,
+                    fontSize: 11.5,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {lane.key === "active"
+                    ? locale === "en"
+                      ? "Open + investigating incidents stay here for coordination."
+                      : "Open 與 investigating 事故維持在此分流持續協調。"
+                    : lane.key === "resolved"
+                      ? locale === "en"
+                        ? "Recovery completed, waiting for formal closure or follow-up."
+                        : "Recovery 已完成，等待正式結案或後續追蹤。"
+                      : locale === "en"
+                        ? "Closed incidents remain searchable and linked for audit."
+                        : "已結案事故仍保留搜尋與 audit 關聯。"}
+                </div>
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        <Card
+          theme={theme}
           title="Governance guardrail · 三條鐵律"
           subtitle={
             locale === "en"
@@ -1637,6 +1801,32 @@ export default function IncidentsPage() {
                       }}
                     >
                       {record.description}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 6,
+                      }}
+                    >
+                      {record.relatedOrderId ? (
+                        <Pill theme={theme} tone="info">
+                          {locale === "en" ? "dispatch linked" : "已連結派遣"}
+                        </Pill>
+                      ) : null}
+                      {record.serviceRecoveryActions.length === 0 ? (
+                        <Pill theme={theme} tone="warn">
+                          {locale === "en"
+                            ? "recovery missing"
+                            : "尚未記錄 recovery"}
+                        </Pill>
+                      ) : null}
+                      {!record.assignedTo ? (
+                        <Pill theme={theme} tone="danger">
+                          {locale === "en" ? "owner missing" : "尚未指派"}
+                        </Pill>
+                      ) : null}
                     </div>
                   </div>
                   <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
