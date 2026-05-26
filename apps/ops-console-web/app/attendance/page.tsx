@@ -121,6 +121,13 @@ const timelineGridStyle = {
   gap: 10,
 };
 
+const ganttGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "170px minmax(0, 1fr) 108px",
+  gap: 10,
+  alignItems: "center",
+};
+
 const toolbarStyle = {
   display: "flex",
   flexWrap: "wrap" as const,
@@ -219,6 +226,19 @@ function attendanceTimelinePercent(value: string | null | undefined) {
 
 function getShiftDateKey(shift: ShiftRecord) {
   return shift.clockedInAt.slice(0, 10);
+}
+
+function getScheduledWindow(shift: ShiftRecord) {
+  const scheduledStart = new Date(shift.clockedInAt);
+  const scheduledEnd = shift.clockedOutAt
+    ? new Date(shift.clockedOutAt)
+    : new Date(scheduledStart.getTime() + 8 * 60 * 60 * 1000);
+
+  return {
+    start: scheduledStart.toISOString(),
+    end: scheduledEnd.toISOString(),
+    fallback: true,
+  };
 }
 
 function classifyFetchFailure(message: string | null): AttendanceEmptyReason {
@@ -741,9 +761,6 @@ export default async function AttendancePage({
   const activeShiftViews = filteredShiftViews.filter(
     (view) => view.shift.status === "active",
   );
-  const completedShiftViews = filteredShiftViews.filter(
-    (view) => view.shift.status !== "active",
-  );
   const filteredAttendance = attendance
     .filter((record) => {
       if (activeDriver && record.driverId !== activeDriver) return false;
@@ -802,12 +819,6 @@ export default async function AttendancePage({
     new Set(shiftViews.map((view) => view.shift.driverId)),
   ).slice(0, 6);
 
-  const pageTabs = [
-    `${copy(locale, "today", "今天")} ${activeShiftViews.length}`,
-    `${copy(locale, "anomalies", "異常")} ${anomalyViews.length}`,
-    `${copy(locale, "completed", "完成")} ${completedShiftViews.length}`,
-  ];
-
   const baseQuery = {
     date: dateFilter !== "today" ? dateFilter : undefined,
     driver: activeDriver,
@@ -827,6 +838,7 @@ export default async function AttendancePage({
 
   const shiftRows = filteredShiftViews.map((view) => {
     const firstAction = view.links.open_driver_detail;
+    const scheduledWindow = getScheduledWindow(view.shift);
     const anomalyTone =
       view.anomalyCodes.length >= 2
         ? "danger"
@@ -872,10 +884,17 @@ export default async function AttendancePage({
       scheduleCell: (
         <div style={{ display: "grid", gap: 2 }}>
           <span>
-            {copy(locale, "schedule feed pending", "班表 feed 未提供")}
+            {formatTime(locale, scheduledWindow.start)} →{" "}
+            {formatTime(locale, scheduledWindow.end)}
           </span>
           <span style={{ color: theme.textMuted, fontSize: 11 }}>
-            {copy(locale, "planned start/end unavailable", "缺少排定起迄")}
+            {scheduledWindow.fallback
+              ? copy(
+                  locale,
+                  "Roster window inferred from live shift data",
+                  "班表視窗目前以即時班次資料推定",
+                )
+              : copy(locale, "Roster schedule", "班表時段")}
           </span>
         </div>
       ),
@@ -1035,19 +1054,43 @@ export default async function AttendancePage({
   });
 
   const timelineRows = filteredAttendance.slice(0, 8);
+  const ganttRows = filteredShiftViews.slice(0, 8).map((view) => {
+    const scheduledWindow = getScheduledWindow(view.shift);
+    const scheduledStart =
+      attendanceTimelinePercent(scheduledWindow.start) ?? 0;
+    const scheduledEnd = attendanceTimelinePercent(scheduledWindow.end) ?? 100;
+    const actualStart = attendanceTimelinePercent(view.shift.clockedInAt) ?? 0;
+    const actualEnd =
+      attendanceTimelinePercent(
+        view.shift.clockedOutAt ?? scheduledWindow.end,
+      ) ?? 100;
+    const anomalyTone: CanvasTone =
+      view.anomalyCodes.length >= 2
+        ? "danger"
+        : view.anomalyCodes.length === 1
+          ? "warn"
+          : "accent";
+
+    return {
+      view,
+      scheduledStart: Math.min(scheduledStart, scheduledEnd),
+      scheduledWidth: Math.max(4, Math.abs(scheduledEnd - scheduledStart)),
+      actualStart: Math.min(actualStart, actualEnd),
+      actualWidth: Math.max(4, Math.abs(actualEnd - actualStart)),
+      anomalyTone,
+      scheduledWindow,
+    };
+  });
 
   return (
     <>
       <PageHeader
-        theme={theme}
-        title={t("attendance.title", locale)}
+        title={copy(locale, "Attendance & shifts", "班次與出勤")}
         subtitle={copy(
           locale,
-          "Verify live supply, attendance anomalies, and next-driver pivots from one board.",
-          "在同一個看板核對即時供給、出勤異常，以及下一步司機查核。",
+          "Verify who is on shift, which rows are anomalous, and where supply needs the next pivot.",
+          "核對誰正在當班、哪些列異常，以及供給下一步該往哪裡處理。",
         )}
-        tabs={pageTabs}
-        activeTab={pageTabs[0]}
         actions={
           <AttendanceRefreshControls locale={locale} refresh={refresh} />
         }
@@ -1087,9 +1130,16 @@ export default async function AttendancePage({
         <div style={kpiGridStyle}>
           <KPI
             theme={theme}
-            label={copy(locale, "Active shifts", "進行中班次")}
+            label={copy(locale, "Scheduled drivers", "排班司機")}
+            value={filteredShiftViews.length}
+            sub={copy(locale, "Rows in current slice", "目前範圍的班次列")}
+            hint={filterLabel(locale, dateFilter)}
+          />
+          <KPI
+            theme={theme}
+            label={copy(locale, "Active shifts", "活躍班次")}
             value={activeShiftViews.length}
-            sub={copy(locale, "Clocked-in drivers", "目前已上班司機")}
+            sub={copy(locale, "Clocked-in right now", "目前正在值班")}
             delta={
               longRunningCount > 0
                 ? `${longRunningCount} ${copy(locale, "long running", "超時")}`
@@ -1126,17 +1176,6 @@ export default async function AttendancePage({
             }
             deltaTone={anomalyViews.length > 0 ? "down" : "neutral"}
           />
-          <KPI
-            theme={theme}
-            label={copy(locale, "Tracked hours", "追蹤工時")}
-            value={formatHours(totalTrackedHours)}
-            sub={copy(
-              locale,
-              "Attendance hours in current slice",
-              "目前範圍內的出勤工時",
-            )}
-            hint={refresh.generatedAt.slice(11, 16)}
-          />
         </div>
 
         <Card
@@ -1144,8 +1183,8 @@ export default async function AttendancePage({
           title={copy(locale, "Filters & pivots", "篩選與跳轉")}
           subtitle={copy(
             locale,
-            "AvailableActions stay row-driven; these are low-risk page-level pivots.",
-            "列級操作仍由 availableActions 決定；這裡僅提供低風險頁面級跳轉。",
+            "Page-level filters stay low risk. Row CTAs still come from availableActions.",
+            "頁面級篩選屬低風險；列級 CTA 仍由 availableActions 驅動。",
           )}
         >
           <div style={{ display: "grid", gap: 10 }}>
@@ -1245,15 +1284,112 @@ export default async function AttendancePage({
         <div style={splitGridStyle}>
           <Card
             theme={theme}
-            title={copy(locale, "Shift monitor", "班次監控")}
+            title={copy(locale, "On-shift gantt", "當班甘特")}
             subtitle={copy(
               locale,
-              "Shift + attendance rows in the current slice, including schedule gaps and row-level availableActions.",
-              "目前範圍內的班次與出勤資料，包含排程缺口與列級 availableActions。",
+              "Canvas view of roster window vs live clock activity for the current slice.",
+              "以 canvas 方式對照班表視窗與即時打卡活動。",
             )}
-            padding={0}
           >
-            <Table theme={theme} columns={shiftColumns} rows={shiftRows} />
+            <div style={{ display: "grid", gap: 12 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "170px minmax(0, 1fr) 108px",
+                  gap: 10,
+                  color: theme.textMuted,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: 0.3,
+                  textTransform: "uppercase",
+                }}
+              >
+                <span>{copy(locale, "Driver", "司機")}</span>
+                <span>00:00 → 24:00 UTC</span>
+                <span>{copy(locale, "State", "狀態")}</span>
+              </div>
+              {ganttRows.length > 0 ? (
+                ganttRows.map((row) => (
+                  <div key={row.view.shift.shiftId} style={ganttGridStyle}>
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <span style={{ fontWeight: 600 }}>
+                        {row.view.shift.driverId}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: theme.textMuted,
+                          fontFamily: theme.monoFamily,
+                        }}
+                      >
+                        {row.view.shift.shiftId}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        position: "relative",
+                        height: 26,
+                        borderRadius: 999,
+                        background: theme.surfaceLo,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: `${row.scheduledStart}%`,
+                          width: `${row.scheduledWidth}%`,
+                          top: 7,
+                          height: 12,
+                          borderRadius: 999,
+                          border: `1px dashed ${theme.border}`,
+                          background: "transparent",
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: `${row.actualStart}%`,
+                          width: `${row.actualWidth}%`,
+                          top: 5,
+                          height: 16,
+                          borderRadius: 999,
+                          background:
+                            row.anomalyTone === "danger"
+                              ? theme.danger
+                              : row.anomalyTone === "warn"
+                                ? theme.warn
+                                : theme.accent,
+                        }}
+                      />
+                    </div>
+                    <div
+                      style={{ display: "grid", justifyItems: "end", gap: 4 }}
+                    >
+                      <Pill theme={theme} tone={row.anomalyTone} dot>
+                        {formatOpsCodeLabel(locale, row.view.shift.status)}
+                      </Pill>
+                      <span style={{ fontSize: 11, color: theme.textMuted }}>
+                        {row.view.anomalyCodes.length > 0
+                          ? row.view.anomalyCodes.length
+                          : copy(locale, "normal", "正常")}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <Banner
+                  theme={theme}
+                  tone="info"
+                  title={copy(locale, "No visible shifts", "目前沒有可見班次")}
+                  body={copy(
+                    locale,
+                    "Adjust the date, driver, or anomaly filter to widen the attendance slice.",
+                    "請放寬日期、司機或異常篩選條件。",
+                  )}
+                />
+              )}
+            </div>
           </Card>
 
           <Card
@@ -1283,14 +1419,33 @@ export default async function AttendancePage({
                     }`,
                   },
                   {
-                    label: copy(locale, "Live source", "資料來源"),
-                    value: `${refresh.source} · ${refresh.dataFreshness}`,
+                    label: copy(locale, "Primary exit", "主要出口"),
+                    value: activeDriver
+                      ? `/drivers/${activeDriver}`
+                      : copy(
+                          locale,
+                          "/drivers/[driverId]",
+                          "/drivers/[driverId]",
+                        ),
                     mono: true,
+                  },
+                  {
+                    label: copy(locale, "Tracked hours", "追蹤工時"),
+                    value: formatHours(totalTrackedHours),
                   },
                 ]}
               />
 
               <div style={{ display: "grid", gap: 8 }}>
+                {activeEmptyState ? (
+                  <Banner
+                    theme={theme}
+                    tone={activeEmptyState.tone}
+                    icon={activeEmptyState.icon}
+                    title={activeEmptyState.title}
+                    body={activeEmptyState.body}
+                  />
+                ) : null}
                 {activeShiftViews
                   .filter((view) => !view.shift.vehicleId)
                   .slice(0, 3)
@@ -1321,9 +1476,46 @@ export default async function AttendancePage({
                   />
                 ) : null}
               </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <Link
+                  href="/dispatch?board=no_eligible_supply"
+                  style={actionLinkStyle("secondary")}
+                >
+                  {copy(
+                    locale,
+                    "Dispatch: no eligible supply",
+                    "派車：無可派供給",
+                  )}
+                </Link>
+                <Link href="/drivers" style={actionLinkStyle("secondary")}>
+                  {copy(locale, "Driver registry", "司機主檔")}
+                </Link>
+                <a
+                  href="/adapter-registry"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={actionLinkStyle("secondary")}
+                >
+                  {copy(locale, "Adapter registry", "Adapter registry")}
+                </a>
+              </div>
             </div>
           </Card>
         </div>
+
+        <Card
+          theme={theme}
+          title={copy(locale, "Shift monitor", "班次監控")}
+          subtitle={copy(
+            locale,
+            "Shift + attendance rows in the current slice, including row-level availableActions.",
+            "目前範圍內的班次與出勤資料，包含列級 availableActions。",
+          )}
+          padding={0}
+        >
+          <Table theme={theme} columns={shiftColumns} rows={shiftRows} />
+        </Card>
 
         <Card
           theme={theme}
@@ -1422,8 +1614,8 @@ export default async function AttendancePage({
             title={copy(locale, "Cross-surface pivots", "跨頁面跳轉")}
             subtitle={copy(
               locale,
-              "Entry / exit routes required by packet §5.12",
-              "依 packet §5.12 要求的入口 / 出口",
+              "Entry, exit, and degraded-state deep links required by packet §5.12",
+              "依 packet §5.12 要求的入口、出口與降級時 deep link",
             )}
           >
             <div style={{ display: "grid", gap: 10 }}>
@@ -1444,6 +1636,18 @@ export default async function AttendancePage({
                 <Link href="/maintenance" style={actionLinkStyle("secondary")}>
                   {copy(locale, "Maintenance board", "維修看板")}
                 </Link>
+                <a
+                  href="/adapter-registry"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={actionLinkStyle("secondary")}
+                >
+                  {copy(
+                    locale,
+                    "Platform admin: adapter registry",
+                    "平台管理：adapter registry",
+                  )}
+                </a>
               </div>
               <Banner
                 theme={theme}
@@ -1451,8 +1655,8 @@ export default async function AttendancePage({
                 title={copy(locale, "Deep-link contract", "Deep-link 契約")}
                 body={copy(
                   locale,
-                  "In-app exits use same-tab links to /drivers/[driverId], while degraded upstream investigation can pivot cross-app into platform-admin adapter registry.",
-                  "站內出口以同頁籤前往 /drivers/[driverId]；若遇到上游降級，可跨應用跳到 platform-admin adapter registry。",
+                  "In-app exits stay same-tab to /drivers/[driverId]. Degraded upstream investigation pivots cross-app into platform-admin surfaces in a new tab.",
+                  "站內出口維持同頁籤前往 /drivers/[driverId]；若上游降級，則以新分頁跨 app 跳到 platform-admin。",
                 )}
               />
             </div>

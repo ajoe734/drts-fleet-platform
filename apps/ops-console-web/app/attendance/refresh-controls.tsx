@@ -63,12 +63,8 @@ export function AttendanceRefreshControls({
 
   const ageMs = Math.max(0, now - generatedAt);
   const stale = ageMs >= refresh.staleAfterMs;
-  const freshnessTone =
-    refresh.dataFreshness === "degraded"
-      ? "danger"
-      : stale
-        ? "warn"
-        : "success";
+  const degraded = refresh.dataFreshness === "degraded";
+  const freshnessTone = degraded ? "danger" : stale ? "warn" : "success";
 
   return (
     <div
@@ -83,9 +79,14 @@ export function AttendanceRefreshControls({
         T3 · 15s
       </Pill>
       <Pill theme={theme} tone={freshnessTone} dot>
-        {stale ? copy(locale, "stale", "過期") : copy(locale, "fresh", "最新")}{" "}
+        {degraded
+          ? copy(locale, "degraded", "降級")
+          : stale
+            ? copy(locale, "stale", "過期")
+            : copy(locale, "fresh", "最新")}{" "}
         · {Math.floor(ageMs / 1000)}s
       </Pill>
+      <Pill theme={theme}>{refresh.source}</Pill>
       <Btn
         theme={theme}
         variant="secondary"
