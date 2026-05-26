@@ -192,3 +192,20 @@ Fresh 2026-05-26 validation still shows:
 - merge-to-`dev` plus environment access are the remaining blockers
 
 Until the corrected branch artifacts are merged onto `origin/dev` and a valid staging bearer path exists so the governed rerun can pass `STRICT_VERIFICATION_BODY=1`, this task should stay `blocked`, not `review` or `done`.
+
+## 2026-05-26 Dispatch Revalidation (head `19194d8a`)
+
+- Dispatch resumed from the isolated worker worktree on branch `codex2/ph1gc-fin-gov-001`.
+- `git fetch origin` completed before the latest trunk comparison.
+- `git rev-parse HEAD` = `19194d8ae7262de8db22c117e59a8d53de600dd4`.
+- `git rev-parse origin/codex2/ph1gc-fin-gov-001` = `19194d8ae7262de8db22c117e59a8d53de600dd4`.
+- `git rev-parse origin/dev` = `070f9aea91e066ffce138b321e16dd8cda10828d`.
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` still lists `E2E-010-governance-aware-billing-reporting.sh`.
+- `git diff --check` passed from the isolated worktree.
+- `git show origin/dev:docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` still exposes the pre-fix verification body with `ownerName` and `approvalEvaluationId`, so acceptance item 1 remains open on trunk.
+- `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` still asserts the pre-fix field set and omits the explicit 13-field coverage matrix, so acceptance item 2 remains open on trunk.
+- `git show origin/dev:docs/03-runbooks/phase1-workflow-acceptance-release-gates.md | grep -n 'WF-FIN-GOV-001'` returns no row, so the matrix-side trunk visibility acceptance is also still open even though this branch retains the row locally.
+- No governed staging rerun was executed from this workspace during this dispatch, so there is still no fresh reviewer-readable invoice/report artifact and no green live `STRICT_VERIFICATION_BODY=1` run to justify a `PASS (live staging evidence)` uplift.
+- Canonical machine truth accepted a `note` update from `AI_NAME=Codex2 scripts/ai-status.sh note PH1GC-FIN-GOV-001 ...`, but the control plane still records the task as `owner=Codex`, `reviewer=Codex2`, `status=blocked`; that drift prevents an owner-lane `progress`/`blocker` write from this dispatch without reassignment.
