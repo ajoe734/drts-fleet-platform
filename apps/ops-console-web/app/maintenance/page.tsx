@@ -14,6 +14,7 @@ import { useSearchParams } from "next/navigation";
 import {
   MAINTENANCE_STATUSES,
   MAINTENANCE_TYPES,
+  type ActionReceipt,
   type CreateMaintenanceRecordCommand,
   type CrossAppResourceLink,
   type EmptyReason,
@@ -64,6 +65,7 @@ type SaveNotice = {
   tone: Exclude<CanvasTone, "neutral">;
   title: string;
   body?: string;
+  receipt?: ActionReceipt;
 };
 
 type LoadState = {
@@ -287,25 +289,21 @@ function emptyReasonLabel(locale: "en" | "zh", reason: EmptyReason) {
 function withFleetCreateGuard(
   action: ResourceActionDescriptor | undefined,
   canCreate: boolean,
-): ResourceActionDescriptor {
-  const base =
-    action ??
-    createActionDescriptor({
-      action: "create_record",
-      enabled: true,
-      riskLevel: "medium",
-    });
+): ResourceActionDescriptor | undefined {
+  if (!action) {
+    return undefined;
+  }
 
   const disabledReasonCode = !canCreate
     ? "vehicle_registry_empty"
-    : base.disabledReasonCode;
+    : action.disabledReasonCode;
 
   return createActionDescriptor({
-    action: base.action,
-    enabled: canCreate && base.enabled,
-    riskLevel: base.riskLevel,
+    action: action.action,
+    enabled: canCreate && action.enabled,
+    riskLevel: action.riskLevel,
     ...(disabledReasonCode ? { disabledReasonCode } : {}),
-    ...(base.requiresReason ? { requiresReason: base.requiresReason } : {}),
+    ...(action.requiresReason ? { requiresReason: action.requiresReason } : {}),
   });
 }
 
@@ -349,6 +347,45 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
   return base ? `${base}${link.route}` : link.route;
 }
 
+function buildAuditLink(
+  locale: "en" | "zh",
+  auditId: string,
+): CrossAppResourceLink {
+  return {
+    targetApp: "platform-admin",
+    route: `/audit?auditId=${encodeURIComponent(auditId)}`,
+    resourceType: "audit_log",
+    resourceId: auditId,
+    openMode: "new_tab",
+    label: copy(locale, "View audit", "查看稽核"),
+  };
+}
+
+function receiptReferenceCopy(
+  locale: "en" | "zh",
+  receipt: ActionReceipt,
+) {
+  return copy(
+    locale,
+    `Action ${receipt.actionId} · Audit ${receipt.auditId}`,
+    `動作 ${receipt.actionId} · 稽核 ${receipt.auditId}`,
+  );
+}
+
+function withReceiptNotice(
+  locale: "en" | "zh",
+  notice: SaveNotice,
+  receipt: ActionReceipt,
+): SaveNotice {
+  return {
+    ...notice,
+    body: [notice.body, receiptReferenceCopy(locale, receipt)]
+      .filter(Boolean)
+      .join(" "),
+    receipt,
+  };
+}
+
 function disabledReasonCopy(
   locale: "en" | "zh",
   code: string | undefined,
@@ -375,43 +412,6 @@ function disabledReasonCopy(
     default:
       return undefined;
   }
-}
-
-function buildCreateAction(
-  canCreate: boolean,
-): ResourceActionDescriptor {
-  return createActionDescriptor({
-    action: "create_record",
-    enabled: canCreate,
-    riskLevel: "medium",
-    ...(canCreate ? {} : { disabledReasonCode: "vehicle_registry_empty" }),
-  });
-}
-
-function buildEditAction(
-  record: MaintenanceRuntimeRecord,
-): ResourceActionDescriptor {
-  const enabled =
-    record.status !== "completed" && record.status !== "cancelled";
-  return createActionDescriptor({
-    action: "edit_record",
-    enabled,
-    riskLevel: "medium",
-    ...(enabled ? {} : { disabledReasonCode: "completed" }),
-  });
-}
-
-function buildCompleteAction(
-  record: MaintenanceRuntimeRecord,
-): ResourceActionDescriptor {
-  return createActionDescriptor({
-    action: "complete_record",
-    enabled: record.status === "in_progress",
-    riskLevel: "medium",
-    ...(record.status === "in_progress"
-      ? {}
-      : { disabledReasonCode: "not_in_progress" }),
-  });
 }
 
 function filterActivityTimestamp(record: MaintenanceRuntimeRecord) {
@@ -452,7 +452,7 @@ function dateWithinRange(
 
 function nextActionForReason(
   reason: EmptyReason,
-  createAction: ResourceActionDescriptor,
+  createAction: ResourceActionDescriptor | undefined,
 ): ResourceActionDescriptor | undefined {
   if (reason === "no_data") {
     return createAction;
@@ -487,7 +487,7 @@ function nextActionForReason(
 
 function createEmptyEnvelope(
   reason: EmptyReason,
-  createAction: ResourceActionDescriptor,
+  createAction: ResourceActionDescriptor | undefined,
 ): EmptyStateEnvelope {
   const nextAction = nextActionForReason(reason, createAction);
   return {
@@ -888,20 +888,26 @@ function MaintenanceEditorModal({
           ...(costValue ? { cost: Number(costValue) } : {}),
           ...(notesValue ? { notes: notesValue } : {}),
         };
-        await client.createMaintenance(payload);
-        await onSaved({
-          tone: "success",
-          title: copy(
+        const result = await client.createMaintenance(payload);
+        await onSaved(
+          withReceiptNotice(
             locale,
-            "Maintenance record created",
-            "保修工單已建立",
+            {
+              tone: "success",
+              title: copy(
+                locale,
+                "Maintenance record created",
+                "保修工單已建立",
+              ),
+              body: copy(
+                locale,
+                "The new work order is now visible in the monitoring queue.",
+                "新工單已加入保修監控隊列。",
+              ),
+            },
+            result.receipt,
           ),
-          body: copy(
-            locale,
-            "The new work order is now visible in the monitoring queue.",
-            "新工單已加入保修監控隊列。",
-          ),
-        });
+        );
       } else {
         const editingRecord = state.record;
         const completedAtIso = completedAt
@@ -917,20 +923,29 @@ function MaintenanceEditorModal({
           ...(costValue ? { cost: Number(costValue) } : {}),
           ...(notesValue ? { notes: notesValue } : {}),
         };
-        await client.updateMaintenance(editingRecord.maintenanceId, payload);
-        await onSaved({
-          tone: "success",
-          title: copy(
+        const result = await client.updateMaintenance(
+          editingRecord.maintenanceId,
+          payload,
+        );
+        await onSaved(
+          withReceiptNotice(
             locale,
-            "Maintenance record updated",
-            "保修工單已更新",
+            {
+              tone: "success",
+              title: copy(
+                locale,
+                "Maintenance record updated",
+                "保修工單已更新",
+              ),
+              body: copy(
+                locale,
+                "The revised work order will refresh into the live queue.",
+                "更新後的工單會在下一輪 live queue 反映。",
+              ),
+            },
+            result.receipt,
           ),
-          body: copy(
-            locale,
-            "The revised work order will refresh into the live queue.",
-            "更新後的工單會在下一輪 live queue 反映。",
-          ),
-        });
+        );
       }
       onClose();
     } catch (caught) {
@@ -1335,30 +1350,12 @@ export default function MaintenancePage() {
       ...records.map((entry) => entry.vehicleId),
     ])].length > 0;
   const createAction = withFleetCreateGuard(
-    findAction(listActions, "create_record") ?? buildCreateAction(true),
+    findAction(listActions, "create_record"),
     hasVehicleProvisioning,
   );
-  const refreshAction =
-    findAction(listActions, "refresh") ??
-    createActionDescriptor({
-      action: "refresh",
-      enabled: true,
-      riskLevel: "low",
-    });
-  const searchAction =
-    findAction(listActions, "search") ??
-    createActionDescriptor({
-      action: "search",
-      enabled: true,
-      riskLevel: "low",
-    });
-  const filterAction =
-    findAction(listActions, "filter") ??
-    createActionDescriptor({
-      action: "filter",
-      enabled: true,
-      riskLevel: "low",
-    });
+  const refreshAction = findAction(listActions, "refresh");
+  const searchAction = findAction(listActions, "search");
+  const filterAction = findAction(listActions, "filter");
 
   const hasStructuredFilters =
     vehicleFilter !== "all" || fromDate !== "" || toDate !== "";
@@ -1628,13 +1625,9 @@ export default function MaintenancePage() {
   }
 
   const tableRows: MaintenanceRow[] = filteredRecords.map((record) => {
-    const editAction =
-      findAction(record.availableActions, "edit_record") ??
-      buildEditAction(record);
-    const completeAction =
-      findAction(record.availableActions, "complete_record") ??
-      buildCompleteAction(record);
-    const vehicleLink = `/vehicles?focus=${encodeURIComponent(record.vehicleId)}`;
+    const editAction = findAction(record.availableActions, "edit_record");
+    const completeAction = findAction(record.availableActions, "complete_record");
+    const vehicleLink = `/vehicles/${encodeURIComponent(record.vehicleId)}`;
     const platformFleetLink: CrossAppResourceLink = {
       targetApp: "platform-admin",
       route: `/fleet?vehicleId=${encodeURIComponent(record.vehicleId)}`,
@@ -1734,43 +1727,51 @@ export default function MaintenancePage() {
         </span>
       ),
       actionsCell: (
-        <div style={{ display: "flex", gap: 6 }}>
-          <span title={buttonTitle(locale, editAction)}>
-            <Btn
-              theme={theme}
-              size="xs"
-              disabled={!editAction.enabled}
-              onClick={() => {
-                if (editAction.enabled) {
-                  setEditorState({ mode: "edit", record });
-                }
-              }}
-              style={{ minWidth: 58 }}
-            >
-              {actionButtonLabel(locale, editAction.action)}
-            </Btn>
-          </span>
-          <span title={buttonTitle(locale, completeAction)}>
-            <Btn
-              theme={theme}
-              size="xs"
-              disabled={!completeAction.enabled}
-              icon="check"
-              onClick={() => {
-                if (completeAction.enabled) {
-                  setConfirmState({
-                    action: "complete",
-                    descriptor: completeAction,
-                    record,
-                  });
-                }
-              }}
-              style={{ minWidth: 68 }}
-            >
-              {actionButtonLabel(locale, completeAction.action)}
-            </Btn>
-          </span>
-        </div>
+        editAction || completeAction ? (
+          <div style={{ display: "flex", gap: 6 }}>
+            {editAction ? (
+              <span title={buttonTitle(locale, editAction)}>
+                <Btn
+                  theme={theme}
+                  size="xs"
+                  disabled={!editAction.enabled}
+                  onClick={() => {
+                    if (editAction.enabled) {
+                      setEditorState({ mode: "edit", record });
+                    }
+                  }}
+                  style={{ minWidth: 58 }}
+                >
+                  {actionButtonLabel(locale, editAction.action)}
+                </Btn>
+              </span>
+            ) : null}
+            {completeAction ? (
+              <span title={buttonTitle(locale, completeAction)}>
+                <Btn
+                  theme={theme}
+                  size="xs"
+                  disabled={!completeAction.enabled}
+                  icon="check"
+                  onClick={() => {
+                    if (completeAction.enabled) {
+                      setConfirmState({
+                        action: "complete",
+                        descriptor: completeAction,
+                        record,
+                      });
+                    }
+                  }}
+                  style={{ minWidth: 68 }}
+                >
+                  {actionButtonLabel(locale, completeAction.action)}
+                </Btn>
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <span style={{ color: theme.textMuted }}>—</span>
+        )
       ),
     };
   });
@@ -1805,19 +1806,25 @@ export default function MaintenancePage() {
   async function handleComplete(record: MaintenanceRuntimeRecord) {
     try {
       const client = getOpsClient();
-      await client.updateMaintenance(record.maintenanceId, {
+      const result = await client.updateMaintenance(record.maintenanceId, {
         status: "completed",
       });
       setConfirmState(null);
-      setNotice({
-        tone: "success",
-        title: copy(locale, "Work order completed", "工單已標記完成"),
-        body: copy(
+      setNotice(
+        withReceiptNotice(
           locale,
-          "The maintenance queue will refresh with the updated dispatch state.",
-          "保修隊列會以新的派車狀態重新整理。",
+          {
+            tone: "success",
+            title: copy(locale, "Work order completed", "工單已標記完成"),
+            body: copy(
+              locale,
+              "The maintenance queue will refresh with the updated dispatch state.",
+              "保修隊列會以新的派車狀態重新整理。",
+            ),
+          },
+          result.receipt,
         ),
-      });
+      );
       await loadSnapshot("manual");
     } catch (caught) {
       setConfirmState(null);
@@ -1896,27 +1903,35 @@ export default function MaintenancePage() {
             <Pill theme={theme} tone={refreshTone}>
               {freshnessLabel}
             </Pill>
-            <Btn
-              theme={theme}
-              icon={refreshIcon()}
-              disabled={!refreshAction.enabled || loadState.refreshing}
-              onClick={() => void refreshNow()}
-            >
-              {loadState.refreshing
-                ? copy(locale, "Refreshing…", "重整中…")
-                : copy(locale, "Refresh", "重整")}
-            </Btn>
-            <span title={buttonTitle(locale, createAction)}>
+            {refreshAction ? (
               <Btn
                 theme={theme}
-                variant="primary"
-                icon="plus"
-                disabled={!createAction.enabled}
-                onClick={() => setEditorState({ mode: "create" })}
+                icon={refreshIcon()}
+                disabled={!refreshAction.enabled || loadState.refreshing}
+                onClick={() => void refreshNow()}
               >
-                {copy(locale, "Create work order", "開立工單")}
+                {loadState.refreshing
+                  ? copy(locale, "Refreshing…", "重整中…")
+                  : copy(locale, "Refresh", "重整")}
               </Btn>
-            </span>
+            ) : null}
+            {createAction ? (
+              <span title={buttonTitle(locale, createAction)}>
+                <Btn
+                  theme={theme}
+                  variant="primary"
+                  icon="plus"
+                  disabled={!createAction.enabled}
+                  onClick={() => {
+                    if (createAction.enabled) {
+                      setEditorState({ mode: "create" });
+                    }
+                  }}
+                >
+                  {copy(locale, "Create work order", "開立工單")}
+                </Btn>
+              </span>
+            ) : null}
           </>
         }
       />
@@ -1936,6 +1951,22 @@ export default function MaintenancePage() {
             icon={notice.tone === "danger" ? "warn" : "check"}
             title={notice.title}
             body={notice.body}
+            actions={
+              notice.receipt ? (
+                <a
+                  href={resolveCrossAppHref(
+                    buildAuditLink(locale, notice.receipt.auditId),
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ textDecoration: "none" }}
+                >
+                  <Btn theme={theme} icon="ext">
+                    {copy(locale, "View audit", "查看稽核")}
+                  </Btn>
+                </a>
+              ) : undefined
+            }
           />
         ) : null}
 
@@ -2017,51 +2048,67 @@ export default function MaintenancePage() {
               alignItems: "center",
             }}
           >
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "7px 10px",
-                borderRadius: 7,
-                border: `1px solid ${theme.border}`,
-                background: theme.bgRaised,
-              }}
-            >
-              <CanvasIcon name="search" size={14} style={{ color: theme.textDim }} />
-              <input
-                value={search}
-                onChange={(event) => {
-                  if (searchAction.enabled) {
-                    setSearch(event.target.value);
-                  }
-                }}
-                disabled={!searchAction.enabled}
-                placeholder={copy(
-                  locale,
-                  "Search work order, vehicle, technician, or notes",
-                  "搜尋工單、車輛、技師或備註",
-                )}
+            {searchAction ? (
+              <label
                 style={{
-                  flex: 1,
-                  border: 0,
-                  outline: "none",
-                  background: "transparent",
-                  color: theme.text,
-                  fontSize: 12.5,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "7px 10px",
+                  borderRadius: 7,
+                  border: `1px solid ${theme.border}`,
+                  background: theme.bgRaised,
                 }}
-              />
-            </label>
-            <Btn
-              theme={theme}
-              icon="filter"
-              disabled={!filterAction.enabled}
-              onClick={() => setShowFilters((current) => !current)}
-            >
-              {showFilters
-                ? copy(locale, "Hide filters", "收合篩選")
-                : copy(locale, "Filter", "篩選")}
-            </Btn>
+              >
+                <CanvasIcon
+                  name="search"
+                  size={14}
+                  style={{ color: theme.textDim }}
+                />
+                <input
+                  value={search}
+                  onChange={(event) => {
+                    if (searchAction.enabled) {
+                      setSearch(event.target.value);
+                    }
+                  }}
+                  disabled={!searchAction.enabled}
+                  placeholder={copy(
+                    locale,
+                    "Search work order, vehicle, technician, or notes",
+                    "搜尋工單、車輛、技師或備註",
+                  )}
+                  style={{
+                    flex: 1,
+                    border: 0,
+                    outline: "none",
+                    background: "transparent",
+                    color: theme.text,
+                    fontSize: 12.5,
+                  }}
+                />
+              </label>
+            ) : (
+              <div style={{ color: theme.textMuted, fontSize: 12 }}>
+                {copy(
+                  locale,
+                  "Search is not available for this maintenance view.",
+                  "此 maintenance 視圖目前不提供搜尋。",
+                )}
+              </div>
+            )}
+            {filterAction ? (
+              <Btn
+                theme={theme}
+                icon="filter"
+                disabled={!filterAction.enabled}
+                onClick={() => setShowFilters((current) => !current)}
+              >
+                {showFilters
+                  ? copy(locale, "Hide filters", "收合篩選")
+                  : copy(locale, "Filter", "篩選")}
+              </Btn>
+            ) : null}
             <a
               href={resolveCrossAppHref(platformFleetLink)}
               target="_blank"
@@ -2074,7 +2121,7 @@ export default function MaintenancePage() {
             </a>
           </div>
 
-          {showFilters ? (
+          {filterAction && showFilters ? (
             <div
               style={{
                 display: "grid",

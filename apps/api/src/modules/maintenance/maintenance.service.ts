@@ -1,9 +1,14 @@
+import { randomUUID } from "node:crypto";
+
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   AuditLogRecord,
   EmptyStateEnvelope,
+  MaintenanceDeleteResult,
   MaintenanceListView,
+  MaintenanceMutationResult,
   MaintenanceRuntimeRecord,
   ResourceActionDescriptor,
   UiRefreshMetadata,
@@ -76,13 +81,7 @@ export class MaintenanceService implements OnModuleInit {
   createMaintenanceLog(
     command: CreateMaintenanceLogCommand,
     requestId?: string,
-    options?: { captureAudit?: false },
-  ): MaintenanceLogRecord;
-  createMaintenanceLog(
-    command: CreateMaintenanceLogCommand,
-    requestId?: string,
-    options?: { captureAudit?: boolean },
-  ) {
+  ): MaintenanceMutationResult {
     this.assertValidType(command.type);
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.description, "description");
@@ -124,7 +123,14 @@ export class MaintenanceService implements OnModuleInit {
       requestId,
     );
 
-    return this.toRuntimeRecord(record);
+    return {
+      record: this.toRuntimeRecord(record),
+      receipt: this.buildReceipt(
+        "create_maintenance_log",
+        maintenanceId,
+        auditLog.auditId,
+      ),
+    };
   }
 
   listMaintenanceLogs(vehicleId?: string): MaintenanceListView {
@@ -162,14 +168,7 @@ export class MaintenanceService implements OnModuleInit {
     maintenanceId: string,
     command: UpdateMaintenanceLogCommand,
     requestId?: string,
-    options?: { captureAudit?: false },
-  ): MaintenanceLogRecord;
-  updateMaintenanceLog(
-    maintenanceId: string,
-    command: UpdateMaintenanceLogCommand,
-    requestId?: string,
-    options?: { captureAudit?: boolean },
-  ) {
+  ): MaintenanceMutationResult {
     const record = this.require(maintenanceId);
     const updated: MaintenanceLogRecord = {
       ...record,
@@ -210,24 +209,20 @@ export class MaintenanceService implements OnModuleInit {
       requestId,
     );
 
-    return this.toRuntimeRecord(updated);
+    return {
+      record: this.toRuntimeRecord(updated),
+      receipt: this.buildReceipt(
+        "update_maintenance_log",
+        maintenanceId,
+        auditLog.auditId,
+      ),
+    };
   }
 
   deleteMaintenanceLog(
     maintenanceId: string,
-    requestId: string | undefined,
-    options: { captureAudit: true },
-  ): AuditedActionResult<{ deleted: true; maintenanceId: string }>;
-  deleteMaintenanceLog(
-    maintenanceId: string,
     requestId?: string,
-    options?: { captureAudit?: false },
-  ): { deleted: true; maintenanceId: string };
-  deleteMaintenanceLog(
-    maintenanceId: string,
-    requestId?: string,
-    options?: { captureAudit?: boolean },
-  ) {
+  ): MaintenanceDeleteResult {
     const record = this.require(maintenanceId);
     this.records = this.records.filter(
       (candidate) => candidate.maintenanceId !== maintenanceId,
@@ -250,15 +245,15 @@ export class MaintenanceService implements OnModuleInit {
       requestId,
     );
 
-    const deletion = { deleted: true as const, maintenanceId };
-    if (options?.captureAudit) {
-      return {
-        data: deletion,
-        auditLog,
-      };
-    }
-
-    return deletion;
+    return {
+      deleted: true,
+      maintenanceId,
+      receipt: this.buildReceipt(
+        "delete_maintenance_log",
+        maintenanceId,
+        auditLog.auditId,
+      ),
+    };
   }
 
   private require(maintenanceId: string) {
@@ -320,6 +315,29 @@ export class MaintenanceService implements OnModuleInit {
     const log = { ...input };
     if (requestId) (log as any).requestId = requestId;
     return this.auditNotificationService.recordAuditLog(log);
+  }
+
+  private buildReceipt(
+    actionName:
+      | "create_maintenance_log"
+      | "update_maintenance_log"
+      | "delete_maintenance_log",
+    maintenanceId: string,
+    auditId: string,
+  ): ActionReceipt {
+    return {
+      actionId: `maintenance-${randomUUID()}`,
+      auditId,
+      resourceType: "maintenance_log",
+      resourceId: maintenanceId,
+      status: "completed",
+      message:
+        actionName === "create_maintenance_log"
+          ? "Maintenance record created."
+          : actionName === "delete_maintenance_log"
+            ? "Maintenance record deleted."
+            : "Maintenance record updated.",
+    };
   }
 
   private buildListActions(): ResourceActionDescriptor[] {

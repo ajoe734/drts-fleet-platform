@@ -1,6 +1,7 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type {
+  ActionReceipt,
   EmptyStateEnvelope,
   ResourceActionDescriptor,
   UiRefreshMetadata,
@@ -4385,6 +4386,17 @@ export interface MaintenanceRecord {
 
 export interface MaintenanceRuntimeRecord extends MaintenanceRecord {
   availableActions: ResourceActionDescriptor[];
+}
+
+export interface MaintenanceMutationResult {
+  record: MaintenanceRuntimeRecord;
+  receipt: ActionReceipt;
+}
+
+export interface MaintenanceDeleteResult {
+  deleted: true;
+  maintenanceId: string;
+  receipt: ActionReceipt;
 }
 
 export interface MaintenanceListView {

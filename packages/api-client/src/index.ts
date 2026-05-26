@@ -101,7 +101,9 @@ import type {
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
   LinkCallOrderCommand,
+  MaintenanceDeleteResult,
   MaintenanceListView,
+  MaintenanceMutationResult,
   MaintenanceRecord,
   MaintenanceRuntimeRecord,
   MarkReimbursementPaidCommand,
@@ -2475,8 +2477,8 @@ export class ApiClient {
 
   async createMaintenance(
     command: CreateMaintenanceRecordCommand,
-  ): Promise<MaintenanceRuntimeRecord> {
-    return this.post<MaintenanceRuntimeRecord>("/api/maintenance", {
+  ): Promise<MaintenanceMutationResult> {
+    return this.post<MaintenanceMutationResult>("/api/maintenance", {
       body: command,
     });
   }
@@ -2490,15 +2492,17 @@ export class ApiClient {
   async updateMaintenance(
     maintenanceId: string,
     command: UpdateMaintenanceRecordCommand,
-  ): Promise<MaintenanceRuntimeRecord> {
-    return this.patch<MaintenanceRuntimeRecord>(
+  ): Promise<MaintenanceMutationResult> {
+    return this.patch<MaintenanceMutationResult>(
       `/api/maintenance/${maintenanceId}`,
       { body: command },
     );
   }
 
-  async deleteMaintenance(maintenanceId: string) {
-    return this.delete(`/api/maintenance/${maintenanceId}`);
+  async deleteMaintenance(
+    maintenanceId: string,
+  ): Promise<MaintenanceDeleteResult> {
+    return this.delete<MaintenanceDeleteResult>(`/api/maintenance/${maintenanceId}`);
   }
 
   async listShifts(driverId?: string): Promise<ShiftRecord[]> {
