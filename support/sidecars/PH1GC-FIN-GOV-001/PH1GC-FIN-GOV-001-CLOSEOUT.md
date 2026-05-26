@@ -7,7 +7,7 @@ Branch: `codex2/ph1gc-fin-gov-001`
 PR: not opened from this branch
 Status: `blocked` (acceptance still blocked by trunk visibility + live staging evidence)
 Machine-truth status on `2026-05-26`: canonical `ai-status.json` was briefly moved to `in_progress` for dispatch revalidation and should return to `blocked` once the refreshed blocker note is written. The downstream repo-local deliverables remain represented by `WF-FIN-GOV-001-MATRIX`, `FIN-GOV-UAT-001`, and `WF-FIN-GOV-001-E2E`, all `done`, but the parent closeout cannot advance because task-level acceptance still depends on trunk absorption plus live-uplift evidence.
-Current branch head during latest dispatch revalidation: `2275a53b` (`wip(PH1GC-FIN-GOV-001): anchor dispatch blocker refresh`)
+Current branch head during latest dispatch revalidation: `d0e67375` (`wip(PH1GC-FIN-GOV-001): anchor dispatch blocker refresh`)
 Files changed:
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`
 - `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`
@@ -121,6 +121,19 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` still lists `E2E-010-governance-aware-billing-reporting.sh`.
 - `git diff --check origin/dev...HEAD` passed.
 - `git show origin/dev:docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md | grep -n 'ownerName\\|approvalEvaluationId'` still returns the pre-fix legacy verification-body lines, confirming acceptance item 1 remains open on trunk.
+- `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md | grep -n 'ownerName\\|approvalEvaluationId'` still returns the older field-set assertions, confirming acceptance item 2 remains open on trunk.
+- No governed staging rerun was executed from this workspace during this refresh, so there is still no reviewer-readable invoice/report artifact and no green live `STRICT_VERIFICATION_BODY=1` run to justify a `PASS (live staging evidence)` uplift.
+
+## 2026-05-26 Dispatch Blocker Refresh (current head)
+
+- A follow-up owner-lane revalidation was run from the isolated task worktree after confirming `origin/codex2/ph1gc-fin-gov-001` now points at `d0e67375`.
+- `git rev-parse HEAD` = `d0e6737512760c0f6dc03e78419e47169bb6fbd5`.
+- `git rev-parse origin/dev` = `070f9aea91e066ffce138b321e16dd8cda10828d`.
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` still lists `E2E-010-governance-aware-billing-reporting.sh`.
+- `git diff --check origin/dev...HEAD` passed.
+- `git show origin/dev:docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md | grep -n 'ownerName\\|approvalEvaluationId'` still returns the pre-fix verification-body lines, confirming acceptance item 1 remains open on trunk.
 - `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md | grep -n 'ownerName\\|approvalEvaluationId'` still returns the older field-set assertions, confirming acceptance item 2 remains open on trunk.
 - No governed staging rerun was executed from this workspace during this refresh, so there is still no reviewer-readable invoice/report artifact and no green live `STRICT_VERIFICATION_BODY=1` run to justify a `PASS (live staging evidence)` uplift.
 
