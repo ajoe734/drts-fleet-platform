@@ -156,6 +156,12 @@ const queueLinkStyle = {
   fontWeight: 700,
 };
 
+const maintenanceLinkStyle = {
+  color: theme.accent,
+  textDecoration: "none",
+  fontWeight: 700,
+};
+
 function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
     return "—";
@@ -668,6 +674,19 @@ export default async function DashboardPage() {
   ].join(" · ");
 
   const banners = [
+    operations.overdueMaintenance > 0
+      ? {
+          key: "maintenance-overdue",
+          tone:
+            operations.overdueMaintenance > 2 ? ("danger" as const) : "warn",
+          title: t("dashboard.quicklink.maintenance", locale),
+          body: t("dashboard.exceptions.maintenance", locale, {
+            count: operations.overdueMaintenance,
+          }),
+          href: "/maintenance?status=overdue",
+          cta: t("dashboard.quicklink.maintenance", locale),
+        }
+      : null,
     topAlert
       ? {
           key: topAlert.key,
@@ -963,15 +982,19 @@ export default async function DashboardPage() {
             theme={theme}
             label={t("dashboard.openIncidents", locale)}
             value={formatCompactNumber(operations.openIncidents)}
-            delta={
-              operations.overdueMaintenance > 0
-                ? `${formatCompactNumber(operations.overdueMaintenance)} breach`
-                : undefined
+            sub={t("dashboard.openIncidentsSub", locale)}
+            hint={
+              operations.overdueMaintenance > 0 ? (
+                <Link
+                  href="/maintenance?status=overdue"
+                  style={maintenanceLinkStyle}
+                >
+                  {t("dashboard.exceptions.maintenance", locale, {
+                    count: operations.overdueMaintenance,
+                  })}
+                </Link>
+              ) : undefined
             }
-            deltaTone={operations.overdueMaintenance > 0 ? "down" : "neutral"}
-            sub={t("dashboard.openIncidentsSub", locale, {
-              count: operations.overdueMaintenance,
-            })}
           />
           <KPI
             theme={theme}

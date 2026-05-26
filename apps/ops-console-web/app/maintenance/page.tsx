@@ -187,6 +187,15 @@ function getDisabledActionHint(
 export default function MaintenancePage() {
   const { t, locale } = useTranslation();
   const searchParams = useSearchParams();
+  const initialStatusFilter =
+    searchParams.get("status") === "scheduled" ||
+    searchParams.get("status") === "in_progress" ||
+    searchParams.get("status") === "completed" ||
+    searchParams.get("status") === "cancelled" ||
+    searchParams.get("status") === "overdue"
+      ? (searchParams.get("status") as StatusFilter)
+      : "all";
+  const linkedVehicleId = searchParams.get("vehicleId");
   const [records, setRecords] = useState<RuntimeMaintenanceRecord[]>([]);
   const [pageActions, setPageActions] = useState<ResourceActionDescriptor[]>(
     [],
@@ -199,11 +208,12 @@ export default function MaintenancePage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [vehicleFilter, setVehicleFilter] = useState("all");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [query, setQuery] = useState(searchParams.get("q") ?? "");
+  const [statusFilter, setStatusFilter] =
+    useState<StatusFilter>(initialStatusFilter);
+  const [vehicleFilter, setVehicleFilter] = useState(linkedVehicleId ?? "all");
+  const [startDate, setStartDate] = useState(searchParams.get("start") ?? "");
+  const [endDate, setEndDate] = useState(searchParams.get("end") ?? "");
   const [pendingMutation, setPendingMutation] =
     useState<PendingMutation | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -392,6 +402,9 @@ export default function MaintenancePage() {
   const refreshAction = pageActions.find(
     (action) => action.action === "refresh_records",
   );
+  const hasPageAuthority =
+    pageActions.length > 0 ||
+    records.some((record) => record.availableActions.length > 0);
 
   const emptyState = resolveEmptyState({
     locale,
@@ -513,6 +526,38 @@ export default function MaintenancePage() {
           </div>
         ) : null}
 
+        {linkedVehicleId ? (
+          <section className="entry-banner">
+            <div>
+              <p className="strip-label">
+                {copy(locale, "Deep link context", "進入上下文")}
+              </p>
+              <strong>
+                {copy(
+                  locale,
+                  `Vehicle ${linkedVehicleId} maintenance history is pre-filtered.`,
+                  `已預先篩選車輛 ${linkedVehicleId} 的維保紀錄。`,
+                )}
+              </strong>
+              <p className="strip-detail">
+                {copy(
+                  locale,
+                  "Use the vehicle link to jump back to registry detail.",
+                  "可用車輛連結返回車籍詳情。",
+                )}
+              </p>
+            </div>
+            <div className="refresh-actions">
+              <Link
+                className="ghost-link"
+                href={`/vehicles/${linkedVehicleId}`}
+              >
+                {copy(locale, "Open vehicle", "開啟車輛")}
+              </Link>
+            </div>
+          </section>
+        ) : null}
+
         {overdueRecords.length > 0 ? (
           <section className="attention-banner">
             <div>
@@ -592,6 +637,19 @@ export default function MaintenancePage() {
                   {copy(locale, "Work orders", "工單總覽")}
                 </p>
                 <h3>{copy(locale, "Maintenance backlog", "保修工單清單")}</h3>
+                <p className="section-note">
+                  {hasPageAuthority
+                    ? copy(
+                        locale,
+                        "Actions on this board are rendered from availableActions.",
+                        "此看板上的操作完全依 availableActions 呈現。",
+                      )
+                    : copy(
+                        locale,
+                        "Your current scope can only read this board.",
+                        "你目前的權限只能唯讀此看板。",
+                      )}
+                </p>
               </div>
               <button
                 className="primary-btn"
@@ -779,6 +837,11 @@ export default function MaintenancePage() {
                             >
                               {copy(locale, "Open vehicle", "開啟車輛")}
                             </Link>
+                            {record.availableActions.length === 0 ? (
+                              <span className="action-hint">
+                                {copy(locale, "Read-only", "唯讀")}
+                              </span>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -885,6 +948,7 @@ export default function MaintenancePage() {
           }
           .toast-banner,
           .refresh-strip,
+          .entry-banner,
           .attention-banner,
           .panel,
           .metric-card,
@@ -895,6 +959,7 @@ export default function MaintenancePage() {
           }
           .toast-banner,
           .refresh-strip,
+          .entry-banner,
           .attention-banner,
           .loading-panel,
           .panel,
@@ -913,6 +978,7 @@ export default function MaintenancePage() {
             border-color: rgba(251, 113, 133, 0.38);
           }
           .refresh-strip,
+          .entry-banner,
           .attention-banner {
             display: flex;
             justify-content: space-between;
@@ -929,6 +995,9 @@ export default function MaintenancePage() {
           .freshness-degraded,
           .freshness-unknown {
             border-color: rgba(248, 113, 113, 0.34);
+          }
+          .entry-banner {
+            border-color: rgba(96, 165, 250, 0.3);
           }
           .strip-label,
           .eyebrow,
@@ -967,6 +1036,12 @@ export default function MaintenancePage() {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 12px;
+          }
+          .section-note {
+            margin: 8px 0 0;
+            color: #94a3b8;
+            font-size: 13px;
+            line-height: 1.5;
           }
           .metric-card {
             padding: 18px;
@@ -1124,11 +1199,21 @@ export default function MaintenancePage() {
             font-weight: 700;
             margin-bottom: 4px;
           }
+          .ghost-link,
           .inline-link,
           .attention-link,
           .watch-card {
             color: #fdba74;
             text-decoration: none;
+          }
+          .ghost-link {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 14px;
+            border: 1px solid rgba(125, 211, 252, 0.28);
+            padding: 10px 14px;
+            background: rgba(8, 47, 73, 0.28);
+            color: #bae6fd;
           }
           .status-badge {
             background: rgba(15, 23, 42, 0.8);
@@ -1209,6 +1294,10 @@ export default function MaintenancePage() {
             background: rgba(127, 29, 29, 0.22);
             color: #fee2e2;
           }
+          .action-hint {
+            color: #94a3b8;
+            font-size: 12px;
+          }
           @media (max-width: 1100px) {
             .workspace-grid {
               grid-template-columns: 1fr;
@@ -1219,6 +1308,7 @@ export default function MaintenancePage() {
           }
           @media (max-width: 820px) {
             .refresh-strip,
+            .entry-banner,
             .attention-banner,
             .panel-head {
               flex-direction: column;
@@ -1470,6 +1560,27 @@ function EmptyStateCard({
           background: rgba(15, 23, 42, 0.58);
           color: #e2e8f0;
         }
+        .empty-not_provisioned {
+          border-color: rgba(96, 165, 250, 0.35);
+          background: rgba(12, 74, 110, 0.18);
+        }
+        .empty-fetch_failed,
+        .empty-external_unavailable {
+          border-color: rgba(248, 113, 113, 0.38);
+          background: rgba(69, 10, 10, 0.2);
+        }
+        .empty-permission_denied {
+          border-color: rgba(250, 204, 21, 0.34);
+          background: rgba(113, 63, 18, 0.2);
+        }
+        .empty-filtered_empty {
+          border-color: rgba(125, 211, 252, 0.34);
+          background: rgba(8, 47, 73, 0.22);
+        }
+        .empty-no_data {
+          border-color: rgba(45, 212, 191, 0.28);
+          background: rgba(15, 118, 110, 0.14);
+        }
         .empty-badge {
           display: inline-flex;
           width: fit-content;
@@ -1481,6 +1592,24 @@ function EmptyStateCard({
           letter-spacing: 0.08em;
           text-transform: uppercase;
           font-weight: 700;
+        }
+        .empty-fetch_failed .empty-badge,
+        .empty-external_unavailable .empty-badge {
+          background: rgba(248, 113, 113, 0.16);
+          color: #fda4af;
+        }
+        .empty-permission_denied .empty-badge {
+          background: rgba(250, 204, 21, 0.16);
+          color: #fde68a;
+        }
+        .empty-not_provisioned .empty-badge,
+        .empty-filtered_empty .empty-badge {
+          background: rgba(125, 211, 252, 0.16);
+          color: #bae6fd;
+        }
+        .empty-no_data .empty-badge {
+          background: rgba(45, 212, 191, 0.16);
+          color: #99f6e4;
         }
         h3 {
           margin: 0;
