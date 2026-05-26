@@ -16,7 +16,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -48,15 +47,9 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const kpiGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-  gap: 12,
-};
-
 const controlCardStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(300px, 0.95fr)",
   gap: 16,
 };
 
@@ -72,11 +65,10 @@ const pillRowStyle: CSSProperties = {
   gap: 8,
 };
 
-const contentGridStyle: CSSProperties = {
+const supportingGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.55fr) minmax(300px, 0.9fr)",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
   gap: 16,
-  alignItems: "start",
 };
 
 const cardStackStyle: CSSProperties = {
@@ -138,6 +130,16 @@ const accessMetaStyle: CSSProperties = {
   gap: 2,
   fontSize: 11.5,
   color: th.textMuted,
+};
+
+const authorityMetaStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 11,
+  color: th.textDim,
+  fontFamily: th.monoFamily,
 };
 
 const roleListStyle: CSSProperties = {
@@ -220,10 +222,11 @@ type UserRow = TenantUserRoleRecord & {
   availableActions: ResourceActionDescriptor[];
   lastLoginAt: string | null;
   roleDisplayName: string;
+  actionAuthority: "embedded" | "fallback";
 };
 
 type UsersPageData = {
-  users: TenantUserRoleRecord[];
+  users: RuntimeTenantUserRecord[];
   roles: TenantRoleCatalogRecord[];
   failures: LoadFailure[];
 };
@@ -234,6 +237,11 @@ type EmptyStateConfig = {
   tone: CanvasTone;
   icon: ReactNode;
   nextAction?: ResourceActionDescriptor;
+};
+
+type RuntimeTenantUserRecord = TenantUserRoleRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  lastLoginAt?: string | null;
 };
 
 const ROLE_CANVAS_LABEL: Record<string, string> = {
@@ -448,7 +456,7 @@ function getRefreshAction(): ResourceActionDescriptor {
   return buildActionDescriptor("refresh", true, "low");
 }
 
-function getUserAvailableActions(
+function buildFallbackUserActions(
   user: TenantUserRoleRecord,
 ): ResourceActionDescriptor[] {
   const updateRole = buildActionDescriptor(
@@ -474,6 +482,20 @@ function getUserAvailableActions(
   return [updateRole, suspend, resendInvite];
 }
 
+function resolveUserAvailableActions(user: RuntimeTenantUserRecord) {
+  if ("availableActions" in user && Array.isArray(user.availableActions)) {
+    return {
+      availableActions: user.availableActions,
+      actionAuthority: "embedded" as const,
+    };
+  }
+
+  return {
+    availableActions: buildFallbackUserActions(user),
+    actionAuthority: "fallback" as const,
+  };
+}
+
 function getAction(
   availableActions: ResourceActionDescriptor[],
   action: string,
@@ -482,18 +504,29 @@ function getAction(
 }
 
 function buildUserRows(
-  users: TenantUserRoleRecord[],
+  users: RuntimeTenantUserRecord[],
   roles: TenantRoleCatalogRecord[],
 ): UserRow[] {
   const roleLookup = new Map(roles.map((role) => [role.roleCode, role]));
 
-  return users.map((user) => ({
-    ...user,
-    availableActions: getUserAvailableActions(user),
-    lastLoginAt: user.status === "active" ? user.updatedAt : null,
-    roleDisplayName:
-      roleLookup.get(user.roleCode)?.displayName ?? getRoleLabel(user.roleCode),
-  }));
+  return users.map((user) => {
+    const actionResolution = resolveUserAvailableActions(user);
+
+    return {
+      ...user,
+      availableActions: actionResolution.availableActions,
+      actionAuthority: actionResolution.actionAuthority,
+      lastLoginAt:
+        "lastLoginAt" in user
+          ? (user.lastLoginAt ?? null)
+          : user.status === "active"
+            ? user.updatedAt
+            : null,
+      roleDisplayName:
+        roleLookup.get(user.roleCode)?.displayName ??
+        getRoleLabel(user.roleCode),
+    };
+  });
 }
 
 function deriveEmptyReason(
@@ -603,7 +636,7 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
 async function loadUsersData(): Promise<UsersPageData> {
   const client = getTenantClient();
   const [usersResult, rolesResult] = await Promise.allSettled([
-    client.listTenantUsers() as Promise<TenantUserRoleRecord[]>,
+    client.listTenantUsers() as Promise<RuntimeTenantUserRecord[]>,
     client.listTenantRoles() as Promise<TenantRoleCatalogRecord[]>,
   ]);
 
@@ -769,15 +802,15 @@ export default async function UsersPage({
   const suspendedUsers = users.filter(
     (user) => user.status === "suspended",
   ).length;
-  const adminUsers = users.filter(
-    (user) => user.roleCode === "tenant_admin",
-  ).length;
   const latestUpdated = users.reduce<string | null>((latest, user) => {
     if (!latest) return user.updatedAt;
     return new Date(user.updatedAt) > new Date(latest)
       ? user.updatedAt
       : latest;
   }, null);
+  const fallbackActionUsers = userRows.filter(
+    (row) => row.actionAuthority === "fallback",
+  ).length;
 
   const crossAppLinks = getCrossAppLinks(tenantId);
   const refreshHref = buildQueryString(resolvedSearchParams, {
@@ -880,7 +913,7 @@ export default async function UsersPage({
               />
             </div>
             <span style={userMetaStyle}>
-              availableActions:
+              availableActions[{row.actionAuthority}]:
               {row.availableActions.map((action: ResourceActionDescriptor) =>
                 action.enabled ? ` ${action.action}` : ` ${action.action}[off]`,
               )}
@@ -895,8 +928,8 @@ export default async function UsersPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="人員與角色"
-        subtitle="tc_admin only · tenant_admin / operator / finance / viewer"
+        title="使用者"
+        subtitle="只有 tc_admin 可操作 · tenant_admin / operator / finance / integration_mgr / viewer"
         actions={
           <>
             <a href={refreshHref} style={{ textDecoration: "none" }}>
@@ -922,10 +955,20 @@ export default async function UsersPage({
         <CanvasBanner
           theme={th}
           tone={refreshMetadata.dataFreshness === "degraded" ? "warn" : "info"}
-          icon={refreshMetadata.dataFreshness === "degraded" ? "warn" : "info"}
-          title={`T5 Tenant slow · 30s cadence · ${TENANT_REFRESH_TIER}`}
-          body={`snapshot ${formatRefreshAt(refreshMetadata.generatedAt)} · freshness ${refreshMetadata.dataFreshness} · source ${refreshMetadata.source}`}
+          icon="refresh"
+          title={`Refresh tier T5 · 30s cadence · ${TENANT_REFRESH_TIER}`}
+          body={`目前顯示的是 ${formatRefreshAt(refreshMetadata.generatedAt)} 產生的 snapshot · dataFreshness=${refreshMetadata.dataFreshness} · source=${refreshMetadata.source}`}
         />
+
+        {fallbackActionUsers > 0 ? (
+          <CanvasBanner
+            theme={th}
+            tone="info"
+            icon="info"
+            title="availableActions authority fallback active"
+            body={`${formatCount(fallbackActionUsers)} 筆 roster row 尚未從後端收到 embedded availableActions；目前先用 legacy status-based fallback render disabled/enabled CTA，待 UI-BE-005 contract 補齊後可自動切回 backend authority。`}
+          />
+        ) : null}
 
         {failures.length > 0 ? (
           <CanvasBanner
@@ -941,33 +984,6 @@ export default async function UsersPage({
               .join(" · ")}
           />
         ) : null}
-
-        <div style={kpiGridStyle}>
-          <CanvasKPI
-            theme={th}
-            label="Users"
-            value={formatCount(users.length)}
-            sub="tenant roster"
-          />
-          <CanvasKPI
-            theme={th}
-            label="Active"
-            value={formatCount(activeUsers)}
-            sub="current access"
-          />
-          <CanvasKPI
-            theme={th}
-            label="Invited"
-            value={formatCount(invitedUsers)}
-            sub="pending invite"
-          />
-          <CanvasKPI
-            theme={th}
-            label="Suspended"
-            value={formatCount(suspendedUsers)}
-            sub={`${formatCount(adminUsers)} tenant_admin`}
-          />
-        </div>
 
         <div style={controlCardStyle}>
           <CanvasCard theme={th} title="篩選" subtitle="role + status">
@@ -1044,93 +1060,112 @@ export default async function UsersPage({
 
           <CanvasCard
             theme={th}
-            title="調查與收斂"
-            subtitle="refresh / audit / cross-app deep links"
+            title="Roster 摘要"
+            subtitle="must-show data / authority / refresh"
           >
-            <CanvasDL
-              theme={th}
-              cols={1}
-              items={[
-                {
-                  k: "Latest roster update",
-                  v: latestUpdated ? formatUpdated(latestUpdated) : "—",
-                  mono: true,
-                },
-                {
-                  k: "Assignable roles",
-                  v: `${formatCount(assignableRoles.length)} / ${formatCount(roles.length)}`,
-                  mono: true,
-                },
-                {
-                  k: "Tenant audit",
-                  v: "/audit?resourceType=tenant_user_role",
-                  mono: true,
-                },
-              ]}
-            />
+            <div style={controlStackStyle}>
+              <div style={pillRowStyle}>
+                <CanvasPill theme={th} tone="accent">
+                  {formatCount(users.length)} users
+                </CanvasPill>
+                <CanvasPill theme={th} tone="success">
+                  {formatCount(activeUsers)} active
+                </CanvasPill>
+                <CanvasPill theme={th} tone="warn">
+                  {formatCount(invitedUsers)} pending_invite
+                </CanvasPill>
+                <CanvasPill theme={th} tone="neutral">
+                  {formatCount(suspendedUsers)} suspended
+                </CanvasPill>
+              </div>
+
+              <CanvasDL
+                theme={th}
+                cols={1}
+                items={[
+                  {
+                    k: "Latest roster update",
+                    v: latestUpdated ? formatUpdated(latestUpdated) : "—",
+                    mono: true,
+                  },
+                  {
+                    k: "Assignable roles",
+                    v: `${formatCount(assignableRoles.length)} / ${formatCount(roles.length)}`,
+                    mono: true,
+                  },
+                  {
+                    k: "Tenant audit",
+                    v: "/audit?resourceType=tenant_user_role",
+                    mono: true,
+                  },
+                ]}
+              />
+            </div>
           </CanvasCard>
         </div>
 
-        <div style={contentGridStyle}>
-          <CanvasCard theme={th} padding={0}>
-            {emptyReason && emptyConfig ? (
-              <EmptyStateBlock reason={emptyReason} config={emptyConfig} />
+        <CanvasCard theme={th} padding={0}>
+          {emptyReason && emptyConfig ? (
+            <EmptyStateBlock reason={emptyReason} config={emptyConfig} />
+          ) : (
+            <CanvasTable<UserRow>
+              theme={th}
+              columns={columns}
+              rows={userRows}
+            />
+          )}
+        </CanvasCard>
+
+        <div style={supportingGridStyle}>
+          <CanvasCard
+            theme={th}
+            title="角色目錄"
+            subtitle="role catalog remains backend-owned"
+          >
+            {roles.length > 0 ? (
+              <div style={roleListStyle}>
+                {roles.map((role, index) => (
+                  <div
+                    key={role.roleCode}
+                    style={
+                      index === roles.length - 1 ? undefined : roleListItemStyle
+                    }
+                  >
+                    <div style={roleListMetaStyle}>
+                      <span style={roleListTitleStyle}>{role.displayName}</span>
+                      <CanvasPill theme={th} tone={getRoleCatalogTone(role)}>
+                        {role.roleCode}
+                      </CanvasPill>
+                    </div>
+                    <div style={roleListDescriptionStyle}>
+                      {role.description}
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <CanvasTable<UserRow>
-                theme={th}
-                columns={columns}
-                rows={userRows}
+              <EmptyStateBlock
+                reason="not_provisioned"
+                config={getEmptyStateConfig(
+                  "not_provisioned",
+                  pageInviteAction,
+                )}
               />
             )}
           </CanvasCard>
 
-          <div style={cardStackStyle}>
-            <CanvasCard
-              theme={th}
-              title="角色目錄"
-              subtitle="role catalog remains backend-owned"
-            >
-              {roles.length > 0 ? (
-                <div style={roleListStyle}>
-                  {roles.map((role, index) => (
-                    <div
-                      key={role.roleCode}
-                      style={
-                        index === roles.length - 1
-                          ? undefined
-                          : roleListItemStyle
-                      }
-                    >
-                      <div style={roleListMetaStyle}>
-                        <span style={roleListTitleStyle}>
-                          {role.displayName}
-                        </span>
-                        <CanvasPill theme={th} tone={getRoleCatalogTone(role)}>
-                          {role.roleCode}
-                        </CanvasPill>
-                      </div>
-                      <div style={roleListDescriptionStyle}>
-                        {role.description}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <EmptyStateBlock
-                  reason="not_provisioned"
-                  config={getEmptyStateConfig(
-                    "not_provisioned",
-                    pageInviteAction,
-                  )}
-                />
-              )}
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title="Cross-app audit"
-              subtitle="ops / platform actions affecting tenant access open in new tab"
-            >
+          <CanvasCard
+            theme={th}
+            title="Cross-app audit"
+            subtitle="ops / platform actions affecting tenant access open in new tab"
+          >
+            <div style={cardStackStyle}>
+              <div style={authorityMetaStyle}>
+                <span>cross-app deep links</span>
+                <CanvasPill theme={th} tone="info">
+                  new_tab
+                </CanvasPill>
+              </div>
               <div style={linkStackStyle}>
                 <a
                   href="/audit?resourceType=tenant_user_role"
@@ -1160,8 +1195,8 @@ export default async function UsersPage({
                   </a>
                 ))}
               </div>
-            </CanvasCard>
-          </div>
+            </div>
+          </CanvasCard>
         </div>
       </div>
     </div>
