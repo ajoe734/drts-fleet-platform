@@ -2,7 +2,7 @@
 
 **Task:** `PH1GC-FIN-GOV-001` — Phase 1 gap closure: governance-aware billing/reporting spec + UAT
 **Owner:** `Codex`
-**Reviewer:** `Codex2`
+**Reviewer:** `Claude2`
 **Branch:** `codex/ph1gc-fin-gov-001`
 **Directive:** `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7 (`WF-FIN-GOV-001`)
 **Task-brief planning ref:** `docs/00-context/phase1-origin-dev-gap-closure-implementation-spec-20260520.md` (re-read in this worktree during the 2026-05-25 reassignment and the 2026-05-26 closeout revalidation)
@@ -19,7 +19,7 @@ Owner:
 `Codex`
 
 Reviewer:
-`Codex2`
+`Claude2`
 
 Branch:
 `codex/ph1gc-fin-gov-001`
