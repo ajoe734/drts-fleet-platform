@@ -8,6 +8,7 @@ import type {
   IncidentRecord,
   IncidentTimelineEntry,
   OwnedOrderRecord,
+  RefreshTier,
   ResourceActionDescriptor,
   ServiceRecoveryActionRecord,
   UiRefreshMetadata,
@@ -63,7 +64,7 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const INCIDENT_REFRESH_MS = 15_000;
+const INCIDENT_REFRESH_TIER: RefreshTier = "medium";
 
 const EMPTY_STATE_CONFIG: Record<
   Exclude<EmptyReason, "driver_not_eligible">,
@@ -411,24 +412,33 @@ function getActionCopy(action: string, locale: Locale) {
   return formatOpsCodeLabel(locale, action);
 }
 
+function buildIncidentWorkspaceLink(incidentId: string) {
+  return `/incidents?incidentId=${encodeURIComponent(incidentId)}`;
+}
+
+function buildComplaintWorkspaceLink(caseNo: string) {
+  return `/complaints?caseNo=${encodeURIComponent(caseNo)}`;
+}
+
 function actionTarget(
   incident: IncidentRuntimeRecord,
   action: ResourceActionDescriptor,
 ) {
   const normalized = action.action.toLowerCase();
-  if (normalized.includes("recovery")) {
-    return `/incidents?incidentId=${encodeURIComponent(incident.incidentId)}`;
-  }
-  if (normalized.includes("update") || normalized.includes("resolve")) {
-    return `/incidents?incidentId=${encodeURIComponent(incident.incidentId)}`;
-  }
-  if (normalized.includes("close")) {
-    return `/incidents?incidentId=${encodeURIComponent(incident.incidentId)}`;
+  if (
+    normalized.includes("recovery") ||
+    normalized.includes("update") ||
+    normalized.includes("resolve") ||
+    normalized.includes("close") ||
+    normalized.includes("ack") ||
+    normalized.includes("escalation")
+  ) {
+    return buildIncidentWorkspaceLink(incident.incidentId);
   }
   if (normalized.includes("lift") && incident.relatedDriverId) {
     return `/drivers/${encodeURIComponent(incident.relatedDriverId)}`;
   }
-  return `/incidents?incidentId=${encodeURIComponent(incident.incidentId)}`;
+  return buildIncidentWorkspaceLink(incident.incidentId);
 }
 
 function EmptyStateBlock({
@@ -584,12 +594,7 @@ export default async function IncidentDetailPage({
     ) ?? null;
   const tenantLabel = getTenantLabel(relatedOrder);
   const suppression = inferSuppression(incident, relatedDriver);
-  const refreshMetadata = incident.refreshMetadata ?? {
-    generatedAt: new Date().toISOString(),
-    staleAfterMs: INCIDENT_REFRESH_MS,
-    dataFreshness: "fresh",
-    source: "live",
-  };
+  const refreshMetadata = incident.refreshMetadata ?? null;
   const availableActions = incident.availableActions ?? [];
   const serviceRecoveryAction =
     availableActions.find((action) =>
@@ -693,6 +698,20 @@ export default async function IncidentDetailPage({
       ),
     },
     {
+      k: locale === "en" ? "Vehicle" : "車輛",
+      v: incident.relatedVehicleId ? (
+        <Link
+          href={`/vehicles/${encodeURIComponent(incident.relatedVehicleId)}`}
+          style={actionLinkStyle(theme, "secondary")}
+        >
+          <CanvasIcon name="ext" size={12} />
+          <span>{incident.relatedVehicleId}</span>
+        </Link>
+      ) : (
+        "—"
+      ),
+    },
+    {
       k: locale === "en" ? "Driver" : "司機",
       v: incident.relatedDriverId ? (
         <Link
@@ -710,7 +729,7 @@ export default async function IncidentDetailPage({
       k: locale === "en" ? "Complaint" : "客訴",
       v: incident.relatedComplaintCaseNo ? (
         <Link
-          href={`/complaints/${encodeURIComponent(incident.relatedComplaintCaseNo)}`}
+          href={buildComplaintWorkspaceLink(incident.relatedComplaintCaseNo)}
           style={actionLinkStyle(theme, "secondary")}
         >
           <CanvasIcon name="ext" size={12} />
@@ -854,6 +873,14 @@ export default async function IncidentDetailPage({
   ]
     .filter(Boolean)
     .join(" · ");
+  const refreshTone =
+    refreshMetadata?.dataFreshness === "degraded"
+      ? "danger"
+      : refreshMetadata?.dataFreshness === "stale"
+        ? "warn"
+        : refreshMetadata?.dataFreshness === "unknown" || !refreshMetadata
+          ? "info"
+          : null;
 
   return (
     <>
@@ -876,8 +903,8 @@ export default async function IncidentDetailPage({
             }}
           >
             <IncidentRefreshTier
-              generatedAt={refreshMetadata.generatedAt}
-              staleAfterMs={refreshMetadata.staleAfterMs}
+              tier={INCIDENT_REFRESH_TIER}
+              metadata={refreshMetadata}
               theme={theme}
               locale={locale}
             />
@@ -961,6 +988,36 @@ export default async function IncidentDetailPage({
               }
               body={bannerBody || incident.description}
             />
+
+            {refreshTone ? (
+              <Banner
+                theme={theme}
+                tone={refreshTone}
+                icon={
+                  refreshMetadata?.dataFreshness === "degraded"
+                    ? "warn"
+                    : "clock"
+                }
+                title={
+                  refreshMetadata
+                    ? locale === "en"
+                      ? `Snapshot is ${refreshMetadata.dataFreshness}`
+                      : `資料快照目前為 ${formatOpsCodeLabel(locale, refreshMetadata.dataFreshness)}`
+                    : locale === "en"
+                      ? "Refresh metadata unavailable"
+                      : "缺少刷新中繼資料"
+                }
+                body={
+                  refreshMetadata
+                    ? locale === "en"
+                      ? `Source ${refreshMetadata.source}. Use refresh before acting if the timeline or assignment state looks out of date.`
+                      : `來源 ${formatOpsCodeLabel(locale, refreshMetadata.source)}。若時間線或指派狀態看起來過期，請先重新整理再操作。`
+                    : locale === "en"
+                      ? "The backend did not return UiRefreshMetadata for this incident snapshot."
+                      : "後端沒有為這筆 incident snapshot 回傳 UiRefreshMetadata。"
+                }
+              />
+            ) : null}
 
             {isReadOnly ? (
               <Banner
@@ -1181,9 +1238,20 @@ export default async function IncidentDetailPage({
                     <span>{locale === "en" ? "Open driver" : "開啟司機"}</span>
                   </Link>
                 ) : null}
+                {incident.relatedVehicleId ? (
+                  <Link
+                    href={`/vehicles/${encodeURIComponent(incident.relatedVehicleId)}`}
+                    style={actionLinkStyle(theme, "ghost")}
+                  >
+                    <CanvasIcon name="ext" size={12} />
+                    <span>{locale === "en" ? "Open vehicle" : "開啟車輛"}</span>
+                  </Link>
+                ) : null}
                 {incident.relatedComplaintCaseNo ? (
                   <Link
-                    href={`/complaints/${encodeURIComponent(incident.relatedComplaintCaseNo)}`}
+                    href={buildComplaintWorkspaceLink(
+                      incident.relatedComplaintCaseNo,
+                    )}
                     style={actionLinkStyle(theme, "ghost")}
                   >
                     <CanvasIcon name="ext" size={12} />
