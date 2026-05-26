@@ -112,7 +112,12 @@ const BOARD_META: readonly BoardMeta[] = [
   { id: "ready", zh: "待派遣", en: "Ready queue", tone: "accent" },
   { id: "assigned", zh: "已指派", en: "Assigned", tone: "success" },
   { id: "exception", zh: "例外保留", en: "Exception hold", tone: "warn" },
-  { id: "no_supply", zh: "無可用司機", en: "No eligible supply", tone: "danger" },
+  {
+    id: "no_supply",
+    zh: "無可用司機",
+    en: "No eligible supply",
+    tone: "danger",
+  },
   { id: "governance", zh: "需審批", en: "Governance blocked", tone: "warn" },
   { id: "forwarded", zh: "外部鏡像", en: "Forwarded mirror", tone: "info" },
 ] as const;
@@ -176,7 +181,11 @@ const BOARD_SUBTITLES: Record<BoardId, { zh: string; en: string }> = {
 
 const ACTION_LABELS: Record<
   string,
-  { zh: string; en: string; icon?: "ext" | "warn" | "check" | "arrow" | "clock" }
+  {
+    zh: string;
+    en: string;
+    icon?: "ext" | "warn" | "check" | "arrow" | "clock";
+  }
 > = {
   assign: { zh: "指派", en: "assign", icon: "check" },
   redispatch: { zh: "改派", en: "redispatch", icon: "arrow" },
@@ -271,7 +280,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function getNestedValue(record: Record<string, unknown>, path: string): unknown {
+function getNestedValue(
+  record: Record<string, unknown>,
+  path: string,
+): unknown {
   return path.split(".").reduce<unknown>((current, segment) => {
     if (!isRecord(current)) {
       return undefined;
@@ -334,7 +346,9 @@ function stripTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
 
-function getCrossAppOrigin(target: "ops-console" | "platform-admin" | "tenant-console") {
+function getCrossAppOrigin(
+  target: "ops-console" | "platform-admin" | "tenant-console",
+) {
   switch (target) {
     case "platform-admin":
       return (
@@ -400,7 +414,11 @@ function inferEmptyReason(error: unknown): EmptyReason {
   if (message.includes("404")) {
     return "not_provisioned";
   }
-  if (message.includes("502") || message.includes("503") || message.includes("504")) {
+  if (
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("504")
+  ) {
     return "external_unavailable";
   }
   return "fetch_failed";
@@ -418,7 +436,9 @@ async function loadUiList<T>(
       items: response.data.items ?? [],
       refresh: response.data.refresh ?? UNKNOWN_REFRESH,
       health: response.health ?? HEALTHY_HEALTH,
-      ...(response.data.emptyState ? { emptyState: response.data.emptyState } : {}),
+      ...(response.data.emptyState
+        ? { emptyState: response.data.emptyState }
+        : {}),
     };
   } catch (error) {
     return {
@@ -578,6 +598,14 @@ function pickCurrentTask(tasks: DriverTaskRecord[]) {
   );
 }
 
+function isOwnedActiveDriverTaskState(
+  status: DriverTaskRecord["status"],
+): status is (typeof OWNED_ACTIVE_DRIVER_TASK_STATES)[number] {
+  return OWNED_ACTIVE_DRIVER_TASK_STATES.includes(
+    status as (typeof OWNED_ACTIVE_DRIVER_TASK_STATES)[number],
+  );
+}
+
 function hasGovernanceAction(order: OwnedOrderRecord) {
   return (
     order.availableActions?.some(
@@ -605,7 +633,7 @@ function getVisibleOwnedState(
     return "exception_hold";
   }
 
-  if (task && OWNED_ACTIVE_DRIVER_TASK_STATES.includes(task.status)) {
+  if (task && isOwnedActiveDriverTaskState(task.status)) {
     return task.status;
   }
 
@@ -638,10 +666,7 @@ function getVisibleOwnedState(
   return order.status;
 }
 
-function resolveOwnedBoard(
-  order: OwnedOrderRecord,
-  visibleState: string,
-) {
+function resolveOwnedBoard(order: OwnedOrderRecord, visibleState: string) {
   if (visibleState === "override_pending") {
     return "governance";
   }
@@ -675,9 +700,8 @@ function getOwnedGateSummary(order: OwnedOrderRecord): {
   }
 
   const activeGate = (order.complianceGates ?? []).find(
-    (
-      gate: NonNullable<OwnedOrderRecord["complianceGates"]>[number],
-    ) => gate.blocking || gate.state !== "clear",
+    (gate: NonNullable<OwnedOrderRecord["complianceGates"]>[number]) =>
+      gate.blocking || gate.state !== "clear",
   );
   if (activeGate) {
     return {
@@ -733,7 +757,9 @@ function getAdapterTone(status: AdapterHealthRecord["status"]): CanvasTone {
   }
 }
 
-function getForwardedStateTone(status: ForwardedOrderRecord["status"]): CanvasTone {
+function getForwardedStateTone(
+  status: ForwardedOrderRecord["status"],
+): CanvasTone {
   switch (status) {
     case "sync_failed":
       return "danger";
@@ -791,9 +817,20 @@ function compareOwnedItems(left: OwnedWorkItem, right: OwnedWorkItem) {
   return right.order.updatedAt.localeCompare(left.order.updatedAt);
 }
 
-function compareForwardedItems(left: ForwardedWorkItem, right: ForwardedWorkItem) {
-  const leftPriority = needsForwardedAttention(left.order) ? 0 : isForwardedTerminal(left.order) ? 2 : 1;
-  const rightPriority = needsForwardedAttention(right.order) ? 0 : isForwardedTerminal(right.order) ? 2 : 1;
+function compareForwardedItems(
+  left: ForwardedWorkItem,
+  right: ForwardedWorkItem,
+) {
+  const leftPriority = needsForwardedAttention(left.order)
+    ? 0
+    : isForwardedTerminal(left.order)
+      ? 2
+      : 1;
+  const rightPriority = needsForwardedAttention(right.order)
+    ? 0
+    : isForwardedTerminal(right.order)
+      ? 2
+      : 1;
   if (leftPriority !== rightPriority) {
     return leftPriority - rightPriority;
   }
@@ -866,6 +903,10 @@ function getActionHref(
     };
   }
 
+  if (!context.forwarded) {
+    return { href: "/dispatch" };
+  }
+
   return {
     href: `/dispatch/${encodeURIComponent(context.forwarded.mirrorOrderId)}`,
   };
@@ -900,11 +941,7 @@ function actionLinkStyle(
         : mediumRisk
           ? theme.surface
           : theme.surfaceLo,
-    color: disabled
-      ? theme.textMuted
-      : highRisk
-        ? theme.danger
-        : theme.text,
+    color: disabled ? theme.textMuted : highRisk ? theme.danger : theme.text,
     textDecoration: "none",
     fontSize: 11.5,
     fontWeight: 600,
@@ -920,7 +957,11 @@ function renderActionLinks(
   locale: Locale,
 ) {
   if (!descriptors || descriptors.length === 0) {
-    return <span style={{ color: theme.textMuted }}>{locale === "zh" ? "唯讀" : "read-only"}</span>;
+    return (
+      <span style={{ color: theme.textMuted }}>
+        {locale === "zh" ? "唯讀" : "read-only"}
+      </span>
+    );
   }
 
   const visible = descriptors.slice(0, 3);
@@ -1002,11 +1043,7 @@ function renderActionLinks(
   );
 }
 
-function buildDispatchHref(
-  board: BoardId,
-  filter: string,
-  focus: FocusTarget,
-) {
+function buildDispatchHref(board: BoardId, filter: string, focus: FocusTarget) {
   const params = new URLSearchParams();
   params.set("board", board);
   if (filter && filter !== "all") {
@@ -1034,8 +1071,11 @@ function buildBoardFilters(
     const readyItems = ownedItems.filter((item) => item.board === "ready");
     const counts = {
       all: readyItems.length,
-      queued: readyItems.filter((item) => item.visibleState === "queued").length,
-      broadcasting: readyItems.filter((item) => item.visibleState === "broadcasting").length,
+      queued: readyItems.filter((item) => item.visibleState === "queued")
+        .length,
+      broadcasting: readyItems.filter(
+        (item) => item.visibleState === "broadcasting",
+      ).length,
     };
     return [
       {
@@ -1063,14 +1103,18 @@ function buildBoardFilters(
   }
 
   if (board === "assigned") {
-    const assignedItems = ownedItems.filter((item) => item.board === "assigned");
+    const assignedItems = ownedItems.filter(
+      (item) => item.board === "assigned",
+    );
     const counts = {
       all: assignedItems.length,
       pending_acceptance: assignedItems.filter(
         (item) => item.visibleState === "pending_acceptance",
       ).length,
-      accepted: assignedItems.filter((item) => item.visibleState === "accepted").length,
-      on_trip: assignedItems.filter((item) => item.visibleState === "on_trip").length,
+      accepted: assignedItems.filter((item) => item.visibleState === "accepted")
+        .length,
+      on_trip: assignedItems.filter((item) => item.visibleState === "on_trip")
+        .length,
       proof_pending: assignedItems.filter(
         (item) => item.visibleState === "proof_pending",
       ).length,
@@ -1132,9 +1176,8 @@ function buildBoardFilters(
       manual_fallback: forwardedItems.filter(
         (item) => item.order.manualFallback.required,
       ).length,
-      terminal: forwardedItems.filter((item) =>
-        isForwardedTerminal(item.order),
-      ).length,
+      terminal: forwardedItems.filter((item) => isForwardedTerminal(item.order))
+        .length,
     };
     return [
       {
@@ -1205,7 +1248,11 @@ function buildBoardFilters(
   ];
 }
 
-function applyOwnedFilter(items: OwnedWorkItem[], board: BoardId, filter: string) {
+function applyOwnedFilter(
+  items: OwnedWorkItem[],
+  board: BoardId,
+  filter: string,
+) {
   const boardItems = items.filter((item) => item.board === board);
 
   if (filter === "all") {
@@ -1243,7 +1290,9 @@ function applyForwardedFilter(items: ForwardedWorkItem[], filter: string) {
   }
 }
 
-function getRefreshTone(refresh: UiRefreshMetadata["dataFreshness"]): CanvasTone {
+function getRefreshTone(
+  refresh: UiRefreshMetadata["dataFreshness"],
+): CanvasTone {
   switch (refresh) {
     case "stale":
       return "warn";
@@ -1258,7 +1307,9 @@ function getRefreshTone(refresh: UiRefreshMetadata["dataFreshness"]): CanvasTone
 }
 
 function mergeHealth(...envelopes: UiHealthEnvelope[]) {
-  const degradedServices = envelopes.flatMap((envelope) => envelope.degradedServices);
+  const degradedServices = envelopes.flatMap(
+    (envelope) => envelope.degradedServices,
+  );
   const status = envelopes.some((envelope) => envelope.status === "down")
     ? "down"
     : envelopes.some((envelope) => envelope.status === "degraded")
@@ -1308,7 +1359,9 @@ function buildSelectedState(
   const focusForwarded = forwardedItems.find(
     (item) =>
       focus.orderId &&
-      [item.order.mirrorOrderId, item.order.externalOrderId].includes(focus.orderId),
+      [item.order.mirrorOrderId, item.order.externalOrderId].includes(
+        focus.orderId,
+      ),
   );
   if (focusForwarded) {
     return {
@@ -1365,7 +1418,11 @@ function renderBoardNav(
     <div style={boardNavStyle}>
       {BOARD_META.map((meta) => {
         const active = meta.id === activeBoard;
-        const href = buildDispatchHref(meta.id, meta.id === activeBoard ? activeFilter : "all", focus);
+        const href = buildDispatchHref(
+          meta.id,
+          meta.id === activeBoard ? activeFilter : "all",
+          focus,
+        );
         return (
           <Link
             key={meta.id}
@@ -1386,9 +1443,20 @@ function renderBoardNav(
             <Pill theme={theme} tone={meta.tone} dot={active}>
               {formatCompactNumber(counts[meta.id])}
             </Pill>
-            <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+            <span
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                lineHeight: 1.15,
+              }}
+            >
               <span>{meta.zh}</span>
-              <span style={{ fontSize: 11, color: active ? theme.textMuted : theme.textDim }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: active ? theme.textMuted : theme.textDim,
+                }}
+              >
                 {meta.en}
               </span>
             </span>
@@ -1448,7 +1516,10 @@ function renderHeaderActionLink({
 }
 
 function renderRefreshBanner(refresh: UiRefreshMetadata, locale: Locale) {
-  if (refresh.dataFreshness === "fresh" || refresh.dataFreshness === "unknown") {
+  if (
+    refresh.dataFreshness === "fresh" ||
+    refresh.dataFreshness === "unknown"
+  ) {
     return null;
   }
 
@@ -1479,9 +1550,8 @@ function renderHealthBanner(health: UiHealthEnvelope, locale: Locale) {
   const impacted = health.degradedServices
     .slice(0, 3)
     .map(
-      (
-        service: NonNullable<UiHealthEnvelope["degradedServices"]>[number],
-      ) => `${service.service}: ${service.impact}`,
+      (service: NonNullable<UiHealthEnvelope["degradedServices"]>[number]) =>
+        `${service.service}: ${service.impact}`,
     )
     .join(" · ");
 
@@ -1509,7 +1579,9 @@ function renderAuxiliaryWarnings(
   locale: Locale,
   ...warnings: Array<string | undefined>
 ) {
-  const visible = warnings.filter((warning): warning is string => Boolean(warning));
+  const visible = warnings.filter((warning): warning is string =>
+    Boolean(warning),
+  );
   if (visible.length === 0) {
     return null;
   }
@@ -1670,9 +1742,7 @@ function renderEmptyState(
           tone: "danger" as const,
           icon: "x" as const,
           title:
-            locale === "zh"
-              ? "資料讀取失敗"
-              : "Failed to load dispatch data",
+            locale === "zh" ? "資料讀取失敗" : "Failed to load dispatch data",
           body:
             locale === "zh"
               ? "請先重整；若持續失敗，改以 detail 或 audit 驗證。"
@@ -1708,7 +1778,10 @@ function renderEmptyState(
               ? "鏡像或 adapter 狀態異常，請到 owner app 檢查。"
               : "Mirror or adapter state is unavailable; inspect the owner app.",
           href: adapterHref,
-          label: locale === "zh" ? "查看 adapter registry" : "Inspect adapter registry",
+          label:
+            locale === "zh"
+              ? "查看 adapter registry"
+              : "Inspect adapter registry",
           external: true,
         };
       case "filtered_empty":
@@ -1746,11 +1819,10 @@ function renderEmptyState(
   })();
 
   const nextHref =
-    nextAction?.action === "inspect_adapter"
-      ? adapterHref
-      : actionCopy.href;
-  const nextLabel =
-    nextAction ? getActionLabel(nextAction, locale) : actionCopy.label;
+    nextAction?.action === "inspect_adapter" ? adapterHref : actionCopy.href;
+  const nextLabel = nextAction
+    ? getActionLabel(nextAction, locale)
+    : actionCopy.label;
   const nextExternal =
     nextAction?.action === "inspect_adapter" ? true : actionCopy.external;
 
@@ -1783,21 +1855,41 @@ function renderEmptyState(
       >
         <CanvasIcon name={actionCopy.icon} size={20} />
       </div>
-      <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          <strong style={{ fontSize: 14, color: theme.text }}>{actionCopy.title}</strong>
+      <div
+        style={{
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <strong style={{ fontSize: 14, color: theme.text }}>
+            {actionCopy.title}
+          </strong>
           <Pill theme={theme} tone={actionCopy.tone}>
             {reason}
           </Pill>
         </div>
-        <div style={{ color: theme.textMuted, fontSize: 12.5, lineHeight: 1.5 }}>
+        <div
+          style={{ color: theme.textMuted, fontSize: 12.5, lineHeight: 1.5 }}
+        >
           {actionCopy.body}
         </div>
         <div>
           {renderHeaderActionLink({
             href: nextHref,
             label: nextLabel,
-            ...(nextExternal ? { external: true, icon: "ext" } : { icon: "arrow" }),
+            ...(nextExternal
+              ? { external: true, icon: "ext" }
+              : { icon: "arrow" }),
           })}
         </div>
       </div>
@@ -1807,7 +1899,14 @@ function renderEmptyState(
 
 function renderSnapshotStrip(refresh: UiRefreshMetadata, locale: Locale) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+      }}
+    >
       <Pill theme={theme} tone="info">
         {REFRESH_TIER_LABEL}
       </Pill>
@@ -1815,7 +1914,8 @@ function renderSnapshotStrip(refresh: UiRefreshMetadata, locale: Locale) {
         {refresh.dataFreshness}
       </Pill>
       <span style={{ fontSize: 12, color: theme.textMuted }}>
-        {locale === "zh" ? "snapshot" : "snapshot"} {formatDateTime(locale, refresh.generatedAt)} UTC
+        {locale === "zh" ? "snapshot" : "snapshot"}{" "}
+        {formatDateTime(locale, refresh.generatedAt)} UTC
       </span>
     </div>
   );
@@ -1844,8 +1944,8 @@ function buildReadyBoardRows(
   const rows: TableRow[] = items.map((item) => {
     const gate = getOwnedGateSummary(item.order);
     const candidateCount = item.job
-      ? candidateCountsByJobId.get(item.job.dispatchJobId) ??
-        item.order.dispatchAttemptCount
+      ? (candidateCountsByJobId.get(item.job.dispatchJobId) ??
+        item.order.dispatchAttemptCount)
       : item.order.dispatchAttemptCount;
 
     return {
@@ -1853,16 +1953,29 @@ function buildReadyBoardRows(
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
             href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
-            style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+            style={{
+              color: theme.accent,
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
           >
             {item.order.orderNo}
           </Link>
-          <span style={{ color: theme.textDim, fontSize: 11 }}>{item.order.orderId}</span>
+          <span style={{ color: theme.textDim, fontSize: 11 }}>
+            {item.order.orderId}
+          </span>
         </div>
       ),
       tenant: getTenantLabel(item.order),
       routeCell: (
-        <div style={{ display: "flex", flexDirection: "column", gap: 1, whiteSpace: "normal" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 1,
+            whiteSpace: "normal",
+          }}
+        >
           <span>{getAddressLabel(item.order.pickup)}</span>
           <span style={{ color: theme.textDim, fontSize: 11 }}>
             ↓ {getAddressLabel(item.order.dropoff)}
@@ -1880,9 +1993,14 @@ function buildReadyBoardRows(
           {gate.label}
         </Pill>
       ),
-      actions: renderActionLinks(item.order.availableActions, { board: "ready", order: item.order }, locale),
+      actions: renderActionLinks(
+        item.order.availableActions,
+        { board: "ready", order: item.order },
+        locale,
+      ),
       _selected:
-        focus.orderId === item.order.orderId || focus.bookingId === item.order.bookingId,
+        focus.orderId === item.order.orderId ||
+        focus.bookingId === item.order.bookingId,
     };
   });
 
@@ -1915,11 +2033,17 @@ function buildAssignedBoardRows(
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
             href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
-            style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+            style={{
+              color: theme.accent,
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
           >
             {item.order.orderNo}
           </Link>
-          <span style={{ color: theme.textDim, fontSize: 11 }}>{item.order.orderId}</span>
+          <span style={{ color: theme.textDim, fontSize: 11 }}>
+            {item.order.orderId}
+          </span>
         </div>
       ),
       tenant: getTenantLabel(item.order),
@@ -1950,7 +2074,8 @@ function buildAssignedBoardRows(
         locale,
       ),
       _selected:
-        focus.orderId === item.order.orderId || focus.bookingId === item.order.bookingId,
+        focus.orderId === item.order.orderId ||
+        focus.bookingId === item.order.bookingId,
     };
   });
 
@@ -1977,9 +2102,8 @@ function buildExceptionBoardRows(
     const holdOwner =
       hold?.overrideRequest?.requestedBy.actorId ??
       item.order.complianceGates?.find(
-        (
-          gate: NonNullable<OwnedOrderRecord["complianceGates"]>[number],
-        ) => gate.blocking,
+        (gate: NonNullable<OwnedOrderRecord["complianceGates"]>[number]) =>
+          gate.blocking,
       )?.reviewerLabel ??
       "—";
     const relatedHref = hold?.reasonCode.includes("incident")
@@ -1991,11 +2115,17 @@ function buildExceptionBoardRows(
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
             href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
-            style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+            style={{
+              color: theme.accent,
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
           >
             {item.order.orderNo}
           </Link>
-          <span style={{ color: theme.textDim, fontSize: 11 }}>{item.order.orderId}</span>
+          <span style={{ color: theme.textDim, fontSize: 11 }}>
+            {item.order.orderId}
+          </span>
         </div>
       ),
       tenant: getTenantLabel(item.order),
@@ -2007,7 +2137,10 @@ function buildExceptionBoardRows(
       owner: holdOwner,
       age: formatAge(locale, hold?.raisedAt ?? item.order.updatedAt),
       related: (
-        <Link href={relatedHref} style={{ color: theme.accent, textDecoration: "none" }}>
+        <Link
+          href={relatedHref}
+          style={{ color: theme.accent, textDecoration: "none" }}
+        >
           {locale === "zh" ? "相關案件" : "related case"} →
         </Link>
       ),
@@ -2017,7 +2150,8 @@ function buildExceptionBoardRows(
         locale,
       ),
       _selected:
-        focus.orderId === item.order.orderId || focus.bookingId === item.order.bookingId,
+        focus.orderId === item.order.orderId ||
+        focus.bookingId === item.order.bookingId,
     };
   });
 
@@ -2052,16 +2186,23 @@ function buildNoSupplyBoardRows(
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
             href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
-            style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+            style={{
+              color: theme.accent,
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
           >
             {item.order.orderNo}
           </Link>
-          <span style={{ color: theme.textDim, fontSize: 11 }}>{item.order.orderId}</span>
+          <span style={{ color: theme.textDim, fontSize: 11 }}>
+            {item.order.orderId}
+          </span>
         </div>
       ),
       tenant: getTenantLabel(item.order),
       attempts: String(
-        escalation?.attemptCount ?? Math.max(1, item.order.dispatchAttemptCount),
+        escalation?.attemptCount ??
+          Math.max(1, item.order.dispatchAttemptCount),
       ),
       reasonCell: (
         <Pill theme={theme} tone="danger" dot>
@@ -2075,7 +2216,8 @@ function buildNoSupplyBoardRows(
         locale,
       ),
       _selected:
-        focus.orderId === item.order.orderId || focus.bookingId === item.order.bookingId,
+        focus.orderId === item.order.orderId ||
+        focus.bookingId === item.order.bookingId,
     };
   });
 
@@ -2121,11 +2263,17 @@ function buildGovernanceBoardRows(
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
             href={`/dispatch/${encodeURIComponent(item.order.orderId)}`}
-            style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+            style={{
+              color: theme.accent,
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
           >
             {item.order.orderNo}
           </Link>
-          <span style={{ color: theme.textDim, fontSize: 11 }}>{item.order.orderId}</span>
+          <span style={{ color: theme.textDim, fontSize: 11 }}>
+            {item.order.orderId}
+          </span>
         </div>
       ),
       tenant: getTenantLabel(item.order),
@@ -2137,7 +2285,10 @@ function buildGovernanceBoardRows(
       requester,
       age: formatAge(locale, age),
       linkCell: (
-        <Link href={approvalHref} style={{ color: theme.accent, textDecoration: "none" }}>
+        <Link
+          href={approvalHref}
+          style={{ color: theme.accent, textDecoration: "none" }}
+        >
           {requestId ?? (locale === "zh" ? "審批佇列" : "approval queue")} →
         </Link>
       ),
@@ -2147,7 +2298,8 @@ function buildGovernanceBoardRows(
         locale,
       ),
       _selected:
-        focus.orderId === item.order.orderId || focus.bookingId === item.order.bookingId,
+        focus.orderId === item.order.orderId ||
+        focus.bookingId === item.order.bookingId,
     };
   });
 
@@ -2177,7 +2329,11 @@ function buildForwardedBoardRows(
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
             href={`/dispatch/${encodeURIComponent(item.order.mirrorOrderId)}`}
-            style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}
+            style={{
+              color: theme.accent,
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
           >
             {item.order.mirrorOrderId}
           </Link>
@@ -2189,7 +2345,14 @@ function buildForwardedBoardRows(
       source: formatOpsCodeLabel(locale, item.order.platformCode),
       externalOrderId: item.order.externalOrderId,
       routeCell: (
-        <div style={{ display: "flex", flexDirection: "column", gap: 1, whiteSpace: "normal" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 1,
+            whiteSpace: "normal",
+          }}
+        >
           <span>
             {readForwardedValue(item.order, [
               "pickupSummary",
@@ -2227,7 +2390,11 @@ function buildForwardedBoardRows(
         </Pill>
       ),
       mismatchCell: (
-        <Pill theme={theme} tone={mismatch.tone} dot={mismatch.tone !== "success"}>
+        <Pill
+          theme={theme}
+          tone={mismatch.tone}
+          dot={mismatch.tone !== "success"}
+        >
           {mismatch.label}
         </Pill>
       ),
@@ -2261,7 +2428,9 @@ function buildForwardedBoardRows(
   return { rows, columns };
 }
 
-export default async function DispatchPage({ searchParams }: DispatchPageProps) {
+export default async function DispatchPage({
+  searchParams,
+}: DispatchPageProps) {
   const [client, locale, resolvedSearchParams] = await Promise.all([
     getServerOpsClient(),
     getServerLocale(),
@@ -2288,30 +2457,36 @@ export default async function DispatchPage({ searchParams }: DispatchPageProps) 
       ? "forwarded"
       : null;
 
-  const [ownedLoad, forwardedLoad, dispatchJobsLoad, driverTasksLoad, adapterHealthLoad, reconciliationIssuesLoad] =
-    await Promise.all([
-      loadUiList<OwnedOrderRecord>(
-        client,
-        "/api/orders",
-        "dispatch.owned.empty.fetch_failed",
-      ),
-      loadUiList<ForwardedOrderRecord>(
-        client,
-        "/api/forwarder/orders",
-        "dispatch.forwarded.empty.fetch_failed",
-      ),
-      loadAuxList<DispatchJobRecord>(() => client.listDispatchJobs()),
-      loadAuxList<DriverTaskRecord>(() => client.listDriverTasks()),
-      loadAuxList<AdapterHealthRecord>(async () => {
-        const response = await client.get<{ items: AdapterHealthRecord[] }>(
-          "/api/forwarder/adapters/health",
-        );
-        return response.items ?? [];
-      }),
-      loadAuxList<ForwarderReconciliationIssue>(() =>
-        client.listForwarderReconciliationIssues(),
-      ),
-    ]);
+  const [
+    ownedLoad,
+    forwardedLoad,
+    dispatchJobsLoad,
+    driverTasksLoad,
+    adapterHealthLoad,
+    reconciliationIssuesLoad,
+  ] = await Promise.all([
+    loadUiList<OwnedOrderRecord>(
+      client,
+      "/api/orders",
+      "dispatch.owned.empty.fetch_failed",
+    ),
+    loadUiList<ForwardedOrderRecord>(
+      client,
+      "/api/forwarder/orders",
+      "dispatch.forwarded.empty.fetch_failed",
+    ),
+    loadAuxList<DispatchJobRecord>(() => client.listDispatchJobs()),
+    loadAuxList<DriverTaskRecord>(() => client.listDriverTasks()),
+    loadAuxList<AdapterHealthRecord>(async () => {
+      const response = await client.get<{ items: AdapterHealthRecord[] }>(
+        "/api/forwarder/adapters/health",
+      );
+      return response.items ?? [];
+    }),
+    loadAuxList<ForwarderReconciliationIssue>(() =>
+      client.listForwarderReconciliationIssues(),
+    ),
+  ]);
 
   const jobByOrderId = new Map(
     dispatchJobsLoad.items.map((job) => [job.orderId, job]),
@@ -2441,14 +2616,22 @@ export default async function DispatchPage({ searchParams }: DispatchPageProps) 
     );
     rows = built.rows;
     columns = built.columns;
-    if (ownedVisibleItems.length === 0 && boardCounts.ready > 0 && activeFilter !== "all") {
+    if (
+      ownedVisibleItems.length === 0 &&
+      boardCounts.ready > 0 &&
+      activeFilter !== "all"
+    ) {
       emptyReason = "filtered_empty";
     }
   } else if (activeBoard === "assigned") {
     const built = buildAssignedBoardRows(ownedVisibleItems, locale, focus);
     rows = built.rows;
     columns = built.columns;
-    if (ownedVisibleItems.length === 0 && boardCounts.assigned > 0 && activeFilter !== "all") {
+    if (
+      ownedVisibleItems.length === 0 &&
+      boardCounts.assigned > 0 &&
+      activeFilter !== "all"
+    ) {
       emptyReason = "filtered_empty";
     }
   } else if (activeBoard === "exception") {
@@ -2467,7 +2650,11 @@ export default async function DispatchPage({ searchParams }: DispatchPageProps) 
     const built = buildForwardedBoardRows(forwardedVisibleItems, locale, focus);
     rows = built.rows;
     columns = built.columns;
-    if (forwardedVisibleItems.length === 0 && boardCounts.forwarded > 0 && activeFilter !== "all") {
+    if (
+      forwardedVisibleItems.length === 0 &&
+      boardCounts.forwarded > 0 &&
+      activeFilter !== "all"
+    ) {
       emptyReason = "filtered_empty";
     }
   }
@@ -2504,7 +2691,8 @@ export default async function DispatchPage({ searchParams }: DispatchPageProps) 
             {activeBoard === "forwarded"
               ? renderHeaderActionLink({
                   href: buildPlatformAdminAdapterHref(),
-                  label: locale === "zh" ? "Adapter registry" : "Adapter registry",
+                  label:
+                    locale === "zh" ? "Adapter registry" : "Adapter registry",
                   icon: "ext",
                   external: true,
                 })
@@ -2540,7 +2728,9 @@ export default async function DispatchPage({ searchParams }: DispatchPageProps) 
         {renderBoardBanner(
           activeBoard,
           locale,
-          activeBoard === "forwarded" ? forwardedVisibleItems : ownedVisibleItems,
+          activeBoard === "forwarded"
+            ? forwardedVisibleItems
+            : ownedVisibleItems,
         )}
 
         {filters.length > 1 ? (
@@ -2567,12 +2757,18 @@ export default async function DispatchPage({ searchParams }: DispatchPageProps) 
           theme={theme}
           title={boardTitle}
           subtitle={locale === "zh" ? boardSubtitle.zh : boardSubtitle.en}
-          padding={rows.length > 0 ? 0 : undefined}
+          {...(rows.length > 0 ? { padding: 0 } : {})}
         >
           {rows.length > 0 ? (
             <Table theme={theme} columns={columns} rows={rows} />
           ) : (
-            renderEmptyState(emptyReason, activeBoard, locale, focus, nextAction)
+            renderEmptyState(
+              emptyReason,
+              activeBoard,
+              locale,
+              focus,
+              nextAction,
+            )
           )}
         </Card>
       </div>
