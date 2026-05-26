@@ -4,11 +4,13 @@ import type {
   DriverLocationSnapshot,
   DriverRegistryRecord,
   EmptyReason,
+  EmptyStateEnvelope,
   ForwardedOrderRecord,
   PlatformCode,
   PlatformPresenceRecord,
   PlatformPresenceSummary,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { RefreshOnInterval } from "@/components/refresh-on-interval";
@@ -53,7 +55,7 @@ type DriverListFilters = {
 };
 
 type DriverRowModel = {
-  driver: DriverRegistryRecord;
+  driver: DriverRegistryListItem;
   location: DriverLocationSnapshot | undefined;
   locationState: "live" | "stale" | "missing" | "unknown";
   presences: PlatformPresenceRecord[];
@@ -78,6 +80,16 @@ type EmptyStateModel = {
 type LoadResult<T> = {
   data: T | null;
   error: string | null;
+};
+
+type DriverRegistryListItem = DriverRegistryRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type LoadedListEnvelope<T> = {
+  items: T[];
+  emptyState: EmptyStateEnvelope | null;
+  refreshMetadata: UiRefreshMetadata | null;
 };
 
 const shellStyle: CSSProperties = {
@@ -278,6 +290,143 @@ async function loadWithError<T>(
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isRiskLevel(
+  value: unknown,
+): value is ResourceActionDescriptor["riskLevel"] {
+  return value === "low" || value === "medium" || value === "high";
+}
+
+function readActions(value: unknown): ResourceActionDescriptor[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+    if (
+      typeof entry.action !== "string" ||
+      typeof entry.enabled !== "boolean" ||
+      !isRiskLevel(entry.riskLevel)
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        action: entry.action,
+        enabled: entry.enabled,
+        riskLevel: entry.riskLevel,
+        ...(typeof entry.disabledReasonCode === "string"
+          ? { disabledReasonCode: entry.disabledReasonCode }
+          : {}),
+        ...(typeof entry.requiresReason === "boolean"
+          ? { requiresReason: entry.requiresReason }
+          : {}),
+      },
+    ];
+  });
+}
+
+function readRefreshMetadata(value: unknown): UiRefreshMetadata | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (
+    typeof value.generatedAt !== "string" ||
+    typeof value.staleAfterMs !== "number" ||
+    (value.dataFreshness !== "fresh" &&
+      value.dataFreshness !== "stale" &&
+      value.dataFreshness !== "degraded" &&
+      value.dataFreshness !== "unknown") ||
+    (value.source !== "live" &&
+      value.source !== "cache" &&
+      value.source !== "sandbox" &&
+      value.source !== "static")
+  ) {
+    return null;
+  }
+
+  return {
+    generatedAt: value.generatedAt,
+    staleAfterMs: value.staleAfterMs,
+    dataFreshness: value.dataFreshness,
+    source: value.source,
+  };
+}
+
+function readEmptyStateEnvelope(value: unknown): EmptyStateEnvelope | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const reason =
+    typeof value.reason === "string" && isEmptyReason(value.reason)
+      ? value.reason
+      : null;
+  if (!reason || typeof value.messageCode !== "string") {
+    return null;
+  }
+  const nextAction = readActions(
+    value.nextAction ? [value.nextAction] : undefined,
+  )?.[0];
+
+  return {
+    reason,
+    messageCode: value.messageCode,
+    ...(nextAction ? { nextAction } : {}),
+  };
+}
+
+async function loadListWithEnvelope<T>(
+  loader: () => Promise<unknown>,
+  locale: "en" | "zh",
+): Promise<LoadResult<LoadedListEnvelope<T>>> {
+  try {
+    const value = await loader();
+    if (Array.isArray(value)) {
+      return {
+        data: {
+          items: value as T[],
+          emptyState: null,
+          refreshMetadata: null,
+        },
+        error: null,
+      };
+    }
+
+    if (isRecord(value) && Array.isArray(value.items)) {
+      return {
+        data: {
+          items: value.items as T[],
+          emptyState: readEmptyStateEnvelope(value.emptyState),
+          refreshMetadata: readRefreshMetadata(value.refreshMetadata),
+        },
+        error: null,
+      };
+    }
+
+    return {
+      data: {
+        items: [],
+        emptyState: null,
+        refreshMetadata: null,
+      },
+      error: t("common.unknown", locale),
+    };
+  } catch (error) {
+    return {
+      data: null,
+      error:
+        error instanceof Error ? error.message : t("common.unknown", locale),
+    };
+  }
+}
+
 function isLocationStale(
   snapshot: DriverLocationSnapshot | undefined,
 ): boolean {
@@ -349,7 +498,7 @@ function presenceLabel(
   return `${name ?? presence.platformCode} · ${status} · ${binding}`;
 }
 
-function buildDriverActions(
+function buildFallbackDriverActions(
   row: Omit<DriverRowModel, "availableActions">,
 ): ResourceActionDescriptor[] {
   return [
@@ -375,6 +524,12 @@ function buildDriverActions(
         : { disabledReasonCode: "no_platform_binding" }),
     },
   ];
+}
+
+function resolveDriverActions(
+  row: Omit<DriverRowModel, "availableActions">,
+): ResourceActionDescriptor[] {
+  return row.driver.availableActions ?? buildFallbackDriverActions(row);
 }
 
 function matchesView(row: DriverRowModel, view: DriversViewKey): boolean {
@@ -475,6 +630,7 @@ function buildEmptyStateModel(
   reason: EmptyReason,
   locale: "en" | "zh",
   filters: DriverListFilters,
+  emptyStateEnvelope?: EmptyStateEnvelope | null,
 ): EmptyStateModel {
   const titleKey =
     reason === "no_data"
@@ -524,7 +680,8 @@ function buildEmptyStateModel(
   const refreshHref = buildHref(filters, { page: 1 });
 
   const nextAction =
-    reason === "filtered_empty"
+    emptyStateEnvelope?.nextAction ??
+    (reason === "filtered_empty"
       ? {
           action: "clear_filters",
           enabled: true,
@@ -542,7 +699,7 @@ function buildEmptyStateModel(
               enabled: true,
               riskLevel: "low" as const,
             }
-          : undefined;
+          : undefined);
 
   const nextHref =
     reason === "filtered_empty"
@@ -576,6 +733,120 @@ function buildEmptyStateModel(
     ...(reason === "external_unavailable" && adapterRegistryHref
       ? { nextTarget: "_blank" as const }
       : {}),
+  };
+}
+
+function isRefreshMetadataStale(
+  refreshMetadata: UiRefreshMetadata | null,
+): boolean {
+  if (!refreshMetadata) {
+    return false;
+  }
+  if (refreshMetadata.dataFreshness !== "fresh") {
+    return true;
+  }
+  const generatedAt = new Date(refreshMetadata.generatedAt).getTime();
+  if (!Number.isFinite(generatedAt)) {
+    return false;
+  }
+  return Date.now() - generatedAt > refreshMetadata.staleAfterMs;
+}
+
+function getRefreshBannerModel(
+  refreshMetadata: UiRefreshMetadata | null,
+  locale: "en" | "zh",
+) {
+  if (!refreshMetadata) {
+    return null;
+  }
+
+  const stale = isRefreshMetadataStale(refreshMetadata);
+  if (refreshMetadata.dataFreshness === "degraded") {
+    return {
+      title: t("drivers.refreshBanner.degradedTitle", locale),
+      body: t("drivers.refreshBanner.degradedBody", locale),
+      background: "#fff7ed",
+      border: "#fdba74",
+      color: "#9a3412",
+    };
+  }
+  if (refreshMetadata.dataFreshness === "unknown") {
+    return {
+      title: t("drivers.refreshBanner.unknownTitle", locale),
+      body: t("drivers.refreshBanner.unknownBody", locale),
+      background: "#f8fafc",
+      border: "#cbd5e1",
+      color: "#475569",
+    };
+  }
+  if (refreshMetadata.dataFreshness === "stale" || stale) {
+    return {
+      title: t("drivers.refreshBanner.staleTitle", locale),
+      body: t("drivers.refreshBanner.staleBody", locale, {
+        source: refreshMetadata.source,
+      }),
+      background: "#fffbeb",
+      border: "#fcd34d",
+      color: "#92400e",
+    };
+  }
+
+  return null;
+}
+
+function getDriverActionPresentation(
+  row: DriverRowModel,
+  action: ResourceActionDescriptor,
+  locale: "en" | "zh",
+) {
+  if (
+    action.action === "open_driver_detail" ||
+    action.action === "open_driver" ||
+    action.action === "view_driver_detail"
+  ) {
+    return {
+      href: `/drivers/${encodeURIComponent(row.driver.driverId)}`,
+      label: t("drivers.list.openDetail", locale),
+      ariaLabel: getOpsLabel(locale, "openDriverDetail", {
+        driverId: row.driver.driverId,
+      }),
+    };
+  }
+
+  if (
+    action.action === "open_active_dispatch" ||
+    action.action === "open_dispatch" ||
+    action.action === "view_dispatch_detail"
+  ) {
+    return row.activeForwardedOrders[0]
+      ? {
+          href: `/dispatch/${encodeURIComponent(row.activeForwardedOrders[0].mirrorOrderId)}`,
+          label: t("drivers.list.openDispatch", locale),
+        }
+      : {
+          label: t("drivers.list.openDispatch", locale),
+        };
+  }
+
+  if (
+    action.action === "open_adapter_registry" ||
+    action.action === "inspect_adapter_registry" ||
+    action.action === "open_platform_admin_adapter_registry"
+  ) {
+    const href = buildPlatformAdminHref(PLATFORM_ADMIN_ADAPTER_REGISTRY_ROUTE);
+    return href
+      ? {
+          href,
+          target: "_blank" as const,
+          label: t("drivers.list.openAdapterRegistry", locale),
+        }
+      : {
+          label: t("drivers.list.openAdapterRegistry", locale),
+        };
+  }
+
+  return {
+    label: formatOpsCodeLabel(locale, action.action),
   };
 }
 
@@ -651,7 +922,10 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   const generatedAt = new Date().toISOString();
 
   const [driversResult, locationsResult, forwardedResult] = await Promise.all([
-    loadWithError<DriverRegistryRecord[]>(() => client.listDrivers(), locale),
+    loadListWithEnvelope<DriverRegistryListItem>(
+      () => client.listDrivers() as Promise<unknown>,
+      locale,
+    ),
     loadWithError<DriverLocationSnapshot[]>(
       () => client.listDriverLocations(),
       locale,
@@ -662,7 +936,8 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     ),
   ]);
 
-  const drivers = driversResult.data ?? [];
+  const driversEnvelope = driversResult.data;
+  const drivers = driversEnvelope?.items ?? [];
   const locations = locationsResult.data ?? [];
   const locationByDriver = new Map<string, DriverLocationSnapshot>();
   for (const snapshot of locations) {
@@ -709,7 +984,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     };
     return {
       ...baseRow,
-      availableActions: buildDriverActions(baseRow),
+      availableActions: resolveDriverActions(baseRow),
     };
   });
 
@@ -740,20 +1015,25 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     presenceErrorCount > 0 &&
     !driversResult.error;
 
+  const backendEmptyState =
+    rows.length === 0 ? (driversEnvelope?.emptyState ?? null) : null;
   const emptyReason: EmptyReason | null = filters.emptyReason
     ? filters.emptyReason
     : driversResult.error
       ? "fetch_failed"
       : forceExternalUnavailable
         ? "external_unavailable"
-        : rows.length === 0
-          ? "no_data"
-          : filteredRows.length === 0
-            ? "filtered_empty"
-            : null;
+        : (backendEmptyState?.reason ??
+          (rows.length === 0
+            ? "no_data"
+            : filteredRows.length === 0
+              ? "filtered_empty"
+              : null));
   const emptyStateModel = emptyReason
-    ? buildEmptyStateModel(emptyReason, locale, filters)
+    ? buildEmptyStateModel(emptyReason, locale, filters, backendEmptyState)
     : null;
+  const refreshMetadata = driversEnvelope?.refreshMetadata ?? null;
+  const refreshBanner = getRefreshBannerModel(refreshMetadata, locale);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const currentPage = Math.min(filters.page, totalPages);
@@ -805,8 +1085,10 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
           },
           {
             label: t("drivers.meta.generatedAt", locale),
-            value: generatedAt,
-            tone: "neutral",
+            value: refreshMetadata?.generatedAt ?? generatedAt,
+            tone: isRefreshMetadataStale(refreshMetadata)
+              ? "warning"
+              : "neutral",
           },
           {
             label: t("drivers.meta.visible", locale),
@@ -864,6 +1146,20 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
               })}
             </span>
             {t("drivers.list.platformStatusUnavailableBody", locale)}
+          </div>
+        ) : null}
+
+        {refreshBanner ? (
+          <div
+            style={{
+              ...alertBaseStyle,
+              background: refreshBanner.background,
+              border: `1px solid ${refreshBanner.border}`,
+              color: refreshBanner.color,
+            }}
+          >
+            <span style={bannerStrongStyle}>{refreshBanner.title}</span>
+            {refreshBanner.body}
           </div>
         ) : null}
 
@@ -1211,59 +1507,27 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                       <Td density="compact">
                         <div style={actionListStyle}>
                           {row.availableActions.map((action) => {
-                            const href =
-                              action.action === "open_driver_detail"
-                                ? `/drivers/${encodeURIComponent(row.driver.driverId)}`
-                                : action.action === "open_active_dispatch" &&
-                                    row.activeForwardedOrders[0]
-                                  ? `/dispatch/${encodeURIComponent(
-                                      row.activeForwardedOrders[0]
-                                        .mirrorOrderId,
-                                    )}`
-                                  : action.action === "open_adapter_registry"
-                                    ? buildPlatformAdminHref(
-                                        PLATFORM_ADMIN_ADAPTER_REGISTRY_ROUTE,
-                                      )
-                                    : null;
-                            const target =
-                              action.action === "open_adapter_registry"
-                                ? "_blank"
-                                : undefined;
-                            const label =
-                              action.action === "open_driver_detail"
-                                ? t("drivers.list.openDetail", locale)
-                                : action.action === "open_active_dispatch"
-                                  ? t("drivers.list.openDispatch", locale)
-                                  : t(
-                                      "drivers.list.openAdapterRegistry",
-                                      locale,
-                                    );
+                            const presentation = getDriverActionPresentation(
+                              row,
+                              action,
+                              locale,
+                            );
 
-                            if (action.enabled && href) {
+                            if (action.enabled && presentation.href) {
                               return (
                                 <Link
                                   key={action.action}
-                                  href={href}
-                                  target={target}
+                                  href={presentation.href}
+                                  target={presentation.target}
                                   rel={
-                                    target === "_blank"
+                                    presentation.target === "_blank"
                                       ? "noreferrer"
                                       : undefined
                                   }
                                   style={actionLinkStyle}
-                                  aria-label={
-                                    action.action === "open_driver_detail"
-                                      ? getOpsLabel(
-                                          locale,
-                                          "openDriverDetail",
-                                          {
-                                            driverId: row.driver.driverId,
-                                          },
-                                        )
-                                      : undefined
-                                  }
+                                  aria-label={presentation.ariaLabel}
                                 >
-                                  {label}
+                                  {presentation.label}
                                 </Link>
                               );
                             }
@@ -1278,10 +1542,12 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                                         locale,
                                         action.disabledReasonCode,
                                       )
-                                    : undefined
+                                    : action.enabled
+                                      ? action.action
+                                      : undefined
                                 }
                               >
-                                {label}
+                                {presentation.label}
                               </span>
                             );
                           })}

@@ -235,6 +235,15 @@ const en = {
   "drivers.meta.refreshValue": "T3 · 15s",
   "drivers.meta.generatedAt": "Generated at",
   "drivers.meta.visible": "Visible",
+  "drivers.refreshBanner.staleTitle": "Data freshness is stale",
+  "drivers.refreshBanner.staleBody":
+    "This snapshot is past its freshness window. Source: {source}. Refresh to load a newer registry view.",
+  "drivers.refreshBanner.degradedTitle": "Driver registry is in degraded mode",
+  "drivers.refreshBanner.degradedBody":
+    "The latest driver list is partial or cached while a dependency recovers.",
+  "drivers.refreshBanner.unknownTitle": "Driver registry freshness is unknown",
+  "drivers.refreshBanner.unknownBody":
+    "The backend did not confirm freshness for this snapshot. Use refresh before making time-sensitive decisions.",
   "drivers.tabs.all": "All",
   "drivers.tabs.available": "Available",
   "drivers.tabs.onTrip": "On trip",
@@ -1768,6 +1777,15 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.meta.refreshValue": "T3 · 15 秒",
   "drivers.meta.generatedAt": "產生時間",
   "drivers.meta.visible": "目前顯示",
+  "drivers.refreshBanner.staleTitle": "資料新鮮度已過期",
+  "drivers.refreshBanner.staleBody":
+    "這份快照已超過新鮮度視窗。來源：{source}。請重新整理以載入較新的司機名冊。",
+  "drivers.refreshBanner.degradedTitle": "司機名冊目前處於降級模式",
+  "drivers.refreshBanner.degradedBody":
+    "相依服務恢復前，最新司機清單可能只有部分資料或來自快取。",
+  "drivers.refreshBanner.unknownTitle": "司機名冊新鮮度未知",
+  "drivers.refreshBanner.unknownBody":
+    "後端未確認這份快照的新鮮度。進行時效敏感判斷前請先重新整理。",
   "drivers.tabs.all": "全部",
   "drivers.tabs.available": "可派",
   "drivers.tabs.onTrip": "行程中",
