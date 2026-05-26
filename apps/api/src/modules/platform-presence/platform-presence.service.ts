@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type {
   AdapterHealthRecord,
+  AuditLogRecord,
   PlatformEligibility,
   PlatformCode,
   PlatformPresenceAdapterStatusRecord,
@@ -8,6 +9,7 @@ import type {
   PlatformPresenceSummary,
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { ForwarderService } from "../forwarder/forwarder.service";
 import { PlatformPresenceRepository } from "./platform-presence.repository";
 
@@ -25,6 +27,8 @@ export class PlatformPresenceService {
   constructor(
     @Optional() private readonly repo?: PlatformPresenceRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   private dbEnabled(): boolean {
@@ -82,12 +86,44 @@ export class PlatformPresenceService {
       updatedAt: isoNow(),
     };
 
-    if (this.dbEnabled()) {
-      return this.repo!.upsert(record);
-    }
-    const bucket = this.getMemoryBucket(driverId);
-    bucket.set(platformCode, record);
-    return record;
+    const persisted = this.dbEnabled()
+      ? await this.repo!.upsert(record)
+      : (() => {
+          const bucket = this.getMemoryBucket(driverId);
+          bucket.set(platformCode, record);
+          return record;
+        })();
+
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "platform-presence",
+        actionName: "request_reauth",
+        resourceType: "platform_presence",
+        resourceId: `${driverId}:${platformCode}`,
+        ...(existing
+          ? {
+              oldValuesSummary: {
+                status: existing.status,
+                tokenExpiresAt: existing.tokenExpiresAt,
+                reauthRequired: existing.reauthRequired,
+              },
+            }
+          : {}),
+        newValuesSummary: {
+          driverId,
+          platformCode,
+          status: persisted.status,
+          tokenExpiresAt: persisted.tokenExpiresAt,
+          reauthRequired: persisted.reauthRequired,
+        },
+      },
+      persisted.updatedAt,
+    );
+
+    return persisted;
   }
 
   async setOffline(
@@ -113,12 +149,54 @@ export class PlatformPresenceService {
       updatedAt: isoNow(),
     };
 
-    if (this.dbEnabled()) {
-      return this.repo!.upsert(record);
-    }
-    const bucket = this.getMemoryBucket(driverId);
-    bucket.set(platformCode, record);
-    return record;
+    const persisted = this.dbEnabled()
+      ? await this.repo!.upsert(record)
+      : (() => {
+          const bucket = this.getMemoryBucket(driverId);
+          bucket.set(platformCode, record);
+          return record;
+        })();
+
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "platform-presence",
+        actionName: "force_offline",
+        resourceType: "platform_presence",
+        resourceId: `${driverId}:${platformCode}`,
+        ...(existing
+          ? {
+              oldValuesSummary: {
+                status: existing.status,
+                tokenExpiresAt: existing.tokenExpiresAt,
+                reauthRequired: existing.reauthRequired,
+              },
+            }
+          : {}),
+        newValuesSummary: {
+          driverId,
+          platformCode,
+          status: persisted.status,
+          tokenExpiresAt: persisted.tokenExpiresAt,
+          reauthRequired: persisted.reauthRequired,
+        },
+      },
+      persisted.updatedAt,
+    );
+
+    return persisted;
+  }
+
+  private recordAudit(
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
+    updatedAt: string,
+  ) {
+    this.auditNotificationService?.recordAuditLog({
+      ...input,
+      requestId: `platform-presence:${updatedAt}:${input.resourceId ?? "unknown"}`,
+    });
   }
 
   private listAdapterHealthSafely(): AdapterHealthRecord[] {

@@ -60,6 +60,18 @@ type TableRow = Record<string, unknown> & {
   _selected?: boolean;
 };
 
+type DriverDetailRuntimeRecord = DriverRegistryRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  matchingSuppression?: DriverMatchingSuppression | null;
+  phone?: string | null;
+};
+
+type PlatformPresenceRuntimeRecord = PlatformPresenceRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  lastReauthAt?: string | null;
+  bindingStatus?: string | null;
+};
+
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: true,
@@ -455,80 +467,6 @@ function buildCrossAppHref(path: string) {
   return `${baseOrigin.replace(/\/$/, "")}${normalizedPath}`;
 }
 
-function buildPlatformActions(
-  presence: PlatformPresenceRecord,
-  hasActiveForwardedTask: boolean,
-  hasActiveSosIncident: boolean,
-): ResourceActionDescriptor[] {
-  const forceOfflineDisabledReason = hasActiveSosIncident
-    ? "sos_in_response"
-    : presence.status === "online"
-      ? null
-      : "platform_offline";
-  const requestReauthDisabledReason = presence.accountId
-    ? null
-    : "platform_unbound";
-  return [
-    {
-      action: "force_offline",
-      enabled: presence.status === "online" && !hasActiveSosIncident,
-      ...(forceOfflineDisabledReason
-        ? { disabledReasonCode: forceOfflineDisabledReason }
-        : {}),
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "request_reauth",
-      enabled: Boolean(presence.accountId),
-      ...(requestReauthDisabledReason
-        ? { disabledReasonCode: requestReauthDisabledReason }
-        : {}),
-      riskLevel: "medium",
-    },
-    {
-      action: "mark_forwarded_unavailable",
-      enabled: false,
-      disabledReasonCode: hasActiveForwardedTask
-        ? "action_not_supported"
-        : "no_forwarded_task",
-      riskLevel: "medium",
-    },
-  ];
-}
-
-function buildDriverActions(
-  driver: DriverRegistryRecord,
-  statementPeriod: string,
-  suppression: DriverMatchingSuppression | null,
-  hasActiveSosIncident: boolean,
-): ResourceActionDescriptor[] {
-  const suppressionDisabledReason =
-    suppression?.active || !hasActiveSosIncident ? null : "already_active";
-  const statementDisabledReason = /^\d{4}-\d{2}$/.test(statementPeriod)
-    ? null
-    : "read_model_gap";
-  return [
-    {
-      action: suppression?.active ? "lift_suppression" : "suppress_matching",
-      enabled: suppression?.active ? true : !hasActiveSosIncident,
-      ...(suppressionDisabledReason
-        ? { disabledReasonCode: suppressionDisabledReason }
-        : {}),
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "generate_driver_statement",
-      enabled: /^\d{4}-\d{2}$/.test(statementPeriod),
-      ...(statementDisabledReason
-        ? { disabledReasonCode: statementDisabledReason }
-        : {}),
-      riskLevel: "low",
-    },
-  ];
-}
-
 function pickLatestActiveTask(tasks: DriverTaskRecord[]) {
   return (
     [...tasks].sort((left, right) => {
@@ -549,24 +487,59 @@ function pickLatestActiveTask(tasks: DriverTaskRecord[]) {
   );
 }
 
-function deriveSuppressionRecord(
-  driver: DriverRegistryRecord,
-  activeSosIncident: IncidentRecord | null,
-): DriverMatchingSuppression | null {
-  if (driver.workState !== "incident_hold") {
+function hasAvailableActionsField(resource: unknown) {
+  return Boolean(
+    resource &&
+    typeof resource === "object" &&
+    Object.prototype.hasOwnProperty.call(resource, "availableActions"),
+  );
+}
+
+function readAvailableActions(resource: unknown): ResourceActionDescriptor[] {
+  if (!hasAvailableActionsField(resource)) {
+    return [];
+  }
+
+  const actions = (resource as { availableActions?: unknown }).availableActions;
+  return Array.isArray(actions)
+    ? actions.filter(
+        (action): action is ResourceActionDescriptor =>
+          Boolean(action) &&
+          typeof action === "object" &&
+          typeof (action as { action?: unknown }).action === "string" &&
+          typeof (action as { enabled?: unknown }).enabled === "boolean" &&
+          typeof (action as { riskLevel?: unknown }).riskLevel === "string",
+      )
+    : [];
+}
+
+function readMatchingSuppression(
+  resource: unknown,
+): DriverMatchingSuppression | null | undefined {
+  if (
+    !resource ||
+    typeof resource !== "object" ||
+    !Object.prototype.hasOwnProperty.call(resource, "matchingSuppression")
+  ) {
+    return undefined;
+  }
+
+  const suppression = (resource as { matchingSuppression?: unknown })
+    .matchingSuppression;
+  if (!suppression) {
     return null;
   }
 
-  const baseAt = activeSosIncident?.updatedAt ?? driver.updatedAt;
-  const expiresAt = new Date(new Date(baseAt).getTime() + 24 * 60 * 60 * 1000);
+  if (
+    typeof suppression === "object" &&
+    typeof (suppression as { active?: unknown }).active === "boolean" &&
+    typeof (suppression as { reasonCode?: unknown }).reasonCode === "string" &&
+    typeof (suppression as { expiresAt?: unknown }).expiresAt === "string"
+  ) {
+    return suppression as DriverMatchingSuppression;
+  }
 
-  return {
-    active: true,
-    reasonCode: activeSosIncident ? "incident" : "manual_ops_hold",
-    sourceIncidentId: activeSosIncident?.incidentId ?? null,
-    expiresAt: expiresAt.toISOString(),
-    liftedAt: null,
-  };
+  return null;
 }
 
 export default async function DriverDetailPage({
@@ -637,9 +610,9 @@ export default async function DriverDetailPage({
     );
   }
 
-  const driver = (driversResult.data ?? []).find(
-    (candidate) => candidate.driverId === driverId,
-  );
+  const driver = (
+    (driversResult.data ?? []) as DriverDetailRuntimeRecord[]
+  ).find((candidate) => candidate.driverId === driverId);
   if (!driver) {
     notFound();
   }
@@ -650,7 +623,8 @@ export default async function DriverDetailPage({
   const locationStale = isLocationStale(locationSnapshot);
 
   const presenceSummary = presenceResult.data;
-  const presences = presenceSummary?.presences ?? [];
+  const presences = (presenceSummary?.presences ??
+    []) as PlatformPresenceRuntimeRecord[];
   const adapterStatusByPlatform = new Map<
     string,
     PlatformPresenceAdapterStatusRecord
@@ -727,7 +701,15 @@ export default async function DriverDetailPage({
         incident.severity === "critical" &&
         (incident.status === "open" || incident.status === "investigating"),
     ) ?? null;
-  const suppression = deriveSuppressionRecord(driver, activeSosIncident);
+  const suppressionState = readMatchingSuppression(driver);
+  const suppression = suppressionState?.active ? suppressionState : null;
+  const suppressionStateExposed = suppressionState !== undefined;
+  const inferredSosSuppressionExpiry =
+    activeSosIncident && !suppression
+      ? new Date(
+          new Date(activeSosIncident.updatedAt).getTime() + 24 * 60 * 60 * 1000,
+        ).toISOString()
+      : null;
 
   const hasReadModelGap =
     driver.workState === "incident_hold" &&
@@ -774,8 +756,9 @@ export default async function DriverDetailPage({
     : locale === "zh"
       ? "沒有 active device binding"
       : "No active device binding";
-  const phoneSummary =
-    locale === "zh"
+  const phoneSummary = driver.phone
+    ? driver.phone
+    : locale === "zh"
       ? "電話未下發至 ops contract"
       : "Phone not exposed in ops contract";
   const headerSubtitle =
@@ -799,7 +782,7 @@ export default async function DriverDetailPage({
   const platformAdminAuditHref = buildCrossAppHref("/audit");
 
   const platformRows: TableRow[] = presences.map(
-    (presence: PlatformPresenceRecord) => {
+    (presence: PlatformPresenceRuntimeRecord) => {
       const adapter = adapterStatusByPlatform.get(presence.platformCode);
       const platformName =
         PLATFORM_CODE_REGISTRY[presence.platformCode]?.displayName ??
@@ -829,8 +812,9 @@ export default async function DriverDetailPage({
               {presence.accountId}
             </span>
             <span style={{ color: theme.textMuted, fontSize: 11 }}>
-              {locale === "zh" ? "更新於" : "Updated"}{" "}
-              {formatShortDateTime(locale, presence.updatedAt)}
+              {locale === "zh"
+                ? `最後重驗 ${formatShortDateTime(locale, (presence as PlatformPresenceRuntimeRecord).lastReauthAt ?? presence.updatedAt)}`
+                : `Last re-auth ${formatShortDateTime(locale, (presence as PlatformPresenceRuntimeRecord).lastReauthAt ?? presence.updatedAt)}`}
             </span>
           </div>
         ) : (
@@ -841,7 +825,13 @@ export default async function DriverDetailPage({
         presence: (
           <div style={{ display: "grid", gap: 4 }}>
             <Pill theme={theme} tone={getPresenceTone(presence)} dot>
-              {formatOpsCodeLabel(locale, presence.status)}
+              {formatOpsCodeLabel(
+                locale,
+                (presence as PlatformPresenceRuntimeRecord).bindingStatus ??
+                  (presence.reauthRequired
+                    ? "reauth_required"
+                    : presence.status),
+              )}
             </Pill>
             {presence.reauthRequired ? (
               <Pill theme={theme} tone="warn">
@@ -889,7 +879,7 @@ export default async function DriverDetailPage({
             </span>
           </div>
         ),
-        actions: (
+        actions: hasAvailableActionsField(presence) ? (
           <DriverAvailableActions
             driverId={driver.driverId}
             workState={driver.workState}
@@ -897,14 +887,12 @@ export default async function DriverDetailPage({
             platformStatus={presence.status}
             statementPeriod={selectedPeriod}
             compact
-            actions={buildPlatformActions(
-              presence,
-              activeForwardedTasks.some(
-                (task) => task.platformCode === presence.platformCode,
-              ),
-              Boolean(activeSosIncident),
-            )}
+            actions={readAvailableActions(presence)}
           />
+        ) : (
+          <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+            {locale === "zh" ? "read-only" : "Read-only"}
+          </span>
         ),
       };
     },
@@ -1254,12 +1242,7 @@ export default async function DriverDetailPage({
     { h: locale === "zh" ? "ACTOR" : "ACTOR", k: "actor", w: 120, mono: true },
     { h: locale === "zh" ? "AUDIT" : "AUDIT", k: "requestId", w: 180 },
   ];
-  const driverActionDescriptors = buildDriverActions(
-    driver,
-    selectedPeriod,
-    suppression,
-    Boolean(activeSosIncident),
-  );
+  const driverActionDescriptors = readAvailableActions(driver);
 
   return (
     <>
@@ -1372,8 +1355,12 @@ export default async function DriverDetailPage({
             }
             body={
               locale === "zh"
-                ? `${activeSosIncident.incidentId} · 24h TTL（至 ${formatDateTime(locale, suppression?.expiresAt)}）· ops_manager 可延長。此頁所有 dispatch 影響動作已停用。`
-                : `${activeSosIncident.incidentId} · 24h TTL (until ${formatDateTime(locale, suppression?.expiresAt)}) · ops_manager may extend it. Dispatch-impacting actions on this page are paused.`
+                ? suppression?.expiresAt || inferredSosSuppressionExpiry
+                  ? `${activeSosIncident.incidentId} · 24h TTL（至 ${formatDateTime(locale, suppression?.expiresAt ?? inferredSosSuppressionExpiry)}）· ops_manager 可延長。此頁所有 dispatch 影響動作已停用。`
+                  : `${activeSosIncident.incidentId} · suppression 已啟用，但目前 contract 尚未回傳 TTL；請改從 incident / audit deep link 驗證。此頁所有 dispatch 影響動作已停用。`
+                : suppression?.expiresAt || inferredSosSuppressionExpiry
+                  ? `${activeSosIncident.incidentId} · 24h TTL (until ${formatDateTime(locale, suppression?.expiresAt ?? inferredSosSuppressionExpiry)}) · ops_manager may extend it. Dispatch-impacting actions on this page are paused.`
+                  : `${activeSosIncident.incidentId} · suppression is active, but the current contract does not expose TTL yet. Verify through the incident or audit deep links. Dispatch-impacting actions on this page are paused.`
             }
             actions={
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1394,6 +1381,22 @@ export default async function DriverDetailPage({
                   {locale === "zh" ? "在新分頁看 audit" : "Open audit in admin"}
                 </a>
               </div>
+            }
+          />
+        ) : driver.workState === "incident_hold" && !suppressionStateExposed ? (
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title={
+              locale === "zh"
+                ? "suppression read model 尚未佈建"
+                : "Suppression read model not provisioned"
+            }
+            body={
+              locale === "zh"
+                ? "目前 contract 尚未提供 DriverMatchingSuppression；請改從 incident / audit deep link 驗證實際 reason、TTL 與 source incident。"
+                : "The current contract does not expose DriverMatchingSuppression. Verify the active reason, TTL, and source incident through the incident or audit deep links."
             }
           />
         ) : null}
@@ -1566,10 +1569,7 @@ export default async function DriverDetailPage({
                   { k: locale === "zh" ? "姓名" : "Name", v: driver.name },
                   {
                     k: locale === "zh" ? "電話" : "Phone",
-                    v:
-                      locale === "zh"
-                        ? "目前 contract 未提供"
-                        : "Not exposed by the current contract",
+                    v: phoneSummary,
                   },
                   {
                     k: locale === "zh" ? "主狀態" : "Status",
@@ -1626,44 +1626,43 @@ export default async function DriverDetailPage({
                 : "Driven by availableActions"
             }
           >
-            <div style={{ display: "grid", gap: 12 }}>
-              <DriverAvailableActions
-                driverId={driver.driverId}
-                workState={driver.workState}
-                statementPeriod={selectedPeriod}
-                actions={driverActionDescriptors}
-              />
-              <div
-                style={{
-                  display: "grid",
-                  gap: 6,
-                  color: theme.textMuted,
-                  fontSize: 11.5,
-                }}
-              >
-                <div>
-                  {locale === "zh"
-                    ? "高風險動作會要求理由；目前 API 尚未承載 reason / TTL，因此頁面會保留確認，但以現有 endpoint 寫回。"
-                    : "High-risk actions require a reason. Current APIs do not yet persist reason / TTL, so the UI preserves confirmation while writing through the existing endpoint."}
-                </div>
-                <div>
-                  {locale === "zh"
-                    ? "Mutation audit 會透過新分頁 deep link 到 platform-admin。"
-                    : "Mutation audit opens through a new-tab deep link into platform-admin."}
-                </div>
-                <a
-                  href={platformAdminAuditHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={actionLinkStyle("ghost")}
+            {hasAvailableActionsField(driver) ? (
+              <div style={{ display: "grid", gap: 12 }}>
+                <DriverAvailableActions
+                  driverId={driver.driverId}
+                  workState={driver.workState}
+                  statementPeriod={selectedPeriod}
+                  actions={driverActionDescriptors}
+                />
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 6,
+                    color: theme.textMuted,
+                    fontSize: 11.5,
+                  }}
                 >
-                  <CanvasIcon name="ext" size={12} />
-                  {locale === "zh"
-                    ? "前往 Platform Admin /audit"
-                    : "Open Platform Admin /audit"}
-                </a>
+                  <div>
+                    {locale === "zh"
+                      ? "所有 CTA 與 disabled reason 直接讀取 backend `availableActions`。"
+                      : "Every CTA and disabled reason is read directly from backend `availableActions`."}
+                  </div>
+                  <a
+                    href={platformAdminAuditHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={actionLinkStyle("ghost")}
+                  >
+                    <CanvasIcon name="ext" size={12} />
+                    {locale === "zh"
+                      ? "前往 Platform Admin /audit"
+                      : "Open Platform Admin /audit"}
+                  </a>
+                </div>
               </div>
-            </div>
+            ) : (
+              renderEmptyState("not_provisioned", locale)
+            )}
           </Card>
         </section>
 
@@ -1680,8 +1679,8 @@ export default async function DriverDetailPage({
             value={String(presences.length)}
             sub={
               locale === "zh"
-                ? `${presences.filter((presence: PlatformPresenceRecord) => presence.status === "online").length} online`
-                : `${presences.filter((presence: PlatformPresenceRecord) => presence.status === "online").length} online`
+                ? `${presences.filter((presence: PlatformPresenceRuntimeRecord) => presence.status === "online").length} online`
+                : `${presences.filter((presence: PlatformPresenceRuntimeRecord) => presence.status === "online").length} online`
             }
           />
           <KPI
@@ -1689,11 +1688,12 @@ export default async function DriverDetailPage({
             label={locale === "zh" ? "需重新驗證" : "Re-auth required"}
             value={String(
               presences.filter(
-                (presence: PlatformPresenceRecord) => presence.reauthRequired,
+                (presence: PlatformPresenceRuntimeRecord) =>
+                  presence.reauthRequired,
               ).length,
             )}
             delta={
-              presences.some((presence: PlatformPresenceRecord) =>
+              presences.some((presence: PlatformPresenceRuntimeRecord) =>
                 tokenExpirySoon(presence),
               )
                 ? locale === "zh"

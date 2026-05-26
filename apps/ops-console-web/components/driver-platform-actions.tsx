@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  AuditLogRecord,
   DriverRegistryRecord,
   PlatformCode,
   PlatformPresenceStatus,
@@ -10,7 +11,12 @@ import type {
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
-import { CanvasBtn as Btn, buildCanvasTheme } from "@drts/ui-web";
+import {
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasIcon,
+  buildCanvasTheme,
+} from "@drts/ui-web";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -26,6 +32,12 @@ type DriverAvailableActionsProps = {
   platformStatus?: PlatformPresenceStatus;
   statementPeriod?: string;
   compact?: boolean;
+};
+
+type ActionReceiptState = {
+  action: string;
+  auditId: string | null;
+  requestId: string | null;
 };
 
 function formatReasonLabel(reason: string, locale: "en" | "zh") {
@@ -101,6 +113,33 @@ function getPendingLabel(action: string, locale: "en" | "zh") {
   }
 }
 
+function getActionAuditName(action: string) {
+  switch (action) {
+    case "force_offline":
+      return "force_offline";
+    case "request_reauth":
+      return "request_reauth";
+    case "suppress_matching":
+      return "suppress_matching";
+    case "lift_suppression":
+      return "lift_suppression";
+    case "generate_driver_statement":
+      return "generate_driver_statement";
+    default:
+      return action;
+  }
+}
+
+function buildAuditHref(auditId: string) {
+  const path = `/audit?auditId=${encodeURIComponent(auditId)}`;
+  const baseOrigin =
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN?.trim() ||
+    process.env.PROD_PLATFORM_ADMIN_ORIGIN?.trim() ||
+    "";
+
+  return baseOrigin ? `${baseOrigin.replace(/\/$/, "")}${path}` : path;
+}
+
 export function DriverAvailableActions({
   driverId,
   workState,
@@ -114,6 +153,7 @@ export function DriverAvailableActions({
   const router = useRouter();
   const { locale } = useTranslation();
   const [error, setError] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<ActionReceiptState | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
@@ -148,6 +188,8 @@ export function DriverAvailableActions({
 
     setPendingAction(action);
     setError(null);
+    setReceipt(null);
+    const startedAt = new Date().toISOString();
 
     try {
       switch (action) {
@@ -196,6 +238,38 @@ export function DriverAvailableActions({
         default:
           throw new Error(`Unsupported action: ${action}`);
       }
+
+      const latestAudit = (await client.listAuditLogs())
+        .filter((entry: AuditLogRecord) => {
+          if (entry.actionName !== getActionAuditName(action)) {
+            return false;
+          }
+          if (entry.createdAt < startedAt) {
+            return false;
+          }
+          if (action === "generate_driver_statement") {
+            return entry.newValuesSummary?.driverId === driverId;
+          }
+          if (platformCode) {
+            return (
+              entry.resourceId === `${driverId}:${platformCode}` ||
+              entry.newValuesSummary?.driverId === driverId
+            );
+          }
+          return (
+            entry.resourceId === driverId ||
+            entry.newValuesSummary?.driverId === driverId
+          );
+        })
+        .sort((left, right) =>
+          right.createdAt.localeCompare(left.createdAt),
+        )[0];
+
+      setReceipt({
+        action,
+        auditId: latestAudit?.auditId ?? null,
+        requestId: latestAudit?.requestId ?? null,
+      });
 
       startTransition(() => {
         router.refresh();
@@ -295,6 +369,48 @@ export function DriverAvailableActions({
         <div style={{ color: theme.danger, fontSize: compact ? 11 : 11.5 }}>
           {locale === "zh" ? "操作失敗" : "Action failed"}: {error}
         </div>
+      ) : null}
+
+      {receipt ? (
+        <Banner
+          theme={theme}
+          tone="success"
+          icon="audit"
+          title={
+            locale === "zh"
+              ? `${getActionLabel(receipt.action, locale)} 已送出`
+              : `${getActionLabel(receipt.action, locale)} submitted`
+          }
+          body={
+            receipt.auditId
+              ? locale === "zh"
+                ? `Audit 已建立：${receipt.auditId}`
+                : `Audit recorded: ${receipt.auditId}`
+              : locale === "zh"
+                ? `請用 requestId ${receipt.requestId ?? "—"} 追蹤後續 audit。`
+                : `Track the follow-up audit with requestId ${receipt.requestId ?? "—"}.`
+          }
+          actions={
+            receipt.auditId ? (
+              <a
+                href={buildAuditHref(receipt.auditId)}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  color: theme.text,
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: compact ? 11 : 12,
+                }}
+              >
+                <CanvasIcon name="ext" size={12} />
+                {locale === "zh" ? "View audit" : "View audit"}
+              </a>
+            ) : undefined
+          }
+        />
       ) : null}
     </div>
   );

@@ -1234,6 +1234,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
     command: UpdateDriverWorkStateCommand,
   ) {
     const driver = this.requireDriver(driverId);
+    const previousWorkState = driver.workState;
     driver.workState = command.workState;
     driver.updatedAt = new Date().toISOString();
     const updated = this.decorateDriver(driver);
@@ -1242,6 +1243,33 @@ export class RegulatoryRegistryService implements OnModuleInit {
         drivers: [this.cloneDriver(updated)],
       },
       "update_driver_work_state",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName:
+          previousWorkState === "incident_hold" &&
+          command.workState !== "incident_hold"
+            ? "lift_suppression"
+            : command.workState === "incident_hold"
+              ? "suppress_matching"
+              : "update_driver_work_state",
+        resourceType: "driver",
+        resourceId: driverId,
+        oldValuesSummary: {
+          workState: previousWorkState,
+        },
+        newValuesSummary: {
+          driverId,
+          workState: updated.workState,
+          dispatchEligible: updated.dispatchEligible,
+          eligibilityBlockedReasons: [...updated.eligibilityBlockedReasons],
+        },
+      },
+      `driver-work-state:${updated.updatedAt}:${driverId}`,
     );
     return this.cloneDriver(updated);
   }
