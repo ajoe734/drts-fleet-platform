@@ -1093,6 +1093,15 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     financeIssuesOk: financeIssuesOutcome.ok,
     mismatchCount,
   });
+  const pageActionByName = new Map<string, ResourceActionDescriptor>(
+    pageActions.map((descriptor) => [descriptor.action, descriptor]),
+  );
+  const filterPeriodDescriptor = pageActionByName.get("filterPeriod") ?? null;
+  const filterServiceBucketDescriptor =
+    pageActionByName.get("filterServiceBucket") ?? null;
+  const filterVehicleDescriptor = pageActionByName.get("filterVehicle") ?? null;
+  const openPlatformAdminPaymentsDescriptor =
+    pageActionByName.get("openPlatformAdminPayments") ?? null;
 
   const renderTabBody = () => {
     switch (tab) {
@@ -1171,14 +1180,16 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           title={t("revenue.banner.readOnlyTitle", locale)}
           body={t("revenue.banner.readOnlyBody", locale)}
           actions={
-            <CrossAppLink
-              href={crossAppHref(
-                platformAdminPaymentsLink(
-                  t("revenue.action.openPlatformAdminPayments", locale),
-                ),
-              )}
-              label={t("revenue.action.openPlatformAdminPayments", locale)}
-            />
+            openPlatformAdminPaymentsDescriptor?.enabled ? (
+              <CrossAppLink
+                href={crossAppHref(
+                  platformAdminPaymentsLink(
+                    t("revenue.action.openPlatformAdminPayments", locale),
+                  ),
+                )}
+                label={t("revenue.action.openPlatformAdminPayments", locale)}
+              />
+            ) : null
           }
         />
 
@@ -1233,14 +1244,27 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     const label = t(labelKey, locale);
     switch (descriptor.action) {
       case "refresh":
+        if (!descriptor.enabled) {
+          return (
+            <span
+              key={descriptor.action}
+              aria-disabled="true"
+              title={descriptor.disabledReasonCode}
+              style={{ display: "inline-flex" }}
+            >
+              <Btn theme={theme} icon="arrow" disabled>
+                {label}
+              </Btn>
+            </span>
+          );
+        }
         return (
           <Link
             key={descriptor.action}
             href={buildHref(filters, tab, { mismatch: mismatchId })}
             style={{ textDecoration: "none" }}
-            aria-disabled={!descriptor.enabled}
           >
-            <Btn theme={theme} icon="arrow" disabled={!descriptor.enabled}>
+            <Btn theme={theme} icon="arrow">
               {label}
             </Btn>
           </Link>
@@ -1289,49 +1313,62 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   }
 
   function renderFilterChips() {
+    // Per packet §3.5 (Q-X13) every filter CTA on this page is owned by an
+    // availableActions descriptor. When the descriptor is disabled (e.g.
+    // upstream orders feed degraded), the chip stops being a clickable link
+    // and surfaces the disabledReasonCode as a tooltip.
+    const periodActive = filterPeriodDescriptor?.enabled !== false;
+    const bucketActive = filterServiceBucketDescriptor?.enabled !== false;
+    const vehicleActive = filterVehicleDescriptor?.enabled !== false;
+    const periodReason = filterPeriodDescriptor?.disabledReasonCode;
+    const bucketReason = filterServiceBucketDescriptor?.disabledReasonCode;
+    const vehicleReason = filterVehicleDescriptor?.disabledReasonCode;
     return (
       <div style={filterRowStyle}>
-        <span style={{ fontSize: 11.5, color: theme.textMuted }}>
+        <span
+          style={{ fontSize: 11.5, color: theme.textMuted }}
+          title={!periodActive ? periodReason : undefined}
+        >
           {t("revenue.action.filterPeriod", locale)}
         </span>
-        {PERIOD_KEYS.map((p) => (
-          <Link
-            key={`period-${p}`}
-            href={buildHref(filters, tab, { period: p, mismatch: null })}
-            style={{ textDecoration: "none" }}
-          >
-            <Pill
-              theme={theme}
-              tone={p === filters.period ? "accent" : "neutral"}
-              dot={p === filters.period}
-            >
-              {t(`revenue.period.${p}`, locale)}
-            </Pill>
-          </Link>
-        ))}
-        <span style={{ fontSize: 11.5, color: theme.textMuted, marginLeft: 8 }}>
+        {PERIOD_KEYS.map((p) =>
+          renderFilterChip({
+            key: `period-${p}`,
+            enabled: periodActive,
+            disabledReason: periodReason,
+            href: buildHref(filters, tab, { period: p, mismatch: null }),
+            label: t(`revenue.period.${p}`, locale),
+            selected: p === filters.period,
+            showDot: true,
+          }),
+        )}
+        <span
+          style={{
+            fontSize: 11.5,
+            color: theme.textMuted,
+            marginLeft: 8,
+          }}
+          title={!bucketActive ? bucketReason : undefined}
+        >
           {t("revenue.action.filterServiceBucket", locale)}
         </span>
-        {(["all", "standard_taxi", "business_dispatch"] as const).map((sb) => (
-          <Link
-            key={`bucket-${sb}`}
-            href={buildHref(filters, tab, {
+        {(["all", "standard_taxi", "business_dispatch"] as const).map((sb) =>
+          renderFilterChip({
+            key: `bucket-${sb}`,
+            enabled: bucketActive,
+            disabledReason: bucketReason,
+            href: buildHref(filters, tab, {
               serviceBucket: sb,
               mismatch: null,
-            })}
-            style={{ textDecoration: "none" }}
-          >
-            <Pill
-              theme={theme}
-              tone={sb === filters.serviceBucket ? "accent" : "neutral"}
-              dot={sb === filters.serviceBucket}
-            >
-              {sb === "all"
+            }),
+            label:
+              sb === "all"
                 ? t("revenue.bucket.all", locale)
-                : t(`revenue.bucket.${sb}`, locale)}
-            </Pill>
-          </Link>
-        ))}
+                : t(`revenue.bucket.${sb}`, locale),
+            selected: sb === filters.serviceBucket,
+            showDot: true,
+          }),
+        )}
         {vehicleOptions.length > 0 ? (
           <>
             <span
@@ -1340,43 +1377,82 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                 color: theme.textMuted,
                 marginLeft: 8,
               }}
+              title={!vehicleActive ? vehicleReason : undefined}
             >
               {t("revenue.action.filterVehicle", locale)}
             </span>
-            <Link
-              href={buildHref(filters, tab, {
+            {renderFilterChip({
+              key: "vehicle-all",
+              enabled: vehicleActive,
+              disabledReason: vehicleReason,
+              href: buildHref(filters, tab, {
                 vehicleId: "all",
                 mismatch: null,
-              })}
-              style={{ textDecoration: "none" }}
-            >
-              <Pill
-                theme={theme}
-                tone={filters.vehicleId === "all" ? "accent" : "neutral"}
-              >
-                {t("revenue.vehicle.all", locale)}
-              </Pill>
-            </Link>
-            {vehicleOptions.slice(0, 8).map((vid) => (
-              <Link
-                key={`vehicle-${vid}`}
-                href={buildHref(filters, tab, {
+              }),
+              label: t("revenue.vehicle.all", locale),
+              selected: filters.vehicleId === "all",
+              showDot: false,
+            })}
+            {vehicleOptions.slice(0, 8).map((vid) =>
+              renderFilterChip({
+                key: `vehicle-${vid}`,
+                enabled: vehicleActive,
+                disabledReason: vehicleReason,
+                href: buildHref(filters, tab, {
                   vehicleId: vid,
                   mismatch: null,
-                })}
-                style={{ textDecoration: "none" }}
-              >
-                <Pill
-                  theme={theme}
-                  tone={vid === filters.vehicleId ? "accent" : "neutral"}
-                >
-                  {vid}
-                </Pill>
-              </Link>
-            ))}
+                }),
+                label: vid,
+                selected: vid === filters.vehicleId,
+                showDot: false,
+              }),
+            )}
           </>
         ) : null}
       </div>
+    );
+  }
+
+  function renderFilterChip(args: {
+    key: string;
+    enabled: boolean;
+    disabledReason: string | undefined;
+    href: string;
+    label: string;
+    selected: boolean;
+    showDot: boolean;
+  }) {
+    const tone = args.selected ? "accent" : "neutral";
+    const pill = args.enabled ? (
+      <Pill theme={theme} tone={tone} dot={args.showDot && args.selected}>
+        {args.label}
+      </Pill>
+    ) : (
+      <Pill
+        theme={theme}
+        tone={tone}
+        dot={args.showDot && args.selected}
+        style={{ opacity: 0.55 }}
+      >
+        {args.label}
+      </Pill>
+    );
+    if (!args.enabled) {
+      return (
+        <span
+          key={args.key}
+          aria-disabled="true"
+          title={args.disabledReason}
+          style={{ cursor: "not-allowed", display: "inline-flex" }}
+        >
+          {pill}
+        </span>
+      );
+    }
+    return (
+      <Link key={args.key} href={args.href} style={{ textDecoration: "none" }}>
+        {pill}
+      </Link>
     );
   }
 
@@ -1839,18 +1915,35 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       const label = t(`revenue.action.${descriptor.action}`, locale);
       switch (descriptor.action) {
         case "openMismatchDrawer":
+          if (!descriptor.enabled) {
+            return (
+              <span
+                key={descriptor.action}
+                aria-disabled="true"
+                title={descriptor.disabledReasonCode}
+                style={{ display: "inline-flex" }}
+              >
+                <Btn
+                  theme={theme}
+                  variant={row.isSelected ? "primary" : "secondary"}
+                  icon="arrow"
+                  disabled
+                >
+                  {label}
+                </Btn>
+              </span>
+            );
+          }
           return (
             <Link
               key={descriptor.action}
               href={buildHref(filters, "mismatch", { mismatch: row.jobId })}
               style={{ textDecoration: "none" }}
-              aria-disabled={!descriptor.enabled}
             >
               <Btn
                 theme={theme}
                 variant={row.isSelected ? "primary" : "secondary"}
                 icon="arrow"
-                disabled={!descriptor.enabled}
               >
                 {label}
               </Btn>
