@@ -94,6 +94,7 @@ type HealthPayload = {
 type BoardRecord = RuntimeOwnedOrder | RuntimeForwardedOrder;
 
 type BoardActionContext = {
+  action: string;
   href: string;
   label: string;
   riskLevel: ResourceActionDescriptor["riskLevel"];
@@ -875,15 +876,14 @@ function buildActionHref(
         return buildPlatformAdminHref(
           `/adapter-registry?platformCode=${encodeURIComponent(record.platformCode)}`,
         );
-      case "force_refresh":
-      case "sync_forwarded_order_status":
-        return buildDispatchHref({
+      default: {
+        const baseHref = buildDispatchHref({
           board,
           facet: selectedFacet,
           workItemId: record.mirrorOrderId,
         });
-      default:
-        return `/dispatch/${encodeURIComponent(record.mirrorOrderId)}?board=${board}&intent=${encodeURIComponent(action.action)}`;
+        return `${baseHref}${baseHref.includes("?") ? "&" : "?"}intent=${encodeURIComponent(action.action)}`;
+      }
     }
   }
 
@@ -939,6 +939,7 @@ function buildEmptyStateActionContext(
   }
 
   return {
+    action: action.action,
     href,
     label: resolveActionLabel(action.action, locale),
     riskLevel: action.riskLevel,
@@ -969,6 +970,7 @@ function buildActionContexts(
       href.startsWith("https://");
 
     return {
+      action: action.action,
       href,
       label: resolveActionLabel(action.action, locale),
       riskLevel: action.riskLevel,
@@ -1169,9 +1171,7 @@ function pickPrimaryAction(
   candidates: string[],
 ): BoardActionContext | null {
   for (const candidate of candidates) {
-    const matched = actions.find((action) =>
-      action.href.includes(`intent=${encodeURIComponent(candidate)}`),
-    );
+    const matched = actions.find((action) => action.action === candidate);
     if (matched && !matched.disabled) {
       return matched;
     }
@@ -1190,6 +1190,16 @@ function renderActionButton(
         {fallbackLabel}
       </Btn>
     ) : null;
+  }
+
+  if (action.disabled) {
+    return (
+      <Btn theme={theme} variant="secondary">
+        {action.label ??
+          fallbackLabel ??
+          (locale === "zh" ? "目前不可用" : "Unavailable")}
+      </Btn>
+    );
   }
 
   return (
@@ -1233,6 +1243,7 @@ function renderBoardSignalBanner({
     const inspectAdapter =
       pickPrimaryAction(selectedActions, ["inspect_adapter"]) ??
       ({
+        action: "inspect_adapter",
         href: buildPlatformAdminHref("/adapter-registry"),
         label: zh ? "查看 adapter ↗" : "Inspect adapter ↗",
         riskLevel: "low",
@@ -1862,7 +1873,11 @@ export default async function DispatchPage({
         mirror: (
           <div style={{ display: "grid", gap: 2 }}>
             <Link
-              href={`/dispatch/${encodeURIComponent(order.mirrorOrderId)}`}
+              href={buildDispatchHref({
+                board,
+                facet: selectedFacet,
+                workItemId: order.mirrorOrderId,
+              })}
               style={{
                 color: theme.accent,
                 fontWeight: 700,
