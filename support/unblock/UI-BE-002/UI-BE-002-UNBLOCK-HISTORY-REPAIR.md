@@ -6,7 +6,7 @@
 - Parent: `UI-BE-002`
 - Owner: `Codex2`
 - Reviewer: `Codex`
-- Audit timestamp: `2026-05-26`
+- Audit timestamp: `2026-05-26T13:50:00Z`
 
 ## Diagnosis
 
@@ -40,12 +40,18 @@ machine-truth transition, not by missing `/api/health` implementation.
    `2026-05-26T12:45:05Z` until this child task reopened the parent onto the
    clean `origin/codex2/ui-be-002` evidence branch and restored a concrete
    machine-truth next step.
+5. The child task's own closeout evidence was then misrecorded in machine truth:
+   reviewer feedback referenced nonexistent SHA
+   `99ef485eeb98567475f595c234b8d02155d06e77`, while the pushed owner branch,
+   local branch tip, and PR #305 all point to
+   `99ef485e250c7caafe55ed00500c27490984f6d0`. The remaining repair work is
+   therefore machine-truth evidence correction, not another git-history fix.
 
 ## Evidence
 
 ### Branch and worktree state
 
-- `origin/dev @ 070f9aea5a16f68c9352d81925a0b6bda3ae2e7c`
+- `origin/dev @ 070f9aea91e066ffce138b321e16dd8cda10828d`
 - local `codex/ui-be-002 @ 75f10e4c4098f37f3e46d3ba692da6d0e705db2f`
   in worktree
   `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-ui-be-002`
@@ -58,13 +64,22 @@ machine-truth transition, not by missing `/api/health` implementation.
   returning `7 13`
 - reviewer-lane `origin/codex/ui-be-002-unblock-history-repair @ affbc19bdcc745e89bf634ace7e289645fc8f19e`
   is the first pushed artifact commit for this child task
+- owner-lane `origin/codex2/ui-be-002-unblock-history-repair @ 99ef485e250c7caafe55ed00500c27490984f6d0`
+  is the actual pushed closeout commit for this child task and matches local
+  `HEAD` plus PR #305
 - `origin/codex/ui-be-002-sidecar-acceptance @ f37b2a2d2188e1ec835e45f2d5a4034195ccb86d`
 - `git ls-remote --heads origin` returns pushed refs for
-  `codex2/ui-be-002`, `gemini2/ui-be-002`,
+  `codex2/ui-be-002`, `codex2/ui-be-002-unblock-history-repair`,
+  `gemini2/ui-be-002`,
   `codex/ui-be-002-unblock-history-repair`, and
   `codex/ui-be-002-sidecar-acceptance`, but not for `codex/ui-be-002`
 - `gh pr list --head codex2/ui-be-002 --json number,title,headRefName,baseRefName,state,url`
   returns `[]`
+- `gh pr view 305 --json number,title,headRefName,baseRefName,state,url,commits`
+  returns PR `#305` on head `codex2/ui-be-002-unblock-history-repair`, base
+  `dev`, state `OPEN`, URL
+  `https://github.com/ajoe734/drts-fleet-platform/pull/305`, with single
+  commit `99ef485e250c7caafe55ed00500c27490984f6d0`
 
 ### Exact diff shape
 
@@ -100,6 +115,10 @@ machine-truth transition, not by missing `/api/health` implementation.
 - The original defect was the missing `review_approved` transition between the
   final review pass and the blocker creation; the parent has since been
   restored to a normal review state without rewriting any shared branch
+- The remaining child-task defect is a bad SHA in reviewer machine truth, not a
+  mismatched remote ref: `git show 99ef485eeb98567475f595c234b8d02155d06e77`
+  fails with `fatal: bad object`, while `git show 99ef485e250c...` resolves to
+  the pushed closeout commit
 
 ## Exact Contamination
 
@@ -118,6 +137,10 @@ The blockage is a four-part mismatch:
 4. Machine truth lost the final `review -> review_approved` transition, so the
    parent task is blocked even though the clean closeout commit
    `1c32aa1d545929a11b4916c067e86b11a253f598` is already pushed.
+5. The helper task handoff then cited a bogus child-task closeout SHA, which
+   made the reviewer think branch/PR history had drifted even though
+   `origin/codex2/ui-be-002-unblock-history-repair`, local `HEAD`, and PR #305
+   were all aligned on `99ef485e250c7caafe55ed00500c27490984f6d0`.
 
 ## Non-Destructive Repair Path
 
@@ -159,12 +182,21 @@ scripts/ai-status.sh done UI-BE-002 \
   "Owner finalized approved /api/health UiHealthEnvelope closeout on pushed branch origin/codex2/ui-be-002 at 1c32aa1d545929a11b4916c067e86b11a253f598; origin/gemini2/ui-be-002 remains audit-only contamination evidence and no force-push was required."
 ```
 
+7. Helper-task closeout evidence must reference the real pushed SHA:
+
+```bash
+AI_NAME=Codex2 scripts/ai-status.sh handoff UI-BE-002-UNBLOCK-HISTORY-REPAIR Codex \
+  "Updated unblock evidence to the real pushed owner SHA. Task-scoped closeout branch origin/codex2/ui-be-002-unblock-history-repair, local HEAD, and PR #305 all point to 99ef485e250c7caafe55ed00500c27490984f6d0; 99ef485eeb98567475f595c234b8d02155d06e77 is not a git object. Parent unblock diagnosis remains unchanged: use origin/codex2/ui-be-002 @ 1c32aa1d545929a11b4916c067e86b11a253f598 as the clean parent evidence branch and treat origin/gemini2/ui-be-002 as audit-only contamination evidence."
+```
+
 ## Why This Is Safe
 
 - No existing remote ref is rewritten.
 - No force-push is required.
 - The contaminated owner rail remains available for audit.
 - The clean repair rail remains the canonical pushed evidence branch.
+- The helper task's pushed closeout rail, PR, and local branch all agree on the
+  same real SHA, so the repair is only a metadata correction.
 - The parent is resumed by state-machine correction only, not by altering the
   already-pushed task commits.
 - The canonical unblock artifact can be replayed onto the owner branch for this
@@ -186,7 +218,10 @@ scripts/ai-status.sh done UI-BE-002 \
   - `git diff --name-only 5e76ec58..gemini2/ui-be-002`
   - `git diff --name-only origin/dev...codex2/ui-be-002`
   - `git diff --check origin/dev...codex2/ui-be-002`
-  - `git ls-remote --heads origin 'refs/heads/codex2/ui-be-002' 'refs/heads/gemini2/ui-be-002' 'refs/heads/codex/ui-be-002' 'refs/heads/codex/ui-be-002-sidecar-acceptance'`
+  - `git ls-remote --heads origin 'refs/heads/codex2/ui-be-002' 'refs/heads/codex2/ui-be-002-unblock-history-repair' 'refs/heads/gemini2/ui-be-002' 'refs/heads/codex/ui-be-002' 'refs/heads/codex/ui-be-002-sidecar-acceptance'`
   - `gh pr list --head codex2/ui-be-002 --json number,title,headRefName,baseRefName,state,url`
+  - `gh pr view 305 --json number,title,headRefName,baseRefName,state,url,commits`
+  - `git show --stat --summary 99ef485e250c7caafe55ed00500c27490984f6d0`
+  - `git show 99ef485eeb98567475f595c234b8d02155d06e77`
 - Confirmed machine-truth event ordering around the lost approval with:
   - `grep -n '"task_id": "UI-BE-002"' -B2 -A6 /home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl`
