@@ -43,6 +43,7 @@ const EMPTY_REASONS: EmptyReason[] = [
 type OwnerFilter = "all" | "mine" | "unassigned";
 type SeverityFilter = "all" | ComplaintCaseRecord["severity"];
 type SlaFilter = "all" | ComplaintSlaStatus;
+type ComplaintTab = "all" | "mine" | "breach" | "escalated";
 type ModalState =
   | {
       action: "create";
@@ -124,12 +125,12 @@ function toLabelFromSource(
   locale: "en" | "zh",
   source: ComplaintCaseRecord["caseSource"],
 ) {
-  const map = {
+  const map: Record<ComplaintCaseRecord["caseSource"], string> = {
     phone: locale === "en" ? "Phone" : "電話",
     web: locale === "en" ? "Tenant web" : "租戶 Web",
     app: locale === "en" ? "Passenger app" : "乘客 App",
     ops: locale === "en" ? "Ops" : "營運",
-  } as const;
+  };
   return map[source];
 }
 
@@ -196,6 +197,35 @@ function buildAuditLink(caseNo: string): CrossAppResourceLink {
   };
 }
 
+function normalizeComplaintTab(value: string | null): ComplaintTab | null {
+  if (
+    value === "all" ||
+    value === "mine" ||
+    value === "breach" ||
+    value === "escalated"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function findResourceLink(
+  record: ComplaintCaseRecord,
+  resourceType: CrossAppResourceLink["resourceType"],
+) {
+  return (record.resourceLinks ?? []).find(
+    (link) => link.resourceType === resourceType,
+  );
+}
+
+function formatElapsedHours(from: string, to: string) {
+  const diffHours = Math.max(
+    0,
+    (new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60),
+  );
+  return `${Math.round(diffHours)}h`;
+}
+
 function ActionPill({
   descriptor,
   locale,
@@ -219,11 +249,7 @@ function ActionPill({
   );
 }
 
-function ResourceLinkAnchor({
-  link,
-}: {
-  link: CrossAppResourceLink;
-}) {
+function ResourceLinkAnchor({ link }: { link: CrossAppResourceLink }) {
   const isExternal = link.openMode === "new_tab";
   const content = (
     <>
@@ -234,7 +260,12 @@ function ResourceLinkAnchor({
 
   if (isExternal) {
     return (
-      <a href={link.route} target="_blank" rel="noreferrer" className="link-chip">
+      <a
+        href={link.route}
+        target="_blank"
+        rel="noreferrer"
+        className="link-chip"
+      >
         {content}
       </a>
     );
@@ -255,9 +286,8 @@ export default function ComplaintsPage() {
   );
   const [selectedCaseNo, setSelectedCaseNo] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<ComplaintTimelineEntry[]>([]);
-  const [exportView, setExportView] = useState<ComplaintExportViewRecord | null>(
-    null,
-  );
+  const [exportView, setExportView] =
+    useState<ComplaintExportViewRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{
@@ -265,6 +295,9 @@ export default function ComplaintsPage() {
     link?: CrossAppResourceLink;
   } | null>(null);
   const [query, setQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<ComplaintTab>(
+    normalizeComplaintTab(searchParams.get("tab")) ?? "all",
+  );
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
   const [statusFilter, setStatusFilter] = useState<ComplaintCaseStatus | "all">(
     "all",
@@ -285,8 +318,17 @@ export default function ComplaintsPage() {
     useState<EscalateComplaintToIncidentCommand["severity"]>("medium");
   const [escalateReason, setEscalateReason] = useState("");
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
-  const forcedEmptyReason = normalizeEmptyReason(searchParams.get("emptyReason"));
+  const forcedEmptyReason = normalizeEmptyReason(
+    searchParams.get("emptyReason"),
+  );
   const caseNoFromQuery = searchParams.get("caseNo");
+
+  useEffect(() => {
+    const nextTab = normalizeComplaintTab(searchParams.get("tab"));
+    if (nextTab) {
+      setActiveTab(nextTab);
+    }
+  }, [searchParams]);
 
   const records = forcedEmptyReason ? [] : (workspace?.items ?? []);
   const selectedRecord =
@@ -407,6 +449,15 @@ export default function ComplaintsPage() {
   }
 
   const filteredRecords = records.filter((record) => {
+    if (activeTab === "mine" && record.assigneeId !== DEMO_ASSIGNEE) {
+      return false;
+    }
+    if (activeTab === "breach" && getRecordSlaStatus(record) !== "breached") {
+      return false;
+    }
+    if (activeTab === "escalated" && !record.relatedIncidentId) {
+      return false;
+    }
     if (ownerFilter === "mine" && record.assigneeId !== DEMO_ASSIGNEE) {
       return false;
     }
@@ -442,12 +493,35 @@ export default function ComplaintsPage() {
 
   const tabCounts = {
     all: records.length,
-    mine: records.filter((record) => record.assigneeId === DEMO_ASSIGNEE).length,
+    mine: records.filter((record) => record.assigneeId === DEMO_ASSIGNEE)
+      .length,
     breach: records.filter(
       (record) => getRecordSlaStatus(record) === "breached",
     ).length,
     escalated: records.filter((record) => record.relatedIncidentId).length,
   };
+  const openCasesCount = records.filter(
+    (record) => record.status !== "closed",
+  ).length;
+  const avgHandleHours = records.length
+    ? Math.round(
+        records.reduce((total, record) => {
+          return (
+            total +
+            (new Date(record.updatedAt).getTime() -
+              new Date(record.createdAt).getTime()) /
+              (1000 * 60 * 60)
+          );
+        }, 0) / records.length,
+      )
+    : 0;
+  const reopenRate = records.length
+    ? Math.round(
+        (records.filter((record) => record.reopenCount > 0).length /
+          records.length) *
+          100,
+      )
+    : 0;
   const staleAt = workspace
     ? new Date(workspace.refresh.generatedAt).getTime() +
       workspace.refresh.staleAfterMs
@@ -459,9 +533,7 @@ export default function ComplaintsPage() {
       clockTick > staleAt);
   const emptyReason =
     forcedEmptyReason ??
-    (!workspace && error
-      ? "fetch_failed"
-      : null) ??
+    (!workspace && error ? "fetch_failed" : null) ??
     ((workspace?.items.length ?? 0) === 0
       ? (workspace?.emptyState?.reason ?? "no_data")
       : filteredRecords.length === 0
@@ -478,23 +550,26 @@ export default function ComplaintsPage() {
   const modalRecord =
     modalState && "record" in modalState ? modalState.record : null;
 
-  async function handleAction(descriptor: ResourceActionDescriptor) {
-    if (!descriptor.enabled || !selectedRecord) {
+  async function handleAction(
+    descriptor: ResourceActionDescriptor,
+    targetRecord = selectedRecord,
+  ) {
+    if (!descriptor.enabled || !targetRecord) {
       return;
     }
 
     if (descriptor.action === "export_case_view") {
       await runBusyAction("export_case_view", async () => {
         const nextExportView = await getOpsClient().getComplaintExportView(
-          selectedRecord.caseNo,
+          targetRecord.caseNo,
         );
         setExportView(nextExportView);
         setNotice({
           message:
             locale === "en"
-              ? `${selectedRecord.caseNo} export packet refreshed.`
-              : `${selectedRecord.caseNo} 匯出封包已更新。`,
-          link: buildAuditLink(selectedRecord.caseNo),
+              ? `${targetRecord.caseNo} export packet refreshed.`
+              : `${targetRecord.caseNo} 匯出封包已更新。`,
+          link: buildAuditLink(targetRecord.caseNo),
         });
       });
       return;
@@ -502,8 +577,24 @@ export default function ComplaintsPage() {
 
     setModalState({
       action: descriptor.action as ModalState["action"],
-      record: selectedRecord,
+      record: targetRecord,
     });
+  }
+
+  function handleEmptyStateAction(descriptor?: ResourceActionDescriptor) {
+    if (!descriptor || descriptor.enabled === false) {
+      void loadWorkspace(selectedCaseNo ?? undefined);
+      return;
+    }
+    if (descriptor.action === "create_complaint") {
+      setModalState({ action: "create" });
+      return;
+    }
+    if (descriptor.action === "export_case_view" && selectedRecord) {
+      void handleAction(descriptor);
+      return;
+    }
+    void loadWorkspace(selectedCaseNo ?? undefined);
   }
 
   function renderEmptyState(reason: EmptyReason) {
@@ -516,63 +607,129 @@ export default function ComplaintsPage() {
       }
     > = {
       no_data: {
-        title: locale === "en" ? "No complaint case waiting." : "目前沒有待處理客訴。",
+        title:
+          locale === "en"
+            ? "No complaint case waiting."
+            : "目前沒有待處理客訴。",
         body:
           locale === "en"
             ? "Ops has no open case in the current workspace snapshot."
             : "目前的 workspace snapshot 中沒有 open complaint case。",
-        hint: locale === "en" ? "Create a complaint if intake happened outside the queue." : "若有脫離佇列的人工受理，可直接建立客訴。",
+        hint:
+          locale === "en"
+            ? "Create a complaint if intake happened outside the queue."
+            : "若有脫離佇列的人工受理，可直接建立客訴。",
       },
       not_provisioned: {
-        title: locale === "en" ? "Complaint workflow not provisioned." : "客訴流程尚未開通。",
+        title:
+          locale === "en"
+            ? "Complaint workflow not provisioned."
+            : "客訴流程尚未開通。",
         body:
           locale === "en"
             ? "This tenant or environment has not enabled complaint handling."
             : "此租戶或環境尚未啟用 complaint handling。",
-        hint: locale === "en" ? "Escalate to platform admin to enable the feature set." : "需由 platform admin 啟用對應功能集。",
+        hint:
+          locale === "en"
+            ? "Escalate to platform admin to enable the feature set."
+            : "需由 platform admin 啟用對應功能集。",
       },
       fetch_failed: {
-        title: locale === "en" ? "Workspace fetch failed." : "工作區資料抓取失敗。",
+        title:
+          locale === "en" ? "Workspace fetch failed." : "工作區資料抓取失敗。",
         body:
           locale === "en"
             ? "The backend did not return a valid complaints snapshot."
             : "後端未成功回傳 complaints snapshot。",
-        hint: locale === "en" ? "Retry or inspect the upstream complaint service." : "請重試或檢查上游 complaint service。",
+        hint:
+          locale === "en"
+            ? "Retry or inspect the upstream complaint service."
+            : "請重試或檢查上游 complaint service。",
       },
       permission_denied: {
-        title: locale === "en" ? "You do not have complaint scope." : "你沒有 complaints scope。",
+        title:
+          locale === "en"
+            ? "You do not have complaint scope."
+            : "你沒有 complaints scope。",
         body:
           locale === "en"
             ? "The current actor lacks permission to read this complaint workspace."
             : "目前 actor 沒有讀取此 complaint workspace 的權限。",
-        hint: locale === "en" ? "Request ops_compliance visibility." : "請申請 ops_compliance 可見權限。",
+        hint:
+          locale === "en"
+            ? "Request ops_compliance visibility."
+            : "請申請 ops_compliance 可見權限。",
       },
       external_unavailable: {
-        title: locale === "en" ? "External dependency unavailable." : "外部依賴不可用。",
+        title:
+          locale === "en"
+            ? "External dependency unavailable."
+            : "外部依賴不可用。",
         body:
           locale === "en"
             ? "A linked intake or recording dependency is currently degraded."
             : "受理或錄音相關依賴目前降級不可用。",
-        hint: locale === "en" ? "Stay in triage mode and refresh once upstream recovers." : "先維持 triage，待上游恢復後再刷新。",
+        hint:
+          locale === "en"
+            ? "Stay in triage mode and refresh once upstream recovers."
+            : "先維持 triage，待上游恢復後再刷新。",
+      },
+      driver_not_eligible: {
+        title:
+          locale === "en"
+            ? "Actor not eligible for this queue."
+            : "目前 actor 不符合此佇列資格。",
+        body:
+          locale === "en"
+            ? "This empty reason is uncommon for complaints, but the backend marked the actor as not eligible."
+            : "此 empty reason 在 complaints 中不常見，但 backend 回傳目前 actor 不具此佇列資格。",
+        hint:
+          locale === "en"
+            ? "Check role scope or workspace routing."
+            : "請檢查角色 scope 與 workspace 路由設定。",
       },
       filtered_empty: {
-        title: locale === "en" ? "Filters removed every result." : "目前篩選條件把結果全部排除了。",
+        title:
+          locale === "en"
+            ? "Filters removed every result."
+            : "目前篩選條件把結果全部排除了。",
         body:
           locale === "en"
             ? "The base queue has data, but the current owner / severity / SLA filters are too narrow."
             : "原始佇列有資料，但 owner / severity / SLA 篩選過窄。",
-        hint: locale === "en" ? "Reset one or more filters to continue triage." : "放寬條件後再繼續 triage。",
+        hint:
+          locale === "en"
+            ? "Reset one or more filters to continue triage."
+            : "放寬條件後再繼續 triage。",
       },
     };
 
-    const state = copy[reason];
+    const state = copy[reason] ?? copy.no_data;
+    const nextAction = workspace?.emptyState?.nextAction;
     return (
       <section className={`empty-state reason-${reason}`}>
         <div className="empty-icon">{reason.slice(0, 2).toUpperCase()}</div>
-        <div>
+        <div className="empty-copy">
           <h3>{state.title}</h3>
           <p>{state.body}</p>
           <small>{state.hint}</small>
+          <div className="empty-actions">
+            <button
+              type="button"
+              className="header-btn"
+              onClick={() => handleEmptyStateAction(nextAction)}
+              disabled={nextAction?.enabled === false}
+              title={getDisabledReason(locale, nextAction?.disabledReasonCode)}
+            >
+              {nextAction?.action === "create_complaint"
+                ? locale === "en"
+                  ? "Create complaint"
+                  : "建立客訴"
+                : locale === "en"
+                  ? "Refresh workspace"
+                  : "重新整理工作區"}
+            </button>
+          </div>
         </div>
       </section>
     );
@@ -594,7 +751,10 @@ export default function ComplaintsPage() {
               className="header-btn"
               onClick={() => setModalState({ action: "create" })}
               disabled={createAction?.enabled === false}
-              title={getDisabledReason(locale, createAction?.disabledReasonCode)}
+              title={getDisabledReason(
+                locale,
+                createAction?.disabledReasonCode,
+              )}
             >
               {locale === "en" ? "Create complaint" : "建立客訴"}
             </button>
@@ -607,7 +767,10 @@ export default function ComplaintsPage() {
                   ? locale === "en"
                     ? "Select a case first."
                     : "請先選擇案件。"
-                  : getDisabledReason(locale, exportPageAction?.disabledReasonCode)
+                  : getDisabledReason(
+                      locale,
+                      exportPageAction?.disabledReasonCode,
+                    )
               }
               onClick={() =>
                 selectedRecord
@@ -625,38 +788,70 @@ export default function ComplaintsPage() {
         }
       />
 
-      <section className="hero-row">
+      <section className="hero-shell">
         <div className="hero-copy">
-          <p className="eyebrow">T3 / 15s refresh</p>
+          <p className="eyebrow">Complaint Center</p>
           <h2>
             {locale === "en"
-              ? "Complaints list rebuilt around queue-first triage."
-              : "客訴頁面已改成 queue-first triage。"}
+              ? "Queue-first triage with SLA urgency and explicit escalation exits."
+              : "以 queue-first triage 呈現，SLA 緊急度與升級出口全部放在主畫面。"}
           </h2>
           <p>
             {locale === "en"
-              ? "Backend-computed SLA status, row-level authority, six empty reasons, and cross-app audit exits are visible on the surface."
-              : "頁面直接呈現 backend 計算的 SLA、row-level authority、六種 empty reason 與 cross-app audit 出口。"}
+              ? "T3 refresh, backend-computed SLA state, row-level availableActions, six empty reasons, and cross-app audit links are surfaced directly."
+              : "T3 刷新、backend 計算 SLA、row-level availableActions、六種 empty reason 與 cross-app audit 連結都直接露出。"}
           </p>
         </div>
-        <div className="kpi-grid">
-          <article className="kpi-card">
-            <span>{locale === "en" ? "Open queue" : "未結案件"}</span>
-            <strong>{tabCounts.all}</strong>
-          </article>
-          <article className="kpi-card breach">
-            <span>SLA breach</span>
-            <strong>{tabCounts.breach}</strong>
-          </article>
-          <article className="kpi-card">
-            <span>{locale === "en" ? "Assigned to me" : "我負責"}</span>
-            <strong>{tabCounts.mine}</strong>
-          </article>
-          <article className="kpi-card">
-            <span>{locale === "en" ? "Escalated" : "已升級事故"}</span>
-            <strong>{tabCounts.escalated}</strong>
-          </article>
+        <div className="hero-meta">
+          <span className="meta-pill">T3 / 15s</span>
+          <span className="meta-pill">
+            {locale === "en" ? "Source" : "來源"}{" "}
+            <strong>{workspace?.refresh.source ?? "live"}</strong>
+          </span>
+          <span className={`meta-pill ${isStale ? "warning" : ""}`}>
+            {locale === "en" ? "Freshness" : "新鮮度"}{" "}
+            <strong>{workspace?.refresh.dataFreshness ?? "unknown"}</strong>
+          </span>
         </div>
+      </section>
+
+      <section className="signal-grid">
+        <article className="signal-card">
+          <span>{locale === "en" ? "Open complaints" : "未結客訴"}</span>
+          <strong>{openCasesCount}</strong>
+          <small>
+            {locale === "en"
+              ? `${tabCounts.breach} SLA breach`
+              : `${tabCounts.breach} 件 SLA breach`}
+          </small>
+        </article>
+        <article className="signal-card">
+          <span>{locale === "en" ? "Avg handling" : "平均處理"}</span>
+          <strong>{avgHandleHours}h</strong>
+          <small>
+            {locale === "en"
+              ? "Created → updated"
+              : "依 created → updated 計算"}
+          </small>
+        </article>
+        <article className="signal-card breach">
+          <span>{locale === "en" ? "Escalated incidents" : "升級事故"}</span>
+          <strong>{tabCounts.escalated}</strong>
+          <small>
+            {locale === "en"
+              ? "Complaint → incident linkage"
+              : "客訴已連結 incident"}
+          </small>
+        </article>
+        <article className="signal-card">
+          <span>{locale === "en" ? "Reopen rate" : "reopen 率"}</span>
+          <strong>{reopenRate}%</strong>
+          <small>
+            {locale === "en"
+              ? `${records.filter((record) => record.reopenCount > 0).length} reopened cases`
+              : `${records.filter((record) => record.reopenCount > 0).length} 件曾 reopen`}
+          </small>
+        </article>
       </section>
 
       {isStale ? (
@@ -689,17 +884,35 @@ export default function ComplaintsPage() {
       ) : null}
 
       <section className="tabs-row">
-        <button type="button" className="tab-chip">
+        <button
+          type="button"
+          className={`tab-chip ${activeTab === "all" ? "active" : ""}`}
+          onClick={() => setActiveTab("all")}
+        >
           {locale === "en" ? "All" : "全部"} <strong>{tabCounts.all}</strong>
         </button>
-        <button type="button" className="tab-chip active">
-          {locale === "en" ? "Mine" : "我負責"} <strong>{tabCounts.mine}</strong>
+        <button
+          type="button"
+          className={`tab-chip ${activeTab === "mine" ? "active accent" : ""}`}
+          onClick={() => setActiveTab("mine")}
+        >
+          {locale === "en" ? "Mine" : "我負責"}{" "}
+          <strong>{tabCounts.mine}</strong>
         </button>
-        <button type="button" className="tab-chip danger">
+        <button
+          type="button"
+          className={`tab-chip ${activeTab === "breach" ? "active danger" : "danger"}`}
+          onClick={() => setActiveTab("breach")}
+        >
           SLA breach <strong>{tabCounts.breach}</strong>
         </button>
-        <button type="button" className="tab-chip">
-          {locale === "en" ? "Escalated" : "已升級"} <strong>{tabCounts.escalated}</strong>
+        <button
+          type="button"
+          className={`tab-chip ${activeTab === "escalated" ? "active" : ""}`}
+          onClick={() => setActiveTab("escalated")}
+        >
+          {locale === "en" ? "Escalated" : "已升級"}{" "}
+          <strong>{tabCounts.escalated}</strong>
         </button>
       </section>
 
@@ -707,14 +920,22 @@ export default function ComplaintsPage() {
         <input
           type="search"
           value={query}
-          placeholder={locale === "en" ? "Search case / order / call" : "搜尋案件 / 訂單 / 通話"}
+          placeholder={
+            locale === "en"
+              ? "Search case / order / call"
+              : "搜尋案件 / 訂單 / 通話"
+          }
           onChange={(event) => setQuery(event.target.value)}
         />
         <select
           value={ownerFilter}
-          onChange={(event) => setOwnerFilter(event.target.value as OwnerFilter)}
+          onChange={(event) =>
+            setOwnerFilter(event.target.value as OwnerFilter)
+          }
         >
-          <option value="all">{locale === "en" ? "All owners" : "所有負責人"}</option>
+          <option value="all">
+            {locale === "en" ? "All owners" : "所有負責人"}
+          </option>
           <option value="mine">{locale === "en" ? "Mine" : "我的案件"}</option>
           <option value="unassigned">
             {locale === "en" ? "Unassigned" : "未指派"}
@@ -726,7 +947,9 @@ export default function ComplaintsPage() {
             setStatusFilter(event.target.value as ComplaintCaseStatus | "all")
           }
         >
-          <option value="all">{locale === "en" ? "All status" : "所有狀態"}</option>
+          <option value="all">
+            {locale === "en" ? "All status" : "所有狀態"}
+          </option>
           {STATUS_OPTIONS.map((status) => (
             <option key={status} value={status}>
               {formatOpsCodeLabel(locale, status)}
@@ -741,7 +964,9 @@ export default function ComplaintsPage() {
             )
           }
         >
-          <option value="all">{locale === "en" ? "All severity" : "所有嚴重度"}</option>
+          <option value="all">
+            {locale === "en" ? "All severity" : "所有嚴重度"}
+          </option>
           <option value="normal">{locale === "en" ? "Normal" : "一般"}</option>
           <option value="high">{locale === "en" ? "High" : "高"}</option>
         </select>
@@ -751,7 +976,9 @@ export default function ComplaintsPage() {
             setSlaFilter(event.target.value as ComplaintSlaStatus | "all")
           }
         >
-          <option value="all">{locale === "en" ? "All SLA" : "所有 SLA"}</option>
+          <option value="all">
+            {locale === "en" ? "All SLA" : "所有 SLA"}
+          </option>
           <option value="within_sla">within_sla</option>
           <option value="warning">warning</option>
           <option value="breached">breached</option>
@@ -767,19 +994,40 @@ export default function ComplaintsPage() {
 
       {loading ? (
         <section className="loading-panel">
-          {locale === "en" ? "Loading complaint workspace..." : "載入 complaint workspace..."}
+          {locale === "en"
+            ? "Loading complaint workspace..."
+            : "載入 complaint workspace..."}
         </section>
       ) : emptyReason ? (
         renderEmptyState(emptyReason)
       ) : (
-        <section className="workspace-grid">
+        <section className="workspace-stack">
           <div className="list-card">
+            <div className="list-card-head">
+              <div>
+                <p className="eyebrow">
+                  {locale === "en" ? "Full list" : "完整案件佇列"}
+                </p>
+                <h3>{locale === "en" ? "Complaint queue" : "客訴案件佇列"}</h3>
+              </div>
+              <div className="table-hints">
+                <span>
+                  {locale === "en"
+                    ? `${filteredRecords.length} visible`
+                    : `${filteredRecords.length} 筆可見`}
+                </span>
+                <span>
+                  {locale === "en"
+                    ? "availableActions drive CTAs"
+                    : "CTA 由 availableActions 驅動"}
+                </span>
+              </div>
+            </div>
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>CASE</th>
-                    <th>{locale === "en" ? "Source" : "來源"}</th>
                     <th>{locale === "en" ? "Category" : "類別"}</th>
                     <th>SEV</th>
                     <th>{locale === "en" ? "Description" : "摘要"}</th>
@@ -789,20 +1037,50 @@ export default function ComplaintsPage() {
                     <th>{locale === "en" ? "Owner" : "負責人"}</th>
                     <th>{locale === "en" ? "Status" : "狀態"}</th>
                     <th>{locale === "en" ? "Updated" : "更新時間"}</th>
+                    <th>{locale === "en" ? "Actions" : "動作"}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRecords.map((record) => (
                     <tr
                       key={record.caseNo}
-                      className={record.caseNo === selectedCaseNo ? "selected" : ""}
+                      className={[
+                        record.caseNo === selectedCaseNo ? "selected" : "",
+                        getRecordSlaStatus(record) === "breached"
+                          ? "row-breached"
+                          : "",
+                        record.reopenCount > 0 ? "row-reopened" : "",
+                      ].join(" ")}
                       onClick={() => setSelectedCaseNo(record.caseNo)}
                     >
-                      <td className="mono accent">{record.caseNo}</td>
-                      <td>{toLabelFromSource(locale, record.caseSource)}</td>
-                      <td>{formatOpsCodeLabel(locale, record.category)}</td>
+                      <td className="summary-cell">
+                        <Link
+                          href={`/complaints/${record.caseNo}`}
+                          className="mono accent inline-link"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {record.caseNo}
+                        </Link>
+                        <small>
+                          {toLabelFromSource(locale, record.caseSource)}
+                        </small>
+                      </td>
                       <td>
-                        <span className={`pill ${toneForSeverity(record.severity)}`}>
+                        <strong>
+                          {formatOpsCodeLabel(locale, record.category)}
+                        </strong>
+                        {record.relatedIncidentId ? (
+                          <small>
+                            {locale === "en"
+                              ? "Escalated to incident"
+                              : "已升級事故"}
+                          </small>
+                        ) : null}
+                      </td>
+                      <td>
+                        <span
+                          className={`pill ${toneForSeverity(record.severity)}`}
+                        >
                           {record.severity}
                         </span>
                       </td>
@@ -816,10 +1094,49 @@ export default function ComplaintsPage() {
                           </small>
                         ) : null}
                       </td>
-                      <td className="mono">{record.relatedOrderId ?? "—"}</td>
-                      <td className="mono">{record.relatedCallId ?? "—"}</td>
+                      <td className="mono">
+                        {record.relatedOrderId ? (
+                          <ResourceLinkAnchor
+                            link={
+                              findResourceLink(
+                                record,
+                                "dispatch_work_item",
+                              ) ?? {
+                                targetApp: "ops-console",
+                                route: `/dispatch/${record.relatedOrderId}`,
+                                resourceType: "dispatch_work_item",
+                                resourceId: record.relatedOrderId,
+                                openMode: "same_tab",
+                                label: record.relatedOrderId,
+                              }
+                            }
+                          />
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="mono">
+                        {record.relatedCallId ? (
+                          <ResourceLinkAnchor
+                            link={
+                              findResourceLink(record, "call_session") ?? {
+                                targetApp: "ops-console",
+                                route: `/callcenter?callId=${encodeURIComponent(record.relatedCallId)}`,
+                                resourceType: "call_session",
+                                resourceId: record.relatedCallId,
+                                openMode: "same_tab",
+                                label: record.relatedCallId,
+                              }
+                            }
+                          />
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td>
-                        <span className={`pill ${toneForSla(getRecordSlaStatus(record))}`}>
+                        <span
+                          className={`pill ${toneForSla(getRecordSlaStatus(record))}`}
+                        >
                           {getRecordSlaStatus(record)}
                         </span>
                         <small>
@@ -835,11 +1152,38 @@ export default function ComplaintsPage() {
                           (locale === "en" ? "unassigned" : "未指派")}
                       </td>
                       <td>
-                        <span className={`pill ${toneForStatus(record.status)}`}>
+                        <span
+                          className={`pill ${toneForStatus(record.status)}`}
+                        >
                           {record.status}
                         </span>
                       </td>
                       <td>{formatDateTime(record.updatedAt)}</td>
+                      <td>
+                        <div className="row-actions">
+                          {(record.availableActions ?? [])
+                            .slice(0, 3)
+                            .map((descriptor) => (
+                              <button
+                                key={`${record.caseNo}-${descriptor.action}`}
+                                type="button"
+                                className={`row-action row-risk-${descriptor.riskLevel}`}
+                                disabled={!descriptor.enabled}
+                                title={getDisabledReason(
+                                  locale,
+                                  descriptor.disabledReasonCode,
+                                )}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedCaseNo(record.caseNo);
+                                  void handleAction(descriptor, record);
+                                }}
+                              >
+                                {descriptor.action.replaceAll("_", " ")}
+                              </button>
+                            ))}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -847,16 +1191,19 @@ export default function ComplaintsPage() {
             </div>
           </div>
 
-          <aside className="detail-column">
+          <section className="selection-grid">
             {selectedRecord ? (
               <>
-                <section className="detail-card">
+                <section className="detail-card summary-panel">
                   <div className="detail-head">
                     <div>
                       <p className="eyebrow">
                         {locale === "en" ? "Selected complaint" : "已選取案件"}
                       </p>
                       <h3>{selectedRecord.caseNo}</h3>
+                      <p className="detail-description">
+                        {selectedRecord.description}
+                      </p>
                     </div>
                     <div className="head-badges">
                       <span
@@ -866,20 +1213,32 @@ export default function ComplaintsPage() {
                       >
                         {getRecordSlaStatus(selectedRecord)}
                       </span>
-                      <span className={`pill ${toneForStatus(selectedRecord.status)}`}>
+                      <span
+                        className={`pill ${toneForStatus(selectedRecord.status)}`}
+                      >
                         {selectedRecord.status}
                       </span>
+                      {selectedRecord.reopenCount > 0 ? (
+                        <span className="pill warning">
+                          {locale === "en"
+                            ? `reopen ×${selectedRecord.reopenCount}`
+                            : `reopen ×${selectedRecord.reopenCount}`}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
-                  <p className="detail-description">{selectedRecord.description}</p>
                   <dl className="meta-grid">
                     <div>
                       <dt>{locale === "en" ? "Source" : "來源"}</dt>
-                      <dd>{toLabelFromSource(locale, selectedRecord.caseSource)}</dd>
+                      <dd>
+                        {toLabelFromSource(locale, selectedRecord.caseSource)}
+                      </dd>
                     </div>
                     <div>
                       <dt>{locale === "en" ? "Category" : "類別"}</dt>
-                      <dd>{formatOpsCodeLabel(locale, selectedRecord.category)}</dd>
+                      <dd>
+                        {formatOpsCodeLabel(locale, selectedRecord.category)}
+                      </dd>
                     </div>
                     <div>
                       <dt>{locale === "en" ? "Severity" : "嚴重度"}</dt>
@@ -894,15 +1253,36 @@ export default function ComplaintsPage() {
                       <dd>{formatDateTime(selectedRecord.slaDueAt)}</dd>
                     </div>
                     <div>
+                      <dt>
+                        {locale === "en" ? "Reopen count" : "reopen 次數"}
+                      </dt>
+                      <dd>{selectedRecord.reopenCount}</dd>
+                    </div>
+                    <div>
+                      <dt>{locale === "en" ? "Created" : "建立時間"}</dt>
+                      <dd>{formatDateTime(selectedRecord.createdAt)}</dd>
+                    </div>
+                    <div>
                       <dt>{locale === "en" ? "Last update" : "最後更新"}</dt>
                       <dd>{formatDateTime(selectedRecord.updatedAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>{locale === "en" ? "Handling age" : "處理時長"}</dt>
+                      <dd>
+                        {formatElapsedHours(
+                          selectedRecord.createdAt,
+                          selectedRecord.updatedAt,
+                        )}
+                      </dd>
                     </div>
                   </dl>
                 </section>
 
-                <section className="detail-card">
+                <section className="detail-card action-panel">
                   <div className="section-head">
-                    <h4>{locale === "en" ? "Available actions" : "可用動作"}</h4>
+                    <h4>
+                      {locale === "en" ? "Available actions" : "可用動作"}
+                    </h4>
                     <small>
                       {locale === "en"
                         ? "Driven by availableActions"
@@ -910,22 +1290,40 @@ export default function ComplaintsPage() {
                     </small>
                   </div>
                   <div className="actions-grid">
-                    {(selectedRecord.availableActions ?? []).map((descriptor) => (
-                      <ActionPill
-                        key={`${selectedRecord.caseNo}-${descriptor.action}`}
-                        descriptor={descriptor}
-                        locale={locale}
-                        onClick={() => void handleAction(descriptor)}
-                      />
-                    ))}
+                    {(selectedRecord.availableActions ?? []).map(
+                      (descriptor) => (
+                        <ActionPill
+                          key={`${selectedRecord.caseNo}-${descriptor.action}`}
+                          descriptor={descriptor}
+                          locale={locale}
+                          onClick={() => void handleAction(descriptor)}
+                        />
+                      ),
+                    )}
+                  </div>
+                  <div className="detail-links">
+                    <Link
+                      href={`/complaints/${selectedRecord.caseNo}`}
+                      className="inline-link"
+                    >
+                      {locale === "en" ? "Open detail route" : "開啟詳情頁"}
+                    </Link>
+                    <ResourceLinkAnchor
+                      link={
+                        findResourceLink(selectedRecord, "audit_log") ??
+                        buildAuditLink(selectedRecord.caseNo)
+                      }
+                    />
                   </div>
                 </section>
 
                 <section className="detail-card">
                   <div className="section-head">
-                    <h4>{locale === "en" ? "Links" : "連結"}</h4>
+                    <h4>{locale === "en" ? "Linked entities" : "關聯實體"}</h4>
                     <small>
-                      {locale === "en" ? "Cross-app links open in a new tab" : "跨 app 連結會以新分頁開啟"}
+                      {locale === "en"
+                        ? "Cross-app links open in a new tab"
+                        : "跨 app 連結會以新分頁開啟"}
                     </small>
                   </div>
                   <div className="links-wrap">
@@ -941,13 +1339,16 @@ export default function ComplaintsPage() {
                     <small>{timeline.length}</small>
                   </div>
                   <div className="timeline-list">
-                    {timeline.slice(-5).reverse().map((entry) => (
-                      <article key={entry.entryId} className="timeline-item">
-                        <strong>{entry.action}</strong>
-                        <p>{entry.note}</p>
-                        <small>{formatDateTime(entry.createdAt)}</small>
-                      </article>
-                    ))}
+                    {timeline
+                      .slice(-5)
+                      .reverse()
+                      .map((entry) => (
+                        <article key={entry.entryId} className="timeline-item">
+                          <strong>{entry.action}</strong>
+                          <p>{entry.note}</p>
+                          <small>{formatDateTime(entry.createdAt)}</small>
+                        </article>
+                      ))}
                   </div>
                 </section>
 
@@ -966,18 +1367,23 @@ export default function ComplaintsPage() {
                   </div>
                   <div className="export-box">
                     <span>{formatDateTime(exportView?.exportGeneratedAt)}</span>
-                    <ResourceLinkAnchor link={buildAuditLink(selectedRecord.caseNo)} />
+                    <ResourceLinkAnchor
+                      link={
+                        findResourceLink(selectedRecord, "audit_log") ??
+                        buildAuditLink(selectedRecord.caseNo)
+                      }
+                    />
                   </div>
                 </section>
               </>
             ) : (
-              <section className="detail-card">
+              <section className="detail-card empty-selection">
                 {locale === "en"
                   ? "Select a complaint row to inspect actions, links, and timeline."
                   : "選擇一筆客訴案件以檢視動作、連結與時間軸。"}
               </section>
             )}
-          </aside>
+          </section>
         </section>
       )}
 
@@ -1001,7 +1407,8 @@ export default function ComplaintsPage() {
                 onSubmit={(event) => {
                   event.preventDefault();
                   void runBusyAction("create_complaint", async () => {
-                    const created = await getOpsClient().createComplaint(createForm);
+                    const created =
+                      await getOpsClient().createComplaint(createForm);
                     setCreateForm(INITIAL_CREATE_FORM);
                     await loadWorkspace(created.caseNo);
                     setNotice({
@@ -1034,17 +1441,24 @@ export default function ComplaintsPage() {
                   onChange={(event) =>
                     setCreateForm((current) => ({
                       ...current,
-                      severity: event.target.value as CreateComplaintCaseCommand["severity"],
+                      severity: event.target
+                        .value as CreateComplaintCaseCommand["severity"],
                     }))
                   }
                 >
-                  <option value="normal">{locale === "en" ? "Normal" : "一般"}</option>
-                  <option value="high">{locale === "en" ? "High" : "高"}</option>
+                  <option value="normal">
+                    {locale === "en" ? "Normal" : "一般"}
+                  </option>
+                  <option value="high">
+                    {locale === "en" ? "High" : "高"}
+                  </option>
                 </select>
                 <textarea
                   rows={4}
                   required
-                  placeholder={locale === "en" ? "Complaint description" : "客訴描述"}
+                  placeholder={
+                    locale === "en" ? "Complaint description" : "客訴描述"
+                  }
                   value={createForm.description}
                   onChange={(event) =>
                     setCreateForm((current) => ({
@@ -1075,7 +1489,11 @@ export default function ComplaintsPage() {
                     }))
                   }
                 />
-                <button type="submit" className="header-btn" disabled={busyAction === "create_complaint"}>
+                <button
+                  type="submit"
+                  className="header-btn"
+                  disabled={busyAction === "create_complaint"}
+                >
                   {locale === "en" ? "Create" : "建立"}
                 </button>
               </form>
@@ -1114,7 +1532,11 @@ export default function ComplaintsPage() {
                   value={assignmentNote}
                   onChange={(event) => setAssignmentNote(event.target.value)}
                 />
-                <button type="submit" className="header-btn" disabled={busyAction === "assign_complaint"}>
+                <button
+                  type="submit"
+                  className="header-btn"
+                  disabled={busyAction === "assign_complaint"}
+                >
                   {locale === "en" ? "Confirm assign" : "確認指派"}
                 </button>
               </form>
@@ -1147,7 +1569,11 @@ export default function ComplaintsPage() {
                   value={noteText}
                   onChange={(event) => setNoteText(event.target.value)}
                 />
-                <button type="submit" className="header-btn" disabled={busyAction === "add_note"}>
+                <button
+                  type="submit"
+                  className="header-btn"
+                  disabled={busyAction === "add_note"}
+                >
                   {locale === "en" ? "Save note" : "儲存備註"}
                 </button>
               </form>
@@ -1166,9 +1592,15 @@ export default function ComplaintsPage() {
                       closingNote,
                     };
                     if (modalState.action === "resolve_complaint") {
-                      await getOpsClient().resolveComplaint(modalRecord.caseNo, command);
+                      await getOpsClient().resolveComplaint(
+                        modalRecord.caseNo,
+                        command,
+                      );
                     } else {
-                      await getOpsClient().closeComplaint(modalRecord.caseNo, command);
+                      await getOpsClient().closeComplaint(
+                        modalRecord.caseNo,
+                        command,
+                      );
                     }
                     setClosingNote("");
                     await loadWorkspace(modalRecord.caseNo);
@@ -1196,7 +1628,11 @@ export default function ComplaintsPage() {
                   placeholder={locale === "en" ? "Closing note" : "結案說明"}
                   onChange={(event) => setClosingNote(event.target.value)}
                 />
-                <button type="submit" className="header-btn" disabled={busyAction === modalState.action}>
+                <button
+                  type="submit"
+                  className="header-btn"
+                  disabled={busyAction === modalState.action}
+                >
                   {locale === "en" ? "Confirm" : "確認"}
                 </button>
               </form>
@@ -1227,10 +1663,16 @@ export default function ComplaintsPage() {
                   rows={4}
                   required
                   value={reopenReason}
-                  placeholder={locale === "en" ? "Reason is required" : "必填原因"}
+                  placeholder={
+                    locale === "en" ? "Reason is required" : "必填原因"
+                  }
                   onChange={(event) => setReopenReason(event.target.value)}
                 />
-                <button type="submit" className="header-btn" disabled={busyAction === "reopen_complaint"}>
+                <button
+                  type="submit"
+                  className="header-btn"
+                  disabled={busyAction === "reopen_complaint"}
+                >
                   {locale === "en" ? "Reopen" : "重新開啟"}
                 </button>
               </form>
@@ -1242,14 +1684,15 @@ export default function ComplaintsPage() {
                 onSubmit={(event) => {
                   event.preventDefault();
                   void runBusyAction("escalate_to_incident", async () => {
-                    const result = await getOpsClient().escalateComplaintToIncident(
-                      modalRecord.caseNo,
-                      {
-                        title: escalateTitle,
-                        severity: escalateSeverity,
-                        reason: escalateReason,
-                      },
-                    );
+                    const result =
+                      await getOpsClient().escalateComplaintToIncident(
+                        modalRecord.caseNo,
+                        {
+                          title: escalateTitle,
+                          severity: escalateSeverity,
+                          reason: escalateReason,
+                        },
+                      );
                     setEscalateTitle("");
                     setEscalateReason("");
                     setEscalateSeverity("medium");
@@ -1282,7 +1725,8 @@ export default function ComplaintsPage() {
                   value={escalateSeverity}
                   onChange={(event) =>
                     setEscalateSeverity(
-                      event.target.value as EscalateComplaintToIncidentCommand["severity"],
+                      event.target
+                        .value as EscalateComplaintToIncidentCommand["severity"],
                     )
                   }
                 >
@@ -1294,11 +1738,17 @@ export default function ComplaintsPage() {
                 <textarea
                   rows={4}
                   required
-                  placeholder={locale === "en" ? "Escalation reason" : "升級原因"}
+                  placeholder={
+                    locale === "en" ? "Escalation reason" : "升級原因"
+                  }
                   value={escalateReason}
                   onChange={(event) => setEscalateReason(event.target.value)}
                 />
-                <button type="submit" className="header-btn" disabled={busyAction === "escalate_to_incident"}>
+                <button
+                  type="submit"
+                  className="header-btn"
+                  disabled={busyAction === "escalate_to_incident"}
+                >
                   {locale === "en" ? "Escalate" : "升級"}
                 </button>
               </form>
@@ -1309,80 +1759,128 @@ export default function ComplaintsPage() {
 
       <style jsx>{`
         .complaints-page {
-          padding: 24px;
           background:
-            radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 28%),
-            linear-gradient(180deg, #f7fafc 0%, #eef3f7 100%);
+            radial-gradient(
+              circle at top left,
+              rgba(244, 114, 62, 0.18),
+              transparent 24%
+            ),
+            radial-gradient(
+              circle at right top,
+              rgba(15, 118, 110, 0.08),
+              transparent 20%
+            ),
+            linear-gradient(180deg, #f7f2eb 0%, #efe6d9 100%);
           min-height: 100%;
+          padding: 24px;
+          color: #1f2937;
+        }
+        .complaints-page :global(*) {
+          box-sizing: border-box;
         }
         .header-actions,
         .tabs-row,
         .toolbar,
-        .hero-row,
-        .kpi-grid,
-        .workspace-grid,
         .actions-grid,
         .links-wrap {
           display: flex;
           gap: 12px;
         }
-        .hero-row,
-        .workspace-grid {
-          align-items: stretch;
+        .hero-shell,
+        .signal-grid,
+        .selection-grid,
+        .workspace-stack {
+          display: grid;
+          gap: 16px;
         }
-        .hero-row {
-          margin: 16px 0;
-          justify-content: space-between;
+        .hero-shell {
+          grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
+          align-items: end;
+          margin: 18px 0 16px;
         }
         .hero-copy,
         .list-card,
         .detail-card,
-        .kpi-card,
+        .signal-card,
         .loading-panel,
         .empty-state,
         .modal-card {
-          border: 1px solid rgba(15, 23, 42, 0.08);
-          border-radius: 20px;
-          background: rgba(255, 255, 255, 0.92);
-          box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
+          border: 1px solid rgba(140, 94, 63, 0.16);
+          border-radius: 24px;
+          background: rgba(255, 251, 246, 0.92);
+          box-shadow: 0 20px 60px rgba(89, 55, 24, 0.09);
         }
         .hero-copy {
-          flex: 1;
-          padding: 24px;
+          padding: 28px;
+        }
+        .hero-copy p:last-child {
+          max-width: 60ch;
+          margin-bottom: 0;
         }
         .hero-copy h2,
         .detail-head h3,
         .empty-state h3 {
           margin: 0 0 8px;
+          font-size: clamp(1.6rem, 3vw, 2.35rem);
+          line-height: 1.05;
         }
         .eyebrow {
           margin: 0 0 8px;
           font-size: 11px;
           letter-spacing: 0.12em;
           text-transform: uppercase;
-          color: #2563eb;
+          color: #c2410c;
           font-weight: 700;
         }
-        .kpi-grid {
-          width: min(440px, 100%);
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+        .hero-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          align-content: start;
+          justify-content: flex-end;
         }
-        .kpi-card {
+        .meta-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 14px;
+          border-radius: 999px;
+          background: rgba(255, 248, 241, 0.88);
+          border: 1px solid rgba(140, 94, 63, 0.16);
+          font-size: 12px;
+          color: #7c2d12;
+        }
+        .meta-pill.warning {
+          background: #fff1df;
+          color: #9a3412;
+        }
+        .signal-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+        .signal-card {
           padding: 18px;
         }
-        .kpi-card span {
+        .signal-card span {
           display: block;
           font-size: 12px;
-          color: #64748b;
+          color: #7c5a3b;
         }
-        .kpi-card strong {
+        .signal-card strong {
           display: block;
           margin-top: 8px;
           font-size: 28px;
         }
-        .kpi-card.breach {
-          background: linear-gradient(135deg, #fff1f2, #ffffff);
+        .signal-card small {
+          display: block;
+          margin-top: 6px;
+          color: #8a6f52;
+        }
+        .signal-card.breach {
+          background: linear-gradient(
+            135deg,
+            rgba(255, 240, 231, 0.98),
+            rgba(255, 251, 246, 0.98)
+          );
         }
         .banner {
           display: flex;
@@ -1391,57 +1889,68 @@ export default function ComplaintsPage() {
           gap: 16px;
           margin: 12px 0;
           padding: 12px 16px;
-          border-radius: 14px;
+          border-radius: 18px;
           font-size: 13px;
         }
         .banner.stale {
-          background: #fff7ed;
+          background: #fff4e7;
           color: #9a3412;
+          border: 1px solid rgba(194, 65, 12, 0.18);
         }
         .banner.error {
           background: #fef2f2;
           color: #991b1b;
+          border: 1px solid rgba(153, 27, 27, 0.16);
         }
         .banner.notice {
-          background: #eff6ff;
-          color: #1d4ed8;
+          background: #fff7ed;
+          color: #9a3412;
+          border: 1px solid rgba(194, 65, 12, 0.18);
         }
         .tab-chip,
         .header-btn,
         .text-btn,
         .action-pill,
-        .link-chip {
+        .link-chip,
+        .row-action {
           border: 0;
           border-radius: 999px;
           cursor: pointer;
-          transition: transform 120ms ease, opacity 120ms ease;
+          transition:
+            transform 120ms ease,
+            opacity 120ms ease;
         }
         .tab-chip,
         .header-btn,
-        .action-pill {
+        .action-pill,
+        .row-action {
           padding: 10px 14px;
         }
         .tab-chip {
-          background: rgba(255, 255, 255, 0.84);
-          color: #0f172a;
+          background: rgba(255, 248, 241, 0.92);
+          color: #3f2c1f;
+          border: 1px solid rgba(140, 94, 63, 0.14);
         }
         .tab-chip.active {
-          background: #dbeafe;
-          color: #1d4ed8;
+          background: #f4b183;
+          color: #4a1d0b;
+        }
+        .tab-chip.accent {
+          background: #f7d7bf;
         }
         .tab-chip.danger {
-          background: #fee2e2;
-          color: #b91c1c;
+          background: #ffe1d6;
+          color: #b42318;
         }
         .header-btn {
-          background: #0f172a;
+          background: #111827;
           color: white;
           font-weight: 600;
         }
         .header-btn.secondary {
-          background: white;
-          color: #0f172a;
-          border: 1px solid rgba(15, 23, 42, 0.12);
+          background: rgba(255, 251, 246, 0.98);
+          color: #1f2937;
+          border: 1px solid rgba(140, 94, 63, 0.18);
         }
         .toolbar {
           margin: 16px 0;
@@ -1471,36 +1980,59 @@ export default function ComplaintsPage() {
           align-items: center;
           gap: 18px;
         }
+        .empty-copy {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .empty-actions {
+          margin-top: 6px;
+        }
         .empty-icon {
           width: 72px;
           height: 72px;
           border-radius: 24px;
           display: grid;
           place-items: center;
-          background: rgba(15, 23, 42, 0.06);
+          background: rgba(194, 65, 12, 0.08);
           font-weight: 800;
           letter-spacing: 0.08em;
+          color: #c2410c;
         }
-        .workspace-grid {
-          display: grid;
-          grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.9fr);
+        .workspace-stack {
+          margin-top: 12px;
         }
-        .list-card,
-        .detail-column {
-          min-width: 0;
+        .list-card-head {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          align-items: flex-start;
+          padding: 20px 20px 0;
+        }
+        .list-card-head h3 {
+          margin: 0;
+        }
+        .table-hints {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 6px;
+          color: #8a6f52;
+          font-size: 12px;
         }
         .table-wrap {
           overflow: auto;
+          margin-top: 16px;
         }
         table {
           width: 100%;
           border-collapse: collapse;
-          min-width: 1120px;
+          min-width: 1260px;
         }
         th,
         td {
           padding: 14px 12px;
-          border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+          border-bottom: 1px solid rgba(225, 213, 200, 0.9);
           text-align: left;
           vertical-align: top;
           font-size: 13px;
@@ -1509,8 +2041,8 @@ export default function ComplaintsPage() {
           font-size: 11px;
           letter-spacing: 0.08em;
           text-transform: uppercase;
-          color: #64748b;
-          background: rgba(248, 250, 252, 0.9);
+          color: #8a6f52;
+          background: rgba(250, 243, 234, 0.96);
           position: sticky;
           top: 0;
         }
@@ -1518,14 +2050,27 @@ export default function ComplaintsPage() {
           cursor: pointer;
         }
         tbody tr.selected {
-          background: #eff6ff;
+          background: rgba(250, 221, 195, 0.42);
+        }
+        tbody tr.row-breached {
+          background-image: linear-gradient(
+            90deg,
+            rgba(255, 234, 223, 0.8),
+            transparent 42%
+          );
+        }
+        tbody tr.row-reopened td:first-child {
+          border-left: 4px solid #c2410c;
         }
         .mono {
           font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         }
         .accent {
-          color: #2563eb;
+          color: #c2410c;
           font-weight: 700;
+        }
+        .inline-link {
+          text-decoration: none;
         }
         .pill {
           display: inline-flex;
@@ -1553,8 +2098,8 @@ export default function ComplaintsPage() {
           color: #334155;
         }
         .pill.info {
-          background: #dbeafe;
-          color: #1d4ed8;
+          background: #fde6d4;
+          color: #9a3412;
         }
         .summary-cell strong,
         .timeline-item strong,
@@ -1562,20 +2107,53 @@ export default function ComplaintsPage() {
         .detail-card h4 {
           display: block;
         }
+        .summary-cell {
+          min-width: 180px;
+        }
         .summary-cell small,
         td small,
         .timeline-item small,
         .section-head small,
         .empty-state small {
-          color: #64748b;
+          color: #8a6f52;
         }
-        .detail-column {
+        .row-actions {
           display: flex;
-          flex-direction: column;
-          gap: 12px;
+          flex-wrap: wrap;
+          gap: 6px;
+          min-width: 220px;
+        }
+        .row-action {
+          padding: 7px 10px;
+          font-size: 11px;
+          text-transform: lowercase;
+          background: #f8efe5;
+          color: #4b3523;
+          border: 1px solid rgba(140, 94, 63, 0.14);
+        }
+        .row-action:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+        .row-risk-high {
+          background: #ffe1d6;
+          color: #9f1239;
+        }
+        .row-risk-medium {
+          background: #fff1df;
+          color: #9a3412;
+        }
+        .selection-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .detail-card {
           padding: 18px;
+        }
+        .summary-panel {
+          grid-column: span 1;
+        }
+        .action-panel {
+          grid-column: span 1;
         }
         .detail-head,
         .section-head,
@@ -1614,7 +2192,7 @@ export default function ComplaintsPage() {
           margin-top: 14px;
         }
         .action-pill {
-          background: #0f172a;
+          background: #111827;
           color: white;
           text-align: left;
         }
@@ -1631,15 +2209,21 @@ export default function ComplaintsPage() {
           flex-wrap: wrap;
           margin-top: 14px;
         }
+        .detail-links {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          margin-top: 14px;
+        }
         .link-chip {
           display: inline-flex;
           align-items: center;
           gap: 6px;
           padding: 9px 12px;
           text-decoration: none;
-          background: #f8fafc;
-          color: #0f172a;
-          border: 1px solid rgba(148, 163, 184, 0.24);
+          background: #fff7f0;
+          color: #4b3523;
+          border: 1px solid rgba(140, 94, 63, 0.18);
         }
         .timeline-list {
           margin-top: 14px;
@@ -1680,7 +2264,9 @@ export default function ComplaintsPage() {
           margin-top: 16px;
         }
         @media (max-width: 1180px) {
-          .workspace-grid {
+          .hero-shell,
+          .signal-grid,
+          .selection-grid {
             grid-template-columns: 1fr;
           }
         }
@@ -1688,12 +2274,10 @@ export default function ComplaintsPage() {
           .complaints-page {
             padding: 16px;
           }
-          .hero-row,
           .tabs-row,
           .toolbar {
             flex-direction: column;
           }
-          .kpi-grid,
           .meta-grid {
             grid-template-columns: 1fr;
           }
@@ -1706,7 +2290,7 @@ export default function ComplaintsPage() {
             width: 100%;
           }
           table {
-            min-width: 920px;
+            min-width: 980px;
           }
         }
       `}</style>
