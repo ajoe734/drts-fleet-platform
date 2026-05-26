@@ -17,7 +17,7 @@ import type {
 import { DispatchAutoRefresh } from "@/components/dispatch-auto-refresh";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { formatCompactNumber, formatMinorCurrency } from "@/lib/ops-analytics";
+import { formatCompactNumber } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import { t } from "@/lib/translations";
@@ -25,9 +25,6 @@ import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
-  CanvasDL as DL,
-  CanvasField as Field,
-  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
@@ -114,16 +111,40 @@ const theme = buildCanvasTheme({
 });
 
 const pageStackStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 14,
+};
+
+const boardNavStyle = {
+  padding: "14px 24px 0",
+  borderBottom: `1px solid ${theme.border}`,
+  background: theme.surface,
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap" as const,
+};
+
+const boardNavLinkStyle = {
+  textDecoration: "none",
+  color: "inherit",
+};
+
+const boardNavItemStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+  padding: "7px 11px 8px",
+  borderBottom: "2px solid transparent",
+  marginBottom: -1,
+  fontSize: 12.5,
+};
+
+const boardContentStyle = {
   padding: 24,
   display: "flex",
   flexDirection: "column" as const,
-  gap: 16,
-};
-
-const boardRailStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-  gap: 10,
+  gap: 14,
 };
 
 const filterRowStyle = {
@@ -132,22 +153,33 @@ const filterRowStyle = {
   gap: 8,
 };
 
-const summaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.35fr) minmax(300px, 0.9fr)",
-  gap: 16,
-};
-
 const actionGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
   gap: 10,
 };
 
-const infoGridStyle = {
+const selectedTrayStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 10,
+  gap: 12,
+  padding: "16px 18px 18px",
+  borderTop: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+};
+
+const selectedMetaStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+};
+
+const selectedMetaCellStyle = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  display: "grid",
+  gap: 4,
 };
 
 const DRIVER_TASK_PRIORITY: Record<string, number> = {
@@ -1027,15 +1059,268 @@ function renderEmptyState(
       }`.trim()}
       icon={<span style={{ fontSize: 22 }}>{content.icon}</span>}
       actions={
-        <Link
-          href={buildDispatchHref({ board })}
-          style={{ textDecoration: "none" }}
-        >
-          <Btn theme={theme} variant="secondary" icon="arrow">
-            {zh ? "重設 board" : "Reset board"}
-          </Btn>
-        </Link>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {emptyState.nextAction ? (
+            <Link
+              href={`${buildDispatchHref({ board })}${
+                buildDispatchHref({ board }).includes("?") ? "&" : "?"
+              }intent=${encodeURIComponent(emptyState.nextAction.action)}`}
+              style={{ textDecoration: "none" }}
+            >
+              <Btn theme={theme} variant="primary" icon="arrow">
+                {resolveActionLabel(emptyState.nextAction.action, locale)}
+              </Btn>
+            </Link>
+          ) : null}
+          <Link
+            href={buildDispatchHref({ board })}
+            style={{ textDecoration: "none" }}
+          >
+            <Btn theme={theme} variant="secondary" icon="arrow">
+              {zh ? "重設 board" : "Reset board"}
+            </Btn>
+          </Link>
+        </div>
       }
+    />
+  );
+}
+
+function pickPrimaryAction(
+  actions: BoardActionContext[],
+  candidates: string[],
+): BoardActionContext | null {
+  for (const candidate of candidates) {
+    const matched = actions.find((action) =>
+      action.href.includes(`intent=${encodeURIComponent(candidate)}`),
+    );
+    if (matched && !matched.disabled) {
+      return matched;
+    }
+  }
+  return actions.find((action) => !action.disabled) ?? null;
+}
+
+function renderActionButton(
+  action: BoardActionContext | null,
+  locale: Locale,
+  fallbackLabel?: string,
+) {
+  if (!action) {
+    return fallbackLabel ? (
+      <Btn theme={theme} variant="secondary">
+        {fallbackLabel}
+      </Btn>
+    ) : null;
+  }
+
+  return (
+    <Link
+      href={action.href}
+      target={action.external ? "_blank" : undefined}
+      rel={action.external ? "noreferrer" : undefined}
+      style={{ textDecoration: "none" }}
+    >
+      <Btn
+        theme={theme}
+        variant={action.riskLevel === "high" ? "primary" : "secondary"}
+        icon={action.external ? "ext" : "arrow"}
+      >
+        {action.label ?? (locale === "zh" ? "前往處理" : "Open")}
+      </Btn>
+    </Link>
+  );
+}
+
+function renderBoardSignalBanner({
+  board,
+  locale,
+  selectedRecord,
+  selectedActions,
+  degradedAdapters,
+  boardCount,
+  visibleCount,
+}: {
+  board: DispatchBoard;
+  locale: Locale;
+  selectedRecord: BoardRecord | null;
+  selectedActions: BoardActionContext[];
+  degradedAdapters: AdapterHealthRecord[];
+  boardCount: number;
+  visibleCount: number;
+}) {
+  const zh = locale === "zh";
+
+  if (board === "forwarded" && degradedAdapters.length > 0) {
+    const inspectAdapter =
+      pickPrimaryAction(selectedActions, ["inspect_adapter"]) ??
+      ({
+        href: buildPlatformAdminHref("/adapter-registry"),
+        label: zh ? "查看 adapter ↗" : "Inspect adapter ↗",
+        riskLevel: "low",
+        disabled: false,
+        external: true,
+      } satisfies BoardActionContext);
+    return (
+      <Banner
+        theme={theme}
+        tone="warn"
+        icon="warn"
+        title={
+          zh
+            ? `${degradedAdapters[0]?.platformCode ?? "adapter"} degraded · Forwarded mirror 影響中`
+            : `${degradedAdapters[0]?.platformCode ?? "adapter"} degraded · forwarded mirror impacted`
+        }
+        body={
+          zh
+            ? `目前可見 ${visibleCount} / ${boardCount} 筆鏡像單；優先走 reconciliation / manual fallback。`
+            : `Showing ${visibleCount} / ${boardCount} mirror rows. Prioritize reconciliation and manual fallback.`
+        }
+        actions={renderActionButton(inspectAdapter, locale)}
+      />
+    );
+  }
+
+  if (!selectedRecord) {
+    return null;
+  }
+
+  if ("mirrorOrderId" in selectedRecord) {
+    const primary =
+      pickPrimaryAction(selectedActions, [
+        "complete_forwarder_reconciliation",
+        "engage_manual_fallback",
+        "inspect_adapter",
+        "sync_forwarded_order_status",
+      ]) ?? null;
+    if (!primary) {
+      return null;
+    }
+    return (
+      <Banner
+        theme={theme}
+        tone={selectedRecord.status === "sync_failed" ? "danger" : "warn"}
+        icon="warn"
+        title={`${selectedRecord.mirrorOrderId} · ${selectedRecord.platformCode}`}
+        body={
+          zh
+            ? `狀態 ${selectedRecord.status}；外部單號 ${selectedRecord.externalOrderId}。`
+            : `Status ${selectedRecord.status}; external order ${selectedRecord.externalOrderId}.`
+        }
+        actions={renderActionButton(primary, locale)}
+      />
+    );
+  }
+
+  const title = `${selectedRecord.orderNo} · ${getTenantLabel(selectedRecord)}`;
+  if (board === "governance") {
+    return (
+      <Banner
+        theme={theme}
+        tone="warn"
+        icon="warn"
+        title={
+          zh
+            ? "需平台審批 · /approval-requests"
+            : "Governance hold · /approval-requests"
+        }
+        body={
+          zh
+            ? `${title} 正等待 override / approval request。`
+            : `${title} is blocked on an override / approval request.`
+        }
+        actions={renderActionButton(
+          pickPrimaryAction(selectedActions, ["jump_approval_request"]),
+          locale,
+        )}
+      />
+    );
+  }
+
+  if (board === "exception") {
+    return (
+      <Banner
+        theme={theme}
+        tone="warn"
+        icon="warn"
+        title={zh ? "例外保留需先清除" : "Exception hold must be cleared"}
+        body={
+          zh
+            ? `${title} · hold 原因 ${selectedRecord.exceptionHold?.reasonCode ?? "unknown"}`
+            : `${title} · hold reason ${selectedRecord.exceptionHold?.reasonCode ?? "unknown"}`
+        }
+        actions={renderActionButton(
+          pickPrimaryAction(selectedActions, [
+            "resolve_exception_hold",
+            "resolve_hold",
+            "createIncidentFromDispatchException",
+            "escalate_incident",
+          ]),
+          locale,
+        )}
+      />
+    );
+  }
+
+  if (board === "no_supply") {
+    return (
+      <Banner
+        theme={theme}
+        tone="danger"
+        icon="warn"
+        title={
+          zh
+            ? "No eligible supply 需要人工介入"
+            : "No eligible supply needs intervention"
+        }
+        body={
+          zh
+            ? `${title} · 已嘗試 ${selectedRecord.dispatchAttemptCount} 次，最後原因 ${selectedRecord.lastDispatchFailureReason ?? "unknown"}。`
+            : `${title} · ${selectedRecord.dispatchAttemptCount} attempts, last reason ${selectedRecord.lastDispatchFailureReason ?? "unknown"}.`
+        }
+        actions={renderActionButton(
+          pickPrimaryAction(selectedActions, [
+            "extend_search",
+            "resolve_no_supply",
+            "createIncidentFromDispatchException",
+            "escalate_incident",
+          ]),
+          locale,
+        )}
+      />
+    );
+  }
+
+  const primary = pickPrimaryAction(selectedActions, [
+    "assign",
+    "assign_dispatch",
+    "dispatch_order",
+    "release_driver",
+    "release",
+    "redispatch",
+    "cancel_owned_order",
+    "cancel",
+  ]);
+  if (!primary) {
+    return null;
+  }
+
+  return (
+    <Banner
+      theme={theme}
+      tone={board === "assigned" ? "info" : "warn"}
+      icon="warn"
+      title={title}
+      body={
+        zh
+          ? board === "assigned"
+            ? "目前為已指派 / 行程進行中工作項目。"
+            : "目前為 ready queue 焦點工作項目。"
+          : board === "assigned"
+            ? "Current driver-assigned / in-trip work item."
+            : "Current ready-queue focus item."
+      }
+      actions={renderActionButton(primary, locale)}
     />
   );
 }
@@ -1228,20 +1513,6 @@ function healthBanner(health: UiHealthEnvelope | null, locale: Locale) {
       }
     />
   );
-}
-
-function fieldBodyStyle(mono = false) {
-  return {
-    minHeight: 34,
-    padding: "9px 10px",
-    borderRadius: 8,
-    background: theme.surfaceLo,
-    border: `1px solid ${theme.border}`,
-    color: theme.text,
-    fontSize: mono ? 11.5 : 12.5,
-    lineHeight: 1.45,
-    fontFamily: mono ? theme.monoFamily : theme.fontFamily,
-  } as const;
 }
 
 export default async function DispatchPage({
@@ -1917,11 +2188,18 @@ export default async function DispatchPage({
       <PageHeader
         theme={theme}
         title={t("dispatch.title", locale)}
-        subtitle={`${boardMeta.label} · T2 / 5s · ${boardMeta.description}`}
+        subtitle={
+          zh
+            ? "即時派車工作流 · 6 個子看板 · queue / candidates / ETA / override"
+            : "Live dispatch workflow · 6 sub-boards · queue / candidates / ETA / override"
+        }
         actions={
           <>
             <Pill theme={theme} tone="accent">
               T2 dispatch / 5s
+            </Pill>
+            <Pill theme={theme} tone="neutral">
+              {boardMeta.label}
             </Pill>
             <Link
               href={buildDispatchHref(
@@ -1952,7 +2230,7 @@ export default async function DispatchPage({
         {healthBanner(currentHealth, locale)}
         {freshnessBanner(currentRefresh, locale)}
 
-        <div style={boardRailStyle}>
+        <div style={boardNavStyle}>
           {(
             [
               "ready",
@@ -1969,364 +2247,265 @@ export default async function DispatchPage({
               <Link
                 key={item}
                 href={buildDispatchHref({ board: item })}
-                style={{ textDecoration: "none", color: "inherit" }}
+                style={boardNavLinkStyle}
               >
-                <Card
-                  theme={theme}
-                  title={meta.label}
-                  subtitle={meta.description}
-                  padding={14}
-                  {...(active
-                    ? {
-                        style: {
-                          borderColor: theme.accent,
-                          boxShadow: `0 0 0 1px ${theme.accent} inset`,
-                        },
-                      }
-                    : {})}
+                <div
+                  style={{
+                    ...boardNavItemStyle,
+                    borderBottomColor: active ? theme.accent : "transparent",
+                    color: active ? theme.text : theme.textMuted,
+                    fontWeight: active ? 600 : 500,
+                  }}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 12,
-                    }}
+                  <Pill
+                    theme={theme}
+                    tone={active ? "accent" : "neutral"}
+                    dot={active}
                   >
-                    <strong style={{ fontSize: 24 }}>
-                      {formatCompactNumber(boardCounts[item])}
-                    </strong>
-                    <Pill theme={theme} tone={active ? "accent" : "neutral"}>
-                      {active ? (zh ? "目前" : "Active") : item}
-                    </Pill>
-                  </div>
-                </Card>
+                    {formatCompactNumber(boardCounts[item])}
+                  </Pill>
+                  <span>{meta.label}</span>
+                </div>
               </Link>
             );
           })}
         </div>
 
-        <Card
-          theme={theme}
-          title={boardMeta.label}
-          subtitle={boardMeta.description}
-        >
-          <div style={filterRowStyle}>
-            {board === "forwarded"
-              ? (
-                  [
-                    ["all", `${zh ? "全部" : "All"} ${forwardedBaseCount}`],
-                    [
-                      "attention",
-                      `${zh ? "需注意" : "Attention"} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
-                    ],
-                    [
-                      "sync_failed",
-                      `sync_failed ${sortedForwardedOrders.filter((item) => item.status === "sync_failed").length}`,
-                    ],
-                    [
-                      "manual_fallback",
-                      `manual_fallback ${sortedForwardedOrders.filter((item) => item.manualFallback.required).length}`,
-                    ],
-                    [
-                      "terminal",
-                      `${zh ? "終態" : "Terminal"} ${sortedForwardedOrders.filter(isForwardedTerminal).length}`,
-                    ],
-                  ] as const
-                ).map(([facetKey, label]) => (
-                  <Link
-                    key={facetKey}
-                    href={buildDispatchHref({
-                      board,
-                      facet: facetKey,
-                    })}
-                    style={{ textDecoration: "none" }}
-                  >
-                    <Pill
-                      theme={theme}
-                      tone={selectedFacet === facetKey ? "accent" : "neutral"}
-                      dot={facetKey !== "all"}
-                    >
-                      {label}
-                    </Pill>
-                  </Link>
-                ))
-              : [
-                  ["all", zh ? "全部服務" : "All services"],
-                  ...serviceBuckets.map((item) => [item, item]),
-                ].map(([serviceKey, label]) => (
-                  <Link
-                    key={serviceKey}
-                    href={buildDispatchHref({
-                      board,
-                      service: serviceKey,
-                    })}
-                    style={{ textDecoration: "none" }}
-                  >
-                    <Pill
-                      theme={theme}
-                      tone={
-                        selectedService === serviceKey ? "accent" : "neutral"
-                      }
-                      dot={serviceKey !== "all"}
-                    >
-                      {label}
-                    </Pill>
-                  </Link>
-                ))}
-          </div>
-
-          <div style={{ marginTop: 12, fontSize: 12, color: theme.textMuted }}>
-            {board === "forwarded"
-              ? `${zh ? "顯示" : "Showing"} ${visibleForwardedOrders.length} / ${forwardedBaseCount}`
-              : `${zh ? "顯示" : "Showing"} ${visibleOwnedByBoard.length} / ${boardCounts[board]}`}
-          </div>
-        </Card>
-
-        <Card theme={theme} padding={0}>
-          {boardEmptyState ? (
-            <div style={{ padding: 24 }}>
-              {renderEmptyState(board, boardEmptyState, locale)}
-            </div>
-          ) : (
-            <Table theme={theme} columns={boardColumns} rows={boardRows} />
-          )}
-        </Card>
-
-        <div style={summaryGridStyle}>
-          <Card
-            theme={theme}
-            title={zh ? "Board 摘要" : "Board summary"}
-            subtitle={
-              zh
-                ? "依 packet §5.2 的 must-show data 與 refresh tier 呈現。"
-                : "Rendered from packet §5.2 must-show data and refresh tier."
-            }
-          >
-            <div style={infoGridStyle}>
-              <KPI
-                theme={theme}
-                label={zh ? "可見工作項目" : "Visible work items"}
-                value={formatCompactNumber(
-                  board === "forwarded"
-                    ? visibleForwardedOrders.length
-                    : visibleOwnedByBoard.length,
-                )}
-                sub={boardMeta.label}
-              />
-              <KPI
-                theme={theme}
-                label={zh ? "新鮮度" : "Freshness"}
-                value={currentRefresh.dataFreshness}
-                sub={`${formatDateTime(locale, currentRefresh.generatedAt)} · ${currentRefresh.source}`}
-              />
-              <KPI
-                theme={theme}
-                label={zh ? "治理壓力" : "Governance pressure"}
-                value={formatCompactNumber(boardCounts.governance)}
-                delta={`${formatCompactNumber(boardCounts.no_supply)} no_supply`}
-                deltaTone={boardCounts.governance > 0 ? "down" : "neutral"}
-                sub={
-                  zh
-                    ? "override / approval linkage"
-                    : "override / approval linkage"
-                }
-              />
-              <KPI
-                theme={theme}
-                label={zh ? "Forwarded mismatch" : "Forwarded mismatch"}
-                value={formatCompactNumber(reconciliationIssues.length)}
-                delta={
-                  degradedAdapters.length > 0
-                    ? `${degradedAdapters.length} degraded`
-                    : undefined
-                }
-                deltaTone={degradedAdapters.length > 0 ? "down" : "neutral"}
-                sub={
-                  zh ? "adapter + reconciliation" : "adapter + reconciliation"
-                }
-              />
-            </div>
-
-            <DL
-              theme={theme}
-              cols={2}
-              items={[
-                {
-                  k: zh ? "目前 board" : "Current board",
-                  v: boardMeta.label,
-                  mono: true,
-                },
-                {
-                  k: zh ? "空狀態原因" : "Empty reason",
-                  v: boardEmptyState?.reason ?? "active_rows",
-                  mono: true,
-                },
-                {
-                  k: zh ? "Refresh tier" : "Refresh tier",
-                  v: "dispatch / 5s",
-                  mono: true,
-                },
-                {
-                  k: zh ? "Cross-app links" : "Cross-app links",
-                  v:
-                    board === "forwarded"
-                      ? zh
-                        ? "inspect adapter ↗"
-                        : "inspect adapter ↗"
-                      : zh
-                        ? "approval request / dispatch detail"
-                        : "approval request / dispatch detail",
-                  mono: true,
-                },
-              ]}
-            />
-          </Card>
+        <div style={boardContentStyle}>
+          {renderBoardSignalBanner({
+            board,
+            locale,
+            selectedRecord,
+            selectedActions,
+            degradedAdapters,
+            boardCount:
+              board === "forwarded" ? forwardedBaseCount : boardCounts[board],
+            visibleCount:
+              board === "forwarded"
+                ? visibleForwardedOrders.length
+                : visibleOwnedByBoard.length,
+          })}
 
           <Card
             theme={theme}
-            title={zh ? "Selected Work Item" : "Selected work item"}
-            subtitle={
-              zh
-                ? "CTAs 由 `availableActions` 驅動；跨 app 連結會明示新分頁。"
-                : "CTAs are driven by `availableActions`; cross-app links are explicit."
-            }
+            title={boardMeta.label}
+            subtitle={boardMeta.description}
+            padding={0}
           >
-            {selectedRecord ? (
-              <div style={{ display: "grid", gap: 12 }}>
-                <Field
-                  theme={theme}
-                  label={zh ? "焦點 work item" : "Focused work item"}
-                  hint={
-                    "mirrorOrderId" in selectedRecord
-                      ? formatOpsCodeLabel(locale, selectedRecord.platformCode)
-                      : selectedRecord.serviceBucket
-                  }
-                >
-                  <div style={fieldBodyStyle(true)}>
-                    {"mirrorOrderId" in selectedRecord
-                      ? `${selectedRecord.mirrorOrderId} · ${selectedRecord.externalOrderId}`
-                      : `${selectedRecord.orderNo} · ${selectedRecord.orderId}`}
-                  </div>
-                </Field>
+            <div
+              style={{ padding: "16px 18px 14px", display: "grid", gap: 12 }}
+            >
+              <div style={filterRowStyle}>
+                {board === "forwarded"
+                  ? (
+                      [
+                        ["all", `${zh ? "全部" : "All"} ${forwardedBaseCount}`],
+                        [
+                          "attention",
+                          `${zh ? "需注意" : "Attention"} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
+                        ],
+                        [
+                          "sync_failed",
+                          `sync_failed ${sortedForwardedOrders.filter((item) => item.status === "sync_failed").length}`,
+                        ],
+                        [
+                          "manual_fallback",
+                          `manual_fallback ${sortedForwardedOrders.filter((item) => item.manualFallback.required).length}`,
+                        ],
+                        [
+                          "terminal",
+                          `${zh ? "終態" : "Terminal"} ${sortedForwardedOrders.filter(isForwardedTerminal).length}`,
+                        ],
+                      ] as const
+                    ).map(([facetKey, label]) => (
+                      <Link
+                        key={facetKey}
+                        href={buildDispatchHref({
+                          board,
+                          facet: facetKey,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedFacet === facetKey ? "accent" : "neutral"
+                          }
+                          dot={facetKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))
+                  : [
+                      ["all", zh ? "全部服務" : "All services"],
+                      ...serviceBuckets.map((item) => [item, item]),
+                    ].map(([serviceKey, label]) => (
+                      <Link
+                        key={serviceKey}
+                        href={buildDispatchHref({
+                          board,
+                          service: serviceKey,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedService === serviceKey
+                              ? "accent"
+                              : "neutral"
+                          }
+                          dot={serviceKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+              </div>
 
-                <Field
-                  theme={theme}
-                  label={zh ? "Refresh metadata" : "Refresh metadata"}
-                  hint={zh ? "UiRefreshMetadata" : "UiRefreshMetadata"}
-                >
-                  <div style={fieldBodyStyle(true)}>
-                    {`${currentRefresh.dataFreshness} · ${formatDateTime(
-                      locale,
-                      currentRefresh.generatedAt,
-                    )} · ${currentRefresh.source}`}
-                  </div>
-                </Field>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  fontSize: 12,
+                  color: theme.textMuted,
+                }}
+              >
+                <span>
+                  {board === "forwarded"
+                    ? `${zh ? "顯示" : "Showing"} ${visibleForwardedOrders.length} / ${forwardedBaseCount}`
+                    : `${zh ? "顯示" : "Showing"} ${visibleOwnedByBoard.length} / ${boardCounts[board]}`}
+                </span>
+                <span>
+                  {`${currentRefresh.dataFreshness} · ${formatDateTime(
+                    locale,
+                    currentRefresh.generatedAt,
+                  )} · ${currentRefresh.source}`}
+                </span>
+              </div>
+            </div>
 
-                {renderActionList(selectedActions, locale)}
+            {boardEmptyState ? (
+              <div style={{ padding: 24 }}>
+                {renderEmptyState(board, boardEmptyState, locale)}
               </div>
             ) : (
-              <WorkflowEmptyState
-                density="compact"
-                title={zh ? "沒有焦點 work item" : "No focused work item"}
-                description={
-                  zh
-                    ? "目前 board 沒有可選擇的列。"
-                    : "There is no selected row on the current board."
-                }
-              />
+              <>
+                <Table theme={theme} columns={boardColumns} rows={boardRows} />
+                <div style={selectedTrayStyle}>
+                  {selectedRecord ? (
+                    <>
+                      <div style={selectedMetaStyle}>
+                        <div style={selectedMetaCellStyle}>
+                          <span style={{ fontSize: 11, color: theme.textDim }}>
+                            {zh ? "焦點 work item" : "Focused work item"}
+                          </span>
+                          <strong
+                            style={{
+                              fontFamily: theme.monoFamily,
+                              fontSize: 12,
+                            }}
+                          >
+                            {"mirrorOrderId" in selectedRecord
+                              ? `${selectedRecord.mirrorOrderId} · ${selectedRecord.externalOrderId}`
+                              : `${selectedRecord.orderNo} · ${selectedRecord.orderId}`}
+                          </strong>
+                        </div>
+                        <div style={selectedMetaCellStyle}>
+                          <span style={{ fontSize: 11, color: theme.textDim }}>
+                            {zh ? "跨 app deep links" : "Cross-app deep links"}
+                          </span>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: 6,
+                            }}
+                          >
+                            {board === "governance" ? (
+                              <Link
+                                href="/approval-requests"
+                                style={{
+                                  textDecoration: "none",
+                                  color: "inherit",
+                                }}
+                              >
+                                <Pill theme={theme} tone="warn" dot>
+                                  /approval-requests
+                                </Pill>
+                              </Link>
+                            ) : null}
+                            {board === "exception" || board === "no_supply" ? (
+                              <Link
+                                href={`/incidents?sourceOrderId=${encodeURIComponent(
+                                  "mirrorOrderId" in selectedRecord
+                                    ? selectedRecord.mirrorOrderId
+                                    : selectedRecord.orderId,
+                                )}`}
+                                style={{
+                                  textDecoration: "none",
+                                  color: "inherit",
+                                }}
+                              >
+                                <Pill theme={theme} tone="warn" dot>
+                                  /incidents
+                                </Pill>
+                              </Link>
+                            ) : null}
+                            {board === "forwarded" ? (
+                              <Link
+                                href={buildPlatformAdminHref(
+                                  "/adapter-registry",
+                                )}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  textDecoration: "none",
+                                  color: "inherit",
+                                }}
+                              >
+                                <Pill theme={theme} tone="warn" dot>
+                                  platform-admin ↗
+                                </Pill>
+                              </Link>
+                            ) : null}
+                            <Link
+                              href={buildPlatformAdminHref("/audit")}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                textDecoration: "none",
+                                color: "inherit",
+                              }}
+                            >
+                              <Pill theme={theme} tone="neutral">
+                                /audit ↗
+                              </Pill>
+                            </Link>
+                          </div>
+                        </div>
+                      </div>
+                      {renderActionList(selectedActions, locale)}
+                    </>
+                  ) : (
+                    <WorkflowEmptyState
+                      density="compact"
+                      title={zh ? "沒有焦點 work item" : "No focused work item"}
+                      description={
+                        zh
+                          ? "目前 board 沒有可選擇的列。"
+                          : "There is no selected row on the current board."
+                      }
+                    />
+                  )}
+                </div>
+              </>
             )}
           </Card>
         </div>
-
-        <Card
-          theme={theme}
-          title={zh ? "Deep Links" : "Deep links"}
-          subtitle={
-            zh
-              ? "依 spec 提供跨 app 入口，並明示 new tab。"
-              : "Cross-app entry points required by the spec, explicitly marked."
-          }
-        >
-          <div style={filterRowStyle}>
-            <Link
-              href="/approval-requests"
-              style={{ textDecoration: "none", color: "inherit" }}
-            >
-              <Pill theme={theme} tone="info" dot>
-                /approval-requests
-              </Pill>
-            </Link>
-            <Link
-              href={buildPlatformAdminHref("/audit")}
-              target="_blank"
-              rel="noreferrer"
-              style={{ textDecoration: "none", color: "inherit" }}
-            >
-              <Pill theme={theme} tone="warn" dot>
-                platform-admin /audit ↗
-              </Pill>
-            </Link>
-            <Link
-              href={buildPlatformAdminHref("/adapter-registry")}
-              target="_blank"
-              rel="noreferrer"
-              style={{ textDecoration: "none", color: "inherit" }}
-            >
-              <Pill theme={theme} tone="warn" dot>
-                platform-admin /adapter-registry ↗
-              </Pill>
-            </Link>
-            <Link
-              href="/dashboard"
-              style={{ textDecoration: "none", color: "inherit" }}
-            >
-              <Pill theme={theme} tone="neutral">
-                /dashboard
-              </Pill>
-            </Link>
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <DL
-              theme={theme}
-              cols={2}
-              items={[
-                {
-                  k: zh ? "Owned boards" : "Owned boards",
-                  v: `${boardCounts.ready} ready · ${boardCounts.assigned} assigned`,
-                  mono: true,
-                },
-                {
-                  k: zh ? "Revenue-at-risk" : "Revenue-at-risk",
-                  v: formatMinorCurrency(
-                    sortedOwnedOrders.reduce(
-                      (sum, order) =>
-                        sum + (order.quotedFare?.amountMinor ?? 0),
-                      0,
-                    ),
-                  ),
-                  mono: true,
-                },
-                {
-                  k: zh ? "Forwarded active" : "Forwarded active",
-                  v: `${forwardedBaseCount - sortedForwardedOrders.filter(isForwardedTerminal).length}`,
-                  mono: true,
-                },
-                {
-                  k: zh ? "Adapter degraded" : "Adapter degraded",
-                  v:
-                    degradedAdapters.length > 0
-                      ? degradedAdapters
-                          .map((item: AdapterHealthRecord) => item.platformCode)
-                          .join(", ")
-                      : "none",
-                  mono: true,
-                },
-              ]}
-            />
-          </div>
-        </Card>
       </div>
     </>
   );
