@@ -344,6 +344,17 @@ function getActionButtonLabel(action: string, locale: Locale) {
   }
 }
 
+function buildDashboardDispatchHref(
+  board:
+    | "ready_queue"
+    | "exception_hold"
+    | "no_eligible_supply"
+    | "governance_blocked"
+    | "forwarded_mirror",
+) {
+  return `/dispatch?board=${board}`;
+}
+
 function getAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
   if (targetApp === "ops-console") {
     return process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN?.trim() || "";
@@ -360,6 +371,18 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
     return link.route;
   }
   return `${origin}${link.route}`;
+}
+
+function getAdapterSeverityRank(
+  status: OperationalAdapterDetailRecord["status"],
+) {
+  if (status === "down") {
+    return 0;
+  }
+  if (status === "degraded") {
+    return 1;
+  }
+  return 2;
 }
 
 function getHealthEnvelope(
@@ -642,7 +665,7 @@ function EmptyStateCard({
           label: getActionButtonLabel(nextActionDescriptor.action, locale),
         };
         if (nextActionDescriptor.action === "clear_filters") {
-          action.href = "/dispatch";
+          action.href = buildDashboardDispatchHref("ready_queue");
         } else if (nextActionDescriptor.action === "retry_fetch") {
           action.href = "/dashboard?refresh=1";
         } else if (nextActionDescriptor.action === "open_platform_status") {
@@ -1237,9 +1260,15 @@ export default async function DashboardPage() {
   const eligibleVehicleGap =
     operations.dispatchableVehicles - dispatch.queueDepth;
   const topAdapter =
-    observability.adapterDetails.find(
-      (adapter: OperationalAdapterDetailRecord) => adapter.status !== "healthy",
-    ) ??
+    [...observability.adapterDetails].sort((left, right) => {
+      const severityDiff =
+        getAdapterSeverityRank(left.status) -
+        getAdapterSeverityRank(right.status);
+      if (severityDiff !== 0) {
+        return severityDiff;
+      }
+      return right.lastCheckedAt.localeCompare(left.lastCheckedAt);
+    })[0] ??
     observability.adapterDetails[0] ??
     null;
 
@@ -1280,7 +1309,7 @@ export default async function DashboardPage() {
               ? {
                   descriptor: buildAction("open_forwarded_dispatch", "low"),
                   label: t("dashboard.platformOps.openDispatch", locale),
-                  href: "/dispatch?view=forwarded&state=attention",
+                  href: buildDashboardDispatchHref("forwarded_mirror"),
                 }
               : {
                   descriptor: buildAction("open_incidents", "medium"),
@@ -1326,10 +1355,10 @@ export default async function DashboardPage() {
               label: t("dashboard.dispatchBoards.openOwned", locale),
               href:
                 noSupplyCount > 0
-                  ? "/dispatch?view=owned&state=no_supply"
+                  ? buildDashboardDispatchHref("no_eligible_supply")
                   : exceptionHoldCount > 0
-                    ? "/dispatch?view=owned&state=exception_hold"
-                    : "/dispatch?view=owned&state=override_pending",
+                    ? buildDashboardDispatchHref("exception_hold")
+                    : buildDashboardDispatchHref("governance_blocked"),
             },
           ],
         }
@@ -1346,7 +1375,7 @@ export default async function DashboardPage() {
             {
               descriptor: buildAction("open_forwarded_dispatch", "low"),
               label: t("dashboard.dispatchBoards.openForwarded", locale),
-              href: "/dispatch?view=forwarded&state=attention",
+              href: buildDashboardDispatchHref("forwarded_mirror"),
             },
             {
               descriptor: buildAction("inspect_adapter_registry", "low"),
@@ -1732,6 +1761,30 @@ export default async function DashboardPage() {
                       : "Webhook / rate limit"}
                   </span>
                 </div>
+                <div style={signalRowStyle}>
+                  <Pill
+                    theme={theme}
+                    tone={getHealthTone(topAdapter.rateLimitStatus)}
+                  >
+                    {formatOpsCodeLabel(locale, topAdapter.rateLimitStatus)}
+                  </Pill>
+                  <span style={signalLabelStyle}>
+                    {locale === "en"
+                      ? `Last checked ${formatTimestamp(topAdapter.lastCheckedAt, locale)}`
+                      : `最後檢查 ${formatTimestamp(topAdapter.lastCheckedAt, locale)}`}
+                  </span>
+                </div>
+                <div style={signalRowStyle}>
+                  <Pill theme={theme} tone="info">
+                    {locale === "en" ? "error" : "錯誤"}
+                  </Pill>
+                  <span style={signalLabelStyle}>
+                    {topAdapter.lastError ??
+                      (locale === "en"
+                        ? "No current adapter error."
+                        : "目前沒有 adapter 錯誤。")}
+                  </span>
+                </div>
               </div>
             ) : (
               <EmptyStateCard
@@ -1932,7 +1985,7 @@ export default async function DashboardPage() {
               action={{
                 descriptor: buildAction("open_dispatch", "low"),
                 label: getActionButtonLabel("open_dispatch", locale),
-                href: "/dispatch?view=owned",
+                href: buildDashboardDispatchHref("ready_queue"),
               }}
               locale={locale}
               variant="ghost"
