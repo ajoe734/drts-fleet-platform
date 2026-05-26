@@ -252,6 +252,29 @@ function buildDefaultPageActions(): ResourceActionDescriptor[] {
   ];
 }
 
+function buildIncidentListRequestPath(params: {
+  complaintCaseNo?: string;
+  dispatchExceptionOrderId?: string;
+  exceptionReasonCode?: string;
+}) {
+  const search = new URLSearchParams();
+  if (params.complaintCaseNo?.trim()) {
+    search.set("complaintCaseNo", params.complaintCaseNo.trim());
+  }
+  if (params.dispatchExceptionOrderId?.trim()) {
+    search.set(
+      "dispatchExceptionOrderId",
+      params.dispatchExceptionOrderId.trim(),
+    );
+  }
+  if (params.exceptionReasonCode?.trim()) {
+    search.set("exceptionReasonCode", params.exceptionReasonCode.trim());
+  }
+
+  const query = search.toString();
+  return query ? `/api/incidents?${query}` : "/api/incidents";
+}
+
 function classifyErrorReason(message: string): EmptyReason {
   if (message.includes("403") || message.includes("401")) {
     return "permission_denied";
@@ -755,6 +778,11 @@ export default function IncidentsPage() {
     exceptionReasonCode,
     exceptionNote: searchParams.get("exceptionNote") ?? "",
   };
+  const incidentListRequestPath = buildIncidentListRequestPath({
+    complaintCaseNo: complaintCaseNoFromQuery,
+    dispatchExceptionOrderId,
+    exceptionReasonCode,
+  });
 
   const loadRecords = useEffectEvent(async (manual: boolean) => {
     if (manual) {
@@ -763,8 +791,9 @@ export default function IncidentsPage() {
 
     try {
       const client = getOpsClient();
-      const payload =
-        await client.get<IncidentListRuntimeEnvelope>("/api/incidents");
+      const payload = await client.get<IncidentListRuntimeEnvelope>(
+        incidentListRequestPath,
+      );
       const normalizedItems = Array.isArray(payload)
         ? (payload as unknown as IncidentRecordRuntime[])
         : (payload.items ?? []);
