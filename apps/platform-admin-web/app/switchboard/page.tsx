@@ -141,29 +141,33 @@ function normalizeEmptyState(value: unknown): EmptyStateEnvelope | null {
   if (!isRecord(value) || !isEmptyReason(value.reason)) {
     return null;
   }
-  return {
+  const normalized: EmptyStateEnvelope = {
     reason: value.reason,
     messageCode:
       typeof value.messageCode === "string"
         ? value.messageCode
         : `switchboard.empty.${value.reason}`,
-    nextAction: isActionDescriptor(value.nextAction) ? value.nextAction : undefined,
   };
+  if (isActionDescriptor(value.nextAction)) {
+    normalized.nextAction = value.nextAction;
+  }
+  return normalized;
 }
 
-function normalizeListPayload<T extends Record<string, unknown>>(
+function normalizeListPayload<T extends object>(
   value: unknown,
 ): SwitchboardListPayload<T> {
   if (Array.isArray(value)) {
     return {
       items: value.filter(isRecord) as T[],
       availableActions: [],
-      emptyState: value.length === 0
-        ? {
-            reason: "no_data",
-            messageCode: "switchboard.empty.no_data",
-          }
-        : null,
+      emptyState:
+        value.length === 0
+          ? {
+              reason: "no_data",
+              messageCode: "switchboard.empty.no_data",
+            }
+          : null,
       refreshTier: null,
       lastUpdatedAt: null,
       crossAppLinks: [],
@@ -200,10 +204,10 @@ function normalizeListPayload<T extends Record<string, unknown>>(
     availableActions,
     emptyState:
       items.length === 0
-        ? emptyState ?? {
+        ? (emptyState ?? {
             reason: "no_data",
             messageCode: "switchboard.empty.no_data",
-          }
+          })
         : emptyState,
     refreshTier:
       typeof value.refreshTier === "string" ? value.refreshTier : null,
@@ -248,11 +252,7 @@ function inferPlacardScope(templateName: string) {
   return "brand_template";
 }
 
-function actionLabel(
-  action: string,
-  locale: string,
-  fallback: string,
-) {
+function actionLabel(action: string, locale: string, fallback: string) {
   const labels: Record<string, { zh: string; en: string }> = {
     create: { zh: "建立", en: "Create" },
     create_version: { zh: "建立草稿", en: "Create draft" },
@@ -260,7 +260,10 @@ function actionLabel(
     delete_draft: { zh: "刪除草稿", en: "Delete draft" },
     download: { zh: "下載成品", en: "Download artifact" },
     generate_placard: { zh: "產生牌貼", en: "Generate placard" },
-    generate_placard_version: { zh: "產生牌貼版本", en: "Generate placard version" },
+    generate_placard_version: {
+      zh: "產生牌貼版本",
+      en: "Generate placard version",
+    },
     publish: { zh: "發布", en: "Publish" },
     refresh: { zh: "重新整理", en: "Refresh" },
     view_audit: { zh: "查看稽核", en: "View audit" },
@@ -293,7 +296,10 @@ function SectionEmptyState({
   emptyState: EmptyStateEnvelope;
   onAction: (action: ResourceActionDescriptor) => void;
 }) {
-  const copy =
+  const copy: Record<
+    EmptyReason,
+    { title: string; body: string; tone: string }
+  > =
     locale === "en"
       ? {
           no_data: {
@@ -320,6 +326,11 @@ function SectionEmptyState({
             title: "Dependent system unavailable",
             body: "A downstream artifact or distribution system is unavailable. Publication should be paused.",
             tone: "#7c3aed",
+          },
+          driver_not_eligible: {
+            title: "Actor not eligible for this queue",
+            body: "This empty-state code is reserved for other surfaces. Switchboard stays read-only until a valid dataset is available.",
+            tone: "#475569",
           },
           filtered_empty: {
             title: "No rows match the current filter",
@@ -353,6 +364,11 @@ function SectionEmptyState({
             body: "下游成品或發放系統目前不可用，建議暫停牌貼相關發布動作。",
             tone: "#7c3aed",
           },
+          driver_not_eligible: {
+            title: "此角色不適用於目前佇列",
+            body: "這個 empty-state code 主要提供其他 surface 使用；在 switchboard 只維持唯讀提示，等待可用資料集。",
+            tone: "#475569",
+          },
           filtered_empty: {
             title: "目前篩選條件沒有結果",
             body: "請調整檢視條件或放寬期間，才能看到符合條件的版本與成品。",
@@ -374,7 +390,9 @@ function SectionEmptyState({
       })}
     >
       <div>
-        <div style={{ fontWeight: 700, color: config.tone }}>{config.title}</div>
+        <div style={{ fontWeight: 700, color: config.tone }}>
+          {config.title}
+        </div>
         <div style={{ color: "#475569", fontSize: 13, lineHeight: 1.6 }}>
           {config.body}
         </div>
@@ -466,7 +484,8 @@ export default function SwitchboardPage() {
           publishedCount: "Published",
           placardCount: "Placards",
           tiedCount: "Linked to live version",
-          sourceHint: "Source version and retired-source constraints follow packet §5 + placard source lineage rules.",
+          sourceHint:
+            "Source version and retired-source constraints follow packet §5 + placard source lineage rules.",
           download: "Download PDF",
           audit: "Audit view",
           opsLink: "Ops distribution view",
@@ -539,7 +558,8 @@ export default function SwitchboardPage() {
           publishedCount: "已發布",
           placardCount: "牌貼",
           tiedCount: "綁定 live 版本",
-          sourceHint: "來源版本與 retired source 限制遵循 packet §5 與牌貼 lineage 規則。",
+          sourceHint:
+            "來源版本與 retired source 限制遵循 packet §5 與牌貼 lineage 規則。",
           download: "下載 PDF",
           audit: "稽核視圖",
           opsLink: "Ops 發放視圖",
@@ -615,9 +635,10 @@ export default function SwitchboardPage() {
         normalizeListPayload<PublicInfoWithRuntime>(publicInfoResult.value),
       );
     } else {
-      nextError = publicInfoResult.reason instanceof Error
-        ? publicInfoResult.reason.message
-        : String(publicInfoResult.reason);
+      nextError =
+        publicInfoResult.reason instanceof Error
+          ? publicInfoResult.reason.message
+          : String(publicInfoResult.reason);
       setPublicInfoPayload({
         items: [],
         availableActions: [],
@@ -636,9 +657,10 @@ export default function SwitchboardPage() {
         normalizeListPayload<PlacardWithRuntime>(placardResult.value),
       );
     } else {
-      const placardError = placardResult.reason instanceof Error
-        ? placardResult.reason.message
-        : String(placardResult.reason);
+      const placardError =
+        placardResult.reason instanceof Error
+          ? placardResult.reason.message
+          : String(placardResult.reason);
       nextError = nextError ?? placardError;
       setPlacardPayload({
         items: [],
@@ -662,7 +684,8 @@ export default function SwitchboardPage() {
     void loadData();
   }, [loadData]);
 
-  const refreshTier = publicInfoPayload.refreshTier ??
+  const refreshTier =
+    publicInfoPayload.refreshTier ??
     placardPayload.refreshTier ??
     REFRESH_TIER_FALLBACK;
 
@@ -679,7 +702,9 @@ export default function SwitchboardPage() {
 
   const publicInfoById = useMemo(
     () =>
-      Object.fromEntries(publicInfo.map((version) => [version.versionId, version])),
+      Object.fromEntries(
+        publicInfo.map((version) => [version.versionId, version]),
+      ),
     [publicInfo],
   );
 
@@ -697,7 +722,9 @@ export default function SwitchboardPage() {
   );
   const livePublicInfoVersion = publishedVersions[0] ?? null;
   const livePlacardVersion =
-    placards.find((placard) => placard.publishedAt != null) ?? placards[0] ?? null;
+    placards.find((placard) => placard.publishedAt != null) ??
+    placards[0] ??
+    null;
   const selectedPublicInfoVersion =
     publicInfoById[placardForm.publicInfoVersionId] ?? null;
   const versionCodePrecheckMessage = useMemo(
@@ -742,7 +769,10 @@ export default function SwitchboardPage() {
         riskLevel: "low",
       },
     ];
-    const merged = [...publicInfoPayload.availableActions, ...placardPayload.availableActions];
+    const merged = [
+      ...publicInfoPayload.availableActions,
+      ...placardPayload.availableActions,
+    ];
     return merged.length > 0 ? merged : fallback;
   }, [
     placardPayload.availableActions,
@@ -803,9 +833,10 @@ export default function SwitchboardPage() {
       status: version.status,
       actor: version.publishedBy ?? "—",
       at: version.publishedAt ?? version.updatedAt ?? version.createdAt,
-      note: version.effectiveFrom && version.effectiveTo
-        ? `${version.effectiveFrom} → ${version.effectiveTo}`
-        : version.effectiveFrom ?? version.effectiveTo ?? "—",
+      note:
+        version.effectiveFrom && version.effectiveTo
+          ? `${version.effectiveFrom} → ${version.effectiveTo}`
+          : (version.effectiveFrom ?? version.effectiveTo ?? "—"),
     }));
     const placardEvents = placards.map((placard) => ({
       id: `placard-${placard.placardVersionId}`,
@@ -846,7 +877,9 @@ export default function SwitchboardPage() {
     return true;
   }
 
-  function getVersionActions(version: PublicInfoWithRuntime) {
+  function getVersionActions(
+    version: PublicInfoWithRuntime,
+  ): ResourceActionDescriptor[] {
     if (version.availableActions && version.availableActions.length > 0) {
       return version.availableActions;
     }
@@ -868,7 +901,9 @@ export default function SwitchboardPage() {
     return [];
   }
 
-  function getPlacardActions(placard: PlacardWithRuntime) {
+  function getPlacardActions(
+    placard: PlacardWithRuntime,
+  ): ResourceActionDescriptor[] {
     if (placard.availableActions && placard.availableActions.length > 0) {
       return placard.availableActions;
     }
@@ -940,9 +975,7 @@ export default function SwitchboardPage() {
   ) {
     const confirmed = await confirmDescriptorAction(
       descriptor,
-      isEnglish
-        ? "Delete this draft version?"
-        : "要刪除這個公開資訊草稿嗎？",
+      isEnglish ? "Delete this draft version?" : "要刪除這個公開資訊草稿嗎？",
     );
     if (!confirmed) {
       return;
@@ -1010,7 +1043,10 @@ export default function SwitchboardPage() {
   }
 
   async function handleActionDescriptor(descriptor: ResourceActionDescriptor) {
-    if (descriptor.action === "create" || descriptor.action === "create_version") {
+    if (
+      descriptor.action === "create" ||
+      descriptor.action === "create_version"
+    ) {
       setShowPublicInfoForm(true);
       setShowPlacardForm(false);
       setActiveTab("versions");
@@ -1036,7 +1072,11 @@ export default function SwitchboardPage() {
     }
     if (descriptor.action === "download") {
       if (livePlacardVersion?.artifactDownloadUrl) {
-        window.open(livePlacardVersion.artifactDownloadUrl, "_blank", "noopener,noreferrer");
+        window.open(
+          livePlacardVersion.artifactDownloadUrl,
+          "_blank",
+          "noopener,noreferrer",
+        );
       }
       return;
     }
@@ -1050,13 +1090,24 @@ export default function SwitchboardPage() {
   }
 
   if (loading) {
-    return <div style={emptyStateStyle}>{isEnglish ? "Loading switchboard..." : "載入 switchboard 中..."}</div>;
+    return (
+      <div style={emptyStateStyle}>
+        {isEnglish ? "Loading switchboard..." : "載入 switchboard 中..."}
+      </div>
+    );
   }
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
       <div style={pageHeaderStyle}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 10,
+            alignItems: "center",
+          }}
+        >
           <h1 style={pageHeaderTitleStyle}>{copy.title}</h1>
           <span style={statusBadgeStyle("info")}>
             {copy.refreshLabel} {refreshTier}
@@ -1066,13 +1117,24 @@ export default function SwitchboardPage() {
           </span>
         </div>
         <p style={pageHeaderSubtitleStyle}>{copy.subtitle}</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, color: "#64748b", fontSize: 13 }}>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            color: "#64748b",
+            fontSize: 13,
+          }}
+        >
           <span>
             {copy.refreshedAt}: {formatDateTime(lastRefreshedAt ?? "")}
           </span>
           <span>
-            {copy.labels.updatedAt}: {formatDateTime(
-              publicInfoPayload.lastUpdatedAt ?? placardPayload.lastUpdatedAt ?? "",
+            {copy.labels.updatedAt}:{" "}
+            {formatDateTime(
+              publicInfoPayload.lastUpdatedAt ??
+                placardPayload.lastUpdatedAt ??
+                "",
             )}
           </span>
         </div>
@@ -1109,10 +1171,12 @@ export default function SwitchboardPage() {
         />
         <MetricCard
           label={copy.labels.tiedCount}
-          value={placards.filter((placard) => {
-            const source = publicInfoById[placard.publicInfoVersionId];
-            return source?.status === "published";
-          }).length}
+          value={
+            placards.filter((placard) => {
+              const source = publicInfoById[placard.publicInfoVersionId];
+              return source?.status === "published";
+            }).length
+          }
           note={isEnglish ? "Ready for distribution" : "可進入發放"}
         />
       </div>
@@ -1143,7 +1207,8 @@ export default function SwitchboardPage() {
           <div style={supportCopyStyle}>
             {livePlacardVersion
               ? `${livePlacardVersion.templateName} · ${formatDateTime(
-                  livePlacardVersion.publishedAt ?? livePlacardVersion.createdAt,
+                  livePlacardVersion.publishedAt ??
+                    livePlacardVersion.createdAt,
                 )}`
               : copy.labels.pendingArtifact}
           </div>
@@ -1156,21 +1221,23 @@ export default function SwitchboardPage() {
 
       <div style={toolbarRowStyle}>
         <div style={pillTabsStyle}>
-          {(["versions", "placards", "history"] as SwitchboardTab[]).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              style={mergeStyles(
-                actionButtonStyle({
-                  tone: activeTab === tab ? "primary" : "secondary",
-                }),
-                { borderRadius: 999 },
-              )}
-              onClick={() => setActiveTab(tab)}
-            >
-              {copy.tabs[tab]}
-            </button>
-          ))}
+          {(["versions", "placards", "history"] as SwitchboardTab[]).map(
+            (tab) => (
+              <button
+                key={tab}
+                type="button"
+                style={mergeStyles(
+                  actionButtonStyle({
+                    tone: activeTab === tab ? "primary" : "secondary",
+                  }),
+                  { borderRadius: 999 },
+                )}
+                onClick={() => setActiveTab(tab)}
+              >
+                {copy.tabs[tab]}
+              </button>
+            ),
+          )}
         </div>
 
         <div style={toolbarActionsStyle}>
@@ -1185,7 +1252,9 @@ export default function SwitchboardPage() {
                 title={descriptor.disabledReasonCode}
                 disabled={!descriptor.enabled}
                 style={mergeStyles(
-                  actionButtonStyle({ tone: isPrimary ? "primary" : "secondary" }),
+                  actionButtonStyle({
+                    tone: isPrimary ? "primary" : "secondary",
+                  }),
                   disabledActionStyle(!descriptor.enabled),
                 )}
                 onClick={() => void handleActionDescriptor(descriptor)}
@@ -1196,8 +1265,8 @@ export default function SwitchboardPage() {
                   descriptor.action === "generate_placard_version"
                     ? copy.topActions.generatePlacard
                     : descriptor.action === "refresh"
-                    ? copy.topActions.refresh
-                    : copy.topActions.createVersion,
+                      ? copy.topActions.refresh
+                      : copy.topActions.createVersion,
                 )}
               </button>
             );
@@ -1208,7 +1277,10 @@ export default function SwitchboardPage() {
       {showPublicInfoForm && (
         <div style={surfaceCardStyle}>
           <div style={sectionTitleStyle}>{copy.forms.createVersion}</div>
-          <form onSubmit={handleCreatePublicInfo} style={{ display: "grid", gap: 16 }}>
+          <form
+            onSubmit={handleCreatePublicInfo}
+            style={{ display: "grid", gap: 16 }}
+          >
             <div style={formGridStyle}>
               <label style={labelStyle}>
                 Title
@@ -1221,7 +1293,9 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder={isEnglish ? "2026 Q3 public info" : "2026 Q3 公開資訊"}
+                  placeholder={
+                    isEnglish ? "2026 Q3 public info" : "2026 Q3 公開資訊"
+                  }
                 />
               </label>
               <label style={labelStyle}>
@@ -1277,7 +1351,9 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder={isEnglish ? "Optional sunset timestamp" : "選填結束時間"}
+                  placeholder={
+                    isEnglish ? "Optional sunset timestamp" : "選填結束時間"
+                  }
                 />
               </label>
               <label style={labelStyle}>
@@ -1347,7 +1423,10 @@ export default function SwitchboardPage() {
       {showPlacardForm && (
         <div style={surfaceCardStyle}>
           <div style={sectionTitleStyle}>{copy.forms.generatePlacard}</div>
-          <form onSubmit={handleGeneratePlacard} style={{ display: "grid", gap: 16 }}>
+          <form
+            onSubmit={handleGeneratePlacard}
+            style={{ display: "grid", gap: 16 }}
+          >
             <div style={formGridStyle}>
               <label style={labelStyle}>
                 {copy.labels.sourceVersion}
@@ -1412,7 +1491,11 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder={isEnglish ? "Optional external asset reference" : "選填外部成品參照"}
+                  placeholder={
+                    isEnglish
+                      ? "Optional external asset reference"
+                      : "選填外部成品參照"
+                  }
                 />
               </label>
             </div>
@@ -1477,10 +1560,14 @@ export default function SwitchboardPage() {
                       <div style={resourceCardHeaderStyle}>
                         <div>
                           <div style={resourceTitleStyle}>{version.title}</div>
-                          <div style={resourceMetaStyle}>{version.versionId}</div>
+                          <div style={resourceMetaStyle}>
+                            {version.versionId}
+                          </div>
                         </div>
                         <span
-                          style={statusBadgeStyle(publicInfoStatusTone(version.status))}
+                          style={statusBadgeStyle(
+                            publicInfoStatusTone(version.status),
+                          )}
                         >
                           {formatPlatformCodeLabel(locale, version.status)}
                         </span>
@@ -1511,7 +1598,9 @@ export default function SwitchboardPage() {
 
                       <div style={resourceActionsStyle}>
                         {getVersionActions(version).length === 0 ? (
-                          <span style={supportCopyStyle}>{copy.labels.retention}</span>
+                          <span style={supportCopyStyle}>
+                            {copy.labels.retention}
+                          </span>
                         ) : (
                           getVersionActions(version).map((descriptor) => {
                             const busy =
@@ -1525,19 +1614,30 @@ export default function SwitchboardPage() {
                                 disabled={!descriptor.enabled || busy}
                                 style={mergeStyles(
                                   actionButtonStyle({
-                                    tone: descriptor.action === "publish" ? "primary" : "secondary",
+                                    tone:
+                                      descriptor.action === "publish"
+                                        ? "primary"
+                                        : "secondary",
                                     size: "sm",
                                   }),
-                                  disabledActionStyle(!descriptor.enabled || busy),
+                                  disabledActionStyle(
+                                    !descriptor.enabled || busy,
+                                  ),
                                 )}
                                 onClick={() => {
                                   if (descriptor.action === "publish") {
-                                    void handlePublishVersion(version.versionId, descriptor);
+                                    void handlePublishVersion(
+                                      version.versionId,
+                                      descriptor,
+                                    );
                                   } else if (
                                     descriptor.action === "delete" ||
                                     descriptor.action === "delete_draft"
                                   ) {
-                                    void handleDeleteDraft(version.versionId, descriptor);
+                                    void handleDeleteDraft(
+                                      version.versionId,
+                                      descriptor,
+                                    );
                                   }
                                 }}
                               >
@@ -1563,11 +1663,14 @@ export default function SwitchboardPage() {
               <div style={sectionTitleStyle}>{copy.sections.livePreview}</div>
               <div style={placardPreviewStyle}>
                 <div style={placardBrandStyle}>
-                  {livePublicInfoVersion?.title ?? (isEnglish ? "No live disclosure" : "尚無 live 揭露")}
+                  {livePublicInfoVersion?.title ??
+                    (isEnglish ? "No live disclosure" : "尚無 live 揭露")}
                 </div>
                 <div style={placardCalloutStyle}>
-                  {isEnglish ? "Call" : "叫車"} {livePublicInfoVersion?.callPhone ?? "—"} ·{" "}
-                  {isEnglish ? "Complaint" : "客訴"} {livePublicInfoVersion?.complaintPhone ?? "—"}
+                  {isEnglish ? "Call" : "叫車"}{" "}
+                  {livePublicInfoVersion?.callPhone ?? "—"} ·{" "}
+                  {isEnglish ? "Complaint" : "客訴"}{" "}
+                  {livePublicInfoVersion?.complaintPhone ?? "—"}
                 </div>
                 <div style={placardBodyStyle}>
                   <div>{livePlacardVersion?.versionCode ?? "—"}</div>
@@ -1586,7 +1689,9 @@ export default function SwitchboardPage() {
                     href={livePlacardVersion.artifactDownloadUrl}
                     target="_blank"
                     rel="noreferrer"
-                    style={mergeStyles(actionButtonStyle(), { textDecoration: "none" })}
+                    style={mergeStyles(actionButtonStyle(), {
+                      textDecoration: "none",
+                    })}
                   >
                     {copy.labels.download}
                   </a>
@@ -1659,15 +1764,22 @@ export default function SwitchboardPage() {
           ) : (
             <div style={stackListStyle}>
               {placards.map((placard) => {
-                const sourceVersion = publicInfoById[placard.publicInfoVersionId];
+                const sourceVersion =
+                  publicInfoById[placard.publicInfoVersionId];
                 return (
                   <div key={placard.placardVersionId} style={resourceCardStyle}>
                     <div style={resourceCardHeaderStyle}>
                       <div>
-                        <div style={resourceTitleStyle}>{placard.versionCode}</div>
-                        <div style={resourceMetaStyle}>{placard.placardVersionId}</div>
+                        <div style={resourceTitleStyle}>
+                          {placard.versionCode}
+                        </div>
+                        <div style={resourceMetaStyle}>
+                          {placard.placardVersionId}
+                        </div>
                       </div>
-                      <span style={statusBadgeStyle(placardStatusTone(placard))}>
+                      <span
+                        style={statusBadgeStyle(placardStatusTone(placard))}
+                      >
                         {formatPlatformCodeLabel(
                           locale,
                           placard.publishedAt ? "published" : "draft",
@@ -1678,13 +1790,16 @@ export default function SwitchboardPage() {
                     <div style={detailGridStyle}>
                       <DetailItem
                         label={copy.labels.sourceVersion}
-                        value={sourceVersion?.title ?? placard.publicInfoVersionId}
+                        value={
+                          sourceVersion?.title ?? placard.publicInfoVersionId
+                        }
                       />
                       <DetailItem
                         label={copy.labels.scope}
                         value={formatPlatformCodeLabel(
                           locale,
-                          placard.scope ?? inferPlacardScope(placard.templateName),
+                          placard.scope ??
+                            inferPlacardScope(placard.templateName),
                         )}
                       />
                       <DetailItem
@@ -1693,7 +1808,9 @@ export default function SwitchboardPage() {
                       />
                       <DetailItem
                         label={copy.labels.artifact}
-                        value={placard.artifactFileId ?? copy.labels.pendingArtifact}
+                        value={
+                          placard.artifactFileId ?? copy.labels.pendingArtifact
+                        }
                       />
                     </div>
 
@@ -1723,14 +1840,19 @@ export default function SwitchboardPage() {
                           href={placard.artifactDownloadUrl}
                           target="_blank"
                           rel="noreferrer"
-                          style={mergeStyles(actionButtonStyle({ size: "sm" }), {
-                            textDecoration: "none",
-                          })}
+                          style={mergeStyles(
+                            actionButtonStyle({ size: "sm" }),
+                            {
+                              textDecoration: "none",
+                            },
+                          )}
                         >
                           {copy.labels.download}
                         </a>
                       ) : (
-                        <span style={supportCopyStyle}>{copy.labels.placardFlight}</span>
+                        <span style={supportCopyStyle}>
+                          {copy.labels.placardFlight}
+                        </span>
                       )}
                       {getPlacardActions(placard).map((descriptor) => (
                         <button
@@ -1743,21 +1865,30 @@ export default function SwitchboardPage() {
                           }
                           style={mergeStyles(
                             actionButtonStyle({
-                              tone: descriptor.action === "publish" ? "primary" : "secondary",
+                              tone:
+                                descriptor.action === "publish"
+                                  ? "primary"
+                                  : "secondary",
                               size: "sm",
                             }),
                             disabledActionStyle(
                               !descriptor.enabled ||
-                                publishingPlacardId === placard.placardVersionId,
+                                publishingPlacardId ===
+                                  placard.placardVersionId,
                             ),
                           )}
                           onClick={() =>
                             void handlePublishPlacard(
                               placard.placardVersionId,
                               descriptor,
-                            )}
+                            )
+                          }
                         >
-                          {actionLabel(descriptor.action, locale, descriptor.action)}
+                          {actionLabel(
+                            descriptor.action,
+                            locale,
+                            descriptor.action,
+                          )}
                         </button>
                       ))}
                     </div>
@@ -1792,8 +1923,8 @@ export default function SwitchboardPage() {
                           event.status === "published"
                             ? "success"
                             : event.status === "draft"
-                            ? "warning"
-                            : "neutral",
+                              ? "warning"
+                              : "neutral",
                         )}
                       >
                         {formatPlatformCodeLabel(locale, event.status)}
@@ -1818,7 +1949,9 @@ export default function SwitchboardPage() {
                 padding: 16,
               })}
             >
-              <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 6 }}>
+              <div
+                style={{ fontWeight: 700, color: "#92400e", marginBottom: 6 }}
+              >
                 {isEnglish
                   ? "Older published versions still active"
                   : "仍有舊 published 版本未退場"}
@@ -1866,7 +1999,11 @@ function DetailItem({
   return (
     <div style={{ display: "grid", gap: 4 }}>
       <div style={sectionEyebrowStyle}>{label}</div>
-      <div style={mono ? mergeStyles(detailValueStyle, monoTextStyle) : detailValueStyle}>
+      <div
+        style={
+          mono ? mergeStyles(detailValueStyle, monoTextStyle) : detailValueStyle
+        }
+      >
         {value}
       </div>
     </div>
