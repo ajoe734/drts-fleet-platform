@@ -811,62 +811,86 @@ function renderStateMachine(
   locale: Locale,
   states: string[],
   currentState: string,
+  options?: {
+    exceptionalTone?: Exclude<CanvasTone, "neutral">;
+    exceptionalBody?: string;
+  },
 ) {
-  const currentIndex = Math.max(
-    states.findIndex((state) => state === currentState),
-    0,
-  );
+  const currentIndex = states.findIndex((state) => state === currentState);
+  const isKnownState = currentIndex >= 0;
+  const exceptionalTone = options?.exceptionalTone ?? "warn";
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: `repeat(${states.length}, minmax(0, 1fr))`,
-        gap: 8,
-      }}
-    >
-      {states.map((state, index) => {
-        const tone: CanvasTone =
-          index < currentIndex
-            ? "success"
-            : index === currentIndex
-              ? "accent"
-              : "neutral";
-        return (
-          <div
-            key={state}
-            style={{
-              display: "grid",
-              gap: 6,
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: `1px solid ${tone === "accent" ? theme.accent : theme.border}`,
-              background:
-                tone === "accent"
-                  ? "rgba(133, 212, 255, 0.12)"
-                  : tone === "success"
-                    ? "rgba(76, 175, 80, 0.08)"
-                    : theme.surfaceLo,
-            }}
-          >
-            <span
+    <div style={{ display: "grid", gap: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${states.length}, minmax(0, 1fr))`,
+          gap: 8,
+        }}
+      >
+        {states.map((state, index) => {
+          const tone: CanvasTone = isKnownState
+            ? index < currentIndex
+              ? "success"
+              : index === currentIndex
+                ? "accent"
+                : "neutral"
+            : "neutral";
+          return (
+            <div
+              key={state}
               style={{
-                color: tone === "accent" ? theme.accent : theme.textDim,
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: "0.08em",
+                display: "grid",
+                gap: 6,
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: `1px solid ${tone === "accent" ? theme.accent : theme.border}`,
+                background:
+                  tone === "accent"
+                    ? "rgba(133, 212, 255, 0.12)"
+                    : tone === "success"
+                      ? "rgba(76, 175, 80, 0.08)"
+                      : theme.surfaceLo,
               }}
             >
-              {index + 1}
-            </span>
-            <span
-              style={{ color: theme.text, fontSize: 12.5, fontWeight: 600 }}
-            >
-              {formatCode(locale, state)}
-            </span>
-          </div>
-        );
-      })}
+              <span
+                style={{
+                  color: tone === "accent" ? theme.accent : theme.textDim,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                }}
+              >
+                {index + 1}
+              </span>
+              <span
+                style={{ color: theme.text, fontSize: 12.5, fontWeight: 600 }}
+              >
+                {formatCode(locale, state)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {!isKnownState ? (
+        <Banner
+          theme={theme}
+          tone={exceptionalTone}
+          icon={exceptionalTone === "danger" ? "warn" : "clock"}
+          title={
+            locale === "zh"
+              ? `例外 / 終態：${formatCode(locale, currentState)}`
+              : `Exceptional or terminal state: ${formatCode(locale, currentState)}`
+          }
+          body={
+            options?.exceptionalBody ??
+            (locale === "zh"
+              ? "此狀態不屬於標準進度階梯，不能回退顯示成 step 1；請改以 exception panel 與 availableActions 判讀下一步。"
+              : "This state sits outside the normal progression and must not render as step 1; use the exception panel and availableActions to determine the next step.")
+          }
+        />
+      ) : null}
     </div>
   );
 }
@@ -1250,6 +1274,19 @@ function buildEmptyStateContent(
           locale === "zh"
             ? "adapter 或外部平台目前無法提供候選資料。"
             : "An adapter or external platform is currently unable to provide candidate data.",
+      };
+    case "driver_not_eligible":
+      return {
+        tone: "warn" as const,
+        icon: "warn" as const,
+        title:
+          locale === "zh"
+            ? "司機目前不具派遣資格"
+            : "Driver is not currently eligible",
+        body:
+          locale === "zh"
+            ? "此空態來自 driver_not_eligible，代表資格或 gating 阻止派遣，不能視為一般 no_data。"
+            : "This empty state comes from driver_not_eligible, which means eligibility or gating blocks dispatch and must not be treated as generic no_data.",
       };
     case "filtered_empty":
       return {
@@ -1909,6 +1946,19 @@ export default async function DispatchDetailPage({
                     "completed",
                   ],
                   stateCode,
+                  {
+                    exceptionalTone:
+                      getStateTone(stateCode) === "neutral"
+                        ? "info"
+                        : (getStateTone(stateCode) as Exclude<
+                            CanvasTone,
+                            "neutral"
+                          >),
+                    exceptionalBody:
+                      locale === "zh"
+                        ? "owned dispatch 目前處於例外或終態；請改看 Compliance / hold、No supply、Timeout 與 availableActions，而不是把它當成流程起點。"
+                        : "This owned dispatch is in an exceptional or terminal state; use Compliance / hold, No supply, Timeout, and availableActions instead of treating it as the start of the flow.",
+                  },
                 )}
               </Card>
 
@@ -2261,17 +2311,21 @@ export default async function DispatchDetailPage({
     "adapter",
     forwardedOrder.platformCode,
   );
-  const reconciliationLink = buildCrossAppLink(
-    `/payments/reconciliation/${encodeURIComponent(
-      issue?.reconciliationJob.reconciliationJobId ??
-        forwardedOrder.reconciliationJob?.reconciliationJobId ??
-        forwardedOrder.mirrorOrderId,
-    )}`,
-    locale === "zh" ? "Open reconciliation" : "Open reconciliation",
-    "reconciliation_issue",
+  const reconciliationResourceId =
     issue?.reconciliationJob.reconciliationJobId ??
-      forwardedOrder.reconciliationJob?.reconciliationJobId ??
-      forwardedOrder.mirrorOrderId,
+    forwardedOrder.reconciliationJob?.reconciliationJobId ??
+    forwardedOrder.mirrorOrderId;
+  const reconciliationLink = buildCrossAppLink(
+    issue ? "/payments" : "/payments#payments-create-issue",
+    locale === "zh"
+      ? issue
+        ? "Open reconciliation queue"
+        : "Create reconciliation issue"
+      : issue
+        ? "Open reconciliation queue"
+        : "Create reconciliation issue",
+    issue ? "reconciliation_queue" : "reconciliation_create",
+    reconciliationResourceId,
   );
   const focusedForwardedAction =
     forwardedActions.find((action) => action.action === focusedActionId) ??
@@ -2525,6 +2579,18 @@ export default async function DispatchDetailPage({
                   "completed_synced",
                 ],
                 forwardedOrder.status,
+                {
+                  exceptionalTone:
+                    getForwardedStateTone(forwardedOrder.status) === "neutral"
+                      ? "info"
+                      : (getForwardedStateTone(
+                          forwardedOrder.status,
+                        ) as Exclude<CanvasTone, "neutral">),
+                  exceptionalBody:
+                    locale === "zh"
+                      ? "forwarded mirror 目前不在標準同步進度上；請依 adapter health、reconciliation、manual fallback 與 availableActions 決策。"
+                      : "This forwarded mirror is outside the standard sync progression; use adapter health, reconciliation, manual fallback, and availableActions to decide the next action.",
+                },
               )}
             </Card>
 
