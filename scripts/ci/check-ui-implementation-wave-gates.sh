@@ -34,10 +34,13 @@ echo "==> Gate 4/6: api-client typed adoption"
 pnpm --filter @drts/api-client typecheck
 
 echo "==> Gate 5/6: app adoption"
-pnpm --filter @drts/platform-admin-web typecheck
-pnpm --filter @drts/ops-console-web typecheck
-pnpm --filter @drts/tenant-console-web typecheck
-pnpm --filter @drts/driver-app typecheck
+# Run app typechecks through turbo so dependency ^build chains (for example
+# @drts/ui-tokens) are honored on a clean tree.
+pnpm exec turbo run typecheck \
+  --filter=@drts/platform-admin-web \
+  --filter=@drts/ops-console-web \
+  --filter=@drts/tenant-console-web \
+  --filter=@drts/driver-app
 
 echo "==> Gate 6/6: action-authority discipline and smoke anchors"
 ./scripts/ci/check-bff-only-imports.sh
