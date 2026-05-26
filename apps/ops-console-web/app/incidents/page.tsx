@@ -485,10 +485,6 @@ function isPriorityIncident(record: IncidentRecordRuntime) {
     return true;
   }
 
-  if (record.category === "safety" || record.sourceDispatchExceptionOrderId) {
-    return true;
-  }
-
   const haystack = `${record.title} ${record.description}`.toLowerCase();
   return haystack.includes("sos");
 }
