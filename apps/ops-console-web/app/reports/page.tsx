@@ -6,6 +6,7 @@ import { PageHeader } from "@drts/ui-web";
 import type {
   CreateReportJobCommand,
   CrossAppResourceLink,
+  EmptyStateEnvelope,
   EmptyReason,
   FilingPackageDetailRecord,
   FilingPackageListRecord,
@@ -92,6 +93,13 @@ type EmptyStateDefinition = {
   body: string;
   accent: string;
   suggestion: string;
+};
+
+type RuntimeListResponse<T> = {
+  items?: T[];
+  emptyState?: EmptyStateEnvelope;
+  refreshMetadata?: UiRefreshMetadata;
+  availableActions?: ReportAction[];
 };
 
 type PageActionKind = "create_report_job" | "generate_filing_package";
@@ -285,22 +293,107 @@ function jobCategory(jobType: string) {
     : "Operational";
 }
 
-function getRefreshMetadata(
-  records: Array<{ refreshMetadata?: UiRefreshMetadata }>,
-) {
-  const first = records.find(
-    (record) => record.refreshMetadata,
-  )?.refreshMetadata;
-  if (first) {
-    return first;
+function normalizeListResponse<T>(
+  payload: RuntimeListResponse<T> | T[],
+): RuntimeListResponse<T> {
+  if (Array.isArray(payload)) {
+    return { items: payload };
   }
-  const generatedAt = new Date().toISOString();
   return {
-    generatedAt,
-    staleAfterMs: 5 * 60 * 1000,
-    dataFreshness: "fresh",
-    source: "live",
-  } satisfies UiRefreshMetadata;
+    items: payload.items ?? [],
+    ...(payload.emptyState ? { emptyState: payload.emptyState } : {}),
+    ...(payload.refreshMetadata
+      ? { refreshMetadata: payload.refreshMetadata }
+      : {}),
+    ...(payload.availableActions
+      ? { availableActions: payload.availableActions }
+      : {}),
+  };
+}
+
+function getSubmittedByLabel(
+  record: Partial<RuntimeReportJob> | Partial<RuntimeReportJobDetail> | null,
+) {
+  if (!record) {
+    return "system";
+  }
+  const aliases = [
+    record.submittedBy,
+    (record as Record<string, unknown>).submittedByDisplayName,
+    (record as Record<string, unknown>).submittedByName,
+    (record as Record<string, unknown>).submittedByUserName,
+    (record as Record<string, unknown>).submittedByUserId,
+    (record as Record<string, unknown>).createdByDisplayName,
+    (record as Record<string, unknown>).createdBy,
+  ];
+
+  for (const candidate of aliases) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+
+  return "system";
+}
+
+function getCompletedAtValue(
+  record: Partial<RuntimeReportJob> | Partial<RuntimeReportJobDetail> | null,
+) {
+  if (!record) {
+    return null;
+  }
+  const aliases = [
+    record.completedAt,
+    (record as Record<string, unknown>).completedAt,
+  ];
+  for (const candidate of aliases) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+  return record.status === "completed" ? (record.updatedAt ?? null) : null;
+}
+
+function getPackageScopeSummary(
+  filingPackage:
+    | Partial<RuntimeFilingPackage>
+    | Partial<RuntimeFilingPackageDetail>
+    | null,
+  locale: "en" | "zh",
+) {
+  const summary =
+    filingPackage?.scopeSummary ??
+    ((filingPackage as Record<string, unknown> | null)?.periodSummary as
+      | string
+      | undefined) ??
+    null;
+  if (summary && summary.trim().length > 0) {
+    return summary;
+  }
+  const periodSummary = (filingPackage as Record<string, unknown> | null)
+    ?.periodSummary;
+  if (typeof periodSummary === "string" && periodSummary.trim().length > 0) {
+    return periodSummary;
+  }
+  return copyText(
+    locale,
+    "Scope not carried by current payload",
+    "目前 payload 尚未攜帶 scope",
+  );
+}
+
+function toSurfaceActionDescriptor(
+  action: PageActionKind,
+  descriptor?: PageActionDescriptor,
+): ReportAction {
+  return {
+    action,
+    enabled: descriptor?.enabled ?? false,
+    ...(descriptor?.disabledReasonCode
+      ? { disabledReasonCode: descriptor.disabledReasonCode }
+      : {}),
+    riskLevel: "low",
+  };
 }
 
 function fallbackJobActions(
@@ -576,7 +669,6 @@ export default function ReportsPage() {
   const [detailLoadingKey, setDetailLoadingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [jobType, setJobType] = useState<ReportJobType>(REPORT_JOB_TYPES[0]!);
   const [format, setFormat] = useState<ReportOutputFormat>("xlsx");
@@ -593,6 +685,18 @@ export default function ReportsPage() {
     null,
   );
   const [reasonText, setReasonText] = useState("");
+  const [jobEmptyState, setJobEmptyState] = useState<EmptyStateEnvelope | null>(
+    null,
+  );
+  const [packageEmptyState, setPackageEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [jobListRefreshMetadata, setJobListRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
+  const [packageListRefreshMetadata, setPackageListRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
+  const [pageAvailableActions, setPageAvailableActions] = useState<
+    ReportAction[]
+  >([]);
 
   useEffect(() => {
     void loadData();
@@ -619,13 +723,26 @@ export default function ReportsPage() {
     setLoading(true);
     try {
       const client = getOpsClient();
-      const [reportJobs, filingPackages] = await Promise.all([
-        client.listReportJobs(),
-        client.listFilingPackages(),
+      const [reportJobsPayload, filingPackagesPayload] = await Promise.all([
+        client.get<RuntimeListResponse<RuntimeReportJob> | RuntimeReportJob[]>(
+          "/api/reports/jobs",
+        ),
+        client.get<
+          RuntimeListResponse<RuntimeFilingPackage> | RuntimeFilingPackage[]
+        >("/api/filing-packages"),
       ]);
-      setJobs(reportJobs as RuntimeReportJob[]);
-      setPackages(filingPackages as RuntimeFilingPackage[]);
-      setLastLoadedAt(new Date().toISOString());
+      const reportJobs = normalizeListResponse(reportJobsPayload);
+      const filingPackages = normalizeListResponse(filingPackagesPayload);
+      setJobs(reportJobs.items ?? []);
+      setPackages(filingPackages.items ?? []);
+      setJobEmptyState(reportJobs.emptyState ?? null);
+      setPackageEmptyState(filingPackages.emptyState ?? null);
+      setJobListRefreshMetadata(reportJobs.refreshMetadata ?? null);
+      setPackageListRefreshMetadata(filingPackages.refreshMetadata ?? null);
+      setPageAvailableActions([
+        ...(reportJobs.availableActions ?? []),
+        ...(filingPackages.availableActions ?? []),
+      ]);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("common.unknown"));
@@ -826,6 +943,46 @@ export default function ReportsPage() {
     });
   }
 
+  function handleSurfaceAction(action: ReportAction) {
+    if (!action.enabled) {
+      setNotice(
+        copyText(
+          locale,
+          `Action unavailable: ${action.disabledReasonCode ?? action.action}`,
+          `操作不可用：${action.disabledReasonCode ?? action.action}`,
+        ),
+      );
+      return;
+    }
+
+    if (action.action === "create_report_job") {
+      setComposerMode((current) => (current === "report" ? null : "report"));
+      return;
+    }
+
+    if (action.action === "generate_filing_package") {
+      setComposerMode((current) => (current === "package" ? null : "package"));
+      return;
+    }
+
+    if (action.href) {
+      window.open(
+        action.href,
+        action.openMode === "same_tab" ? "_self" : "_blank",
+        "noopener,noreferrer",
+      );
+      return;
+    }
+
+    setNotice(
+      copyText(
+        locale,
+        `No handler is wired for ${action.action} yet.`,
+        `${action.action} 目前尚未接上處理器。`,
+      ),
+    );
+  }
+
   async function executeActionImmediately(
     kind: PendingAction["kind"],
     action: ReportAction,
@@ -873,15 +1030,22 @@ export default function ReportsPage() {
   }
 
   const activePresetCategory = jobCategory(jobType);
-  const refreshMetadata = getRefreshMetadata([...jobs, ...packages]);
-  const effectiveGeneratedAt = lastLoadedAt ?? refreshMetadata.generatedAt;
+  const activeRefreshMetadata =
+    selection?.kind === "job"
+      ? (jobDetail?.refreshMetadata ?? jobListRefreshMetadata)
+      : selection?.kind === "package"
+        ? (packageDetail?.refreshMetadata ?? packageListRefreshMetadata)
+        : activeTab === "jobs"
+          ? jobListRefreshMetadata
+          : packageListRefreshMetadata;
+  const effectiveGeneratedAt = activeRefreshMetadata?.generatedAt ?? null;
   const freshnessAgeMs = effectiveGeneratedAt
-    ? Date.now() - new Date(effectiveGeneratedAt).getTime()
+    ? Date.now() - new Date(activeRefreshMetadata?.generatedAt ?? "").getTime()
     : 0;
   const effectiveFreshness =
-    freshnessAgeMs > refreshMetadata.staleAfterMs
+    activeRefreshMetadata && freshnessAgeMs > activeRefreshMetadata.staleAfterMs
       ? "stale"
-      : refreshMetadata.dataFreshness;
+      : (activeRefreshMetadata?.dataFreshness ?? "unknown");
 
   const normalizedSearch = search.trim().toLowerCase();
   const filteredJobs = useMemo(() => {
@@ -895,7 +1059,7 @@ export default function ReportsPage() {
               job.jobId,
               job.jobType,
               summarizeFilters(job.filters),
-              job.submittedBy ?? "",
+              getSubmittedByLabel(job),
             ]
               .join(" ")
               .toLowerCase()
@@ -925,8 +1089,10 @@ export default function ReportsPage() {
 
   const urlEmptyReason = searchParams.get("emptyReason") as EmptyReason | null;
   const activeEmptyReason = (() => {
-    if (urlEmptyReason) {
-      return urlEmptyReason;
+    const backendEmptyReason =
+      activeTab === "jobs" ? jobEmptyState?.reason : packageEmptyState?.reason;
+    if (backendEmptyReason) {
+      return backendEmptyReason;
     }
     if (error) {
       if (/403|permission|forbidden/i.test(error)) {
@@ -946,6 +1112,9 @@ export default function ReportsPage() {
       filteredPackages.length === 0
     ) {
       return "filtered_empty";
+    }
+    if (urlEmptyReason) {
+      return urlEmptyReason;
     }
     return "no_data";
   })();
@@ -993,12 +1162,14 @@ export default function ReportsPage() {
     ];
 
     for (const actionName of knownActions) {
-      const match = records
-        .flatMap((record) => record.availableActions ?? [])
-        .find((action) => action.action === actionName);
+      const match =
+        pageAvailableActions.find((action) => action.action === actionName) ??
+        records
+          .flatMap((record) => record.availableActions ?? [])
+          .find((action) => action.action === actionName);
       inventory.set(actionName, {
         action: actionName,
-        enabled: match?.enabled ?? true,
+        enabled: match?.enabled ?? false,
         ...(match?.disabledReasonCode
           ? { disabledReasonCode: match.disabledReasonCode }
           : {}),
@@ -1006,7 +1177,7 @@ export default function ReportsPage() {
     }
 
     return inventory;
-  }, [jobDetail, jobs, packageDetail, packages]);
+  }, [jobDetail, jobs, packageDetail, packages, pageAvailableActions]);
 
   const metrics = [
     {
@@ -1093,11 +1264,12 @@ export default function ReportsPage() {
                 type="button"
                 className="primary-button"
                 onClick={() =>
-                  pageActions.get("create_report_job")?.enabled
-                    ? setComposerMode((current) =>
-                        current === "report" ? null : "report",
-                      )
-                    : undefined
+                  handleSurfaceAction(
+                    toSurfaceActionDescriptor(
+                      "create_report_job",
+                      pageActions.get("create_report_job"),
+                    ),
+                  )
                 }
                 disabled={!pageActions.get("create_report_job")?.enabled}
                 title={formatDisabledReason(
@@ -1111,11 +1283,12 @@ export default function ReportsPage() {
                 type="button"
                 className="secondary-button"
                 onClick={() =>
-                  pageActions.get("generate_filing_package")?.enabled
-                    ? setComposerMode((current) =>
-                        current === "package" ? null : "package",
-                      )
-                    : undefined
+                  handleSurfaceAction(
+                    toSurfaceActionDescriptor(
+                      "generate_filing_package",
+                      pageActions.get("generate_filing_package"),
+                    ),
+                  )
                 }
                 disabled={!pageActions.get("generate_filing_package")?.enabled}
                 title={formatDisabledReason(
@@ -1138,26 +1311,39 @@ export default function ReportsPage() {
                 </strong>
               </div>
               <div className="freshness-copy">
-                <span>
-                  {copyText(locale, "Generated", "產生時間")}{" "}
-                  {formatDateTimeShort(effectiveGeneratedAt)}
-                </span>
-                <span>
-                  {copyText(locale, "Source", "來源")} {refreshMetadata.source}
-                </span>
-                <span>
-                  {effectiveFreshness === "stale"
-                    ? copyText(
-                        locale,
-                        "Snapshot may be stale. Refresh before download handoff.",
-                        "快照可能已過時。交付下載前請先刷新。",
-                      )
-                    : copyText(
-                        locale,
-                        "Snapshot still within the manual freshness window.",
-                        "快照仍在手動刷新可接受的新鮮度範圍內。",
-                      )}
-                </span>
+                {activeRefreshMetadata ? (
+                  <>
+                    <span>
+                      {copyText(locale, "Generated", "產生時間")}{" "}
+                      {formatDateTimeShort(effectiveGeneratedAt)}
+                    </span>
+                    <span>
+                      {copyText(locale, "Source", "來源")}{" "}
+                      {activeRefreshMetadata.source}
+                    </span>
+                    <span>
+                      {effectiveFreshness === "stale"
+                        ? copyText(
+                            locale,
+                            "Snapshot may be stale. Refresh before download handoff.",
+                            "快照可能已過時。交付下載前請先刷新。",
+                          )
+                        : copyText(
+                            locale,
+                            "Snapshot still within the manual freshness window.",
+                            "快照仍在手動刷新可接受的新鮮度範圍內。",
+                          )}
+                    </span>
+                  </>
+                ) : (
+                  <span>
+                    {copyText(
+                      locale,
+                      "Backend freshness metadata is unavailable for this snapshot.",
+                      "此快照尚未提供後端 freshness metadata。",
+                    )}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1417,7 +1603,18 @@ export default function ReportsPage() {
               </div>
             ) : activeTab === "jobs" ? (
               filteredJobs.length === 0 ? (
-                <EmptyStatePanel definition={emptyStateDefinition} />
+                <EmptyStatePanel
+                  definition={emptyStateDefinition}
+                  action={
+                    filteredJobs.length === 0 &&
+                    jobs.length === 0 &&
+                    jobEmptyState?.nextAction
+                      ? (jobEmptyState.nextAction as ReportAction)
+                      : null
+                  }
+                  onAction={handleSurfaceAction}
+                  locale={locale}
+                />
               ) : (
                 <div className="table-shell">
                   <div className="table-head table-head-jobs">
@@ -1425,8 +1622,10 @@ export default function ReportsPage() {
                     <span>KIND</span>
                     <span>PARAMETERS</span>
                     <span>STATUS</span>
-                    <span>TTL</span>
-                    <span>CREATED</span>
+                    <span>SUBMITTED BY</span>
+                    <span>SUBMITTED</span>
+                    <span>COMPLETED</span>
+                    <span>EXPIRES</span>
                     <span>ACTIONS</span>
                   </div>
                   {filteredJobs.map((job) => {
@@ -1439,8 +1638,8 @@ export default function ReportsPage() {
                         className={
                           selection?.kind === "job" &&
                           selection.id === job.jobId
-                            ? "table-row active"
-                            : "table-row"
+                            ? "table-row table-row-job active"
+                            : "table-row table-row-job"
                         }
                         onClick={() => void inspectReportJob(job.jobId)}
                       >
@@ -1462,6 +1661,13 @@ export default function ReportsPage() {
                             tone={pillToneForStatus(job.status)}
                           />
                         </span>
+                        <span>{getSubmittedByLabel(job)}</span>
+                        <span className="mono">
+                          {formatDateTimeShort(job.createdAt)}
+                        </span>
+                        <span className="mono">
+                          {formatDateTimeShort(getCompletedAtValue(job))}
+                        </span>
                         <span className="mono">
                           {job.artifact?.expiresAt ? (
                             <span
@@ -1478,9 +1684,6 @@ export default function ReportsPage() {
                           ) : (
                             copyText(locale, "pending", "待發行")
                           )}
-                        </span>
-                        <span className="mono">
-                          {formatDateTimeShort(job.createdAt)}
                         </span>
                         <span className="action-cell">
                           {actions.map((action) => (
@@ -1516,7 +1719,18 @@ export default function ReportsPage() {
                 </div>
               )
             ) : filteredPackages.length === 0 ? (
-              <EmptyStatePanel definition={emptyStateDefinition} />
+              <EmptyStatePanel
+                definition={emptyStateDefinition}
+                action={
+                  filteredPackages.length === 0 &&
+                  packages.length === 0 &&
+                  packageEmptyState?.nextAction
+                    ? (packageEmptyState.nextAction as ReportAction)
+                    : null
+                }
+                onAction={handleSurfaceAction}
+                locale={locale}
+              />
             ) : (
               <div className="table-shell">
                 <div className="table-head table-head-packages">
@@ -1539,8 +1753,8 @@ export default function ReportsPage() {
                       className={
                         selection?.kind === "package" &&
                         selection.id === filingPackage.packageId
-                          ? "table-row active"
-                          : "table-row"
+                          ? "table-row table-row-package active"
+                          : "table-row table-row-package"
                       }
                       onClick={() =>
                         void inspectFilingPackage(filingPackage.packageId)
@@ -1561,12 +1775,7 @@ export default function ReportsPage() {
                         </small>
                       </span>
                       <span>
-                        {filingPackage.scopeSummary ??
-                          copyText(
-                            locale,
-                            "Scope not carried by list payload",
-                            "清單 payload 未攜帶 scope",
-                          )}
+                        {getPackageScopeSummary(filingPackage, locale)}
                       </span>
                       <span>
                         <StatusPill
@@ -1666,11 +1875,7 @@ export default function ReportsPage() {
                     <dl className="detail-list">
                       <DetailItem
                         label={copyText(locale, "Submitted by", "提交者")}
-                        value={
-                          jobDetail?.submittedBy ??
-                          selectedJob.submittedBy ??
-                          "system"
-                        }
+                        value={getSubmittedByLabel(jobDetail ?? selectedJob)}
                       />
                       <DetailItem
                         label={copyText(locale, "Submitted at", "提交時間")}
@@ -1681,11 +1886,7 @@ export default function ReportsPage() {
                       <DetailItem
                         label={copyText(locale, "Completed at", "完成時間")}
                         value={formatDateTime(
-                          jobDetail?.completedAt ??
-                            selectedJob.completedAt ??
-                            (selectedJob.status === "completed"
-                              ? selectedJob.updatedAt
-                              : null),
+                          getCompletedAtValue(jobDetail ?? selectedJob),
                         )}
                       />
                       <DetailItem
@@ -1790,7 +1991,11 @@ export default function ReportsPage() {
                   ) : null}
                 </>
               ) : (
-                <EmptyStatePanel definition={emptyStateDefinition} compact />
+                <EmptyStatePanel
+                  definition={emptyStateDefinition}
+                  compact
+                  locale={locale}
+                />
               )
             ) : selectedPackage ? (
               <>
@@ -1830,15 +2035,10 @@ export default function ReportsPage() {
                     />
                     <DetailItem
                       label={copyText(locale, "Scope", "範圍")}
-                      value={
-                        packageDetail?.scopeSummary ??
-                        selectedPackage.scopeSummary ??
-                        copyText(
-                          locale,
-                          "Scope not carried by current contract",
-                          "目前 contract 尚未攜帶 scope",
-                        )
-                      }
+                      value={getPackageScopeSummary(
+                        packageDetail ?? selectedPackage,
+                        locale,
+                      )}
                     />
                     <DetailItem
                       label={copyText(locale, "Items", "項目數")}
@@ -1923,7 +2123,11 @@ export default function ReportsPage() {
                 ) : null}
               </>
             ) : (
-              <EmptyStatePanel definition={emptyStateDefinition} compact />
+              <EmptyStatePanel
+                definition={emptyStateDefinition}
+                compact
+                locale={locale}
+              />
             )}
           </aside>
         </section>
@@ -2402,11 +2606,21 @@ export default function ReportsPage() {
         }
 
         .table-head-jobs,
-        .table-row {
-          grid-template-columns: 1.1fr 1.1fr 1.5fr 0.9fr 0.8fr 1fr 1.1fr;
+        .table-row-job {
+          grid-template-columns:
+            1.05fr
+            1fr
+            1.45fr
+            0.8fr
+            1fr
+            0.95fr
+            0.95fr
+            0.9fr
+            1.1fr;
         }
 
-        .table-head-packages {
+        .table-head-packages,
+        .table-row-package {
           grid-template-columns: 1.1fr 1.1fr 1.4fr 0.9fr 0.8fr 1fr 1.1fr;
         }
 
@@ -2447,6 +2661,10 @@ export default function ReportsPage() {
 
         .table-row:hover {
           transform: translateY(-1px);
+        }
+
+        .empty-state-action {
+          margin-top: 6px;
         }
 
         .mono {
@@ -2744,9 +2962,15 @@ export default function ReportsPage() {
 function EmptyStatePanel({
   definition,
   compact = false,
+  action = null,
+  onAction,
+  locale,
 }: {
   definition: EmptyStateDefinition;
   compact?: boolean;
+  action?: ReportAction | null;
+  onAction?: (action: ReportAction) => void;
+  locale: "en" | "zh";
 }) {
   return (
     <div className={compact ? "empty-state compact" : "empty-state"}>
@@ -2760,6 +2984,21 @@ function EmptyStatePanel({
       <h3>{definition.title}</h3>
       <p>{definition.body}</p>
       <p>{definition.suggestion}</p>
+      {action ? (
+        <button
+          type="button"
+          className="ghost-button empty-state-action"
+          disabled={!action.enabled}
+          title={
+            action.enabled
+              ? undefined
+              : formatDisabledReason(action.disabledReasonCode, locale)
+          }
+          onClick={() => onAction?.(action)}
+        >
+          {action.label ?? labelForAction(action.action, locale)}
+        </button>
+      ) : null}
     </div>
   );
 }
