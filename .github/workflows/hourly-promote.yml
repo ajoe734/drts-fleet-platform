@@ -272,9 +272,19 @@ jobs:
             python3 scripts/git/check_staged_generated_files.py --range origin/main HEAD
 
           run_check \
+            "BFF-only imports" \
+            "Verifying protected UI surfaces stay on backend-owned authority paths." \
+            ./scripts/ci/check-bff-only-imports.sh
+
+          run_check \
             "Smoke acceptance" \
             "Running lint, typecheck, and unit tests on the promote snapshot." \
             bash -lc 'pnpm install --frozen-lockfile && pnpm run lint && pnpm run typecheck && pnpm run test:unit'
+
+          run_check \
+            "UI implementation wave gate" \
+            "Verifying the phase1-ui-implementation-wave-202605 release-gate matrix." \
+            bash -lc 'pnpm install --frozen-lockfile && ./scripts/ci/check-ui-implementation-wave-gates.sh'
 
           echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
           exit "$overall"
@@ -285,7 +295,7 @@ jobs:
         run: |
           pr="${{ steps.pr.outputs.pr_number }}"
           run_url="${{ steps.checks.outputs.run_url }}"
-          required=("Commit trailers" "Runtime mirror guard" "Smoke acceptance")
+          required=("Commit trailers" "BFF-only imports" "Runtime mirror guard" "Smoke acceptance" "UI implementation wave gate")
           # GitHub can take a short moment to surface freshly-published checks
           # on the PR head SHA and satisfy branch protection.
           for i in $(seq 1 20); do
@@ -313,7 +323,7 @@ jobs:
             done
             if [ "$all_done" = "true" ]; then
               if [ "$all_green" = "true" ]; then
-                echo "All 3 required checks green after ${i} poll(s)."
+                echo "All 5 required checks green after ${i} poll(s)."
                 echo "ready=true" >> "$GITHUB_OUTPUT"
                 exit 0
               else

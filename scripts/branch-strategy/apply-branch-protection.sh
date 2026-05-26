@@ -30,9 +30,10 @@ echo
 
 apply_protection() {
   local branch="$1"
-  # v3: identical protection on main + *-dev:
+  # v4: identical protection on main + dev:
   #   - 0 approvals (CI is the gate)
-  #   - 3 required checks: Commit trailers, Runtime mirror guard, Smoke acceptance
+  #   - 5 required checks: Commit trailers, BFF-only imports, Runtime mirror
+  #     guard, Smoke acceptance, UI implementation wave gate
   #   - linear history, no force-push, no delete
   #   - PR-only (handled by GitHub when contexts are set + no direct-push bypass)
   local payload
@@ -40,7 +41,7 @@ apply_protection() {
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["Commit trailers", "Runtime mirror guard", "Smoke acceptance"]
+    "contexts": ["Commit trailers", "BFF-only imports", "Runtime mirror guard", "Smoke acceptance", "UI implementation wave gate"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
@@ -60,7 +61,7 @@ EOF
     echo "  [apply] $branch"
     echo "$payload" | gh api -X PUT "repos/$REPO/branches/$branch/protection" --input - >/dev/null
   else
-    echo "  [plan] $branch  reviews=0  checks=[Commit trailers, Runtime mirror guard, Smoke acceptance]"
+    echo "  [plan] $branch  reviews=0  checks=[Commit trailers, BFF-only imports, Runtime mirror guard, Smoke acceptance, UI implementation wave gate]"
   fi
 }
 

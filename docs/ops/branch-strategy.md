@@ -95,7 +95,7 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 | Workflow                                | Trigger                                                   | What it does                                                                                                  |
 | --------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `ci.yml` (3 named gates)                | PR to main / dev; push main                               | Commit trailers + Runtime mirror guard + Smoke acceptance                                                     |
+| `ci.yml` (5 named gates)                | PR to main / dev; push main                               | Commit trailers + BFF-only imports + Runtime mirror guard + Smoke acceptance + UI implementation wave gate    |
 | `ci-integ.yml`                          | push to dev; workflow_dispatch                            | heavier integration suite (build, integration tests, orchestrator-tests) — prerequisite for `nightly-publish` |
 | `nightly-publish.yml`                   | cron `0 3 * * *`; workflow_dispatch                       | cut `publish/v<date>` + tag `release/v<date>` from dev HEAD                                                   |
 | `deploy-dev.yml`                        | push to `publish/v*`; workflow_dispatch                   | deploy to dev GCP (this is what makes dev VM roll)                                                            |
@@ -110,9 +110,18 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 ### Gate 1: feat → dev (every PR)
 
-- 3 named CI checks: `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance`
+- 5 named CI checks: `Commit trailers`, `BFF-only imports`, `Runtime mirror guard`, `Smoke acceptance`, `UI implementation wave gate`
 - 0 reviewers required
 - `auto-merge` enabled per PR
+
+#### Workflow-family release-gate matrix
+
+Pack `00_INDEX.md` invariant 7 remains binding on top of the generic branch gate.
+The current workflow family that adds extra release-discipline requirements is:
+
+| Workflow family                        | Binding source                                                                                                                                  | Release gates that must stay green before merge / promote                                                                                         | Enforced by                                                                                                                     |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `phase1-ui-implementation-wave-202605` | `docs/03-runbooks/system-design-pack-implementation-runbook-20260524.md`; `docs/03-runbooks/phase1-ui-implementation-wave-planning-20260525.md` | `contracts compile`; `docs landed`; `backend support`; `api-client typed adoption`; `app adoption`; `action-authority discipline + smoke anchors` | `UI implementation wave gate` in `ci.yml`, branch protection on `main`/`dev`, and inline promote checks in `hourly-promote.yml` |
 
 ### Gate 2: dev → publish snapshot (once a day, nightly cron)
 
@@ -124,7 +133,7 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 - ≥30 min soak time since publish was cut (configurable)
 - no open issue with label `regression:v<date>` (humans/testers can block by opening such an issue)
 - main does not already contain this publish's content (idempotency)
-- auto-PR opens, `hourly-promote.yml` ensures the static branch-strategy labels exist, and 3 named CI checks must pass
+- auto-PR opens, `hourly-promote.yml` ensures the static branch-strategy labels exist, and 5 named CI checks must pass
 
 ### Gate 4: prod deploy (manual)
 
@@ -145,15 +154,15 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 Identical settings on `main` and `dev`:
 
-| Setting                       | Value                                                         |
-| ----------------------------- | ------------------------------------------------------------- |
-| Required reviewers            | 0                                                             |
-| Required status checks        | `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance` |
-| Strict (up-to-date with base) | yes                                                           |
-| Linear history                | yes                                                           |
-| Force-push                    | no                                                            |
-| Delete                        | no                                                            |
-| Enforce admins                | no                                                            |
+| Setting                       | Value                                                                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Required reviewers            | 0                                                                                                                |
+| Required status checks        | `Commit trailers`, `BFF-only imports`, `Runtime mirror guard`, `Smoke acceptance`, `UI implementation wave gate` |
+| Strict (up-to-date with base) | yes                                                                                                              |
+| Linear history                | yes                                                                                                              |
+| Force-push                    | no                                                                                                               |
+| Delete                        | no                                                                                                               |
+| Enforce admins                | no                                                                                                               |
 
 `publish/v*` branches are **not** protected by branch protection. They are protected by convention (immutable) and by the fact that nothing in the workflows writes to them after the initial nightly cut.
 
@@ -381,7 +390,7 @@ git switch -c <lane>/<task-id-kebab> origin/dev
 
 ## 12. References
 
-- `.github/workflows/ci.yml` — the 3 PR gates
+- `.github/workflows/ci.yml` — the 5 PR gates
 - `.github/workflows/ci-integ.yml` — heavier CI on push to `dev`
 - `.github/workflows/nightly-publish.yml` — 03:00 UTC cut publish snapshot
 - `.github/workflows/hourly-promote.yml` — :15 hourly promote + tag-on-merge

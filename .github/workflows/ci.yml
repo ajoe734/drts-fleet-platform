@@ -1,10 +1,12 @@
 name: CI
 
-# ci-feat — the 3 gates every PR must clear to merge into a protected branch.
+# ci-feat — the required checks every PR must clear to merge into a protected branch.
 # Branch protection on main + dev requires:
 #   ① Commit trailers       — commit messages have <TASK-ID>: subject + Task-ID/LLM-Agent/Reviewer trailers
-#   ② Runtime mirror guard  — no docs-site/ / *-bg.pid / runtime-logs/ etc. in the diff
-#   ③ Smoke acceptance      — lint + typecheck + unit tests pass
+#   ② BFF-only imports      — protected UI surfaces stay on backend-owned authority paths
+#   ③ Runtime mirror guard  — no docs-site/ / *-bg.pid / runtime-logs/ etc. in the diff
+#   ④ Smoke acceptance      — lint + typecheck + unit tests pass
+#   ⑤ UI implementation wave gate — pack invariant 7 release-gate discipline for phase1 UI wave
 #
 # See docs/ops/branch-strategy.md §6 for the model.
 
@@ -115,3 +117,22 @@ jobs:
         run: pnpm run typecheck
       - name: Unit tests
         run: pnpm run test:unit
+
+  ui-implementation-wave-gate:
+    name: UI implementation wave gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Verify phase1 UI implementation wave gates
+        run: ./scripts/ci/check-ui-implementation-wave-gates.sh
