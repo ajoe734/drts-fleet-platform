@@ -73,6 +73,13 @@ assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_CLOUDSQL_INSTANCE" "PROD_GCP_CLO
 assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT" "PROD_GCP_RUNTIME_SERVICE_ACCOUNT config gate is present"
 assert_contains "$WORKFLOW_PROD" "secrets.PROD_WIF_SERVICE_ACCOUNT" "PROD_WIF_SERVICE_ACCOUNT config gate is present"
 assert_contains "$WORKFLOW_PROD" "secrets.PROD_WIF_PROVIDER" "PROD_WIF_PROVIDER config gate is present"
+assert_contains "$WORKFLOW_PROD" "vars.PROD_ARTIFACT_REGISTRY" "PROD_ARTIFACT_REGISTRY config gate is present"
+assert_contains "$WORKFLOW_PROD" "Resolve Artifact Registry host" "single-path registry host resolution exists"
+assert_contains "$WORKFLOW_PROD" "gcloud auth configure-docker \${{ steps.registry_host.outputs.host }} --quiet" "docker auth uses derived registry host"
+assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_API_SERVICE" "PROD_GCP_API_SERVICE override is wired"
+assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_PLATFORM_ADMIN_SERVICE" "PROD_GCP_PLATFORM_ADMIN_SERVICE override is wired"
+assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_OPS_CONSOLE_SERVICE" "PROD_GCP_OPS_CONSOLE_SERVICE override is wired"
+assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_MIGRATION_JOB" "PROD_GCP_MIGRATION_JOB override is wired"
 
 save_check "validate_config" "status" "pass"
 save_check "validate_config" "mode" "static_contract_check"

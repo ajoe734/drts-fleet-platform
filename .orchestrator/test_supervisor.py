@@ -2051,6 +2051,87 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         self.assertEqual(state["history"], [{"approval_id": "apr-old", "status": "resolved"}])
 
 
+class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
+    def _config(self, root: Path, *, interval: float | None = None) -> dict[str, object]:
+        supervisor_cfg: dict[str, object] = {}
+        if interval is not None:
+            supervisor_cfg["git_reconcile_interval_seconds"] = interval
+        config: dict[str, object] = {
+            "paths": {"status_file": str(root / "ai-status.json")},
+            "supervisor": supervisor_cfg,
+        }
+        return config
+
+    def test_first_call_runs_and_stamps_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text("{}", encoding="utf-8")
+            (root / "scripts").mkdir()
+            script = root / "scripts" / "ai_status.py"
+            script.write_text("# placeholder\n", encoding="utf-8")
+            config = self._config(root)
+            state: dict[str, object] = {"supervisor": {}}
+            fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="reconcile-from-git: no drift found against origin/dev\n", stderr="")
+            with mock.patch.object(supervisor.subprocess, "run", return_value=fake_result) as run_mock:
+                ran = supervisor.reconcile_status_from_git(config, state)
+            self.assertTrue(ran)
+            run_mock.assert_called_once()
+            self.assertIn("last_git_reconcile_at", state["supervisor"])  # type: ignore[index]
+
+    def test_second_call_within_window_skips_subprocess(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text("{}", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "ai_status.py").write_text("# placeholder\n", encoding="utf-8")
+            config = self._config(root, interval=60.0)
+            # Timestamp 5s ago — within 60s window.
+            recent = supervisor.datetime.now(supervisor.timezone.utc) - supervisor.timedelta(seconds=5)
+            state = {
+                "supervisor": {
+                    "last_git_reconcile_at": recent.replace(microsecond=0)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+            }
+            with mock.patch.object(supervisor.subprocess, "run") as run_mock:
+                ran = supervisor.reconcile_status_from_git(config, state)
+            self.assertFalse(ran)
+            run_mock.assert_not_called()
+
+    def test_second_call_after_window_runs_subprocess(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text("{}", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "ai_status.py").write_text("# placeholder\n", encoding="utf-8")
+            config = self._config(root, interval=60.0)
+            # Timestamp 120s ago — well outside 60s window.
+            old = supervisor.datetime.now(supervisor.timezone.utc) - supervisor.timedelta(seconds=120)
+            state = {
+                "supervisor": {
+                    "last_git_reconcile_at": old.replace(microsecond=0)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+            }
+            fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="reconcile-from-git: no drift found against origin/dev\n", stderr="")
+            with mock.patch.object(supervisor.subprocess, "run", return_value=fake_result) as run_mock:
+                ran = supervisor.reconcile_status_from_git(config, state)
+            self.assertTrue(ran)
+            run_mock.assert_called_once()
+
+    def test_skips_when_status_file_path_missing(self) -> None:
+        # OPS-STATE-RECONCILE-002 guard: don't raise KeyError when config
+        # omits paths.status_file (e.g. minimal test config).
+        config: dict[str, object] = {"paths": {}, "supervisor": {}}
+        state: dict[str, object] = {"supervisor": {}}
+        with mock.patch.object(supervisor.subprocess, "run") as run_mock:
+            ran = supervisor.reconcile_status_from_git(config, state)
+        self.assertFalse(ran)
+        run_mock.assert_not_called()
+
+
 class UnderutilizationSidecarDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
@@ -6164,6 +6245,135 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
             )
         self.assertIsNotNone(result)
         self.assertEqual(result["dirty_paths"], [".orchestrator/skills/renamed.md"])
+
+
+
+
+class DispatchCooldownTests(unittest.TestCase):
+    """Cooldown protects freshly-dispatched workers from voluntary supersede.
+
+    See `worker_in_dispatch_cooldown` in supervisor.py. Cooldown is
+    measured against the timestamp embedded in the worker run_id; for
+    workers whose run_id has no parseable timestamp (legacy / synthetic
+    fixtures), cooldown is bypassed so the historical supersede behaviour
+    is preserved.
+    """
+
+    def test_parse_returns_none_for_short_slug(self) -> None:
+        self.assertIsNone(supervisor.parse_worker_dispatched_at("run-1"))
+        self.assertIsNone(supervisor.parse_worker_dispatched_at(None))
+        self.assertIsNone(supervisor.parse_worker_dispatched_at(""))
+
+    def test_parse_extracts_timestamp_from_production_run_id(self) -> None:
+        dt = supervisor.parse_worker_dispatched_at("codex-20260526T043357Z-d168b9f0")
+        self.assertIsNotNone(dt)
+        from datetime import datetime, timezone
+        self.assertEqual(
+            dt, datetime(2026, 5, 26, 4, 33, 57, tzinfo=timezone.utc)
+        )
+
+    def test_cooldown_false_when_disabled(self) -> None:
+        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
+        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, 0))
+        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, -1))
+
+    def test_cooldown_false_for_non_running_worker(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "stalled", "run_id": "codex-20260526T043357Z-aaa"}
+        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
+        self.assertFalse(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "stalled workers must remain recoverable via supersede",
+        )
+
+    def test_cooldown_true_for_fresh_running_worker(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
+        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
+        self.assertTrue(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "running worker dispatched 3s ago is within 300s cooldown",
+        )
+
+    def test_cooldown_false_for_stale_worker(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
+        now = datetime(2026, 5, 26, 5, 30, 0, tzinfo=timezone.utc)
+        self.assertFalse(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "running worker dispatched 56 min ago is outside 300s cooldown",
+        )
+
+    def test_cooldown_false_when_runid_has_no_timestamp(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "running", "run_id": "run-active"}
+        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
+        self.assertFalse(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "synthetic test fixtures without timestamped run_ids must bypass cooldown",
+        )
+
+    def test_ready_dispatch_settings_default_cooldown(self) -> None:
+        settings = supervisor.ready_dispatch_settings({})
+        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 300)
+
+    def test_ready_dispatch_settings_honors_explicit_zero(self) -> None:
+        settings = supervisor.ready_dispatch_settings({
+            "ready_dispatcher": {"dispatch_cooldown_seconds": 0}
+        })
+        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 0)
+
+
+
+
+class PruneDoneHandoffsTests(unittest.TestCase):
+    """`prune_done_handoffs` bounds ai-status.json's handoffs audit-log tail.
+
+    Without this prune the file grew to ~9 MB / 17k entries during the
+    2026-05-26 incident, making the dashboard fetch unusably slow. See
+    feedback_ai_status_handoff_bloat.
+    """
+
+    def test_noop_under_keep_threshold(self) -> None:
+        s = {"handoffs": [{"status": "done"}] * 100}
+        supervisor.prune_done_handoffs(s, keep=500)
+        self.assertEqual(len(s["handoffs"]), 100)
+
+    def test_pending_entries_always_preserved(self) -> None:
+        # 2000 done + 5 pending; even with keep=10, pending entries survive.
+        handoffs = (
+            [{"status": "done", "task_id": f"D{i}"} for i in range(2000)]
+            + [{"status": "pending", "task_id": f"P{i}"} for i in range(5)]
+        )
+        s = {"handoffs": list(handoffs)}
+        supervisor.prune_done_handoffs(s, keep=10)
+        kinds = [x.get("status") for x in s["handoffs"]]
+        self.assertEqual(kinds.count("pending"), 5,
+                         "all pending handoffs must survive prune")
+        self.assertEqual(kinds.count("done"), 10,
+                         "only the last `keep` done entries survive")
+
+    def test_keeps_most_recent_done_by_position(self) -> None:
+        # done entries are appended chronologically; the prune must keep the
+        # tail, not the head, so audit history reflects what *just* happened.
+        handoffs = [{"status": "done", "task_id": f"T{i}"} for i in range(1000)]
+        s = {"handoffs": list(handoffs)}
+        supervisor.prune_done_handoffs(s, keep=3)
+        self.assertEqual(
+            [x["task_id"] for x in s["handoffs"]],
+            ["T997", "T998", "T999"],
+        )
+
+    def test_missing_handoffs_key_is_safe(self) -> None:
+        s = {}
+        supervisor.prune_done_handoffs(s, keep=500)  # must not raise
+        self.assertNotIn("handoffs", s)
+
+    def test_non_list_handoffs_is_safe(self) -> None:
+        # Bad data type — defensive against malformed input.
+        s = {"handoffs": "not-a-list"}
+        supervisor.prune_done_handoffs(s, keep=500)
+        self.assertEqual(s["handoffs"], "not-a-list")  # unchanged
 
 
 if __name__ == "__main__":

@@ -36,10 +36,8 @@ import {
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasShell as Shell,
   CanvasTable as Table,
   buildCanvasTheme,
-  type CanvasShellNavItem,
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -157,127 +155,6 @@ const queueLinkStyle = {
   textDecoration: "none",
   fontWeight: 700,
 };
-
-const dashboardShellResetCss = `
-  body {
-    background: ${theme.bg};
-  }
-
-  body > aside {
-    display: none !important;
-  }
-
-  body > main {
-    padding: 0 !important;
-    background: ${theme.bg} !important;
-  }
-`;
-
-function buildShellNav(
-  locale: Locale,
-  counts: {
-    dashboard: number;
-    dispatch: number;
-    incidents: number;
-  },
-): CanvasShellNavItem[] {
-  return [
-    { divider: locale === "en" ? "Workspaces" : "工作面" },
-    {
-      key: "dashboard",
-      href: "/dashboard",
-      icon: "dashboard",
-      label: t("nav.dashboard", locale),
-      ...(counts.dashboard > 0
-        ? { badge: String(counts.dashboard), badgeTone: "warn" as const }
-        : {}),
-    },
-    { divider: locale === "en" ? "Live Ops" : "即時派遣" },
-    {
-      key: "dispatch",
-      href: "/dispatch",
-      icon: "dispatch",
-      label: t("nav.dispatch", locale),
-      matchPaths: ["/dispatch"],
-      ...(counts.dispatch > 0
-        ? { badge: String(counts.dispatch), badgeTone: "accent" as const }
-        : {}),
-    },
-    {
-      key: "callcenter",
-      href: "/callcenter",
-      icon: "callcenter",
-      label: t("nav.callcenter", locale),
-    },
-    { divider: locale === "en" ? "Casework" : "案件處理" },
-    {
-      key: "complaints",
-      href: "/complaints",
-      icon: "complaints",
-      label: t("nav.complaints", locale),
-    },
-    {
-      key: "incidents",
-      href: "/incidents",
-      icon: "incidents",
-      label: t("nav.incidents", locale),
-      matchPaths: ["/incidents"],
-      ...(counts.incidents > 0
-        ? { badge: String(counts.incidents), badgeTone: "danger" as const }
-        : {}),
-    },
-    { divider: locale === "en" ? "Monitoring" : "營運監控" },
-    {
-      key: "reports",
-      href: "/reports",
-      icon: "reports",
-      label: t("nav.reports", locale),
-    },
-    {
-      key: "revenue",
-      href: "/revenue",
-      icon: "revenue",
-      label: t("nav.revenue", locale),
-    },
-    {
-      key: "attendance",
-      href: "/attendance",
-      icon: "attendance",
-      label: t("nav.attendance", locale),
-    },
-    {
-      key: "maintenance",
-      href: "/maintenance",
-      icon: "maintenance",
-      label: t("nav.maintenance", locale),
-    },
-    { divider: locale === "en" ? "Registry" : "主資料" },
-    {
-      key: "drivers",
-      href: "/drivers",
-      icon: "fleet",
-      label: t("nav.drivers", locale),
-    },
-    {
-      key: "vehicles",
-      href: "/vehicles",
-      icon: "vehicles",
-      label: t("nav.vehicles", locale),
-    },
-    {
-      key: "contracts",
-      href: "/contracts",
-      icon: "contracts",
-      label: t("nav.contracts", locale),
-    },
-    {
-      key: "feature-flags",
-      href: "/feature-flags",
-      icon: "flags",
-      label: t("nav.featureFlags", locale),
-    },
-  ];
-}
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
@@ -774,12 +651,6 @@ export default async function DashboardPage() {
     (job: DispatchJobRecord) => job.status === "matching",
   ).length;
 
-  const shellNav = buildShellNav(locale, {
-    dashboard: Math.max(opsAlerts.length, adapterAttentionCount),
-    dispatch: dispatch.queueDepth,
-    incidents: operations.openIncidents,
-  });
-
   const headerSubtitle = [
     formatTimestamp(health.timestamp, locale),
     locale === "en"
@@ -1003,21 +874,7 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <style>{dashboardShellResetCss}</style>
-      <Shell
-        theme={theme}
-        nav={shellNav}
-        active="dashboard"
-        brandLabel={t("app.name", locale)}
-        brandSubLabel={t("app.sub", locale)}
-        breadcrumb={[t("nav.dashboard", locale)]}
-        env="production"
-        versionLabel="canvas"
-        searchPlaceholder={t("common.search", locale)}
-        avatarLabel="OC"
-        style={{ minHeight: "100vh", height: "100vh" }}
-      >
-        <PageHeader
+      <PageHeader
           theme={theme}
           title={t("dashboard.title", locale)}
           subtitle={headerSubtitle}
@@ -1223,7 +1080,6 @@ export default async function DashboardPage() {
             <Table theme={theme} columns={queueColumns} rows={queueRows} />
           </Card>
         </div>
-      </Shell>
     </>
   );
 }
