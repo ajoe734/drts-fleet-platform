@@ -375,6 +375,50 @@ function renderDeepLink(link: CrossAppResourceLink, labelOverride?: string) {
   );
 }
 
+function renderActionDescriptor(
+  action: ResourceActionDescriptor,
+  link: CrossAppResourceLink | undefined,
+  locale: Locale,
+  primaryAction?: string,
+) {
+  if (!action.enabled || !link) {
+    return (
+      <span
+        key={action.action}
+        title={disabledActionHint(action, locale)}
+        style={{
+          ...actionLinkStyle("secondary", true),
+          pointerEvents: "none",
+        }}
+      >
+        {actionLabel(action.action, locale)}
+      </span>
+    );
+  }
+
+  const variant = action.action === primaryAction ? "primary" : "secondary";
+
+  return link.openMode === "same_tab" ? (
+    <Link
+      key={action.action}
+      href={link.route}
+      style={actionLinkStyle(variant)}
+    >
+      {actionLabel(action.action, locale)}
+    </Link>
+  ) : (
+    <a
+      key={action.action}
+      href={link.route}
+      target="_blank"
+      rel="noreferrer"
+      style={actionLinkStyle(variant)}
+    >
+      {actionLabel(action.action, locale)}
+    </a>
+  );
+}
+
 function buildEmptyStateView(
   locale: Locale,
   reason: AttendanceEmptyReason,
@@ -523,7 +567,15 @@ function buildEmptyStateView(
         ),
         tone: "danger",
         icon: "warn",
-        sameAppHref: "/drivers",
+        sameAppHref: "/attendance",
+        nextLink: {
+          targetApp: "ops-console",
+          route: "/drivers",
+          resourceType: "driver_registry",
+          resourceId: "all-drivers",
+          openMode: "same_tab",
+          label: copy(locale, "Open driver registry", "前往司機主檔"),
+        },
       };
     case "no_data":
     default:
@@ -638,7 +690,7 @@ function actionLabel(action: string, locale: Locale) {
     case "clear_filters":
       return copy(locale, "Clear filters", "清除篩選");
     case "retry_refresh":
-      return copy(locale, "Open registry", "前往主檔");
+      return copy(locale, "Retry refresh", "重新整理");
     case "inspect_driver_registry":
       return copy(locale, "Open driver registry", "前往司機主檔");
     default:
@@ -940,43 +992,11 @@ export default async function AttendancePage({
       actionsCell: (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {view.availableActions.map((action) => {
-            const link = view.links[action.action];
-            if (!action.enabled || !link) {
-              return (
-                <span
-                  key={action.action}
-                  title={disabledActionHint(action, locale)}
-                  style={{
-                    ...actionLinkStyle("secondary", true),
-                    pointerEvents: "none",
-                  }}
-                >
-                  {actionLabel(action.action, locale)}
-                </span>
-              );
-            }
-            return link.openMode === "same_tab" ? (
-              <Link
-                key={action.action}
-                href={link.route}
-                style={actionLinkStyle(
-                  action.action === "open_driver_detail"
-                    ? "primary"
-                    : "secondary",
-                )}
-              >
-                {actionLabel(action.action, locale)}
-              </Link>
-            ) : (
-              <a
-                key={action.action}
-                href={link.route}
-                target="_blank"
-                rel="noreferrer"
-                style={actionLinkStyle()}
-              >
-                {actionLabel(action.action, locale)}
-              </a>
+            return renderActionDescriptor(
+              action,
+              view.links[action.action],
+              locale,
+              "open_driver_detail",
             );
           })}
         </div>
@@ -991,7 +1011,7 @@ export default async function AttendancePage({
     { h: copy(locale, "CLOCK", "打卡"), k: "clockCell", w: 188 },
     { h: copy(locale, "STATE", "狀態"), k: "statusCell", w: 118 },
     { h: copy(locale, "ANOMALY", "異常"), k: "anomalyCell", w: 160 },
-    { h: copy(locale, "ACTIONS", "操作"), k: "actionsCell", w: 160 },
+    { h: copy(locale, "ACTIONS", "操作"), k: "actionsCell", w: 240 },
   ];
 
   const attendanceRows = filteredAttendance.slice(0, 16).map((record) => {
@@ -1046,9 +1066,22 @@ export default async function AttendancePage({
           <Pill theme={theme}>{copy(locale, "normal", "正常")}</Pill>
         ),
       actionsCell: (
-        <Link href={driverLink} style={actionLinkStyle("secondary")}>
-          {copy(locale, "Open driver", "查看司機")}
-        </Link>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {relatedShift ? (
+            relatedShift.availableActions.map((action) =>
+              renderActionDescriptor(
+                action,
+                relatedShift.links[action.action],
+                locale,
+                "open_driver_detail",
+              ),
+            )
+          ) : (
+            <span style={actionLinkStyle("secondary", true)}>
+              {copy(locale, "No linked actions", "目前沒有可用操作")}
+            </span>
+          )}
+        </div>
       ),
     } satisfies AttendanceRow;
   });
