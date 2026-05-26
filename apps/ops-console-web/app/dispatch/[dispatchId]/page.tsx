@@ -111,7 +111,7 @@ type ActionDestination = {
 
 const theme = buildCanvasTheme({
   surface: "ops",
-  dark: true,
+  dark: false,
   density: "compact",
 });
 
@@ -1336,6 +1336,28 @@ function renderRefreshBanner(
   );
 }
 
+function renderWorkspaceTitle(
+  title: string,
+  domain: "owned" | "forwarded",
+  tone: CanvasTone = "accent",
+) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 10,
+        flexWrap: "wrap",
+      }}
+    >
+      <span>{title}</span>
+      <Pill theme={theme} tone={tone}>
+        {domain}
+      </Pill>
+    </span>
+  );
+}
+
 function normalizeRoutePath(route: string) {
   if (/^https?:\/\//.test(route)) {
     return route;
@@ -1655,6 +1677,10 @@ export default async function DispatchDetailPage({
         ),
       },
       {
+        k: locale === "zh" ? "Order source" : "Order source",
+        v: formatCode(locale, ownedRecord.orderSource),
+      },
+      {
         k: locale === "zh" ? "Tenant" : "Tenant",
         v: getTenantLabel(ownedRecord),
       },
@@ -1670,6 +1696,10 @@ export default async function DispatchDetailPage({
       {
         k: locale === "zh" ? "Pickup" : "Pickup",
         v: getAddressLabel(ownedRecord.pickup),
+      },
+      {
+        k: locale === "zh" ? "Passenger" : "Passenger",
+        v: `${ownedRecord.passenger.name} · ${ownedRecord.passenger.phone}`,
       },
       {
         k: locale === "zh" ? "Dropoff" : "Dropoff",
@@ -1817,6 +1847,11 @@ export default async function DispatchDetailPage({
         mono: true,
       },
       {
+        k: locale === "zh" ? "Callback contact" : "Callback contact",
+        v: ownedRecord.passenger.phone,
+        mono: true,
+      },
+      {
         k: locale === "zh" ? "Approval state" : "Approval state",
         v: (
           <Pill
@@ -1844,7 +1879,10 @@ export default async function DispatchDetailPage({
       <>
         <PageHeader
           theme={theme}
-          title={`${ownedRecord.orderId} · ${ownedRecord.orderNo}`}
+          title={renderWorkspaceTitle(
+            `${ownedRecord.orderId} · ${ownedRecord.orderNo}`,
+            "owned",
+          )}
           subtitle={[
             locale === "zh" ? "Dispatch workspace" : "Dispatch workspace",
             formatCode(locale, stateCode),
@@ -2240,6 +2278,11 @@ export default async function DispatchDetailPage({
                         ),
                       },
                       {
+                        k: locale === "zh" ? "Accepted" : "Accepted",
+                        v: formatLongDateTime(locale, currentTask?.acceptedAt),
+                        mono: true,
+                      },
+                      {
                         k: locale === "zh" ? "Route" : "Route",
                         v:
                           currentTask && currentTask.waypoints.length > 0
@@ -2263,6 +2306,11 @@ export default async function DispatchDetailPage({
                           : locale === "zh"
                             ? "待補"
                             : "Pending",
+                      },
+                      {
+                        k: locale === "zh" ? "Completed" : "Completed",
+                        v: formatLongDateTime(locale, currentTask?.completedAt),
+                        mono: true,
                       },
                     ]}
                   />
@@ -2360,6 +2408,12 @@ export default async function DispatchDetailPage({
       v: formatCode(locale, forwardedOrder.platformCode),
     },
     {
+      k: locale === "zh" ? "Source platform" : "Source platform",
+      v:
+        mirroredTask?.sourcePlatform ??
+        formatCode(locale, forwardedOrder.platformCode),
+    },
+    {
       k: locale === "zh" ? "External order" : "External order",
       v: forwardedOrder.externalOrderId,
       mono: true,
@@ -2440,7 +2494,11 @@ export default async function DispatchDetailPage({
     <>
       <PageHeader
         theme={theme}
-        title={`${forwardedOrder.mirrorOrderId} · ${forwardedOrder.externalOrderId}`}
+        title={renderWorkspaceTitle(
+          `${forwardedOrder.mirrorOrderId} · ${forwardedOrder.externalOrderId}`,
+          "forwarded",
+          "info",
+        )}
         subtitle={[
           locale === "zh"
             ? "Forwarded dispatch workspace"
