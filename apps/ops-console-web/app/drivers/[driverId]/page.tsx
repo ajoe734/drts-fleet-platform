@@ -86,19 +86,22 @@ const layoutStyle: CSSProperties = {
 const heroGridStyle: CSSProperties = {
   display: "grid",
   gap: 16,
-  gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  alignItems: "start",
 };
 
 const pairGridStyle: CSSProperties = {
   display: "grid",
   gap: 16,
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  alignItems: "start",
 };
 
 const tripleGridStyle: CSSProperties = {
   display: "grid",
   gap: 16,
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+  alignItems: "start",
 };
 
 const pageSectionNavStyle: CSSProperties = {
@@ -345,13 +348,38 @@ function renderEmptyState(
   body?: ReactNode,
 ) {
   const copy = getEmptyStateCopy(reason, locale);
+  const icon =
+    reason === "no_data"
+      ? "health"
+      : reason === "not_provisioned"
+        ? "clock"
+        : reason === "permission_denied"
+          ? "audit"
+          : reason === "external_unavailable"
+            ? "ext"
+            : "warn";
+  const reasonLabel =
+    locale === "zh" ? `EmptyReason · ${reason}` : `EmptyReason · ${reason}`;
   return (
     <Banner
       theme={theme}
       tone={copy.tone}
-      icon={copy.tone === "info" ? "health" : "warn"}
+      icon={icon}
       title={copy.title}
-      body={body ?? copy.body}
+      body={
+        <div style={{ display: "grid", gap: 8 }}>
+          <div>{body ?? copy.body}</div>
+          <div
+            style={{
+              fontFamily: theme.monoFamily,
+              fontSize: 11,
+              color: theme.textMuted,
+            }}
+          >
+            {reasonLabel}
+          </div>
+        </div>
+      }
     />
   );
 }
@@ -432,22 +460,30 @@ function buildPlatformActions(
   hasActiveForwardedTask: boolean,
   hasActiveSosIncident: boolean,
 ): ResourceActionDescriptor[] {
+  const forceOfflineDisabledReason = hasActiveSosIncident
+    ? "sos_in_response"
+    : presence.status === "online"
+      ? null
+      : "platform_offline";
+  const requestReauthDisabledReason = presence.accountId
+    ? null
+    : "platform_unbound";
   return [
     {
       action: "force_offline",
       enabled: presence.status === "online" && !hasActiveSosIncident,
-      disabledReasonCode: hasActiveSosIncident
-        ? "sos_in_response"
-        : presence.status === "online"
-          ? undefined
-          : "platform_offline",
+      ...(forceOfflineDisabledReason
+        ? { disabledReasonCode: forceOfflineDisabledReason }
+        : {}),
       requiresReason: true,
       riskLevel: "high",
     },
     {
       action: "request_reauth",
       enabled: Boolean(presence.accountId),
-      disabledReasonCode: presence.accountId ? undefined : "platform_unbound",
+      ...(requestReauthDisabledReason
+        ? { disabledReasonCode: requestReauthDisabledReason }
+        : {}),
       riskLevel: "medium",
     },
     {
@@ -467,24 +503,27 @@ function buildDriverActions(
   suppression: DriverMatchingSuppression | null,
   hasActiveSosIncident: boolean,
 ): ResourceActionDescriptor[] {
+  const suppressionDisabledReason =
+    suppression?.active || !hasActiveSosIncident ? null : "already_active";
+  const statementDisabledReason = /^\d{4}-\d{2}$/.test(statementPeriod)
+    ? null
+    : "read_model_gap";
   return [
     {
       action: suppression?.active ? "lift_suppression" : "suppress_matching",
       enabled: suppression?.active ? true : !hasActiveSosIncident,
-      disabledReasonCode: suppression?.active
-        ? undefined
-        : hasActiveSosIncident
-          ? "already_active"
-          : undefined,
+      ...(suppressionDisabledReason
+        ? { disabledReasonCode: suppressionDisabledReason }
+        : {}),
       requiresReason: true,
       riskLevel: "high",
     },
     {
       action: "generate_driver_statement",
       enabled: /^\d{4}-\d{2}$/.test(statementPeriod),
-      disabledReasonCode: /^\d{4}-\d{2}$/.test(statementPeriod)
-        ? undefined
-        : "read_model_gap",
+      ...(statementDisabledReason
+        ? { disabledReasonCode: statementDisabledReason }
+        : {}),
       riskLevel: "low",
     },
   ];
@@ -719,6 +758,22 @@ export default async function DriverDetailPage({
   const shiftSubtitle =
     shifts[0]?.shiftId ??
     (locale === "zh" ? "近期無 shift" : "No recent shift");
+  const serviceBucketSummary = driver.supportedServiceBuckets.length
+    ? driver.supportedServiceBuckets
+        .map((bucket) => formatOpsCodeLabel(locale, bucket))
+        .join(" · ")
+    : "—";
+  const deviceBindingSummary = driver.deviceBindings.length
+    ? driver.deviceBindings
+        .map((binding) =>
+          binding.deviceLabel
+            ? `${binding.deviceLabel} (${formatOpsCodeLabel(locale, binding.status)})`
+            : `${binding.deviceId} (${formatOpsCodeLabel(locale, binding.status)})`,
+        )
+        .join(" · ")
+    : locale === "zh"
+      ? "沒有 active device binding"
+      : "No active device binding";
   const phoneSummary =
     locale === "zh"
       ? "電話未下發至 ops contract"
@@ -1530,6 +1585,14 @@ export default async function DriverDetailPage({
                       driver.eligibilityBlockedReasons,
                       locale,
                     ),
+                  },
+                  {
+                    k: locale === "zh" ? "服務桶" : "Service buckets",
+                    v: serviceBucketSummary,
+                  },
+                  {
+                    k: locale === "zh" ? "裝置綁定" : "Device bindings",
+                    v: deviceBindingSummary,
                   },
                   {
                     k: locale === "zh" ? "定位訊號" : "Location signal",
