@@ -7,6 +7,7 @@ import { PageHeader } from "@drts/ui-web";
 import { useTranslation } from "@/lib/i18n";
 import type {
   ActionReceipt,
+  ActionRiskLevel,
   CreateMaintenanceRecordCommand,
   EmptyReason,
   EmptyStateEnvelope,
@@ -38,7 +39,9 @@ type RuntimeMaintenanceRecord = MaintenanceListItem & {
 type PendingMutation = {
   mode: "create" | "edit";
   command: CreateMaintenanceRecordCommand | UpdateMaintenanceRecordCommand;
+  descriptor: ResourceActionDescriptor;
   record?: RuntimeMaintenanceRecord;
+  reason?: string;
 };
 
 type ToastState = {
@@ -196,6 +199,43 @@ function getPlatformAdminAuditHref(auditId: string): string | null {
   }
 
   return `${baseUrl.replace(/\/$/, "")}${route}`;
+}
+
+function getVehicleHref(vehicleId: string) {
+  return `/vehicles/${encodeURIComponent(vehicleId)}`;
+}
+
+function getActionLabel(
+  action: string,
+  locale: "en" | "zh",
+  fallback?: string,
+): string {
+  switch (action) {
+    case "create_record":
+      return copy(locale, "Create record", "開立工單");
+    case "edit_record":
+      return copy(locale, "Edit record", "編輯工單");
+    case "search_records":
+      return copy(locale, "Search", "搜尋");
+    case "filter_records":
+      return copy(locale, "Filter", "篩選");
+    case "refresh_records":
+      return copy(locale, "Refresh", "重新整理");
+    default:
+      return fallback ?? action;
+  }
+}
+
+function getRiskLabel(riskLevel: ActionRiskLevel, locale: "en" | "zh") {
+  switch (riskLevel) {
+    case "high":
+      return copy(locale, "High risk", "高風險");
+    case "medium":
+      return copy(locale, "Medium risk", "中風險");
+    case "low":
+    default:
+      return copy(locale, "Low risk", "低風險");
+  }
 }
 
 export default function MaintenancePage() {
@@ -453,9 +493,10 @@ export default function MaintenancePage() {
       ? undefined
       : records.find((record) => record.maintenanceId === editingId);
 
-  async function runMutation() {
+  async function runMutation(reasonOverride?: string) {
     if (!pendingMutation) return;
     const client = getOpsClient();
+    const reason = reasonOverride ?? pendingMutation.reason;
     try {
       if (pendingMutation.mode === "edit" && pendingMutation.record) {
         const receipt = (await client.updateMaintenance(
@@ -465,7 +506,13 @@ export default function MaintenancePage() {
         const auditHref = getPlatformAdminAuditHref(receipt.auditId);
         setToast({
           tone: "success",
-          message: copy(locale, "Maintenance record updated.", "工單已更新。"),
+          message: reason
+            ? copy(
+                locale,
+                "Maintenance record updated with reviewer note.",
+                "工單已更新，並附帶操作原因。",
+              )
+            : copy(locale, "Maintenance record updated.", "工單已更新。"),
           receipt,
           ...(auditHref ? { auditHref } : {}),
         });
@@ -476,7 +523,13 @@ export default function MaintenancePage() {
         const auditHref = getPlatformAdminAuditHref(receipt.auditId);
         setToast({
           tone: "success",
-          message: copy(locale, "Maintenance record created.", "工單已建立。"),
+          message: reason
+            ? copy(
+                locale,
+                "Maintenance record created with reviewer note.",
+                "工單已建立，並附帶操作原因。",
+              )
+            : copy(locale, "Maintenance record created.", "工單已建立。"),
           receipt,
           ...(auditHref ? { auditHref } : {}),
         });
@@ -602,7 +655,7 @@ export default function MaintenancePage() {
             <div className="refresh-actions">
               <Link
                 className="ghost-link"
-                href={`/vehicles?vehicleId=${encodeURIComponent(linkedVehicleId)}`}
+                href={getVehicleHref(linkedVehicleId)}
               >
                 {copy(locale, "Open vehicle", "開啟車輛")}
               </Link>
@@ -784,6 +837,21 @@ export default function MaintenancePage() {
               ) : null}
             </div>
 
+            <div className="action-roster" aria-label="available actions">
+              {pageActions.map((action) => (
+                <span
+                  key={action.action}
+                  className={`action-pill risk-${action.riskLevel} ${
+                    action.enabled ? "" : "action-pill-disabled"
+                  }`}
+                  title={getDisabledActionHint(action, locale)}
+                >
+                  {getActionLabel(action.action, locale)}
+                  <small>{getRiskLabel(action.riskLevel, locale)}</small>
+                </span>
+              ))}
+            </div>
+
             {showCreate || editingRecord ? (
               <MaintenanceForm
                 editingRecord={editingRecord}
@@ -792,9 +860,16 @@ export default function MaintenancePage() {
                   setEditingId(null);
                 }}
                 onSubmit={(command) => {
+                  const descriptor = editingRecord
+                    ? editingRecord.availableActions.find(
+                        (action) => action.action === "edit_record",
+                      )
+                    : createAction;
+                  if (!descriptor) return;
                   setPendingMutation({
                     mode: editingRecord ? "edit" : "create",
                     command,
+                    descriptor,
                     ...(editingRecord ? { record: editingRecord } : {}),
                   });
                 }}
@@ -856,7 +931,7 @@ export default function MaintenancePage() {
                         <td>
                           <Link
                             className="inline-link"
-                            href={`/vehicles/${record.vehicleId}`}
+                            href={getVehicleHref(record.vehicleId)}
                           >
                             {record.vehicleId}
                           </Link>
@@ -902,7 +977,7 @@ export default function MaintenancePage() {
                             ) : null}
                             <Link
                               className="inline-link"
-                              href={`/vehicles?vehicleId=${encodeURIComponent(record.vehicleId)}`}
+                              href={getVehicleHref(record.vehicleId)}
                             >
                               {copy(locale, "Open vehicle", "開啟車輛")}
                             </Link>
@@ -941,7 +1016,7 @@ export default function MaintenancePage() {
                     <Link
                       key={record.maintenanceId}
                       className={`watch-card watch-${cue.tone}`}
-                      href={`/vehicles?vehicleId=${encodeURIComponent(record.vehicleId)}`}
+                      href={getVehicleHref(record.vehicleId)}
                     >
                       <div className="watch-head">
                         <strong>{record.vehicleId}</strong>
@@ -1006,7 +1081,12 @@ export default function MaintenancePage() {
             locale={locale}
             pendingMutation={pendingMutation}
             onCancel={() => setPendingMutation(null)}
-            onConfirm={() => void runMutation()}
+            onConfirm={(reason) => {
+              setPendingMutation((current) =>
+                current ? { ...current, reason } : current,
+              );
+              void runMutation(reason);
+            }}
           />
         ) : null}
 
@@ -1225,6 +1305,42 @@ export default function MaintenancePage() {
             gap: 10px;
             margin-bottom: 16px;
           }
+          .action-roster {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 0 0 18px;
+          }
+          .action-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border-radius: 999px;
+            padding: 8px 12px;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            background: rgba(15, 23, 42, 0.48);
+            color: #e2e8f0;
+            font-size: 12px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+          }
+          .action-pill small {
+            color: #94a3b8;
+            font-size: 11px;
+            letter-spacing: 0.06em;
+          }
+          .action-pill-disabled {
+            opacity: 0.58;
+          }
+          .risk-high {
+            border-color: rgba(248, 113, 113, 0.34);
+          }
+          .risk-medium {
+            border-color: rgba(251, 191, 36, 0.28);
+          }
+          .risk-low {
+            border-color: rgba(125, 211, 252, 0.24);
+          }
           .search-input,
           .filter-select {
             width: 100%;
@@ -1352,6 +1468,9 @@ export default function MaintenancePage() {
           }
           .watch-title {
             color: #fdba74;
+            font-weight: 700;
+          }
+          .inline-link {
             font-weight: 700;
           }
           .scope-list {
@@ -1807,8 +1926,20 @@ function ConfirmDialog({
   locale: "en" | "zh";
   pendingMutation: PendingMutation;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: (reason: string) => void;
 }) {
+  const [reason, setReason] = useState(pendingMutation.reason ?? "");
+  const actionLabel = getActionLabel(
+    pendingMutation.descriptor.action,
+    locale,
+    pendingMutation.mode === "edit"
+      ? copy(locale, "Update record", "更新工單")
+      : copy(locale, "Create record", "建立工單"),
+  );
+  const riskLabel = getRiskLabel(pendingMutation.descriptor.riskLevel, locale);
+  const confirmDisabled =
+    pendingMutation.descriptor.requiresReason && !reason.trim();
+
   return (
     <div className="modal-backdrop" role="presentation">
       <div
@@ -1817,29 +1948,45 @@ function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="maintenance-confirm-title"
       >
-        <p className="modal-kicker">
-          {copy(locale, "Medium-risk action", "中風險操作")}
-        </p>
+        <p className="modal-kicker">{riskLabel}</p>
         <h3 id="maintenance-confirm-title">
-          {pendingMutation.mode === "edit"
-            ? copy(locale, "Confirm maintenance update", "確認更新工單")
-            : copy(locale, "Confirm maintenance creation", "確認建立工單")}
+          {copy(locale, "Confirm action", "確認操作")} · {actionLabel}
         </h3>
         <p className="modal-body">
           {pendingMutation.mode === "edit"
             ? copy(
                 locale,
-                "This work order update will be written to the live maintenance log.",
-                "這筆工單更新會直接寫入正式維保紀錄。",
+                "This update writes directly to the live maintenance log and changes dispatch-facing context immediately.",
+                "這次更新會直接寫入正式維保紀錄，並立即改變派車側看到的狀態。",
               )
             : copy(
                 locale,
-                "This new work order will be visible to operations managers immediately.",
-                "這筆新工單會立即對營運管理者可見。",
+                "This new work order becomes visible to operations managers immediately and may affect dispatchable supply.",
+                "這筆新工單會立即對營運管理者可見，也可能影響可派車供給。",
               )}
         </p>
+        {pendingMutation.descriptor.requiresReason ? (
+          <label className="reason-field">
+            <span>{copy(locale, "Reason", "原因")}</span>
+            <textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              rows={4}
+              placeholder={copy(
+                locale,
+                "Describe why this action is required.",
+                "請說明執行這個操作的原因。",
+              )}
+            />
+          </label>
+        ) : null}
         <div className="modal-actions">
-          <button className="primary-btn" type="button" onClick={onConfirm}>
+          <button
+            className="primary-btn"
+            type="button"
+            onClick={() => onConfirm(reason.trim())}
+            disabled={confirmDisabled}
+          >
             {copy(locale, "Confirm", "確認")}
           </button>
           <button className="ghost-btn" type="button" onClick={onCancel}>
@@ -1886,6 +2033,22 @@ function ConfirmDialog({
           display: flex;
           gap: 10px;
           margin-top: 18px;
+        }
+        .reason-field {
+          display: grid;
+          gap: 8px;
+          margin-top: 16px;
+          color: #e2e8f0;
+          font-size: 14px;
+        }
+        .reason-field textarea {
+          width: 100%;
+          border-radius: 14px;
+          border: 1px solid rgba(148, 163, 184, 0.24);
+          background: rgba(15, 23, 42, 0.72);
+          color: #f8fafc;
+          padding: 12px 14px;
+          resize: vertical;
         }
         .primary-btn,
         .ghost-btn {
