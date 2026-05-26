@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { PageHeader, buildCanvasTheme } from "@drts/ui-web";
+import { CanvasPageHeader as PageHeader, buildCanvasTheme } from "@drts/ui-web";
 import type {
   AttachCallRecordingCommand,
   CallbackTaskRecord,
@@ -16,16 +16,16 @@ import type {
   EmptyReason,
   OpenCallSessionCommand,
   OwnedOrderRecord,
+  RefreshTier,
   ResourceActionDescriptor,
   TransferCallToComplaintCommand,
+  UiHealthEnvelope,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import { CALL_TYPES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
-import {
-  formatOpsCodeLabel,
-  formatOpsCodeList,
-} from "@/lib/localized-labels";
+import { formatOpsCodeLabel, formatOpsCodeList } from "@/lib/localized-labels";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -48,6 +48,29 @@ type SessionResource = CallSessionRecord & {
   availableActions: ResourceActionDescriptor[];
   deepLinks: CrossAppResourceLink[];
 };
+
+type RuntimeSessionRecord = CallSessionRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  deepLinks?: CrossAppResourceLink[];
+};
+
+type RuntimeCallbackRecord = CallbackTaskRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  deepLinks?: CrossAppResourceLink[];
+};
+
+type CallcenterListEnvelope<T> = {
+  items: T[];
+  refresh?: UiRefreshMetadata;
+  emptyState?: {
+    reason: EmptyReason;
+    messageCode: string;
+    nextAction?: ResourceActionDescriptor;
+  };
+  health?: UiHealthEnvelope;
+};
+
+type QueueView = "sessions" | "callback" | "recording";
 
 type OutcomeNotice = {
   tone: "success" | "warning";
@@ -83,6 +106,16 @@ const INITIAL_COMPLAINT_TRANSFER_FORM: TransferCallToComplaintCommand = {
   category: "fare_dispute",
   severity: "normal",
   description: "",
+};
+
+const CALLCENTER_REFRESH_TIER: RefreshTier = "dispatch";
+const CALLCENTER_REFRESH_INTERVAL_MS = 5000;
+
+const FALLBACK_REFRESH_METADATA: UiRefreshMetadata = {
+  generatedAt: new Date(0).toISOString(),
+  staleAfterMs: CALLCENTER_REFRESH_INTERVAL_MS,
+  dataFreshness: "unknown",
+  source: "live",
 };
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
@@ -224,9 +257,13 @@ function getDisabledReasonLabel(locale: Locale, code?: string) {
         ? "Close the current active session first."
         : "請先結束目前的 active session。";
     case "identity_already_announced":
-      return locale === "en" ? "Identity already announced." : "已標記身分告知。";
+      return locale === "en"
+        ? "Identity already announced."
+        : "已標記身分告知。";
     case "session_closed":
-      return locale === "en" ? "Closed sessions are read-only." : "已關閉 session 為唯讀。";
+      return locale === "en"
+        ? "Closed sessions are read-only."
+        : "已關閉 session 為唯讀。";
     case "linked_order_exists":
       return locale === "en"
         ? "This session already has a linked order."
@@ -266,7 +303,10 @@ function getActionLabel(locale: Locale, action: string) {
   return label ? label[locale] : action;
 }
 
-function getRiskLabel(locale: Locale, risk: ResourceActionDescriptor["riskLevel"]) {
+function getRiskLabel(
+  locale: Locale,
+  risk: ResourceActionDescriptor["riskLevel"],
+) {
   if (risk === "high") {
     return locale === "en" ? "High" : "高風險";
   }
@@ -283,7 +323,10 @@ function getActionDescriptor(
   return actions.find((item) => item.action === action);
 }
 
-function compareCallSessionPriority(a: CallSessionRecord, b: CallSessionRecord) {
+function compareCallSessionPriority(
+  a: CallSessionRecord,
+  b: CallSessionRecord,
+) {
   if (a.status !== b.status) {
     return a.status === "active" ? -1 : 1;
   }
@@ -350,6 +393,50 @@ function classifyEmptyReason(
   }
 
   return "no_data";
+}
+
+function buildFallbackRefreshMetadata(
+  freshness: UiRefreshMetadata["dataFreshness"] = "fresh",
+): UiRefreshMetadata {
+  return {
+    generatedAt: new Date().toISOString(),
+    staleAfterMs: CALLCENTER_REFRESH_INTERVAL_MS,
+    dataFreshness: freshness,
+    source: "live",
+  };
+}
+
+function buildFallbackHealth(errorMessage: string | null): UiHealthEnvelope {
+  if (!errorMessage) {
+    return {
+      status: "healthy",
+      degradedServices: [],
+      lastCheckedAt: new Date().toISOString(),
+    };
+  }
+
+  const normalized = errorMessage.toLowerCase();
+  const service =
+    normalized.includes("telephony") || normalized.includes("cti")
+      ? "telephony"
+      : normalized.includes("recording")
+        ? "recording"
+        : "ops-api";
+
+  return {
+    status: "degraded",
+    degradedServices: [
+      {
+        service,
+        impact: errorMessage,
+        severity:
+          normalized.includes("down") || normalized.includes("unavailable")
+            ? "critical"
+            : "warning",
+      },
+    ],
+    lastCheckedAt: new Date().toISOString(),
+  };
 }
 
 function buildWorkspaceAction(
@@ -489,26 +576,77 @@ function buildSessionLinks(session: CallSessionRecord): CrossAppResourceLink[] {
   if (session.linkedCaseNo) {
     links.push({
       targetApp: "ops-console",
-      route: `/complaints?caseNo=${encodeURIComponent(session.linkedCaseNo)}`,
+      route: `/complaints/${encodeURIComponent(session.linkedCaseNo)}`,
       resourceType: "complaint_case",
       resourceId: session.linkedCaseNo,
       openMode: "same_tab",
-      label: "Complaint queue",
+      label: "Complaint detail",
     });
   }
 
   return links;
 }
 
-function buildSessionResource(
-  session: CallSessionRecord,
-  locale: Locale,
-): SessionResource {
+function buildSessionResource(session: RuntimeSessionRecord): SessionResource {
   return {
     ...session,
-    availableActions: buildSessionActions(session),
-    deepLinks: buildSessionLinks(session),
+    availableActions:
+      session.availableActions && session.availableActions.length > 0
+        ? session.availableActions
+        : buildSessionActions(session),
+    deepLinks:
+      session.deepLinks && session.deepLinks.length > 0
+        ? session.deepLinks
+        : buildSessionLinks(session),
   };
+}
+
+function isRefreshStale(refresh: UiRefreshMetadata) {
+  const generatedAt = new Date(refresh.generatedAt).getTime();
+  if (Number.isNaN(generatedAt)) {
+    return refresh.dataFreshness !== "fresh";
+  }
+
+  return (
+    refresh.dataFreshness !== "fresh" ||
+    Date.now() - generatedAt > refresh.staleAfterMs
+  );
+}
+
+function getFreshnessTone(refresh: UiRefreshMetadata) {
+  if (refresh.dataFreshness === "degraded") {
+    return "freshness-pill freshness-degraded";
+  }
+  if (isRefreshStale(refresh)) {
+    return "freshness-pill freshness-stale";
+  }
+  return "freshness-pill freshness-fresh";
+}
+
+function renderResourceLink(link: CrossAppResourceLink, className: string) {
+  if (link.openMode === "new_tab") {
+    return (
+      <a
+        key={`${link.targetApp}-${link.resourceId}-${link.route}`}
+        href={link.route}
+        target="_blank"
+        rel="noreferrer"
+        className={className}
+      >
+        {link.label}
+      </a>
+    );
+  }
+
+  return (
+    <Link
+      key={`${link.targetApp}-${link.resourceId}-${link.route}`}
+      href={link.route}
+      className={className}
+    >
+      {link.label}
+    </Link>
+  );
 }
 
 function formatRelativeDeadline(value: string, locale: Locale) {
@@ -574,10 +712,15 @@ function describeAction(
   return { proceed: true, reason: "" };
 }
 
-function renderActionMeta(locale: Locale, descriptor: ResourceActionDescriptor) {
+function renderActionMeta(
+  locale: Locale,
+  descriptor: ResourceActionDescriptor,
+) {
   return (
     <div className="action-meta">
-      <span className="action-risk">{getRiskLabel(locale, descriptor.riskLevel)}</span>
+      <span className="action-risk">
+        {getRiskLabel(locale, descriptor.riskLevel)}
+      </span>
       {descriptor.disabledReasonCode && !descriptor.enabled ? (
         <span className="action-note">
           {getDisabledReasonLabel(locale, descriptor.disabledReasonCode)}
@@ -599,8 +742,8 @@ export default function CallcenterPage() {
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
 
-  const [sessions, setSessions] = useState<CallSessionRecord[]>([]);
-  const [callbacks, setCallbacks] = useState<CallbackTaskRecord[]>([]);
+  const [sessions, setSessions] = useState<RuntimeSessionRecord[]>([]);
+  const [callbacks, setCallbacks] = useState<RuntimeCallbackRecord[]>([]);
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OwnedOrderRecord | null>(
     null,
@@ -614,8 +757,22 @@ export default function CallcenterPage() {
   );
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [queueView, setQueueView] = useState<QueueView>("sessions");
   const [showIntake, setShowIntake] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
+  const [sessionRefresh, setSessionRefresh] = useState<UiRefreshMetadata>(
+    FALLBACK_REFRESH_METADATA,
+  );
+  const [callbackRefresh, setCallbackRefresh] = useState<UiRefreshMetadata>(
+    FALLBACK_REFRESH_METADATA,
+  );
+  const [sessionEmptyReason, setSessionEmptyReason] =
+    useState<EmptyReason | null>(null);
+  const [callbackEmptyReason, setCallbackEmptyReason] =
+    useState<EmptyReason | null>(null);
+  const [health, setHealth] = useState<UiHealthEnvelope>(
+    buildFallbackHealth(null),
+  );
   const [intakeForm, setIntakeForm] = useState(INITIAL_INTAKE_FORM);
   const [orderForm, setOrderForm] = useState(INITIAL_ORDER_FORM);
   const [existingOrderId, setExistingOrderId] = useState("");
@@ -636,8 +793,8 @@ export default function CallcenterPage() {
     () =>
       [...sessions]
         .sort(compareCallSessionPriority)
-        .map((session) => buildSessionResource(session, currentLocale)),
-    [currentLocale, sessions],
+        .map((session) => buildSessionResource(session)),
+    [sessions],
   );
 
   const filteredSessions = useMemo(() => {
@@ -663,9 +820,12 @@ export default function CallcenterPage() {
   }, [deferredQuery, sessionResources]);
 
   const selectedSession =
-    sessionResources.find((session) => session.callId === selectedCallId) ?? null;
+    sessionResources.find((session) => session.callId === selectedCallId) ??
+    null;
 
-  const activeSessions = filteredSessions.filter((session) => session.status === "active");
+  const activeSessions = filteredSessions.filter(
+    (session) => session.status === "active",
+  );
   const waitingSessions = activeSessions.filter(
     (session) => session.callId !== selectedSession?.callId,
   );
@@ -712,18 +872,44 @@ export default function CallcenterPage() {
     sessions.length,
     callbacks.length,
   );
-  const emptyCopy = getEmptyStateCopy(currentLocale, emptyReason);
+  const effectiveEmptyReason =
+    emptyReason === "no_data"
+      ? (sessionEmptyReason ?? callbackEmptyReason ?? emptyReason)
+      : emptyReason;
+  const emptyCopy = getEmptyStateCopy(currentLocale, effectiveEmptyReason);
   const workspaceAction = buildWorkspaceAction(
     sessions.some((session) => session.status === "active"),
   );
+  const activeRefresh =
+    queueView === "callback" ? callbackRefresh : sessionRefresh;
+  const workspaceStale = isRefreshStale(activeRefresh);
+  const tabs = [
+    {
+      id: "sessions" as const,
+      label: currentLocale === "en" ? "Sessions" : "當前 session",
+      badge: activeSessions.length,
+    },
+    {
+      id: "callback" as const,
+      label: currentLocale === "en" ? "Callback queue" : "Callback 佇列",
+      badge: pendingCallbacks.length,
+    },
+    {
+      id: "recording" as const,
+      label: currentLocale === "en" ? "Recordings" : "錄音待補",
+      badge: recordingQueue.length,
+    },
+  ];
 
-  const openSessionsCount = sessions.filter((session) => session.status === "active")
-    .length;
-  const bookingLinkedCount = sessions.filter((session) => session.linkedOrderId).length;
+  const openSessionsCount = sessions.filter(
+    (session) => session.status === "active",
+  ).length;
   const recordingGapCount = sessions.filter(
     (session) => session.recordingState !== "ready",
   ).length;
-  const complaintTransferCount = sessions.filter((session) => session.linkedCaseNo).length;
+  const complaintTransferCount = sessions.filter(
+    (session) => session.linkedCaseNo,
+  ).length;
 
   useEffect(() => {
     void loadData();
@@ -780,13 +966,33 @@ export default function CallcenterPage() {
 
     try {
       const client = getOpsClient();
-      const [nextSessions, nextCallbacks] = await Promise.all([
-        client.listCallSessions(),
-        client.listCallbackTasks(),
+      const [nextSessionsEnvelope, nextCallbacksEnvelope] = await Promise.all([
+        client.get<CallcenterListEnvelope<RuntimeSessionRecord>>(
+          "/api/callcenter/sessions",
+        ),
+        client.get<CallcenterListEnvelope<RuntimeCallbackRecord>>(
+          "/api/callcenter/callbacks",
+        ),
       ]);
+
+      const nextSessions = nextSessionsEnvelope.items ?? [];
+      const nextCallbacks = nextCallbacksEnvelope.items ?? [];
+      const nextHealth =
+        nextSessionsEnvelope.health ??
+        nextCallbacksEnvelope.health ??
+        buildFallbackHealth(null);
 
       setSessions(nextSessions);
       setCallbacks(nextCallbacks);
+      setSessionRefresh(
+        nextSessionsEnvelope.refresh ?? buildFallbackRefreshMetadata("fresh"),
+      );
+      setCallbackRefresh(
+        nextCallbacksEnvelope.refresh ?? buildFallbackRefreshMetadata("fresh"),
+      );
+      setSessionEmptyReason(nextSessionsEnvelope.emptyState?.reason ?? null);
+      setCallbackEmptyReason(nextCallbacksEnvelope.emptyState?.reason ?? null);
+      setHealth(nextHealth);
       setLastRefreshAt(new Date().toISOString());
       setError(null);
 
@@ -799,7 +1005,11 @@ export default function CallcenterPage() {
         null;
       setSelectedCallId(fallbackSelection);
     } catch (nextError) {
-      setError(resolveErrorMessage(nextError));
+      const message = resolveErrorMessage(nextError);
+      setError(message);
+      setSessionRefresh(buildFallbackRefreshMetadata("degraded"));
+      setCallbackRefresh(buildFallbackRefreshMetadata("degraded"));
+      setHealth(buildFallbackHealth(message));
     } finally {
       if (!silent) {
         setLoading(false);
@@ -848,64 +1058,307 @@ export default function CallcenterPage() {
     ? getActionDescriptor(selectedSession.availableActions, "complete_callback")
     : undefined;
   const createBookingAction = selectedSession
-    ? getActionDescriptor(selectedSession.availableActions, "create_phone_booking")
+    ? getActionDescriptor(
+        selectedSession.availableActions,
+        "create_phone_booking",
+      )
     : undefined;
   const linkOrderAction = selectedSession
-    ? getActionDescriptor(selectedSession.availableActions, "link_existing_order")
+    ? getActionDescriptor(
+        selectedSession.availableActions,
+        "link_existing_order",
+      )
     : undefined;
   const transferComplaintAction = selectedSession
-    ? getActionDescriptor(selectedSession.availableActions, "transfer_to_complaint")
+    ? getActionDescriptor(
+        selectedSession.availableActions,
+        "transfer_to_complaint",
+      )
     : undefined;
   const attachRecordingAction = selectedSession
     ? getActionDescriptor(selectedSession.availableActions, "attach_recording")
     : undefined;
+  const activeTabIndex = tabs.findIndex((tab) => tab.id === queueView);
+  const headerTabs = tabs.map((tab) => (
+    <button
+      key={tab.id}
+      type="button"
+      className="header-tab-btn"
+      onClick={() => setQueueView(tab.id)}
+    >
+      <span>{tab.label}</span>
+      <span className="header-tab-badge">{tab.badge}</span>
+    </button>
+  ));
+
+  const activeQueueCard =
+    queueView === "callback"
+      ? {
+          kicker: currentLocale === "en" ? "Callback queue" : "Callback 佇列",
+          title: currentLocale === "en" ? "Pending follow-up" : "待追蹤回覆",
+          count: pendingCallbacks.length,
+          body:
+            filteredCallbackQueue.length > 0 ? (
+              filteredCallbackQueue.map((callback) => (
+                <button
+                  key={callback.callbackTaskId}
+                  type="button"
+                  className="queue-item"
+                  onClick={() => setSelectedCallId(callback.callId)}
+                >
+                  <div>
+                    <strong>{callback.callbackTaskId}</strong>
+                    <p>{getCallbackSummary(callback, currentLocale)}</p>
+                  </div>
+                  <span>
+                    {formatRelativeDeadline(callback.dueAt, currentLocale)}
+                  </span>
+                </button>
+              ))
+            ) : (
+              <div className="subtle-empty">
+                {currentLocale === "en"
+                  ? "No callbacks match the current scope."
+                  : "目前 scope 內沒有 callback。"}
+              </div>
+            ),
+        }
+      : queueView === "recording"
+        ? {
+            kicker: currentLocale === "en" ? "Recording queue" : "錄音佇列",
+            title:
+              currentLocale === "en"
+                ? "Awaiting auto-link or manual attach"
+                : "等待自動連結或手動補掛",
+            count: recordingQueue.length,
+            body:
+              recordingQueue.length > 0 ? (
+                recordingQueue.map((session) => (
+                  <button
+                    key={session.callId}
+                    type="button"
+                    className="queue-item"
+                    onClick={() => setSelectedCallId(session.callId)}
+                  >
+                    <div>
+                      <strong>{session.callId}</strong>
+                      <p>{session.callerPhone}</p>
+                    </div>
+                    <span
+                      className={getRecordingStateTone(session.recordingState)}
+                    >
+                      {formatOpsCodeLabel(
+                        currentLocale,
+                        session.recordingState,
+                      )}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="subtle-empty">
+                  {currentLocale === "en"
+                    ? "No recording gaps right now."
+                    : "目前沒有錄音缺口。"}
+                </div>
+              ),
+          }
+        : {
+            kicker: currentLocale === "en" ? "Waiting queue" : "等待佇列",
+            title:
+              currentLocale === "en" ? "Other live calls" : "其他進行中的通話",
+            count: waitingSessions.length,
+            body:
+              waitingSessions.length > 0 ? (
+                waitingSessions.map((session) => (
+                  <button
+                    key={session.callId}
+                    type="button"
+                    className="queue-item"
+                    onClick={() => setSelectedCallId(session.callId)}
+                  >
+                    <div>
+                      <strong>{session.callId}</strong>
+                      <p>
+                        {formatOpsCodeLabel(currentLocale, session.callType)} ·{" "}
+                        {session.callerPhone}
+                      </p>
+                    </div>
+                    <span>
+                      {formatDateTime(currentLocale, session.startedAt)}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="subtle-empty">
+                  {currentLocale === "en"
+                    ? "No extra waiting calls."
+                    : "目前沒有其他等待中的通話。"}
+                </div>
+              ),
+          };
 
   return (
     <>
       <PageHeader
+        theme={theme}
         title={t("callcenter.title")}
-        subtitle={t("callcenter.subtitle")}
+        subtitle={
+          currentLocale === "en"
+            ? "One active session per agent. Waiting, callback, recording, and history queues stay visible in the same workspace."
+            : "每位 agent 同時間僅一個 active session，等待 / callback / 錄音 / 歷史佇列維持在同一個 workspace。"
+        }
+        tabs={headerTabs}
+        activeTab={headerTabs[activeTabIndex] ?? headerTabs[0]}
+        actions={[
+          <button
+            key="open-session"
+            className="header-action header-action-primary"
+            type="button"
+            onClick={() => setShowIntake((current) => !current)}
+            disabled={!workspaceAction.enabled}
+            title={
+              workspaceAction.enabled
+                ? undefined
+                : getDisabledReasonLabel(
+                    currentLocale,
+                    workspaceAction.disabledReasonCode,
+                  )
+            }
+          >
+            {showIntake
+              ? t("callcenter.hideIntake")
+              : getActionLabel(currentLocale, "open_call_session")}
+          </button>,
+          <button
+            key="close-session"
+            className="header-action"
+            type="button"
+            disabled={!closeAction?.enabled || busyKey === "close-header"}
+            title={
+              closeAction?.enabled
+                ? undefined
+                : getDisabledReasonLabel(
+                    currentLocale,
+                    closeAction?.disabledReasonCode,
+                  )
+            }
+            onClick={() =>
+              selectedSession &&
+              void runGuardedAction("close-header", closeAction, async () => {
+                await getOpsClient().closeCallSession(selectedSession.callId);
+                setOutcomeNotice({
+                  tone: "success",
+                  message:
+                    currentLocale === "en"
+                      ? `Session ${selectedSession.callId} closed.`
+                      : `已關閉 session ${selectedSession.callId}。`,
+                });
+                await loadData(selectedSession.callId);
+              })
+            }
+          >
+            {currentLocale === "en" ? "Close current" : "結束目前"}
+          </button>,
+        ]}
+        sticky={false}
       />
 
       <div className="callcenter-shell">
-        <section className="hero-card">
+        <section className="hero-card hero-card-compact">
           <div className="hero-copy">
             <span className="hero-eyebrow">
               {currentLocale === "en"
-                ? "Refresh tier T2 · 5s auto refresh"
-                : "Refresh tier T2 · 每 5 秒自動刷新"}
+                ? `Refresh tier ${CALLCENTER_REFRESH_TIER} · 5s auto refresh`
+                : `Refresh tier ${CALLCENTER_REFRESH_TIER} · 每 5 秒自動刷新`}
             </span>
             <h2>
               {selectedSession
                 ? `${selectedSession.callId} · ${formatOpsCodeLabel(currentLocale, selectedSession.callType)}`
                 : currentLocale === "en"
-                  ? "Call center workspace"
-                  : "Call center workspace"}
+                  ? "Idle workspace"
+                  : "Idle workspace"}
             </h2>
             <p>
               {selectedSession
                 ? currentLocale === "en"
-                  ? "Handle the active call end-to-end with booking, callback, complaint handoff, and recording evidence in one canvas."
-                  : "在同一個 canvas 內完成進線處理、建單、callback、客訴轉案與錄音證據補齊。"
+                  ? "Handle booking, callback, complaint handoff, and recording evidence without leaving the canvas."
+                  : "在同一個 canvas 內完成建單、callback、客訴轉案與錄音證據補齊。"
                 : emptyCopy.body}
             </p>
           </div>
-          <div className="hero-metrics">
-            <div className="hero-chip hero-chip-accent">
-              <span>{currentLocale === "en" ? "Open sessions" : "Active session"}</span>
-              <strong>{openSessionsCount}</strong>
+          <div className="hero-controls">
+            <div className="hero-metrics">
+              <div className="hero-chip hero-chip-accent">
+                <span>
+                  {currentLocale === "en" ? "Open sessions" : "Active session"}
+                </span>
+                <strong>{openSessionsCount}</strong>
+              </div>
+              <div className="hero-chip">
+                <span>
+                  {currentLocale === "en"
+                    ? "Pending callbacks"
+                    : "待回覆 callback"}
+                </span>
+                <strong>{pendingCallbacks.length}</strong>
+              </div>
+              <div className="hero-chip hero-chip-warning">
+                <span>
+                  {currentLocale === "en" ? "Recording gaps" : "錄音待補"}
+                </span>
+                <strong>{recordingGapCount}</strong>
+              </div>
+              <div className="hero-chip">
+                <span>
+                  {currentLocale === "en" ? "Complaint transfers" : "客訴轉案"}
+                </span>
+                <strong>{complaintTransferCount}</strong>
+              </div>
             </div>
-            <div className="hero-chip">
-              <span>{currentLocale === "en" ? "Pending callbacks" : "待回覆 callback"}</span>
-              <strong>{pendingCallbacks.length}</strong>
+            <div className="toolbar">
+              <input
+                className="search-input"
+                type="search"
+                value={query}
+                placeholder={t("callcenter.search")}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <button
+                className="toolbar-btn"
+                type="button"
+                onClick={() => {
+                  void loadData(selectedCallId ?? undefined);
+                }}
+              >
+                {currentLocale === "en" ? "Refresh now" : "立即刷新"}
+              </button>
             </div>
-            <div className="hero-chip hero-chip-warning">
-              <span>{currentLocale === "en" ? "Recording gaps" : "錄音待補"}</span>
-              <strong>{recordingGapCount}</strong>
-            </div>
-            <div className="hero-chip">
-              <span>{currentLocale === "en" ? "Last refresh" : "最近刷新"}</span>
-              <strong>{lastRefreshAt ? formatDateTime(currentLocale, lastRefreshAt) : "—"}</strong>
+            <div className="toolbar-meta">
+              <span className="tier-chip">T2</span>
+              <span className={getFreshnessTone(activeRefresh)}>
+                {workspaceStale
+                  ? currentLocale === "en"
+                    ? "Stale"
+                    : "已過期"
+                  : currentLocale === "en"
+                    ? "Fresh"
+                    : "最新"}
+              </span>
+              <span className="status-chip">
+                {health.status === "healthy"
+                  ? currentLocale === "en"
+                    ? "Healthy"
+                    : "健康"
+                  : currentLocale === "en"
+                    ? "Degraded"
+                    : "降級中"}
+              </span>
+              <span className="toolbar-hint">
+                {currentLocale === "en" ? "Last refresh" : "最近刷新"}:{" "}
+                {lastRefreshAt
+                  ? formatDateTime(currentLocale, lastRefreshAt)
+                  : "—"}
+              </span>
             </div>
           </div>
         </section>
@@ -945,89 +1398,6 @@ export default function CallcenterPage() {
           </div>
         ) : null}
 
-        <section className="summary-grid">
-          {[
-            {
-              label: currentLocale === "en" ? "Open sessions" : "進行中 session",
-              value: openSessionsCount,
-              note:
-                currentLocale === "en"
-                  ? "One active session per agent"
-                  : "每位 agent 同時間僅一個 active session",
-            },
-            {
-              label: currentLocale === "en" ? "Linked orders" : "已連結訂單",
-              value: bookingLinkedCount,
-              note:
-                currentLocale === "en"
-                  ? "Phone bookings and existing order links"
-                  : "電話建單與既有訂單綁定",
-            },
-            {
-              label: currentLocale === "en" ? "Recording queue" : "錄音補掛佇列",
-              value: recordingGapCount,
-              note:
-                currentLocale === "en"
-                  ? "Pending or missing evidence"
-                  : "待補或遺失的錄音證據",
-            },
-            {
-              label: currentLocale === "en" ? "Complaint transfers" : "客訴轉案",
-              value: complaintTransferCount,
-              note:
-                currentLocale === "en"
-                  ? "Calls already escalated to complaint"
-                  : "已升級為客訴的通話",
-            },
-          ].map((card) => (
-            <article key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
-            </article>
-          ))}
-        </section>
-
-        <section className="toolbar">
-          <input
-            className="search-input"
-            type="search"
-            value={query}
-            placeholder={t("callcenter.search")}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <button
-            className="toolbar-btn toolbar-btn-primary"
-            type="button"
-            onClick={() => setShowIntake((current) => !current)}
-            disabled={!workspaceAction.enabled}
-            title={
-              workspaceAction.enabled
-                ? undefined
-                : getDisabledReasonLabel(
-                    currentLocale,
-                    workspaceAction.disabledReasonCode,
-                  )
-            }
-          >
-            {showIntake ? t("callcenter.hideIntake") : getActionLabel(currentLocale, "open_call_session")}
-          </button>
-          <button
-            className="toolbar-btn"
-            type="button"
-            onClick={() => {
-              setQuery("");
-              void loadData(selectedCallId ?? undefined);
-            }}
-          >
-            {currentLocale === "en" ? "Refresh now" : "立即刷新"}
-          </button>
-          <div className="toolbar-meta">
-            <span className="tier-chip">T2</span>
-            {renderActionMeta(currentLocale, workspaceAction)}
-          </div>
-        </section>
-
         {showIntake ? (
           <section className="canvas-card">
             <div className="card-head">
@@ -1047,7 +1417,8 @@ export default function CallcenterPage() {
                   "open-intake",
                   workspaceAction,
                   async () => {
-                    const created = await getOpsClient().openCallSession(intakeForm);
+                    const created =
+                      await getOpsClient().openCallSession(intakeForm);
                     setShowIntake(false);
                     setIntakeForm(INITIAL_INTAKE_FORM);
                     setSelectedCallId(created.callId);
@@ -1070,7 +1441,8 @@ export default function CallcenterPage() {
                   onChange={(event) =>
                     setIntakeForm((current: OpenCallSessionCommand) => ({
                       ...current,
-                      callType: event.target.value as OpenCallSessionCommand["callType"],
+                      callType: event.target
+                        .value as OpenCallSessionCommand["callType"],
                     }))
                   }
                 >
@@ -1126,7 +1498,9 @@ export default function CallcenterPage() {
                 <button
                   className="toolbar-btn toolbar-btn-primary"
                   type="submit"
-                  disabled={busyKey === "open-intake" || !workspaceAction.enabled}
+                  disabled={
+                    busyKey === "open-intake" || !workspaceAction.enabled
+                  }
                 >
                   {busyKey === "open-intake"
                     ? t("callcenter.form.opening")
@@ -1138,12 +1512,113 @@ export default function CallcenterPage() {
         ) : null}
 
         <div className="workspace-grid">
+          <aside className="workspace-left-rail">
+            <article className="canvas-card rail-card">
+              <div className="card-head">
+                <div>
+                  <span className="section-kicker">
+                    {activeQueueCard.kicker}
+                  </span>
+                  <h3>{activeQueueCard.title}</h3>
+                </div>
+                <span className="count-pill">{activeQueueCard.count}</span>
+              </div>
+              <div className="queue-list">{activeQueueCard.body}</div>
+            </article>
+
+            {!selectedSession ? (
+              <article
+                className={`canvas-card ${getEmptyReasonTone(effectiveEmptyReason)}`}
+              >
+                <span className="empty-accent">{emptyCopy.accent}</span>
+                <h4>{emptyCopy.title}</h4>
+                <p>{emptyCopy.body}</p>
+                {effectiveEmptyReason === "filtered_empty" ? (
+                  <button
+                    className="toolbar-btn"
+                    type="button"
+                    onClick={() => setQuery("")}
+                  >
+                    {currentLocale === "en" ? "Clear search" : "清除搜尋"}
+                  </button>
+                ) : (
+                  <button
+                    className="toolbar-btn toolbar-btn-primary"
+                    type="button"
+                    onClick={() => setShowIntake(true)}
+                    disabled={!workspaceAction.enabled}
+                  >
+                    {getActionLabel(currentLocale, "open_call_session")}
+                  </button>
+                )}
+              </article>
+            ) : (
+              <article className="canvas-card rail-card">
+                <div className="card-head">
+                  <div>
+                    <span className="section-kicker">
+                      {currentLocale === "en"
+                        ? "Workspace signals"
+                        : "Workspace 訊號"}
+                    </span>
+                    <h3>
+                      {currentLocale === "en"
+                        ? "Health and contracts"
+                        : "健康度與契約"}
+                    </h3>
+                  </div>
+                </div>
+                <div className="queue-list">
+                  <div className="signal-card">
+                    <span>
+                      {currentLocale === "en"
+                        ? "availableActions"
+                        : "availableActions"}
+                    </span>
+                    <strong>{selectedSession.availableActions.length}</strong>
+                    <small>
+                      {currentLocale === "en"
+                        ? "Affordances stay visible even when disabled."
+                        : "即使 disabled 也保留 affordance。"}
+                    </small>
+                  </div>
+                  <div className="signal-card">
+                    <span>
+                      {currentLocale === "en" ? "Deep links" : "Deep links"}
+                    </span>
+                    <strong>{selectedSession.deepLinks.length}</strong>
+                    <small>
+                      {currentLocale === "en"
+                        ? "Dispatch and complaint routes are contract-driven."
+                        : "Dispatch 與 complaint 連結由 contract 決定。"}
+                    </small>
+                  </div>
+                  <div className="signal-card">
+                    <span>{currentLocale === "en" ? "Health" : "健康度"}</span>
+                    <strong>{health.status}</strong>
+                    <small>
+                      {health.degradedServices.length > 0
+                        ? health.degradedServices
+                            .map((service) => service.service)
+                            .join(" · ")
+                        : currentLocale === "en"
+                          ? "No degraded dependencies."
+                          : "目前沒有降級依賴。"}
+                    </small>
+                  </div>
+                </div>
+              </article>
+            )}
+          </aside>
+
           <section className="workspace-main">
             <article className="canvas-card spotlight-card">
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en" ? "Active session panel" : "Active session panel"}
+                    {currentLocale === "en"
+                      ? "Active session panel"
+                      : "Active session panel"}
                   </span>
                   <h3>
                     {selectedSession
@@ -1159,8 +1634,15 @@ export default function CallcenterPage() {
                   </p>
                 </div>
                 {selectedSession ? (
-                  <span className={getRecordingStateTone(selectedSession.recordingState)}>
-                    {formatOpsCodeLabel(currentLocale, selectedSession.recordingState)}
+                  <span
+                    className={getRecordingStateTone(
+                      selectedSession.recordingState,
+                    )}
+                  >
+                    {formatOpsCodeLabel(
+                      currentLocale,
+                      selectedSession.recordingState,
+                    )}
                   </span>
                 ) : null}
               </div>
@@ -1176,16 +1658,30 @@ export default function CallcenterPage() {
                   <div className="spotlight-grid">
                     <div className="spotlight-cell">
                       <span>{currentLocale === "en" ? "Call" : "通話"}</span>
-                      <strong>{formatOpsCodeLabel(currentLocale, selectedSession.callType)}</strong>
+                      <strong>
+                        {formatOpsCodeLabel(
+                          currentLocale,
+                          selectedSession.callType,
+                        )}
+                      </strong>
                       <small>{selectedSession.callId}</small>
                     </div>
                     <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Caller" : "來電者"}</span>
+                      <span>
+                        {currentLocale === "en" ? "Caller" : "來電者"}
+                      </span>
                       <strong>{selectedSession.callerPhone}</strong>
-                      <small>{formatDateTime(currentLocale, selectedSession.startedAt)}</small>
+                      <small>
+                        {formatDateTime(
+                          currentLocale,
+                          selectedSession.startedAt,
+                        )}
+                      </small>
                     </div>
                     <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Agent" : "客服人員"}</span>
+                      <span>
+                        {currentLocale === "en" ? "Agent" : "客服人員"}
+                      </span>
                       <strong>{selectedSession.agentId ?? "—"}</strong>
                       <small>
                         {selectedSession.agentIdentityAnnounced
@@ -1198,14 +1694,19 @@ export default function CallcenterPage() {
                       </small>
                     </div>
                     <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Linked records" : "已連結紀錄"}</span>
+                      <span>
+                        {currentLocale === "en"
+                          ? "Linked records"
+                          : "已連結紀錄"}
+                      </span>
                       <strong>
                         {selectedSession.linkedOrderId ??
                           selectedSession.linkedCaseNo ??
                           "—"}
                       </strong>
                       <small>
-                        {selectedSession.linkedOrderId && selectedSession.linkedCaseNo
+                        {selectedSession.linkedOrderId &&
+                        selectedSession.linkedCaseNo
                           ? `${selectedSession.linkedOrderId} + ${selectedSession.linkedCaseNo}`
                           : selectedSession.linkedOrderId
                             ? currentLocale === "en"
@@ -1224,7 +1725,10 @@ export default function CallcenterPage() {
                       <span>{currentLocale === "en" ? "Flags" : "旗標"}</span>
                       <strong>
                         {selectedSession.flags.length > 0
-                          ? formatOpsCodeList(currentLocale, selectedSession.flags)
+                          ? formatOpsCodeList(
+                              currentLocale,
+                              selectedSession.flags,
+                            )
                           : "—"}
                       </strong>
                       <small>
@@ -1238,14 +1742,15 @@ export default function CallcenterPage() {
                       </small>
                     </div>
                     <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Deep links" : "Deep links"}</span>
+                      <span>
+                        {currentLocale === "en" ? "Deep links" : "Deep links"}
+                      </span>
                       <div className="deep-link-list">
                         {selectedSession.deepLinks.length > 0 ? (
-                          selectedSession.deepLinks.map((link: CrossAppResourceLink) => (
-                            <Link key={link.route} href={link.route} className="deep-link-pill">
-                              {link.label}
-                            </Link>
-                          ))
+                          selectedSession.deepLinks.map(
+                            (link: CrossAppResourceLink) =>
+                              renderResourceLink(link, "deep-link-pill"),
+                          )
                         ) : (
                           <span className="deep-link-empty">
                             {currentLocale === "en"
@@ -1258,12 +1763,19 @@ export default function CallcenterPage() {
                   </div>
 
                   <div className="action-strip">
-                    {selectedSession.availableActions.map((descriptor: ResourceActionDescriptor) => (
-                      <div key={descriptor.action} className="action-chip-card">
-                        <strong>{getActionLabel(currentLocale, descriptor.action)}</strong>
-                        {renderActionMeta(currentLocale, descriptor)}
-                      </div>
-                    ))}
+                    {selectedSession.availableActions.map(
+                      (descriptor: ResourceActionDescriptor) => (
+                        <div
+                          key={descriptor.action}
+                          className="action-chip-card"
+                        >
+                          <strong>
+                            {getActionLabel(currentLocale, descriptor.action)}
+                          </strong>
+                          {renderActionMeta(currentLocale, descriptor)}
+                        </div>
+                      ),
+                    )}
                   </div>
                 </>
               ) : (
@@ -1297,9 +1809,15 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en" ? "Session actions" : "Session 動作"}
+                    {currentLocale === "en"
+                      ? "Session actions"
+                      : "Session 動作"}
                   </span>
-                  <h3>{currentLocale === "en" ? "Greeting to resolution" : "從 greeting 到 resolution"}</h3>
+                  <h3>
+                    {currentLocale === "en"
+                      ? "Greeting to resolution"
+                      : "從 greeting 到 resolution"}
+                  </h3>
                   <p>
                     {currentLocale === "en"
                       ? "Affordances stay visible even when disabled; enabled state comes from availableActions."
@@ -1310,12 +1828,18 @@ export default function CallcenterPage() {
 
               <div className="action-panels">
                 <section className="mini-panel">
-                  <h4>{currentLocale === "en" ? "Session controls" : "Session 控制"}</h4>
+                  <h4>
+                    {currentLocale === "en"
+                      ? "Session controls"
+                      : "Session 控制"}
+                  </h4>
                   <div className="mini-actions">
                     <button
                       className="toolbar-btn"
                       type="button"
-                      disabled={!announceAction?.enabled || busyKey === "announce"}
+                      disabled={
+                        !announceAction?.enabled || busyKey === "announce"
+                      }
                       title={
                         announceAction?.enabled
                           ? undefined
@@ -1326,25 +1850,29 @@ export default function CallcenterPage() {
                       }
                       onClick={() =>
                         selectedSession &&
-                        void runGuardedAction("announce", announceAction, async () => {
-                          await getOpsClient().announceCallAgentIdentity(
-                            selectedSession.callId,
-                            {
-                              agentId:
-                                selectedSession.agentId ??
-                                intakeForm.agentId ??
-                                "AGENT-OPS-001",
-                            },
-                          );
-                          setOutcomeNotice({
-                            tone: "success",
-                            message:
-                              currentLocale === "en"
-                                ? `Identity announced for ${selectedSession.callId}.`
-                                : `已為 ${selectedSession.callId} 標記身分告知。`,
-                          });
-                          await loadData(selectedSession.callId);
-                        })
+                        void runGuardedAction(
+                          "announce",
+                          announceAction,
+                          async () => {
+                            await getOpsClient().announceCallAgentIdentity(
+                              selectedSession.callId,
+                              {
+                                agentId:
+                                  selectedSession.agentId ??
+                                  intakeForm.agentId ??
+                                  "AGENT-OPS-001",
+                              },
+                            );
+                            setOutcomeNotice({
+                              tone: "success",
+                              message:
+                                currentLocale === "en"
+                                  ? `Identity announced for ${selectedSession.callId}.`
+                                  : `已為 ${selectedSession.callId} 標記身分告知。`,
+                            });
+                            await loadData(selectedSession.callId);
+                          },
+                        )
                       }
                     >
                       {getActionLabel(currentLocale, "announce_identity")}
@@ -1363,24 +1891,34 @@ export default function CallcenterPage() {
                       }
                       onClick={() =>
                         selectedSession &&
-                        void runGuardedAction("close", closeAction, async () => {
-                          await getOpsClient().closeCallSession(selectedSession.callId);
-                          setOutcomeNotice({
-                            tone: "success",
-                            message:
-                              currentLocale === "en"
-                                ? `Session ${selectedSession.callId} closed.`
-                                : `已關閉 session ${selectedSession.callId}。`,
-                          });
-                          await loadData(selectedSession.callId);
-                        })
+                        void runGuardedAction(
+                          "close",
+                          closeAction,
+                          async () => {
+                            await getOpsClient().closeCallSession(
+                              selectedSession.callId,
+                            );
+                            setOutcomeNotice({
+                              tone: "success",
+                              message:
+                                currentLocale === "en"
+                                  ? `Session ${selectedSession.callId} closed.`
+                                  : `已關閉 session ${selectedSession.callId}。`,
+                            });
+                            await loadData(selectedSession.callId);
+                          },
+                        )
                       }
                     >
                       {getActionLabel(currentLocale, "close_session")}
                     </button>
                   </div>
-                  {announceAction ? renderActionMeta(currentLocale, announceAction) : null}
-                  {closeAction ? renderActionMeta(currentLocale, closeAction) : null}
+                  {announceAction
+                    ? renderActionMeta(currentLocale, announceAction)
+                    : null}
+                  {closeAction
+                    ? renderActionMeta(currentLocale, closeAction)
+                    : null}
                 </section>
 
                 <section className="mini-panel">
@@ -1392,40 +1930,55 @@ export default function CallcenterPage() {
                       if (!selectedSession) {
                         return;
                       }
-                      void runGuardedAction("quote-eta", quoteEtaAction, async () => {
-                        await getOpsClient().quoteCallEta(selectedSession.callId, {
-                          etaMinutes: Number(quotedEtaMinutes),
-                        });
-                        setOutcomeNotice({
-                          tone: "success",
-                          message:
-                            currentLocale === "en"
-                              ? `ETA ${quotedEtaMinutes} min saved.`
-                              : `已儲存 ETA ${quotedEtaMinutes} 分鐘。`,
-                        });
-                        await loadData(selectedSession.callId);
-                      });
+                      void runGuardedAction(
+                        "quote-eta",
+                        quoteEtaAction,
+                        async () => {
+                          await getOpsClient().quoteCallEta(
+                            selectedSession.callId,
+                            {
+                              etaMinutes: Number(quotedEtaMinutes),
+                            },
+                          );
+                          setOutcomeNotice({
+                            tone: "success",
+                            message:
+                              currentLocale === "en"
+                                ? `ETA ${quotedEtaMinutes} min saved.`
+                                : `已儲存 ETA ${quotedEtaMinutes} 分鐘。`,
+                          });
+                          await loadData(selectedSession.callId);
+                        },
+                      );
                     }}
                   >
                     <input
                       type="number"
                       min={1}
                       value={quotedEtaMinutes}
-                      onChange={(event) => setQuotedEtaMinutes(event.target.value)}
+                      onChange={(event) =>
+                        setQuotedEtaMinutes(event.target.value)
+                      }
                     />
                     <button
                       className="toolbar-btn"
                       type="submit"
-                      disabled={!quoteEtaAction?.enabled || busyKey === "quote-eta"}
+                      disabled={
+                        !quoteEtaAction?.enabled || busyKey === "quote-eta"
+                      }
                     >
                       {getActionLabel(currentLocale, "quote_eta")}
                     </button>
                   </form>
-                  {quoteEtaAction ? renderActionMeta(currentLocale, quoteEtaAction) : null}
+                  {quoteEtaAction
+                    ? renderActionMeta(currentLocale, quoteEtaAction)
+                    : null}
                 </section>
 
                 <section className="mini-panel">
-                  <h4>{currentLocale === "en" ? "Recording evidence" : "錄音證據"}</h4>
+                  <h4>
+                    {currentLocale === "en" ? "Recording evidence" : "錄音證據"}
+                  </h4>
                   <form
                     className="stack-form"
                     onSubmit={(event) => {
@@ -1516,7 +2069,9 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en" ? "Resolution desk" : "Resolution desk"}
+                    {currentLocale === "en"
+                      ? "Resolution desk"
+                      : "Resolution desk"}
                   </span>
                   <h3>
                     {currentLocale === "en"
@@ -1533,7 +2088,9 @@ export default function CallcenterPage() {
 
               <div className="action-panels action-panels-wide">
                 <section className="mini-panel">
-                  <h4>{getActionLabel(currentLocale, "create_phone_booking")}</h4>
+                  <h4>
+                    {getActionLabel(currentLocale, "create_phone_booking")}
+                  </h4>
                   <form
                     className="stack-form"
                     onSubmit={(event) => {
@@ -1553,7 +2110,9 @@ export default function CallcenterPage() {
                         dropoff: { address: orderForm.dropoffAddress },
                         passenger: {
                           name: orderForm.passengerName,
-                          phone: orderForm.passengerPhone || selectedSession.callerPhone,
+                          phone:
+                            orderForm.passengerPhone ||
+                            selectedSession.callerPhone,
                         },
                         ...(orderForm.notes.trim()
                           ? { notes: orderForm.notes.trim() }
@@ -1564,7 +2123,8 @@ export default function CallcenterPage() {
                         "create-booking",
                         createBookingAction,
                         async () => {
-                          const created = await getOpsClient().createCallCenterOrder(command);
+                          const created =
+                            await getOpsClient().createCallCenterOrder(command);
                           setOrderForm(INITIAL_ORDER_FORM);
                           setOutcomeNotice({
                             tone: "success",
@@ -1645,7 +2205,8 @@ export default function CallcenterPage() {
                       className="toolbar-btn toolbar-btn-primary"
                       type="submit"
                       disabled={
-                        !createBookingAction?.enabled || busyKey === "create-booking"
+                        !createBookingAction?.enabled ||
+                        busyKey === "create-booking"
                       }
                     >
                       {getActionLabel(currentLocale, "create_phone_booking")}
@@ -1657,7 +2218,9 @@ export default function CallcenterPage() {
                 </section>
 
                 <section className="mini-panel">
-                  <h4>{getActionLabel(currentLocale, "link_existing_order")}</h4>
+                  <h4>
+                    {getActionLabel(currentLocale, "link_existing_order")}
+                  </h4>
                   <form
                     className="stack-form"
                     onSubmit={(event) => {
@@ -1665,25 +2228,32 @@ export default function CallcenterPage() {
                       if (!selectedSession) {
                         return;
                       }
-                      void runGuardedAction("link-order", linkOrderAction, async () => {
-                        await getOpsClient().linkCallOrder(selectedSession.callId, {
-                          orderId: existingOrderId,
-                        });
-                        setExistingOrderId("");
-                        setOutcomeNotice({
-                          tone: "success",
-                          message:
-                            currentLocale === "en"
-                              ? `Order ${existingOrderId} linked to ${selectedSession.callId}.`
-                              : `已將訂單 ${existingOrderId} 綁定到 ${selectedSession.callId}。`,
-                          href: `/dispatch/${encodeURIComponent(existingOrderId)}`,
-                          label:
-                            currentLocale === "en"
-                              ? "Open linked dispatch"
-                              : "開啟已綁定 dispatch",
-                        });
-                        await loadData(selectedSession.callId);
-                      });
+                      void runGuardedAction(
+                        "link-order",
+                        linkOrderAction,
+                        async () => {
+                          await getOpsClient().linkCallOrder(
+                            selectedSession.callId,
+                            {
+                              orderId: existingOrderId,
+                            },
+                          );
+                          setExistingOrderId("");
+                          setOutcomeNotice({
+                            tone: "success",
+                            message:
+                              currentLocale === "en"
+                                ? `Order ${existingOrderId} linked to ${selectedSession.callId}.`
+                                : `已將訂單 ${existingOrderId} 綁定到 ${selectedSession.callId}。`,
+                            href: `/dispatch/${encodeURIComponent(existingOrderId)}`,
+                            label:
+                              currentLocale === "en"
+                                ? "Open linked dispatch"
+                                : "開啟已綁定 dispatch",
+                          });
+                          await loadData(selectedSession.callId);
+                        },
+                      );
                     }}
                   >
                     <input
@@ -1691,17 +2261,23 @@ export default function CallcenterPage() {
                       required
                       placeholder={t("callcenter.existingOrderIdPlaceholder")}
                       value={existingOrderId}
-                      onChange={(event) => setExistingOrderId(event.target.value)}
+                      onChange={(event) =>
+                        setExistingOrderId(event.target.value)
+                      }
                     />
                     <button
                       className="toolbar-btn"
                       type="submit"
-                      disabled={!linkOrderAction?.enabled || busyKey === "link-order"}
+                      disabled={
+                        !linkOrderAction?.enabled || busyKey === "link-order"
+                      }
                     >
                       {getActionLabel(currentLocale, "link_existing_order")}
                     </button>
                   </form>
-                  {linkOrderAction ? renderActionMeta(currentLocale, linkOrderAction) : null}
+                  {linkOrderAction
+                    ? renderActionMeta(currentLocale, linkOrderAction)
+                    : null}
                 </section>
 
                 <section className="mini-panel">
@@ -1717,10 +2293,13 @@ export default function CallcenterPage() {
                         "create-callback",
                         callbackAction,
                         async () => {
-                          await getOpsClient().createCallbackTask(selectedSession.callId, {
-                            dueAt: toIsoString(callbackDueAt),
-                            note: callbackNote,
-                          });
+                          await getOpsClient().createCallbackTask(
+                            selectedSession.callId,
+                            {
+                              dueAt: toIsoString(callbackDueAt),
+                              note: callbackNote,
+                            },
+                          );
                           setCallbackDueAt("");
                           setCallbackNote("");
                           setOutcomeNotice({
@@ -1750,7 +2329,10 @@ export default function CallcenterPage() {
                     <button
                       className="toolbar-btn"
                       type="submit"
-                      disabled={!callbackAction?.enabled || busyKey === "create-callback"}
+                      disabled={
+                        !callbackAction?.enabled ||
+                        busyKey === "create-callback"
+                      }
                     >
                       {getActionLabel(currentLocale, "create_callback")}
                     </button>
@@ -1789,7 +2371,9 @@ export default function CallcenterPage() {
                       type="text"
                       placeholder={t("callcenter.completionNotePlaceholder")}
                       value={callbackCompleteNote}
-                      onChange={(event) => setCallbackCompleteNote(event.target.value)}
+                      onChange={(event) =>
+                        setCallbackCompleteNote(event.target.value)
+                      }
                     />
                     <button
                       className="toolbar-btn"
@@ -1802,14 +2386,18 @@ export default function CallcenterPage() {
                       {getActionLabel(currentLocale, "complete_callback")}
                     </button>
                   </form>
-                  {callbackAction ? renderActionMeta(currentLocale, callbackAction) : null}
+                  {callbackAction
+                    ? renderActionMeta(currentLocale, callbackAction)
+                    : null}
                   {completeCallbackAction
                     ? renderActionMeta(currentLocale, completeCallbackAction)
                     : null}
                 </section>
 
                 <section className="mini-panel">
-                  <h4>{getActionLabel(currentLocale, "transfer_to_complaint")}</h4>
+                  <h4>
+                    {getActionLabel(currentLocale, "transfer_to_complaint")}
+                  </h4>
                   <form
                     className="stack-form"
                     onSubmit={(event) => {
@@ -1822,21 +2410,22 @@ export default function CallcenterPage() {
                         "transfer-complaint",
                         transferComplaintAction,
                         async () => {
-                          const result = await getOpsClient().transferCallToComplaint(
-                            selectedSession.callId,
-                            {
-                              ...transferForm,
-                              ...(selectedSession.linkedOrderId ||
-                              transferForm.relatedOrderId
-                                ? {
-                                    relatedOrderId:
-                                      selectedSession.linkedOrderId ??
-                                      transferForm.relatedOrderId ??
-                                      null,
-                                  }
-                                : {}),
-                            },
-                          );
+                          const result =
+                            await getOpsClient().transferCallToComplaint(
+                              selectedSession.callId,
+                              {
+                                ...transferForm,
+                                ...(selectedSession.linkedOrderId ||
+                                transferForm.relatedOrderId
+                                  ? {
+                                      relatedOrderId:
+                                        selectedSession.linkedOrderId ??
+                                        transferForm.relatedOrderId ??
+                                        null,
+                                    }
+                                  : {}),
+                              },
+                            );
                           setTransferForm(INITIAL_COMPLAINT_TRANSFER_FORM);
                           setOutcomeNotice({
                             tone: "success",
@@ -1861,10 +2450,12 @@ export default function CallcenterPage() {
                     <select
                       value={transferForm.category}
                       onChange={(event) =>
-                        setTransferForm((current: TransferCallToComplaintCommand) => ({
-                          ...current,
-                          category: event.target.value as ComplaintCategory,
-                        }))
+                        setTransferForm(
+                          (current: TransferCallToComplaintCommand) => ({
+                            ...current,
+                            category: event.target.value as ComplaintCategory,
+                          }),
+                        )
                       }
                     >
                       {COMPLAINT_CATEGORY_OPTIONS.map((category) => (
@@ -1876,10 +2467,13 @@ export default function CallcenterPage() {
                     <select
                       value={transferForm.severity}
                       onChange={(event) =>
-                        setTransferForm((current: TransferCallToComplaintCommand) => ({
-                          ...current,
-                          severity: event.target.value as TransferCallToComplaintCommand["severity"],
-                        }))
+                        setTransferForm(
+                          (current: TransferCallToComplaintCommand) => ({
+                            ...current,
+                            severity: event.target
+                              .value as TransferCallToComplaintCommand["severity"],
+                          }),
+                        )
                       }
                     >
                       <option value="normal">
@@ -1892,13 +2486,17 @@ export default function CallcenterPage() {
                     <textarea
                       rows={4}
                       required
-                      placeholder={t("callcenter.complaintDescriptionPlaceholder")}
+                      placeholder={t(
+                        "callcenter.complaintDescriptionPlaceholder",
+                      )}
                       value={transferForm.description}
                       onChange={(event) =>
-                        setTransferForm((current: TransferCallToComplaintCommand) => ({
-                          ...current,
-                          description: event.target.value,
-                        }))
+                        setTransferForm(
+                          (current: TransferCallToComplaintCommand) => ({
+                            ...current,
+                            description: event.target.value,
+                          }),
+                        )
                       }
                     />
                     <button
@@ -1923,7 +2521,9 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en" ? "Dispatch trace" : "Dispatch trace"}
+                    {currentLocale === "en"
+                      ? "Dispatch trace"
+                      : "Dispatch trace"}
                   </span>
                   <h3>
                     {currentLocale === "en"
@@ -1948,7 +2548,12 @@ export default function CallcenterPage() {
                     </div>
                     <div className="spotlight-cell">
                       <span>{currentLocale === "en" ? "Status" : "狀態"}</span>
-                      <strong>{formatOpsCodeLabel(currentLocale, selectedOrder.status)}</strong>
+                      <strong>
+                        {formatOpsCodeLabel(
+                          currentLocale,
+                          selectedOrder.status,
+                        )}
+                      </strong>
                       <small>
                         {selectedOrder.etaSnapshot
                           ? currentLocale === "en"
@@ -1965,10 +2570,15 @@ export default function CallcenterPage() {
                       <small>{selectedOrder.dropoff.address}</small>
                     </div>
                     <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Compliance" : "合規"}</span>
+                      <span>
+                        {currentLocale === "en" ? "Compliance" : "合規"}
+                      </span>
                       <strong>
                         {selectedOrder.complianceFlags.length > 0
-                          ? formatOpsCodeList(currentLocale, selectedOrder.complianceFlags)
+                          ? formatOpsCodeList(
+                              currentLocale,
+                              selectedOrder.complianceFlags,
+                            )
                           : "—"}
                       </strong>
                       <small>{selectedOrder.recordingId ?? "—"}</small>
@@ -1991,10 +2601,17 @@ export default function CallcenterPage() {
                       dispatchTrace.map((entry) => (
                         <article key={entry.traceId} className="timeline-item">
                           <div>
-                            <strong>{formatOpsCodeLabel(currentLocale, entry.eventType)}</strong>
+                            <strong>
+                              {formatOpsCodeLabel(
+                                currentLocale,
+                                entry.eventType,
+                              )}
+                            </strong>
                             <p>{entry.message}</p>
                           </div>
-                          <span>{formatDateTime(currentLocale, entry.createdAt)}</span>
+                          <span>
+                            {formatDateTime(currentLocale, entry.createdAt)}
+                          </span>
                         </article>
                       ))
                     ) : (
@@ -2021,48 +2638,15 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en" ? "Waiting queue" : "等待佇列"}
-                  </span>
-                  <h3>{currentLocale === "en" ? "Other live calls" : "其他進行中的通話"}</h3>
-                </div>
-                <span className="count-pill">{waitingSessions.length}</span>
-              </div>
-              <div className="queue-list">
-                {waitingSessions.length > 0 ? (
-                  waitingSessions.map((session) => (
-                    <button
-                      key={session.callId}
-                      type="button"
-                      className="queue-item"
-                      onClick={() => setSelectedCallId(session.callId)}
-                    >
-                      <div>
-                        <strong>{session.callId}</strong>
-                        <p>
-                          {formatOpsCodeLabel(currentLocale, session.callType)} ·{" "}
-                          {session.callerPhone}
-                        </p>
-                      </div>
-                      <span>{formatDateTime(currentLocale, session.startedAt)}</span>
-                    </button>
-                  ))
-                ) : (
-                  <div className="subtle-empty">
                     {currentLocale === "en"
-                      ? "No extra waiting calls."
-                      : "目前沒有其他等待中的通話。"}
-                  </div>
-                )}
-              </div>
-            </article>
-
-            <article className="canvas-card rail-card">
-              <div className="card-head">
-                <div>
-                  <span className="section-kicker">
-                    {currentLocale === "en" ? "Callback queue" : "Callback 佇列"}
+                      ? "Callback queue"
+                      : "Callback 佇列"}
                   </span>
-                  <h3>{currentLocale === "en" ? "Across all sessions" : "跨所有 session"}</h3>
+                  <h3>
+                    {currentLocale === "en"
+                      ? "Across all sessions"
+                      : "跨所有 session"}
+                  </h3>
                 </div>
                 <span className="count-pill">{pendingCallbacks.length}</span>
               </div>
@@ -2079,7 +2663,9 @@ export default function CallcenterPage() {
                         <strong>{callback.callbackTaskId}</strong>
                         <p>{getCallbackSummary(callback, currentLocale)}</p>
                       </div>
-                      <span>{formatRelativeDeadline(callback.dueAt, currentLocale)}</span>
+                      <span>
+                        {formatRelativeDeadline(callback.dueAt, currentLocale)}
+                      </span>
                     </button>
                   ))
                 ) : (
@@ -2098,7 +2684,11 @@ export default function CallcenterPage() {
                   <span className="section-kicker">
                     {currentLocale === "en" ? "Recording queue" : "錄音佇列"}
                   </span>
-                  <h3>{currentLocale === "en" ? "Awaiting auto-link or manual attach" : "等待自動連結或手動補掛"}</h3>
+                  <h3>
+                    {currentLocale === "en"
+                      ? "Awaiting auto-link or manual attach"
+                      : "等待自動連結或手動補掛"}
+                  </h3>
                 </div>
                 <span className="count-pill">{recordingQueue.length}</span>
               </div>
@@ -2115,8 +2705,15 @@ export default function CallcenterPage() {
                         <strong>{session.callId}</strong>
                         <p>{session.callerPhone}</p>
                       </div>
-                      <span className={getRecordingStateTone(session.recordingState)}>
-                        {formatOpsCodeLabel(currentLocale, session.recordingState)}
+                      <span
+                        className={getRecordingStateTone(
+                          session.recordingState,
+                        )}
+                      >
+                        {formatOpsCodeLabel(
+                          currentLocale,
+                          session.recordingState,
+                        )}
                       </span>
                     </button>
                   ))
@@ -2134,9 +2731,13 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en" ? "Session history" : "Session 歷史"}
+                    {currentLocale === "en"
+                      ? "Session history"
+                      : "Session 歷史"}
                   </span>
-                  <h3>{currentLocale === "en" ? "Closed calls" : "已結束通話"}</h3>
+                  <h3>
+                    {currentLocale === "en" ? "Closed calls" : "已結束通話"}
+                  </h3>
                 </div>
                 <span className="count-pill">{sessionHistory.length}</span>
               </div>
@@ -2152,11 +2753,13 @@ export default function CallcenterPage() {
                       <div>
                         <strong>{session.callId}</strong>
                         <p>
-                          {formatOpsCodeLabel(currentLocale, session.callType)} ·{" "}
-                          {session.callerPhone}
+                          {formatOpsCodeLabel(currentLocale, session.callType)}{" "}
+                          · {session.callerPhone}
                         </p>
                       </div>
-                      <span>{formatDateTime(currentLocale, session.endedAt)}</span>
+                      <span>
+                        {formatDateTime(currentLocale, session.endedAt)}
+                      </span>
                     </button>
                   ))
                 ) : (
@@ -2227,6 +2830,54 @@ export default function CallcenterPage() {
           text-transform: uppercase;
         }
 
+        .header-action {
+          min-height: 40px;
+          padding: 0 16px;
+          border-radius: 999px;
+          border: 1px solid ${theme.border};
+          background: ${theme.surfaceLo};
+          color: ${theme.text};
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .header-action-primary {
+          background: ${theme.accent};
+          border-color: ${theme.accent};
+          color: #0d1015;
+        }
+
+        .header-action:disabled,
+        .header-tab-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+
+        .header-tab-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          font: inherit;
+          cursor: pointer;
+        }
+
+        .header-tab-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 22px;
+          min-height: 22px;
+          padding: 0 7px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.08);
+          font-size: 11px;
+          font-weight: 700;
+        }
+
         .hero-metrics,
         .summary-grid,
         .action-strip,
@@ -2241,6 +2892,13 @@ export default function CallcenterPage() {
         .hero-metrics {
           align-content: start;
           justify-content: flex-end;
+        }
+
+        .hero-controls {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          align-items: stretch;
         }
 
         .hero-chip,
@@ -2377,11 +3035,19 @@ export default function CallcenterPage() {
           gap: 10px;
           align-items: center;
           margin-left: auto;
+          flex-wrap: wrap;
+        }
+
+        .toolbar-hint {
+          color: ${theme.textMuted};
+          font-size: 12px;
         }
 
         .tier-chip,
         .count-pill,
-        .state-pill {
+        .state-pill,
+        .status-chip,
+        .freshness-pill {
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -2392,6 +3058,22 @@ export default function CallcenterPage() {
           background: ${theme.surfaceLo};
           font-size: 12px;
           font-weight: 700;
+        }
+
+        .freshness-fresh {
+          border-color: rgba(55, 211, 153, 0.34);
+          color: #83f1c2;
+        }
+
+        .freshness-stale,
+        .freshness-degraded {
+          border-color: rgba(255, 184, 77, 0.28);
+          color: #ffd08a;
+        }
+
+        .status-chip {
+          border-color: rgba(104, 179, 255, 0.28);
+          color: #92c9ff;
         }
 
         .state-positive {
@@ -2444,10 +3126,11 @@ export default function CallcenterPage() {
 
         .workspace-grid {
           display: grid;
-          grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
+          grid-template-columns: minmax(260px, 320px) minmax(0, 1.3fr) minmax(260px, 0.82fr);
           gap: 18px;
         }
 
+        .workspace-left-rail,
         .workspace-main,
         .workspace-rail,
         .trace-stack,
@@ -2472,6 +3155,7 @@ export default function CallcenterPage() {
         .spotlight-cell,
         .mini-panel,
         .queue-item,
+        .signal-card,
         .timeline-item,
         .loading-state,
         .empty-state {
@@ -2482,9 +3166,28 @@ export default function CallcenterPage() {
 
         .spotlight-cell,
         .mini-panel,
+        .signal-card,
         .loading-state,
         .empty-state {
           padding: 16px;
+        }
+
+        .signal-card span {
+          color: ${theme.textMuted};
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        }
+
+        .signal-card strong {
+          display: block;
+          margin-top: 6px;
+        }
+
+        .signal-card small {
+          display: block;
+          margin-top: 6px;
+          color: ${theme.textMuted};
         }
 
         .spotlight-cell strong,
