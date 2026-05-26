@@ -68,14 +68,7 @@ const STALE_AFTER_MS_BY_TIER: Record<RefreshTier, number> = {
 const REVENUE_STALE_AFTER_MS =
   STALE_AFTER_MS_BY_TIER[REVENUE_REFRESH_TIER] ?? 15_000;
 
-type RevenueTab = "insight" | "channel" | "matrix" | "mismatch";
-const DEFAULT_REVENUE_PERIOD: RevenuePeriod = "yesterday";
-const TAB_KEYS: readonly RevenueTab[] = [
-  "insight",
-  "channel",
-  "matrix",
-  "mismatch",
-] as const;
+const DEFAULT_REVENUE_PERIOD: RevenuePeriod = "today";
 
 const MATRIX_CHANNEL_ORDER = [
   "tenant_enterprise",
@@ -124,12 +117,6 @@ function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function resolveTab(value: string | undefined): RevenueTab {
-  return (TAB_KEYS as readonly string[]).includes(value ?? "")
-    ? (value as RevenueTab)
-    : "matrix";
-}
-
 function resolveFilters(
   searchParams?: Record<string, string | string[] | undefined>,
 ): RevenueFilters {
@@ -164,15 +151,10 @@ function filtersAreDefault(filters: RevenueFilters): boolean {
 
 function buildHref(
   filters: RevenueFilters,
-  tab: RevenueTab,
-  overrides: Partial<
-    RevenueFilters & { tab: RevenueTab; mismatch: string | null }
-  > = {},
+  overrides: Partial<RevenueFilters & { mismatch: string | null }> = {},
 ) {
   const next = { ...filters, ...overrides };
-  const nextTab = overrides.tab ?? tab;
   const params = new URLSearchParams();
-  if (nextTab !== "matrix") params.set("tab", nextTab);
   if (next.period !== DEFAULT_REVENUE_PERIOD) params.set("period", next.period);
   if (next.serviceBucket !== "all")
     params.set("serviceBucket", next.serviceBucket);
@@ -396,13 +378,11 @@ function EmptyStatePanel({
   envelope,
   locale,
   filters,
-  tab,
   themeRef,
 }: {
   envelope: EmptyStateEnvelope;
   locale: Locale;
   filters: RevenueFilters;
-  tab: RevenueTab;
   themeRef: CanvasTheme;
 }) {
   const copy = emptyStateCopy(envelope, locale, "revenue");
@@ -476,7 +456,6 @@ function EmptyStatePanel({
           reason={envelope.reason}
           locale={locale}
           filters={filters}
-          tab={tab}
         />
       </div>
     </div>
@@ -487,21 +466,16 @@ function EmptyStateActions({
   reason,
   locale,
   filters,
-  tab,
 }: {
   reason: EmptyReason;
   locale: Locale;
   filters: RevenueFilters;
-  tab: RevenueTab;
 }) {
   switch (reason) {
     case "fetch_failed":
       return (
         <div style={filterRowStyle}>
-          <Link
-            href={buildHref(filters, tab)}
-            style={{ textDecoration: "none" }}
-          >
+          <Link href={buildHref(filters)} style={{ textDecoration: "none" }}>
             <Btn theme={theme} icon="arrow">
               {t("revenue.action.retry", locale)}
             </Btn>
@@ -512,7 +486,7 @@ function EmptyStateActions({
       return (
         <div style={filterRowStyle}>
           <Link
-            href={buildHref(filters, tab, {
+            href={buildHref(filters, {
               period: "7d",
               serviceBucket: "all",
               vehicleId: "all",
@@ -782,7 +756,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const resolvedSearchParams = await (searchParams ??
     Promise.resolve({} as Record<string, string | string[] | undefined>));
   const filters = resolveFilters(resolvedSearchParams);
-  const tab = resolveTab(firstParam(resolvedSearchParams.tab));
   const mismatchId = firstParam(resolvedSearchParams.mismatch) ?? null;
   const filtersActive = !filtersAreDefault(filters);
   const locale = await getServerLocale();
@@ -900,7 +873,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const filteredForwarderIssues = forwarderIssues.filter((issue) =>
     matchRevenueWindow(issue.createdAt, filters.period),
   );
-  const mismatchCount = filteredForwarderIssues.length;
   const recognisedRevenueMinor = insights.totalRevenueMinor;
   const matrixEvidenceByChannel = {
     tenant_enterprise: t("revenue.matrix.evidence.tenant_enterprise", locale, {
@@ -979,38 +951,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       .sort((left, right) => right.revenueMinor - left.revenueMinor);
   })();
 
-  const tabs = TAB_KEYS.map((key) => {
-    const isActive = key === tab;
-    const label = (() => {
-      switch (key) {
-        case "insight":
-          return t("revenue.tab.insight", locale);
-        case "channel":
-          return t("revenue.tab.channelMix", locale);
-        case "matrix":
-          return t("revenue.tab.matrix", locale);
-        case "mismatch":
-          return mismatchCount > 0
-            ? `${t("revenue.tab.mismatch", locale)} · ${formatCompactNumber(mismatchCount)}`
-            : t("revenue.tab.mismatch", locale);
-      }
-    })();
-    return (
-      <Link
-        key={key}
-        href={buildHref(filters, tab, { tab: key, mismatch: null })}
-        style={{
-          color: "inherit",
-          textDecoration: "none",
-          fontWeight: isActive ? 600 : 500,
-        }}
-      >
-        {label}
-      </Link>
-    );
-  });
-  const activeTab = tabs[TAB_KEYS.indexOf(tab)];
-
   // availableActions[] drives all CTAs per Q-X13. 0-length list means
   // the surface is read-only for the current actor. Until backend wires
   // per-actor scopes, period/serviceBucket/vehicle filters and refresh
@@ -1052,25 +992,11 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     pageActions.map((descriptor) => [descriptor.action, descriptor] as const),
   );
 
-  const renderTabBody = () => {
-    switch (tab) {
-      case "insight":
-        return renderInsight();
-      case "channel":
-        return renderChannelMix();
-      case "matrix":
-        return renderMatrix();
-      case "mismatch":
-        return renderMismatch();
-    }
-  };
-
-  const drawerOpen = tab === "mismatch" && mismatchId !== null;
-  const closeDrawerHref = buildHref(filters, tab, { mismatch: null });
-  const tabContent = renderTabBody();
-  const bodySlot = drawerOpen ? (
+  const drawerOpen = mismatchId !== null;
+  const closeDrawerHref = buildHref(filters, { mismatch: null });
+  const mismatchSlot = drawerOpen ? (
     <div style={drawerLayoutStyle}>
-      <div style={{ minWidth: 0 }}>{tabContent}</div>
+      <div style={{ minWidth: 0 }}>{renderMismatch()}</div>
       <MismatchDrawer
         issue={selectedMismatch}
         financeIssue={selectedFinanceIssue}
@@ -1079,7 +1005,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       />
     </div>
   ) : (
-    tabContent
+    renderMismatch()
   );
 
   return (
@@ -1088,8 +1014,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         theme={theme}
         title={t("revenue.canvas.title", locale)}
         subtitle={t("revenue.canvas.subtitle", locale)}
-        tabs={tabs}
-        activeTab={activeTab}
         actions={renderHeaderActions()}
       />
 
@@ -1177,7 +1101,21 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
         {renderFilterChips()}
 
-        {bodySlot}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>{renderInsight()}</div>
+          <div style={{ minWidth: 0 }}>{renderChannelMix()}</div>
+        </div>
+
+        {renderMatrix()}
+
+        {mismatchSlot}
       </div>
     </>
   );
@@ -1207,7 +1145,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               return (
                 <Link
                   key={descriptor.action}
-                  href={buildHref(filters, tab, { mismatch: mismatchId })}
+                  href={buildHref(filters, { mismatch: mismatchId })}
                   style={{ textDecoration: "none" }}
                 >
                   <Btn theme={theme} icon="arrow">
@@ -1269,7 +1207,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                 periodAction.enabled ? (
                   <Link
                     key={`period-${p}`}
-                    href={buildHref(filters, tab, {
+                    href={buildHref(filters, {
                       period: p,
                       mismatch: null,
                     })}
@@ -1314,7 +1252,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                 return serviceBucketAction.enabled ? (
                   <Link
                     key={`bucket-${sb}`}
-                    href={buildHref(filters, tab, {
+                    href={buildHref(filters, {
                       serviceBucket: sb,
                       mismatch: null,
                     })}
@@ -1353,7 +1291,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             </span>
             {vehicleAction.enabled ? (
               <Link
-                href={buildHref(filters, tab, {
+                href={buildHref(filters, {
                   vehicleId: "all",
                   mismatch: null,
                 })}
@@ -1378,7 +1316,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               vehicleAction.enabled ? (
                 <Link
                   key={`vehicle-${vid}`}
-                  href={buildHref(filters, tab, {
+                  href={buildHref(filters, {
                     vehicleId: vid,
                     mismatch: null,
                   })}
@@ -1504,7 +1442,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               envelope={buildEmptyEnvelope(productEmpty, "revenue")}
               locale={locale}
               filters={filters}
-              tab={tab}
               themeRef={theme}
             />
           ) : (
@@ -1531,7 +1468,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               envelope={buildEmptyEnvelope(vehicleEmpty, "revenue")}
               locale={locale}
               filters={filters}
-              tab={tab}
               themeRef={theme}
             />
           ) : (
@@ -1598,7 +1534,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             envelope={buildEmptyEnvelope(channelEmpty, "revenue")}
             locale={locale}
             filters={filters}
-            tab={tab}
             themeRef={theme}
           />
         ) : (
@@ -1627,7 +1562,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             envelope={buildEmptyEnvelope(matrixEmpty, "revenue")}
             locale={locale}
             filters={filters}
-            tab={tab}
             themeRef={theme}
           />
         </Card>
@@ -1801,7 +1735,6 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             envelope={buildEmptyEnvelope(mismatchEmpty, "revenue")}
             locale={locale}
             filters={filters}
-            tab={tab}
             themeRef={theme}
           />
         </Card>
@@ -1940,7 +1873,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         r: (row) =>
           canOpenMismatchDrawer() ? (
             <Link
-              href={buildHref(filters, "mismatch", { mismatch: row.jobId })}
+              href={buildHref(filters, { mismatch: row.jobId })}
               style={{ textDecoration: "none" }}
             >
               <Btn
