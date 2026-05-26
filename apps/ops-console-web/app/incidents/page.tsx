@@ -892,6 +892,42 @@ export default function IncidentsPage() {
     "refresh",
     "reload",
   ]);
+  const refreshLabel = formatRefreshBadge(refresh, refreshTier, locale);
+  const headerActions = (
+    <>
+      <Pill theme={theme} tone={getRefreshTone(refresh)}>
+        {refreshLabel}
+      </Pill>
+      {refreshAction ? (
+        <span title={getActionTitle(refreshAction, locale)}>
+          <Btn
+            theme={theme}
+            variant={getActionVariant(refreshAction)}
+            danger={isDangerAction(refreshAction)}
+            icon="more"
+            disabled={refreshAction.enabled === false}
+            onClick={() => handleAction(refreshAction)}
+          >
+            {getActionLabel(refreshAction, locale)}
+          </Btn>
+        </span>
+      ) : null}
+      {createAction ? (
+        <span title={getActionTitle(createAction, locale)}>
+          <Btn
+            theme={theme}
+            variant={getActionVariant(createAction)}
+            danger={isDangerAction(createAction)}
+            icon="plus"
+            disabled={createAction.enabled === false}
+            onClick={() => handleAction(createAction)}
+          >
+            {getActionLabel(createAction, locale)}
+          </Btn>
+        </span>
+      ) : null}
+    </>
+  );
   const refreshIntervalMs = getRefreshIntervalMs(refreshTier);
   const filteredEmpty = filteredRecords.length === 0 && records.length > 0;
   const effectiveEmptyState = filteredEmpty
@@ -903,7 +939,7 @@ export default function IncidentsPage() {
   }, [loadRecords]);
 
   useEffect(() => {
-    if (!createFromQuery || createAction?.enabled === false) {
+    if (!createFromQuery || !createAction || createAction.enabled === false) {
       return;
     }
 
@@ -1098,7 +1134,6 @@ export default function IncidentsPage() {
     { h: "OCCURRED", k: "occurredCell", w: 145, r: (row) => row.occurredCell },
     { h: "AGE", k: "ageCell", w: 90, r: (row) => row.ageCell },
   ];
-  const refreshLabel = formatRefreshBadge(refresh, refreshTier, locale);
   const hasAllClearState =
     !loading &&
     !effectiveEmptyState &&
@@ -1141,37 +1176,7 @@ export default function IncidentsPage() {
                 ? "Active"
                 : "進行中"
         }
-        actions={
-          <>
-            <Pill theme={theme} tone={getRefreshTone(refresh)}>
-              {refreshLabel}
-            </Pill>
-            <span title={getActionTitle(refreshAction, locale)}>
-              <Btn
-                theme={theme}
-                variant={getActionVariant(refreshAction)}
-                danger={isDangerAction(refreshAction)}
-                icon="more"
-                disabled={refreshAction?.enabled === false}
-                onClick={() => refreshAction && handleAction(refreshAction)}
-              >
-                {getActionLabel(refreshAction, locale)}
-              </Btn>
-            </span>
-            <span title={getActionTitle(createAction, locale)}>
-              <Btn
-                theme={theme}
-                variant={getActionVariant(createAction)}
-                danger={isDangerAction(createAction)}
-                icon="plus"
-                disabled={createAction?.enabled === false}
-                onClick={() => createAction && handleAction(createAction)}
-              >
-                {getActionLabel(createAction, locale)}
-              </Btn>
-            </span>
-          </>
-        }
+        actions={headerActions}
       />
 
       <div
