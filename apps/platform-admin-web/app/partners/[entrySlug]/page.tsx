@@ -42,7 +42,6 @@ import {
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasField as Field,
-  CanvasIcon,
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
@@ -147,9 +146,7 @@ const kpiGridStyle = {
 
 const fieldGridStyle = (compact: boolean): CSSProperties => ({
   display: "grid",
-  gridTemplateColumns: compact
-    ? "minmax(0, 1fr)"
-    : "repeat(2, minmax(0, 1fr))",
+  gridTemplateColumns: compact ? "minmax(0, 1fr)" : "repeat(2, minmax(0, 1fr))",
   gap: 12,
 });
 
@@ -251,6 +248,20 @@ const deepLinkStyle = {
   gap: 10,
 } satisfies CSSProperties;
 
+const miniListStyle = {
+  display: "grid",
+  gap: 10,
+} satisfies CSSProperties;
+
+const miniRowStyle = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 12,
+  padding: "10px 0",
+  borderBottom: `1px solid ${theme.border}`,
+} satisfies CSSProperties;
+
 const filterRowStyle = {
   display: "flex",
   gap: 8,
@@ -314,7 +325,12 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       badgeTone: "warn",
     },
     { divider: labels.tenantGov },
-    { key: "tenants", href: "/tenants", icon: "tenants", label: labels.tenants },
+    {
+      key: "tenants",
+      href: "/tenants",
+      icon: "tenants",
+      label: labels.tenants,
+    },
     {
       key: "tenant-governance",
       href: "/tenant-governance",
@@ -322,7 +338,12 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       label: labels.tenantGov,
     },
     { divider: labels.partners },
-    { key: "partners", href: "/partners", icon: "partners", label: labels.partners },
+    {
+      key: "partners",
+      href: "/partners",
+      icon: "partners",
+      label: labels.partners,
+    },
     { key: "users", href: "/users", icon: "users", label: labels.users },
     { divider: labels.fleetGov },
     { key: "fleet", href: "/fleet", icon: "fleet", label: labels.fleet },
@@ -333,7 +354,12 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       icon: "switchboard",
       label: labels.switchboard,
     },
-    { key: "pricing", href: "/pricing", icon: "pricing", label: labels.pricing },
+    {
+      key: "pricing",
+      href: "/pricing",
+      icon: "pricing",
+      label: labels.pricing,
+    },
     {
       key: "payments",
       href: "/payments",
@@ -351,9 +377,19 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       badgeTone: "danger",
     },
     { divider: labels.platformLayer },
-    { key: "notices", href: "/notices", icon: "notices", label: labels.notices },
+    {
+      key: "notices",
+      href: "/notices",
+      icon: "notices",
+      label: labels.notices,
+    },
     { key: "audit", href: "/audit", icon: "audit", label: labels.audit },
-    { key: "flags", href: "/feature-flags", icon: "flags", label: labels.flags },
+    {
+      key: "flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: labels.flags,
+    },
   ];
 }
 
@@ -454,9 +490,15 @@ function toCanvasTone(
   return tone === "warning" ? "warn" : tone;
 }
 
-function fallbackActions(entry: PartnerDetailRecord): ResourceActionDescriptor[] {
+function fallbackActions(
+  entry: PartnerDetailRecord,
+): ResourceActionDescriptor[] {
   return [
-    { action: "edit", enabled: entry.status !== "revoked", riskLevel: "medium" },
+    {
+      action: "edit",
+      enabled: entry.status !== "revoked",
+      riskLevel: "medium",
+    },
     {
       action: "activate",
       enabled: entry.status === "inactive",
@@ -641,9 +683,15 @@ function actionLabel(
       case "deactivate":
         return { title: "Deactivate partner entry", confirm: "Deactivate" };
       case "issue_credential":
-        return { title: "Issue ingress credential", confirm: "Issue credential" };
+        return {
+          title: "Issue ingress credential",
+          confirm: "Issue credential",
+        };
       case "rotate_credential":
-        return { title: "Rotate ingress credential", confirm: "Rotate credential" };
+        return {
+          title: "Rotate ingress credential",
+          confirm: "Rotate credential",
+        };
       case "revoke_credential":
         return { title: "Revoke credential", confirm: "Revoke credential" };
     }
@@ -820,28 +868,26 @@ function deriveDeepLinks(
     pushLink({
       key,
       label: String(link.label),
-      href:
-        link.route.startsWith("http")
-          ? link.route
-          : link.targetApp === "ops-console"
-            ? `https://ops.drts.io${link.route}`
-            : link.route,
+      href: link.route.startsWith("http")
+        ? link.route
+        : link.targetApp === "ops-console"
+          ? `https://ops.drts.io${link.route}`
+          : link.route,
       openInNewTab: link.openMode === "new_tab",
       helper: fallbackHelper,
     });
   });
 
-  const upstream = entry.crossAppLinks ?? [];
+  const upstream: CrossAppResourceLink[] = entry.crossAppLinks ?? [];
   upstream.forEach((link) => {
     pushLink({
       key: `${link.targetApp}:${link.resourceType}:${link.resourceId}`,
       label: String(link.label),
-      href:
-        link.route.startsWith("http")
-          ? link.route
-          : link.targetApp === "ops-console"
-            ? `https://ops.drts.io${link.route}`
-            : link.route,
+      href: link.route.startsWith("http")
+        ? link.route
+        : link.targetApp === "ops-console"
+          ? `https://ops.drts.io${link.route}`
+          : link.route,
       openInNewTab: link.openMode === "new_tab",
       helper:
         locale === "en"
@@ -893,15 +939,21 @@ function PlaintextCredentialModal({
     <div style={modalScrimStyle} role="dialog" aria-modal="true">
       <div style={modalCardStyle}>
         <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ ...shellBadgeRowStyle, justifyContent: "space-between" }}>
+          <div
+            style={{ ...shellBadgeRowStyle, justifyContent: "space-between" }}
+          >
             <Pill theme={theme} tone="danger">
               Q-ADM07
             </Pill>
             <Pill theme={theme} tone="accent">
-              {locale === "en" ? "plaintext-once modal" : "plaintext-once modal"}
+              {locale === "en"
+                ? "plaintext-once modal"
+                : "plaintext-once modal"}
             </Pill>
           </div>
-          <h2 style={{ margin: 0, fontSize: 20, color: theme.text }}>{title}</h2>
+          <h2 style={{ margin: 0, fontSize: 20, color: theme.text }}>
+            {title}
+          </h2>
           <div style={mutedTextStyle}>
             {locale === "en"
               ? "Copy or download the secret now. It will not be shown again after this modal closes."
@@ -940,7 +992,11 @@ function PlaintextCredentialModal({
         </div>
 
         <div style={buttonRowStyle}>
-          <Btn theme={theme} variant="secondary" onClick={() => void handleCopy()}>
+          <Btn
+            theme={theme}
+            variant="secondary"
+            onClick={() => void handleCopy()}
+          >
             {copied
               ? locale === "en"
                 ? "Copied"
@@ -980,7 +1036,12 @@ function PlaintextCredentialModal({
               ? "Keep audit lineage and rotation notes in sync with any handoff outside this app."
               : "若此 secret 需要交接到其他系統，請同步維護 audit lineage 與 rotation note。"}
           </div>
-          <Btn theme={theme} variant="primary" disabled={!stored} onClick={onClose}>
+          <Btn
+            theme={theme}
+            variant="primary"
+            disabled={!stored}
+            onClick={onClose}
+          >
             {locale === "en" ? "I stored this key" : "我已保存此 key"}
           </Btn>
         </div>
@@ -1066,7 +1127,12 @@ function ActionModal({
         </Field>
 
         <div style={overlayActionsStyle}>
-          <Btn theme={theme} variant="secondary" onClick={onClose} disabled={working}>
+          <Btn
+            theme={theme}
+            variant="secondary"
+            onClick={onClose}
+            disabled={working}
+          >
             {locale === "en" ? "Cancel" : "取消"}
           </Btn>
           <Btn
@@ -1096,15 +1162,23 @@ export default function PartnerDetailPage() {
   const client = usePlatformAdminClient();
   const [entry, setEntry] = useState<PartnerDetailRecord | null>(null);
   const [editForm, setEditForm] = useState<EntryFormState>(EMPTY_ENTRY_FORM);
-  const [credentials, setCredentials] = useState<PartnerIngressCredentialRecord[]>([]);
+  const [credentials, setCredentials] = useState<
+    PartnerIngressCredentialRecord[]
+  >([]);
   const [issuedCredential, setIssuedCredential] =
     useState<PartnerIngressCredentialIssued | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [changingStatus, setChangingStatus] = useState<ActionIntent | null>(null);
-  const [revokingCredentialId, setRevokingCredentialId] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [changingStatus, setChangingStatus] = useState<ActionIntent | null>(
+    null,
+  );
+  const [revokingCredentialId, setRevokingCredentialId] = useState<
+    string | null
+  >(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
+    null,
+  );
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [credentialFilter, setCredentialFilter] =
@@ -1134,9 +1208,11 @@ export default function PartnerDetailPage() {
       setError(null);
 
       try {
-        const entries = (await client.listPlatformPartnerEntries()) as PartnerDetailRecord[];
+        const entries =
+          (await client.listPlatformPartnerEntries()) as PartnerDetailRecord[];
         const selected =
-          entries.find((candidate) => candidate.entrySlug === entrySlug) ?? null;
+          entries.find((candidate) => candidate.entrySlug === entrySlug) ??
+          null;
         setEntry(selected);
         setEditForm(selected ? toPartnerFormState(selected) : EMPTY_ENTRY_FORM);
 
@@ -1146,7 +1222,9 @@ export default function PartnerDetailPage() {
 
         if (selected) {
           const nextCredentials =
-            await client.listPlatformPartnerIngressCredentials(selected.entrySlug);
+            await client.listPlatformPartnerIngressCredentials(
+              selected.entrySlug,
+            );
           setCredentials(nextCredentials ?? []);
         } else {
           setCredentials([]);
@@ -1241,6 +1319,9 @@ export default function PartnerDetailPage() {
     () => credentials.filter((credential) => !credential.revokedAt).length,
     [credentials],
   );
+  const latestCredential = credentials[0] ?? null;
+  const latestActiveCredential =
+    credentials.find((credential) => !credential.revokedAt) ?? null;
 
   const readinessItems = useMemo(
     () =>
@@ -1252,7 +1333,9 @@ export default function PartnerDetailPage() {
     [activeCredentialCount, entry, t],
   );
 
-  const readinessReadyCount = readinessItems.filter((item) => item.ready).length;
+  const readinessReadyCount = readinessItems.filter(
+    (item) => item.ready,
+  ).length;
   const readinessMissingCount = readinessItems.length - readinessReadyCount;
   const readinessComplete =
     readinessItems.length > 0 && readinessItems.every((item) => item.ready);
@@ -1267,7 +1350,10 @@ export default function PartnerDetailPage() {
       return "—";
     }
     return (
-      [entry.brandingMetadata?.supportEmail, entry.brandingMetadata?.supportPhone]
+      [
+        entry.brandingMetadata?.supportEmail,
+        entry.brandingMetadata?.supportPhone,
+      ]
         .filter(Boolean)
         .join(" · ") || "—"
     );
@@ -1279,7 +1365,11 @@ export default function PartnerDetailPage() {
     }
 
     return [
-      { k: "TENANT", v: `${entry.partnerType} · ${entry.tenantId}`, mono: true },
+      {
+        k: "TENANT",
+        v: `${entry.partnerType} · ${entry.tenantId}`,
+        mono: true,
+      },
       { k: "BANK CODE", v: entry.bankCode ?? "—", mono: true },
       {
         k: "PROGRAM",
@@ -1306,7 +1396,9 @@ export default function PartnerDetailPage() {
       {
         k: "THEME ACCENT",
         v: entry.themeAccent ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+          >
             <span
               style={{
                 width: 10,
@@ -1341,7 +1433,9 @@ export default function PartnerDetailPage() {
       },
       {
         k: locale === "en" ? "Adapter" : "Adapter",
-        v: contract ? `${contract.adapterCode} · ${contract.adapterVersion}` : "—",
+        v: contract
+          ? `${contract.adapterCode} · ${contract.adapterVersion}`
+          : "—",
         mono: true,
       },
       {
@@ -1539,12 +1633,11 @@ export default function PartnerDetailPage() {
 
   const refreshTier =
     entry?.refreshTier ?? ("medium_slow" satisfies RefreshTier);
-  const freshnessTone = error
-    ? "danger"
-    : lastLoadedAt &&
-        Date.now() - new Date(lastLoadedAt).getTime() > T4_REFRESH_MS
-      ? "warn"
-      : "success";
+  const isStaleData = Boolean(
+    lastLoadedAt &&
+    Date.now() - new Date(lastLoadedAt).getTime() > T4_REFRESH_MS,
+  );
+  const freshnessTone = error ? "danger" : isStaleData ? "warn" : "success";
 
   const executePendingAction = useCallback(
     async (reason: string) => {
@@ -1623,7 +1716,13 @@ export default function PartnerDetailPage() {
 
   if (loading) {
     return (
-      <div style={{ ...pageStackStyle, minHeight: "100vh", placeContent: "center" }}>
+      <div
+        style={{
+          ...pageStackStyle,
+          minHeight: "100vh",
+          placeContent: "center",
+        }}
+      >
         <WorkflowEmptyState
           title={t("partners.loading")}
           description={
@@ -1652,8 +1751,15 @@ export default function PartnerDetailPage() {
         <div style={pageStackStyle}>
           <PageHeader
             theme={theme}
-            title={locale === "en" ? "Partner entry unavailable" : "Partner entry 無法使用"}
-            subtitle={error ?? (locale === "en" ? "Entry not found." : "找不到此 entry。")}
+            title={
+              locale === "en"
+                ? "Partner entry unavailable"
+                : "Partner entry 無法使用"
+            }
+            subtitle={
+              error ??
+              (locale === "en" ? "Entry not found." : "找不到此 entry。")
+            }
             actions={
               <Link href="/partners" style={{ textDecoration: "none" }}>
                 <Btn theme={theme} variant="secondary">
@@ -1697,68 +1803,72 @@ export default function PartnerDetailPage() {
         <div style={pageStackStyle}>
           <PageHeader
             theme={theme}
-            title={entry.displayName}
-            subtitle={`/${entry.entrySlug} · ${entry.partnerCode} · ${entry.programId}`}
-            tabs={[
-              "Overview",
-              "Branding",
-              "Auth",
-              "Eligibility",
-              "Credentials",
-              "Audit",
-            ]}
-            activeTab="Overview"
+            title={`${entry.bankCode ?? entry.partnerCode} · ${entry.programId}`}
+            subtitle={`/${entry.entrySlug} · ${entry.displayName}`}
             actions={
               <div style={buttonRowStyle}>
                 <Link href="/partners" style={{ textDecoration: "none" }}>
                   <Btn theme={theme} variant="secondary">
-                    {locale === "en" ? "Back to entries" : "返回 partner entries"}
+                    {locale === "en"
+                      ? "Back to entries"
+                      : "返回 partner entries"}
                   </Btn>
                 </Link>
                 <Btn
                   theme={theme}
                   variant="secondary"
-                  onClick={() => void loadEntry({ preserveIssuedCredential: true })}
+                  onClick={() =>
+                    void loadEntry({ preserveIssuedCredential: true })
+                  }
                 >
                   {locale === "en" ? "Refresh" : "重新整理"}
                 </Btn>
                 {previewUrl ? (
-                  <a href={previewUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                  <a
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ textDecoration: "none" }}
+                  >
                     <Btn theme={theme} variant="secondary">
                       {locale === "en" ? "Preview entry" : "預覽 entry"}
                     </Btn>
                   </a>
                 ) : null}
-                {activateAction ? (
+                {issueAction ? (
                   <Btn
                     theme={theme}
                     variant="primary"
-                    disabled={!activateAction.enabled || changingStatus === "activate"}
+                    disabled={
+                      !issueAction.enabled ||
+                      changingStatus === "issue_credential"
+                    }
                     onClick={() =>
                       setPendingAction({
-                        intent: "activate",
-                        descriptor: activateAction,
+                        intent: "issue_credential",
+                        descriptor: issueAction,
                       })
                     }
                   >
-                    {locale === "en" ? "Activate" : "啟用"}
+                    {locale === "en" ? "Issue credential" : "核發 credential"}
                   </Btn>
                 ) : null}
-                {deactivateAction ? (
+                {rotateAction ? (
                   <Btn
                     theme={theme}
                     variant="secondary"
                     disabled={
-                      !deactivateAction.enabled || changingStatus === "deactivate"
+                      !rotateAction.enabled ||
+                      changingStatus === "rotate_credential"
                     }
                     onClick={() =>
                       setPendingAction({
-                        intent: "deactivate",
-                        descriptor: deactivateAction,
+                        intent: "rotate_credential",
+                        descriptor: rotateAction,
                       })
                     }
                   >
-                    {locale === "en" ? "Deactivate" : "停用"}
+                    {locale === "en" ? "Rotate credential" : "輪替 credential"}
                   </Btn>
                 ) : null}
               </div>
@@ -1775,6 +1885,19 @@ export default function PartnerDetailPage() {
                   : "Partner entry 更新失敗"
               }
               body={error}
+            />
+          ) : null}
+
+          {isStaleData ? (
+            <Banner
+              theme={theme}
+              tone="warn"
+              title={locale === "en" ? "Data is stale" : "資料已變舊"}
+              body={
+                locale === "en"
+                  ? `This snapshot is older than the T4 30-second target. Refresh before making activation or credential decisions.`
+                  : "目前畫面超過 T4 的 30 秒更新目標。請先重新整理，再做啟用或 credential 決策。"
+              }
             />
           ) : null}
 
@@ -1799,7 +1922,11 @@ export default function PartnerDetailPage() {
                     ? `${readinessMissingCount} gap(s)`
                     : `${readinessMissingCount} 項缺口`
               }
-              hint={locale === "en" ? "View readiness gaps below" : "請見下方 readiness gaps"}
+              hint={
+                locale === "en"
+                  ? "View readiness gaps below"
+                  : "請見下方 readiness gaps"
+              }
             />
             <KPI
               theme={theme}
@@ -1835,86 +1962,11 @@ export default function PartnerDetailPage() {
             <div style={sectionStackStyle}>
               <Card
                 theme={theme}
-                title={locale === "en" ? "Entry overview" : "Entry 基本資料"}
+                title={locale === "en" ? "Entry basic data" : "Entry 基本資料"}
                 subtitle={
                   locale === "en"
-                    ? "All spec-required entry identity, routing, auth, and readiness fields remain visible on one surface."
-                    : "將 spec 要求的 identity、routing、auth 與 readiness 欄位集中在同一個治理視圖。"
-                }
-              >
-                <DL
-                  theme={theme}
-                  items={overviewItems}
-                  cols={isCompactViewport ? 1 : 2}
-                />
-              </Card>
-
-              <Card
-                theme={theme}
-                title={locale === "en" ? "Routing and branding" : "Routing 與 Branding"}
-                subtitle={
-                  locale === "en"
-                    ? "Display name, route, accent, and support metadata remain platform-governed."
-                    : "display name、route、accent 與 support metadata 皆由平台治理。"
-                }
-              >
-                <div style={fieldGridStyle(isCompactViewport)}>
-                  <TextField
-                    label={t("partners.form.displayName")}
-                    value={editForm.displayName}
-                    onChange={(value) => updateFormField("displayName", value)}
-                    required
-                    disabled={!editAction?.enabled}
-                  />
-                  <TextField
-                    label={t("partners.form.entryHost")}
-                    value={editForm.entryHost}
-                    onChange={(value) => updateFormField("entryHost", value)}
-                    placeholder="partner.example"
-                    mono
-                    disabled={!editAction?.enabled}
-                  />
-                  <TextField
-                    label={t("partners.form.entryPath")}
-                    value={editForm.entryPath}
-                    onChange={(value) => updateFormField("entryPath", value)}
-                    placeholder="/partner/bank-demo-alpha-airport"
-                    mono
-                    disabled={!editAction?.enabled}
-                    hint={previewUrl ? previewUrl : undefined}
-                  />
-                  <TextField
-                    label={t("partners.form.themeAccent")}
-                    value={editForm.themeAccent}
-                    onChange={(value) => updateFormField("themeAccent", value)}
-                    placeholder="#0b7285"
-                    mono
-                    disabled={!editAction?.enabled}
-                  />
-                  <TextField
-                    label={t("partners.form.supportEmail")}
-                    value={editForm.supportEmail}
-                    onChange={(value) => updateFormField("supportEmail", value)}
-                    disabled={!editAction?.enabled}
-                  />
-                  <TextField
-                    label={t("partners.form.supportPhone")}
-                    value={editForm.supportPhone}
-                    onChange={(value) => updateFormField("supportPhone", value)}
-                    disabled={!editAction?.enabled}
-                  />
-                </div>
-              </Card>
-            </div>
-
-            <div style={sectionStackStyle}>
-              <Card
-                theme={theme}
-                title={locale === "en" ? "Promotion posture" : "Promotion posture"}
-                subtitle={
-                  locale === "en"
-                    ? "Readiness, lifecycle, and credential coverage stay co-located before activation."
-                    : "在啟用前將 readiness、lifecycle 與 credential coverage 保持同視角檢查。"
+                    ? "Partner identity, routing, auth, and support fields stay visible on the credential governance surface."
+                    : "將 partner identity、routing、auth 與 support 欄位集中在 credential 治理視圖。"
                 }
                 actions={
                   <div style={shellBadgeRowStyle}>
@@ -1930,10 +1982,46 @@ export default function PartnerDetailPage() {
                   </div>
                 }
               >
+                <DL
+                  theme={theme}
+                  items={overviewItems}
+                  cols={isCompactViewport ? 1 : 2}
+                />
+              </Card>
+            </div>
+
+            <div style={sectionStackStyle}>
+              <Card
+                theme={theme}
+                title={locale === "en" ? "Readiness" : "Readiness"}
+                subtitle={
+                  locale === "en"
+                    ? "Launch posture, lifecycle, and activation actions stay co-located before external traffic is allowed."
+                    : "在允許外部流量前，將 launch posture、lifecycle 與啟用動作維持在同一視角。"
+                }
+                actions={
+                  <div style={shellBadgeRowStyle}>
+                    <Pill theme={theme} tone={freshnessTone}>
+                      {refreshTier}
+                    </Pill>
+                    <span style={mutedTextStyle}>
+                      {lastLoadedAt
+                        ? `${locale === "en" ? "loaded" : "載入於"} ${formatDateTime(lastLoadedAt)}`
+                        : "—"}
+                    </span>
+                  </div>
+                }
+              >
                 <div style={sectionStackStyle}>
                   <Banner
                     theme={theme}
-                    tone={readinessComplete ? "success" : entry.status === "active" ? "danger" : "warn"}
+                    tone={
+                      readinessComplete
+                        ? "success"
+                        : entry.status === "active"
+                          ? "danger"
+                          : "warn"
+                    }
                     title={
                       readinessComplete
                         ? locale === "en"
@@ -1953,6 +2041,60 @@ export default function PartnerDetailPage() {
                           : "在 routing、support 與 credential 缺口補齊前，不應直接啟用外部流量。"
                     }
                   />
+                  <div style={buttonRowStyle}>
+                    {activateAction ? (
+                      <Btn
+                        theme={theme}
+                        variant="primary"
+                        disabled={
+                          !activateAction.enabled ||
+                          changingStatus === "activate"
+                        }
+                        onClick={() =>
+                          setPendingAction({
+                            intent: "activate",
+                            descriptor: activateAction,
+                          })
+                        }
+                      >
+                        {locale === "en" ? "Activate" : "啟用"}
+                      </Btn>
+                    ) : null}
+                    {deactivateAction ? (
+                      <Btn
+                        theme={theme}
+                        variant="secondary"
+                        disabled={
+                          !deactivateAction.enabled ||
+                          changingStatus === "deactivate"
+                        }
+                        onClick={() =>
+                          setPendingAction({
+                            intent: "deactivate",
+                            descriptor: deactivateAction,
+                          })
+                        }
+                      >
+                        {locale === "en" ? "Deactivate" : "停用"}
+                      </Btn>
+                    ) : null}
+                  </div>
+                  {activateAction && !activateAction.enabled ? (
+                    <div style={mutedTextStyle}>
+                      {disabledReasonLabel(
+                        activateAction.disabledReasonCode,
+                        locale,
+                      )}
+                    </div>
+                  ) : null}
+                  {deactivateAction && !deactivateAction.enabled ? (
+                    <div style={mutedTextStyle}>
+                      {disabledReasonLabel(
+                        deactivateAction.disabledReasonCode,
+                        locale,
+                      )}
+                    </div>
+                  ) : null}
                   <DL
                     theme={theme}
                     cols={isCompactViewport ? 1 : 2}
@@ -1963,7 +2105,10 @@ export default function PartnerDetailPage() {
                         mono: true,
                       },
                       {
-                        k: locale === "en" ? "Support contact" : "Support contact",
+                        k:
+                          locale === "en"
+                            ? "Support contact"
+                            : "Support contact",
                         v: supportValue,
                       },
                       {
@@ -1984,7 +2129,10 @@ export default function PartnerDetailPage() {
                         ),
                       },
                       {
-                        k: locale === "en" ? "Available actions" : "Available actions",
+                        k:
+                          locale === "en"
+                            ? "Available actions"
+                            : "Available actions",
                         v: availableActions.length,
                         mono: true,
                       },
@@ -1995,7 +2143,113 @@ export default function PartnerDetailPage() {
 
               <Card
                 theme={theme}
-                title={locale === "en" ? "Cross-app deep links" : "Cross-app deep links"}
+                title={
+                  locale === "en" ? "Active credentials" : "Active credentials"
+                }
+                subtitle={
+                  locale === "en"
+                    ? "Masked-only summary stays visible even after the plaintext-once modal is dismissed."
+                    : "即使 plaintext-once modal 關閉後，仍要維持 masked-only 的 credential 摘要。"
+                }
+              >
+                {activeCredentialCount > 0 ? (
+                  <div style={miniListStyle}>
+                    <div style={miniRowStyle}>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: theme.text,
+                          }}
+                        >
+                          {locale === "en"
+                            ? "Latest active key"
+                            : "最新有效 key"}
+                        </div>
+                        <div style={mutedTextStyle}>
+                          {locale === "en"
+                            ? "Most recent active ingress credential"
+                            : "最近一次仍有效的 ingress credential"}
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          fontFamily: theme.monoFamily,
+                          fontSize: 11.5,
+                          color: theme.text,
+                        }}
+                      >
+                        {latestActiveCredential
+                          ? `${latestActiveCredential.keyPrefix}${latestActiveCredential.maskedSuffix}`
+                          : "—"}
+                      </span>
+                    </div>
+                    <div style={miniRowStyle}>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: theme.text,
+                          }}
+                        >
+                          {locale === "en" ? "Last rotation" : "最近輪替"}
+                        </div>
+                        <div style={mutedTextStyle}>
+                          {locale === "en"
+                            ? "Derived from latest credential issue timestamp"
+                            : "以最新 credential 核發時間代表最近輪替"}
+                        </div>
+                      </div>
+                      <span style={mutedTextStyle}>
+                        {latestCredential
+                          ? formatDateTime(latestCredential.createdAt)
+                          : "—"}
+                      </span>
+                    </div>
+                    <div style={{ ...miniRowStyle, borderBottom: "none" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: theme.text,
+                          }}
+                        >
+                          {locale === "en" ? "Last used" : "最後使用"}
+                        </div>
+                        <div style={mutedTextStyle}>
+                          {locale === "en"
+                            ? "Latest observed ingress usage telemetry"
+                            : "最近一次 ingress 使用遙測"}
+                        </div>
+                      </div>
+                      <span style={mutedTextStyle}>
+                        {latestActiveCredential?.lastUsedAt
+                          ? formatDateTime(latestActiveCredential.lastUsedAt)
+                          : "—"}
+                      </span>
+                    </div>
+                  </div>
+                ) : credentialEmptyReason ? (
+                  <WorkflowEmptyState
+                    title={emptyStateCopy(credentialEmptyReason, locale).title}
+                    description={
+                      emptyStateCopy(credentialEmptyReason, locale).body
+                    }
+                    tone={emptyStateTone(credentialEmptyReason)}
+                  />
+                ) : null}
+              </Card>
+
+              <Card
+                theme={theme}
+                title={
+                  locale === "en"
+                    ? "Cross-app deep links"
+                    : "Cross-app deep links"
+                }
                 subtitle={
                   locale === "en"
                     ? "Use new-tab operational links and companion admin routes before acting on production traffic."
@@ -2016,7 +2270,13 @@ export default function PartnerDetailPage() {
                       }}
                     >
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: theme.text }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: theme.text,
+                          }}
+                        >
                           {link.label}
                         </div>
                         <div style={mutedTextStyle}>{link.helper}</div>
@@ -2067,9 +2327,7 @@ export default function PartnerDetailPage() {
                           : "info"
                       }
                       title={
-                        locale === "en"
-                          ? "Credential posture"
-                          : "憑證姿態"
+                        locale === "en" ? "Credential posture" : "憑證姿態"
                       }
                       body={
                         entry.authMode === "partner_api_key"
@@ -2096,28 +2354,36 @@ export default function PartnerDetailPage() {
                       <TextField
                         label={t("partners.form.partnerType")}
                         value={editForm.partnerType}
-                        onChange={(value) => updateFormField("partnerType", value)}
+                        onChange={(value) =>
+                          updateFormField("partnerType", value)
+                        }
                         mono
                         disabled={!editAction?.enabled}
                       />
                       <TextField
                         label={t("partners.form.partnerCode")}
                         value={editForm.partnerCode}
-                        onChange={(value) => updateFormField("partnerCode", value)}
+                        onChange={(value) =>
+                          updateFormField("partnerCode", value)
+                        }
                         mono
                         disabled={!editAction?.enabled}
                       />
                       <TextField
                         label={t("partners.form.programId")}
                         value={editForm.programId}
-                        onChange={(value) => updateFormField("programId", value)}
+                        onChange={(value) =>
+                          updateFormField("programId", value)
+                        }
                         mono
                         disabled={!editAction?.enabled}
                       />
                       <TextField
                         label={t("partners.form.programCode")}
                         value={editForm.programCode}
-                        onChange={(value) => updateFormField("programCode", value)}
+                        onChange={(value) =>
+                          updateFormField("programCode", value)
+                        }
                         mono
                         disabled={!editAction?.enabled}
                       />
@@ -2131,7 +2397,9 @@ export default function PartnerDetailPage() {
                       <TextField
                         label={t("partners.form.entrySlug")}
                         value={editForm.entrySlug}
-                        onChange={(value) => updateFormField("entrySlug", value)}
+                        onChange={(value) =>
+                          updateFormField("entrySlug", value)
+                        }
                         mono
                         disabled
                       />
@@ -2145,7 +2413,9 @@ export default function PartnerDetailPage() {
                             value as BusinessDispatchSubtype,
                           )
                         }
-                        formatOption={(value) => formatPlatformCodeLabel(locale, value)}
+                        formatOption={(value) =>
+                          formatPlatformCodeLabel(locale, value)
+                        }
                         disabled={!editAction?.enabled}
                       />
                       <SelectField
@@ -2153,9 +2423,14 @@ export default function PartnerDetailPage() {
                         value={editForm.authMode}
                         options={PARTNER_ENTRY_AUTH_MODES}
                         onChange={(value) =>
-                          updateFormField("authMode", value as PartnerEntryAuthMode)
+                          updateFormField(
+                            "authMode",
+                            value as PartnerEntryAuthMode,
+                          )
                         }
-                        formatOption={(value) => formatPlatformCodeLabel(locale, value)}
+                        formatOption={(value) =>
+                          formatPlatformCodeLabel(locale, value)
+                        }
                         disabled={!editAction?.enabled}
                       />
                     </div>
@@ -2166,7 +2441,11 @@ export default function PartnerDetailPage() {
               <div id="eligibility" style={sectionAnchorStyle}>
                 <Card
                   theme={theme}
-                  title={locale === "en" ? "Eligibility contract" : "Eligibility contract"}
+                  title={
+                    locale === "en"
+                      ? "Eligibility contract"
+                      : "Eligibility contract"
+                  }
                   subtitle={
                     locale === "en"
                       ? "Contract snapshot, fallback policy, and adapter posture define the platform-owned eligibility gate."
@@ -2208,7 +2487,9 @@ export default function PartnerDetailPage() {
                           value as PartnerEligibilityMode,
                         )
                       }
-                      formatOption={(value) => formatPlatformCodeLabel(locale, value)}
+                      formatOption={(value) =>
+                        formatPlatformCodeLabel(locale, value)
+                      }
                       disabled={!editAction?.enabled}
                     />
                     <DL
@@ -2230,7 +2511,10 @@ export default function PartnerDetailPage() {
                   {editAction
                     ? editAction.enabled
                       ? actionHelpText(editAction, locale)
-                      : disabledReasonLabel(editAction.disabledReasonCode, locale)
+                      : disabledReasonLabel(
+                          editAction.disabledReasonCode,
+                          locale,
+                        )
                     : locale === "en"
                       ? "No edit action is currently available for this resource."
                       : "目前此 resource 沒有可用的 edit action。"}
@@ -2242,7 +2526,9 @@ export default function PartnerDetailPage() {
                   theme={theme}
                   variant="primary"
                   disabled={
-                    saving || !editAction?.enabled || !editForm.displayName.trim()
+                    saving ||
+                    !editAction?.enabled ||
+                    !editForm.displayName.trim()
                   }
                   onClick={() => void saveEntry()}
                 >
@@ -2285,7 +2571,9 @@ export default function PartnerDetailPage() {
                             })
                           }
                         >
-                          {locale === "en" ? "Issue credential" : "核發 credential"}
+                          {locale === "en"
+                            ? "Issue credential"
+                            : "核發 credential"}
                         </Btn>
                       ) : null}
                       {rotateAction ? (
@@ -2303,39 +2591,58 @@ export default function PartnerDetailPage() {
                             })
                           }
                         >
-                          {locale === "en" ? "Rotate credential" : "輪替 credential"}
+                          {locale === "en"
+                            ? "Rotate credential"
+                            : "輪替 credential"}
                         </Btn>
                       ) : null}
                     </div>
                   }
                 >
                   <div style={sectionStackStyle}>
+                    <div style={mutedTextStyle}>
+                      {issueAction && !issueAction.enabled
+                        ? disabledReasonLabel(
+                            issueAction.disabledReasonCode,
+                            locale,
+                          )
+                        : rotateAction && !rotateAction.enabled
+                          ? disabledReasonLabel(
+                              rotateAction.disabledReasonCode,
+                              locale,
+                            )
+                          : locale === "en"
+                            ? "Issue, rotate, and revoke controls are driven by availableActions and remain audit-logged."
+                            : "核發、輪替與撤銷控制皆由 availableActions 驅動，且會寫入 audit。"}
+                    </div>
                     <div style={filterRowStyle}>
-                      {(["active", "revoked", "all"] as const).map((filterValue) => (
-                        <Btn
-                          key={filterValue}
-                          theme={theme}
-                          variant={
-                            credentialFilter === filterValue
-                              ? "primary"
-                              : "secondary"
-                          }
-                          size="xs"
-                          onClick={() => setCredentialFilter(filterValue)}
-                        >
-                          {filterValue === "active"
-                            ? locale === "en"
-                              ? "Active"
-                              : "有效"
-                            : filterValue === "revoked"
+                      {(["active", "revoked", "all"] as const).map(
+                        (filterValue) => (
+                          <Btn
+                            key={filterValue}
+                            theme={theme}
+                            variant={
+                              credentialFilter === filterValue
+                                ? "primary"
+                                : "secondary"
+                            }
+                            size="xs"
+                            onClick={() => setCredentialFilter(filterValue)}
+                          >
+                            {filterValue === "active"
                               ? locale === "en"
-                                ? "Revoked"
-                                : "已撤銷"
-                              : locale === "en"
-                                ? "All"
-                                : "全部"}
-                        </Btn>
-                      ))}
+                                ? "Active"
+                                : "有效"
+                              : filterValue === "revoked"
+                                ? locale === "en"
+                                  ? "Revoked"
+                                  : "已撤銷"
+                                : locale === "en"
+                                  ? "All"
+                                  : "全部"}
+                          </Btn>
+                        ),
+                      )}
                       <span style={mutedTextStyle}>
                         {locale === "en"
                           ? `${credentialRows.length} visible / ${credentials.length} total`
@@ -2351,8 +2658,12 @@ export default function PartnerDetailPage() {
                       />
                     ) : credentialEmptyReason ? (
                       <WorkflowEmptyState
-                        title={emptyStateCopy(credentialEmptyReason, locale).title}
-                        description={emptyStateCopy(credentialEmptyReason, locale).body}
+                        title={
+                          emptyStateCopy(credentialEmptyReason, locale).title
+                        }
+                        description={
+                          emptyStateCopy(credentialEmptyReason, locale).body
+                        }
                         tone={emptyStateTone(credentialEmptyReason)}
                         actions={
                           issueAction?.enabled ? (
@@ -2409,7 +2720,10 @@ export default function PartnerDetailPage() {
                           </strong>
                           <span style={mutedTextStyle}>{item.value}</span>
                         </div>
-                        <Pill theme={theme} tone={item.ready ? "success" : "warn"}>
+                        <Pill
+                          theme={theme}
+                          tone={item.ready ? "success" : "warn"}
+                        >
                           {item.ready
                             ? locale === "en"
                               ? "Ready"
@@ -2444,7 +2758,9 @@ export default function PartnerDetailPage() {
                       <Banner
                         theme={theme}
                         tone="danger"
-                        title={locale === "en" ? "Entry revoked" : "Entry 已撤銷"}
+                        title={
+                          locale === "en" ? "Entry revoked" : "Entry 已撤銷"
+                        }
                         body={
                           entry.revokeReason ??
                           (locale === "en"
