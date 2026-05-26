@@ -13,6 +13,7 @@ import type {
   ApproveExceptionOverrideCommand,
   AnnounceCallAgentIdentityCommand,
   ApproveReimbursementBatchCommand,
+  ActionableResourceRuntimeFields,
   AuditLogRecord,
   AssignReconciliationIssueCommand,
   AssignComplaintCaseCommand,
@@ -77,6 +78,7 @@ import type {
   DriverStatementRecord,
   DriverTaskRecord,
   UnifiedDriverTaskView,
+  UiListResourceEnvelope,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
   EvidenceGovernanceCatalog,
@@ -117,6 +119,7 @@ import type {
   PlacardVersionRecord,
   PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
+  RefreshTier,
   PlatformEarningsByPlatformResponse,
   PlatformEarningsSummary,
   PlatformMaintenanceModeRecord,
@@ -252,6 +255,13 @@ export interface RequestOptions {
 
 interface ListEnvelope<T> {
   items: T[];
+}
+
+export type PlatformPartnerEntryListItem = PartnerChannelEntryRecord &
+  ActionableResourceRuntimeFields;
+
+export interface PlatformPartnerEntryListResponse extends UiListResourceEnvelope<PlatformPartnerEntryListItem> {
+  refreshTier: RefreshTier;
 }
 
 function snakeToCamelCase(key: string): string {
@@ -1951,8 +1961,8 @@ export class ApiClient {
     );
   }
 
-  async listPlatformPartnerEntries(): Promise<PartnerChannelEntryRecord[]> {
-    return this.getList<PartnerChannelEntryRecord>(
+  async listPlatformPartnerEntries(): Promise<PlatformPartnerEntryListResponse> {
+    return this.get<PlatformPartnerEntryListResponse>(
       "/api/platform-admin/partner-entries",
     );
   }

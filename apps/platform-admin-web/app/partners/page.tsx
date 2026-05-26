@@ -21,10 +21,11 @@ import {
   type EntryFormState,
 } from "@/components/partner-governance-shared";
 import type {
-  CrossAppResourceLink,
+  ActionableResourceRuntimeFields,
   EmptyReason,
   EmptyStateEnvelope,
   PartnerChannelEntryRecord,
+  RefreshTier,
   ResourceActionDescriptor,
 } from "@drts/contracts";
 import {
@@ -41,18 +42,8 @@ import {
 } from "@drts/ui-web";
 
 type PartnerFilter = "all" | "active" | "inactive" | "revoked" | "attention";
-type PartnerRow = PartnerChannelEntryRecord & {
-  availableActions?: ResourceActionDescriptor[];
-  resourceLinks?: CrossAppResourceLink[];
-};
+type PartnerRow = PartnerChannelEntryRecord & ActionableResourceRuntimeFields;
 type PartnerTableRow = PartnerRow & Record<string, unknown>;
-type PartnerListResponse = {
-  items?: PartnerRow[];
-  availableActions?: ResourceActionDescriptor[];
-  emptyState?: EmptyStateEnvelope;
-  refreshTier?: string;
-  refreshedAt?: string;
-};
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -363,28 +354,6 @@ function emptyTone(reason: EmptyReason): "danger" | "warn" | "neutral" {
   }
 }
 
-function normalizeListResponse(
-  result: PartnerRow[] | PartnerListResponse | null | undefined,
-): PartnerListResponse {
-  if (Array.isArray(result)) {
-    return { items: result };
-  }
-  const normalized: PartnerListResponse = {
-    items: result?.items ?? [],
-    availableActions: result?.availableActions ?? [],
-  };
-  if (result?.emptyState) {
-    normalized.emptyState = result.emptyState;
-  }
-  if (result?.refreshTier) {
-    normalized.refreshTier = result.refreshTier;
-  }
-  if (result?.refreshedAt) {
-    normalized.refreshedAt = result.refreshedAt;
-  }
-  return normalized;
-}
-
 function partnerNeedsAttention(entry: PartnerChannelEntryRecord) {
   return (
     entry.status !== "active" ||
@@ -407,14 +376,26 @@ function readinessSummary(
   };
 }
 
-function refreshIntervalMs(refreshTier: string | null) {
+function refreshIntervalMs(refreshTier: RefreshTier | null) {
   switch (refreshTier) {
-    case "T4":
+    case "medium_slow":
+    case "slow":
       return 30_000;
-    case "T6":
+    case "manual":
       return null;
     default:
       return null;
+  }
+}
+
+function formatRefreshTierLabel(refreshTier: RefreshTier) {
+  switch (refreshTier) {
+    case "medium_slow":
+      return "T4 / medium_slow";
+    case "manual":
+      return "T6 / manual";
+    default:
+      return refreshTier;
   }
 }
 
@@ -426,12 +407,13 @@ export default function PartnersPage() {
     [],
   );
   const [emptyState, setEmptyState] = useState<EmptyStateEnvelope | null>(null);
-  const [refreshTier, setRefreshTier] = useState("T4");
+  const [refreshTier, setRefreshTier] = useState<RefreshTier>("medium_slow");
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [pendingRowAction, setPendingRowAction] = useState<string | null>(null);
   const [filter, setFilter] = useState<PartnerFilter>("all");
   const [search, setSearch] = useState("");
   const [tenantFilter, setTenantFilter] = useState("all");
@@ -591,15 +573,12 @@ export default function PartnersPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await client.get<PartnerRow[] | PartnerListResponse>(
-        "/api/platform-admin/partner-entries",
-      );
-      const normalized = normalizeListResponse(result);
-      setEntries(normalized.items ?? []);
-      setListActions(normalized.availableActions ?? []);
-      setEmptyState(normalized.emptyState ?? null);
-      setRefreshTier(normalized.refreshTier ?? "T4");
-      setRefreshedAt(normalized.refreshedAt ?? new Date().toISOString());
+      const result = await client.listPlatformPartnerEntries();
+      setEntries(result.items ?? []);
+      setListActions(result.availableActions ?? []);
+      setEmptyState(result.emptyState ?? null);
+      setRefreshTier(result.refreshTier ?? "medium_slow");
+      setRefreshedAt(result.refreshedAt ?? new Date().toISOString());
     } catch (cause: unknown) {
       setEntries([]);
       setListActions([]);
@@ -612,6 +591,35 @@ export default function PartnersPage() {
       setLoading(false);
     }
   }, [client]);
+
+  const handleRowAction = useCallback(
+    async (entrySlug: string, action: ResourceActionDescriptor) => {
+      if (!action.enabled) {
+        return;
+      }
+
+      const normalizedAction = action.action.toLowerCase();
+      setPendingRowAction(`${entrySlug}:${action.action}`);
+      setError(null);
+
+      try {
+        if (normalizedAction.includes("deactivate")) {
+          await client.deactivatePlatformPartnerEntry(entrySlug);
+        } else if (normalizedAction.includes("activate")) {
+          await client.activatePlatformPartnerEntry(entrySlug);
+        } else {
+          return;
+        }
+
+        await loadEntries();
+      } catch (cause: unknown) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setPendingRowAction(null);
+      }
+    },
+    [client, loadEntries],
+  );
 
   useEffect(() => {
     void loadEntries();
@@ -840,7 +848,7 @@ export default function PartnersPage() {
           <div style={summaryCardStyle}>
             <div style={toolbarClusterStyle}>
               <CanvasPill theme={theme} tone="neutral">
-                {copy.refreshTierLabel}: {refreshTier}
+                {copy.refreshTierLabel}: {formatRefreshTierLabel(refreshTier)}
               </CanvasPill>
               <CanvasPill theme={theme} tone="neutral">
                 {copy.refreshedAtLabel}:{" "}
@@ -1318,14 +1326,31 @@ export default function PartnersPage() {
                                   <button
                                     key={action.action}
                                     type="button"
-                                    disabled={!action.enabled}
+                                    disabled={
+                                      !action.enabled ||
+                                      pendingRowAction ===
+                                        `${entry.entrySlug}:${action.action}`
+                                    }
                                     title={
                                       action.disabledReasonCode ||
                                       `${action.riskLevel}${action.requiresReason ? " · reason" : ""}`
                                     }
-                                    style={chipButtonStyle(!action.enabled)}
+                                    style={chipButtonStyle(
+                                      !action.enabled ||
+                                        pendingRowAction ===
+                                          `${entry.entrySlug}:${action.action}`,
+                                    )}
+                                    onClick={() =>
+                                      void handleRowAction(
+                                        entry.entrySlug,
+                                        action,
+                                      )
+                                    }
                                   >
-                                    {action.action}
+                                    {pendingRowAction ===
+                                    `${entry.entrySlug}:${action.action}`
+                                      ? t("common.saving")
+                                      : action.action}
                                   </button>
                                 ))
                             ) : (
@@ -1344,7 +1369,7 @@ export default function PartnersPage() {
                             >
                               {copy.openDetail}
                             </Link>
-                            {links.map((link: CrossAppResourceLink) => (
+                            {links.map((link) => (
                               <a
                                 key={`${link.targetApp}:${link.resourceType}:${link.resourceId}`}
                                 href={link.route}
