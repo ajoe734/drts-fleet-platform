@@ -21,7 +21,6 @@ import type {
   CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
-  RefreshTier,
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "@drts/contracts/ui-runtime";
@@ -29,7 +28,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
   CanvasField,
   CanvasPageHeader,
   CanvasPill,
@@ -40,8 +38,6 @@ import {
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
-
-type UserFilter = "all" | PlatformAdminUserStatus;
 
 type UsersApiPayload = {
   items?: PlatformAdminUserRecord[];
@@ -72,7 +68,6 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const REFRESH_TIER: RefreshTier = "medium_slow";
 const REFRESH_TIER_LABEL = "T4";
 const REFRESH_STALE_AFTER_MS = 30_000;
 const EMPTY_REASON_OPTIONS: EmptyReason[] = [
@@ -107,14 +102,6 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const toolbarStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  justifyContent: "space-between",
-  gap: 12,
-  alignItems: "center",
-} satisfies CSSProperties;
-
 const pillRowStyle = {
   display: "flex",
   flexWrap: "wrap",
@@ -127,6 +114,19 @@ const actionRowStyle = {
   gap: 6,
   flexWrap: "wrap",
   justifyContent: "flex-end",
+} satisfies CSSProperties;
+
+const cardHeaderMetaStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const cardMetaStyle = {
+  display: "grid",
+  gap: 4,
 } satisfies CSSProperties;
 
 const inlineMetaStyle = {
@@ -236,7 +236,12 @@ function buildPlatformNav(locale: Locale): CanvasShellNavItem[] {
       badgeTone: "warn",
     },
     { divider: labels.tenantGov },
-    { key: "tenants", href: "/tenants", icon: "tenants", label: labels.tenants },
+    {
+      key: "tenants",
+      href: "/tenants",
+      icon: "tenants",
+      label: labels.tenants,
+    },
     {
       key: "partners",
       href: "/partners",
@@ -253,7 +258,12 @@ function buildPlatformNav(locale: Locale): CanvasShellNavItem[] {
       label: labels.switchboard,
     },
     { divider: labels.pricingGov },
-    { key: "pricing", href: "/pricing", icon: "pricing", label: labels.pricing },
+    {
+      key: "pricing",
+      href: "/pricing",
+      icon: "pricing",
+      label: labels.pricing,
+    },
     {
       key: "payments",
       href: "/payments",
@@ -263,7 +273,12 @@ function buildPlatformNav(locale: Locale): CanvasShellNavItem[] {
       badgeTone: "danger",
     },
     { divider: labels.platformLayer },
-    { key: "notices", href: "/notices", icon: "notices", label: labels.notices },
+    {
+      key: "notices",
+      href: "/notices",
+      icon: "notices",
+      label: labels.notices,
+    },
     { key: "audit", href: "/audit", icon: "audit", label: labels.audit },
     {
       key: "flags",
@@ -345,29 +360,6 @@ function buildAuditLink(user: PlatformAdminUserRecord): CrossAppResourceLink {
   };
 }
 
-function defaultRowActions(
-  user: PlatformAdminUserRecord,
-): ResourceActionDescriptor[] {
-  return [
-    {
-      action: "update_role",
-      enabled: true,
-      riskLevel: "medium",
-    },
-    {
-      action: user.status === "suspended" ? "reactivate" : "suspend",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "view_audit",
-      enabled: true,
-      riskLevel: "low",
-    },
-  ];
-}
-
 function defaultPageActions(): ResourceActionDescriptor[] {
   return [
     { action: "refresh", enabled: true, riskLevel: "low" },
@@ -379,75 +371,88 @@ function emptyReasonCopy(
   reason: EmptyReason,
   locale: Locale,
 ): { title: string; body: string; tone: CanvasTone } {
-  const zh: Record<EmptyReason, { title: string; body: string; tone: CanvasTone }> =
-    {
-      no_data: {
-        title: "目前沒有平台人員資料",
-        body: "尚未建立任何平台使用者主檔。若權限允許，可直接邀請第一位內部治理人員。",
-        tone: "neutral",
-      },
-      not_provisioned: {
-        title: "人員治理尚未啟用",
-        body: "此環境尚未 provision 平台使用者目錄，需先完成 bootstrap 或基礎設定。",
-        tone: "info",
-      },
-      fetch_failed: {
-        title: "載入失敗",
-        body: "控制平面未回傳可信快照。請稍後重整並確認 API 與 admin runtime 健康狀態。",
-        tone: "danger",
-      },
-      permission_denied: {
-        title: "沒有檢視權限",
-        body: "目前身分未被授權讀取平台內部使用者清單。若需要存取，請由 pa_super_admin 調整。",
-        tone: "warn",
-      },
-      external_unavailable: {
-        title: "外部依賴暫時不可用",
-        body: "上游 identity 或 directory 依賴目前不可用，因此此頁無法建立可信快照。",
-        tone: "warn",
-      },
-      filtered_empty: {
-        title: "目前篩選條件沒有結果",
-        body: "請放寬搜尋字詞或切換狀態篩選；原始資料可能仍然存在。",
-        tone: "neutral",
-      },
-    };
+  const zh: Record<
+    EmptyReason,
+    { title: string; body: string; tone: CanvasTone }
+  > = {
+    no_data: {
+      title: "目前沒有平台人員資料",
+      body: "尚未建立任何平台使用者主檔。若權限允許，可直接邀請第一位內部治理人員。",
+      tone: "neutral",
+    },
+    not_provisioned: {
+      title: "人員治理尚未啟用",
+      body: "此環境尚未 provision 平台使用者目錄，需先完成 bootstrap 或基礎設定。",
+      tone: "info",
+    },
+    fetch_failed: {
+      title: "載入失敗",
+      body: "控制平面未回傳可信快照。請稍後重整並確認 API 與 admin runtime 健康狀態。",
+      tone: "danger",
+    },
+    permission_denied: {
+      title: "沒有檢視權限",
+      body: "目前身分未被授權讀取平台內部使用者清單。若需要存取，請由 pa_super_admin 調整。",
+      tone: "warn",
+    },
+    external_unavailable: {
+      title: "外部依賴暫時不可用",
+      body: "上游 identity 或 directory 依賴目前不可用，因此此頁無法建立可信快照。",
+      tone: "warn",
+    },
+    filtered_empty: {
+      title: "目前篩選條件沒有結果",
+      body: "目前檢視範圍內沒有符合的人員資料；原始 roster 仍可能存在。",
+      tone: "neutral",
+    },
+  };
 
-  const en: Record<EmptyReason, { title: string; body: string; tone: CanvasTone }> =
-    {
-      no_data: {
-        title: "No platform users yet",
-        body: "No internal staff records exist in this environment. Invite the first governed user if your scope allows it.",
-        tone: "neutral",
-      },
-      not_provisioned: {
-        title: "User governance is not provisioned",
-        body: "This environment has not provisioned the staff directory yet. Complete bootstrap before managing platform identities.",
-        tone: "info",
-      },
-      fetch_failed: {
-        title: "Unable to load the roster",
-        body: "The control plane did not return a trusted snapshot. Refresh after the admin runtime recovers.",
-        tone: "danger",
-      },
-      permission_denied: {
-        title: "Access denied",
-        body: "The current identity cannot read the internal platform user roster. Request pa_super_admin scope if needed.",
-        tone: "warn",
-      },
-      external_unavailable: {
-        title: "External dependency unavailable",
-        body: "An upstream identity or directory dependency is unavailable, so this screen cannot present a trusted roster.",
-        tone: "warn",
-      },
-      filtered_empty: {
-        title: "No results for this filter",
-        body: "Broaden the search or switch the status filter. The underlying roster may still contain records.",
-        tone: "neutral",
-      },
-    };
+  const en: Record<
+    EmptyReason,
+    { title: string; body: string; tone: CanvasTone }
+  > = {
+    no_data: {
+      title: "No platform users yet",
+      body: "No internal staff records exist in this environment. Invite the first governed user if your scope allows it.",
+      tone: "neutral",
+    },
+    not_provisioned: {
+      title: "User governance is not provisioned",
+      body: "This environment has not provisioned the staff directory yet. Complete bootstrap before managing platform identities.",
+      tone: "info",
+    },
+    fetch_failed: {
+      title: "Unable to load the roster",
+      body: "The control plane did not return a trusted snapshot. Refresh after the admin runtime recovers.",
+      tone: "danger",
+    },
+    permission_denied: {
+      title: "Access denied",
+      body: "The current identity cannot read the internal platform user roster. Request pa_super_admin scope if needed.",
+      tone: "warn",
+    },
+    external_unavailable: {
+      title: "External dependency unavailable",
+      body: "An upstream identity or directory dependency is unavailable, so this screen cannot present a trusted roster.",
+      tone: "warn",
+    },
+    filtered_empty: {
+      title: "No results for this filter",
+      body: "The current scoped view has no matching users, although the underlying roster may still contain records.",
+      tone: "neutral",
+    },
+  };
 
-  return locale === "en" ? en[reason] : zh[reason];
+  return (
+    (locale === "en" ? en[reason] : zh[reason]) ?? {
+      title: locale === "en" ? "No data available" : "目前沒有資料",
+      body:
+        locale === "en"
+          ? "The control plane returned an unsupported empty state."
+          : "控制平面回傳了未支援的空狀態代碼。",
+      tone: "neutral",
+    }
+  );
 }
 
 function statusTone(status: PlatformAdminUserStatus): CanvasTone {
@@ -518,7 +523,7 @@ function UsersActionButton({
       variant={tone.variant}
       danger={tone.danger}
       disabled={!descriptor.enabled}
-      onClick={onClick}
+      {...(onClick ? { onClick } : {})}
       style={!descriptor.enabled ? { opacity: 0.48 } : undefined}
     >
       {actionLabel(locale, descriptor.action)}
@@ -562,7 +567,7 @@ function EmptyStatePanel({
             <UsersActionButton
               locale={locale}
               descriptor={nextAction}
-              onClick={onNextAction}
+              {...(onNextAction ? { onClick: onNextAction } : {})}
             />
           </div>
         ) : null}
@@ -603,13 +608,15 @@ function ActionModal({
   onConfirm: () => void;
 }) {
   const descriptor = pendingAction.descriptor;
-  const isHighRisk = descriptor.riskLevel === "high";
+  const requiresReason =
+    descriptor.requiresReason ?? descriptor.riskLevel === "high";
   const disabled =
     pendingAction.kind === "create"
       ? creating || !formEmail.trim() || !formDisplayName.trim()
       : pendingAction.kind === "update_role"
         ? mutatingUserId === pendingAction.user.userId
-        : mutatingUserId === pendingAction.user.userId || !reason.trim();
+        : mutatingUserId === pendingAction.user.userId ||
+          (requiresReason && !reason.trim());
 
   const title =
     pendingAction.kind === "create"
@@ -657,7 +664,10 @@ function ActionModal({
           <div style={cardBodyStackStyle}>
             {pendingAction.kind === "create" ? (
               <>
-                <CanvasField theme={theme} label={locale === "en" ? "Email" : "電子郵件"}>
+                <CanvasField
+                  theme={theme}
+                  label={locale === "en" ? "Email" : "電子郵件"}
+                >
                   <input
                     type="email"
                     value={formEmail}
@@ -673,7 +683,9 @@ function ActionModal({
                   <input
                     type="text"
                     value={formDisplayName}
-                    onChange={(event) => onDisplayNameChange(event.target.value)}
+                    onChange={(event) =>
+                      onDisplayNameChange(event.target.value)
+                    }
                     placeholder={locale === "en" ? "Yi-Chun Lin" : "林宜君"}
                     style={inputStyle}
                   />
@@ -721,7 +733,10 @@ function ActionModal({
                     },
                     {
                       k: locale === "en" ? "Current status" : "目前狀態",
-                      v: formatPlatformCodeLabel(locale, pendingAction.user.status),
+                      v: formatPlatformCodeLabel(
+                        locale,
+                        pendingAction.user.status,
+                      ),
                     },
                   ]}
                 />
@@ -733,7 +748,9 @@ function ActionModal({
                     <select
                       value={formRoleCode}
                       onChange={(event) =>
-                        onRoleChange(event.target.value as PlatformAdminUserRole)
+                        onRoleChange(
+                          event.target.value as PlatformAdminUserRole,
+                        )
                       }
                       style={{ ...inputStyle, paddingRight: 28 }}
                     >
@@ -745,7 +762,7 @@ function ActionModal({
                     </select>
                   </CanvasField>
                 ) : null}
-                {isHighRisk ? (
+                {requiresReason ? (
                   <CanvasField
                     theme={theme}
                     label={locale === "en" ? "Reason" : "原因"}
@@ -783,7 +800,9 @@ function ActionModal({
                 ) : null}
               </>
             )}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <div
+              style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
+            >
               <CanvasBtn theme={theme} variant="secondary" onClick={onClose}>
                 {locale === "en" ? "Cancel" : "取消"}
               </CanvasBtn>
@@ -815,9 +834,8 @@ export default function UsersPage() {
 
   const nav = useMemo(() => buildPlatformNav(locale), [locale]);
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [pageActions, setPageActions] = useState<ResourceActionDescriptor[]>(
-    defaultPageActions(),
-  );
+  const [pageActions, setPageActions] =
+    useState<ResourceActionDescriptor[]>(defaultPageActions());
   const [refreshMeta, setRefreshMeta] = useState<UiRefreshMetadata>(
     buildFallbackRefresh(),
   );
@@ -825,9 +843,9 @@ export default function UsersPage() {
     useState<EmptyStateEnvelope | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<UserFilter>("all");
-  const [search, setSearch] = useState("");
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
+    null,
+  );
   const [formEmail, setFormEmail] = useState("");
   const [formDisplayName, setFormDisplayName] = useState("");
   const [formRoleCode, setFormRoleCode] =
@@ -848,7 +866,9 @@ export default function UsersPage() {
     setError(null);
 
     try {
-      const payload = await client.get<UsersApiPayload>("/api/platform-admin/users");
+      const payload = await client.get<UsersApiPayload>(
+        "/api/platform-admin/users",
+      );
       const items = payload.items ?? [];
       setUsers(
         items.map((user) => {
@@ -857,24 +877,20 @@ export default function UsersPage() {
           };
           return {
             ...user,
-            availableActions:
-              record.availableActions && record.availableActions.length > 0
-                ? record.availableActions
-                : defaultRowActions(user),
+            availableActions: record.availableActions ?? [],
             auditLink: buildAuditLink(user),
+            _selected: user.status === "suspended",
           };
         }),
       );
-      setPageActions(
-        payload.availableActions && payload.availableActions.length > 0
-          ? payload.availableActions
-          : defaultPageActions(),
-      );
+      setPageActions(payload.availableActions ?? []);
       setServerEmptyState(payload.emptyState ?? null);
       setRefreshMeta(buildFallbackRefresh(payload.refresh));
     } catch (caughtError) {
       const message =
-        caughtError instanceof Error ? caughtError.message : String(caughtError);
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError);
       setError(message);
       setUsers([]);
       setServerEmptyState({
@@ -903,32 +919,6 @@ export default function UsersPage() {
     return () => window.clearInterval(timer);
   }, [loadUsers]);
 
-  const visibleUsers = useMemo(() => {
-    const loweredSearch = search.trim().toLowerCase();
-
-    return users.filter((user) => {
-      if (filter !== "all" && user.status !== filter) {
-        return false;
-      }
-      if (!loweredSearch) {
-        return true;
-      }
-      return [user.displayName, user.email, user.userId, user.roleCode].some(
-        (value) => value.toLowerCase().includes(loweredSearch),
-      );
-    });
-  }, [filter, search, users]);
-
-  const counts = useMemo(
-    () => ({
-      all: users.length,
-      active: users.filter((user) => user.status === "active").length,
-      invited: users.filter((user) => user.status === "invited").length,
-      suspended: users.filter((user) => user.status === "suspended").length,
-    }),
-    [users],
-  );
-
   const effectiveEmptyState = useMemo(() => {
     if (emptyReasonOverride) {
       return {
@@ -936,32 +926,27 @@ export default function UsersPage() {
         messageCode: `forced_${emptyReasonOverride}`,
       } satisfies EmptyStateEnvelope;
     }
-    if (visibleUsers.length > 0) {
+    if (users.length > 0) {
       return null;
     }
     if (serverEmptyState) {
       return serverEmptyState;
     }
-    if (filter !== "all" || search.trim()) {
-      return {
-        reason: "filtered_empty",
-        messageCode: "platform_users_filtered_empty",
-      } satisfies EmptyStateEnvelope;
-    }
     return {
       reason: "no_data",
       messageCode: "platform_users_no_data",
     } satisfies EmptyStateEnvelope;
-  }, [emptyReasonOverride, filter, search, serverEmptyState, visibleUsers]);
+  }, [emptyReasonOverride, serverEmptyState, users]);
 
   const primaryCreateAction =
-    pageActions.find((action) =>
+    pageActions.find((action: ResourceActionDescriptor) =>
       ["create_staff_user", "create", "invite"].includes(action.action),
-    ) ?? defaultPageActions()[1];
+    ) ?? null;
 
   const refreshAction =
-    pageActions.find((action) => action.action === "refresh") ??
-    defaultPageActions()[0];
+    pageActions.find(
+      (action: ResourceActionDescriptor) => action.action === "refresh",
+    ) ?? defaultPageActions()[0];
 
   const deepLinks = useMemo<CrossAppResourceLink[]>(
     () => [
@@ -994,6 +979,9 @@ export default function UsersPage() {
   );
 
   const openCreateModal = useCallback(() => {
+    if (!primaryCreateAction) {
+      return;
+    }
     setFormEmail("");
     setFormDisplayName("");
     setFormRoleCode("operator");
@@ -1001,23 +989,26 @@ export default function UsersPage() {
     setPendingAction({ kind: "create", descriptor: primaryCreateAction });
   }, [primaryCreateAction]);
 
-  const openRowAction = useCallback((user: UserRow, action: ResourceActionDescriptor) => {
-    setFormRoleCode(user.roleCode);
-    setReason("");
-    if (action.action === "view_audit") {
-      openCrossAppLink(user.auditLink);
-      return;
-    }
-    if (action.action === "update_role" || action.action === "update") {
-      setPendingAction({ kind: "update_role", descriptor: action, user });
-      return;
-    }
-    setPendingAction({
-      kind: action.action === "reactivate" ? "reactivate" : "suspend",
-      descriptor: action,
-      user,
-    });
-  }, []);
+  const openRowAction = useCallback(
+    (user: UserRow, action: ResourceActionDescriptor) => {
+      setFormRoleCode(user.roleCode);
+      setReason("");
+      if (action.action === "view_audit") {
+        openCrossAppLink(user.auditLink);
+        return;
+      }
+      if (action.action === "update_role" || action.action === "update") {
+        setPendingAction({ kind: "update_role", descriptor: action, user });
+        return;
+      }
+      setPendingAction({
+        kind: action.action === "reactivate" ? "reactivate" : "suspend",
+        descriptor: action,
+        user,
+      });
+    },
+    [],
+  );
 
   const closeModal = useCallback(() => {
     setPendingAction(null);
@@ -1070,7 +1061,9 @@ export default function UsersPage() {
       await loadUsers();
     } catch (caughtError) {
       setError(
-        caughtError instanceof Error ? caughtError.message : String(caughtError),
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError),
       );
     } finally {
       setMutatingUserId(null);
@@ -1188,24 +1181,21 @@ export default function UsersPage() {
           title={locale === "en" ? "Platform users" : "平台人員"}
           subtitle={
             locale === "en"
-              ? "Internal identity governance. Visual aligned to the canvas; action authority remains backend-driven."
-              : "平台內部身分治理。視覺對齊 canvas，操作權限仍由後端 authority 決定。"
+              ? "Internal identity governance. Action authority remains backend-driven."
+              : "平台內部身分治理，操作權限仍由後端 authority 決定。"
           }
           actions={
             <>
               <CanvasPill theme={theme} tone="neutral">
                 {REFRESH_TIER_LABEL} · 30s
               </CanvasPill>
-              <UsersActionButton
-                locale={locale}
-                descriptor={refreshAction}
-                onClick={() => void loadUsers()}
-              />
-              <UsersActionButton
-                locale={locale}
-                descriptor={primaryCreateAction}
-                onClick={openCreateModal}
-              />
+              {primaryCreateAction ? (
+                <UsersActionButton
+                  locale={locale}
+                  descriptor={primaryCreateAction}
+                  onClick={openCreateModal}
+                />
+              ) : null}
             </>
           }
         />
@@ -1231,19 +1221,11 @@ export default function UsersPage() {
                 : `資料於 ${formatDateTime(refreshMeta.generatedAt)} 由 ${refreshMeta.source} 來源產生。此頁依 packet 指定的 T4 medium-slow cadence 輪詢。`
             }
             actions={
-              <div style={pillRowStyle}>
-                {deepLinks.map((link) => (
-                  <CanvasBtn
-                    key={`${link.targetApp}-${link.route}`}
-                    theme={theme}
-                    variant="secondary"
-                    size="xs"
-                    onClick={() => openCrossAppLink(link)}
-                  >
-                    {link.label}
-                  </CanvasBtn>
-                ))}
-              </div>
+              <UsersActionButton
+                locale={locale}
+                descriptor={refreshAction}
+                onClick={() => void loadUsers()}
+              />
             }
           />
 
@@ -1252,62 +1234,58 @@ export default function UsersPage() {
             title={locale === "en" ? "Platform users" : "平台人員"}
             subtitle={
               locale === "en"
-                ? "Spec §5.7: must-show id, display name, email, role, status, updated time. CTAs render from availableActions."
-                : "對應 spec §5.7：必顯 id、display name、email、role、status、updated time，CTA 由 availableActions 驅動。"
+                ? "Must-show roster fields from spec §5.7. CTAs render strictly from availableActions."
+                : "對應 spec §5.7 的必顯欄位，CTA 嚴格由 availableActions 驅動。"
             }
           >
             <div style={cardBodyStackStyle}>
-              <div style={toolbarStyle}>
-                <div style={pillRowStyle}>
-                  {[
-                    ["all", locale === "en" ? "All" : "全部", counts.all],
-                    ["active", locale === "en" ? "Active" : "啟用", counts.active],
-                    ["invited", locale === "en" ? "Invited" : "邀請中", counts.invited],
-                    [
-                      "suspended",
-                      locale === "en" ? "Suspended" : "停用",
-                      counts.suspended,
-                    ],
-                  ].map(([value, label, count]) => {
-                    const selected = filter === value;
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setFilter(value as UserFilter)}
-                        style={{
-                          border: `1px solid ${
-                            selected ? theme.accent : theme.border
-                          }`,
-                          background: selected ? theme.accentBg : theme.surface,
-                          color: selected ? theme.accent : theme.text,
-                          borderRadius: 999,
-                          minHeight: 30,
-                          padding: "0 12px",
-                          fontFamily: theme.fontFamily,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {label} · {count}
-                      </button>
-                    );
-                  })}
+              <div style={cardHeaderMetaStyle}>
+                <div style={cardMetaStyle}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: theme.textMuted,
+                    }}
+                  >
+                    {locale === "en" ? "Visible states" : "可見狀態"}
+                  </div>
+                  <div style={pillRowStyle}>
+                    <CanvasPill theme={theme} tone="success" dot>
+                      {locale === "en" ? "Active" : "啟用"}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="warn" dot>
+                      {locale === "en" ? "Pending invitation" : "邀請中"}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="danger" dot>
+                      {locale === "en" ? "Suspended" : "停用"}
+                    </CanvasPill>
+                  </div>
                 </div>
 
-                <div style={{ width: "min(280px, 100%)" }}>
-                  <input
-                    type="search"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder={
-                      locale === "en"
-                        ? "Search name, email, id, role"
-                        : "搜尋姓名、email、id、role"
-                    }
-                    style={inputStyle}
-                  />
+                <div style={cardMetaStyle}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: theme.textMuted,
+                    }}
+                  >
+                    {locale === "en" ? "Cross-app links" : "跨應用連結"}
+                  </div>
+                  <div style={pillRowStyle}>
+                    {deepLinks.map((link) => (
+                      <CanvasBtn
+                        key={`inline-${link.targetApp}-${link.route}`}
+                        theme={theme}
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => openCrossAppLink(link)}
+                      >
+                        {link.label}
+                      </CanvasBtn>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -1330,7 +1308,7 @@ export default function UsersPage() {
                     effectiveEmptyState.nextAction ??
                     (effectiveEmptyState.reason === "no_data" ||
                     effectiveEmptyState.reason === "not_provisioned"
-                      ? primaryCreateAction
+                      ? (primaryCreateAction ?? undefined)
                       : effectiveEmptyState.reason === "fetch_failed" ||
                           effectiveEmptyState.reason === "external_unavailable"
                         ? refreshAction
@@ -1348,74 +1326,14 @@ export default function UsersPage() {
                   }}
                 />
               ) : (
-                <CanvasTable theme={theme} columns={tableColumns} rows={visibleUsers} />
+                <CanvasTable
+                  theme={theme}
+                  columns={tableColumns}
+                  rows={users}
+                />
               )}
 
               {error ? <div style={inlineMetaStyle}>{error}</div> : null}
-            </div>
-          </CanvasCard>
-
-          <CanvasCard
-            theme={theme}
-            title={locale === "en" ? "Screen notes" : "畫面備註"}
-            subtitle={
-              locale === "en"
-                ? "Packet behavior anchors kept explicit for review."
-                : "保留 packet 行為錨點，方便 review。"
-            }
-          >
-            <div style={cardBodyStackStyle}>
-              <CanvasDL
-                theme={theme}
-                cols={2}
-                items={[
-                  {
-                    k: locale === "en" ? "Spec ref" : "Spec ref",
-                    v: "§5.7",
-                    mono: true,
-                  },
-                  {
-                    k: locale === "en" ? "Primary persona" : "主要 persona",
-                    v: "pa_super_admin",
-                    mono: true,
-                  },
-                  {
-                    k: locale === "en" ? "Refresh tier" : "Refresh tier",
-                    v: `${REFRESH_TIER_LABEL} · ${REFRESH_TIER}`,
-                    mono: true,
-                  },
-                  {
-                    k: "EmptyReason",
-                    v: EMPTY_REASON_OPTIONS.join(" · "),
-                    mono: true,
-                  },
-                  {
-                    k: locale === "en" ? "State variants" : "狀態變體",
-                    v:
-                      locale === "en"
-                        ? "empty · pending invitation · suspended"
-                        : "empty · pending invitation · suspended",
-                  },
-                  {
-                    k: locale === "en" ? "Deep links" : "Deep links",
-                    v:
-                      locale === "en"
-                        ? "audit / ops dispatch / revenue mirror"
-                        : "audit / ops dispatch / revenue mirror",
-                  },
-                ]}
-              />
-              <div style={pillRowStyle}>
-                {EMPTY_REASON_OPTIONS.map((reasonOption) => (
-                  <CanvasPill
-                    key={reasonOption}
-                    theme={theme}
-                    tone={effectiveEmptyState?.reason === reasonOption ? "accent" : "neutral"}
-                  >
-                    {reasonOption}
-                  </CanvasPill>
-                ))}
-              </div>
             </div>
           </CanvasCard>
         </div>
