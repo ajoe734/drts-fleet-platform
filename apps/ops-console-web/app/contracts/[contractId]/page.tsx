@@ -494,6 +494,56 @@ function getOwnerAppLabel(
   return t("contractDetail.ownerApp.platformAdmin", locale);
 }
 
+function formatTenantLinkageValue(
+  detail: OpsContractDetailRecord["tenantLinkage"],
+  locale: Locale,
+) {
+  if (detail.tenantId && detail.tenantDisplayName) {
+    return `${detail.tenantId} · ${detail.tenantDisplayName}`;
+  }
+  return (
+    detail.tenantDisplayName ?? detail.tenantId ?? t("common.dash", locale)
+  );
+}
+
+function renderInlineResourceLink(
+  locale: Locale,
+  value: string,
+  link: CrossAppResourceLink | null,
+  descriptor: OpsContractDetailRecord["availableActions"][number] | undefined,
+) {
+  if (!descriptor?.enabled || !link) {
+    return value;
+  }
+
+  const target = toLinkTarget(link);
+  const label = t(
+    `contractDetail.actions.action.${descriptor.action}` as never,
+    locale,
+  );
+
+  return (
+    <Link
+      href={target.href}
+      target={target.openMode === "new_tab" ? "_blank" : undefined}
+      rel={target.openMode === "new_tab" ? "noopener noreferrer" : undefined}
+      aria-label={`${label}: ${value}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        color: theme.text,
+        textDecoration: "none",
+      }}
+    >
+      <span>{value}</span>
+      <span style={{ color: theme.textMuted, display: "inline-flex" }}>
+        <CanvasIcon name="ext" size={12} />
+      </span>
+    </Link>
+  );
+}
+
 function renderReferenceLink(
   locale: Locale,
   descriptor: OpsContractDetailRecord["availableActions"][number],
@@ -593,10 +643,29 @@ export default async function ContractDetailPage({
   const cadenceLabel = refreshTierCadenceLabel(detail.refreshTier);
   const ownerAppLabel = getOwnerAppLabel(locale, detail.mutationLink.targetApp);
   const mutationLinkTarget = toLinkTarget(detail.mutationLink);
+  const actionDescriptorByAction = new Map(
+    detail.availableActions.map((descriptor) => [
+      descriptor.action,
+      descriptor,
+    ]),
+  );
   const actionLinkByAction = new Map(
     detail.actionLinks.map(({ action, link }) => [action, link]),
   );
+  const tenantLinkDescriptor = actionDescriptorByAction.get("open_tenant_sla");
+  const partnerLinkDescriptor =
+    actionDescriptorByAction.get("open_partner_entry");
+  const inlineLinkedActions = new Set<string>();
+  if (tenantLinkDescriptor?.enabled && detail.tenantLinkage.tenantLink) {
+    inlineLinkedActions.add(tenantLinkDescriptor.action);
+  }
+  if (partnerLinkDescriptor?.enabled && detail.tenantLinkage.partnerLink) {
+    inlineLinkedActions.add(partnerLinkDescriptor.action);
+  }
   const referenceActions = detail.availableActions.filter((descriptor) => {
+    if (inlineLinkedActions.has(descriptor.action)) {
+      return false;
+    }
     const link = actionLinkByAction.get(descriptor.action);
     if (!descriptor.enabled || !link) {
       return true;
@@ -655,12 +724,21 @@ export default async function ContractDetailPage({
   const linkageItems: CanvasDLItem[] = [
     {
       k: t("contractDetail.linkage.tenant", locale),
-      v: detail.tenantLinkage.tenantDisplayName ?? t("common.dash", locale),
-      mono: Boolean(detail.tenantLinkage.tenantId),
+      v: renderInlineResourceLink(
+        locale,
+        formatTenantLinkageValue(detail.tenantLinkage, locale),
+        detail.tenantLinkage.tenantLink,
+        tenantLinkDescriptor,
+      ),
     },
     {
       k: t("contractDetail.linkage.partnerEntry", locale),
-      v: detail.tenantLinkage.partnerEntrySlug ?? t("common.dash", locale),
+      v: renderInlineResourceLink(
+        locale,
+        detail.tenantLinkage.partnerEntrySlug ?? t("common.dash", locale),
+        detail.tenantLinkage.partnerLink,
+        partnerLinkDescriptor,
+      ),
       mono: Boolean(detail.tenantLinkage.partnerEntrySlug),
     },
     {
