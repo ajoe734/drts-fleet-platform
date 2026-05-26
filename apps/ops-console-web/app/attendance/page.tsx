@@ -15,6 +15,7 @@ import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
+  CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasKPI as KPI,
@@ -33,12 +34,15 @@ type AttendancePageProps = {
     date?: string | string[];
     driver?: string | string[];
     emptyReason?: string | string[];
+    view?: string | string[];
   }>;
 };
 
 type AttendanceSearchParams = Awaited<
   NonNullable<AttendancePageProps["searchParams"]>
 >;
+
+type AttendanceView = "today" | "week" | "anomaly";
 
 type AttendanceEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
 
@@ -135,6 +139,12 @@ const toolbarStyle = {
   alignItems: "center",
 };
 
+const headerTabStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+};
+
 const chipRowStyle = {
   display: "flex",
   flexWrap: "wrap" as const,
@@ -177,6 +187,12 @@ function yesterdayKey() {
   return value.toISOString().slice(0, 10);
 }
 
+function lastWeekKey() {
+  const value = new Date();
+  value.setUTCDate(value.getUTCDate() - 6);
+  return value.toISOString().slice(0, 10);
+}
+
 function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) return "—";
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -204,6 +220,14 @@ function formatTime(locale: Locale, value: string | null | undefined) {
 function formatHours(value: number | null | undefined) {
   if (value == null) return "—";
   return `${value.toFixed(1)}h`;
+}
+
+function formatShortDate(locale: Locale, value: string) {
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
 function shiftDurationHours(shift: ShiftRecord) {
@@ -268,6 +292,11 @@ function classifyFetchFailure(message: string | null): AttendanceEmptyReason {
     return "not_provisioned";
   }
   return "fetch_failed";
+}
+
+function resolveAttendanceView(value: string | undefined): AttendanceView {
+  if (value === "week" || value === "anomaly") return value;
+  return "today";
 }
 
 function isAttendanceEmptyReason(
@@ -360,6 +389,25 @@ function buildQueryString(
   }
   const encoded = next.toString();
   return encoded ? `?${encoded}` : "";
+}
+
+function readAvailableActions(
+  record: unknown,
+): ResourceActionDescriptor[] | null {
+  if (!record || typeof record !== "object") return null;
+  const candidate = (record as { availableActions?: unknown }).availableActions;
+  if (!Array.isArray(candidate)) return null;
+  return candidate.filter((entry): entry is ResourceActionDescriptor => {
+    if (!entry || typeof entry !== "object") return false;
+    const action = (entry as { action?: unknown }).action;
+    const enabled = (entry as { enabled?: unknown }).enabled;
+    const riskLevel = (entry as { riskLevel?: unknown }).riskLevel;
+    return (
+      typeof action === "string" &&
+      typeof enabled === "boolean" &&
+      (riskLevel === "low" || riskLevel === "medium" || riskLevel === "high")
+    );
+  });
 }
 
 function renderDeepLink(link: CrossAppResourceLink, labelOverride?: string) {
@@ -742,6 +790,7 @@ function toneForShiftStatus(status: ShiftRecord["status"]) {
 function filterLabel(locale: Locale, dateFilter: string) {
   if (dateFilter === "today") return copy(locale, "Today", "今天");
   if (dateFilter === "yesterday") return copy(locale, "Yesterday", "昨天");
+  if (dateFilter === "week") return copy(locale, "This week", "本週");
   if (dateFilter === "all") return copy(locale, "All dates", "全部日期");
   return dateFilter;
 }
@@ -756,8 +805,12 @@ export default async function AttendancePage({
   ]);
 
   const activeDriver = firstValue(params.driver)?.trim() || undefined;
+  const attendanceView = resolveAttendanceView(firstValue(params.view));
   const dateFilter = firstValue(params.date) ?? "today";
-  const anomalyFilter = firstValue(params.anomaly) ?? "all";
+  const anomalyFilter =
+    attendanceView === "anomaly"
+      ? "only"
+      : (firstValue(params.anomaly) ?? "all");
   const emptyOverride = firstValue(params.emptyReason);
 
   let shifts: ShiftRecord[] = [];
@@ -781,14 +834,17 @@ export default async function AttendancePage({
   const refresh = buildRefreshMetadata(error);
   const today = todayKey();
   const yesterday = yesterdayKey();
+  const lastWeek = lastWeekKey();
   const effectiveDate =
-    dateFilter === "today"
-      ? today
-      : dateFilter === "yesterday"
-        ? yesterday
-        : dateFilter === "all"
-          ? undefined
-          : dateFilter;
+    attendanceView === "week"
+      ? undefined
+      : dateFilter === "today"
+        ? today
+        : dateFilter === "yesterday"
+          ? yesterday
+          : dateFilter === "all"
+            ? undefined
+            : dateFilter;
 
   const attendanceByShift = new Map(
     attendance.map((record) => [record.shiftId, record] as const),
@@ -797,11 +853,14 @@ export default async function AttendancePage({
     .map((shift) => {
       const shiftAttendance = attendanceByShift.get(shift.shiftId) ?? null;
       const anomalyCodes = getShiftAnomalyCodes(shift, shiftAttendance);
+      const contractActions =
+        readAvailableActions(shift) ?? readAvailableActions(shiftAttendance);
       return {
         shift,
         attendance: shiftAttendance,
         anomalyCodes,
-        availableActions: buildShiftActions(shift, anomalyCodes),
+        availableActions:
+          contractActions ?? buildShiftActions(shift, anomalyCodes),
         links: getShiftLinks(shift),
       } satisfies ShiftView;
     })
@@ -811,8 +870,12 @@ export default async function AttendancePage({
 
   const filteredShiftViews = shiftViews.filter((view) => {
     if (activeDriver && view.shift.driverId !== activeDriver) return false;
-    if (effectiveDate && getShiftDateKey(view.shift) !== effectiveDate)
+    const shiftDate = getShiftDateKey(view.shift);
+    if (attendanceView === "week") {
+      if (shiftDate < lastWeek || shiftDate > today) return false;
+    } else if (effectiveDate && shiftDate !== effectiveDate) {
       return false;
+    }
     if (anomalyFilter === "only" && view.anomalyCodes.length === 0)
       return false;
     return true;
@@ -824,7 +887,11 @@ export default async function AttendancePage({
   const filteredAttendance = attendance
     .filter((record) => {
       if (activeDriver && record.driverId !== activeDriver) return false;
-      if (effectiveDate && record.date !== effectiveDate) return false;
+      if (attendanceView === "week") {
+        if (record.date < lastWeek || record.date > today) return false;
+      } else if (effectiveDate && record.date !== effectiveDate) {
+        return false;
+      }
       if (
         anomalyFilter === "only" &&
         record.status !== "partial" &&
@@ -880,10 +947,79 @@ export default async function AttendancePage({
   ).slice(0, 6);
 
   const baseQuery = {
-    date: dateFilter !== "today" ? dateFilter : undefined,
+    view: attendanceView !== "today" ? attendanceView : undefined,
+    date:
+      attendanceView === "today" && dateFilter !== "today"
+        ? dateFilter
+        : undefined,
     driver: activeDriver,
-    anomaly: anomalyFilter !== "all" ? anomalyFilter : undefined,
+    anomaly:
+      attendanceView !== "anomaly" && anomalyFilter !== "all"
+        ? anomalyFilter
+        : undefined,
   };
+
+  const headerTabs = [
+    {
+      id: "today",
+      label: copy(locale, "Today", "今日"),
+      href: `/attendance${buildQueryString(baseQuery, {
+        view: undefined,
+        date: undefined,
+        anomaly: undefined,
+      })}`,
+    },
+    {
+      id: "week",
+      label: copy(locale, "Week", "本週"),
+      href: `/attendance${buildQueryString(baseQuery, {
+        view: "week",
+        date: undefined,
+        anomaly: undefined,
+      })}`,
+    },
+    {
+      id: "anomaly",
+      label: copy(locale, "Anomaly", "異常"),
+      href: `/attendance${buildQueryString(baseQuery, {
+        view: "anomaly",
+        date: undefined,
+        anomaly: undefined,
+      })}`,
+    },
+  ];
+
+  const currentTabIndex = Math.max(
+    0,
+    headerTabs.findIndex((tab) => tab.id === attendanceView),
+  );
+  const currentTab = headerTabs[currentTabIndex]!;
+  const headerTabNodes = headerTabs.map((tab) => (
+    <Link
+      key={tab.id}
+      href={tab.href}
+      style={{ color: "inherit", textDecoration: "none" }}
+    >
+      <span style={headerTabStyle}>
+        {tab.label}
+        {tab.id === "anomaly" && anomalyViews.length > 0 ? (
+          <Pill theme={theme} tone="danger">
+            {anomalyViews.length}
+          </Pill>
+        ) : null}
+      </span>
+    </Link>
+  ));
+  const selectedSliceLabel =
+    attendanceView === "week"
+      ? copy(
+          locale,
+          `${formatShortDate(locale, lastWeek)} - ${formatShortDate(locale, today)}`,
+          `${formatShortDate(locale, lastWeek)} - ${formatShortDate(locale, today)}`,
+        )
+      : attendanceView === "anomaly"
+        ? copy(locale, "Anomalous rows only", "僅顯示異常列")
+        : copy(locale, `${today} · UTC`, `${today} · UTC`);
 
   const shiftColumns: CanvasTableColumn<ShiftRow>[] = [
     { h: copy(locale, "SHIFT", "班次"), k: "shiftCell", w: 138 },
@@ -1127,13 +1263,16 @@ export default async function AttendancePage({
     <>
       <PageHeader
         title={copy(locale, "Attendance & shifts", "班次與出勤")}
-        subtitle={copy(
-          locale,
-          "Verify who is on shift, which rows are anomalous, and where supply needs the next pivot.",
-          "核對誰正在當班、哪些列異常，以及供給下一步該往哪裡處理。",
-        )}
+        subtitle={selectedSliceLabel}
+        tabs={headerTabNodes}
+        activeTab={headerTabNodes[currentTabIndex]}
         actions={
-          <AttendanceRefreshControls locale={locale} refresh={refresh} />
+          <>
+            <Btn theme={theme} variant="secondary" icon="ext" disabled>
+              {copy(locale, "Export", "匯出")}
+            </Btn>
+            <AttendanceRefreshControls locale={locale} refresh={refresh} />
+          </>
         }
       />
 
@@ -1174,7 +1313,11 @@ export default async function AttendancePage({
             label={copy(locale, "Scheduled drivers", "排班司機")}
             value={filteredShiftViews.length}
             sub={copy(locale, "Rows in current slice", "目前範圍的班次列")}
-            hint={filterLabel(locale, dateFilter)}
+            hint={
+              attendanceView === "week"
+                ? filterLabel(locale, "week")
+                : filterLabel(locale, dateFilter)
+            }
           />
           <KPI
             theme={theme}
@@ -1198,7 +1341,11 @@ export default async function AttendancePage({
               "Present attendance rows",
               "狀態為 present 的出勤",
             )}
-            hint={filterLabel(locale, dateFilter)}
+            hint={
+              attendanceView === "week"
+                ? filterLabel(locale, "week")
+                : filterLabel(locale, dateFilter)
+            }
           />
           <KPI
             theme={theme}
@@ -1235,9 +1382,12 @@ export default async function AttendancePage({
                   <Link
                     key={value}
                     href={`/attendance${buildQueryString(baseQuery, {
+                      view: value === "today" ? undefined : "today",
                       date: value === "today" ? undefined : value,
                     })}`}
-                    style={chipLinkStyle(dateFilter === value)}
+                    style={chipLinkStyle(
+                      attendanceView === "today" && dateFilter === value,
+                    )}
                   >
                     {filterLabel(locale, value)}
                   </Link>
@@ -1254,10 +1404,16 @@ export default async function AttendancePage({
                   <Link
                     key={option.value}
                     href={`/attendance${buildQueryString(baseQuery, {
+                      view: option.value === "only" ? "anomaly" : undefined,
                       anomaly:
                         option.value === "all" ? undefined : option.value,
                     })}`}
-                    style={chipLinkStyle(anomalyFilter === option.value)}
+                    style={chipLinkStyle(
+                      option.value === "only"
+                        ? attendanceView === "anomaly"
+                        : anomalyFilter === option.value &&
+                            attendanceView !== "anomaly",
+                    )}
                   >
                     {option.label}
                   </Link>
@@ -1453,10 +1609,12 @@ export default async function AttendancePage({
                   },
                   {
                     label: copy(locale, "Current filter", "目前篩選"),
-                    value: `${filterLabel(locale, dateFilter)} · ${activeDriver ?? copy(locale, "all drivers", "全部司機")} · ${
+                    value: `${currentTab.label} · ${activeDriver ?? copy(locale, "all drivers", "全部司機")} · ${
                       anomalyFilter === "only"
                         ? copy(locale, "anomalies only", "僅看異常")
-                        : copy(locale, "all rows", "全部")
+                        : attendanceView === "week"
+                          ? copy(locale, "7-day slice", "7 天範圍")
+                          : copy(locale, "all rows", "全部")
                     }`,
                   },
                   {
