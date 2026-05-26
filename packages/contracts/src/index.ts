@@ -1,6 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-import type { ResourceActionDescriptor } from "./ui-runtime";
+import type {
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -3246,6 +3251,13 @@ export const COMPLAINT_CASE_STATUSES = [
 ] as const;
 export type ComplaintCaseStatus = (typeof COMPLAINT_CASE_STATUSES)[number];
 
+export const COMPLAINT_SLA_STATUSES = [
+  "within_sla",
+  "warning",
+  "breached",
+] as const;
+export type ComplaintSlaStatus = (typeof COMPLAINT_SLA_STATUSES)[number];
+
 export interface CreateComplaintCaseCommand {
   caseSource: "phone" | "web" | "app" | "ops";
   relatedOrderId?: string | null;
@@ -3311,13 +3323,24 @@ export interface ComplaintCaseRecord {
   description: string;
   assigneeId: string | null;
   status: ComplaintCaseStatus;
+  slaStatus?: ComplaintSlaStatus;
   slaDueAt: string;
+  slaBreachedAt?: string | null;
   slaBreach: boolean;
   reopenCount: number;
   resolutionCode: ComplaintResolutionCode | null;
   closingNote: string | null;
   createdAt: string;
   updatedAt: string;
+  availableActions?: ResourceActionDescriptor[];
+  resourceLinks?: CrossAppResourceLink[];
+}
+
+export interface ComplaintCaseListWorkspace {
+  items: ComplaintCaseRecord[];
+  refresh: UiRefreshMetadata;
+  emptyState?: EmptyStateEnvelope;
+  pageActions: ResourceActionDescriptor[];
 }
 
 export interface ComplaintTimelineEntry {

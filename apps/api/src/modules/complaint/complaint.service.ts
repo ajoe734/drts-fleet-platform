@@ -7,14 +7,18 @@ import type {
   AssignComplaintCaseCommand,
   AuditLogRecord,
   ComplaintCaseRecord,
+  ComplaintCaseListWorkspace,
   ComplaintCaseStatus,
   ComplaintCategory,
   ComplaintExportViewRecord,
   ComplaintResolutionCode,
+  ComplaintSlaStatus,
   ComplaintTimelineEntry,
+  CrossAppResourceLink,
   CreateComplaintCaseCommand,
   LinkComplaintToIncidentCommand,
   ReopenComplaintCaseCommand,
+  ResourceActionDescriptor,
   ResolveComplaintCaseCommand,
 } from "@drts/contracts";
 
@@ -123,13 +127,17 @@ export class ComplaintService implements OnModuleInit {
       description: command.description,
       assigneeId: null,
       status: "new",
+      slaStatus: "within_sla",
       slaDueAt: this.calculateSlaDueAt(command.category, command.severity, now),
+      slaBreachedAt: null,
       slaBreach: false,
       reopenCount: 0,
       resolutionCode: null,
       closingNote: null,
       createdAt,
       updatedAt: createdAt,
+      availableActions: [],
+      resourceLinks: [],
     };
 
     const createdEntry = this.createTimelineEntry(
@@ -172,10 +180,29 @@ export class ComplaintService implements OnModuleInit {
     return this.cloneComplaintCase(complaintCase);
   }
 
-  listComplaintCases() {
-    return this.complaintCases.map((complaintCase) =>
+  listComplaintCases(): ComplaintCaseListWorkspace {
+    const items = this.complaintCases.map((complaintCase) =>
       this.cloneComplaintCase(complaintCase),
     );
+
+    return {
+      items,
+      refresh: {
+        generatedAt: new Date().toISOString(),
+        staleAfterMs: 15_000,
+        dataFreshness: "fresh",
+        source: "live",
+      },
+      ...(items.length === 0
+        ? {
+            emptyState: {
+              reason: "no_data",
+              messageCode: "complaints.empty.no_data",
+            },
+          }
+        : {}),
+      pageActions: this.buildPageActions(items),
+    };
   }
 
   getComplaintCase(caseNo: string) {
@@ -452,7 +479,9 @@ export class ComplaintService implements OnModuleInit {
     const updated = {
       ...complaintCase,
       status: "reopened" as ComplaintCaseStatus,
+      slaStatus: "within_sla" as ComplaintSlaStatus,
       slaDueAt: newSlaDueAt,
+      slaBreachedAt: null,
       slaBreach: false,
       reopenCount: (complaintCase.reopenCount ?? 0) + 1,
       updatedAt: now.toISOString(),
@@ -508,6 +537,8 @@ export class ComplaintService implements OnModuleInit {
 
     const updated = {
       ...complaintCase,
+      slaStatus: "breached" as ComplaintSlaStatus,
+      slaBreachedAt: new Date().toISOString(),
       slaBreach: true,
       updatedAt: new Date().toISOString(),
     };
@@ -842,9 +873,173 @@ export class ComplaintService implements OnModuleInit {
   }
 
   private cloneComplaintCase(complaintCase: ComplaintCaseRecord) {
+    const slaStatus = this.computeSlaStatus(complaintCase);
     return {
       ...complaintCase,
+      slaStatus,
+      slaBreachedAt: complaintCase.slaBreachedAt ?? null,
+      slaBreach: slaStatus === "breached",
+      availableActions: this.buildAvailableActions(complaintCase),
+      resourceLinks: this.buildResourceLinks(complaintCase),
     };
+  }
+
+  private buildPageActions(
+    complaintCases: readonly ComplaintCaseRecord[],
+  ): ResourceActionDescriptor[] {
+    return [
+      {
+        action: "create_complaint",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      {
+        action: "export_case_view",
+        enabled: complaintCases.some((complaintCase) =>
+          (complaintCase.availableActions ?? []).some(
+            (descriptor) =>
+              descriptor.action === "export_case_view" && descriptor.enabled,
+          ),
+        ),
+        disabledReasonCode: complaintCases.length
+          ? "no_export_ready_case"
+          : "no_cases_available",
+        riskLevel: "low",
+      },
+    ];
+  }
+
+  private buildAvailableActions(
+    complaintCase: ComplaintCaseRecord,
+  ): ResourceActionDescriptor[] {
+    const isClosed = complaintCase.status === "closed";
+    const isResolved = complaintCase.status === "resolved";
+    const hasIncident = Boolean(complaintCase.relatedIncidentId);
+
+    return [
+      {
+        action: "assign_complaint",
+        enabled: !isClosed && !isResolved,
+        disabledReasonCode:
+          isClosed || isResolved ? "case_read_only" : undefined,
+        riskLevel: "medium",
+      },
+      {
+        action: "add_note",
+        enabled: !isClosed && !isResolved,
+        disabledReasonCode:
+          isClosed || isResolved ? "case_read_only" : undefined,
+        riskLevel: "low",
+      },
+      {
+        action: "resolve_complaint",
+        enabled: !isClosed && !isResolved,
+        disabledReasonCode:
+          isClosed || isResolved ? "already_resolved_or_closed" : undefined,
+        riskLevel: "medium",
+      },
+      {
+        action: "close_complaint",
+        enabled: isResolved,
+        disabledReasonCode: isClosed
+          ? "already_closed"
+          : !isResolved
+            ? "resolve_required"
+            : undefined,
+        riskLevel: "medium",
+      },
+      {
+        action: "reopen_complaint",
+        enabled: isClosed,
+        disabledReasonCode: isClosed ? undefined : "close_required",
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "escalate_to_incident",
+        enabled: !isClosed && !hasIncident,
+        disabledReasonCode: isClosed
+          ? "closed_case_cannot_escalate"
+          : hasIncident
+            ? "incident_already_linked"
+            : undefined,
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "export_case_view",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
+  }
+
+  private buildResourceLinks(
+    complaintCase: ComplaintCaseRecord,
+  ): CrossAppResourceLink[] {
+    const links: CrossAppResourceLink[] = [];
+
+    if (complaintCase.relatedOrderId) {
+      links.push({
+        targetApp: "ops-console",
+        route: `/dispatch/${complaintCase.relatedOrderId}`,
+        resourceType: "dispatch_work_item",
+        resourceId: complaintCase.relatedOrderId,
+        openMode: "same_tab",
+        label: `Dispatch ${complaintCase.relatedOrderId}`,
+      });
+    }
+
+    if (complaintCase.relatedCallId) {
+      links.push({
+        targetApp: "ops-console",
+        route: `/callcenter?callId=${encodeURIComponent(complaintCase.relatedCallId)}`,
+        resourceType: "call_session",
+        resourceId: complaintCase.relatedCallId,
+        openMode: "same_tab",
+        label: `Call ${complaintCase.relatedCallId}`,
+      });
+    }
+
+    if (complaintCase.relatedIncidentId) {
+      links.push({
+        targetApp: "ops-console",
+        route: `/incidents/${complaintCase.relatedIncidentId}`,
+        resourceType: "incident",
+        resourceId: complaintCase.relatedIncidentId,
+        openMode: "same_tab",
+        label: `Incident ${complaintCase.relatedIncidentId}`,
+      });
+    }
+
+    links.push({
+      targetApp: "platform-admin",
+      route: `/audit?resourceType=complaint_case&resourceId=${encodeURIComponent(complaintCase.caseNo)}`,
+      resourceType: "audit_log",
+      resourceId: complaintCase.caseNo,
+      openMode: "new_tab",
+      label: `Audit ${complaintCase.caseNo}`,
+    });
+
+    return links;
+  }
+
+  private computeSlaStatus(
+    complaintCase: ComplaintCaseRecord,
+  ): ComplaintSlaStatus {
+    if (complaintCase.slaBreach || complaintCase.slaBreachedAt) {
+      return "breached";
+    }
+
+    const remainingMs =
+      new Date(complaintCase.slaDueAt).getTime() - Date.now();
+    if (remainingMs <= 0) {
+      return "breached";
+    }
+    if (remainingMs <= 2 * 60 * 60 * 1000) {
+      return "warning";
+    }
+    return "within_sla";
   }
 
   private persistChanges(
