@@ -38,6 +38,18 @@ type FeatureFlagFilters = {
   scope: FeatureFlagScopeFilter;
 };
 
+type OpsFeatureFlagEmptyReason =
+  | "no_data"
+  | "not_provisioned"
+  | "fetch_failed"
+  | "permission_denied"
+  | "external_unavailable"
+  | "filtered_empty";
+
+type OpsFeatureFlagEmptyState = Omit<EmptyStateEnvelope, "reason"> & {
+  reason: OpsFeatureFlagEmptyReason;
+};
+
 type FeatureFlagTableRow = Record<string, unknown> & {
   rowKey: string;
   keyCell: ReactNode;
@@ -515,6 +527,36 @@ function isOperationalLegacyFlag(key: string) {
   return !key.startsWith("driver-app.") && !key.startsWith("tenant-portal.");
 }
 
+function normalizeFeatureFlagsEmptyState(
+  emptyState: EmptyStateEnvelope | null | undefined,
+): OpsFeatureFlagEmptyState | undefined {
+  if (!emptyState) {
+    return undefined;
+  }
+
+  const reason: OpsFeatureFlagEmptyReason = (() => {
+    switch (emptyState.reason) {
+      case "no_data":
+      case "not_provisioned":
+      case "fetch_failed":
+      case "permission_denied":
+      case "external_unavailable":
+      case "filtered_empty":
+        return emptyState.reason;
+      case "driver_not_eligible":
+        // Driver-only empty state is outside the ops packet surface; collapse
+        // it into an existing management-app treatment instead of adding a
+        // seventh visual branch on this page.
+        return "permission_denied";
+    }
+  })();
+
+  return {
+    ...emptyState,
+    reason,
+  };
+}
+
 function mapLegacySummary(
   summary: FeatureFlagSummary,
   locale: Locale,
@@ -576,6 +618,9 @@ function normalizeResponse(
 ): FeatureFlagVisibilityListResponse {
   const ownerAppLink = response.ownerAppLink ?? defaultOwnerAppLink(locale);
   const pageActions = [...(response.availableActions ?? [])];
+  const normalizedEmptyState = normalizeFeatureFlagsEmptyState(
+    response.emptyState,
+  );
 
   if (!pageActions.some((action) => action.action === "search")) {
     pageActions.push(defaultSearchAction());
@@ -598,7 +643,7 @@ function normalizeResponse(
       source: "static",
     },
     availableActions: pageActions,
-    ...(response.emptyState ? { emptyState: response.emptyState } : {}),
+    ...(normalizedEmptyState ? { emptyState: normalizedEmptyState } : {}),
     ...(ownerAppLink ? { ownerAppLink } : {}),
   };
 }
@@ -925,14 +970,18 @@ function resolveEmptyState(
   response: FeatureFlagVisibilityListResponse,
   visibleItems: FeatureFlagVisibilityRecord[],
   filters: FeatureFlagFilters,
-): EmptyStateEnvelope | null {
+): OpsFeatureFlagEmptyState | null {
   if (visibleItems.length > 0) {
     return null;
   }
 
+  const normalizedEmptyState = normalizeFeatureFlagsEmptyState(
+    response.emptyState,
+  );
+
   if (response.items.length === 0) {
     return (
-      response.emptyState ?? {
+      normalizedEmptyState ?? {
         reason: "no_data",
         messageCode: "flags.empty",
       }
@@ -947,7 +996,7 @@ function resolveEmptyState(
   }
 
   return (
-    response.emptyState ?? {
+    normalizedEmptyState ?? {
       reason: "no_data",
       messageCode: "flags.empty",
     }
@@ -956,7 +1005,7 @@ function resolveEmptyState(
 
 function emptyStateCopy(
   locale: Locale,
-  state: EmptyStateEnvelope,
+  state: OpsFeatureFlagEmptyState,
 ): {
   tone: CanvasTone;
   icon: "check" | "flags" | "warn" | "x" | "filter" | "clock";
@@ -1090,7 +1139,7 @@ function actionLabel(locale: Locale, action: ResourceActionDescriptor) {
 
 function renderEmptyState(
   locale: Locale,
-  state: EmptyStateEnvelope,
+  state: OpsFeatureFlagEmptyState,
   filters: FeatureFlagFilters,
   ownerAppLink: CrossAppResourceLink,
 ) {
