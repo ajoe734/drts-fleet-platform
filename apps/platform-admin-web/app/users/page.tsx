@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import React, {
   useCallback,
   useEffect,
@@ -8,9 +7,11 @@ import React, {
   useState,
   type CSSProperties,
 } from "react";
+import { useSearchParams } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
 import type {
   PlatformAdminUserRecord,
   PlatformAdminUserRole,
@@ -30,7 +31,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -42,18 +42,20 @@ import {
 } from "@drts/ui-web";
 
 type UserFilter = "all" | PlatformAdminUserStatus;
+
 type UsersApiPayload = {
   items?: PlatformAdminUserRecord[];
   emptyState?: EmptyStateEnvelope;
   refresh?: Partial<UiRefreshMetadata>;
   availableActions?: ResourceActionDescriptor[];
 };
+
 type UserRow = PlatformAdminUserRecord &
   Record<string, unknown> & {
     availableActions: ResourceActionDescriptor[];
     auditLink: CrossAppResourceLink;
   };
-type UsersTableRow = UserRow & Record<string, unknown>;
+
 type PendingAction =
   | {
       kind: "create";
@@ -65,10 +67,11 @@ type PendingAction =
       user: UserRow;
     };
 
-const PLATFORM_THEME = buildCanvasTheme({
+const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
 });
+
 const REFRESH_TIER: RefreshTier = "medium_slow";
 const REFRESH_TIER_LABEL = "T4";
 const REFRESH_STALE_AFTER_MS = 30_000;
@@ -86,6 +89,7 @@ const ROLE_CODES: PlatformAdminUserRole[] = [
   "operator",
   "viewer",
 ];
+
 const APP_ORIGINS: Record<CrossAppResourceLink["targetApp"], string> = {
   "platform-admin": "",
   "ops-console": process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN ?? "",
@@ -103,25 +107,19 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const contentGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.7fr) minmax(280px, 0.95fr)",
-  gap: 16,
-  alignItems: "start",
-} satisfies CSSProperties;
-
 const toolbarStyle = {
   display: "flex",
-  gap: 8,
   flexWrap: "wrap",
-  alignItems: "center",
   justifyContent: "space-between",
+  gap: 12,
+  alignItems: "center",
 } satisfies CSSProperties;
 
 const pillRowStyle = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
+  alignItems: "center",
 } satisfies CSSProperties;
 
 const actionRowStyle = {
@@ -133,8 +131,21 @@ const actionRowStyle = {
 
 const inlineMetaStyle = {
   fontSize: 11.5,
-  color: PLATFORM_THEME.textMuted,
+  color: theme.textMuted,
   lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const inputStyle = {
+  width: "100%",
+  minHeight: 34,
+  borderRadius: 7,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  padding: "0 10px",
+  fontFamily: theme.fontFamily,
+  fontSize: 12.5,
+  boxSizing: "border-box",
 } satisfies CSSProperties;
 
 const modalBackdropStyle = {
@@ -152,8 +163,8 @@ const modalCardStyle = {
   width: "min(560px, 100%)",
   maxHeight: "min(84vh, 780px)",
   overflow: "auto",
-  background: PLATFORM_THEME.surface,
-  border: `1px solid ${PLATFORM_THEME.border}`,
+  background: theme.surface,
+  border: `1px solid ${theme.border}`,
   borderRadius: 14,
   boxShadow: "0 24px 64px rgba(15, 23, 42, 0.22)",
 } satisfies CSSProperties;
@@ -163,20 +174,13 @@ const cardBodyStackStyle = {
   gap: 14,
 } satisfies CSSProperties;
 
-const inputStyle = {
-  width: "100%",
-  minHeight: 34,
-  borderRadius: 7,
-  border: `1px solid ${PLATFORM_THEME.border}`,
-  background: PLATFORM_THEME.bgRaised,
-  color: PLATFORM_THEME.text,
-  padding: "0 10px",
-  fontFamily: PLATFORM_THEME.fontFamily,
-  fontSize: 12.5,
-  boxSizing: "border-box",
+const monoMetaStyle = {
+  fontSize: 11,
+  color: theme.textDim,
+  fontFamily: theme.monoFamily,
 } satisfies CSSProperties;
 
-function buildPlatformNav(locale: string): CanvasShellNavItem[] {
+function buildPlatformNav(locale: Locale): CanvasShellNavItem[] {
   const labels =
     locale === "en"
       ? {
@@ -232,12 +236,7 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       badgeTone: "warn",
     },
     { divider: labels.tenantGov },
-    {
-      key: "tenants",
-      href: "/tenants",
-      icon: "tenants",
-      label: labels.tenants,
-    },
+    { key: "tenants", href: "/tenants", icon: "tenants", label: labels.tenants },
     {
       key: "partners",
       href: "/partners",
@@ -254,12 +253,7 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       label: labels.switchboard,
     },
     { divider: labels.pricingGov },
-    {
-      key: "pricing",
-      href: "/pricing",
-      icon: "pricing",
-      label: labels.pricing,
-    },
+    { key: "pricing", href: "/pricing", icon: "pricing", label: labels.pricing },
     {
       key: "payments",
       href: "/payments",
@@ -269,12 +263,7 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       badgeTone: "danger",
     },
     { divider: labels.platformLayer },
-    {
-      key: "notices",
-      href: "/notices",
-      icon: "notices",
-      label: labels.notices,
-    },
+    { key: "notices", href: "/notices", icon: "notices", label: labels.notices },
     { key: "audit", href: "/audit", icon: "audit", label: labels.audit },
     {
       key: "flags",
@@ -292,7 +281,7 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
 }
 
 function actionLabel(
-  locale: string,
+  locale: Locale,
   action: string,
   fallback?: string,
 ): string {
@@ -300,13 +289,17 @@ function actionLabel(
     refresh: { en: "Refresh", zh: "重新整理" },
     create_staff_user: { en: "Invite user", zh: "邀請人員" },
     create: { en: "Invite user", zh: "邀請人員" },
+    invite: { en: "Invite user", zh: "邀請人員" },
     update_role: { en: "Update role", zh: "更新角色" },
+    update: { en: "Update role", zh: "更新角色" },
     suspend: { en: "Suspend", zh: "停用" },
     reactivate: { en: "Reactivate", zh: "重新啟用" },
     view_audit: { en: "View audit", zh: "查看稽核" },
   };
   const value = labels[action];
-  if (value) return locale === "en" ? value.en : value.zh;
+  if (value) {
+    return locale === "en" ? value.en : value.zh;
+  }
   return fallback ?? action;
 }
 
@@ -384,23 +377,23 @@ function defaultPageActions(): ResourceActionDescriptor[] {
 
 function emptyReasonCopy(
   reason: EmptyReason,
-  locale: string,
+  locale: Locale,
 ): { title: string; body: string; tone: CanvasTone } {
   const zh: Record<EmptyReason, { title: string; body: string; tone: CanvasTone }> =
     {
       no_data: {
         title: "目前沒有平台人員資料",
-        body: "還沒有任何平台使用者主檔。若權限允許，可直接建立第一位內部治理人員。",
+        body: "尚未建立任何平台使用者主檔。若權限允許，可直接邀請第一位內部治理人員。",
         tone: "neutral",
       },
       not_provisioned: {
         title: "人員治理尚未啟用",
-        body: "此環境尚未 provision 平台使用者目錄，需先完成基礎設定或 bootstrap。",
+        body: "此環境尚未 provision 平台使用者目錄，需先完成 bootstrap 或基礎設定。",
         tone: "info",
       },
       fetch_failed: {
         title: "載入失敗",
-        body: "控制平面回應異常，畫面未取得有效使用者快照。請稍後重整並檢查 API 健康。",
+        body: "控制平面未回傳可信快照。請稍後重整並確認 API 與 admin runtime 健康狀態。",
         tone: "danger",
       },
       permission_denied: {
@@ -410,7 +403,7 @@ function emptyReasonCopy(
       },
       external_unavailable: {
         title: "外部依賴暫時不可用",
-        body: "上游 identity 或 directory 依賴目前不可用，頁面因此無法建立可信快照。",
+        body: "上游 identity 或 directory 依賴目前不可用，因此此頁無法建立可信快照。",
         tone: "warn",
       },
       filtered_empty: {
@@ -424,7 +417,7 @@ function emptyReasonCopy(
     {
       no_data: {
         title: "No platform users yet",
-        body: "No internal staff records exist in this environment. Create the first governed user if your scope allows it.",
+        body: "No internal staff records exist in this environment. Invite the first governed user if your scope allows it.",
         tone: "neutral",
       },
       not_provisioned: {
@@ -434,7 +427,7 @@ function emptyReasonCopy(
       },
       fetch_failed: {
         title: "Unable to load the roster",
-        body: "The control plane did not return a usable snapshot. Refresh after API health recovers.",
+        body: "The control plane did not return a trusted snapshot. Refresh after the admin runtime recovers.",
         tone: "danger",
       },
       permission_denied: {
@@ -459,7 +452,7 @@ function emptyReasonCopy(
 
 function statusTone(status: PlatformAdminUserStatus): CanvasTone {
   if (status === "active") return "success";
-  if (status === "invited") return "info";
+  if (status === "invited") return "warn";
   return "danger";
 }
 
@@ -487,19 +480,40 @@ function resolveLinkHref(link: CrossAppResourceLink): string {
   return origin ? `${origin}${link.route}` : link.route;
 }
 
+function openCrossAppLink(link: CrossAppResourceLink) {
+  const href = resolveLinkHref(link);
+  if (link.openMode === "new_tab") {
+    window.open(href, "_blank", "noopener,noreferrer");
+    return;
+  }
+  window.location.assign(href);
+}
+
+function userInitials(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1))
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
+
 function UsersActionButton({
   locale,
   descriptor,
   onClick,
 }: {
-  locale: string;
+  locale: Locale;
   descriptor: ResourceActionDescriptor;
   onClick?: () => void;
 }) {
   const tone = actionTone(descriptor);
+
   return (
     <CanvasBtn
-      theme={PLATFORM_THEME}
+      theme={theme}
       size="xs"
       variant={tone.variant}
       danger={tone.danger}
@@ -518,26 +532,27 @@ function EmptyStatePanel({
   nextAction,
   onNextAction,
 }: {
-  locale: string;
+  locale: Locale;
   reason: EmptyReason;
   nextAction?: ResourceActionDescriptor;
   onNextAction?: () => void;
 }) {
   const copy = emptyReasonCopy(reason, locale);
+
   return (
     <CanvasCard
-      theme={PLATFORM_THEME}
+      theme={theme}
       title={copy.title}
       subtitle={reason}
       style={{
         background:
           copy.tone === "danger"
-            ? PLATFORM_THEME.dangerBg
+            ? theme.dangerBg
             : copy.tone === "warn"
-              ? PLATFORM_THEME.warnBg
+              ? theme.warnBg
               : copy.tone === "info"
-                ? PLATFORM_THEME.infoBg
-                : PLATFORM_THEME.surface,
+                ? theme.infoBg
+                : theme.surface,
       }}
     >
       <div style={{ display: "grid", gap: 12 }}>
@@ -572,7 +587,7 @@ function ActionModal({
   onReasonChange,
   onConfirm,
 }: {
-  locale: string;
+  locale: Locale;
   pendingAction: PendingAction;
   formEmail: string;
   formDisplayName: string;
@@ -616,7 +631,7 @@ function ActionModal({
   const subtitle =
     pendingAction.kind === "create"
       ? locale === "en"
-        ? "Medium-risk governance action. The backend remains the RBAC authority."
+        ? "Medium-risk governance action. RBAC authority remains backend-driven."
         : "中風險治理操作；RBAC 真值仍由後端 authority 決定。"
       : pendingAction.kind === "update_role"
         ? locale === "en"
@@ -630,11 +645,11 @@ function ActionModal({
     <div style={modalBackdropStyle}>
       <div style={modalCardStyle}>
         <CanvasCard
-          theme={PLATFORM_THEME}
+          theme={theme}
           title={title}
           subtitle={subtitle}
           actions={
-            <CanvasBtn theme={PLATFORM_THEME} variant="ghost" onClick={onClose}>
+            <CanvasBtn theme={theme} variant="ghost" onClick={onClose}>
               {locale === "en" ? "Close" : "關閉"}
             </CanvasBtn>
           }
@@ -642,10 +657,7 @@ function ActionModal({
           <div style={cardBodyStackStyle}>
             {pendingAction.kind === "create" ? (
               <>
-                <CanvasField
-                  theme={PLATFORM_THEME}
-                  label={locale === "en" ? "Email" : "電子郵件"}
-                >
+                <CanvasField theme={theme} label={locale === "en" ? "Email" : "電子郵件"}>
                   <input
                     type="email"
                     value={formEmail}
@@ -655,7 +667,7 @@ function ActionModal({
                   />
                 </CanvasField>
                 <CanvasField
-                  theme={PLATFORM_THEME}
+                  theme={theme}
                   label={locale === "en" ? "Display name" : "顯示名稱"}
                 >
                   <input
@@ -667,7 +679,7 @@ function ActionModal({
                   />
                 </CanvasField>
                 <CanvasField
-                  theme={PLATFORM_THEME}
+                  theme={theme}
                   label={locale === "en" ? "Initial role" : "初始角色"}
                 >
                   <select
@@ -675,10 +687,7 @@ function ActionModal({
                     onChange={(event) =>
                       onRoleChange(event.target.value as PlatformAdminUserRole)
                     }
-                    style={{
-                      ...inputStyle,
-                      paddingRight: 28,
-                    }}
+                    style={{ ...inputStyle, paddingRight: 28 }}
                   >
                     {ROLE_CODES.map((roleCode) => (
                       <option key={roleCode} value={roleCode}>
@@ -691,7 +700,7 @@ function ActionModal({
             ) : (
               <>
                 <CanvasDL
-                  theme={PLATFORM_THEME}
+                  theme={theme}
                   cols={1}
                   items={[
                     {
@@ -718,7 +727,7 @@ function ActionModal({
                 />
                 {pendingAction.kind === "update_role" ? (
                   <CanvasField
-                    theme={PLATFORM_THEME}
+                    theme={theme}
                     label={locale === "en" ? "Target role" : "目標角色"}
                   >
                     <select
@@ -726,10 +735,7 @@ function ActionModal({
                       onChange={(event) =>
                         onRoleChange(event.target.value as PlatformAdminUserRole)
                       }
-                    style={{
-                        ...inputStyle,
-                        paddingRight: 28,
-                      }}
+                      style={{ ...inputStyle, paddingRight: 28 }}
                     >
                       {ROLE_CODES.map((roleCode) => (
                         <option key={roleCode} value={roleCode}>
@@ -741,7 +747,7 @@ function ActionModal({
                 ) : null}
                 {isHighRisk ? (
                   <CanvasField
-                    theme={PLATFORM_THEME}
+                    theme={theme}
                     label={locale === "en" ? "Reason" : "原因"}
                     hint={
                       locale === "en"
@@ -758,14 +764,12 @@ function ActionModal({
                         resize: "vertical",
                         borderRadius: 10,
                         border: `1px solid ${
-                          reason.trim()
-                            ? PLATFORM_THEME.border
-                            : PLATFORM_THEME.danger
+                          reason.trim() ? theme.border : theme.danger
                         }`,
-                        background: PLATFORM_THEME.bgRaised,
-                        color: PLATFORM_THEME.text,
+                        background: theme.bgRaised,
+                        color: theme.text,
                         padding: 10,
-                        fontFamily: PLATFORM_THEME.fontFamily,
+                        fontFamily: theme.fontFamily,
                         fontSize: 12.5,
                         boxSizing: "border-box",
                       }}
@@ -780,11 +784,11 @@ function ActionModal({
               </>
             )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <CanvasBtn theme={PLATFORM_THEME} variant="secondary" onClick={onClose}>
+              <CanvasBtn theme={theme} variant="secondary" onClick={onClose}>
                 {locale === "en" ? "Cancel" : "取消"}
               </CanvasBtn>
               <CanvasBtn
-                theme={PLATFORM_THEME}
+                theme={theme}
                 variant="primary"
                 danger={descriptor.riskLevel === "high"}
                 disabled={disabled}
@@ -806,7 +810,9 @@ function ActionModal({
 
 export default function UsersPage() {
   const { locale } = useTranslation();
+  const searchParams = useSearchParams();
   const client = usePlatformAdminClient();
+
   const nav = useMemo(() => buildPlatformNav(locale), [locale]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [pageActions, setPageActions] = useState<ResourceActionDescriptor[]>(
@@ -830,19 +836,12 @@ export default function UsersPage() {
   const [creating, setCreating] = useState(false);
   const [mutatingUserId, setMutatingUserId] = useState<string | null>(null);
 
-  const queryOverrides = useMemo(() => {
-    if (typeof window === "undefined") {
-      return { emptyReason: null as EmptyReason | null };
-    }
-    const params = new URLSearchParams(window.location.search);
-    const emptyReasonParam = params.get("emptyReason");
-    const emptyReason = EMPTY_REASON_OPTIONS.includes(
-      emptyReasonParam as EmptyReason,
-    )
-      ? (emptyReasonParam as EmptyReason)
+  const emptyReasonOverride = useMemo(() => {
+    const value = searchParams.get("emptyReason");
+    return EMPTY_REASON_OPTIONS.includes(value as EmptyReason)
+      ? (value as EmptyReason)
       : null;
-    return { emptyReason };
-  }, []);
+  }, [searchParams]);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -906,6 +905,7 @@ export default function UsersPage() {
 
   const visibleUsers = useMemo(() => {
     const loweredSearch = search.trim().toLowerCase();
+
     return users.filter((user) => {
       if (filter !== "all" && user.status !== filter) {
         return false;
@@ -921,22 +921,19 @@ export default function UsersPage() {
 
   const counts = useMemo(
     () => ({
-      total: users.length,
+      all: users.length,
       active: users.filter((user) => user.status === "active").length,
       invited: users.filter((user) => user.status === "invited").length,
       suspended: users.filter((user) => user.status === "suspended").length,
-      elevated: users.filter(
-        (user) => user.roleCode === "superadmin" || user.roleCode === "admin",
-      ).length,
     }),
     [users],
   );
 
   const effectiveEmptyState = useMemo(() => {
-    if (queryOverrides.emptyReason) {
+    if (emptyReasonOverride) {
       return {
-        reason: queryOverrides.emptyReason,
-        messageCode: `forced_${queryOverrides.emptyReason}`,
+        reason: emptyReasonOverride,
+        messageCode: `forced_${emptyReasonOverride}`,
       } satisfies EmptyStateEnvelope;
     }
     if (visibleUsers.length > 0) {
@@ -955,15 +952,46 @@ export default function UsersPage() {
       reason: "no_data",
       messageCode: "platform_users_no_data",
     } satisfies EmptyStateEnvelope;
-  }, [filter, queryOverrides.emptyReason, search, serverEmptyState, visibleUsers]);
+  }, [emptyReasonOverride, filter, search, serverEmptyState, visibleUsers]);
 
   const primaryCreateAction =
     pageActions.find((action) =>
       ["create_staff_user", "create", "invite"].includes(action.action),
     ) ?? defaultPageActions()[1];
+
   const refreshAction =
     pageActions.find((action) => action.action === "refresh") ??
     defaultPageActions()[0];
+
+  const deepLinks = useMemo<CrossAppResourceLink[]>(
+    () => [
+      {
+        targetApp: "platform-admin",
+        route: "/audit?resourceType=platform_admin_user",
+        resourceType: "platform_admin_user",
+        resourceId: "all",
+        openMode: "new_tab",
+        label: locale === "en" ? "Audit trail" : "使用者稽核",
+      },
+      {
+        targetApp: "ops-console",
+        route: "/dispatch",
+        resourceType: "dispatch_board",
+        resourceId: "ops",
+        openMode: "new_tab",
+        label: locale === "en" ? "Ops dispatch board" : "Ops 調度看板",
+      },
+      {
+        targetApp: "ops-console",
+        route: "/revenue",
+        resourceType: "reconciliation_issue",
+        resourceId: "mirror",
+        openMode: "new_tab",
+        label: locale === "en" ? "Revenue mirror" : "Revenue 鏡像",
+      },
+    ],
+    [locale],
+  );
 
   const openCreateModal = useCallback(() => {
     setFormEmail("");
@@ -974,13 +1002,13 @@ export default function UsersPage() {
   }, [primaryCreateAction]);
 
   const openRowAction = useCallback((user: UserRow, action: ResourceActionDescriptor) => {
-    if (action.action === "view_audit") {
-      window.open(resolveLinkHref(user.auditLink), "_blank", "noopener,noreferrer");
-      return;
-    }
     setFormRoleCode(user.roleCode);
     setReason("");
-    if (action.action === "update_role") {
+    if (action.action === "view_audit") {
+      openCrossAppLink(user.auditLink);
+      return;
+    }
+    if (action.action === "update_role" || action.action === "update") {
       setPendingAction({ kind: "update_role", descriptor: action, user });
       return;
     }
@@ -1024,6 +1052,7 @@ export default function UsersPage() {
 
     const { user } = pendingAction;
     setMutatingUserId(user.userId);
+
     try {
       setError(null);
       if (pendingAction.kind === "update_role") {
@@ -1056,74 +1085,75 @@ export default function UsersPage() {
     pendingAction,
   ]);
 
-  const tableColumns = useMemo<CanvasTableColumn<UsersTableRow>[]>(
+  const tableColumns = useMemo<CanvasTableColumn<UserRow>[]>(
     () => [
       {
-        h: locale === "en" ? "Name" : "姓名",
-        w: 250,
+        h: locale === "en" ? "Name" : "NAME",
+        w: 220,
         r: (row) => (
-          <div style={{ display: "grid", gap: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: 12,
-                  background: PLATFORM_THEME.accentBg,
-                  color: PLATFORM_THEME.accent,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                }}
-              >
-                {row.displayName.slice(0, 2).toUpperCase()}
-              </span>
-              <span style={{ fontWeight: 600 }}>{row.displayName}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 11,
+                background: theme.accentBg,
+                color: theme.accent,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 10,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}
+            >
+              {userInitials(row.displayName)}
+            </span>
+            <div style={{ display: "grid", gap: 2 }}>
+              <span style={{ fontWeight: 500 }}>{row.displayName}</span>
+              <span style={monoMetaStyle}>{row.userId}</span>
             </div>
-            <span style={inlineMetaStyle}>{row.userId}</span>
           </div>
         ),
       },
       {
         h: "EMAIL",
-        w: 250,
+        w: 240,
         mono: true,
         r: (row) => row.email,
       },
       {
-        h: locale === "en" ? "Role" : "角色",
+        h: locale === "en" ? "Role" : "ROLE",
         w: 180,
         r: (row) => (
-          <CanvasPill theme={PLATFORM_THEME} tone={roleTone(row.roleCode)}>
+          <CanvasPill theme={theme} tone={roleTone(row.roleCode)}>
             {formatPlatformCodeLabel(locale, row.roleCode)}
           </CanvasPill>
         ),
       },
       {
-        h: locale === "en" ? "Status" : "狀態",
-        w: 140,
+        h: locale === "en" ? "Status" : "STATUS",
+        w: 120,
         r: (row) => (
-          <CanvasPill theme={PLATFORM_THEME} tone={statusTone(row.status)} dot>
+          <CanvasPill theme={theme} tone={statusTone(row.status)} dot>
             {formatPlatformCodeLabel(locale, row.status)}
           </CanvasPill>
         ),
       },
       {
-        h: locale === "en" ? "Updated" : "更新時間",
-        w: 170,
+        h: locale === "en" ? "Updated" : "更新",
+        w: 150,
         mono: true,
         r: (row) => formatDateTime(row.updatedAt),
       },
       {
-        h: locale === "en" ? "Actions" : "操作",
-        w: 280,
+        h: "ACTIONS",
+        w: 260,
         align: "right",
         r: (row) => (
           <div style={actionRowStyle}>
             {row.availableActions.length === 0 ? (
-              <CanvasPill theme={PLATFORM_THEME} tone="neutral">
+              <CanvasPill theme={theme} tone="neutral">
                 {locale === "en" ? "Read only" : "唯讀"}
               </CanvasPill>
             ) : (
@@ -1143,64 +1173,28 @@ export default function UsersPage() {
     [locale, openRowAction],
   );
 
-  const deepLinks = useMemo<CrossAppResourceLink[]>(
-    () => [
-      {
-        targetApp: "platform-admin",
-        route: "/audit?resourceType=platform_admin_user",
-        resourceType: "platform_admin_user",
-        resourceId: "all",
-        openMode: "new_tab",
-        label: locale === "en" ? "Audit users" : "查看使用者稽核",
-      },
-      {
-        targetApp: "ops-console",
-        route: "/revenue",
-        resourceType: "reconciliation_issue",
-        resourceId: "mirror",
-        openMode: "new_tab",
-        label:
-          locale === "en"
-            ? "Open ops revenue mirror"
-            : "開啟 ops revenue 鏡像",
-      },
-      {
-        targetApp: "platform-admin",
-        route: "/adapter-registry",
-        resourceType: "adapter_registry",
-        resourceId: "all",
-        openMode: "same_tab",
-        label:
-          locale === "en"
-            ? "Inspect adapter registry"
-            : "檢視 adapter registry",
-      },
-    ],
-    [locale],
-  );
-
   return (
     <>
       <CanvasShell
-        theme={PLATFORM_THEME}
+        theme={theme}
         nav={nav}
         currentPath="/users"
         env="production"
-        breadcrumb={[locale === "en" ? "People & Fleet" : "人員與車隊", locale === "en" ? "Platform users" : "平台人員"]}
+        breadcrumb={[locale === "en" ? "Platform users" : "平台人員"]}
         style={shellStyle}
       >
         <CanvasPageHeader
-          theme={PLATFORM_THEME}
+          theme={theme}
           title={locale === "en" ? "Platform users" : "平台人員"}
           subtitle={
             locale === "en"
-              ? "Internal identity governance for platform-only access. Visual matches the canvas; action authority remains backend-driven."
-              : "平台內部身分治理與平台專屬權限控制。視覺對齊 canvas，操作權限仍以後端 authority 為準。"
+              ? "Internal identity governance. Visual aligned to the canvas; action authority remains backend-driven."
+              : "平台內部身分治理。視覺對齊 canvas，操作權限仍由後端 authority 決定。"
           }
           actions={
             <>
-              <CanvasPill theme={PLATFORM_THEME} tone="neutral">
-                {REFRESH_TIER_LABEL} · {locale === "en" ? "30s cadence" : "30 秒 cadence"}
+              <CanvasPill theme={theme} tone="neutral">
+                {REFRESH_TIER_LABEL} · 30s
               </CanvasPill>
               <UsersActionButton
                 locale={locale}
@@ -1217,43 +1211,8 @@ export default function UsersPage() {
         />
 
         <div style={pageStackStyle}>
-          <div
-            style={{
-              display: "grid",
-              gap: 12,
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            }}
-          >
-            <CanvasKPI
-              theme={PLATFORM_THEME}
-              label={locale === "en" ? "Active staff" : "啟用中人員"}
-              value={String(counts.active)}
-              sub={
-                locale === "en"
-                  ? `${counts.invited} invited · ${counts.suspended} suspended`
-                  : `${counts.invited} 邀請中 · ${counts.suspended} 已停用`
-              }
-            />
-            <CanvasKPI
-              theme={PLATFORM_THEME}
-              label={locale === "en" ? "Admin coverage" : "管理權限覆蓋"}
-              value={String(counts.elevated)}
-              sub={locale === "en" ? "superadmin + admin" : "superadmin + admin"}
-            />
-            <CanvasKPI
-              theme={PLATFORM_THEME}
-              label={locale === "en" ? "Roster size" : "總人數"}
-              value={String(counts.total)}
-              sub={
-                locale === "en"
-                  ? "Must-show: id, email, role, status, updated"
-                  : "必顯資料：id、email、role、status、updated"
-              }
-            />
-          </div>
-
           <CanvasBanner
-            theme={PLATFORM_THEME}
+            theme={theme}
             tone={
               refreshMeta.dataFreshness === "fresh"
                 ? "info"
@@ -1268,266 +1227,197 @@ export default function UsersPage() {
             }
             body={
               locale === "en"
-                ? `Generated ${formatDateTime(refreshMeta.generatedAt)} from ${refreshMeta.source}. This screen polls on the T4 admin medium-slow cadence.`
-                : `資料於 ${formatDateTime(refreshMeta.generatedAt)} 由 ${refreshMeta.source} 來源產生。此頁依 T4 admin medium-slow cadence 輪詢。`
+                ? `Generated ${formatDateTime(refreshMeta.generatedAt)} from ${refreshMeta.source}. This screen follows the T4 medium-slow cadence from the packet.`
+                : `資料於 ${formatDateTime(refreshMeta.generatedAt)} 由 ${refreshMeta.source} 來源產生。此頁依 packet 指定的 T4 medium-slow cadence 輪詢。`
             }
             actions={
-              <CanvasBtn
-                theme={PLATFORM_THEME}
-                variant="secondary"
-                size="sm"
-                onClick={() => void loadUsers()}
-              >
-                {locale === "en" ? "Refresh now" : "立即重整"}
-              </CanvasBtn>
+              <div style={pillRowStyle}>
+                {deepLinks.map((link) => (
+                  <CanvasBtn
+                    key={`${link.targetApp}-${link.route}`}
+                    theme={theme}
+                    variant="secondary"
+                    size="xs"
+                    onClick={() => openCrossAppLink(link)}
+                  >
+                    {link.label}
+                  </CanvasBtn>
+                ))}
+              </div>
             }
           />
 
-          <div style={contentGridStyle}>
-            <div style={{ display: "grid", gap: 16 }}>
-              <CanvasCard
-                theme={PLATFORM_THEME}
-                title={
-                  locale === "en" ? "Platform staff roster" : "平台人員名冊"
-                }
-                subtitle={
-                  locale === "en"
-                    ? "Spec §5.7: create, update role, suspend/reactivate via availableActions."
-                    : "對應 spec §5.7：建立、更新角色、停用／重新啟用皆由 availableActions 驅動。"
-                }
-              >
-                <div style={cardBodyStackStyle}>
-                  <div style={toolbarStyle}>
-                    <div style={pillRowStyle}>
-                      {[
-                        ["all", locale === "en" ? "All" : "全部", counts.total],
-                        ["active", locale === "en" ? "Active" : "啟用", counts.active],
-                        [
-                          "invited",
-                          locale === "en" ? "Invited" : "邀請中",
-                          counts.invited,
-                        ],
-                        [
-                          "suspended",
-                          locale === "en" ? "Suspended" : "停用",
-                          counts.suspended,
-                        ],
-                      ].map(([value, label, count]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => setFilter(value as UserFilter)}
-                          style={{
-                            border: `1px solid ${
-                              filter === value
-                                ? PLATFORM_THEME.accent
-                                : PLATFORM_THEME.border
-                            }`,
-                            background:
-                              filter === value
-                                ? PLATFORM_THEME.accentBg
-                                : PLATFORM_THEME.surface,
-                            color:
-                              filter === value
-                                ? PLATFORM_THEME.accent
-                                : PLATFORM_THEME.text,
-                            borderRadius: 999,
-                            minHeight: 30,
-                            padding: "0 12px",
-                            fontFamily: PLATFORM_THEME.fontFamily,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            cursor: "pointer",
-                          }}
-                        >
-                          {label} · {count}
-                        </button>
-                      ))}
-                    </div>
-                    <div style={{ width: "min(280px, 100%)" }}>
-                      <input
-                        type="search"
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                        placeholder={
-                          locale === "en"
-                            ? "Search name, email, id, role"
-                            : "搜尋姓名、email、id、role"
-                        }
-                        style={inputStyle}
-                      />
-                    </div>
-                  </div>
-
-                  {loading ? (
-                    <CanvasBanner
-                      theme={PLATFORM_THEME}
-                      tone="info"
-                      title={locale === "en" ? "Loading users" : "載入平台人員中"}
-                      body={
-                        locale === "en"
-                          ? "Fetching the latest T4 snapshot from the control plane."
-                          : "正在從控制平面取得最新的 T4 快照。"
-                      }
-                    />
-                  ) : effectiveEmptyState ? (
-                    <EmptyStatePanel
-                      locale={locale}
-                      reason={effectiveEmptyState.reason}
-                      nextAction={
-                        effectiveEmptyState.nextAction ??
-                        (effectiveEmptyState.reason === "no_data" ||
-                        effectiveEmptyState.reason === "not_provisioned"
-                          ? primaryCreateAction
-                          : effectiveEmptyState.reason === "fetch_failed" ||
-                              effectiveEmptyState.reason ===
-                                "external_unavailable"
-                            ? refreshAction
-                            : undefined)
-                      }
-                      onNextAction={() => {
-                        if (
-                          effectiveEmptyState.reason === "no_data" ||
-                          effectiveEmptyState.reason === "not_provisioned"
-                        ) {
-                          openCreateModal();
-                          return;
-                        }
-                        void loadUsers();
-                      }}
-                    />
-                  ) : (
-                    <CanvasTable
-                      theme={PLATFORM_THEME}
-                      columns={tableColumns}
-                      rows={visibleUsers}
-                    />
-                  )}
-                  {error ? (
-                    <div style={inlineMetaStyle}>{error}</div>
-                  ) : null}
+          <CanvasCard
+            theme={theme}
+            title={locale === "en" ? "Platform users" : "平台人員"}
+            subtitle={
+              locale === "en"
+                ? "Spec §5.7: must-show id, display name, email, role, status, updated time. CTAs render from availableActions."
+                : "對應 spec §5.7：必顯 id、display name、email、role、status、updated time，CTA 由 availableActions 驅動。"
+            }
+          >
+            <div style={cardBodyStackStyle}>
+              <div style={toolbarStyle}>
+                <div style={pillRowStyle}>
+                  {[
+                    ["all", locale === "en" ? "All" : "全部", counts.all],
+                    ["active", locale === "en" ? "Active" : "啟用", counts.active],
+                    ["invited", locale === "en" ? "Invited" : "邀請中", counts.invited],
+                    [
+                      "suspended",
+                      locale === "en" ? "Suspended" : "停用",
+                      counts.suspended,
+                    ],
+                  ].map(([value, label, count]) => {
+                    const selected = filter === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setFilter(value as UserFilter)}
+                        style={{
+                          border: `1px solid ${
+                            selected ? theme.accent : theme.border
+                          }`,
+                          background: selected ? theme.accentBg : theme.surface,
+                          color: selected ? theme.accent : theme.text,
+                          borderRadius: 999,
+                          minHeight: 30,
+                          padding: "0 12px",
+                          fontFamily: theme.fontFamily,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {label} · {count}
+                      </button>
+                    );
+                  })}
                 </div>
-              </CanvasCard>
-            </div>
 
-            <div style={{ display: "grid", gap: 16 }}>
-              <CanvasCard
-                theme={PLATFORM_THEME}
-                title={locale === "en" ? "Governance posture" : "治理姿態"}
-                subtitle={
-                  locale === "en"
-                    ? "State variants, role framing, and cross-app references."
-                    : "狀態變體、角色 framing 與 cross-app 參照。"
-                }
-              >
-                <div style={cardBodyStackStyle}>
-                  <CanvasDL
-                    theme={PLATFORM_THEME}
-                    cols={1}
-                    items={[
-                      {
-                        k: locale === "en" ? "Primary persona" : "主要 persona",
-                        v: "pa_super_admin",
-                        mono: true,
-                      },
-                      {
-                        k: locale === "en" ? "Refresh tier" : "Refresh tier",
-                        v: `${REFRESH_TIER_LABEL} · ${REFRESH_TIER}`,
-                        mono: true,
-                      },
-                      {
-                        k: locale === "en" ? "State variants" : "狀態變體",
-                        v:
-                          locale === "en"
-                            ? "empty, pending invitation, suspended"
-                            : "empty、pending invitation、suspended",
-                      },
-                      {
-                        k: "EmptyReason",
-                        v: EMPTY_REASON_OPTIONS.join(" · "),
-                        mono: true,
-                      },
-                    ]}
+                <div style={{ width: "min(280px, 100%)" }}>
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={
+                      locale === "en"
+                        ? "Search name, email, id, role"
+                        : "搜尋姓名、email、id、role"
+                    }
+                    style={inputStyle}
                   />
-                  <div style={pillRowStyle}>
-                    {EMPTY_REASON_OPTIONS.map((reasonOption) => (
-                      <Link
-                        key={reasonOption}
-                        href={`/users?emptyReason=${reasonOption}`}
-                        style={{
-                          textDecoration: "none",
-                        }}
-                      >
-                        <CanvasPill theme={PLATFORM_THEME} tone="neutral">
-                          {reasonOption}
-                        </CanvasPill>
-                      </Link>
-                    ))}
-                  </div>
                 </div>
-              </CanvasCard>
+              </div>
 
-              <CanvasCard
-                theme={PLATFORM_THEME}
-                title={locale === "en" ? "Cross-app deep links" : "Cross-app deep links"}
-                subtitle={
-                  locale === "en"
-                    ? "Spec Q-X03 targets surfaced from the users lane."
-                    : "從 users lane 暴露的 spec Q-X03 deep-link 目標。"
-                }
-              >
-                <div style={cardBodyStackStyle}>
-                  {deepLinks.map((link) => (
-                    <div
-                      key={`${link.targetApp}-${link.route}`}
-                      style={{
-                        display: "grid",
-                        gap: 6,
-                        padding: 12,
-                        border: `1px solid ${PLATFORM_THEME.border}`,
-                        borderRadius: 10,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 8,
-                        }}
-                      >
-                        <strong>{link.label}</strong>
-                        <CanvasPill
-                          theme={PLATFORM_THEME}
-                          tone={link.targetApp === "ops-console" ? "info" : "accent"}
-                        >
-                          {link.targetApp}
-                        </CanvasPill>
-                      </div>
-                      <div style={inlineMetaStyle}>
-                        {link.route} · {link.openMode}
-                      </div>
-                      <div>
-                        <a
-                          href={resolveLinkHref(link)}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{
-                            color: PLATFORM_THEME.accent,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            textDecoration: "none",
-                          }}
-                        >
-                          {locale === "en" ? "Open link" : "開啟連結"}
-                        </a>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CanvasCard>
+              {loading ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="info"
+                  title={locale === "en" ? "Loading users" : "載入平台人員中"}
+                  body={
+                    locale === "en"
+                      ? "Fetching the latest roster snapshot from the control plane."
+                      : "正在從控制平面取得最新的人員快照。"
+                  }
+                />
+              ) : effectiveEmptyState ? (
+                <EmptyStatePanel
+                  locale={locale}
+                  reason={effectiveEmptyState.reason}
+                  nextAction={
+                    effectiveEmptyState.nextAction ??
+                    (effectiveEmptyState.reason === "no_data" ||
+                    effectiveEmptyState.reason === "not_provisioned"
+                      ? primaryCreateAction
+                      : effectiveEmptyState.reason === "fetch_failed" ||
+                          effectiveEmptyState.reason === "external_unavailable"
+                        ? refreshAction
+                        : undefined)
+                  }
+                  onNextAction={() => {
+                    if (
+                      effectiveEmptyState.reason === "no_data" ||
+                      effectiveEmptyState.reason === "not_provisioned"
+                    ) {
+                      openCreateModal();
+                      return;
+                    }
+                    void loadUsers();
+                  }}
+                />
+              ) : (
+                <CanvasTable theme={theme} columns={tableColumns} rows={visibleUsers} />
+              )}
+
+              {error ? <div style={inlineMetaStyle}>{error}</div> : null}
             </div>
-          </div>
+          </CanvasCard>
+
+          <CanvasCard
+            theme={theme}
+            title={locale === "en" ? "Screen notes" : "畫面備註"}
+            subtitle={
+              locale === "en"
+                ? "Packet behavior anchors kept explicit for review."
+                : "保留 packet 行為錨點，方便 review。"
+            }
+          >
+            <div style={cardBodyStackStyle}>
+              <CanvasDL
+                theme={theme}
+                cols={2}
+                items={[
+                  {
+                    k: locale === "en" ? "Spec ref" : "Spec ref",
+                    v: "§5.7",
+                    mono: true,
+                  },
+                  {
+                    k: locale === "en" ? "Primary persona" : "主要 persona",
+                    v: "pa_super_admin",
+                    mono: true,
+                  },
+                  {
+                    k: locale === "en" ? "Refresh tier" : "Refresh tier",
+                    v: `${REFRESH_TIER_LABEL} · ${REFRESH_TIER}`,
+                    mono: true,
+                  },
+                  {
+                    k: "EmptyReason",
+                    v: EMPTY_REASON_OPTIONS.join(" · "),
+                    mono: true,
+                  },
+                  {
+                    k: locale === "en" ? "State variants" : "狀態變體",
+                    v:
+                      locale === "en"
+                        ? "empty · pending invitation · suspended"
+                        : "empty · pending invitation · suspended",
+                  },
+                  {
+                    k: locale === "en" ? "Deep links" : "Deep links",
+                    v:
+                      locale === "en"
+                        ? "audit / ops dispatch / revenue mirror"
+                        : "audit / ops dispatch / revenue mirror",
+                  },
+                ]}
+              />
+              <div style={pillRowStyle}>
+                {EMPTY_REASON_OPTIONS.map((reasonOption) => (
+                  <CanvasPill
+                    key={reasonOption}
+                    theme={theme}
+                    tone={effectiveEmptyState?.reason === reasonOption ? "accent" : "neutral"}
+                  >
+                    {reasonOption}
+                  </CanvasPill>
+                ))}
+              </div>
+            </div>
+          </CanvasCard>
         </div>
       </CanvasShell>
 
