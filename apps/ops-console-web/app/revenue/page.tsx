@@ -99,7 +99,7 @@ const pageStackStyle: CSSProperties = {
 
 const kpiGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
 };
 
@@ -112,7 +112,7 @@ const filterRowStyle: CSSProperties = {
 
 const drawerLayoutStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 380px",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 380px)",
   gap: 16,
 };
 
@@ -229,6 +229,10 @@ function classifyOrderChannel(order: OwnedOrderRecord): string {
 
 function isoMinusMs(ms: number): string {
   return new Date(Date.now() - ms).toISOString();
+}
+
+function matchRevenueWindow(timestamp: string, period: RevenuePeriod): boolean {
+  return matchesRevenuePeriod(timestamp, period);
 }
 
 function buildRefreshMetadata(anyFetchFailed: boolean): UiRefreshMetadata {
@@ -875,14 +879,15 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     ({ order }) => !order.partnerId,
   ).length;
   const totalTrips = relevantCompletedTasks.length;
+  const filteredForwardedOrders = forwardedOrders.filter((order) =>
+    matchRevenueWindow(order.createdAt, filters.period),
+  );
   const forwardedSyncFailedCount = forwardedOrders.filter(
     (order) =>
       order.status === "sync_failed" &&
-      matchesRevenuePeriod(order.createdAt, filters.period),
+      matchRevenueWindow(order.createdAt, filters.period),
   ).length;
-  const forwardedActiveCount = forwardedOrders.filter((order) =>
-    matchesRevenuePeriod(order.createdAt, filters.period),
-  ).length;
+  const forwardedActiveCount = filteredForwardedOrders.length;
   const forwardedSyncFailedPct = pctLabel(
     forwardedSyncFailedCount,
     Math.max(forwardedActiveCount, 1),
@@ -893,10 +898,34 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     (issue) => issue.status === "open" || issue.status === "assigned",
   ).length;
   const filteredForwarderIssues = forwarderIssues.filter((issue) =>
-    matchesRevenuePeriod(issue.createdAt, filters.period),
+    matchRevenueWindow(issue.createdAt, filters.period),
   );
   const mismatchCount = filteredForwarderIssues.length;
   const recognisedRevenueMinor = insights.totalRevenueMinor;
+  const matrixEvidenceByChannel = {
+    tenant_enterprise: t("revenue.matrix.evidence.tenant_enterprise", locale, {
+      orders: relevantCompletedTasks.filter(
+        ({ order }) => order.businessDispatchSubtype === "enterprise_dispatch",
+      ).length,
+      statements: statements.filter((statement) =>
+        matchRevenueWindow(statement.createdAt, filters.period),
+      ).length,
+    }),
+    partner_airport: t("revenue.matrix.evidence.partner_airport", locale, {
+      trips: relevantCompletedTasks.filter(({ order }) =>
+        Boolean(order.partnerId),
+      ).length,
+    }),
+    phone_dispatch: t("revenue.matrix.evidence.phone_dispatch", locale, {
+      orders: relevantCompletedTasks.filter(
+        ({ order }) => order.orderSource === "phone",
+      ).length,
+    }),
+    forwarded_shadow: t("revenue.matrix.evidence.forwarded_shadow", locale, {
+      mirrors: filteredForwardedOrders.length,
+      syncFailed: forwardedSyncFailedCount,
+    }),
+  } as const;
 
   const financeIssueByJobId = new Map(
     financeIssues
@@ -1345,7 +1374,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                 actionReasonLabel(vehicleAction, locale),
               )
             )}
-            {vehicleOptions.slice(0, 8).map((vid) =>
+            {vehicleOptions.map((vid) =>
               vehicleAction.enabled ? (
                 <Link
                   key={`vehicle-${vid}`}
@@ -1658,6 +1687,11 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         row,
         row.reimbursementRule,
       ),
+      evidence:
+        matrixEvidenceByChannel[
+          row.channelKey as keyof typeof matrixEvidenceByChannel
+        ] ??
+        (row.reportingArtifacts.join(" · ") || row.notes || ""),
       ledgerMode: row.localLedgerMode,
     }));
 
@@ -1701,6 +1735,21 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
               {row.reimbursementRule}
             </div>
+          </div>
+        ),
+      },
+      {
+        h: t("revenue.matrix.col.evidence", locale),
+        w: 220,
+        r: (row) => (
+          <div
+            style={{
+              color: theme.textMuted,
+              fontSize: 11.5,
+              lineHeight: 1.4,
+            }}
+          >
+            {row.evidence || "—"}
           </div>
         ),
       },
