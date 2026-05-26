@@ -87,10 +87,19 @@ type PendingAction =
     };
 
 type EmptyStateDefinition = {
+  eyebrow: string;
   title: string;
   body: string;
   accent: string;
   suggestion: string;
+};
+
+type PageActionKind = "create_report_job" | "generate_filing_package";
+
+type PageActionDescriptor = {
+  action: PageActionKind;
+  enabled: boolean;
+  disabledReasonCode?: string | undefined;
 };
 
 type JobPresetMetadata = {
@@ -276,8 +285,12 @@ function jobCategory(jobType: string) {
     : "Operational";
 }
 
-function getRefreshMetadata(records: Array<{ refreshMetadata?: UiRefreshMetadata }>) {
-  const first = records.find((record) => record.refreshMetadata)?.refreshMetadata;
+function getRefreshMetadata(
+  records: Array<{ refreshMetadata?: UiRefreshMetadata }>,
+) {
+  const first = records.find(
+    (record) => record.refreshMetadata,
+  )?.refreshMetadata;
   if (first) {
     return first;
   }
@@ -290,7 +303,9 @@ function getRefreshMetadata(records: Array<{ refreshMetadata?: UiRefreshMetadata
   } satisfies UiRefreshMetadata;
 }
 
-function fallbackJobActions(job: RuntimeReportJob | RuntimeReportJobDetail): ReportAction[] {
+function fallbackJobActions(
+  job: RuntimeReportJob | RuntimeReportJobDetail,
+): ReportAction[] {
   const actions: ReportAction[] = [];
   if (job.artifact?.downloadUrl) {
     const expired = isExpired(job.artifact.expiresAt);
@@ -360,6 +375,10 @@ function fallbackPackageActions(
 
 function labelForAction(action: string, locale: "en" | "zh") {
   switch (action) {
+    case "create_report_job":
+      return copyText(locale, "Create report job", "建立報表工作");
+    case "generate_filing_package":
+      return copyText(locale, "Generate filing package", "產生申報套件");
     case "download_artifact":
       return copyText(locale, "Download", "下載");
     case "download_zip":
@@ -372,6 +391,23 @@ function labelForAction(action: string, locale: "en" | "zh") {
       return copyText(locale, "Inspect", "檢視");
     default:
       return formatOpsCodeLabel(locale, action);
+  }
+}
+
+function formatDisabledReason(code: string | undefined, locale: "en" | "zh") {
+  if (!code) {
+    return copyText(locale, "Action unavailable", "操作不可用");
+  }
+
+  switch (code) {
+    case "artifact_expired":
+      return copyText(
+        locale,
+        "Signed artifact link expired. Issue a fresh artifact first.",
+        "簽名成品連結已到期，請先重新發行成品。",
+      );
+    default:
+      return formatOpsCodeLabel(locale, code);
   }
 }
 
@@ -396,7 +432,12 @@ function getEmptyStateDefinition(
 ): EmptyStateDefinition {
   const definitions: Record<EmptyReason, EmptyStateDefinition> = {
     no_data: {
-      title: copyText(locale, "Nothing has been run yet", "目前尚未執行任何工作"),
+      eyebrow: copyText(locale, "No work yet", "尚無工作"),
+      title: copyText(
+        locale,
+        "Nothing has been run yet",
+        "目前尚未執行任何工作",
+      ),
       body: copyText(
         locale,
         "No report jobs or filing packages are available for this scope yet.",
@@ -410,7 +451,12 @@ function getEmptyStateDefinition(
       ),
     },
     not_provisioned: {
-      title: copyText(locale, "Reporting is not provisioned", "報表能力尚未開通"),
+      eyebrow: copyText(locale, "Provisioning required", "需要先開通"),
+      title: copyText(
+        locale,
+        "Reporting is not provisioned",
+        "報表能力尚未開通",
+      ),
       body: copyText(
         locale,
         "This tenant or role does not have report generation provisioned yet.",
@@ -424,7 +470,12 @@ function getEmptyStateDefinition(
       ),
     },
     fetch_failed: {
-      title: copyText(locale, "The snapshot could not be loaded", "快照載入失敗"),
+      eyebrow: copyText(locale, "Snapshot failed", "快照失敗"),
+      title: copyText(
+        locale,
+        "The snapshot could not be loaded",
+        "快照載入失敗",
+      ),
       body: copyText(
         locale,
         "The backend returned an error while loading report state.",
@@ -438,6 +489,7 @@ function getEmptyStateDefinition(
       ),
     },
     permission_denied: {
+      eyebrow: copyText(locale, "Permission required", "需要權限"),
       title: copyText(locale, "You do not have access", "你沒有此頁資料存取權"),
       body: copyText(
         locale,
@@ -452,7 +504,12 @@ function getEmptyStateDefinition(
       ),
     },
     external_unavailable: {
-      title: copyText(locale, "An external dependency is unavailable", "外部依賴目前不可用"),
+      eyebrow: copyText(locale, "External dependency", "外部依賴"),
+      title: copyText(
+        locale,
+        "An external dependency is unavailable",
+        "外部依賴目前不可用",
+      ),
       body: copyText(
         locale,
         "The reporting adapter is degraded or down, so artifacts cannot be issued.",
@@ -466,6 +523,7 @@ function getEmptyStateDefinition(
       ),
     },
     filtered_empty: {
+      eyebrow: copyText(locale, "Filter mismatch", "篩選不符"),
       title: copyText(locale, "Filters are too narrow", "篩選條件過窄"),
       body: copyText(
         locale,
@@ -480,7 +538,12 @@ function getEmptyStateDefinition(
       ),
     },
     driver_not_eligible: {
-      title: copyText(locale, "Driver eligibility does not apply here", "此頁不使用司機資格空態"),
+      eyebrow: copyText(locale, "Out of scope", "不適用"),
+      title: copyText(
+        locale,
+        "Driver eligibility does not apply here",
+        "此頁不使用司機資格空態",
+      ),
       body: copyText(
         locale,
         "This empty reason belongs to driver-app flows and is not expected on Reports.",
@@ -502,7 +565,9 @@ export default function ReportsPage() {
   const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<RuntimeReportJob[]>([]);
   const [packages, setPackages] = useState<RuntimeFilingPackage[]>([]);
-  const [jobDetail, setJobDetail] = useState<RuntimeReportJobDetail | null>(null);
+  const [jobDetail, setJobDetail] = useState<RuntimeReportJobDetail | null>(
+    null,
+  );
   const [packageDetail, setPackageDetail] =
     useState<RuntimeFilingPackageDetail | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -524,7 +589,9 @@ export default function ReportsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [notice, setNotice] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
+    null,
+  );
   const [reasonText, setReasonText] = useState("");
 
   useEffect(() => {
@@ -626,7 +693,9 @@ export default function ReportsPage() {
           await loadData();
           await inspectReportJob(accepted.jobId);
         } catch (cause) {
-          setError(cause instanceof Error ? cause.message : t("common.unknown"));
+          setError(
+            cause instanceof Error ? cause.message : t("common.unknown"),
+          );
         }
       })();
     });
@@ -654,7 +723,9 @@ export default function ReportsPage() {
           await loadData();
           await inspectFilingPackage(accepted.packageId);
         } catch (cause) {
-          setError(cause instanceof Error ? cause.message : t("common.unknown"));
+          setError(
+            cause instanceof Error ? cause.message : t("common.unknown"),
+          );
         }
       })();
     });
@@ -879,35 +950,70 @@ export default function ReportsPage() {
     return "no_data";
   })();
 
-  const emptyStateDefinition = getEmptyStateDefinition(activeEmptyReason, locale);
+  const emptyStateDefinition = getEmptyStateDefinition(
+    activeEmptyReason,
+    locale,
+  );
 
   const selectedJob =
     selection?.kind === "job"
-      ? jobs.find((job) => job.jobId === selection.id) ?? null
+      ? (jobs.find((job) => job.jobId === selection.id) ?? null)
       : null;
   const selectedPackage =
     selection?.kind === "package"
-      ? packages.find((filingPackage) => filingPackage.packageId === selection.id) ??
-        null
+      ? (packages.find(
+          (filingPackage) => filingPackage.packageId === selection.id,
+        ) ?? null)
       : null;
 
   const selectedJobActions = jobDetail
-    ? jobDetail.availableActions ?? fallbackJobActions(jobDetail)
+    ? (jobDetail.availableActions ?? fallbackJobActions(jobDetail))
     : selectedJob
-      ? selectedJob.availableActions ?? fallbackJobActions(selectedJob)
+      ? (selectedJob.availableActions ?? fallbackJobActions(selectedJob))
       : [];
 
   const selectedPackageActions = packageDetail
-    ? packageDetail.availableActions ?? fallbackPackageActions(packageDetail)
+    ? (packageDetail.availableActions ?? fallbackPackageActions(packageDetail))
     : selectedPackage
-      ? selectedPackage.availableActions ?? fallbackPackageActions(selectedPackage)
+      ? (selectedPackage.availableActions ??
+        fallbackPackageActions(selectedPackage))
       : [];
+
+  const pageActions = useMemo(() => {
+    const inventory = new Map<PageActionKind, PageActionDescriptor>();
+    const knownActions: PageActionKind[] = [
+      "create_report_job",
+      "generate_filing_package",
+    ];
+    const records = [
+      ...jobs,
+      ...packages,
+      ...(jobDetail ? [jobDetail] : []),
+      ...(packageDetail ? [packageDetail] : []),
+    ];
+
+    for (const actionName of knownActions) {
+      const match = records
+        .flatMap((record) => record.availableActions ?? [])
+        .find((action) => action.action === actionName);
+      inventory.set(actionName, {
+        action: actionName,
+        enabled: match?.enabled ?? true,
+        ...(match?.disabledReasonCode
+          ? { disabledReasonCode: match.disabledReasonCode }
+          : {}),
+      });
+    }
+
+    return inventory;
+  }, [jobDetail, jobs, packageDetail, packages]);
 
   const metrics = [
     {
       label: copyText(locale, "Queued / running", "排隊 / 執行中"),
-      value: jobs.filter((job) => job.status !== "completed" && job.status !== "failed")
-        .length,
+      value: jobs.filter(
+        (job) => job.status !== "completed" && job.status !== "failed",
+      ).length,
       note: copyText(
         locale,
         "Background work still consuming capacity",
@@ -929,7 +1035,8 @@ export default function ReportsPage() {
       label: copyText(locale, "Expiring soon", "即將到期"),
       value:
         jobs.filter((job) => expiresSoon(job.artifact?.expiresAt)).length +
-        packages.filter((filingPackage) => expiresSoon(filingPackage.expiresAt)).length,
+        packages.filter((filingPackage) => expiresSoon(filingPackage.expiresAt))
+          .length,
       note: copyText(
         locale,
         "Links within the next 12 hours need operator attention",
@@ -986,23 +1093,38 @@ export default function ReportsPage() {
                 type="button"
                 className="primary-button"
                 onClick={() =>
-                  setComposerMode((current) =>
-                    current === "report" ? null : "report",
-                  )
+                  pageActions.get("create_report_job")?.enabled
+                    ? setComposerMode((current) =>
+                        current === "report" ? null : "report",
+                      )
+                    : undefined
                 }
+                disabled={!pageActions.get("create_report_job")?.enabled}
+                title={formatDisabledReason(
+                  pageActions.get("create_report_job")?.disabledReasonCode,
+                  locale,
+                )}
               >
-                {copyText(locale, "Create report job", "建立報表工作")}
+                {labelForAction("create_report_job", locale)}
               </button>
               <button
                 type="button"
                 className="secondary-button"
                 onClick={() =>
-                  setComposerMode((current) =>
-                    current === "package" ? null : "package",
-                  )
+                  pageActions.get("generate_filing_package")?.enabled
+                    ? setComposerMode((current) =>
+                        current === "package" ? null : "package",
+                      )
+                    : undefined
                 }
+                disabled={!pageActions.get("generate_filing_package")?.enabled}
+                title={formatDisabledReason(
+                  pageActions.get("generate_filing_package")
+                    ?.disabledReasonCode,
+                  locale,
+                )}
               >
-                {copyText(locale, "Generate filing package", "產生申報套件")}
+                {labelForAction("generate_filing_package", locale)}
               </button>
             </div>
           </div>
@@ -1011,7 +1133,9 @@ export default function ReportsPage() {
             <div className={`freshness-banner freshness-${effectiveFreshness}`}>
               <div>
                 <span className="meta-label">T6</span>
-                <strong>{copyText(locale, "Manual refresh", "手動刷新")}</strong>
+                <strong>
+                  {copyText(locale, "Manual refresh", "手動刷新")}
+                </strong>
               </div>
               <div className="freshness-copy">
                 <span>
@@ -1062,13 +1186,17 @@ export default function ReportsPage() {
           <section className="message-stack">
             {error && (
               <div className="error-banner">
-                <strong>{copyText(locale, "Backend message", "後端訊息")}</strong>
+                <strong>
+                  {copyText(locale, "Backend message", "後端訊息")}
+                </strong>
                 <span>{error}</span>
               </div>
             )}
             {notice && (
               <div className="notice-banner">
-                <strong>{copyText(locale, "Operator receipt", "操作回執")}</strong>
+                <strong>
+                  {copyText(locale, "Operator receipt", "操作回執")}
+                </strong>
                 <span>{notice}</span>
               </div>
             )}
@@ -1082,10 +1210,18 @@ export default function ReportsPage() {
                 <div className="composer-head">
                   <div>
                     <p>{copyText(locale, "Create report", "建立報表")}</p>
-                    <h2>{copyText(locale, "Background export job", "背景匯出工作")}</h2>
+                    <h2>
+                      {copyText(
+                        locale,
+                        "Background export job",
+                        "背景匯出工作",
+                      )}
+                    </h2>
                   </div>
                   <span className="composer-chip">
-                    {t(`reports.category.${activePresetCategory.toLowerCase()}`)}
+                    {t(
+                      `reports.category.${activePresetCategory.toLowerCase()}`,
+                    )}
                   </span>
                 </div>
                 <div className="composer-grid">
@@ -1142,7 +1278,11 @@ export default function ReportsPage() {
                   </label>
                 </div>
                 <div className="composer-submit">
-                  <button type="submit" className="primary-button" disabled={pending}>
+                  <button
+                    type="submit"
+                    className="primary-button"
+                    disabled={pending}
+                  >
                     {pending
                       ? copyText(locale, "Submitting…", "提交中…")
                       : copyText(locale, "Queue report job", "送出報表工作")}
@@ -1154,7 +1294,13 @@ export default function ReportsPage() {
                 <div className="composer-head">
                   <div>
                     <p>{copyText(locale, "Create filing", "建立申報")}</p>
-                    <h2>{copyText(locale, "Immutable filing package", "不可變申報套件")}</h2>
+                    <h2>
+                      {copyText(
+                        locale,
+                        "Immutable filing package",
+                        "不可變申報套件",
+                      )}
+                    </h2>
                   </div>
                   <span className="composer-chip">
                     {copyText(locale, "Low-risk action", "低風險操作")}
@@ -1194,10 +1340,18 @@ export default function ReportsPage() {
                   </label>
                 </div>
                 <div className="composer-submit">
-                  <button type="submit" className="primary-button" disabled={pending}>
+                  <button
+                    type="submit"
+                    className="primary-button"
+                    disabled={pending}
+                  >
                     {pending
                       ? copyText(locale, "Submitting…", "提交中…")
-                      : copyText(locale, "Queue filing package", "送出申報套件")}
+                      : copyText(
+                          locale,
+                          "Queue filing package",
+                          "送出申報套件",
+                        )}
                   </button>
                 </div>
               </form>
@@ -1231,14 +1385,20 @@ export default function ReportsPage() {
                   className="search-input"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder={copyText(locale, "Search id, type, scope", "搜尋編號、類型、範圍")}
+                  placeholder={copyText(
+                    locale,
+                    "Search id, type, scope",
+                    "搜尋編號、類型、範圍",
+                  )}
                 />
                 <select
                   className="status-select"
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value)}
                 >
-                  <option value="all">{copyText(locale, "All status", "全部狀態")}</option>
+                  <option value="all">
+                    {copyText(locale, "All status", "全部狀態")}
+                  </option>
                   <option value="queued">queued</option>
                   <option value="running">running</option>
                   <option value="completed">completed</option>
@@ -1249,7 +1409,11 @@ export default function ReportsPage() {
 
             {loading ? (
               <div className="loading-card">
-                {copyText(locale, "Loading report snapshot…", "正在載入報表快照…")}
+                {copyText(
+                  locale,
+                  "Loading report snapshot…",
+                  "正在載入報表快照…",
+                )}
               </div>
             ) : activeTab === "jobs" ? (
               filteredJobs.length === 0 ? (
@@ -1273,7 +1437,8 @@ export default function ReportsPage() {
                         key={job.jobId}
                         type="button"
                         className={
-                          selection?.kind === "job" && selection.id === job.jobId
+                          selection?.kind === "job" &&
+                          selection.id === job.jobId
                             ? "table-row active"
                             : "table-row"
                         }
@@ -1281,10 +1446,15 @@ export default function ReportsPage() {
                       >
                         <span className="mono">{job.jobId}</span>
                         <span>
-                          <strong>{formatOpsCodeLabel(locale, job.jobType)}</strong>
+                          <strong>
+                            {formatOpsCodeLabel(locale, job.jobType)}
+                          </strong>
                           <small>{jobCategory(job.jobType)}</small>
                         </span>
-                        <span>{job.parametersSummary ?? summarizeFilters(job.filters)}</span>
+                        <span>
+                          {job.parametersSummary ??
+                            summarizeFilters(job.filters)}
+                        </span>
                         <span>
                           <StatusPill
                             status={job.status}
@@ -1293,11 +1463,25 @@ export default function ReportsPage() {
                           />
                         </span>
                         <span className="mono">
-                          {job.artifact?.expiresAt
-                            ? formatRelativeMinutes(job.artifact.expiresAt)
-                            : copyText(locale, "pending", "待發行")}
+                          {job.artifact?.expiresAt ? (
+                            <span
+                              className={
+                                isExpired(job.artifact.expiresAt)
+                                  ? "ttl-badge expired"
+                                  : expiresSoon(job.artifact.expiresAt)
+                                    ? "ttl-badge warning"
+                                    : "ttl-badge"
+                              }
+                            >
+                              {formatRelativeMinutes(job.artifact.expiresAt)}
+                            </span>
+                          ) : (
+                            copyText(locale, "pending", "待發行")
+                          )}
                         </span>
-                        <span className="mono">{formatDateTimeShort(job.createdAt)}</span>
+                        <span className="mono">
+                          {formatDateTimeShort(job.createdAt)}
+                        </span>
                         <span className="action-cell">
                           {actions.map((action) => (
                             <button
@@ -1305,12 +1489,24 @@ export default function ReportsPage() {
                               type="button"
                               className="action-pill"
                               disabled={!action.enabled}
+                              title={
+                                action.enabled
+                                  ? undefined
+                                  : formatDisabledReason(
+                                      action.disabledReasonCode,
+                                      locale,
+                                    )
+                              }
                               onClick={(event) => {
                                 event.stopPropagation();
                                 requestAction("job", action, job);
                               }}
                             >
-                              {action.label ?? labelForAction(action.action, locale)}
+                              {action.label ??
+                                labelForAction(action.action, locale)}
+                              {action.openMode === "new_tab"
+                                ? copyText(locale, " (new tab)", "（新分頁）")
+                                : null}
                             </button>
                           ))}
                         </span>
@@ -1353,10 +1549,13 @@ export default function ReportsPage() {
                       <span className="mono">{filingPackage.packageId}</span>
                       <span>
                         <strong>
-                          {formatOpsCodeLabel(locale, filingPackage.packageType)}
+                          {formatOpsCodeLabel(
+                            locale,
+                            filingPackage.packageType,
+                          )}
                         </strong>
                         <small>
-                          {filingPackage.immutable ?? true
+                          {(filingPackage.immutable ?? true)
                             ? copyText(locale, "Immutable", "不可變")
                             : copyText(locale, "Mutable", "可變")}
                         </small>
@@ -1377,9 +1576,21 @@ export default function ReportsPage() {
                         />
                       </span>
                       <span className="mono">
-                        {filingPackage.expiresAt
-                          ? formatRelativeMinutes(filingPackage.expiresAt)
-                          : copyText(locale, "issue on detail", "詳情發行")}
+                        {filingPackage.expiresAt ? (
+                          <span
+                            className={
+                              isExpired(filingPackage.expiresAt)
+                                ? "ttl-badge expired"
+                                : expiresSoon(filingPackage.expiresAt)
+                                  ? "ttl-badge warning"
+                                  : "ttl-badge"
+                            }
+                          >
+                            {formatRelativeMinutes(filingPackage.expiresAt)}
+                          </span>
+                        ) : (
+                          copyText(locale, "issue on detail", "詳情發行")
+                        )}
                       </span>
                       <span className="mono">
                         {formatDateTimeShort(
@@ -1393,12 +1604,24 @@ export default function ReportsPage() {
                             type="button"
                             className="action-pill"
                             disabled={!action.enabled}
+                            title={
+                              action.enabled
+                                ? undefined
+                                : formatDisabledReason(
+                                    action.disabledReasonCode,
+                                    locale,
+                                  )
+                            }
                             onClick={(event) => {
                               event.stopPropagation();
                               requestAction("package", action, filingPackage);
                             }}
                           >
-                            {action.label ?? labelForAction(action.action, locale)}
+                            {action.label ??
+                              labelForAction(action.action, locale)}
+                            {action.openMode === "new_tab"
+                              ? copyText(locale, " (new tab)", "（新分頁）")
+                              : null}
                           </button>
                         ))}
                       </span>
@@ -1443,11 +1666,17 @@ export default function ReportsPage() {
                     <dl className="detail-list">
                       <DetailItem
                         label={copyText(locale, "Submitted by", "提交者")}
-                        value={jobDetail?.submittedBy ?? selectedJob.submittedBy ?? "system"}
+                        value={
+                          jobDetail?.submittedBy ??
+                          selectedJob.submittedBy ??
+                          "system"
+                        }
                       />
                       <DetailItem
                         label={copyText(locale, "Submitted at", "提交時間")}
-                        value={formatDateTime(jobDetail?.createdAt ?? selectedJob.createdAt)}
+                        value={formatDateTime(
+                          jobDetail?.createdAt ?? selectedJob.createdAt,
+                        )}
                       />
                       <DetailItem
                         label={copyText(locale, "Completed at", "完成時間")}
@@ -1461,14 +1690,19 @@ export default function ReportsPage() {
                       />
                       <DetailItem
                         label={copyText(locale, "Parameters", "參數")}
-                        value={jobDetail?.parametersSummary ?? summarizeFilters(selectedJob.filters)}
+                        value={
+                          jobDetail?.parametersSummary ??
+                          summarizeFilters(selectedJob.filters)
+                        }
                       />
                     </dl>
                   </div>
 
                   <div className="detail-block">
                     <div className="mini-banner">
-                      <strong>{copyText(locale, "Artifact handling", "成品處理")}</strong>
+                      <strong>
+                        {copyText(locale, "Artifact handling", "成品處理")}
+                      </strong>
                       <span>
                         {jobDetail?.artifact?.downloadMetadata
                           ? copyText(
@@ -1491,7 +1725,9 @@ export default function ReportsPage() {
                     </div>
                     {selectedJob.status === "failed" && (
                       <div className="failure-card">
-                        <strong>{copyText(locale, "Failure", "失敗原因")}</strong>
+                        <strong>
+                          {copyText(locale, "Failure", "失敗原因")}
+                        </strong>
                         <span>
                           {jobDetail?.failureReason ??
                             selectedJob.failureReason ??
@@ -1514,9 +1750,23 @@ export default function ReportsPage() {
                               : "ghost-button"
                           }
                           disabled={!action.enabled}
-                          onClick={() => requestAction("job", action, selectedJob)}
+                          title={
+                            action.enabled
+                              ? undefined
+                              : formatDisabledReason(
+                                  action.disabledReasonCode,
+                                  locale,
+                                )
+                          }
+                          onClick={() =>
+                            requestAction("job", action, selectedJob)
+                          }
                         >
-                          {action.label ?? labelForAction(action.action, locale)}
+                          {action.label ??
+                            labelForAction(action.action, locale)}
+                          {action.openMode === "new_tab"
+                            ? copyText(locale, " (new tab)", "（新分頁）")
+                            : null}
                         </button>
                       ))}
                     </div>
@@ -1524,7 +1774,9 @@ export default function ReportsPage() {
 
                   {jobDetail?.rows?.length ? (
                     <div className="detail-block">
-                      <h3>{copyText(locale, "Dispatch trace rows", "派車追蹤列")}</h3>
+                      <h3>
+                        {copyText(locale, "Dispatch trace rows", "派車追蹤列")}
+                      </h3>
                       <div className="detail-table">
                         {jobDetail.rows.slice(0, 4).map((row) => (
                           <div key={row.orderId} className="detail-table-row">
@@ -1546,7 +1798,12 @@ export default function ReportsPage() {
                   <div className="detail-id-row">
                     <div>
                       <strong>{selectedPackage.packageId}</strong>
-                      <p>{formatOpsCodeLabel(locale, selectedPackage.packageType)}</p>
+                      <p>
+                        {formatOpsCodeLabel(
+                          locale,
+                          selectedPackage.packageType,
+                        )}
+                      </p>
                     </div>
                     <StatusPill
                       status={selectedPackage.status}
@@ -1565,7 +1822,11 @@ export default function ReportsPage() {
                     />
                     <DetailItem
                       label={copyText(locale, "Manifest hash", "Manifest 雜湊")}
-                      value={packageDetail?.manifestHash ?? selectedPackage.manifestHash ?? "—"}
+                      value={
+                        packageDetail?.manifestHash ??
+                        selectedPackage.manifestHash ??
+                        "—"
+                      }
                     />
                     <DetailItem
                       label={copyText(locale, "Scope", "範圍")}
@@ -1591,7 +1852,9 @@ export default function ReportsPage() {
 
                 <div className="detail-block">
                   <div className="mini-banner">
-                    <strong>{copyText(locale, "Signed downloads", "簽名下載")}</strong>
+                    <strong>
+                      {copyText(locale, "Signed downloads", "簽名下載")}
+                    </strong>
                     <span>
                       {packageDetail?.downloadMetadata
                         ? copyText(
@@ -1617,9 +1880,22 @@ export default function ReportsPage() {
                             : "ghost-button"
                         }
                         disabled={!action.enabled}
-                        onClick={() => requestAction("package", action, selectedPackage)}
+                        title={
+                          action.enabled
+                            ? undefined
+                            : formatDisabledReason(
+                                action.disabledReasonCode,
+                                locale,
+                              )
+                        }
+                        onClick={() =>
+                          requestAction("package", action, selectedPackage)
+                        }
                       >
                         {action.label ?? labelForAction(action.action, locale)}
+                        {action.openMode === "new_tab"
+                          ? copyText(locale, " (new tab)", "（新分頁）")
+                          : null}
                       </button>
                     ))}
                   </div>
@@ -1627,15 +1903,21 @@ export default function ReportsPage() {
 
                 {packageDetail?.manifest?.entries?.length ? (
                   <div className="detail-block">
-                    <h3>{copyText(locale, "Manifest entries", "Manifest 項目")}</h3>
+                    <h3>
+                      {copyText(locale, "Manifest entries", "Manifest 項目")}
+                    </h3>
                     <div className="detail-table">
-                      {packageDetail.manifest.entries.slice(0, 4).map((entry) => (
-                        <div key={entry.itemId} className="detail-table-row">
-                          <span className="mono">{entry.itemId}</span>
-                          <span>{entry.itemType}</span>
-                          <span className="mono">{entry.manifestHash.slice(0, 12)}…</span>
-                        </div>
-                      ))}
+                      {packageDetail.manifest.entries
+                        .slice(0, 4)
+                        .map((entry) => (
+                          <div key={entry.itemId} className="detail-table-row">
+                            <span className="mono">{entry.itemId}</span>
+                            <span>{entry.itemType}</span>
+                            <span className="mono">
+                              {entry.manifestHash.slice(0, 12)}…
+                            </span>
+                          </div>
+                        ))}
                     </div>
                   </div>
                 ) : null}
@@ -1714,8 +1996,16 @@ export default function ReportsPage() {
           border: 1px solid #f3d4d4;
           border-radius: 28px;
           background:
-            radial-gradient(circle at top right, rgba(251, 191, 188, 0.2), transparent 30%),
-            linear-gradient(180deg, rgba(255, 250, 250, 0.98), rgba(255, 245, 244, 0.96));
+            radial-gradient(
+              circle at top right,
+              rgba(251, 191, 188, 0.2),
+              transparent 30%
+            ),
+            linear-gradient(
+              180deg,
+              rgba(255, 250, 250, 0.98),
+              rgba(255, 245, 244, 0.96)
+            );
           box-shadow: 0 20px 50px rgba(127, 29, 29, 0.08);
         }
 
@@ -1930,8 +2220,16 @@ export default function ReportsPage() {
         .notice-banner {
           border-color: #cbd5e1;
           background:
-            radial-gradient(circle at top right, rgba(148, 163, 184, 0.14), transparent 28%),
-            linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.96));
+            radial-gradient(
+              circle at top right,
+              rgba(148, 163, 184, 0.14),
+              transparent 28%
+            ),
+            linear-gradient(
+              180deg,
+              rgba(248, 250, 252, 0.98),
+              rgba(241, 245, 249, 0.96)
+            );
         }
 
         .error-banner {
@@ -2138,7 +2436,11 @@ export default function ReportsPage() {
         .table-row.active {
           border-color: #fca5a5;
           background:
-            linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(254, 242, 242, 0.96)),
+            linear-gradient(
+              135deg,
+              rgba(255, 255, 255, 0.98),
+              rgba(254, 242, 242, 0.96)
+            ),
             #fff;
           box-shadow: inset 0 0 0 1px rgba(252, 165, 165, 0.24);
         }
@@ -2148,7 +2450,12 @@ export default function ReportsPage() {
         }
 
         .mono {
-          font-family: var(--font-geist-mono, "SFMono-Regular", Consolas, monospace);
+          font-family: var(
+            --font-geist-mono,
+            "SFMono-Regular",
+            Consolas,
+            monospace
+          );
           font-size: 0.9rem;
         }
 
@@ -2167,6 +2474,25 @@ export default function ReportsPage() {
           cursor: pointer;
           font: inherit;
           font-size: 0.82rem;
+        }
+
+        .ttl-badge {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          padding: 0.28rem 0.6rem;
+          background: #e0f2fe;
+          color: #075985;
+        }
+
+        .ttl-badge.warning {
+          background: #fef3c7;
+          color: #b45309;
+        }
+
+        .ttl-badge.expired {
+          background: #fee2e2;
+          color: #b91c1c;
         }
 
         .detail-card {
@@ -2303,6 +2629,15 @@ export default function ReportsPage() {
           margin-bottom: 14px;
         }
 
+        .empty-eyebrow {
+          margin: 0 0 8px;
+          color: #9a3412 !important;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          font-size: 0.72rem;
+          font-weight: 700;
+        }
+
         .empty-state h3 {
           margin: 0 0 8px;
           color: #111827;
@@ -2334,8 +2669,16 @@ export default function ReportsPage() {
           border-radius: 28px;
           border: 1px solid #f3d4d4;
           background:
-            radial-gradient(circle at top right, rgba(251, 191, 188, 0.2), transparent 30%),
-            linear-gradient(180deg, rgba(255, 250, 250, 0.99), rgba(255, 245, 244, 0.97));
+            radial-gradient(
+              circle at top right,
+              rgba(251, 191, 188, 0.2),
+              transparent 30%
+            ),
+            linear-gradient(
+              180deg,
+              rgba(255, 250, 250, 0.99),
+              rgba(255, 245, 244, 0.97)
+            );
           padding: 24px;
           box-shadow: 0 30px 70px rgba(17, 24, 39, 0.18);
         }
@@ -2413,6 +2756,7 @@ function EmptyStatePanel({
           background: `linear-gradient(135deg, ${definition.accent}, rgba(255,255,255,0.92))`,
         }}
       />
+      <p className="empty-eyebrow">{definition.eyebrow}</p>
       <h3>{definition.title}</h3>
       <p>{definition.body}</p>
       <p>{definition.suggestion}</p>
