@@ -32,12 +32,16 @@ import {
 } from "@drts/ui-web";
 import type { ManagementTone, TimelineItem } from "@drts/ui-web";
 import { IncidentRefreshTier } from "./refresh-tier";
+import { IncidentDetailActionPanel } from "./incident-detail-action-panel";
 
 type IncidentDetailPageProps = {
   params: Promise<{
     incidentId: string;
   }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
+
+type IncidentDetailSearchParams = Record<string, string | string[] | undefined>;
 
 type IncidentRuntimeRecord = IncidentRecord & {
   availableActions?: ResourceActionDescriptor[];
@@ -598,14 +602,21 @@ function buildAuditLink(auditId: string) {
   return new URL(route, platformAdminBaseUrl).toString();
 }
 
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 export default async function IncidentDetailPage({
   params,
+  searchParams,
 }: IncidentDetailPageProps) {
-  const [{ incidentId }, locale, client] = await Promise.all([
-    params,
-    getServerLocale(),
-    getServerOpsClient(),
-  ]);
+  const [{ incidentId }, locale, client, resolvedSearchParams] =
+    await Promise.all([
+      params,
+      getServerLocale(),
+      getServerOpsClient(),
+      searchParams ?? Promise.resolve({} as IncidentDetailSearchParams),
+    ]);
 
   const incident = await resolveOrFallback(
     () => client.getIncident(incidentId) as Promise<IncidentRuntimeRecord>,
@@ -977,6 +988,14 @@ export default async function IncidentDetailPage({
         : refreshMetadata?.dataFreshness === "unknown" || !refreshMetadata
           ? "info"
           : null;
+  const initialIntent = firstParam(resolvedSearchParams.intent) ?? null;
+  const platformAdminAuditBaseUrl =
+    process.env.PLATFORM_ADMIN_BASE_URL ??
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_BASE_URL ??
+    null;
+  const latestAuditHref = incidentAuditLogs[0]
+    ? buildAuditLink(incidentAuditLogs[0].auditId)
+    : null;
 
   return (
     <>
@@ -1130,6 +1149,20 @@ export default async function IncidentDetailPage({
                 }
               />
             ) : null}
+
+            <IncidentDetailActionPanel
+              incidentId={incident.incidentId}
+              locale={locale}
+              availableActions={availableActions}
+              initialIntent={initialIntent}
+              initialStatus={incident.status}
+              initialSeverity={incident.severity}
+              initialAssignedTo={incident.assignedTo}
+              initialEscalationTarget={incident.escalationTarget}
+              initialResolutionNote={incident.resolutionNote}
+              latestAuditHref={latestAuditHref}
+              platformAdminAuditBaseUrl={platformAdminAuditBaseUrl}
+            />
 
             <Card
               theme={theme}
