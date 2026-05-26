@@ -19,7 +19,6 @@ import {
 import { ActionButton } from "@/components/ui/ActionButton";
 import { AppScreen } from "@/components/ui/AppScreen";
 import { BottomActionBar } from "@/components/ui/BottomActionBar";
-import { confirmDangerAction } from "@/components/ui/confirm-danger-action";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { FormField } from "@/components/ui/FormField";
@@ -556,19 +555,6 @@ export default function IncidentScreen() {
     }
   };
 
-  const openConfirmDialog = () => {
-    confirmDangerAction({
-      title: "確認送出 SOS",
-      message:
-        "送出後，營運與安全主管會立即收到重大安全警示。若尚未準備好，請先取消並補充現場資訊。",
-      confirmLabel: "確認送出",
-      cancelLabel: "取消",
-      onConfirm: () => {
-        void submitIncident();
-      },
-    });
-  };
-
   const defaultActions = useMemo<ResourceActionDescriptor[]>(
     () => [
       {
@@ -598,7 +584,7 @@ export default function IncidentScreen() {
 
   const holdNotice =
     getDisabledReasonLabel(submitAction.disabledReasonCode) ??
-    "請先長按右側按鈕滿 2 秒，系統才會開啟最終確認。";
+    "進入 SOS 畫面後，請長按 2 秒直接送出，避免誤觸。";
 
   const activeEmptyReason =
     incidentsEnabled === false ? "not_provisioned" : emptyReasonOverride;
@@ -649,7 +635,7 @@ export default function IncidentScreen() {
     }
 
     resetHoldProgress();
-    openConfirmDialog();
+    void submitIncident();
   };
 
   if (incidentsEnabled === null) {
@@ -732,7 +718,7 @@ export default function IncidentScreen() {
                 label={getEntrySourceLabel(entrySource)}
                 variant="info"
               />
-              <StatusChip label="兩階段確認" variant="danger" />
+              <StatusChip label="長按 2 秒送出" variant="danger" />
             </View>
             <View style={styles.heroIconBadge}>
               <Text style={styles.heroIconLabel}>SOS</Text>
@@ -912,8 +898,8 @@ export default function IncidentScreen() {
               />
             </View>
             <Text style={styles.confirmationBody}>
-              長按底部按鈕滿 2
-              秒後，系統仍會再要求一次確認；若情況已排除，可按取消返回上一頁。
+              這個頁面就是 SOS 的保護確認層。請長按底部按鈕滿 2
+              秒直接送出；若情況已排除，可按取消返回上一頁。
             </Text>
             <Text style={styles.availableActionLabel}>
               目前主要操作：{getActionLabel(submitAction.action)}
@@ -927,9 +913,7 @@ export default function IncidentScreen() {
 
       <BottomActionBar
         style={styles.actionBar}
-        notice={
-          holdHintVisible ? holdNotice : "SOS 送出前仍會再確認一次，避免誤觸。"
-        }
+        notice={holdHintVisible ? holdNotice : "SOS 需長按 2 秒才會送出。"}
       >
         <ActionButton
           title={getActionLabel(cancelAction.action)}

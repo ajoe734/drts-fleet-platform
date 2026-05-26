@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
-  confirmDangerAction: vi.fn(),
   isFeatureEnabled: vi.fn(),
   listUnifiedDriverTasks: vi.fn(),
   listDriverTasks: vi.fn(),
@@ -73,10 +72,6 @@ vi.mock("@/components/ui/StatusChip", () => ({
     React.createElement("StatusChip", props),
 }));
 
-vi.mock("@/components/ui/confirm-danger-action", () => ({
-  confirmDangerAction: mocks.confirmDangerAction,
-}));
-
 vi.mock("@/lib/api-client", () => ({
   getDriverClient: () => ({
     isFeatureEnabled: mocks.isFeatureEnabled,
@@ -111,7 +106,6 @@ function findLongPressButton(renderer: any) {
 describe("IncidentScreen", () => {
   beforeEach(() => {
     mocks.replace.mockReset();
-    mocks.confirmDangerAction.mockReset();
     mocks.isFeatureEnabled.mockReset().mockResolvedValue(true);
     mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
     mocks.listDriverTasks.mockReset().mockResolvedValue([]);
@@ -122,7 +116,7 @@ describe("IncidentScreen", () => {
     mocks.localSearchParams = {};
   });
 
-  it("requires long press plus confirmation before creating a critical SOS incident", async () => {
+  it("requires a 2-second long press before creating a critical SOS incident", async () => {
     let renderer: any;
 
     await act(async () => {
@@ -143,29 +137,11 @@ describe("IncidentScreen", () => {
       findLongPressButton(renderer).props.onPress();
     });
 
-    expect(mocks.confirmDangerAction).not.toHaveBeenCalled();
     expect(mocks.createIncident).not.toHaveBeenCalled();
     expect(findLongPressButton(renderer).props.delayLongPress).toBe(2000);
 
     await act(async () => {
       findLongPressButton(renderer).props.onLongPress();
-    });
-
-    expect(mocks.confirmDangerAction).toHaveBeenCalledTimes(1);
-
-    const options = mocks.confirmDangerAction.mock.calls[0]?.[0] as {
-      title: string;
-      confirmLabel: string;
-      cancelLabel: string;
-      onConfirm: () => void;
-    };
-
-    expect(options.title).toBe("確認送出 SOS");
-    expect(options.confirmLabel).toBe("確認送出");
-    expect(options.cancelLabel).toBe("取消");
-
-    await act(async () => {
-      options.onConfirm();
       await flushEffects();
     });
 
@@ -234,14 +210,6 @@ describe("IncidentScreen", () => {
 
     await act(async () => {
       findLongPressButton(renderer).props.onLongPress();
-    });
-
-    const options = mocks.confirmDangerAction.mock.calls[0]?.[0] as {
-      onConfirm: () => void;
-    };
-
-    await act(async () => {
-      options.onConfirm();
       await flushEffects();
     });
 
