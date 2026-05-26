@@ -3,8 +3,8 @@ import Link from "next/link";
 import type {
   CrossAppResourceLink,
   EmptyReason,
+  EmptyStateEnvelope,
   PartnerChannelEntryRecord,
-  PartnerEligibilityReviewQueueItem,
   RefreshTier,
   ResourceActionDescriptor,
   UiRefreshMetadata,
@@ -29,7 +29,16 @@ type ContractsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type ContractListView = VehicleContractRecord & {
+type RuntimeVehicleContractRecord = VehicleContractRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type RuntimePartnerChannelEntryRecord = PartnerChannelEntryRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  ownerLinks?: CrossAppResourceLink[];
+};
+
+type ContractListView = RuntimeVehicleContractRecord & {
   keyTerms: string;
   kindLabel: string;
   counterparties: string;
@@ -37,7 +46,7 @@ type ContractListView = VehicleContractRecord & {
   availableActions: ResourceActionDescriptor[];
 };
 
-type PartnerRelationView = PartnerChannelEntryRecord & {
+type PartnerRelationView = RuntimePartnerChannelEntryRecord & {
   linkedContracts: number;
   availableActions: ResourceActionDescriptor[];
   links: CrossAppResourceLink[];
@@ -135,54 +144,9 @@ function cardSurfaceStyle(tone: "neutral" | "warn" | "danger" | "info") {
 
 function contractStatusTone(status: string) {
   if (status === "active") return "success" as const;
-  if (status === "terminated" || status === "expired") return "danger" as const;
-  if (status === "pending" || status === "draft") return "warning" as const;
+  if (status === "terminated") return "danger" as const;
+  if (status === "draft") return "warning" as const;
   return "neutral" as const;
-}
-
-function eligibilityStatusTone(
-  status: PartnerEligibilityReviewQueueItem["verificationStatus"],
-) {
-  if (status === "manual_review") return "warning" as const;
-  if (status === "ineligible") return "danger" as const;
-  return "neutral" as const;
-}
-
-function formatRequestedBy(
-  item: PartnerEligibilityReviewQueueItem,
-  locale: "en" | "zh",
-) {
-  if (!item.manualFallback.required) {
-    return t("contracts.reviewRequestedBy.none", locale);
-  }
-
-  if (item.manualFallback.requestedBy === "system:auto_fallback") {
-    return t("contracts.reviewRequestedBy.system:auto_fallback", locale);
-  }
-
-  return item.manualFallback.requestedBy ?? t("common.dash", locale);
-}
-
-function formatContext(
-  item: PartnerEligibilityReviewQueueItem,
-  locale: "en" | "zh",
-) {
-  const parts: string[] = [];
-  if (item.requestHints.cardLast4) {
-    parts.push(
-      t("contracts.reviewContext.cardLast4", locale, {
-        value: item.requestHints.cardLast4,
-      }),
-    );
-  }
-  if (item.requestHints.flightNo) {
-    parts.push(
-      t("contracts.reviewContext.flightNo", locale, {
-        value: item.requestHints.flightNo,
-      }),
-    );
-  }
-  return parts.join(" · ") || t("contracts.reviewContext.none", locale);
 }
 
 function formatDate(value: string | null, locale: "en" | "zh") {
@@ -262,10 +226,16 @@ function buildCrossAppUrl(link: CrossAppResourceLink) {
 }
 
 function buildRefreshMetadata(updatedAt: string | null): UiRefreshMetadata {
+  const generatedAt = updatedAt ?? new Date().toISOString();
+  const ageMs = Date.now() - new Date(generatedAt).getTime();
   return {
-    generatedAt: updatedAt ?? new Date().toISOString(),
+    generatedAt,
     staleAfterMs: REFRESH_TIER_MS,
-    dataFreshness: updatedAt ? "fresh" : "unknown",
+    dataFreshness: updatedAt
+      ? ageMs > REFRESH_TIER_MS
+        ? "stale"
+        : "fresh"
+      : "unknown",
     source: "live",
   };
 }
@@ -307,6 +277,7 @@ function renderActionDescriptor(
 ) {
   const labelMap: Record<string, string> = {
     search: copyText(locale, "Search", "查找"),
+    clear_filters: copyText(locale, "Clear filters", "清除篩選"),
     open_contract_detail: copyText(locale, "Open detail", "開啟詳情"),
     open_platform_admin: copyText(locale, "Platform Admin", "Platform Admin"),
     open_tenant_console: copyText(locale, "Tenant Console", "Tenant Console"),
@@ -350,13 +321,15 @@ function renderEmptyState({
   reason,
   locale,
   query,
+  nextAction,
 }: {
   reason: EmptyReason;
   locale: "en" | "zh";
   query: string;
+  nextAction?: ResourceActionDescriptor;
 }) {
   const config: Record<
-    EmptyReason,
+    Exclude<EmptyReason, "driver_not_eligible">,
     {
       tone: "neutral" | "warn" | "danger" | "info";
       title: string;
@@ -474,16 +447,14 @@ function renderEmptyState({
             "Current filters removed every result.",
             "目前篩選條件把所有結果都排除了。",
           ),
-      action: (
-        <a href="/contracts" style={buttonStyle({ emphasis: "secondary" })}>
-          {copyText(locale, "Clear filters", "清除篩選")}
-        </a>
-      ),
-    },
-    driver_not_eligible: {
-      tone: "neutral",
-      title: "",
-      body: "",
+      action:
+        nextAction?.action === "clear_filters" ? (
+          renderActionDescriptor(nextAction, locale, "/contracts")
+        ) : (
+          <a href="/contracts" style={buttonStyle({ emphasis: "secondary" })}>
+            {copyText(locale, "Clear filters", "清除篩選")}
+          </a>
+        ),
     },
   };
 
@@ -540,27 +511,21 @@ export default async function ContractsPage({
     getServerLocale(),
   ]);
 
-  const [contractsResult, partnerEntriesResult, reviewQueueResult] =
-    await Promise.allSettled([
-      client.listContracts(),
-      client.listPartnerEntries(),
-      client.listPartnerEligibilityReviewQueue(),
-    ] as const);
+  const [contractsResult, partnerEntriesResult] = await Promise.allSettled([
+    client.listContracts(),
+    client.listPartnerEntries(),
+  ] as const);
 
   const contracts =
-    contractsResult.status === "fulfilled" ? contractsResult.value : [];
+    contractsResult.status === "fulfilled"
+      ? (contractsResult.value as RuntimeVehicleContractRecord[])
+      : [];
   const partnerEntries =
     partnerEntriesResult.status === "fulfilled"
-      ? partnerEntriesResult.value
+      ? (partnerEntriesResult.value as RuntimePartnerChannelEntryRecord[])
       : [];
-  const reviewQueue =
-    reviewQueueResult.status === "fulfilled" ? reviewQueueResult.value : [];
 
-  const errors = [
-    contractsResult,
-    partnerEntriesResult,
-    reviewQueueResult,
-  ].flatMap((result) =>
+  const errors = [contractsResult, partnerEntriesResult].flatMap((result) =>
     result.status === "rejected"
       ? [
           result.reason instanceof Error
@@ -571,12 +536,9 @@ export default async function ContractsPage({
   );
   const primaryError = errors[0] ?? null;
 
-  const partnerNameBySlug = new Map(
-    partnerEntries.map((entry) => [entry.entrySlug, entry.displayName]),
-  );
   const partnerEntriesByPartnerId = new Map<
     string,
-    PartnerChannelEntryRecord[]
+    RuntimePartnerChannelEntryRecord[]
   >();
   for (const entry of partnerEntries) {
     const bucket = partnerEntriesByPartnerId.get(entry.partnerId) ?? [];
@@ -608,13 +570,16 @@ export default async function ContractsPage({
           : formatOpsCodeLabel(locale, contract.partnerType),
       ].join(" · "),
       expiringSoon,
-      availableActions: [
-        {
-          action: "open_contract_detail",
-          enabled: true,
-          riskLevel: "low",
-        },
-      ],
+      availableActions:
+        contract.availableActions && contract.availableActions.length > 0
+          ? contract.availableActions
+          : [
+              {
+                action: "open_contract_detail",
+                enabled: true,
+                riskLevel: "low",
+              },
+            ],
     };
   });
 
@@ -632,7 +597,7 @@ export default async function ContractsPage({
         label: copyText(locale, "Partner relation", "合作夥伴關聯"),
       };
       const tenantLink: CrossAppResourceLink = {
-        targetApp: "platform-admin",
+        targetApp: "tenant-console",
         route: `/tenants/${encodeURIComponent(entry.tenantId)}`,
         resourceType: "tenant",
         resourceId: entry.tenantId,
@@ -642,20 +607,28 @@ export default async function ContractsPage({
       return {
         ...entry,
         linkedContracts,
-        availableActions: [
-          {
-            action: "open_platform_admin",
-            enabled: true,
-            riskLevel: "low",
-          },
-          {
-            action: "open_tenant_console",
-            enabled: !!entry.tenantId,
-            disabledReasonCode: entry.tenantId ? undefined : "tenant_missing",
-            riskLevel: "low",
-          },
-        ],
-        links: [platformLink, tenantLink],
+        availableActions:
+          entry.availableActions && entry.availableActions.length > 0
+            ? entry.availableActions
+            : [
+                {
+                  action: "open_platform_admin",
+                  enabled: true,
+                  riskLevel: "low",
+                },
+                {
+                  action: "open_tenant_console",
+                  enabled: !!entry.tenantId,
+                  disabledReasonCode: entry.tenantId
+                    ? undefined
+                    : "tenant_missing",
+                  riskLevel: "low",
+                },
+              ],
+        links:
+          entry.ownerLinks && entry.ownerLinks.length > 0
+            ? entry.ownerLinks
+            : [platformLink, tenantLink],
       };
     },
   );
@@ -710,6 +683,20 @@ export default async function ContractsPage({
           ? "filtered_empty"
           : "no_data"
         : null);
+  const emptyState: EmptyStateEnvelope | null = resolvedEmptyReason
+    ? {
+        reason: resolvedEmptyReason,
+        messageCode: `contracts.${resolvedEmptyReason}`,
+        nextAction:
+          resolvedEmptyReason === "filtered_empty"
+            ? {
+                action: "clear_filters",
+                enabled: true,
+                riskLevel: "low",
+              }
+            : undefined,
+      }
+    : null;
 
   const searchAction: ResourceActionDescriptor = {
     action: "search",
@@ -718,9 +705,6 @@ export default async function ContractsPage({
   };
   const expiringSoonCount = contractViews.filter(
     (contract) => contract.expiringSoon,
-  ).length;
-  const manualReviewCount = reviewQueue.filter(
-    (item) => item.verificationStatus === "manual_review",
   ).length;
   const activeContracts = contractViews.filter(
     (contract) => contract.status === "active",
@@ -869,22 +853,23 @@ export default async function ContractsPage({
           accent="#2563eb"
         />
         <StatCard
-          label={copyText(locale, "Manual reviews", "人工審查")}
-          value={manualReviewCount}
+          label={copyText(locale, "Contracts visible", "可見合約")}
+          value={filteredContracts.length}
           sub={copyText(
             locale,
-            "Eligibility queue still impacts dispatch",
-            "eligibility 佇列仍會影響放行",
+            "After current search and filters",
+            "套用目前搜尋與篩選後",
           )}
           accent="#b45309"
         />
       </div>
 
-      {resolvedEmptyReason ? (
+      {emptyState ? (
         renderEmptyState({
-          reason: resolvedEmptyReason,
+          reason: emptyState.reason,
           locale,
           query,
+          nextAction: emptyState.nextAction,
         })
       ) : (
         <div style={{ display: "grid", gap: "18px" }}>
@@ -1002,21 +987,52 @@ export default async function ContractsPage({
                   </Td>
                   <Td density="compact">
                     <div style={{ display: "grid", gap: "8px" }}>
-                      <Link
-                        href={`/contracts/${encodeURIComponent(contract.contractId)}`}
-                        style={buttonStyle({ emphasis: "secondary" })}
-                      >
-                        {copyText(locale, "Open detail", "開啟詳情")}
-                      </Link>
-                      {!contract.availableActions[0].enabled &&
-                      contract.availableActions[0].disabledReasonCode ? (
-                        <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
-                          {formatOpsCodeLabel(
-                            locale,
-                            contract.availableActions[0].disabledReasonCode,
-                          )}
-                        </span>
-                      ) : null}
+                      {contract.availableActions.map(
+                        (action: ResourceActionDescriptor) => {
+                          const detailHref =
+                            action.action === "open_contract_detail"
+                              ? `/contracts/${encodeURIComponent(contract.contractId)}`
+                              : undefined;
+                          const disabledTitle = action.disabledReasonCode
+                            ? formatOpsCodeLabel(
+                                locale,
+                                action.disabledReasonCode,
+                              )
+                            : undefined;
+
+                          if (detailHref) {
+                            return action.enabled ? (
+                              <Link
+                                key={`${contract.contractId}-${action.action}`}
+                                href={detailHref}
+                                style={buttonStyle({ emphasis: "secondary" })}
+                                title={disabledTitle}
+                              >
+                                {copyText(locale, "Open detail", "開啟詳情")}
+                              </Link>
+                            ) : (
+                              <span
+                                key={`${contract.contractId}-${action.action}`}
+                                style={buttonStyle({
+                                  disabled: true,
+                                  emphasis: "secondary",
+                                })}
+                                title={disabledTitle}
+                              >
+                                {copyText(locale, "Open detail", "開啟詳情")}
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={`${contract.contractId}-${action.action}`}
+                            >
+                              {renderActionDescriptor(action, locale)}
+                            </div>
+                          );
+                        },
+                      )}
                     </div>
                   </Td>
                 </Tr>
@@ -1098,122 +1114,28 @@ export default async function ContractsPage({
                       }}
                     >
                       {renderActionDescriptor(
-                        entry.availableActions[0],
+                        entry.availableActions[0] ?? {
+                          action: "open_platform_admin",
+                          enabled: false,
+                          disabledReasonCode: "action_unavailable",
+                          riskLevel: "low",
+                        },
                         locale,
                         buildCrossAppUrl(entry.links[0]),
                         "_blank",
                       )}
                       {renderActionDescriptor(
-                        entry.availableActions[1],
+                        entry.availableActions[1] ?? {
+                          action: "open_tenant_console",
+                          enabled: false,
+                          disabledReasonCode: "action_unavailable",
+                          riskLevel: "low",
+                        },
                         locale,
                         buildCrossAppUrl(entry.links[1]),
                         "_blank",
                       )}
                     </div>
-                  </Td>
-                </Tr>
-              ))}
-            </DataTable>
-          </DataViewCard>
-
-          <DataViewCard
-            title={t("contracts.reviewTitle", locale)}
-            subtitle={t("contracts.reviewSubtitle", locale, {
-              count: reviewQueue.length,
-            })}
-            tone="warning"
-            density="compact"
-            summary={t("contracts.reviewRegistrySummary", locale, {
-              total: reviewQueue.length,
-              manual: manualReviewCount,
-            })}
-          >
-            <DataTable
-              density="compact"
-              tone="warning"
-              columns={[
-                {
-                  label: t("contracts.reviewCol.partnerEntry", locale),
-                  width: "220px",
-                },
-                {
-                  label: t("contracts.reviewCol.reason", locale),
-                  width: "220px",
-                },
-                {
-                  label: t("contracts.reviewCol.status", locale),
-                  width: "130px",
-                },
-                {
-                  label: t("contracts.reviewCol.attempts", locale),
-                  width: "130px",
-                },
-                {
-                  label: t("contracts.reviewCol.requestedAt", locale),
-                  width: "190px",
-                },
-                { label: t("contracts.reviewCol.requestContext", locale) },
-              ]}
-              empty={t("contracts.reviewEmpty", locale)}
-            >
-              {reviewQueue.map((item) => (
-                <Tr key={item.eligibilityVerificationId}>
-                  <Td density="compact">
-                    <DataCellStack
-                      primary={
-                        <strong>
-                          {partnerNameBySlug.get(item.partnerEntrySlug) ??
-                            item.partnerEntrySlug}
-                        </strong>
-                      }
-                      secondary={item.partnerEntrySlug}
-                    />
-                  </Td>
-                  <Td density="compact">
-                    <DataCellStack
-                      primary={formatOpsCodeLabel(
-                        locale,
-                        item.verificationReasonCode,
-                      )}
-                      secondary={
-                        item.manualFallback.reasonCode ??
-                        item.latestAttemptReasonCode ??
-                        t("common.dash", locale)
-                      }
-                    />
-                  </Td>
-                  <Td density="compact">
-                    <StatusChip
-                      tone={eligibilityStatusTone(item.verificationStatus)}
-                      authorityLabel={locale === "zh" ? "判定" : "decision"}
-                      label={t(
-                        `contracts.reviewStatus.${item.verificationStatus}`,
-                        locale,
-                      )}
-                    />
-                  </Td>
-                  <Td density="compact">
-                    <DataCellStack
-                      primary={String(item.attemptCount)}
-                      secondary={
-                        item.latestAttemptStatus
-                          ? formatOpsCodeLabel(locale, item.latestAttemptStatus)
-                          : t("common.dash", locale)
-                      }
-                    />
-                  </Td>
-                  <Td density="compact">
-                    <DataCellStack
-                      primary={formatDateTime(
-                        item.manualFallback.requestedAt,
-                        locale,
-                      )}
-                      secondary={formatRequestedBy(item, locale)}
-                      tertiary={formatDateTime(item.verifiedAt, locale)}
-                    />
-                  </Td>
-                  <Td density="compact" muted>
-                    {formatContext(item, locale)}
                   </Td>
                 </Tr>
               ))}
