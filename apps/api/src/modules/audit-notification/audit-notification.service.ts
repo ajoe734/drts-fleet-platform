@@ -718,6 +718,12 @@ export class AuditNotificationService implements OnModuleInit {
     return notification;
   }
 
+  removeNotification(notificationId: string) {
+    this.notifications = this.notifications.filter(
+      (notification) => notification.notificationId !== notificationId,
+    );
+  }
+
   recordAuditLog(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
       requestId?: string;

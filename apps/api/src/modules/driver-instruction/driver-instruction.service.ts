@@ -52,11 +52,11 @@ export class DriverInstructionService implements OnModuleInit {
     }
   }
 
-  createInstruction(
+  async createInstruction(
     command: CreateDriverOpsInstructionCommand,
     identity: IdentityContext | null,
     requestId?: string,
-  ): DriverOpsInstruction {
+  ): Promise<DriverOpsInstruction> {
     const actor = this.requireOpsIdentity(identity);
     const driverId = this.requireText("driverId", command.driverId);
     const taskId = this.requireText("taskId", command.taskId);
@@ -87,11 +87,18 @@ export class DriverInstructionService implements OnModuleInit {
     });
     instruction.notificationId = notification.notificationId;
 
+    try {
+      await this.persist(instruction, "create_instruction");
+    } catch (error) {
+      this.auditNotificationService.removeNotification(
+        notification.notificationId,
+      );
+      throw error;
+    }
     this.instructions.set(
       instruction.instructionId,
       this.clonePersisted(instruction),
     );
-    this.persist(instruction, "create_instruction");
     this.auditNotificationService.recordAuditLog({
       actorId: actor.actorId,
       actorType: actor.actorType as AuditLogRecord["actorType"],
@@ -131,11 +138,11 @@ export class DriverInstructionService implements OnModuleInit {
       .map((instruction) => this.toPublicInstruction(instruction));
   }
 
-  acknowledgeInstruction(
+  async acknowledgeInstruction(
     instructionId: string,
     identity: IdentityContext | null,
     requestId?: string,
-  ): AcknowledgeDriverOpsInstructionResult {
+  ): Promise<AcknowledgeDriverOpsInstructionResult> {
     const actor = this.requireDriverIdentity(identity);
     const normalizedInstructionId = this.requireText(
       "instructionId",
@@ -179,8 +186,8 @@ export class DriverInstructionService implements OnModuleInit {
       updatedAt: acknowledgedAt,
     };
 
+    await this.persist(updated, "acknowledge_instruction");
     this.instructions.set(updated.instructionId, this.clonePersisted(updated));
-    this.persist(updated, "acknowledge_instruction");
 
     if (updated.notificationId) {
       this.auditNotificationService.markNotificationsRead(
@@ -239,7 +246,16 @@ export class DriverInstructionService implements OnModuleInit {
     return identity;
   }
 
-  private requireText(field: string, value: string) {
+  private requireText(field: string, value: unknown) {
+    if (typeof value !== "string") {
+      throw new ApiRequestError(
+        400,
+        "INVALID_DRIVER_OPS_INSTRUCTION",
+        `${field} is required.`,
+        { field },
+      );
+    }
+
     const normalized = value.trim();
     if (!normalized) {
       throw new ApiRequestError(
@@ -253,12 +269,18 @@ export class DriverInstructionService implements OnModuleInit {
     return normalized;
   }
 
-  private normalizeExpiry(
-    expiresAt: string | null | undefined,
-    issuedAt: string,
-  ) {
+  private normalizeExpiry(expiresAt: unknown, issuedAt: string) {
     if (expiresAt == null) {
       return null;
+    }
+
+    if (typeof expiresAt !== "string") {
+      throw new ApiRequestError(
+        400,
+        "INVALID_DRIVER_OPS_INSTRUCTION_EXPIRY",
+        "expiresAt must be a valid ISO timestamp.",
+        { expiresAt },
+      );
     }
 
     const normalized = expiresAt.trim();
@@ -318,7 +340,7 @@ export class DriverInstructionService implements OnModuleInit {
     return { ...instruction };
   }
 
-  private persist(
+  private async persist(
     instruction: PersistedDriverInstructionRecord,
     context: string,
   ) {
@@ -326,10 +348,17 @@ export class DriverInstructionService implements OnModuleInit {
       return;
     }
 
-    void this.repository
-      .upsert(instruction)
-      .catch((error) =>
-        this.repository?.reportPersistenceFailure(error, context),
+    try {
+      await this.repository.upsert(instruction);
+    } catch (error) {
+      this.repository.reportPersistenceFailure(error, context);
+      throw new ApiRequestError(
+        503,
+        "DRIVER_OPS_INSTRUCTION_STORAGE_UNAVAILABLE",
+        "Driver ops instruction storage is not available.",
+        undefined,
+        true,
       );
+    }
   }
 }

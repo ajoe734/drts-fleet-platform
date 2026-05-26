@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import type { CreateDriverOpsInstructionCommand } from "@drts/contracts";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
@@ -28,39 +29,57 @@ const DRIVER_IDENTITY = {
   supportedExecutionModes: ["supervisor_managed_execution"] as const,
 };
 
+const BASE_COMMAND: CreateDriverOpsInstructionCommand = {
+  driverId: "drv-demo-001",
+  taskId: "task-001",
+  message: "Call dispatch before pickup.",
+  expiresAt: "2099-01-01T00:00:00.000Z",
+};
+
+function createCommand(
+  overrides: Partial<CreateDriverOpsInstructionCommand> = {},
+): CreateDriverOpsInstructionCommand {
+  return {
+    ...BASE_COMMAND,
+    ...overrides,
+  };
+}
+
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolver) => {
+    resolve = resolver;
+  });
+
+  return { promise, resolve };
+}
+
 describe("DriverInstructionService", () => {
-  it("lists only active unacknowledged instructions for the current driver", () => {
+  it("lists only active unacknowledged instructions for the current driver", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new DriverInstructionService(auditNotificationService);
 
-    const active = service.createInstruction(
-      {
-        driverId: "drv-demo-001",
-        taskId: "task-001",
-        message: "Call dispatch before pickup.",
-        expiresAt: "2099-01-01T00:00:00.000Z",
-      },
+    const active = await service.createInstruction(
+      createCommand(),
       OPS_IDENTITY,
       "req-driver-inst-001",
     );
 
-    service.createInstruction(
-      {
-        driverId: "drv-demo-001",
+    await service.createInstruction(
+      createCommand({
         taskId: "task-002",
         message: "Use the secondary pickup lane.",
         expiresAt: "2099-01-02T00:00:00.000Z",
-      },
+      }),
       OPS_IDENTITY,
     );
 
-    service.createInstruction(
-      {
+    await service.createInstruction(
+      createCommand({
         driverId: "drv-demo-002",
-        taskId: "task-001",
         message: "Other driver instruction",
         expiresAt: "2099-01-03T00:00:00.000Z",
-      },
+      }),
       OPS_IDENTITY,
     );
 
@@ -77,29 +96,24 @@ describe("DriverInstructionService", () => {
     ).toEqual([active]);
   });
 
-  it("hides expired instructions and marks linked notifications read on acknowledge", () => {
+  it("hides expired instructions and marks linked notifications read on acknowledge", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new DriverInstructionService(auditNotificationService);
     const now = Date.now();
 
-    const active = service.createInstruction(
-      {
-        driverId: "drv-demo-001",
-        taskId: "task-001",
+    const active = await service.createInstruction(
+      createCommand({
         message: "Proceed to manual fallback rendezvous point.",
-        expiresAt: "2099-01-01T00:00:00.000Z",
-      },
+      }),
       OPS_IDENTITY,
       "req-driver-inst-002",
     );
 
-    service.createInstruction(
-      {
-        driverId: "drv-demo-001",
-        taskId: "task-001",
+    await service.createInstruction(
+      createCommand({
         message: "Short-lived instruction",
         expiresAt: new Date(now + 50).toISOString(),
-      },
+      }),
       OPS_IDENTITY,
     );
 
@@ -113,7 +127,7 @@ describe("DriverInstructionService", () => {
       );
       expect(listed).toEqual([active]);
 
-      const acknowledged = service.acknowledgeInstruction(
+      const acknowledged = await service.acknowledgeInstruction(
         active.instructionId,
         DRIVER_IDENTITY,
         "req-driver-inst-ack-001",
@@ -136,33 +150,29 @@ describe("DriverInstructionService", () => {
     expect(linkedNotification?.readAt).not.toBeNull();
   });
 
-  it("rejects invalid or expired expiry timestamps", () => {
+  it("rejects invalid or expired expiry timestamps", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new DriverInstructionService(auditNotificationService);
 
-    expect(() =>
+    await expect(
       service.createInstruction(
-        {
-          driverId: "drv-demo-001",
-          taskId: "task-001",
+        createCommand({
           message: "Bad expiry",
           expiresAt: "not-a-date",
-        },
+        }),
         OPS_IDENTITY,
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
-    expect(() =>
+    await expect(
       service.createInstruction(
-        {
-          driverId: "drv-demo-001",
-          taskId: "task-001",
+        createCommand({
           message: "Past expiry",
           expiresAt: "2020-01-01T00:00:00.000Z",
-        },
+        }),
         OPS_IDENTITY,
       ),
-    ).toThrowError(
+    ).rejects.toThrowError(
       expect.objectContaining({
         response: expect.objectContaining({
           error: expect.objectContaining({
@@ -173,18 +183,108 @@ describe("DriverInstructionService", () => {
     );
   });
 
-  it("rejects acknowledging an expired instruction", () => {
+  it("rejects missing required fields with INVALID_DRIVER_OPS_INSTRUCTION", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new DriverInstructionService(auditNotificationService);
+
+    await expect(
+      service.createInstruction(
+        {
+          taskId: "task-001",
+          message: "Missing driver id.",
+          expiresAt: null,
+        } as CreateDriverOpsInstructionCommand,
+        OPS_IDENTITY,
+      ),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "INVALID_DRIVER_OPS_INSTRUCTION",
+            details: {
+              field: "driverId",
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("waits for durable create persistence before exposing the instruction", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const deferred = createDeferred();
+    const repository = {
+      upsert: vi.fn().mockReturnValueOnce(deferred.promise),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const service = new DriverInstructionService(
+      auditNotificationService,
+      repository as never,
+    );
+
+    const createPromise = service.createInstruction(
+      createCommand(),
+      OPS_IDENTITY,
+    );
+    await Promise.resolve();
+
+    expect(repository.upsert).toHaveBeenCalledTimes(1);
+    expect(service.listInstructionsForDriver(DRIVER_IDENTITY)).toEqual([]);
+
+    deferred.resolve();
+
+    const instruction = await createPromise;
+    expect(service.listInstructionsForDriver(DRIVER_IDENTITY)).toEqual([
+      instruction,
+    ]);
+  });
+
+  it("returns storage unavailable and leaves no in-memory residue when create persistence fails", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const repository = {
+      upsert: vi.fn().mockRejectedValue(new Error("db unavailable")),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const service = new DriverInstructionService(
+      auditNotificationService,
+      repository as never,
+    );
+
+    await expect(
+      service.createInstruction(createCommand(), OPS_IDENTITY),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "DRIVER_OPS_INSTRUCTION_STORAGE_UNAVAILABLE",
+            retryable: true,
+          }),
+        }),
+      }),
+    );
+
+    expect(repository.reportPersistenceFailure).toHaveBeenCalledWith(
+      expect.any(Error),
+      "create_instruction",
+    );
+    expect(service.listInstructionsForDriver(DRIVER_IDENTITY)).toEqual([]);
+    expect(
+      auditNotificationService
+        .listNotifications()
+        .some((entry) => entry.message === BASE_COMMAND.message),
+    ).toBe(false);
+  });
+
+  it("rejects acknowledging an expired instruction", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new DriverInstructionService(auditNotificationService);
 
     const now = Date.now();
-    const instruction = service.createInstruction(
-      {
-        driverId: "drv-demo-001",
-        taskId: "task-001",
+    const instruction = await service.createInstruction(
+      createCommand({
         message: "Expires immediately",
         expiresAt: new Date(now + 10).toISOString(),
-      },
+      }),
       OPS_IDENTITY,
     );
 
@@ -192,12 +292,12 @@ describe("DriverInstructionService", () => {
     Date.now = () => now + 1000;
 
     try {
-      expect(() =>
+      await expect(
         service.acknowledgeInstruction(
           instruction.instructionId,
           DRIVER_IDENTITY,
         ),
-      ).toThrowError(
+      ).rejects.toThrowError(
         expect.objectContaining({
           response: expect.objectContaining({
             error: expect.objectContaining({
@@ -211,22 +311,70 @@ describe("DriverInstructionService", () => {
     }
   });
 
-  it("keeps acknowledge idempotent after the instruction later expires", () => {
+  it("waits for durable acknowledge persistence before marking the instruction read", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const deferred = createDeferred();
+    const repository = {
+      upsert: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockReturnValueOnce(deferred.promise),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const service = new DriverInstructionService(
+      auditNotificationService,
+      repository as never,
+    );
+
+    const instruction = await service.createInstruction(
+      createCommand(),
+      OPS_IDENTITY,
+    );
+    const linkedNotification = auditNotificationService
+      .listNotifications()
+      .find((entry) => entry.message === instruction.message);
+
+    const acknowledgePromise = service.acknowledgeInstruction(
+      instruction.instructionId,
+      DRIVER_IDENTITY,
+    );
+    await Promise.resolve();
+
+    expect(service.listInstructionsForDriver(DRIVER_IDENTITY)).toEqual([
+      instruction,
+    ]);
+    expect(linkedNotification?.status).toBe("unread");
+
+    deferred.resolve();
+
+    await expect(acknowledgePromise).resolves.toMatchObject({
+      instructionId: instruction.instructionId,
+      taskId: instruction.taskId,
+    });
+
+    const refreshedNotification = auditNotificationService
+      .listNotifications()
+      .find(
+        (entry) => entry.notificationId === linkedNotification?.notificationId,
+      );
+    expect(service.listInstructionsForDriver(DRIVER_IDENTITY)).toEqual([]);
+    expect(refreshedNotification?.status).toBe("read");
+  });
+
+  it("keeps acknowledge idempotent after the instruction later expires", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new DriverInstructionService(auditNotificationService);
 
     const now = Date.now();
-    const instruction = service.createInstruction(
-      {
-        driverId: "drv-demo-001",
-        taskId: "task-001",
+    const instruction = await service.createInstruction(
+      createCommand({
         message: "Acknowledge before expiry.",
         expiresAt: new Date(now + 10).toISOString(),
-      },
+      }),
       OPS_IDENTITY,
     );
 
-    const firstAck = service.acknowledgeInstruction(
+    const firstAck = await service.acknowledgeInstruction(
       instruction.instructionId,
       DRIVER_IDENTITY,
     );
@@ -235,12 +383,12 @@ describe("DriverInstructionService", () => {
     Date.now = () => now + 1000;
 
     try {
-      expect(
+      await expect(
         service.acknowledgeInstruction(
           instruction.instructionId,
           DRIVER_IDENTITY,
         ),
-      ).toEqual(firstAck);
+      ).resolves.toEqual(firstAck);
     } finally {
       Date.now = originalDateNow;
     }

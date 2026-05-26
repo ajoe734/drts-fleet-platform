@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Post, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 
 import type {
   CreateDriverOpsInstructionCommand,
@@ -15,13 +23,13 @@ export class OpsDriverInstructionController {
 
   @Post()
   @RequireRealms("platform", "ops")
-  createInstruction(
+  async createInstruction(
     @Body() command: CreateDriverOpsInstructionCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.service.createInstruction(command, identity, requestId),
+      await this.service.createInstruction(command, identity, requestId),
       requestId,
     );
   }
@@ -48,13 +56,17 @@ export class DriverInstructionController {
 
   @Post(":instructionId/acknowledge")
   @RequireRealms("driver")
-  acknowledgeInstruction(
+  async acknowledgeInstruction(
     @Param("instructionId") instructionId: string,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.service.acknowledgeInstruction(instructionId, identity, requestId),
+      await this.service.acknowledgeInstruction(
+        instructionId,
+        identity,
+        requestId,
+      ),
       requestId,
     );
   }
