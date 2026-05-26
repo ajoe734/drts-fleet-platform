@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -20,6 +21,7 @@ import type {
   EmptyReason,
   ResourceActionDescriptor,
   UiRefreshMetadata,
+  UiSeverity,
 } from "@drts/contracts";
 
 import {
@@ -32,7 +34,7 @@ import {
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
-import { openCrossAppLink } from "@/lib/cross-app-links";
+import { openCrossAppLink, resolveCrossAppUrl } from "@/lib/cross-app-links";
 import {
   formatAmountNumber,
   formatMoney,
@@ -145,6 +147,67 @@ function getDisabledReasonMessage(code?: string) {
     default:
       return "目前無法執行這個操作。";
   }
+}
+
+function getEmptyReasonBadge(reason: EmptyReason) {
+  switch (reason) {
+    case "not_provisioned":
+      return "identity required";
+    case "permission_denied":
+      return "flag gated";
+    case "fetch_failed":
+      return "sync failed";
+    case "external_unavailable":
+      return "external delayed";
+    case "driver_not_eligible":
+      return "eligibility required";
+    case "filtered_empty":
+      return "filtered empty";
+    case "no_data":
+    default:
+      return "no earnings";
+  }
+}
+
+function getEmptyReasonTone(reason: EmptyReason) {
+  switch (reason) {
+    case "fetch_failed":
+      return "danger" as const;
+    case "not_provisioned":
+    case "external_unavailable":
+      return "warn" as const;
+    default:
+      return "info" as const;
+  }
+}
+
+function getSeverityTone(severity: UiSeverity) {
+  switch (severity) {
+    case "critical":
+      return "danger" as const;
+    case "warning":
+      return "warn" as const;
+    case "info":
+    default:
+      return "info" as const;
+  }
+}
+
+function getCrossAppTargetLabel(link: CrossAppResourceLink) {
+  switch (link.targetApp) {
+    case "platform-admin":
+      return "Platform Admin";
+    case "ops-console":
+      return "Ops Console";
+    case "tenant-console":
+      return "Tenant Console";
+    default:
+      return link.targetApp;
+  }
+}
+
+function getOpenModeLabel(link: CrossAppResourceLink) {
+  return link.openMode === "same_tab" ? "same tab" : "new tab";
 }
 
 function getEmptyContent(
@@ -592,12 +655,21 @@ export default function EarningsScreen() {
     dashboard?.availableActions,
     "refresh_earnings",
   );
-  const refreshEnabled = refreshAction?.enabled ?? true;
+  const refreshEnabled = refreshAction?.enabled ?? false;
   const refreshStatus =
     dashboard !== null ? formatRefreshLabel(dashboard.refresh) : "manual";
   const refreshTone =
     dashboard !== null ? getRefreshTone(dashboard.refresh) : "neutral";
   const emptyAction = dashboard?.emptyState?.nextAction ?? null;
+  const reconciliationAction = dashboard?.reconciliationIssue
+    ? findAction(
+        dashboard.reconciliationIssue.availableActions,
+        "open_manager_review",
+      )
+    : null;
+  const reconciliationUrl = dashboard?.reconciliationIssue
+    ? resolveCrossAppUrl(dashboard.reconciliationIssue.managerReviewLink)
+    : null;
 
   if (loading && dashboard === null && error === null) {
     return (
@@ -659,7 +731,7 @@ export default function EarningsScreen() {
           title={driverStrings.earnings.title}
           subtitle={getHeaderSubtitle(period)}
           actions={
-            showRetry ? (
+            showRetry && refreshAction ? (
               <Btn
                 theme={THEME}
                 variant="secondary"
@@ -676,25 +748,79 @@ export default function EarningsScreen() {
             ) : undefined
           }
         />
-        <Banner
+        <Card
           theme={THEME}
-          tone={emptyContent.tone}
-          title={emptyContent.title}
-          body={emptyContent.body}
-          icon={
-            <Ionicons
-              name={emptyContent.icon}
-              size={16}
-              color={
-                emptyContent.tone === "danger"
-                  ? THEME.danger
-                  : emptyContent.tone === "warn"
-                    ? THEME.warn
-                    : THEME.info
-              }
-            />
-          }
-        />
+          style={[
+            styles.emptyStateCard,
+            emptyReason === "fetch_failed"
+              ? styles.emptyStateCardDanger
+              : emptyReason === "not_provisioned" ||
+                  emptyReason === "external_unavailable"
+                ? styles.emptyStateCardWarn
+                : styles.emptyStateCardInfo,
+          ]}
+        >
+          <View style={styles.emptyStateHeroRow}>
+            <View
+              style={[
+                styles.emptyStateIconWrap,
+                {
+                  backgroundColor:
+                    emptyContent.tone === "danger"
+                      ? THEME.dangerBg
+                      : emptyContent.tone === "warn"
+                        ? THEME.warnBg
+                        : THEME.infoBg,
+                  borderColor:
+                    emptyContent.tone === "danger"
+                      ? THEME.dangerBorder
+                      : emptyContent.tone === "warn"
+                        ? THEME.warnBorder
+                        : THEME.infoBorder,
+                },
+              ]}
+            >
+              <Ionicons
+                name={emptyContent.icon}
+                size={18}
+                color={
+                  emptyContent.tone === "danger"
+                    ? THEME.danger
+                    : emptyContent.tone === "warn"
+                      ? THEME.warn
+                      : THEME.info
+                }
+              />
+            </View>
+            <View style={styles.emptyStateCopy}>
+              <Pill theme={THEME} tone={getEmptyReasonTone(emptyReason)}>
+                {getEmptyReasonBadge(emptyReason)}
+              </Pill>
+              <Text
+                style={[
+                  styles.emptyStateTitle,
+                  { color: THEME.text, fontFamily: THEME.fontFamily },
+                ]}
+              >
+                {emptyContent.title}
+              </Text>
+              <Text
+                style={[
+                  styles.emptyStateBody,
+                  { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+                ]}
+              >
+                {emptyContent.body}
+              </Text>
+            </View>
+          </View>
+          <Banner
+            theme={THEME}
+            tone={emptyContent.tone}
+            title="EmptyReason"
+            body={emptyReason}
+          />
+        </Card>
         {hasRefreshEnvelope ? (
           <View style={styles.emptyMetaRow}>
             <Pill theme={THEME} tone={refreshTone}>
@@ -743,13 +869,6 @@ export default function EarningsScreen() {
     return null;
   }
 
-  const reconciliationAction = dashboard.reconciliationIssue
-    ? findAction(
-        dashboard.reconciliationIssue.availableActions,
-        "open_manager_review",
-      )
-    : null;
-
   return (
     <>
       <Shell
@@ -771,16 +890,18 @@ export default function EarningsScreen() {
           title={driverStrings.earnings.title}
           subtitle={getHeaderSubtitle(period)}
           actions={
-            <Btn
-              theme={THEME}
-              variant="secondary"
-              size="sm"
-              disabled={!refreshEnabled || refreshing}
-              icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
-              onPress={() => void runDashboardAction(refreshAction)}
-            >
-              重新整理
-            </Btn>
+            refreshAction ? (
+              <Btn
+                theme={THEME}
+                variant="secondary"
+                size="sm"
+                disabled={!refreshEnabled || refreshing}
+                icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
+                onPress={() => void runDashboardAction(refreshAction)}
+              >
+                重新整理
+              </Btn>
+            ) : undefined
           }
         />
 
@@ -907,6 +1028,14 @@ export default function EarningsScreen() {
               value={`${dashboard.summary.platformCount}`}
             />
           </View>
+          <Text
+            style={[
+              styles.summaryFootnote,
+              { color: THEME.textDim, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            net first · pending payout distinct · authority labeled
+          </Text>
         </Card>
 
         {dashboard.notes?.length ? (
@@ -978,19 +1107,33 @@ export default function EarningsScreen() {
                     ]}
                   >
                     <View style={styles.breakdownTopRow}>
-                      <Pill
-                        theme={THEME}
-                        tone={
-                          item.authorityTone === "owned"
-                            ? "accent"
-                            : item.authorityTone === "reference_only"
-                              ? "info"
-                              : "warn"
-                        }
-                        dot
-                      >
-                        {item.platformName} · {item.platformCode}
-                      </Pill>
+                      <View style={styles.breakdownBadgeGroup}>
+                        <Pill
+                          theme={THEME}
+                          tone={
+                            item.authorityTone === "owned"
+                              ? "accent"
+                              : item.authorityTone === "reference_only"
+                                ? "info"
+                                : "warn"
+                          }
+                          dot
+                        >
+                          {item.platformName} · {item.platformCode}
+                        </Pill>
+                        <Pill
+                          theme={THEME}
+                          tone={
+                            item.authorityTone === "owned"
+                              ? "success"
+                              : item.authorityTone === "reference_only"
+                                ? "info"
+                                : "warn"
+                          }
+                        >
+                          {item.authorityLabel}
+                        </Pill>
+                      </View>
                       <Text
                         style={[
                           styles.breakdownNetValue,
@@ -1076,17 +1219,16 @@ export default function EarningsScreen() {
                         style={[
                           styles.breakdownAuthority,
                           {
-                            color:
-                              item.authorityTone === "owned"
-                                ? THEME.accentHi
-                                : item.authorityTone === "reference_only"
-                                  ? THEME.info
-                                  : THEME.warn,
+                            color: item.referenceOnly
+                              ? THEME.info
+                              : THEME.textDim,
                             fontFamily: THEME.fontFamily,
                           },
                         ]}
                       >
-                        {item.authorityLabel}
+                        {item.referenceOnly
+                          ? "shadow ledger · reference only"
+                          : "payable by platform authority"}
                       </Text>
                     </View>
                     {item.availableActions.length > 0 ? (
@@ -1127,6 +1269,24 @@ export default function EarningsScreen() {
 
         {dashboard.reconciliationIssue ? (
           <Card theme={THEME} style={styles.reconciliationCard}>
+            <View style={styles.reconciliationMetaRow}>
+              <Pill
+                theme={THEME}
+                tone={getSeverityTone(dashboard.reconciliationIssue.severity)}
+              >
+                {dashboard.reconciliationIssue.severity}
+              </Pill>
+              <Pill theme={THEME} tone="neutral">
+                {getCrossAppTargetLabel(
+                  dashboard.reconciliationIssue.managerReviewLink,
+                )}
+              </Pill>
+              <Pill theme={THEME} tone="warn">
+                {getOpenModeLabel(
+                  dashboard.reconciliationIssue.managerReviewLink,
+                )}
+              </Pill>
+            </View>
             <View style={styles.reconciliationPressable}>
               <Ionicons
                 name="warning-outline"
@@ -1157,9 +1317,27 @@ export default function EarningsScreen() {
                     { color: THEME.textDim, fontFamily: THEME.fontFamily },
                   ]}
                 >
-                  deep link ·{" "}
-                  {dashboard.reconciliationIssue.managerReviewLink.targetApp}
+                  {dashboard.reconciliationIssue.managerReviewLink.label} ·{" "}
+                  {dashboard.reconciliationIssue.managerReviewLink.resourceType}
+                  #{dashboard.reconciliationIssue.managerReviewLink.resourceId}
                 </Text>
+                {reconciliationUrl ? (
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.reconciliationUrl,
+                      {
+                        color: THEME.textMuted,
+                        fontFamily:
+                          Platform.OS === "web"
+                            ? THEME.monoFamily
+                            : THEME.fontFamily,
+                      },
+                    ]}
+                  >
+                    {reconciliationUrl}
+                  </Text>
+                ) : null}
               </View>
             </View>
             <Btn
@@ -1462,6 +1640,10 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: "wrap",
   },
+  summaryFootnote: {
+    fontSize: 10.5,
+    lineHeight: 15,
+  },
   summaryMetricsRow: {
     flexDirection: "row",
     gap: 12,
@@ -1522,6 +1704,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  breakdownBadgeGroup: {
+    flexShrink: 1,
+    gap: 6,
+  },
   breakdownNetValue: {
     marginLeft: "auto",
     fontSize: 16,
@@ -1560,6 +1746,11 @@ const styles = StyleSheet.create({
   reconciliationCard: {
     gap: 12,
   },
+  reconciliationMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
   reconciliationPressable: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1583,6 +1774,50 @@ const styles = StyleSheet.create({
   reconciliationMeta: {
     fontSize: 10.5,
     marginTop: 4,
+  },
+  reconciliationUrl: {
+    fontSize: 10,
+    marginTop: 4,
+  },
+  emptyStateCard: {
+    gap: 12,
+  },
+  emptyStateCardInfo: {
+    borderWidth: 1,
+    borderColor: "#274764",
+  },
+  emptyStateCardWarn: {
+    borderWidth: 1,
+    borderColor: "#6A5430",
+  },
+  emptyStateCardDanger: {
+    borderWidth: 1,
+    borderColor: "#6A2A2A",
+  },
+  emptyStateHeroRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  emptyStateIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyStateCopy: {
+    flex: 1,
+    gap: 8,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  emptyStateBody: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   statementList: {
     borderWidth: 1,
