@@ -32,7 +32,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -81,25 +80,21 @@ const headerActionsStyle = {
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
-const railStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-} satisfies CSSProperties;
-
-const summaryCardStyle = {
+const infoBarStyle = {
   border: `1px solid ${theme.neutralBorder}`,
   borderRadius: 18,
   background: theme.bgRaised,
-  padding: 14,
-  display: "grid",
-  gap: 8,
+  padding: "12px 14px",
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  alignItems: "center",
 } satisfies CSSProperties;
 
 const filtersGridStyle = {
   display: "grid",
   gap: 12,
-  gridTemplateColumns: "1.6fr repeat(3, minmax(140px, 1fr))",
+  gridTemplateColumns: "minmax(220px, 1.6fr) repeat(3, minmax(140px, 1fr))",
 } satisfies CSSProperties;
 
 const inputStyle = (mono = false): CSSProperties => ({
@@ -119,6 +114,24 @@ const toolbarClusterStyle = {
   gap: 8,
   flexWrap: "wrap",
   alignItems: "center",
+} satisfies CSSProperties;
+
+const rosterHeaderStyle = {
+  display: "grid",
+  gap: 14,
+} satisfies CSSProperties;
+
+const rosterHeaderTopStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+  alignItems: "center",
+} satisfies CSSProperties;
+
+const filterSummaryStyle = {
+  color: theme.textMuted,
+  fontSize: 12.5,
 } satisfies CSSProperties;
 
 const entryCellStyle = {
@@ -176,12 +189,6 @@ const chipButtonStyle = (disabled: boolean): CSSProperties => ({
   opacity: disabled ? 0.72 : 1,
 });
 
-const attentionBoardStyle = {
-  display: "grid",
-  gap: 10,
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-} satisfies CSSProperties;
-
 const modalScrimStyle = {
   position: "fixed",
   inset: 0,
@@ -207,6 +214,11 @@ const textareaStyle = {
   ...inputStyle(),
   minHeight: 108,
   resize: "vertical",
+} satisfies CSSProperties;
+
+const createModalBodyStyle = {
+  display: "grid",
+  gap: 14,
 } satisfies CSSProperties;
 
 function emptyStateStyle(reason: EmptyReason): CSSProperties {
@@ -482,7 +494,7 @@ export default function PartnersPage() {
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [pendingRowAction, setPendingRowAction] = useState<string | null>(null);
   const [pendingAction, setPendingAction] =
@@ -517,13 +529,11 @@ export default function PartnersPage() {
           createTitle: "Create partner entry",
           createSubtitle:
             "Provision routing, auth mode, eligibility mode, and brand metadata before activation.",
-          attentionTitle: "Attention board",
-          attentionEmpty: "Visible rows are active and readiness-complete.",
           rosterTitle: "Entry roster",
           rosterSubtitle:
-            "Partner roster for tenant mapping, dispatch subtype, auth posture, and cross-app inspection.",
+            "Tenant mapping, dispatch subtype, auth posture, readiness, and cross-app inspection in one governance table.",
           rosterSummary:
-            "List CTAs are driven by availableActions. Rows without actions stay explicitly read-only.",
+            "List CTAs are driven by availableActions. Inactive entries and readiness gaps stay visibly flagged.",
           openDetail: "Open detail",
           clearFilters: "Clear filters",
           readOnly: "Read-only",
@@ -537,6 +547,7 @@ export default function PartnersPage() {
           confirmCancel: "Cancel",
           confirmProceed: "Confirm and continue",
           viewAudit: "View audit",
+          inactiveRisk: "Inactive risk",
           auditPending:
             "Audit trail recorded on the backend. Open audit for the full event.",
           receiptTitle: "Partner action recorded",
@@ -546,11 +557,6 @@ export default function PartnersPage() {
             low: "Direct action with immediate receipt.",
             medium: "Confirmation required before the write is sent.",
             high: "High-risk action. Confirmation is required and a non-empty reason must be captured.",
-          },
-          metrics: {
-            active: "Active entries",
-            attention: "Needs attention",
-            revoked: "Revoked entries",
           },
           filterLabels: {
             all: "All",
@@ -607,13 +613,11 @@ export default function PartnersPage() {
           createTitle: "建立 partner entry",
           createSubtitle:
             "在 activation 前先補齊 routing、auth mode、eligibility mode 與品牌 metadata。",
-          attentionTitle: "Attention board",
-          attentionEmpty: "目前可見 rows 皆為 active 且 readiness 完整。",
           rosterTitle: "Entry roster",
           rosterSubtitle:
-            "tenant 對應、dispatch subtype、auth posture 與跨 app 檢視都集中在這裡。",
+            "tenant 對應、dispatch subtype、auth posture、readiness 與跨 app 檢視集中在同一張治理表。",
           rosterSummary:
-            "清單級 CTA 由 availableActions 決定；row 若沒有 action，畫面會明確呈現唯讀。",
+            "清單級 CTA 由 availableActions 決定；inactive 與 readiness 缺口會持續顯示風險標記。",
           openDetail: "查看詳情",
           clearFilters: "清除篩選",
           readOnly: "唯讀",
@@ -626,6 +630,7 @@ export default function PartnersPage() {
           confirmCancel: "取消",
           confirmProceed: "確認並執行",
           viewAudit: "查看 audit",
+          inactiveRisk: "停用風險",
           auditPending: "後端已記錄稽核事件；可前往 audit 查看完整紀錄。",
           receiptTitle: "Partner 動作已記錄",
           receiptFallback: "partner entry 已變更，且 roster 已重新整理。",
@@ -633,11 +638,6 @@ export default function PartnersPage() {
             low: "直接執行，完成後立即提供 receipt。",
             medium: "送出前必須先確認。",
             high: "高風險動作，必須確認且需填寫非空原因。",
-          },
-          metrics: {
-            active: "啟用 entry",
-            attention: "待補 readiness",
-            revoked: "已撤銷 entry",
           },
           filterLabels: {
             all: "全部",
@@ -803,11 +803,6 @@ export default function PartnersPage() {
     );
   }, [emptyState, entries.length, loading, visibleEntries.length]);
 
-  const attentionEntries = useMemo(
-    () => visibleEntries.filter(partnerNeedsAttention).slice(0, 4),
-    [visibleEntries],
-  );
-
   const refreshAction = findAction(listActions, ["refresh", "reload"]);
   const createAction = findAction(listActions, ["create", "new"]);
 
@@ -837,7 +832,7 @@ export default function PartnersPage() {
         if (action.kind === "create" && action.command) {
           result = await client.createPlatformPartnerEntry(action.command);
           setCreateForm(EMPTY_ENTRY_FORM);
-          setShowCreate(false);
+          setShowCreateModal(false);
         } else if (action.kind === "activate" && action.entrySlug) {
           result = await client.activatePlatformPartnerEntry(action.entrySlug);
         } else if (action.kind === "deactivate" && action.entrySlug) {
@@ -932,6 +927,12 @@ export default function PartnersPage() {
     setTypeFilter("all");
   };
 
+  const activeFilterCount =
+    (search.trim() ? 1 : 0) +
+    (tenantFilter !== "all" ? 1 : 0) +
+    (typeFilter !== "all" ? 1 : 0) +
+    (filter !== "all" ? 1 : 0);
+
   return (
     <CanvasShell
       theme={theme}
@@ -964,10 +965,10 @@ export default function PartnersPage() {
             {createAction ? (
               <CanvasBtn
                 theme={theme}
-                variant={showCreate ? "secondary" : "primary"}
-                icon={showCreate ? "x" : "plus"}
+                variant="primary"
+                icon="plus"
                 disabled={!createAction.enabled}
-                onClick={() => setShowCreate((current) => !current)}
+                onClick={() => setShowCreateModal(true)}
               >
                 {copy.create}
               </CanvasBtn>
@@ -1002,155 +1003,6 @@ export default function PartnersPage() {
           />
         ) : null}
 
-        <div style={railStyle}>
-          <CanvasKPI
-            theme={theme}
-            label={copy.metrics.active}
-            value={counts.active}
-            sub={`${counts.all} total`}
-          />
-          <CanvasKPI
-            theme={theme}
-            label={copy.metrics.attention}
-            value={counts.attention}
-            delta={counts.attention > 0 ? `${counts.attention}` : undefined}
-            deltaTone={counts.attention > 0 ? "down" : "neutral"}
-            sub={
-              locale === "en"
-                ? "Inactive or missing readiness coverage"
-                : "inactive 或 readiness 缺口"
-            }
-          />
-          <CanvasKPI
-            theme={theme}
-            label={copy.metrics.revoked}
-            value={counts.revoked}
-            sub={
-              locale === "en"
-                ? "Retained for audit lineage"
-                : "保留供 audit lineage 追溯"
-            }
-          />
-          <div style={summaryCardStyle}>
-            <div style={toolbarClusterStyle}>
-              <CanvasPill theme={theme} tone="neutral">
-                {copy.refreshTierLabel}: {formatRefreshTierLabel(refreshTier)}
-              </CanvasPill>
-              <CanvasPill theme={theme} tone="neutral">
-                {copy.refreshedAtLabel}:{" "}
-                {refreshedAt ? formatDateTime(refreshedAt) : "—"}
-              </CanvasPill>
-            </div>
-            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
-              {locale === "en"
-                ? "T4 pages poll every 30s; T6 stays manual."
-                : "T4 頁面每 30 秒輪詢；T6 維持手動刷新。"}
-            </span>
-          </div>
-        </div>
-
-        <CanvasCard
-          theme={theme}
-          title={copy.attentionTitle}
-          subtitle={
-            locale === "en"
-              ? "Risk-first strip for inactive and incomplete rows."
-              : "優先呈現 inactive 與 readiness 不完整的 rows。"
-          }
-        >
-          {attentionEntries.length > 0 ? (
-            <div style={attentionBoardStyle}>
-              {attentionEntries.map((entry) => {
-                const readiness = readinessSummary(entry, t);
-                return (
-                  <div key={entry.entrySlug} style={summaryCardStyle}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 8,
-                      }}
-                    >
-                      <div style={entryCellStyle}>
-                        <span
-                          style={entryAvatarStyle(
-                            entry.themeAccent?.trim() || theme.accent,
-                          )}
-                        >
-                          {entry.partnerCode.slice(0, 2).toUpperCase() || "PE"}
-                        </span>
-                        <div style={{ display: "grid", gap: 2 }}>
-                          <Link
-                            href={`/partners/${entry.entrySlug}`}
-                            style={primaryLinkStyle}
-                          >
-                            {entry.displayName}
-                          </Link>
-                          <span style={monoTextStyle}>/{entry.entrySlug}</span>
-                        </div>
-                      </div>
-                      <CanvasPill
-                        theme={theme}
-                        tone={statusTone(entry.status)}
-                        dot
-                      >
-                        {entry.status}
-                      </CanvasPill>
-                    </div>
-                    <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
-                      {entry.tenantId} · {entry.programId}
-                    </span>
-                    <div style={toolbarClusterStyle}>
-                      <CanvasPill
-                        theme={theme}
-                        tone={readiness.tone}
-                        dot={readiness.gaps.length > 0}
-                      >
-                        {readiness.label}
-                      </CanvasPill>
-                      <CanvasPill theme={theme} tone="neutral">
-                        {formatPlatformCodeLabel(locale, entry.authMode)}
-                      </CanvasPill>
-                    </div>
-                    {readiness.gaps.length > 0 ? (
-                      <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
-                        {readiness.gaps
-                          .slice(0, 2)
-                          .map((gap) => gap.label)
-                          .join(" · ")}
-                      </span>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div style={summaryCardStyle}>{copy.attentionEmpty}</div>
-          )}
-        </CanvasCard>
-
-        {showCreate ? (
-          <CanvasCard
-            theme={theme}
-            title={copy.createTitle}
-            subtitle={copy.createSubtitle}
-          >
-            <form onSubmit={handleCreate} style={{ display: "grid", gap: 14 }}>
-              <EntryForm form={createForm} setForm={setCreateForm} t={t} />
-              <div style={toolbarClusterStyle}>
-                <button
-                  type="submit"
-                  disabled={createDisabled}
-                  title={createAction?.disabledReasonCode}
-                  style={chipButtonStyle(createDisabled)}
-                >
-                  {creating ? t("common.creating") : copy.create}
-                </button>
-              </div>
-            </form>
-          </CanvasCard>
-        ) : null}
-
         <CanvasCard
           theme={theme}
           title={copy.rosterTitle}
@@ -1168,8 +1020,44 @@ export default function PartnersPage() {
           }
         >
           <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ color: theme.textMuted, fontSize: 12.5 }}>
-              {copy.rosterSummary}
+            <div style={rosterHeaderStyle}>
+              <div style={rosterHeaderTopStyle}>
+                <div style={toolbarClusterStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {counts.all} total
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="success" dot>
+                    {copy.filterLabels.active} {counts.active}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="warn" dot>
+                    {copy.filterLabels.inactive} {counts.inactive}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="warn" dot>
+                    {copy.filterLabels.attention} {counts.attention}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="danger" dot>
+                    {copy.filterLabels.revoked} {counts.revoked}
+                  </CanvasPill>
+                </div>
+                <div style={toolbarClusterStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.refreshTierLabel}:{" "}
+                    {formatRefreshTierLabel(refreshTier)}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.refreshedAtLabel}:{" "}
+                    {refreshedAt ? formatDateTime(refreshedAt) : "—"}
+                  </CanvasPill>
+                </div>
+              </div>
+              <div style={infoBarStyle}>
+                <span style={filterSummaryStyle}>{copy.rosterSummary}</span>
+                <span style={filterSummaryStyle}>
+                  {locale === "en"
+                    ? `Active filters: ${activeFilterCount}. T4 pages poll every 30s; T6 stays manual.`
+                    : `目前啟用 ${activeFilterCount} 個篩選。T4 頁面每 30 秒輪詢；T6 維持手動刷新。`}
+                </span>
+              </div>
             </div>
 
             <div style={filtersGridStyle}>
@@ -1307,10 +1195,21 @@ export default function PartnersPage() {
                   </CanvasPill>
                 </button>
               ))}
+              {createAction ? (
+                <CanvasBtn
+                  theme={theme}
+                  variant="primary"
+                  icon="plus"
+                  disabled={!createAction.enabled}
+                  onClick={() => setShowCreateModal(true)}
+                >
+                  {copy.create}
+                </CanvasBtn>
+              ) : null}
             </div>
 
             {loading ? (
-              <div style={summaryCardStyle}>{t("partners.loading")}</div>
+              <div style={infoBarStyle}>{t("partners.loading")}</div>
             ) : effectiveEmptyState ? (
               <div style={emptyStateStyle(effectiveEmptyState.reason)}>
                 <CanvasPill
@@ -1369,11 +1268,13 @@ export default function PartnersPage() {
                             "new",
                           ])
                         ) {
-                          setShowCreate(true);
+                          setShowCreateModal(true);
                         }
                       }}
                     >
-                      {effectiveEmptyState.nextAction.action}
+                      {humanizeActionLabel(
+                        effectiveEmptyState.nextAction.action,
+                      )}
                     </button>
                   ) : null}
                 </div>
@@ -1385,7 +1286,7 @@ export default function PartnersPage() {
                 columns={[
                   {
                     h: "ENTRY",
-                    w: 230,
+                    w: 250,
                     r: (entry) => (
                       <div style={entryCellStyle}>
                         <span
@@ -1414,50 +1315,54 @@ export default function PartnersPage() {
                     ),
                   },
                   {
-                    h: "PROGRAM",
-                    w: 170,
+                    h: "TENANT / PROGRAM",
+                    w: 190,
                     r: (entry) => (
                       <div style={{ display: "grid", gap: 2 }}>
                         <span style={{ fontWeight: 600 }}>
-                          {entry.programId}
+                          {entry.tenantId}
                         </span>
-                        <span style={monoTextStyle}>
-                          {entry.programCode || "—"}
-                        </span>
+                        <span style={monoTextStyle}>{entry.programId}</span>
                         <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                          {entry.bankCode || "—"}
+                          {[entry.programCode, entry.bankCode]
+                            .filter(Boolean)
+                            .join(" · ") || "—"}
                         </span>
                       </div>
                     ),
                   },
                   {
-                    h: "SUBTYPE",
-                    w: 170,
+                    h: "TYPE / SUBTYPE",
+                    w: 180,
                     r: (entry) => (
-                      <span style={monoTextStyle}>
-                        {formatPlatformCodeLabel(
-                          locale,
-                          entry.businessDispatchSubtype,
-                        )}
-                      </span>
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <span style={{ fontWeight: 600 }}>
+                          {entry.partnerType || "—"}
+                        </span>
+                        <span style={monoTextStyle}>
+                          {formatPlatformCodeLabel(
+                            locale,
+                            entry.businessDispatchSubtype,
+                          )}
+                        </span>
+                      </div>
                     ),
                   },
                   {
-                    h: "AUTH",
-                    w: 120,
+                    h: "AUTH / ELIGIBILITY",
+                    w: 160,
                     r: (entry) => (
-                      <span style={monoTextStyle}>
-                        {formatPlatformCodeLabel(locale, entry.authMode)}
-                      </span>
-                    ),
-                  },
-                  {
-                    h: "ELIGIBILITY",
-                    w: 140,
-                    r: (entry) => (
-                      <span style={monoTextStyle}>
-                        {formatPlatformCodeLabel(locale, entry.eligibilityMode)}
-                      </span>
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <span style={monoTextStyle}>
+                          {formatPlatformCodeLabel(locale, entry.authMode)}
+                        </span>
+                        <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                          {formatPlatformCodeLabel(
+                            locale,
+                            entry.eligibilityMode,
+                          )}
+                        </span>
+                      </div>
                     ),
                   },
                   {
@@ -1480,26 +1385,43 @@ export default function PartnersPage() {
                       const readiness = readinessSummary(entry, t);
                       return (
                         <div style={{ display: "grid", gap: 6 }}>
-                          <CanvasPill
-                            theme={theme}
-                            tone={readiness.tone}
-                            dot={readiness.gaps.length > 0}
-                          >
-                            {readiness.label}
-                          </CanvasPill>
+                          <div style={toolbarClusterStyle}>
+                            <CanvasPill
+                              theme={theme}
+                              tone={readiness.tone}
+                              dot={readiness.gaps.length > 0}
+                            >
+                              {readiness.label}
+                            </CanvasPill>
+                            {entry.status !== "active" ? (
+                              <CanvasPill theme={theme} tone="warn">
+                                {copy.inactiveRisk}
+                              </CanvasPill>
+                            ) : null}
+                          </div>
                           <span
                             style={{ color: theme.textMuted, fontSize: 11.5 }}
                           >
                             {entry.entryHost || "—"}
                             {entry.entryPath || ""}
                           </span>
+                          {readiness.gaps.length > 0 ? (
+                            <span
+                              style={{ color: theme.textDim, fontSize: 11.5 }}
+                            >
+                              {readiness.gaps
+                                .slice(0, 2)
+                                .map((gap) => gap.label)
+                                .join(" · ")}
+                            </span>
+                          ) : null}
                         </div>
                       );
                     },
                   },
                   {
                     h: "ACTIONS / LINKS",
-                    w: 260,
+                    w: 300,
                     r: (entry) => {
                       const rowActions = entry.availableActions ?? [];
                       const links = entry.resourceLinks ?? [];
@@ -1533,7 +1455,7 @@ export default function PartnersPage() {
                                     {pendingRowAction ===
                                     `${entry.entrySlug}:${action.action}`
                                       ? t("common.saving")
-                                      : action.action}
+                                      : humanizeActionLabel(action.action)}
                                   </button>
                                 ),
                               )
@@ -1593,6 +1515,50 @@ export default function PartnersPage() {
           </div>
         </CanvasCard>
       </div>
+
+      {showCreateModal ? (
+        <div style={modalScrimStyle}>
+          <div style={modalCardStyle}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <CanvasPill theme={theme} tone="accent">
+                {createAction?.riskLevel || "medium"}
+              </CanvasPill>
+              <strong style={{ fontSize: 20 }}>{copy.createTitle}</strong>
+              <span style={{ color: theme.textMuted, fontSize: 13 }}>
+                {copy.createSubtitle}
+              </span>
+            </div>
+            <form onSubmit={handleCreate} style={createModalBodyStyle}>
+              <EntryForm form={createForm} setForm={setCreateForm} t={t} />
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <CanvasBtn
+                  theme={theme}
+                  variant="secondary"
+                  onClick={() => setShowCreateModal(false)}
+                  disabled={creating}
+                >
+                  {copy.confirmCancel}
+                </CanvasBtn>
+                <button
+                  type="submit"
+                  disabled={createDisabled}
+                  title={createAction?.disabledReasonCode}
+                  style={chipButtonStyle(createDisabled)}
+                >
+                  {creating ? t("common.creating") : copy.create}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       {pendingAction ? (
         <div style={modalScrimStyle}>
