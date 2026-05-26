@@ -3,10 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type {
+  ResourceActionDescriptor,
+  TenantAddressDirectoryResponse,
   TenantAddressRecord,
   UpsertTenantAddressCommand,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+
+type AllowedAddressAction = "create" | "update" | "deactivate" | "reactivate";
 
 function readTrimmedString(
   formData: FormData,
@@ -106,10 +110,75 @@ function buildUpsertCommand(formData: FormData): UpsertTenantAddressCommand {
   return command;
 }
 
+function findEnabledAction(
+  actions: ResourceActionDescriptor[] | undefined,
+  action: AllowedAddressAction,
+) {
+  return (
+    actions?.find(
+      (descriptor) => descriptor.action === action && descriptor.enabled,
+    ) ?? null
+  );
+}
+
+function getUnavailableActionMessage(
+  action: AllowedAddressAction,
+  descriptor: ResourceActionDescriptor | null,
+) {
+  return (
+    descriptor?.disabledReasonCode ??
+    `Address action is not available: ${action}.`
+  );
+}
+
+async function loadAddressDirectory() {
+  const client = getTenantClient();
+  const directory =
+    (await client.getAddressDirectory()) as TenantAddressDirectoryResponse;
+  return { client, directory };
+}
+
+function assertPageActionAvailable(
+  directory: TenantAddressDirectoryResponse,
+  action: AllowedAddressAction,
+) {
+  const descriptor = findEnabledAction(directory.availableActions, action);
+  if (!descriptor) {
+    const disabledDescriptor =
+      directory.availableActions.find((item) => item.action === action) ?? null;
+    throw new Error(getUnavailableActionMessage(action, disabledDescriptor));
+  }
+}
+
+function assertRowActionAvailable(
+  directory: TenantAddressDirectoryResponse,
+  addressId: string,
+  action: Exclude<AllowedAddressAction, "create">,
+) {
+  const row = directory.items.find((item) => item.addressId === addressId);
+  if (!row) {
+    throw new Error("Address not found.");
+  }
+
+  const descriptor = findEnabledAction(row.availableActions, action);
+  if (!descriptor) {
+    const disabledDescriptor =
+      row.availableActions.find((item) => item.action === action) ?? null;
+    throw new Error(getUnavailableActionMessage(action, disabledDescriptor));
+  }
+}
+
 export async function upsertAddressAction(formData: FormData) {
   try {
-    const client = getTenantClient();
     const command = buildUpsertCommand(formData);
+    const { client, directory } = await loadAddressDirectory();
+
+    if (command.addressId) {
+      assertRowActionAvailable(directory, command.addressId, "update");
+    } else {
+      assertPageActionAvailable(directory, "create");
+    }
+
     const saved = (await client.upsertAddress(command)) as TenantAddressRecord;
 
     revalidatePath("/addresses");
@@ -167,7 +236,9 @@ export async function changeAddressLifecycleAction(formData: FormData) {
       throw new Error("Unsupported address lifecycle action.");
     }
 
-    const client = getTenantClient();
+    const { client, directory } = await loadAddressDirectory();
+    assertRowActionAvailable(directory, addressId, nextState);
+
     const existing = (await client.listAddresses()).find(
       (row) => row.addressId === addressId,
     );

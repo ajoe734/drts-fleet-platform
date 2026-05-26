@@ -221,6 +221,7 @@ type AddressTabKey = "active" | "inactive" | "quality" | "export";
 type AddressMode = "create" | "edit" | "deactivate" | "reactivate";
 type AddressEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
 type FlashTone = "default" | "warning";
+type AllowedAddressAction = "create" | "update" | "deactivate" | "reactivate";
 
 type SearchParams = {
   q?: string;
@@ -713,6 +714,28 @@ function getSelectedAddress(rows: AddressRow[], addressId: string | undefined) {
   return rows.find((row) => row.addressId === addressId) ?? null;
 }
 
+function findActionDescriptor(
+  actions: ResourceActionDescriptor[] | undefined,
+  action: AllowedAddressAction,
+) {
+  return actions?.find((descriptor) => descriptor.action === action) ?? null;
+}
+
+function getRequestedActionDescriptor(
+  mode: AddressMode | null,
+  directory: TenantAddressDirectoryResponse | null,
+  selectedAddress: AddressRow | null,
+) {
+  if (!mode) return null;
+  if (mode === "create") {
+    return findActionDescriptor(directory?.availableActions, "create");
+  }
+
+  if (!selectedAddress) return null;
+  const action = mode === "edit" ? "update" : mode;
+  return findActionDescriptor(selectedAddress.availableActions, action);
+}
+
 function getFlashTone(rawTone: string | undefined): FlashTone {
   return rawTone === "warning" ? "warning" : "default";
 }
@@ -726,11 +749,13 @@ function ActionFormCard({
   selectedAddress,
   passengers,
   returnTo,
+  requestedAction,
 }: {
   mode: AddressMode | null;
   selectedAddress: AddressRow | null;
   passengers: TenantPassengerRecord[];
   returnTo: string;
+  requestedAction: ResourceActionDescriptor | null;
 }) {
   if (!mode) {
     return (
@@ -758,6 +783,22 @@ function ActionFormCard({
       >
         <p style={emptyCopyStyle}>
           找不到指定 addressId，請從 Directory rows 重新選取。
+        </p>
+      </CanvasCard>
+    );
+  }
+
+  if (!requestedAction?.enabled) {
+    return (
+      <CanvasCard
+        theme={th}
+        title={config.title}
+        subtitle="Action unavailable for current tenant role"
+      >
+        <p style={emptyCopyStyle}>
+          這個 mode 只能由 backend `availableActions` 開啟。目前 request
+          沒有對應可執行 action，原因：
+          {requestedAction?.disabledReasonCode ?? "action_not_available"}。
         </p>
       </CanvasCard>
     );
@@ -1036,6 +1077,11 @@ export default async function AddressesPage({
           toAddressRow(record, passengersById, exportRowsById),
         ),
     resolvedSearchParams.addressId,
+  );
+  const requestedAction = getRequestedActionDescriptor(
+    mode,
+    directory,
+    selectedAddress,
   );
   const returnTo = buildScopedHref(
     query,
@@ -1461,6 +1507,7 @@ export default async function AddressesPage({
               selectedAddress={selectedAddress}
               passengers={passengers}
               returnTo={returnTo}
+              requestedAction={requestedAction}
             />
 
             <CanvasCard
