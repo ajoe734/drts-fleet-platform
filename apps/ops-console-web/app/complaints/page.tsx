@@ -526,11 +526,9 @@ export default function ComplaintsPage() {
     ? new Date(workspace.refresh.generatedAt).getTime() +
       workspace.refresh.staleAfterMs
     : 0;
+  const freshness = workspace?.refresh.dataFreshness;
   const isStale =
-    Boolean(workspace) &&
-    (workspace.refresh.dataFreshness === "stale" ||
-      workspace.refresh.dataFreshness === "degraded" ||
-      clockTick > staleAt);
+    freshness === "stale" || freshness === "degraded" || clockTick > staleAt;
   const emptyReason =
     forcedEmptyReason ??
     (!workspace && error ? "fetch_failed" : null) ??
