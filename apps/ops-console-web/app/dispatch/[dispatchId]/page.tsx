@@ -2,12 +2,16 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import type {
+  AdapterHealthRecord,
   DispatchCandidate,
   DispatchJobRecord,
   DispatchTraceLogRecord,
   DriverRegistryRecord,
   DriverTaskRecord,
+  ForwardedOrderRecord,
+  ForwarderReconciliationIssue,
   OwnedOrderRecord,
+  ResourceActionDescriptor,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
@@ -30,6 +34,7 @@ type DispatchDetailPageProps = {
   params: Promise<{
     dispatchId: string;
   }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 type CandidateRow = Record<string, unknown> & {
@@ -53,6 +58,15 @@ type TimelineEntry = {
   at: string;
   tone: "accent" | "info" | "warn" | "danger";
   actor?: string | null;
+};
+
+type DetailActionContext = {
+  action: string;
+  href: string;
+  label: string;
+  riskLevel: ResourceActionDescriptor["riskLevel"];
+  disabled: boolean;
+  external?: boolean;
 };
 
 const theme = buildCanvasTheme({
@@ -91,6 +105,197 @@ async function resolveOrFallback<T>(
   } catch {
     return fallback;
   }
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function buildPlatformAdminHref(path: string) {
+  const baseUrl =
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ??
+    process.env.PLATFORM_ADMIN_WEB_URL ??
+    "/platform-admin";
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+  return `${baseUrl.replace(/\/$/, "")}${path}`;
+}
+
+function buildDispatchListHref({
+  board,
+  service,
+  facet,
+}: {
+  board?: string | undefined;
+  service?: string | undefined;
+  facet?: string | undefined;
+}) {
+  const params = new URLSearchParams();
+  if (board && board !== "ready") {
+    params.set("board", board);
+  }
+  if (service && service !== "all") {
+    params.set("service", service);
+  }
+  if (facet && facet !== "all") {
+    params.set("facet", facet);
+  }
+  const query = params.toString();
+  return query ? `/dispatch?${query}` : "/dispatch";
+}
+
+function resolveActionLabel(action: string, locale: Locale) {
+  const zh = locale === "zh";
+  switch (action) {
+    case "assign":
+      return zh ? "指派候選" : "Assign candidate";
+    case "release_driver":
+      return zh ? "釋放司機" : "Release driver";
+    case "redispatch":
+      return zh ? "重新派送" : "Redispatch";
+    case "cancel_order":
+      return zh ? "取消訂單" : "Cancel order";
+    case "request_fare_override":
+    case "fare_override_request":
+      return zh ? "申請 fare override" : "Request fare override";
+    case "resolve_exception_hold":
+      return zh ? "解除 hold" : "Resolve hold";
+    case "resolve_no_supply":
+    case "resolve_manually":
+      return zh ? "人工處理" : "Resolve manually";
+    case "escalate_incident":
+    case "createIncidentFromDispatchException":
+      return zh ? "升級 incident" : "Escalate incident";
+    case "extend_search":
+      return zh ? "延長搜尋" : "Extend search";
+    case "jump_approval_request":
+      return zh ? "查看核准單" : "Open approval request";
+    case "trigger_reconciliation":
+    case "complete_forwarder_reconciliation":
+      return zh ? "觸發 reconciliation" : "Trigger reconciliation";
+    case "engage_manual_fallback":
+      return zh ? "啟動 manual fallback" : "Engage manual fallback";
+    case "force_refresh":
+    case "sync_forwarded_order_status":
+    case "mark_forwarder_sync_failed":
+      return zh ? "強制刷新" : "Force refresh";
+    case "broadcast_to_eligible_drivers":
+      return zh ? "廣播給合格司機" : "Broadcast to eligible drivers";
+    case "report_sync_failure":
+      return zh ? "回報 sync failure" : "Report sync failure";
+    case "inspect_adapter":
+      return zh ? "查看 adapter ↗" : "Inspect adapter ↗";
+    default:
+      return action.replace(/_/g, " ");
+  }
+}
+
+function buildActionHref(
+  dispatchId: string,
+  board: string | undefined,
+  service: string | undefined,
+  facet: string | undefined,
+  platformCode: string | undefined,
+  action: ResourceActionDescriptor,
+) {
+  switch (action.action) {
+    case "inspect_adapter":
+      return {
+        href: buildPlatformAdminHref(
+          `/adapter-registry?platformCode=${encodeURIComponent(platformCode ?? "")}`,
+        ),
+        external: true,
+      };
+    case "jump_approval_request":
+      return { href: "/approval-requests", external: false };
+    case "createIncidentFromDispatchException":
+    case "escalate_incident":
+      return {
+        href: `/incidents?sourceOrderId=${encodeURIComponent(dispatchId)}`,
+        external: false,
+      };
+    default: {
+      const params = new URLSearchParams();
+      if (board && board !== "ready") {
+        params.set("board", board);
+      }
+      if (service && service !== "all") {
+        params.set("service", service);
+      }
+      if (facet && facet !== "all") {
+        params.set("facet", facet);
+      }
+      params.set("action", action.action);
+      return {
+        href: `/dispatch/${encodeURIComponent(dispatchId)}?${params.toString()}`,
+        external: false,
+      };
+    }
+  }
+}
+
+function normalizeDetailActions(
+  dispatchId: string,
+  board: string | undefined,
+  service: string | undefined,
+  facet: string | undefined,
+  platformCode: string | undefined,
+  actions: ResourceActionDescriptor[] | undefined,
+  locale: Locale,
+): DetailActionContext[] {
+  return Array.isArray(actions)
+    ? actions.map((action) => {
+        const { href, external } = buildActionHref(
+          dispatchId,
+          board,
+          service,
+          facet,
+          platformCode,
+          action,
+        );
+        return {
+          action: action.action,
+          href,
+          label: resolveActionLabel(action.action, locale),
+          riskLevel: action.riskLevel,
+          disabled: !action.enabled,
+          external,
+        };
+      })
+    : [];
+}
+
+function pickActionFocus(
+  requestedAction: string | undefined,
+  actions: DetailActionContext[],
+) {
+  if (requestedAction) {
+    return actions.find((action) => action.action === requestedAction) ?? null;
+  }
+  return actions.find((action) => !action.disabled) ?? null;
+}
+
+function readSnapshotValue(
+  record: Record<string, unknown>,
+  keys: string[],
+): unknown {
+  for (const key of keys) {
+    if (key in record && record[key] != null) {
+      return record[key];
+    }
+  }
+  return null;
+}
+
+function formatSnapshotText(value: unknown) {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "—";
 }
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
@@ -942,14 +1147,28 @@ function renderTimeline(locale: Locale, entries: TimelineEntry[]) {
 
 export default async function DispatchDetailPage({
   params,
+  searchParams,
 }: DispatchDetailPageProps) {
   const { dispatchId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const board = firstParam(resolvedSearchParams.board);
+  const service = firstParam(resolvedSearchParams.service);
+  const facet = firstParam(resolvedSearchParams.facet);
+  const requestedAction = firstParam(resolvedSearchParams.action);
   const [client, locale] = await Promise.all([
     getServerOpsClient(),
     getServerLocale(),
   ]);
 
-  const [orders, dispatchJobs, driverTasks, drivers] = await Promise.all([
+  const [
+    orders,
+    dispatchJobs,
+    driverTasks,
+    drivers,
+    forwardedOrders,
+    adapterHealth,
+    reconciliationIssues,
+  ] = await Promise.all([
     resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
     resolveOrFallback(
       () => client.listDispatchJobs(),
@@ -957,6 +1176,19 @@ export default async function DispatchDetailPage({
     ),
     resolveOrFallback(() => client.listDriverTasks(), [] as DriverTaskRecord[]),
     resolveOrFallback(() => client.listDrivers(), [] as DriverRegistryRecord[]),
+    resolveOrFallback(
+      () => client.listForwarderOrders(),
+      [] as ForwardedOrderRecord[],
+    ),
+    resolveOrFallback<AdapterHealthRecord[]>(
+      () =>
+        client.getForwarderAdaptersHealth() as Promise<AdapterHealthRecord[]>,
+      [] as AdapterHealthRecord[],
+    ),
+    resolveOrFallback(
+      () => client.listForwarderReconciliationIssues(),
+      [] as ForwarderReconciliationIssue[],
+    ),
   ]);
 
   const matchedOrder =
@@ -968,6 +1200,337 @@ export default async function DispatchDetailPage({
       () => client.getOrder(dispatchId),
       null as OwnedOrderRecord | null,
     ));
+
+  const matchedForwarded =
+    forwardedOrders.find(
+      (candidate) =>
+        candidate.mirrorOrderId === dispatchId ||
+        candidate.externalOrderId === dispatchId,
+    ) ?? null;
+
+  if (!matchedOrder && !matchedForwarded) {
+    notFound();
+  }
+
+  if (!matchedOrder && matchedForwarded) {
+    const routeSnapshot: Record<string, unknown> =
+      typeof matchedForwarded.payload === "object" &&
+      matchedForwarded.payload !== null
+        ? matchedForwarded.payload
+        : {};
+    const authoritativeSnapshot: Record<string, unknown> =
+      typeof matchedForwarded.authoritativeSnapshot === "object" &&
+      matchedForwarded.authoritativeSnapshot !== null
+        ? matchedForwarded.authoritativeSnapshot
+        : {};
+    const linkedIssue =
+      reconciliationIssues.find(
+        (issue) => issue.mirrorOrderId === matchedForwarded.mirrorOrderId,
+      ) ?? null;
+    const adapter: AdapterHealthRecord | null =
+      adapterHealth.find(
+        (item) => item.platformCode === matchedForwarded.platformCode,
+      ) ?? null;
+    const detailActions = normalizeDetailActions(
+      matchedForwarded.mirrorOrderId,
+      board,
+      service,
+      facet,
+      matchedForwarded.platformCode,
+      (
+        matchedForwarded as ForwardedOrderRecord & {
+          availableActions?: ResourceActionDescriptor[];
+        }
+      ).availableActions,
+      locale,
+    );
+    const focusedAction = pickActionFocus(requestedAction, detailActions);
+    const waypoints = readSnapshotValue(authoritativeSnapshot, [
+      "waypoints",
+      "routeWaypoints",
+    ]);
+    const routeLocked = readSnapshotValue(authoritativeSnapshot, [
+      "routeLocked",
+      "isRouteLocked",
+    ]);
+    const lastCallback = readSnapshotValue(authoritativeSnapshot, [
+      "lastCallbackAt",
+      "lastWebhookReceivedAt",
+    ]);
+    const pickup = readSnapshotValue(routeSnapshot, [
+      "pickupAddress",
+      "pickup",
+      "pickupLabel",
+    ]);
+    const dropoff = readSnapshotValue(routeSnapshot, [
+      "dropoffAddress",
+      "dropoff",
+      "dropoffLabel",
+    ]);
+
+    return (
+      <>
+        <PageHeader
+          theme={theme}
+          title={`${matchedForwarded.mirrorOrderId} · ${formatOpsCodeLabel(locale, matchedForwarded.platformCode)}`}
+          subtitle={`${matchedForwarded.externalOrderId} · ${formatOpsCodeLabel(locale, matchedForwarded.status)} · ${formatDateTime(locale, matchedForwarded.updatedAt)}`}
+          actions={
+            <>
+              <Link
+                href={buildDispatchListHref({ board, service, facet })}
+                style={{ textDecoration: "none" }}
+              >
+                <Btn theme={theme} icon="arrow">
+                  {locale === "zh" ? "返回 Dispatch" : "Back to Dispatch"}
+                </Btn>
+              </Link>
+              {focusedAction ? (
+                <Link
+                  href={focusedAction.href}
+                  target={focusedAction.external ? "_blank" : undefined}
+                  rel={focusedAction.external ? "noreferrer" : undefined}
+                  style={{ textDecoration: "none" }}
+                >
+                  <Btn
+                    theme={theme}
+                    variant={
+                      focusedAction.riskLevel === "high"
+                        ? "primary"
+                        : "secondary"
+                    }
+                    icon={focusedAction.external ? "ext" : "check"}
+                  >
+                    {focusedAction.label}
+                  </Btn>
+                </Link>
+              ) : null}
+            </>
+          }
+        />
+
+        <div
+          style={{
+            padding: "24px",
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.95fr)",
+            gap: "16px",
+            alignItems: "start",
+          }}
+        >
+          <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
+            {focusedAction ? (
+              <Card theme={theme} title="Action focus">
+                <DL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      k: locale === "zh" ? "目前處理動作" : "Current action",
+                      v: focusedAction.label,
+                    },
+                    {
+                      k: locale === "zh" ? "工作區出口" : "Workspace exit",
+                      v:
+                        locale === "zh"
+                          ? "此鏡像單已進入 per-work-item workspace，可從右側卡片繼續處理 adapter / reconciliation。"
+                          : "This mirror is now in the per-work-item workspace; continue from the adapter and reconciliation panels.",
+                    },
+                  ]}
+                />
+              </Card>
+            ) : null}
+
+            <Card theme={theme} title="Forwarded summary">
+              <DL
+                theme={theme}
+                cols={2}
+                items={[
+                  { k: "domain", v: "forwarded", mono: true },
+                  {
+                    k: "status",
+                    v: formatOpsCodeLabel(locale, matchedForwarded.status),
+                    mono: true,
+                  },
+                  {
+                    k: "source platform",
+                    v: formatOpsCodeLabel(
+                      locale,
+                      matchedForwarded.platformCode,
+                    ),
+                  },
+                  {
+                    k: "external order",
+                    v: matchedForwarded.externalOrderId,
+                    mono: true,
+                  },
+                  {
+                    k: "pickup",
+                    v: formatSnapshotText(pickup),
+                  },
+                  {
+                    k: "drop",
+                    v: formatSnapshotText(dropoff),
+                  },
+                  {
+                    k: "route locked",
+                    v:
+                      typeof routeLocked === "boolean"
+                        ? routeLocked
+                          ? "yes"
+                          : "no"
+                        : "—",
+                    mono: true,
+                  },
+                  {
+                    k: "waypoints",
+                    v: Array.isArray(waypoints) ? `${waypoints.length}` : "—",
+                    mono: true,
+                  },
+                  {
+                    k: "accepted driver",
+                    v: matchedForwarded.acceptedDriverId ?? "—",
+                    mono: true,
+                  },
+                  {
+                    k: "candidate count",
+                    v: `${matchedForwarded.candidateDriverIds.length}`,
+                    mono: true,
+                  },
+                ]}
+              />
+            </Card>
+
+            <Card theme={theme} title="Sync and reconciliation">
+              <DL
+                theme={theme}
+                cols={2}
+                items={[
+                  {
+                    k: "last native status",
+                    v: matchedForwarded.lastNativeStatus ?? "—",
+                    mono: true,
+                  },
+                  {
+                    k: "last callback",
+                    v:
+                      typeof lastCallback === "string"
+                        ? formatDateTime(locale, lastCallback)
+                        : adapter?.lastWebhookReceivedAt
+                          ? formatDateTime(
+                              locale,
+                              adapter.lastWebhookReceivedAt,
+                            )
+                          : "—",
+                  },
+                  {
+                    k: "manual fallback",
+                    v: matchedForwarded.manualFallback.required
+                      ? matchedForwarded.manualFallback.reason
+                      : locale === "zh"
+                        ? "未要求"
+                        : "not required",
+                  },
+                  {
+                    k: "reconciliation",
+                    v: matchedForwarded.reconciliationJob
+                      ? `${matchedForwarded.reconciliationJob.status} · ${matchedForwarded.reconciliationJob.reason}`
+                      : "—",
+                  },
+                  {
+                    k: "mismatch summary",
+                    v: linkedIssue?.lastSyncError?.message ?? "—",
+                  },
+                  {
+                    k: "no-owned-assignment",
+                    v:
+                      matchedForwarded.acceptedDriverId === null
+                        ? "asserted"
+                        : "review",
+                    mono: true,
+                  },
+                ]}
+              />
+            </Card>
+          </div>
+
+          <div style={{ display: "grid", gap: "16px" }}>
+            <Card theme={theme} title="Available actions">
+              {detailActions.length > 0 ? (
+                <div style={{ display: "grid", gap: "8px" }}>
+                  {detailActions.map((action) =>
+                    action.disabled ? (
+                      <Btn
+                        key={action.action}
+                        theme={theme}
+                        variant="secondary"
+                      >
+                        {action.label}
+                      </Btn>
+                    ) : (
+                      <Link
+                        key={action.action}
+                        href={action.href}
+                        target={action.external ? "_blank" : undefined}
+                        rel={action.external ? "noreferrer" : undefined}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Btn
+                          theme={theme}
+                          variant={
+                            action.riskLevel === "high"
+                              ? "primary"
+                              : "secondary"
+                          }
+                          icon={action.external ? "ext" : "arrow"}
+                        >
+                          {action.label}
+                        </Btn>
+                      </Link>
+                    ),
+                  )}
+                </div>
+              ) : (
+                <div style={{ color: theme.textMuted, fontSize: "12.5px" }}>
+                  {locale === "zh"
+                    ? "目前沒有可執行動作。"
+                    : "No available actions."}
+                </div>
+              )}
+            </Card>
+
+            <Card theme={theme} title="Adapter health">
+              <DL
+                theme={theme}
+                cols={1}
+                items={[
+                  {
+                    k: "adapter",
+                    v: adapter
+                      ? `${formatOpsCodeLabel(locale, adapter.platformCode)} · ${adapter.status}`
+                      : "—",
+                  },
+                  {
+                    k: "auth / webhook",
+                    v: adapter
+                      ? `${adapter.authStatus} / ${adapter.webhookStatus}`
+                      : "—",
+                    mono: true,
+                  },
+                  {
+                    k: "last error",
+                    v:
+                      adapter?.lastError ??
+                      matchedForwarded.lastSyncError?.message ??
+                      "—",
+                  },
+                ]}
+              />
+            </Card>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   if (!matchedOrder) {
     notFound();
@@ -1121,6 +1684,14 @@ export default async function DispatchDetailPage({
         subtitle={`${getAddressLabel(order.pickup)}  →  ${getAddressLabel(order.dropoff)}  ·  ${formatWindow(order, locale)}`}
         actions={
           <>
+            <Link
+              href={buildDispatchListHref({ board, service, facet })}
+              style={{ textDecoration: "none" }}
+            >
+              <Btn theme={theme} icon="arrow">
+                {locale === "zh" ? "返回 Dispatch" : "Back to Dispatch"}
+              </Btn>
+            </Link>
             <Btn theme={theme} icon="phone">
               聯絡乘客
             </Btn>
@@ -1149,6 +1720,28 @@ export default async function DispatchDetailPage({
         }}
       >
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
+          {requestedAction ? (
+            <Card theme={theme} title="Action focus">
+              <DL
+                theme={theme}
+                cols={1}
+                items={[
+                  {
+                    k: locale === "zh" ? "目前處理動作" : "Current action",
+                    v: resolveActionLabel(requestedAction, locale),
+                  },
+                  {
+                    k: locale === "zh" ? "工作區提示" : "Workspace cue",
+                    v:
+                      locale === "zh"
+                        ? "你已從 board CTA 進入此工作項目，可在此完成指派、重派或 escalation 決策。"
+                        : "You entered this work item from a board CTA; complete the assignment, redispatch, or escalation decision here.",
+                  },
+                ]}
+              />
+            </Card>
+          ) : null}
+
           <Card
             theme={theme}
             title={`候選 driver (${candidateRows.length})`}

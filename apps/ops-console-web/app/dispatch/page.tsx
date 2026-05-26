@@ -374,6 +374,37 @@ function buildDispatchHref({
   return query ? `/dispatch?${query}` : "/dispatch";
 }
 
+function buildDispatchDetailHref({
+  dispatchId,
+  board,
+  service,
+  facet,
+  action,
+}: {
+  dispatchId: string;
+  board?: DispatchBoard;
+  service?: string | undefined;
+  facet?: string | undefined;
+  action?: string | undefined;
+}) {
+  const params = new URLSearchParams();
+  if (board && board !== "ready") {
+    params.set("board", board);
+  }
+  if (service && service !== "all") {
+    params.set("service", service);
+  }
+  if (facet && facet !== "all") {
+    params.set("facet", facet);
+  }
+  if (action) {
+    params.set("action", action);
+  }
+  const query = params.toString();
+  const base = `/dispatch/${encodeURIComponent(dispatchId)}`;
+  return query ? `${base}?${query}` : base;
+}
+
 function getBoardMeta(board: DispatchBoard, locale: Locale) {
   const zh = locale === "zh";
   switch (board) {
@@ -877,12 +908,12 @@ function buildActionHref(
           `/adapter-registry?platformCode=${encodeURIComponent(record.platformCode)}`,
         );
       default: {
-        const baseHref = buildDispatchHref({
+        return buildDispatchDetailHref({
+          dispatchId: record.mirrorOrderId,
           board,
           facet: selectedFacet,
-          workItemId: record.mirrorOrderId,
+          action: action.action,
         });
-        return `${baseHref}${baseHref.includes("?") ? "&" : "?"}intent=${encodeURIComponent(action.action)}`;
       }
     }
   }
@@ -901,11 +932,12 @@ function buildActionHref(
     return `/incidents?sourceOrderId=${encodeURIComponent(record.orderId)}`;
   }
 
-  return `/dispatch/${encodeURIComponent(record.orderId)}?board=${board}${
-    selectedService !== "all"
-      ? `&service=${encodeURIComponent(selectedService)}`
-      : ""
-  }&intent=${encodeURIComponent(action.action)}`;
+  return buildDispatchDetailHref({
+    dispatchId: record.orderId,
+    board,
+    service: selectedService,
+    action: action.action,
+  });
 }
 
 function buildEmptyStateActionContext(
@@ -1873,10 +1905,10 @@ export default async function DispatchPage({
         mirror: (
           <div style={{ display: "grid", gap: 2 }}>
             <Link
-              href={buildDispatchHref({
+              href={buildDispatchDetailHref({
+                dispatchId: order.mirrorOrderId,
                 board,
                 facet: selectedFacet,
-                workItemId: order.mirrorOrderId,
               })}
               style={{
                 color: theme.accent,
