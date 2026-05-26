@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type {
   CrossAppResourceLink,
   EmptyReason,
@@ -11,13 +12,16 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import {
-  DataCellStack,
-  DataTable,
-  DataViewCard,
-  PageHeader,
-  StatusChip,
-  Td,
-  Tr,
+  CanvasBanner as Banner,
+  CanvasCard as Card,
+  CanvasIcon,
+  CanvasKPI as KPI,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTone,
 } from "@drts/ui-web";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +53,7 @@ type EmptyStateEnvelopeLike = {
 
 type FeatureFlagPayloadLike = {
   flags?: LegacyFeatureFlagRecord[];
+  notes?: string[];
   refresh?: UiRefreshMetadata;
   refreshTier?: RefreshTier;
   emptyState?: EmptyStateEnvelopeLike;
@@ -69,10 +74,36 @@ type NormalizedFlag = {
 
 type NormalizedFlagsPayload = {
   flags: NormalizedFlag[];
+  notes: string[];
   refresh: UiRefreshMetadata;
   refreshTier: RefreshTier;
   emptyState?: EmptyStateEnvelopeLike;
 };
+
+type FlagTableRow = Record<string, unknown> & {
+  key: string;
+  keyCell: ReactNode;
+  scopeCell: ReactNode;
+  stateCell: ReactNode;
+  updatedByCell: ReactNode;
+  updatedAt: string;
+  description: string;
+  actionsCell: ReactNode;
+  _selected?: boolean;
+};
+
+type EmptyStateIconName =
+  | "flags"
+  | "audit"
+  | "reports"
+  | "search"
+  | "warn";
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
 
 const REFRESH_TIER: RefreshTier = "manual";
 
@@ -84,6 +115,36 @@ const EMPTY_REASON_VALUES = [
   "external_unavailable",
   "filtered_empty",
 ] as const satisfies readonly EmptyReason[];
+
+const pageBodyStyle = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 16,
+};
+
+const kpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 10,
+};
+
+const splitGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.8fr) minmax(260px, 0.9fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const tableColumns: CanvasTableColumn<FlagTableRow>[] = [
+  { h: "KEY", k: "keyCell", w: 320, mono: true },
+  { h: "SCOPE", k: "scopeCell", w: 120 },
+  { h: "STATE", k: "stateCell", w: 180 },
+  { h: "UPDATED BY", k: "updatedByCell", w: 180 },
+  { h: "AT", k: "updatedAt", w: 160, mono: true },
+  { h: "DESCRIPTION", k: "description" },
+  { h: "ACTIONS", k: "actionsCell", w: 220 },
+];
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -133,12 +194,13 @@ function fallbackRefreshMetadata(): UiRefreshMetadata {
   };
 }
 
-function fallbackHistoryAction(
+function fallbackHistoryActions(
   availableActions: ResourceActionDescriptor[] | undefined,
 ): ResourceActionDescriptor[] {
-  if (Array.isArray(availableActions)) {
+  if (Array.isArray(availableActions) && availableActions.length > 0) {
     return availableActions;
   }
+
   return [
     {
       action: "view_change_history",
@@ -181,9 +243,7 @@ function normalizeFeatureFlags(
       );
       const latestRecord = [...records]
         .filter((record) => record.updatedAt)
-        .sort((left, right) =>
-          right.updatedAt.localeCompare(left.updatedAt),
-        )[0];
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
       const enabledValues = new Set(
         records
           .map((record) =>
@@ -208,13 +268,11 @@ function normalizeFeatureFlags(
       const scope: FlagScope =
         globalRecord.scope ??
         (tenantRecords.length > 0 ? "tenant" : "global");
-      const description =
-        featureFlagDescription(locale, globalRecord) ||
-        t("common.dash", locale);
 
       return {
         key,
-        description,
+        description:
+          featureFlagDescription(locale, globalRecord) || t("common.dash", locale),
         scope,
         state,
         currentValue,
@@ -224,7 +282,7 @@ function normalizeFeatureFlags(
           latestRecord?.updatedBy ??
           latestRecord?.changedBy ??
           null,
-        availableActions: fallbackHistoryAction(globalRecord.availableActions),
+        availableActions: fallbackHistoryActions(globalRecord.availableActions),
         historyLink:
           globalRecord.historyLink ??
           {
@@ -244,6 +302,7 @@ function normalizeFeatureFlags(
 
   return {
     flags: normalizedFlags,
+    notes: Array.isArray(maybePayload.notes) ? maybePayload.notes : [],
     refresh: maybePayload.refresh ?? fallbackRefreshMetadata(),
     refreshTier: maybePayload.refreshTier ?? REFRESH_TIER,
     ...(maybePayload.emptyState
@@ -333,26 +392,26 @@ function formatDateTime(value: string | null, locale: Locale) {
   });
 }
 
-function freshnessTone(
-  value: UiRefreshMetadata["dataFreshness"],
-): "success" | "warning" | "danger" | "neutral" {
-  if (value === "fresh") return "success";
-  if (value === "stale") return "warning";
-  if (value === "degraded") return "danger";
+function refreshTone(
+  freshness: UiRefreshMetadata["dataFreshness"],
+): Exclude<CanvasTone, "accent"> {
+  if (freshness === "fresh") return "success";
+  if (freshness === "stale") return "warn";
+  if (freshness === "degraded") return "danger";
   return "neutral";
 }
 
-function stateTone(state: FlagState): "success" | "warning" | "neutral" {
+function stateTone(state: FlagState): Exclude<CanvasTone, "accent"> {
   if (state === "enabled") return "success";
-  if (state === "partial") return "warning";
+  if (state === "partial") return "warn";
   return "neutral";
 }
 
 function actionTone(
   riskLevel: ResourceActionDescriptor["riskLevel"],
-): "neutral" | "warning" | "danger" {
+): Exclude<CanvasTone, "accent"> {
   if (riskLevel === "high") return "danger";
-  if (riskLevel === "medium") return "warning";
+  if (riskLevel === "medium") return "warn";
   return "neutral";
 }
 
@@ -372,73 +431,6 @@ function mapErrorToEmptyReason(error: string): EmptyReason {
   return "fetch_failed";
 }
 
-function buildEmptyState(
-  locale: Locale,
-  reason: EmptyReason,
-  query: string,
-  scope: ScopeFilter,
-): {
-  title: string;
-  body: string;
-  tone: "neutral" | "warning" | "danger";
-  actionLabel: string;
-  actionHref: string;
-  actionTarget?: "_blank";
-} {
-  switch (reason) {
-    case "not_provisioned":
-      return {
-        title: t("flags.emptyState.notProvisioned.title", locale),
-        body: t("flags.emptyState.notProvisioned.body", locale),
-        tone: "warning",
-        actionLabel: t("flags.platformAdminLink", locale),
-        actionHref: resolvePlatformAdminFlagsHref(),
-        actionTarget: "_blank",
-      };
-    case "permission_denied":
-      return {
-        title: t("flags.emptyState.permissionDenied.title", locale),
-        body: t("flags.emptyState.permissionDenied.body", locale),
-        tone: "danger",
-        actionLabel: t("common.refresh", locale),
-        actionHref: buildRefreshHref(query, scope),
-      };
-    case "external_unavailable":
-      return {
-        title: t("flags.emptyState.externalUnavailable.title", locale),
-        body: t("flags.emptyState.externalUnavailable.body", locale),
-        tone: "warning",
-        actionLabel: t("common.tryAgain", locale),
-        actionHref: buildRefreshHref(query, scope),
-      };
-    case "filtered_empty":
-      return {
-        title: t("flags.emptyState.filteredEmpty.title", locale),
-        body: t("flags.emptyState.filteredEmpty.body", locale),
-        tone: "neutral",
-        actionLabel: t("flags.clearFilters", locale),
-        actionHref: "/feature-flags",
-      };
-    case "fetch_failed":
-      return {
-        title: t("flags.emptyState.fetchFailed.title", locale),
-        body: t("flags.emptyState.fetchFailed.body", locale),
-        tone: "danger",
-        actionLabel: t("common.tryAgain", locale),
-        actionHref: buildRefreshHref(query, scope),
-      };
-    case "no_data":
-    default:
-      return {
-        title: t("flags.emptyState.noData.title", locale),
-        body: t("flags.emptyState.noData.body", locale),
-        tone: "neutral",
-        actionLabel: t("common.refresh", locale),
-        actionHref: buildRefreshHref(query, scope),
-      };
-  }
-}
-
 function formatActionLabel(locale: Locale, action: string) {
   const key = `flags.action.${action}`;
   const translated = t(key, locale);
@@ -456,17 +448,50 @@ function formatDisabledReason(locale: Locale, reasonCode: string) {
   return reasonCode.replaceAll("_", " ");
 }
 
+function renderStack(
+  primary: ReactNode,
+  secondary?: ReactNode,
+  tertiary?: ReactNode,
+) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 4,
+        whiteSpace: "normal",
+      }}
+    >
+      <div>{primary}</div>
+      {secondary ? (
+        <div style={{ color: theme.textMuted, fontSize: 11.5 }}>{secondary}</div>
+      ) : null}
+      {tertiary ? (
+        <div style={{ color: theme.textDim, fontSize: 11 }}>{tertiary}</div>
+      ) : null}
+    </div>
+  );
+}
+
 function ActionLink({
   href,
   children,
   target,
-  subdued = false,
+  tone = "neutral",
 }: {
   href: string;
-  children: React.ReactNode;
+  children: ReactNode;
   target?: "_blank";
-  subdued?: boolean;
+  tone?: CanvasTone;
 }) {
+  const palette =
+    tone === "danger"
+      ? { fg: theme.danger, bg: theme.dangerBg, bd: theme.dangerBorder }
+      : tone === "warn"
+        ? { fg: theme.warn, bg: theme.warnBg, bd: theme.warnBorder }
+        : tone === "accent"
+          ? { fg: "#ffffff", bg: theme.accent, bd: theme.accent }
+          : { fg: theme.text, bg: theme.surface, bd: theme.border };
+
   return (
     <Link
       href={href}
@@ -476,16 +501,16 @@ function ActionLink({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: "6px",
-        minHeight: "34px",
-        padding: "0 12px",
-        borderRadius: "999px",
-        border: `1px solid ${subdued ? "#cbd5e1" : "#fb7185"}`,
-        background: subdued ? "#ffffff" : "#fff1f2",
-        color: subdued ? "#334155" : "#be123c",
+        gap: 6,
+        minHeight: 28,
+        padding: "0 10px",
+        borderRadius: 7,
+        border: `1px solid ${palette.bd}`,
+        background: palette.bg,
+        color: palette.fg,
+        fontSize: 12,
+        fontWeight: 500,
         textDecoration: "none",
-        fontSize: "12.5px",
-        fontWeight: 600,
         whiteSpace: "nowrap",
       }}
     >
@@ -494,14 +519,14 @@ function ActionLink({
   );
 }
 
-function FilterChip({
+function ScopeLink({
   href,
   active,
   children,
 }: {
   href: string;
   active: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <Link
@@ -509,15 +534,16 @@ function FilterChip({
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: "6px",
-        padding: "6px 12px",
-        borderRadius: "999px",
-        border: `1px solid ${active ? "#111827" : "#cbd5e1"}`,
-        background: active ? "#111827" : "#ffffff",
-        color: active ? "#ffffff" : "#475569",
+        gap: 6,
+        minHeight: 28,
+        padding: "0 10px",
+        borderRadius: 999,
+        border: `1px solid ${active ? theme.accent : theme.border}`,
+        background: active ? theme.accentBg : theme.surface,
+        color: active ? theme.accent : theme.textMuted,
+        fontSize: 12,
+        fontWeight: active ? 600 : 500,
         textDecoration: "none",
-        fontSize: "12px",
-        fontWeight: active ? 700 : 500,
       }}
     >
       {children}
@@ -525,85 +551,286 @@ function FilterChip({
   );
 }
 
+function buildEmptyState(
+  locale: Locale,
+  reason: EmptyReason,
+  query: string,
+  scope: ScopeFilter,
+): {
+  icon: EmptyStateIconName;
+  tone: Exclude<CanvasTone, "accent">;
+  label: string;
+  title: string;
+  body: string;
+  actionLabel: string;
+  actionHref: string;
+  actionTarget?: "_blank";
+} {
+  switch (reason) {
+    case "not_provisioned":
+      return {
+        icon: "flags",
+        tone: "warn",
+        label: "NOT PROVISIONED",
+        title: t("flags.emptyState.notProvisioned.title", locale),
+        body: t("flags.emptyState.notProvisioned.body", locale),
+        actionLabel: t("flags.platformAdminLink", locale),
+        actionHref: resolvePlatformAdminFlagsHref(),
+        actionTarget: "_blank",
+      };
+    case "permission_denied":
+      return {
+        icon: "audit",
+        tone: "danger",
+        label: "PERMISSION DENIED",
+        title: t("flags.emptyState.permissionDenied.title", locale),
+        body: t("flags.emptyState.permissionDenied.body", locale),
+        actionLabel: t("common.refresh", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+    case "external_unavailable":
+      return {
+        icon: "reports",
+        tone: "warn",
+        label: "EXTERNAL UNAVAILABLE",
+        title: t("flags.emptyState.externalUnavailable.title", locale),
+        body: t("flags.emptyState.externalUnavailable.body", locale),
+        actionLabel: t("common.tryAgain", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+    case "filtered_empty":
+      return {
+        icon: "search",
+        tone: "neutral",
+        label: "FILTERED EMPTY",
+        title: t("flags.emptyState.filteredEmpty.title", locale),
+        body: t("flags.emptyState.filteredEmpty.body", locale),
+        actionLabel: t("flags.clearFilters", locale),
+        actionHref: "/feature-flags",
+      };
+    case "fetch_failed":
+      return {
+        icon: "warn",
+        tone: "danger",
+        label: "FETCH FAILED",
+        title: t("flags.emptyState.fetchFailed.title", locale),
+        body: t("flags.emptyState.fetchFailed.body", locale),
+        actionLabel: t("common.tryAgain", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+    case "no_data":
+    default:
+      return {
+        icon: "flags",
+        tone: "neutral",
+        label: "NO DATA",
+        title: t("flags.emptyState.noData.title", locale),
+        body: t("flags.emptyState.noData.body", locale),
+        actionLabel: t("common.refresh", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+  }
+}
+
 function EmptyStateCard({
   locale,
   reason,
   query,
   scope,
+  messageCode,
 }: {
   locale: Locale;
   reason: EmptyReason;
   query: string;
   scope: ScopeFilter;
+  messageCode?: string;
 }) {
   const emptyState = buildEmptyState(locale, reason, query, scope);
 
   return (
-    <div
+    <Card
+      theme={theme}
+      padding={18}
       style={{
-        borderRadius: "18px",
-        border: `1px solid ${
+        background: theme.surfaceLo,
+        borderColor:
           emptyState.tone === "danger"
-            ? "#fecaca"
-            : emptyState.tone === "warning"
-              ? "#fde68a"
-              : "#cbd5e1"
-        }`,
-        background:
-          emptyState.tone === "danger"
-            ? "#fff1f2"
-            : emptyState.tone === "warning"
-              ? "#fffbeb"
-              : "#f8fafc",
-        padding: "22px",
-        display: "grid",
-        gap: "14px",
+            ? theme.dangerBorder
+            : emptyState.tone === "warn"
+              ? theme.warnBorder
+              : theme.border,
       }}
     >
-      <div style={{ display: "grid", gap: "8px" }}>
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          gridTemplateColumns: "auto minmax(0, 1fr)",
+          alignItems: "start",
+        }}
+      >
         <div
           style={{
-            display: "inline-flex",
-            width: "fit-content",
-            padding: "3px 8px",
-            borderRadius: "999px",
-            border: "1px solid rgba(15, 23, 42, 0.08)",
-            background: "#ffffff",
-            color: "#475569",
-            fontSize: "11px",
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
+            width: 42,
+            height: 42,
+            borderRadius: 12,
+            display: "grid",
+            placeItems: "center",
+            background:
+              emptyState.tone === "danger"
+                ? theme.dangerBg
+                : emptyState.tone === "warn"
+                  ? theme.warnBg
+                  : theme.neutralBg,
+            border: `1px solid ${
+              emptyState.tone === "danger"
+                ? theme.dangerBorder
+                : emptyState.tone === "warn"
+                  ? theme.warnBorder
+                  : theme.neutralBorder
+            }`,
+            color:
+              emptyState.tone === "danger"
+                ? theme.danger
+                : emptyState.tone === "warn"
+                  ? theme.warn
+                  : theme.textMuted,
           }}
         >
-          {reason}
+          <CanvasIcon name={emptyState.icon} size={18} stroke={1.7} />
         </div>
-        <strong style={{ color: "#0f172a", fontSize: "17px" }}>
-          {emptyState.title}
-        </strong>
-        <p
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <Pill theme={theme} tone={emptyState.tone}>
+              {emptyState.label}
+            </Pill>
+            <Pill theme={theme} tone="neutral">
+              {reason}
+            </Pill>
+            {messageCode ? (
+              <Pill theme={theme} tone="neutral">
+                {messageCode}
+              </Pill>
+            ) : null}
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <strong style={{ color: theme.text, fontSize: 16 }}>
+              {emptyState.title}
+            </strong>
+            <span
+              style={{
+                color: theme.textMuted,
+                lineHeight: 1.5,
+                fontSize: 12.5,
+              }}
+            >
+              {emptyState.body}
+            </span>
+          </div>
+          <div>
+            <ActionLink
+              href={emptyState.actionHref}
+              tone={emptyState.tone === "neutral" ? "accent" : emptyState.tone}
+              {...(emptyState.actionTarget
+                ? { target: emptyState.actionTarget }
+                : {})}
+            >
+              {emptyState.actionLabel}
+            </ActionLink>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function buildFlagTableRows(
+  flags: NormalizedFlag[],
+  locale: Locale,
+): FlagTableRow[] {
+  return flags.map((flag) => {
+    const historyHref =
+      resolveCrossAppHref(flag.historyLink) ?? resolvePlatformAdminFlagsHref(flag.key);
+    const hasEnabledAction = flag.availableActions.some((action) => action.enabled);
+
+    return {
+      key: flag.key,
+      keyCell: renderStack(
+        <span style={{ color: theme.text, fontFamily: theme.monoFamily }}>
+          {flag.key}
+        </span>,
+        flag.state === "partial"
+          ? t("flags.midRollout", locale)
+          : flag.tenantIds.length > 0
+            ? t("flags.tenantOverrideCount", locale, {
+                count: flag.tenantIds.length,
+              })
+            : t("flags.opsReadOnly", locale),
+      ),
+      scopeCell: (
+        <Pill theme={theme} tone={flag.scope === "tenant" ? "warn" : "info"}>
+          {t(`flags.scope.${flag.scope}`, locale)}
+        </Pill>
+      ),
+      stateCell: renderStack(
+        <Pill theme={theme} tone={stateTone(flag.state)} dot>
+          {t(`flags.state.${flag.state}`, locale)}
+        </Pill>,
+        flag.currentValue !== flag.state ? flag.currentValue : undefined,
+        flag.state === "partial" ? t("flags.partialStateHelp", locale) : undefined,
+      ),
+      updatedByCell: renderStack(
+        flag.lastChangedBy ?? t("common.dash", locale),
+        flag.historyLink ? t("flags.crossAppHint", locale) : undefined,
+      ),
+      updatedAt: formatDateTime(flag.lastChangedAt, locale),
+      description: flag.description,
+      actionsCell: (
+        <div
           style={{
-            margin: 0,
-            color: "#475569",
-            lineHeight: 1.6,
-            fontSize: "13px",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
           }}
         >
-          {emptyState.body}
-        </p>
-      </div>
-      <div>
-        <ActionLink
-          href={emptyState.actionHref}
-          {...(emptyState.actionTarget
-            ? { target: emptyState.actionTarget }
-            : {})}
-        >
-          {emptyState.actionLabel}
-        </ActionLink>
-      </div>
-    </div>
-  );
+          {!hasEnabledAction ? (
+            <Pill theme={theme} tone="neutral">
+              {t("flags.readOnly", locale)}
+            </Pill>
+          ) : null}
+          {flag.availableActions.map((action) =>
+            action.enabled ? (
+              <ActionLink
+                key={`${flag.key}-${action.action}`}
+                href={historyHref}
+                tone="accent"
+                {...(flag.historyLink?.openMode === "new_tab"
+                  ? { target: "_blank" as const }
+                  : {})}
+              >
+                {formatActionLabel(locale, action.action)}
+              </ActionLink>
+            ) : (
+              <div
+                key={`${flag.key}-${action.action}`}
+                style={{ display: "grid", gap: 4 }}
+              >
+                <Pill theme={theme} tone={actionTone(action.riskLevel)}>
+                  {formatActionLabel(locale, action.action)}
+                </Pill>
+                {action.disabledReasonCode ? (
+                  <span style={{ color: theme.textDim, fontSize: 11 }}>
+                    {formatDisabledReason(locale, action.disabledReasonCode)}
+                  </span>
+                ) : null}
+              </div>
+            ),
+          )}
+        </div>
+      ),
+      _selected: flag.state === "partial",
+    };
+  });
 }
 
 export default async function FeatureFlagsPage({
@@ -625,6 +852,7 @@ export default async function FeatureFlagsPage({
 
   let payload: NormalizedFlagsPayload = {
     flags: [],
+    notes: [],
     refresh: fallbackRefreshMetadata(),
     refreshTier: REFRESH_TIER,
   };
@@ -638,6 +866,7 @@ export default async function FeatureFlagsPage({
       error instanceof Error ? error.message : t("common.unknown", locale);
     payload = {
       flags: [],
+      notes: [],
       refresh: fallbackRefreshMetadata(),
       refreshTier: REFRESH_TIER,
       emptyState: {
@@ -665,7 +894,6 @@ export default async function FeatureFlagsPage({
 
   const visibleFlags =
     effectiveEmptyReason === null ? filteredFlags : ([] as NormalizedFlag[]);
-
   const enabledCount = payload.flags.filter((flag) => flag.state === "enabled")
     .length;
   const partialCount = payload.flags.filter((flag) => flag.state === "partial")
@@ -675,324 +903,263 @@ export default async function FeatureFlagsPage({
   ).length;
   const pageHref = buildPageHref(query, scope, emptyReasonOverride);
   const refreshHref = buildRefreshHref(query, scope, emptyReasonOverride);
-  const freshness = payload.refresh.dataFreshness;
   const platformAdminFlagsHref = resolvePlatformAdminFlagsHref();
+  const rows = buildFlagTableRows(visibleFlags, locale);
 
   return (
     <>
       <PageHeader
-        title={t("flags.title", locale)}
-        eyebrow={locale === "zh" ? "Ops Console" : "Ops Console"}
-        subtitle={t("flags.subtitleReadOnly", locale, {
-          total: payload.flags.length,
-          enabled: enabledCount,
-        })}
+        theme={theme}
+        title={locale === "zh" ? "功能旗標 · read only" : "Feature Flags · read only"}
+        subtitle={t("flags.subtitleReadOnly", locale)}
         actions={
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-            <ActionLink href={refreshHref} subdued>
-              {t("common.refresh", locale)}
-            </ActionLink>
+          <>
+            <ActionLink href={refreshHref}>{t("common.refresh", locale)}</ActionLink>
             <ActionLink
               href={platformAdminFlagsHref}
               target="_blank"
+              tone="accent"
             >
               {t("flags.platformAdminLink", locale)}
             </ActionLink>
-          </div>
+          </>
         }
-        meta={[
-          {
-            label: t("flags.meta.refreshTier", locale),
-            value: t(`flags.refreshTier.${payload.refreshTier}`, locale),
-          },
-          {
-            label: t("flags.meta.freshness", locale),
-            value: t(`flags.freshness.${freshness}`, locale),
-          },
-          {
-            label: t("flags.meta.generatedAt", locale),
-            value: formatDateTime(payload.refresh.generatedAt, locale),
-          },
-          {
-            label: t("flags.meta.source", locale),
-            value: payload.refresh.source,
-          },
-        ]}
       />
 
-      {errorMessage ? (
-        <div
-          style={{
-            background: "#fff1f2",
-            border: "1px solid #fecdd3",
-            borderRadius: "14px",
-            padding: "14px 16px",
-            color: "#be123c",
-            fontSize: "13px",
-            lineHeight: 1.55,
-            marginBottom: "20px",
-          }}
-        >
-          {errorMessage}
-        </div>
-      ) : null}
+      <div style={pageBodyStyle}>
+        {errorMessage ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            title={t("common.somethingWrong", locale)}
+            body={errorMessage}
+          />
+        ) : null}
 
-      {freshness !== "fresh" ? (
-        <div
-          style={{
-            marginBottom: "18px",
-            borderRadius: "16px",
-            border: `1px solid ${
-              freshness === "degraded" ? "#fecaca" : "#fde68a"
-            }`,
-            background: freshness === "degraded" ? "#fff1f2" : "#fffbeb",
-            padding: "14px 16px",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "10px",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <div style={{ display: "grid", gap: "4px" }}>
-            <strong style={{ color: "#0f172a", fontSize: "13px" }}>
-              {t("flags.staleBanner.title", locale)}
-            </strong>
-            <span style={{ color: "#475569", fontSize: "12.5px" }}>
-              {t("flags.staleBanner.body", locale, {
-                freshness: t(`flags.freshness.${freshness}`, locale),
-                generatedAt: formatDateTime(payload.refresh.generatedAt, locale),
-              })}
-            </span>
-          </div>
-          <StatusChip
-            tone={freshnessTone(freshness)}
-            authorityLabel={t("flags.meta.freshness", locale)}
-            label={t(`flags.freshness.${freshness}`, locale)}
+        {payload.refresh.dataFreshness !== "fresh" ? (
+          <Banner
+            theme={theme}
+            tone={
+              payload.refresh.dataFreshness === "degraded" ? "danger" : "warn"
+            }
+            title={t("flags.staleBanner.title", locale)}
+            body={t("flags.staleBanner.body", locale, {
+              freshness: t(
+                `flags.freshness.${payload.refresh.dataFreshness}`,
+                locale,
+              ),
+              generatedAt: formatDateTime(payload.refresh.generatedAt, locale),
+            })}
+            actions={
+              <ActionLink href={refreshHref} tone="accent">
+                {t("common.refresh", locale)}
+              </ActionLink>
+            }
+          />
+        ) : null}
+
+        <div style={kpiGridStyle}>
+          <KPI
+            theme={theme}
+            label={locale === "zh" ? "可見旗標" : "Visible flags"}
+            value={payload.flags.length}
+            sub={locale === "zh" ? "目前快照總數" : "Current snapshot total"}
+          />
+          <KPI
+            theme={theme}
+            label={locale === "zh" ? "已啟用" : "Enabled"}
+            value={enabledCount}
+            sub={locale === "zh" ? "營運可見 enabled" : "Operationally enabled"}
+          />
+          <KPI
+            theme={theme}
+            label={locale === "zh" ? "進行中 rollout" : "Mid-rollout"}
+            value={partialCount}
+            sub={locale === "zh" ? "跨租戶值不一致" : "Tenant values diverge"}
+          />
+          <KPI
+            theme={theme}
+            label={locale === "zh" ? "租戶層級" : "Tenant-scoped"}
+            value={tenantScopedCount}
+            sub={locale === "zh" ? "有 override 足跡" : "Overrides are present"}
           />
         </div>
-      ) : null}
 
-      <DataViewCard
-        title={t("flags.registryTitle", locale)}
-        subtitle={t("flags.registrySubtitle", locale)}
-        tone="info"
-        density="compact"
-        summary={t("flags.registrySummaryV2", locale, {
-          total: payload.flags.length,
-          enabled: enabledCount,
-          partial: partialCount,
-          tenant: tenantScopedCount,
-        })}
-        footer={t("flags.registryFooterV2", locale)}
-        filters={
-          <div style={{ display: "grid", gap: "14px" }}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-              <FilterChip
-                href={buildPageHref(query, "all", emptyReasonOverride)}
-                active={scope === "all"}
+        <div style={splitGridStyle}>
+          <Card
+            theme={theme}
+            title={t("flags.registryTitle", locale)}
+            subtitle={t("flags.registrySubtitle", locale)}
+            padding={18}
+          >
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <ScopeLink
+                  href={buildPageHref(query, "all", emptyReasonOverride)}
+                  active={scope === "all"}
+                >
+                  {t("flags.scope.all", locale)}
+                </ScopeLink>
+                <ScopeLink
+                  href={buildPageHref(query, "global", emptyReasonOverride)}
+                  active={scope === "global"}
+                >
+                  {t("flags.scope.global", locale)}
+                </ScopeLink>
+                <ScopeLink
+                  href={buildPageHref(query, "tenant", emptyReasonOverride)}
+                  active={scope === "tenant"}
+                >
+                  {t("flags.scope.tenant", locale)}
+                </ScopeLink>
+              </div>
+
+              <form
+                action="/feature-flags"
+                method="get"
+                style={{
+                  display: "grid",
+                  gap: 10,
+                  gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                }}
               >
-                {t("flags.scope.all", locale)}
-              </FilterChip>
-              <FilterChip
-                href={buildPageHref(query, "global", emptyReasonOverride)}
-                active={scope === "global"}
+                <input type="hidden" name="scope" value={scope} />
+                <input
+                  name="q"
+                  defaultValue={query}
+                  placeholder={t("flags.searchPlaceholder", locale)}
+                  style={{
+                    minHeight: 34,
+                    borderRadius: 8,
+                    border: `1px solid ${theme.border}`,
+                    background: theme.surface,
+                    color: theme.text,
+                    padding: "0 12px",
+                    fontSize: 12.5,
+                    fontFamily: theme.fontFamily,
+                  }}
+                />
+                <button
+                  type="submit"
+                  style={{
+                    minHeight: 34,
+                    padding: "0 12px",
+                    borderRadius: 8,
+                    border: `1px solid ${theme.accent}`,
+                    background: theme.accentBg,
+                    color: theme.accent,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: theme.fontFamily,
+                    cursor: "pointer",
+                  }}
+                >
+                  {t("common.search", locale)}
+                </button>
+                <ActionLink href={pageHref}>{t("flags.keepFilters", locale)}</ActionLink>
+              </form>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
               >
-                {t("flags.scope.global", locale)}
-              </FilterChip>
-              <FilterChip
-                href={buildPageHref(query, "tenant", emptyReasonOverride)}
-                active={scope === "tenant"}
-              >
-                {t("flags.scope.tenant", locale)}
-              </FilterChip>
+                <Pill theme={theme} tone="accent">
+                  {t(`flags.refreshTier.${payload.refreshTier}`, locale)}
+                </Pill>
+                <Pill theme={theme} tone={refreshTone(payload.refresh.dataFreshness)} dot>
+                  {t(`flags.freshness.${payload.refresh.dataFreshness}`, locale)}
+                </Pill>
+                <Pill theme={theme} tone="neutral">
+                  {payload.refresh.source}
+                </Pill>
+                <Pill theme={theme} tone="neutral">
+                  {formatDateTime(payload.refresh.generatedAt, locale)}
+                </Pill>
+              </div>
             </div>
-            <form
-              action="/feature-flags"
-              method="get"
-              style={{
-                display: "grid",
-                gap: "10px",
-                gridTemplateColumns: "minmax(0, 1fr) auto auto",
-                alignItems: "center",
-              }}
-            >
-              <input type="hidden" name="scope" value={scope} />
-              <input
-                name="q"
-                defaultValue={query}
-                placeholder={t("flags.searchPlaceholder", locale)}
+          </Card>
+
+          <Card
+            theme={theme}
+            title={locale === "zh" ? "治理邊界" : "Governance boundary"}
+            subtitle={
+              locale === "zh"
+                ? "ops 只做 read-only 可見性與交叉 app 深連結。"
+                : "Ops stays read-only and links to the owner app for governance."
+            }
+            padding={18}
+          >
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <Pill theme={theme} tone="neutral">
+                  GET /api/ops/feature-flags
+                </Pill>
+                <Pill theme={theme} tone="neutral">
+                  availableActions
+                </Pill>
+                <Pill theme={theme} tone="neutral">
+                  EmptyReason x6
+                </Pill>
+              </div>
+              <div
                 style={{
-                  width: "100%",
-                  minHeight: "38px",
-                  borderRadius: "12px",
-                  border: "1px solid #cbd5e1",
-                  background: "#ffffff",
-                  padding: "0 12px",
-                  fontSize: "13px",
-                  color: "#0f172a",
-                }}
-              />
-              <button
-                type="submit"
-                style={{
-                  minHeight: "38px",
-                  padding: "0 14px",
-                  borderRadius: "12px",
-                  border: "1px solid #fb7185",
-                  background: "#fff1f2",
-                  color: "#be123c",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  cursor: "pointer",
+                  color: theme.textMuted,
+                  fontSize: 12.5,
+                  lineHeight: 1.55,
                 }}
               >
-                {t("common.search", locale)}
-              </button>
-              <ActionLink href={pageHref} subdued>
-                {t("flags.keepFilters", locale)}
-              </ActionLink>
-            </form>
-          </div>
-        }
-      >
+                {t("flags.registryFooterV2", locale)}
+              </div>
+              {payload.notes.length > 0 ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {payload.notes.map((note) => (
+                    <div
+                      key={note}
+                      style={{
+                        color: theme.textDim,
+                        fontSize: 11.5,
+                        borderTop: `1px solid ${theme.border}`,
+                        paddingTop: 8,
+                      }}
+                    >
+                      {note}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </Card>
+        </div>
+
         {effectiveEmptyReason ? (
           <EmptyStateCard
             locale={locale}
             reason={effectiveEmptyReason}
             query={query}
             scope={scope}
+            {...(payload.emptyState?.messageCode
+              ? { messageCode: payload.emptyState.messageCode }
+              : {})}
           />
         ) : (
-          <DataTable
-            density="compact"
-            tone="info"
-            columns={[
-              { label: t("flags.col.key", locale), width: "280px" },
-              { label: t("flags.col.scope", locale), width: "120px" },
-              { label: t("flags.col.currentValue", locale), width: "180px" },
-              { label: t("flags.col.updatedBy", locale), width: "180px" },
-              { label: t("flags.col.updatedAt", locale), width: "190px" },
-              { label: t("flags.col.description", locale) },
-              { label: t("flags.col.actions", locale), width: "200px" },
-            ]}
+          <Card
+            theme={theme}
+            title={locale === "zh" ? "Operational flag registry" : "Operational flag registry"}
+            subtitle={t("flags.registrySummaryV2", locale, {
+              total: payload.flags.length,
+              enabled: enabledCount,
+              partial: partialCount,
+              tenant: tenantScopedCount,
+            })}
+            padding={0}
           >
-            {visibleFlags.map((flag) => (
-              <Tr key={flag.key} highlighted={flag.state === "partial"}>
-                <Td mono density="compact">
-                  <DataCellStack
-                    primary={flag.key}
-                    secondary={
-                      flag.state === "partial"
-                        ? t("flags.midRollout", locale)
-                        : flag.tenantIds.length > 0
-                          ? t("flags.tenantOverrideCount", locale, {
-                              count: flag.tenantIds.length,
-                            })
-                          : t("flags.opsReadOnly", locale)
-                    }
-                  />
-                </Td>
-                <Td density="compact">
-                  <StatusChip
-                    tone={flag.scope === "tenant" ? "warning" : "info"}
-                    authorityLabel={t("flags.col.scope", locale)}
-                    label={t(`flags.scope.${flag.scope}`, locale)}
-                  />
-                </Td>
-                <Td density="compact">
-                  <DataCellStack
-                    primary={
-                      <StatusChip
-                        tone={stateTone(flag.state)}
-                        authorityLabel={t("flags.col.currentValue", locale)}
-                        label={t(`flags.state.${flag.state}`, locale)}
-                      />
-                    }
-                    secondary={
-                      flag.state === "partial"
-                        ? t("flags.partialStateHelp", locale)
-                        : flag.currentValue !== flag.state
-                          ? flag.currentValue
-                          : undefined
-                    }
-                  />
-                </Td>
-                <Td density="compact">
-                  <DataCellStack
-                    primary={flag.lastChangedBy ?? t("common.dash", locale)}
-                    secondary={
-                      flag.historyLink?.targetApp
-                        ? t("flags.crossAppHint", locale)
-                        : undefined
-                    }
-                  />
-                </Td>
-                <Td density="compact" mono>
-                  {formatDateTime(flag.lastChangedAt, locale)}
-                </Td>
-                <Td density="compact" muted>
-                  {flag.description}
-                </Td>
-                <Td density="compact">
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: "8px",
-                      alignItems: "center",
-                    }}
-                  >
-                    {flag.availableActions.length === 0 ? (
-                      <StatusChip
-                        tone="neutral"
-                        authorityLabel={t("common.actions", locale)}
-                        label={t("flags.readOnly", locale)}
-                      />
-                    ) : null}
-                    {flag.availableActions.map((action) =>
-                      action.enabled && flag.historyLink ? (
-                        <ActionLink
-                          key={`${flag.key}-${action.action}`}
-                          href={
-                            resolveCrossAppHref(flag.historyLink) ??
-                            resolvePlatformAdminFlagsHref(flag.key)
-                          }
-                          {...(flag.historyLink.openMode === "new_tab"
-                            ? { target: "_blank" as const }
-                            : {})}
-                          subdued={action.riskLevel !== "high"}
-                        >
-                          {formatActionLabel(locale, action.action)}
-                        </ActionLink>
-                      ) : (
-                        <DataCellStack
-                          key={`${flag.key}-${action.action}`}
-                          primary={
-                            <StatusChip
-                              tone={actionTone(action.riskLevel)}
-                              authorityLabel={t("common.actions", locale)}
-                              label={formatActionLabel(locale, action.action)}
-                            />
-                          }
-                          secondary={
-                            action.disabledReasonCode
-                              ? formatDisabledReason(
-                                  locale,
-                                  action.disabledReasonCode,
-                                )
-                              : undefined
-                          }
-                        />
-                      ),
-                    )}
-                  </div>
-                </Td>
-              </Tr>
-            ))}
-          </DataTable>
+            <Table theme={theme} columns={tableColumns} rows={rows} />
+          </Card>
         )}
-      </DataViewCard>
+      </div>
     </>
   );
 }
