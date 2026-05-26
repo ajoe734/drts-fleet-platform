@@ -1,6 +1,13 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { FeatureFlag } from "@drts/contracts";
+import type {
+  EmptyStateEnvelope,
+  FeatureFlag,
+  OpsFeatureFlagRecord,
+  OpsFeatureFlagSummary,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "@drts/contracts";
 
 import { FeatureFlagRepository } from "./feature-flag.repository";
 
@@ -14,6 +21,11 @@ export interface FeatureFlagSeed {
 @Injectable()
 export class FeatureFlagsService {
   private readonly logger = new Logger(FeatureFlagsService.name);
+  private static readonly VIEW_CHANGE_HISTORY_ACTION: ResourceActionDescriptor = {
+    action: "view_change_history",
+    enabled: true,
+    riskLevel: "low",
+  };
 
   // In-memory fallback (used when DB is not available)
   private inMemoryFlags: Map<string, FeatureFlag> = new Map();
@@ -187,6 +199,38 @@ export class FeatureFlagsService {
     return flags.filter((flag) => !flag.tenantId);
   }
 
+  async getOpsSummary(tenantId?: string): Promise<OpsFeatureFlagSummary> {
+    const flags = await this.getAll(tenantId);
+    const refresh = this.buildRefreshMetadata();
+    const notes = [
+      "Read-only operational visibility surface for feature-flag rollout checks.",
+      "History and governance stay in Platform Admin.",
+      "availableActions controls which deep-link CTA the UI renders per row.",
+    ];
+
+    if (flags.length === 0) {
+      const emptyState: EmptyStateEnvelope = {
+        reason: "no_data",
+        messageCode: "ops_feature_flags.no_data",
+      };
+
+      return {
+        flags: [],
+        notes,
+        refresh,
+        refreshTier: "manual",
+        emptyState,
+      };
+    }
+
+    return {
+      flags: flags.map((flag) => this.toOpsFlagRecord(flag)),
+      notes,
+      refresh,
+      refreshTier: "manual",
+    };
+  }
+
   async getByKey(
     key: string,
     tenantId?: string,
@@ -251,5 +295,33 @@ export class FeatureFlagsService {
     };
     this.inMemoryFlags.set(this.inMemoryOverrideKey(key, tenantId), updated);
     return updated;
+  }
+
+  private buildRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: 0,
+      dataFreshness: this.getDb() ? "fresh" : "unknown",
+      source: this.getDb() ? "live" : "static",
+    };
+  }
+
+  private toOpsFlagRecord(flag: FeatureFlag): OpsFeatureFlagRecord {
+    const scope = flag.tenantId ? "tenant" : "global";
+    return {
+      ...flag,
+      scope,
+      currentValue: flag.enabled ? "enabled" : "disabled",
+      lastChangedBy: flag.tenantId ? `tenant:${flag.tenantId}` : "platform_admin",
+      availableActions: [FeatureFlagsService.VIEW_CHANGE_HISTORY_ACTION],
+      historyLink: {
+        targetApp: "platform-admin",
+        route: `/feature-flags?flag=${encodeURIComponent(flag.key)}`,
+        resourceType: "feature_flag",
+        resourceId: flag.key,
+        openMode: "new_tab",
+        label: "Platform Admin",
+      },
+    };
   }
 }

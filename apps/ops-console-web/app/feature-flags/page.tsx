@@ -859,7 +859,7 @@ export default async function FeatureFlagsPage({
   let errorMessage: string | null = null;
 
   try {
-    const response = await client.getFeatureFlags();
+    const response = await client.getOpsFeatureFlags();
     payload = normalizeFeatureFlags(response, locale);
   } catch (error) {
     errorMessage =
