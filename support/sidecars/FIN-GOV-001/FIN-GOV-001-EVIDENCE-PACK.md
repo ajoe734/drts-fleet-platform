@@ -2,9 +2,9 @@
 
 **Task:** `FIN-GOV-001` - governance-aware billing and reporting live evidence pack
 **Intended owner:** `Codex2`
-**Intended reviewer:** `Codex`
+**Intended reviewer:** `Claude2`
 **Collected:** `2026-05-19 (UTC)`
-**Current read:** `PARTIAL - static evidence consolidated; 2026-05-23 revalidation still blocked by IAP / WIF / IAM gates`
+**Current read:** `PARTIAL - static evidence consolidated; 2026-05-26 revalidation still blocked by trunk visibility gaps plus IAP / WIF / IAM gates for the live uplift`
 
 ---
 
@@ -224,3 +224,31 @@ When valid staging credentials are available, rerun at minimum:
 
 Only that follow-up pass should be used to argue for a `WF-FIN-001` live gate
 upgrade.
+
+---
+
+## 7. 2026-05-26 Dispatch Revalidation Addendum
+
+The latest isolated-worktree revalidation for `PH1GC-FIN-GOV-001` did not
+collect new live billing/reporting artifacts. It reconfirmed two separate
+blockers:
+
+1. `origin/dev` still has not absorbed the corrected directive-`§H`
+   13-field spec/UAT body carried on `codex2/ph1gc-fin-gov-001`, even though
+   the branch is fully caught up with trunk (`git rev-list --left-right --count
+   origin/dev...HEAD` = `0 40`).
+2. The governed staging rerun needed for `WF-FIN-GOV-001 = PASS (live staging
+   evidence)` still cannot start from this workspace because the bearer/direct
+   origin path remains blocked by IAP / IAM / WIF issues.
+
+Repo-local verification at branch head `05b9c190` remained green:
+
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run`
+- `git diff --check`
+
+This addendum therefore does not upgrade the evidence classification. The
+honest read is still `PARTIAL / static evidence consolidated` until trunk
+absorbs the corrected artifact chain and a fresh strict-mode governed staging
+rerun yields reviewer-readable invoice/report artifacts.
