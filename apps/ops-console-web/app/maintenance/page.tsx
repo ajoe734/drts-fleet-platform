@@ -201,6 +201,21 @@ function getPlatformAdminAuditHref(auditId: string): string | null {
   return `${baseUrl.replace(/\/$/, "")}${route}`;
 }
 
+function getPlatformAdminAuditIndexHref(): string {
+  const baseUrl = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL?.trim();
+  const route = "/audit";
+
+  if (!baseUrl) {
+    return route;
+  }
+
+  return `${baseUrl.replace(/\/$/, "")}${route}`;
+}
+
+function getDashboardHref() {
+  return "/dashboard";
+}
+
 function getVehicleHref(vehicleId: string) {
   return `/vehicles/${encodeURIComponent(vehicleId)}`;
 }
@@ -275,7 +290,7 @@ export default function MaintenancePage() {
   const previewEmptyReason = asPacketEmptyReason(
     searchParams.get("emptyReason"),
   );
-  const refreshTierLabel = REFRESH_TIER.toUpperCase();
+  const refreshTierLabel = `T3 / ${REFRESH_TIER.toUpperCase()}`;
 
   useEffect(() => {
     void loadRecords("initial");
@@ -492,6 +507,7 @@ export default function MaintenancePage() {
     editingId === null
       ? undefined
       : records.find((record) => record.maintenanceId === editingId);
+  const platformAuditIndexHref = getPlatformAdminAuditIndexHref();
 
   async function runMutation(reasonOverride?: string) {
     if (!pendingMutation) return;
@@ -593,10 +609,16 @@ export default function MaintenancePage() {
         >
           <div>
             <p className="strip-label">
-              {copy(locale, "Refresh tier", "更新等級")} · {refreshTierLabel} /
-              15s
+              {copy(locale, "Refresh tier", "更新等級")} · {refreshTierLabel}
             </p>
-            <strong>
+            <p className="strip-detail">
+              {copy(
+                locale,
+                "Packet cadence: poll every 15 seconds.",
+                "依 packet 規範，每 15 秒輪詢一次。",
+              )}
+            </p>
+            <strong className="strip-title">
               {describeFreshness(refresh, locale) ??
                 copy(locale, "Waiting for first snapshot", "等待第一批快照")}
             </strong>
@@ -900,6 +922,7 @@ export default function MaintenancePage() {
                     <th>{copy(locale, "Type", "類別")}</th>
                     <th>{t("maintenance.col.status")}</th>
                     <th>{copy(locale, "Schedule", "排定")}</th>
+                    <th>{copy(locale, "Completed", "完成")}</th>
                     <th>{copy(locale, "Technician", "技師")}</th>
                     <th>{copy(locale, "Cost", "費用")}</th>
                     <th>{copy(locale, "Actions", "操作")}</th>
@@ -948,8 +971,10 @@ export default function MaintenancePage() {
                             {copy(locale, "Scheduled", "排定")}{" "}
                             {formatDateTime(record.scheduledAt, locale)}
                           </div>
+                          <div className="impact-detail">{cue.detail}</div>
+                        </td>
+                        <td>
                           <div className="cell-subcopy">
-                            {copy(locale, "Completed", "完成")}{" "}
                             {formatDateTime(record.completedAt, locale)}
                           </div>
                         </td>
@@ -1073,6 +1098,82 @@ export default function MaintenancePage() {
                 </div>
               </dl>
             </div>
+
+            <div className="panel rail-panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">
+                    {copy(locale, "Sitemap", "路由導覽")}
+                  </p>
+                  <h3>{copy(locale, "Entries and exits", "進入與離開路徑")}</h3>
+                </div>
+              </div>
+              <div className="route-map">
+                <div className="route-block">
+                  <span className="route-label">
+                    {copy(locale, "Entry", "入口")}
+                  </span>
+                  <Link className="route-link" href={getDashboardHref()}>
+                    {copy(
+                      locale,
+                      "Dashboard overdue maintenance KPI",
+                      "Dashboard 逾期維保 KPI",
+                    )}
+                  </Link>
+                  <span className="cell-subcopy">
+                    {copy(
+                      locale,
+                      "Sidebar and vehicle detail both land here.",
+                      "Sidebar 與車輛詳情都會導向此頁。",
+                    )}
+                  </span>
+                </div>
+                <div className="route-block">
+                  <span className="route-label">
+                    {copy(locale, "Exit", "出口")}
+                  </span>
+                  <span className="cell-subcopy">
+                    {copy(
+                      locale,
+                      "Each row returns to vehicle detail for dispatchability context.",
+                      "每筆工單都可返回車輛詳情查看可派車上下文。",
+                    )}
+                  </span>
+                  {linkedVehicleId ? (
+                    <Link
+                      className="route-link"
+                      href={getVehicleHref(linkedVehicleId)}
+                    >
+                      {copy(locale, "Back to linked vehicle", "返回目前車輛")}
+                    </Link>
+                  ) : null}
+                </div>
+                <div className="route-block">
+                  <span className="route-label">
+                    {copy(locale, "Cross-app", "跨 App")}
+                  </span>
+                  <a
+                    className="route-link external-link"
+                    href={platformAuditIndexHref}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {copy(
+                      locale,
+                      "Platform Admin audit trail",
+                      "Platform Admin 稽核軌跡",
+                    )}
+                  </a>
+                  <span className="cell-subcopy">
+                    {copy(
+                      locale,
+                      "Audit deep links open in a new tab per Q-X03.",
+                      "依 Q-X03，跨 App 稽核連結會以新分頁開啟。",
+                    )}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -1181,6 +1282,10 @@ export default function MaintenancePage() {
             margin: 6px 0 0;
             color: #cbd5e1;
             font-size: 13px;
+          }
+          .strip-title {
+            display: block;
+            margin-top: 4px;
           }
           .refresh-actions,
           .attention-links,
@@ -1406,6 +1511,7 @@ export default function MaintenancePage() {
           .ghost-link,
           .inline-link,
           .attention-link,
+          .route-link,
           .watch-card {
             color: #fdba74;
             text-decoration: none;
@@ -1470,6 +1576,12 @@ export default function MaintenancePage() {
             color: #fdba74;
             font-weight: 700;
           }
+          .impact-detail {
+            margin-top: 6px;
+            color: #94a3b8;
+            font-size: 12px;
+            line-height: 1.5;
+          }
           .inline-link {
             font-weight: 700;
           }
@@ -1477,6 +1589,34 @@ export default function MaintenancePage() {
             display: grid;
             gap: 12px;
             margin: 0;
+          }
+          .route-map {
+            display: grid;
+            gap: 14px;
+          }
+          .route-block {
+            display: grid;
+            gap: 6px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            background: rgba(15, 23, 42, 0.56);
+          }
+          .route-label {
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }
+          .route-link {
+            font-weight: 700;
+          }
+          .external-link::after {
+            content: " (new tab)";
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 500;
           }
           .scope-list div {
             display: grid;
