@@ -73,6 +73,14 @@ type CredentialRow = Record<string, unknown> & {
 
 type CredentialLifecycleFilter = "active" | "revoked" | "all";
 
+type DetailSectionId =
+  | "overview"
+  | "branding"
+  | "auth"
+  | "eligibility"
+  | "credentials"
+  | "audit";
+
 type ActionIntent =
   | "edit"
   | "activate"
@@ -268,6 +276,28 @@ const filterRowStyle = {
   flexWrap: "wrap",
   alignItems: "center",
 } satisfies CSSProperties;
+
+const sectionTabRowStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  alignItems: "center",
+} satisfies CSSProperties;
+
+function sectionTabButtonStyle(active: boolean): CSSProperties {
+  return {
+    appearance: "none",
+    border: `1px solid ${active ? theme.accent : theme.border}`,
+    background: active ? theme.accentBg : theme.surface,
+    color: active ? theme.accent : theme.textMuted,
+    borderRadius: 999,
+    padding: "7px 12px",
+    fontSize: 11.5,
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "all 120ms ease",
+  };
+}
 
 function buildPlatformNav(locale: string): CanvasShellNavItem[] {
   const labels =
@@ -667,6 +697,42 @@ function emptyStateCopy(
         title: "目前沒有 credential 歷史",
         body: "此 entry 目前沒有可顯示的 ingress credential 紀錄。",
       };
+  }
+}
+
+function emptyStateAccentLabel(reason: EmptyReason, locale: string): string {
+  if (locale === "en") {
+    switch (reason) {
+      case "not_provisioned":
+        return "Provision required";
+      case "fetch_failed":
+        return "Retry needed";
+      case "permission_denied":
+        return "Read-only";
+      case "external_unavailable":
+        return "Upstream blocked";
+      case "filtered_empty":
+        return "Filter mismatch";
+      case "no_data":
+      default:
+        return "No history";
+    }
+  }
+
+  switch (reason) {
+    case "not_provisioned":
+      return "待 provision";
+    case "fetch_failed":
+      return "需重試";
+    case "permission_denied":
+      return "唯讀";
+    case "external_unavailable":
+      return "上游阻塞";
+    case "filtered_empty":
+      return "篩選不符";
+    case "no_data":
+    default:
+      return "尚無紀錄";
   }
 }
 
@@ -1183,6 +1249,8 @@ export default function PartnerDetailPage() {
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [credentialFilter, setCredentialFilter] =
     useState<CredentialLifecycleFilter>("active");
+  const [activeSection, setActiveSection] =
+    useState<DetailSectionId>("overview");
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1365,6 +1433,10 @@ export default function PartnerDetailPage() {
     }
 
     return [
+      {
+        k: "DISPLAY NAME",
+        v: entry.displayName,
+      },
       {
         k: "TENANT",
         v: `${entry.partnerType} · ${entry.tenantId}`,
@@ -1631,6 +1703,29 @@ export default function PartnerDetailPage() {
     [entry, locale],
   );
 
+  const detailSections = useMemo<
+    Array<{ id: DetailSectionId; label: string; badge?: string }>
+  >(
+    () => [
+      { id: "overview", label: locale === "en" ? "Overview" : "Overview" },
+      { id: "branding", label: locale === "en" ? "Branding" : "Branding" },
+      { id: "auth", label: locale === "en" ? "Auth" : "Auth" },
+      {
+        id: "eligibility",
+        label: locale === "en" ? "Eligibility" : "Eligibility",
+      },
+      {
+        id: "credentials",
+        label: locale === "en" ? "Credentials" : "Credentials",
+        ...(credentials.length > 0
+          ? { badge: String(credentials.length) }
+          : {}),
+      },
+      { id: "audit", label: locale === "en" ? "Audit" : "Audit" },
+    ],
+    [credentials.length, locale],
+  );
+
   const refreshTier =
     entry?.refreshTier ?? ("medium_slow" satisfies RefreshTier);
   const isStaleData = Boolean(
@@ -1638,6 +1733,69 @@ export default function PartnerDetailPage() {
     Date.now() - new Date(lastLoadedAt).getTime() > T4_REFRESH_MS,
   );
   const freshnessTone = error ? "danger" : isStaleData ? "warn" : "success";
+
+  const linkageItems = useMemo(
+    () => [
+      {
+        k: locale === "en" ? "Webhook linkage" : "Webhook linkage",
+        v: entry?.webhookLink ? (
+          <span style={shellBadgeRowStyle}>
+            <Pill theme={theme} tone="accent">
+              {locale === "en" ? "linked" : "已連結"}
+            </Pill>
+            <span style={mutedTextStyle}>{entry.webhookLink.label}</span>
+          </span>
+        ) : locale === "en" ? (
+          "Not linked"
+        ) : (
+          "尚未連結"
+        ),
+      },
+      {
+        k: locale === "en" ? "Adapter linkage" : "Adapter linkage",
+        v: entry?.adapterLink ? (
+          <span style={shellBadgeRowStyle}>
+            <Pill theme={theme} tone="accent">
+              {locale === "en" ? "linked" : "已連結"}
+            </Pill>
+            <span style={mutedTextStyle}>{entry.adapterLink.label}</span>
+          </span>
+        ) : locale === "en" ? (
+          "Not linked"
+        ) : (
+          "尚未連結"
+        ),
+      },
+      {
+        k: locale === "en" ? "Cross-app links" : "Cross-app links",
+        v: `${deepLinks.length}`,
+        mono: true,
+      },
+      {
+        k: locale === "en" ? "Refresh tier" : "Refresh tier",
+        v: `${refreshTier} · 30s`,
+        mono: true,
+      },
+    ],
+    [
+      deepLinks.length,
+      entry?.adapterLink,
+      entry?.webhookLink,
+      locale,
+      refreshTier,
+    ],
+  );
+
+  const jumpToSection = useCallback((sectionId: DetailSectionId) => {
+    setActiveSection(sectionId);
+    if (typeof document === "undefined") {
+      return;
+    }
+    document.getElementById(sectionId)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, []);
 
   const executePendingAction = useCallback(
     async (reason: string) => {
@@ -1900,6 +2058,45 @@ export default function PartnerDetailPage() {
               }
             />
           ) : null}
+
+          <Card
+            theme={theme}
+            title={locale === "en" ? "Detail workspace" : "Detail workspace"}
+            subtitle={
+              locale === "en"
+                ? "Canvas-aligned partner detail flow: overview, branding, auth, eligibility, credential governance, and audit."
+                : "依 canvas 對齊 partner detail 流程：overview、branding、auth、eligibility、credential governance 與 audit。"
+            }
+            actions={
+              <div style={shellBadgeRowStyle}>
+                <Pill theme={theme} tone={statusTone} dot>
+                  {formatPlatformCodeLabel(locale, entry.status)}
+                </Pill>
+                <Pill theme={theme} tone={freshnessTone}>
+                  {refreshTier}
+                </Pill>
+                <Pill theme={theme} tone="accent">
+                  {locale === "en"
+                    ? `${availableActions.length} action(s)`
+                    : `${availableActions.length} 個動作`}
+                </Pill>
+              </div>
+            }
+          >
+            <div style={sectionTabRowStyle}>
+              {detailSections.map((section) => (
+                <button
+                  key={section.id}
+                  type="button"
+                  style={sectionTabButtonStyle(activeSection === section.id)}
+                  onClick={() => jumpToSection(section.id)}
+                >
+                  {section.label}
+                  {section.badge ? ` · ${section.badge}` : ""}
+                </button>
+              ))}
+            </div>
+          </Card>
 
           <div style={kpiGridStyle}>
             <KPI
@@ -2245,6 +2442,18 @@ export default function PartnerDetailPage() {
 
               <Card
                 theme={theme}
+                title={locale === "en" ? "Linkage" : "Linkage"}
+                subtitle={
+                  locale === "en"
+                    ? "Webhook, adapter, and companion admin routes stay visible with the credential governance workflow."
+                    : "將 webhook、adapter 與 companion admin routes 固定顯示在 credential governance workflow 旁。"
+                }
+              >
+                <DL theme={theme} items={linkageItems} cols={1} />
+              </Card>
+
+              <Card
+                theme={theme}
                 title={
                   locale === "en"
                     ? "Cross-app deep links"
@@ -2306,6 +2515,106 @@ export default function PartnerDetailPage() {
 
           <form onSubmit={handleSave} style={splitGridStyle(isCompactViewport)}>
             <div style={sectionStackStyle}>
+              <div id="branding" style={sectionAnchorStyle}>
+                <Card
+                  theme={theme}
+                  title={locale === "en" ? "Branding" : "Branding"}
+                  subtitle={
+                    locale === "en"
+                      ? "Display name, theme accent, support contact, and route preview stay editable from the same governance surface."
+                      : "將 display name、theme accent、support contact 與 route preview 集中在同一治理畫面編輯。"
+                  }
+                >
+                  <div style={sectionStackStyle}>
+                    <div style={fieldGridStyle(isCompactViewport)}>
+                      <TextField
+                        label={locale === "en" ? "Display name" : "顯示名稱"}
+                        value={editForm.displayName}
+                        onChange={(value) =>
+                          updateFormField("displayName", value)
+                        }
+                        disabled={!editAction?.enabled}
+                      />
+                      <TextField
+                        label={
+                          locale === "en" ? "Theme accent" : "Theme accent"
+                        }
+                        value={editForm.themeAccent}
+                        onChange={(value) =>
+                          updateFormField("themeAccent", value)
+                        }
+                        mono
+                        disabled={!editAction?.enabled}
+                      />
+                      <TextField
+                        label={locale === "en" ? "Entry host" : "Entry host"}
+                        value={editForm.entryHost}
+                        onChange={(value) =>
+                          updateFormField("entryHost", value)
+                        }
+                        mono
+                        disabled={!editAction?.enabled}
+                      />
+                      <TextField
+                        label={locale === "en" ? "Entry path" : "Entry path"}
+                        value={editForm.entryPath}
+                        onChange={(value) =>
+                          updateFormField("entryPath", value)
+                        }
+                        mono
+                        disabled={!editAction?.enabled}
+                      />
+                      <TextField
+                        label={
+                          locale === "en" ? "Support email" : "Support email"
+                        }
+                        value={editForm.supportEmail}
+                        onChange={(value) =>
+                          updateFormField("supportEmail", value)
+                        }
+                        mono
+                        disabled={!editAction?.enabled}
+                      />
+                      <TextField
+                        label={
+                          locale === "en" ? "Support phone" : "Support phone"
+                        }
+                        value={editForm.supportPhone}
+                        onChange={(value) =>
+                          updateFormField("supportPhone", value)
+                        }
+                        mono
+                        disabled={!editAction?.enabled}
+                      />
+                    </div>
+                    <DL
+                      theme={theme}
+                      cols={isCompactViewport ? 1 : 2}
+                      items={[
+                        {
+                          k: locale === "en" ? "Preview URL" : "Preview URL",
+                          v: previewUrl ?? "—",
+                          mono: true,
+                        },
+                        {
+                          k:
+                            locale === "en"
+                              ? "Readiness impact"
+                              : "Readiness impact",
+                          v: readinessComplete
+                            ? locale === "en"
+                              ? "Branding lane is launch-ready"
+                              : "Branding 已可上線"
+                            : locale === "en"
+                              ? "Branding gaps still affect readiness"
+                              : "Branding 缺口仍影響 readiness",
+                        },
+                      ]}
+                    />
+                  </div>
+                </Card>
+              </div>
+
               <div id="auth" style={sectionAnchorStyle}>
                 <Card
                   theme={theme}
@@ -2657,33 +2966,90 @@ export default function PartnerDetailPage() {
                         rows={credentialRows}
                       />
                     ) : credentialEmptyReason ? (
-                      <WorkflowEmptyState
-                        title={
-                          emptyStateCopy(credentialEmptyReason, locale).title
-                        }
-                        description={
-                          emptyStateCopy(credentialEmptyReason, locale).body
-                        }
-                        tone={emptyStateTone(credentialEmptyReason)}
-                        actions={
-                          issueAction?.enabled ? (
-                            <Btn
-                              theme={theme}
-                              variant="secondary"
-                              onClick={() =>
-                                setPendingAction({
-                                  intent: "issue_credential",
-                                  descriptor: issueAction,
-                                })
-                              }
-                            >
-                              {locale === "en"
-                                ? "Issue credential"
-                                : "核發 credential"}
-                            </Btn>
-                          ) : undefined
-                        }
-                      />
+                      <div style={sectionStackStyle}>
+                        <div style={shellBadgeRowStyle}>
+                          <Pill
+                            theme={theme}
+                            tone={
+                              credentialEmptyReason === "fetch_failed"
+                                ? "danger"
+                                : credentialEmptyReason ===
+                                      "external_unavailable" ||
+                                    credentialEmptyReason === "filtered_empty"
+                                  ? "warn"
+                                  : "accent"
+                            }
+                          >
+                            {emptyStateAccentLabel(
+                              credentialEmptyReason,
+                              locale,
+                            )}
+                          </Pill>
+                        </div>
+                        <WorkflowEmptyState
+                          title={
+                            emptyStateCopy(credentialEmptyReason, locale).title
+                          }
+                          description={
+                            emptyStateCopy(credentialEmptyReason, locale).body
+                          }
+                          tone={emptyStateTone(credentialEmptyReason)}
+                          actions={
+                            credentialEmptyReason === "fetch_failed" ? (
+                              <Btn
+                                theme={theme}
+                                variant="secondary"
+                                onClick={() =>
+                                  void loadEntry({
+                                    preserveIssuedCredential: true,
+                                  })
+                                }
+                              >
+                                {locale === "en" ? "Retry load" : "重新載入"}
+                              </Btn>
+                            ) : credentialEmptyReason === "filtered_empty" ? (
+                              <Btn
+                                theme={theme}
+                                variant="secondary"
+                                onClick={() => setCredentialFilter("all")}
+                              >
+                                {locale === "en"
+                                  ? "Show all credentials"
+                                  : "顯示全部 credential"}
+                              </Btn>
+                            ) : credentialEmptyReason ===
+                              "external_unavailable" ? (
+                              <a
+                                href={`/adapter-registry?entrySlug=${encodeURIComponent(
+                                  entry.entrySlug,
+                                )}`}
+                                style={{ textDecoration: "none" }}
+                              >
+                                <Btn theme={theme} variant="secondary">
+                                  {locale === "en"
+                                    ? "Inspect adapter linkage"
+                                    : "檢查 adapter linkage"}
+                                </Btn>
+                              </a>
+                            ) : issueAction?.enabled ? (
+                              <Btn
+                                theme={theme}
+                                variant="secondary"
+                                onClick={() =>
+                                  setPendingAction({
+                                    intent: "issue_credential",
+                                    descriptor: issueAction,
+                                  })
+                                }
+                              >
+                                {locale === "en"
+                                  ? "Issue credential"
+                                  : "核發 credential"}
+                              </Btn>
+                            ) : undefined
+                          }
+                        />
+                      </div>
                     ) : null}
                   </div>
                 </Card>
