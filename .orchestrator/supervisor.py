@@ -171,6 +171,46 @@ CHAIRMAN_REPORT_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-review-report
 PREMATURE_EXIT_REASON = "Worker exited before the task reached a terminal status."
 
 
+def prune_done_handoffs(status: dict[str, Any], keep: int = 500) -> None:
+    """Trim ``status["handoffs"]`` in place, keeping all pending entries plus
+    the most recent ``keep`` done entries.
+
+    ai-status.json accumulates handoff records forever; each completed task
+    appends 1+ entries with status="done" that supervisor never reads again
+    (see the ``pending_handoffs = [...]`` filter and the iteration in
+    ``ensure_review_finalize_handoff`` / ``ensure_owner_resume_handoff`` —
+    both consume only pending entries). Without pruning the file grew to
+    ~9 MB with 17k handoffs by the 2026-05-26 incident, slowing the
+    dashboard fetch to the point of appearing dead. See
+    feedback_ai_status_handoff_bloat for the incident write-up.
+
+    Called from ``write_status_with_prune`` (the only sanctioned writer of
+    the status file) so every supervisor cycle that mutates status also
+    bounds the audit-log tail. No-op when handoffs already fit.
+    """
+    handoffs = status.get("handoffs") or []
+    if not isinstance(handoffs, list) or len(handoffs) <= keep:
+        return
+    pending = [x for x in handoffs if x.get("status") != "done"]
+    done = [x for x in handoffs if x.get("status") == "done"]
+    if len(done) <= keep:
+        return
+    status["handoffs"] = pending + done[-keep:]
+
+
+def write_status_with_prune(status_path, status: dict[str, Any], *, keep_handoffs: int = 500) -> None:
+    """Standard status-file write that also bounds the handoffs audit-log tail.
+
+    All supervisor paths that previously called ``write_json(status_path, status)``
+    now route through this wrapper so the prune cannot be forgotten in a new
+    code path. ``keep_handoffs`` is tunable via the
+    ``supervisor.handoff_keep_count`` config key for hosts that want longer
+    audit history.
+    """
+    prune_done_handoffs(status, keep=keep_handoffs)
+    write_json(status_path, status)
+
+
 def supervisor_pid_path(config: dict[str, Any]) -> Path:
     return config_path(config, "state_file").parent / "supervisor.pid"
 
@@ -2934,7 +2974,7 @@ def persist_task_reassignment(
             }
         )
 
-    write_json(status_path, status)
+    write_status_with_prune(status_path, status, keep_handoffs=int(config.get("supervisor", {}).get("handoff_keep_count", 500)))
     return sync_status_pipeline(config)
 
 
@@ -3592,6 +3632,22 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             else:
                 if worker.get("status") == "superseded":
                     continue
+                # Dispatch cooldown: protect freshly-dispatched workers
+                # from being killed for an assignment reshuffle. Without
+                # this guard, availability-first claims thrash the worker
+                # pool — a worker that just spawned is wasteful to kill
+                # before it has had a chance to make progress.
+                if alive and worker_in_dispatch_cooldown(
+                    worker,
+                    ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
+                ):
+                    if not SUPERVISOR_LOG_QUIET:
+                        console_log(
+                            f"supersede skipped (cooldown): task={worker.get('task_id')} "
+                            f"provider={worker.get('provider')} run={worker.get('run_id')}",
+                            quiet=SUPERVISOR_LOG_QUIET,
+                        )
+                    continue
                 if alive:
                     terminate_worker_pid(worker.get("pid"))
                 worker["status"] = "superseded"
@@ -3626,6 +3682,24 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             and worker.get("status") in active_worker_statuses
             and higher_priority_ready_task_exists(config, worker, task_map, state=state, active_statuses=active_worker_statuses)
         ):
+            # Dispatch cooldown: same protection as the assignment-moved
+            # branch. Priority escalation that fires within seconds of a
+            # dispatch is almost always thrashing — the new "higher
+            # priority" task was already visible when this worker was
+            # claimed, so the supervisor should have taken that task
+            # then rather than killing a fresh worker now.
+            if alive and worker_in_dispatch_cooldown(
+                worker,
+                ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
+            ):
+                if not SUPERVISOR_LOG_QUIET:
+                    console_log(
+                        f"priority-escalation supersede skipped (cooldown): "
+                        f"task={worker.get('task_id')} provider={worker.get('provider')} "
+                        f"run={worker.get('run_id')}",
+                        quiet=SUPERVISOR_LOG_QUIET,
+                    )
+                continue
             if alive:
                 terminate_worker_pid(worker.get("pid"))
             worker["status"] = "superseded"
@@ -4111,6 +4185,58 @@ def reconcile_queue_records(config: dict[str, Any], state: dict[str, Any]) -> bo
 
 
 
+def parse_worker_dispatched_at(run_id: str | None) -> datetime | None:
+    """Extract the dispatch timestamp embedded in a worker run_id.
+
+    Production run_ids are formatted as ``<provider>-<YYYYMMDDTHHMMSSZ>-<hash>``
+    (see worker spawn paths). The supervisor never stored a dedicated
+    ``dispatched_at`` field on worker records, so parsing the run_id is the
+    least invasive way to recover the dispatch moment for cooldown checks.
+
+    Returns ``None`` when the run_id is missing or none of its dash-separated
+    components parse as the expected timestamp shape — that preserves prior
+    behaviour for synthetic test fixtures whose run_ids are short slugs like
+    ``run-1`` / ``old-run``.
+    """
+    if not run_id:
+        return None
+    for part in str(run_id).split("-"):
+        try:
+            return datetime.strptime(part, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def worker_in_dispatch_cooldown(
+    worker: dict[str, Any],
+    cooldown_seconds: int,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Return True if the worker is within the dispatch cooldown window.
+
+    Cooldown only protects *running* workers — stalled / fallback / etc.
+    workers must remain recoverable via the normal supersede paths.
+
+    Returns False when:
+      - cooldown_seconds <= 0 (feature disabled)
+      - worker.status is not "running"
+      - run_id has no parseable timestamp (synthetic fixtures, legacy records)
+      - dispatched_at is older than cooldown_seconds
+    """
+    if cooldown_seconds <= 0:
+        return False
+    if worker.get("status") != "running":
+        return False
+    dispatched_at = parse_worker_dispatched_at(worker.get("run_id"))
+    if dispatched_at is None:
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return (now - dispatched_at).total_seconds() < cooldown_seconds
+
+
 def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(config.get("ready_dispatcher", {}) or {})
     settings.setdefault("enabled", True)
@@ -4127,6 +4253,13 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("max_tasks_per_agent", 1)
     settings.setdefault("max_tasks_per_agent_by_lane", {})
     settings.setdefault("max_dispatches_per_tick", 4)
+    # Dispatch cooldown: a *running* worker dispatched within the last
+    # N seconds is protected from voluntary supersede (assignment-moved
+    # or priority-escalation paths). Dead, stalled, and fallback workers
+    # are NOT protected — recovery flows still work. Default 300s
+    # (5 min) is enough to absorb a normal supervisor reshuffle without
+    # killing real work; set to 0 to disable. See worker_in_dispatch_cooldown.
+    settings.setdefault("dispatch_cooldown_seconds", 300)
     return settings
 
 
@@ -6012,7 +6145,7 @@ def apply_chair_reassignment_action(
             "created_at": timestamp,
         }
     )
-    write_json(status_path, status)
+    write_status_with_prune(status_path, status, keep_handoffs=int(config.get("supervisor", {}).get("handoff_keep_count", 500)))
     if not sync_status_pipeline(config):
         return False
     clear_failure_streak(state, task_id, role)
@@ -6385,7 +6518,7 @@ def apply_chair_parent_resume_action(
             blocker["status"] = "resolved"
             blocker["resolved_at"] = timestamp
 
-    write_json(status_path, status)
+    write_status_with_prune(status_path, status, keep_handoffs=int(config.get("supervisor", {}).get("handoff_keep_count", 500)))
     if not sync_status_pipeline(config):
         return False
 
