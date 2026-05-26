@@ -3321,6 +3321,11 @@ export interface ComplaintCaseRecord {
   closingNote: string | null;
   createdAt: string;
   updatedAt: string;
+  // Optional ui-runtime field additions (packets §5.6 / ui-runtime.ts header).
+  // Backend may populate; UI computes a fallback when absent.
+  slaStatus?: "within_sla" | "warning" | "breached";
+  slaBreachedAt?: string | null;
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface ComplaintTimelineEntry {
