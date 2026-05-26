@@ -50,6 +50,32 @@ type LoadResult<T> = {
   error: string | null;
 };
 
+type RuntimeEmptyState = {
+  reason: EmptyReason;
+  messageCode?: string;
+  nextAction?: ResourceActionDescriptor | null;
+};
+
+type RuntimeListEnvelope<T> =
+  | T[]
+  | {
+      items?: T[];
+      refresh?: UiRefreshMetadata | null;
+      emptyState?: RuntimeEmptyState | null;
+    };
+
+type RuntimeListResult<T> = {
+  items: T[];
+  error: string | null;
+  refresh: UiRefreshMetadata | null;
+  emptyState: RuntimeEmptyState | null;
+};
+
+type RuntimeActionRecord<T> = T & {
+  availableActions?: ResourceActionDescriptor[];
+  refresh?: UiRefreshMetadata | null;
+};
+
 type VehicleBinding = {
   driver: DriverRegistryRecord | null;
   source: "task" | "shift";
@@ -90,6 +116,14 @@ type IncidentRow = Record<string, unknown> & {
   severity: string;
   status: string;
   updated: string;
+};
+
+type VehicleActionContext = {
+  currentBinding: VehicleBinding | null;
+  platformAdminHref: string | undefined;
+  primaryContractId: string | undefined;
+  primaryIncidentId: string | undefined;
+  vehicleId: string;
 };
 
 const theme = buildCanvasTheme({
@@ -461,7 +495,7 @@ function renderVehicleAction(action: VehicleAction) {
   if (disabled || !href) {
     return (
       <button
-        key={action.label}
+        key={action.descriptor.action}
         type="button"
         disabled
         title={title}
@@ -475,7 +509,7 @@ function renderVehicleAction(action: VehicleAction) {
   if (action.openInNewTab && href) {
     return (
       <a
-        key={action.label}
+        key={action.descriptor.action}
         href={href}
         target="_blank"
         rel="noreferrer"
@@ -489,7 +523,7 @@ function renderVehicleAction(action: VehicleAction) {
 
   return (
     <Link
-      key={action.label}
+      key={action.descriptor.action}
       href={href}
       prefetch={false}
       title={title}
@@ -543,6 +577,40 @@ async function resolveWithFallback<T>(
         error instanceof Error
           ? error.message
           : copy(locale, "Unknown error", "未知錯誤"),
+    };
+  }
+}
+
+async function resolveListWithFallback<T>(
+  loader: () => Promise<RuntimeListEnvelope<T>>,
+  locale: Locale,
+): Promise<RuntimeListResult<T>> {
+  try {
+    const payload = await loader();
+    if (Array.isArray(payload)) {
+      return {
+        items: payload,
+        error: null,
+        refresh: null,
+        emptyState: null,
+      };
+    }
+
+    return {
+      items: Array.isArray(payload.items) ? payload.items : [],
+      error: null,
+      refresh: payload.refresh ?? null,
+      emptyState: payload.emptyState ?? null,
+    };
+  } catch (error) {
+    return {
+      items: [],
+      error:
+        error instanceof Error
+          ? error.message
+          : copy(locale, "Unknown error", "未知錯誤"),
+      refresh: null,
+      emptyState: null,
     };
   }
 }
@@ -655,13 +723,35 @@ function buildCrossAppHref(origin: string, link: CrossAppResourceLink) {
   return `${origin}${route}`;
 }
 
-function buildRefreshMetadata(hasErrors: boolean): UiRefreshMetadata {
+function buildFallbackRefreshMetadata(hasErrors: boolean): UiRefreshMetadata {
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: "",
     staleAfterMs: REFRESH_STALE_AFTER_MS,
-    dataFreshness: hasErrors ? "degraded" : "fresh",
-    source: "live",
+    dataFreshness: hasErrors ? "degraded" : "unknown",
+    source: "static",
   };
+}
+
+function pickRefreshMetadata(
+  ...candidates: Array<UiRefreshMetadata | null | undefined>
+): UiRefreshMetadata | null {
+  return candidates.find((candidate) => candidate != null) ?? null;
+}
+
+function hasRefreshAttention(metadata: UiRefreshMetadata | null | undefined) {
+  return metadata != null && metadata.dataFreshness !== "fresh";
+}
+
+function getEmptyStateMessage(
+  locale: Locale,
+  emptyState: RuntimeEmptyState | null | undefined,
+  fallbackMessage: string,
+) {
+  if (!emptyState?.messageCode) {
+    return fallbackMessage;
+  }
+
+  return formatOpsCodeLabel(locale, emptyState.messageCode);
 }
 
 function buildRefreshBannerBody(
@@ -682,6 +772,17 @@ function buildRefreshBannerBody(
           "All vehicle detail surfaces loaded.",
           "車輛詳情區塊已完整載入。",
         );
+  const snapshotSummary = metadata.generatedAt
+    ? copy(
+        locale,
+        `Generated ${formatDateTime(locale, metadata.generatedAt)}`,
+        `生成時間 ${formatDateTime(locale, metadata.generatedAt)}`,
+      )
+    : copy(
+        locale,
+        "Backend refresh metadata unavailable; showing the latest server-rendered snapshot.",
+        "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
+      );
 
   return [
     copy(
@@ -689,13 +790,126 @@ function buildRefreshBannerBody(
       `T3 cadence · ${metadata.source} snapshot · ${freshnessLabel}`,
       `T3 節奏 · ${metadata.source} 快照 · ${freshnessLabel}`,
     ),
-    copy(
-      locale,
-      `Generated ${formatDateTime(locale, metadata.generatedAt)}`,
-      `生成時間 ${formatDateTime(locale, metadata.generatedAt)}`,
-    ),
+    snapshotSummary,
     sectionSummary,
   ].join(" · ");
+}
+
+function findPageAction(
+  actions: VehicleAction[],
+  predicate: (action: VehicleAction) => boolean,
+) {
+  return actions.find(predicate);
+}
+
+function buildVehicleActionFromDescriptor(
+  locale: Locale,
+  descriptor: ResourceActionDescriptor,
+  context: VehicleActionContext,
+): VehicleAction {
+  const actionCode = descriptor.action.toLowerCase();
+
+  if (actionCode === "refresh") {
+    return {
+      descriptor,
+      label: copy(locale, "Refresh", "重新整理"),
+      icon: "arrow",
+      href: `/vehicles/${encodeURIComponent(context.vehicleId)}`,
+      variant: "secondary",
+    };
+  }
+
+  if (actionCode.includes("maintenance")) {
+    return {
+      descriptor,
+      label: copy(locale, "Open maintenance", "查看保修"),
+      icon: "ext",
+      href: `/maintenance?vehicleId=${encodeURIComponent(context.vehicleId)}`,
+      variant: "secondary",
+    };
+  }
+
+  if (actionCode.includes("driver")) {
+    return {
+      descriptor,
+      label: copy(locale, "Open current driver", "開啟目前司機"),
+      icon: "users",
+      ...(context.currentBinding?.driver?.driverId
+        ? {
+            href: `/drivers/${encodeURIComponent(context.currentBinding.driver.driverId)}`,
+          }
+        : {}),
+      variant: "secondary",
+    };
+  }
+
+  if (actionCode.includes("contract")) {
+    return {
+      descriptor,
+      label: copy(locale, "Open contract", "開啟合約"),
+      icon: "ext",
+      ...(context.primaryContractId
+        ? {
+            href: `/contracts/${encodeURIComponent(context.primaryContractId)}`,
+          }
+        : {}),
+      variant: "secondary",
+    };
+  }
+
+  if (actionCode.includes("incident")) {
+    return {
+      descriptor,
+      label: copy(locale, "Open incident", "開啟事故"),
+      icon: "warn",
+      ...(context.primaryIncidentId
+        ? {
+            href: `/incidents/${encodeURIComponent(context.primaryIncidentId)}`,
+          }
+        : { href: "/incidents" }),
+      variant: "secondary",
+    };
+  }
+
+  if (
+    actionCode.includes("offboarding") ||
+    actionCode.includes("platform_admin") ||
+    actionCode.includes("fleet")
+  ) {
+    return {
+      descriptor,
+      label: copy(locale, "Platform Admin /fleet", "Platform Admin /fleet"),
+      icon: "ext",
+      ...(context.platformAdminHref ? { href: context.platformAdminHref } : {}),
+      openInNewTab: true,
+      variant: "primary",
+    };
+  }
+
+  if (actionCode.includes("registry")) {
+    return {
+      descriptor,
+      label: copy(locale, "Back to registry", "回到車輛名冊"),
+      icon: "arrow",
+      href: "/vehicles",
+      variant: "ghost",
+    };
+  }
+
+  if (actionCode.includes("note")) {
+    return {
+      descriptor,
+      label: copy(locale, "Add ops note", "新增營運備註"),
+      icon: "plus",
+      variant: "secondary",
+    };
+  }
+
+  return {
+    descriptor,
+    label: formatOpsCodeLabel(locale, descriptor.action),
+    variant: "secondary",
+  };
 }
 
 function formatPartnerLabel(contract: VehicleContractRecord) {
@@ -809,9 +1023,11 @@ export default async function VehicleDetailPage({
     incidentsResult,
     auditsResult,
   ] = await Promise.all([
-    resolveWithFallback<VehicleRegistryRecord[]>(
-      () => client.listVehicles(),
-      [] as VehicleRegistryRecord[],
+    resolveListWithFallback<RuntimeActionRecord<VehicleRegistryRecord>>(
+      () =>
+        client.get<
+          RuntimeListEnvelope<RuntimeActionRecord<VehicleRegistryRecord>>
+        >("/api/regulatory-registry/vehicles"),
       locale,
     ),
     resolveWithFallback<DriverRegistryRecord[]>(
@@ -829,29 +1045,37 @@ export default async function VehicleDetailPage({
       [] as ShiftRecord[],
       locale,
     ),
-    resolveWithFallback<MaintenanceRecord[]>(
-      () => client.listMaintenance(vehicleId),
-      [] as MaintenanceRecord[],
+    resolveListWithFallback<RuntimeActionRecord<MaintenanceRecord>>(
+      () =>
+        client.get<RuntimeListEnvelope<RuntimeActionRecord<MaintenanceRecord>>>(
+          `/api/maintenance?vehicleId=${encodeURIComponent(vehicleId)}`,
+        ),
       locale,
     ),
-    resolveWithFallback<VehicleContractRecord[]>(
-      () => client.listContracts(),
-      [] as VehicleContractRecord[],
+    resolveListWithFallback<RuntimeActionRecord<VehicleContractRecord>>(
+      () =>
+        client.get<
+          RuntimeListEnvelope<RuntimeActionRecord<VehicleContractRecord>>
+        >("/api/regulatory-registry/contracts"),
       locale,
     ),
-    resolveWithFallback<IncidentRecord[]>(
-      () => client.listIncidents(),
-      [] as IncidentRecord[],
+    resolveListWithFallback<RuntimeActionRecord<IncidentRecord>>(
+      () =>
+        client.get<RuntimeListEnvelope<RuntimeActionRecord<IncidentRecord>>>(
+          "/api/incidents",
+        ),
       locale,
     ),
-    resolveWithFallback<AuditLogRecord[]>(
-      () => client.listAuditLogs(),
-      [] as AuditLogRecord[],
+    resolveListWithFallback<RuntimeActionRecord<AuditLogRecord>>(
+      () =>
+        client.get<RuntimeListEnvelope<RuntimeActionRecord<AuditLogRecord>>>(
+          "/api/audit",
+        ),
       locale,
     ),
   ]);
 
-  const vehicle = vehiclesResult.data.find(
+  const vehicle = vehiclesResult.items.find(
     (candidate) => candidate.vehicleId === vehicleId,
   );
 
@@ -880,7 +1104,11 @@ export default async function VehicleDetailPage({
           {renderEmptyState(
             locale,
             reason,
-            vehiclesResult.error,
+            getEmptyStateMessage(
+              locale,
+              vehiclesResult.emptyState,
+              vehiclesResult.error,
+            ),
             refreshAction,
           )}
         </div>
@@ -906,11 +1134,15 @@ export default async function VehicleDetailPage({
         <div style={pageBodyStyle}>
           {renderEmptyState(
             locale,
-            "no_data",
-            copy(
+            vehiclesResult.emptyState?.reason ?? "no_data",
+            getEmptyStateMessage(
               locale,
-              "No vehicle record matches this id in the current ops registry snapshot.",
-              "目前 ops 名冊快照中沒有符合此編號的車輛。",
+              vehiclesResult.emptyState,
+              copy(
+                locale,
+                "No vehicle record matches this id in the current ops registry snapshot.",
+                "目前 ops 名冊快照中沒有符合此編號的車輛。",
+              ),
             ),
             backAction,
           )}
@@ -919,15 +1151,15 @@ export default async function VehicleDetailPage({
     );
   }
 
-  const relatedMaintenance = [...maintenanceResult.data].sort((left, right) =>
+  const relatedMaintenance = [...maintenanceResult.items].sort((left, right) =>
     (right.scheduledAt ?? right.updatedAt).localeCompare(
       left.scheduledAt ?? left.updatedAt,
     ),
   );
-  const relatedContracts = contractsResult.data
+  const relatedContracts = contractsResult.items
     .filter((entry) => entry.vehicleId === vehicleId)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  const relatedIncidents = incidentsResult.data
+  const relatedIncidents = incidentsResult.items
     .filter((entry) => entry.relatedVehicleId === vehicleId)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   const currentBinding = pickCurrentBinding(
@@ -941,12 +1173,28 @@ export default async function VehicleDetailPage({
   ).length;
   const degradedSections = [
     driversResult.error ? sectionErrorLabel(locale, "drivers") : null,
-    maintenanceResult.error ? sectionErrorLabel(locale, "maintenance") : null,
-    contractsResult.error ? sectionErrorLabel(locale, "contracts") : null,
-    incidentsResult.error ? sectionErrorLabel(locale, "incidents") : null,
-    auditsResult.error ? sectionErrorLabel(locale, "audit") : null,
+    maintenanceResult.error || hasRefreshAttention(maintenanceResult.refresh)
+      ? sectionErrorLabel(locale, "maintenance")
+      : null,
+    contractsResult.error || hasRefreshAttention(contractsResult.refresh)
+      ? sectionErrorLabel(locale, "contracts")
+      : null,
+    incidentsResult.error || hasRefreshAttention(incidentsResult.refresh)
+      ? sectionErrorLabel(locale, "incidents")
+      : null,
+    auditsResult.error || hasRefreshAttention(auditsResult.refresh)
+      ? sectionErrorLabel(locale, "audit")
+      : null,
   ].filter((entry): entry is string => Boolean(entry));
-  const refreshMetadata = buildRefreshMetadata(degradedSections.length > 0);
+  const refreshMetadata =
+    pickRefreshMetadata(
+      vehicle.refresh,
+      vehiclesResult.refresh,
+      maintenanceResult.refresh,
+      contractsResult.refresh,
+      incidentsResult.refresh,
+      auditsResult.refresh,
+    ) ?? buildFallbackRefreshMetadata(degradedSections.length > 0);
 
   const platformAdminLink: CrossAppResourceLink = {
     targetApp: "platform-admin",
@@ -964,62 +1212,65 @@ export default async function VehicleDetailPage({
     ? buildCrossAppHref(platformAdminOrigin, platformAdminLink)
     : undefined;
 
-  const pageActions: VehicleAction[] = [
-    {
-      descriptor: { action: "refresh", enabled: true, riskLevel: "low" },
-      label: copy(locale, "Refresh", "重新整理"),
-      icon: "arrow",
-      href: `/vehicles/${encodeURIComponent(vehicle.vehicleId)}`,
-      variant: "secondary",
+  const refreshPageAction: VehicleAction = {
+    descriptor: { action: "refresh", enabled: true, riskLevel: "low" },
+    label: copy(locale, "Refresh", "重新整理"),
+    icon: "arrow",
+    href: `/vehicles/${encodeURIComponent(vehicle.vehicleId)}`,
+    variant: "secondary",
+  };
+  const maintenancePageAction: VehicleAction = {
+    descriptor: {
+      action: "open_maintenance",
+      enabled: true,
+      riskLevel: "low",
     },
-    {
-      descriptor: {
-        action: "open_maintenance",
-        enabled: true,
-        riskLevel: "low",
-      },
-      label: copy(locale, "Open maintenance", "查看保修"),
-      icon: "ext",
-      href: `/maintenance?vehicleId=${encodeURIComponent(vehicle.vehicleId)}`,
-      variant: "secondary",
+    label: copy(locale, "Open maintenance", "查看保修"),
+    icon: "ext",
+    href: `/maintenance?vehicleId=${encodeURIComponent(vehicle.vehicleId)}`,
+    variant: "secondary",
+  };
+  const fallbackDriverAction: VehicleAction = {
+    descriptor: {
+      action: "open_driver",
+      enabled: Boolean(currentBinding?.driver?.driverId),
+      disabledReasonCode: currentBinding
+        ? "driver_record_missing"
+        : "driver_binding_missing",
+      riskLevel: "low",
     },
-    {
-      descriptor: {
-        action: "open_driver",
-        enabled: Boolean(currentBinding?.driver?.driverId),
-        disabledReasonCode: currentBinding
-          ? "driver_record_missing"
-          : "driver_binding_missing",
-        riskLevel: "low",
-      },
-      label: copy(locale, "Open current driver", "開啟目前司機"),
-      icon: "users",
-      ...(currentBinding?.driver?.driverId
-        ? {
-            href: `/drivers/${encodeURIComponent(currentBinding.driver.driverId)}`,
-          }
-        : {}),
-      variant: "secondary",
+    label: copy(locale, "Open current driver", "開啟目前司機"),
+    icon: "users",
+    ...(currentBinding?.driver?.driverId
+      ? {
+          href: `/drivers/${encodeURIComponent(currentBinding.driver.driverId)}`,
+        }
+      : {}),
+    variant: "secondary",
+  };
+  const fallbackOffboardingAction: VehicleAction = {
+    descriptor: {
+      action: "open_platform_admin_offboarding",
+      enabled:
+        Boolean(platformAdminHref) &&
+        (vehicle.supplyLifecycle.offboarding.status !== "none" ||
+          vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"),
+      disabledReasonCode:
+        platformAdminOrigin === null
+          ? "platform_admin_origin_unresolved"
+          : "offboarding_inactive",
+      riskLevel: "medium",
     },
-    {
-      descriptor: {
-        action: "open_platform_admin_offboarding",
-        enabled:
-          Boolean(platformAdminHref) &&
-          (vehicle.supplyLifecycle.offboarding.status !== "none" ||
-            vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"),
-        disabledReasonCode:
-          platformAdminOrigin === null
-            ? "platform_admin_origin_unresolved"
-            : "offboarding_inactive",
-        riskLevel: "medium",
-      },
-      label: copy(locale, "Platform Admin /fleet", "Platform Admin /fleet"),
-      icon: "ext",
-      ...(platformAdminHref ? { href: platformAdminHref } : {}),
-      openInNewTab: true,
-      variant: "primary",
-    },
+    label: copy(locale, "Platform Admin /fleet", "Platform Admin /fleet"),
+    icon: "ext",
+    ...(platformAdminHref ? { href: platformAdminHref } : {}),
+    openInNewTab: true,
+    variant: "primary",
+  };
+  const fallbackPageActions: VehicleAction[] = [
+    refreshPageAction,
+    fallbackDriverAction,
+    fallbackOffboardingAction,
     {
       descriptor: {
         action: "add_ops_note",
@@ -1032,9 +1283,75 @@ export default async function VehicleDetailPage({
       variant: "secondary",
     },
   ];
-  const refreshPageAction = pageActions[0]!;
-  const maintenancePageAction = pageActions[1]!;
-  const offboardingPageAction = pageActions[3]!;
+  const runtimeActionContext: VehicleActionContext = {
+    currentBinding,
+    platformAdminHref,
+    primaryContractId:
+      relatedContracts[0]?.contractId ??
+      vehicle.supplyLifecycle.contract.contractId ??
+      undefined,
+    primaryIncidentId: relatedIncidents[0]?.incidentId,
+    vehicleId: vehicle.vehicleId,
+  };
+  const runtimePageActions = Array.isArray(vehicle.availableActions)
+    ? vehicle.availableActions.map((descriptor) =>
+        buildVehicleActionFromDescriptor(
+          locale,
+          descriptor,
+          runtimeActionContext,
+        ),
+      )
+    : null;
+  const pageActions =
+    runtimePageActions == null
+      ? fallbackPageActions
+      : [
+          refreshPageAction,
+          ...runtimePageActions.filter(
+            (action) => action.descriptor.action.toLowerCase() !== "refresh",
+          ),
+        ];
+  const driverBindingAction =
+    findPageAction(pageActions, (action) =>
+      action.descriptor.action.toLowerCase().includes("driver"),
+    ) ?? fallbackDriverAction;
+  const offboardingPageAction =
+    findPageAction(pageActions, (action) => {
+      const actionCode = action.descriptor.action.toLowerCase();
+      return (
+        actionCode.includes("offboarding") ||
+        actionCode.includes("platform_admin") ||
+        actionCode.includes("fleet")
+      );
+    }) ?? fallbackOffboardingAction;
+  const maintenanceEmptyAction = maintenanceResult.emptyState?.nextAction
+    ? buildVehicleActionFromDescriptor(
+        locale,
+        maintenanceResult.emptyState.nextAction,
+        runtimeActionContext,
+      )
+    : maintenancePageAction;
+  const contractEmptyAction = contractsResult.emptyState?.nextAction
+    ? buildVehicleActionFromDescriptor(
+        locale,
+        contractsResult.emptyState.nextAction,
+        runtimeActionContext,
+      )
+    : undefined;
+  const incidentEmptyAction = incidentsResult.emptyState?.nextAction
+    ? buildVehicleActionFromDescriptor(
+        locale,
+        incidentsResult.emptyState.nextAction,
+        runtimeActionContext,
+      )
+    : undefined;
+  const auditEmptyAction = auditsResult.emptyState?.nextAction
+    ? buildVehicleActionFromDescriptor(
+        locale,
+        auditsResult.emptyState.nextAction,
+        runtimeActionContext,
+      )
+    : undefined;
 
   const maintenanceRows: MaintenanceRow[] = relatedMaintenance
     .slice(0, 5)
@@ -1187,7 +1504,7 @@ export default async function VehicleDetailPage({
 
   const auditEntries = collectVehicleAuditEntries(
     vehicle.vehicleId,
-    auditsResult.data,
+    auditsResult.items,
     relatedContracts,
     relatedMaintenance,
     vehicle,
@@ -1275,41 +1592,6 @@ export default async function VehicleDetailPage({
     },
   ];
 
-  const driverBindingAction: VehicleAction = currentBinding?.driver?.driverId
-    ? {
-        descriptor: {
-          action: "open_driver",
-          enabled: true,
-          riskLevel: "low",
-        },
-        label: copy(locale, "Open driver detail", "開啟司機詳情"),
-        href: `/drivers/${encodeURIComponent(currentBinding.driver.driverId)}`,
-        icon: "users",
-      }
-    : {
-        descriptor: {
-          action: "open_platform_admin_offboarding",
-          enabled:
-            Boolean(platformAdminHref) &&
-            (vehicle.supplyLifecycle.offboarding.status !== "none" ||
-              !vehicle.dispatchableFlag),
-          disabledReasonCode:
-            platformAdminOrigin === null
-              ? "platform_admin_origin_unresolved"
-              : "offboarding_inactive",
-          riskLevel: "medium",
-        },
-        label: copy(
-          locale,
-          "Open Platform Admin /fleet",
-          "開啟 Platform Admin /fleet",
-        ),
-        icon: "ext",
-        ...(platformAdminHref ? { href: platformAdminHref } : {}),
-        openInNewTab: true,
-        variant: "primary",
-      };
-
   return (
     <>
       <PageHeader
@@ -1360,8 +1642,18 @@ export default async function VehicleDetailPage({
       <div style={pageBodyStyle}>
         <Banner
           theme={theme}
-          tone={degradedSections.length > 0 ? "warn" : "info"}
-          icon={degradedSections.length > 0 ? "warn" : "info"}
+          tone={
+            degradedSections.length > 0 ||
+            refreshMetadata.dataFreshness !== "fresh"
+              ? "warn"
+              : "info"
+          }
+          icon={
+            degradedSections.length > 0 ||
+            refreshMetadata.dataFreshness !== "fresh"
+              ? "warn"
+              : "info"
+          }
           title={copy(
             locale,
             `Refresh tier T3 · ${REFRESH_TIER}`,
@@ -1445,8 +1737,12 @@ export default async function VehicleDetailPage({
                 renderEmptyState(
                   locale,
                   classifyErrorReason(maintenanceResult.error),
-                  maintenanceResult.error,
-                  maintenancePageAction,
+                  getEmptyStateMessage(
+                    locale,
+                    maintenanceResult.emptyState,
+                    maintenanceResult.error,
+                  ),
+                  maintenanceEmptyAction,
                 )
               ) : maintenanceRows.length > 0 ? (
                 <Table
@@ -1457,13 +1753,17 @@ export default async function VehicleDetailPage({
               ) : (
                 renderEmptyState(
                   locale,
-                  "no_data",
-                  copy(
+                  maintenanceResult.emptyState?.reason ?? "no_data",
+                  getEmptyStateMessage(
                     locale,
-                    "No maintenance records are currently attached to this vehicle.",
-                    "目前這輛車沒有任何保修紀錄。",
+                    maintenanceResult.emptyState,
+                    copy(
+                      locale,
+                      "No maintenance records are currently attached to this vehicle.",
+                      "目前這輛車沒有任何保修紀錄。",
+                    ),
                   ),
-                  maintenancePageAction,
+                  maintenanceEmptyAction,
                 )
               )}
             </Card>
@@ -1477,7 +1777,12 @@ export default async function VehicleDetailPage({
                 renderEmptyState(
                   locale,
                   classifyErrorReason(contractsResult.error),
-                  contractsResult.error,
+                  getEmptyStateMessage(
+                    locale,
+                    contractsResult.emptyState,
+                    contractsResult.error,
+                  ),
+                  contractEmptyAction,
                 )
               ) : contractRows.length > 0 ? (
                 <Table
@@ -1488,12 +1793,17 @@ export default async function VehicleDetailPage({
               ) : (
                 renderEmptyState(
                   locale,
-                  "not_provisioned",
-                  copy(
+                  contractsResult.emptyState?.reason ?? "not_provisioned",
+                  getEmptyStateMessage(
                     locale,
-                    "No active or historical contract references were found for this vehicle.",
-                    "這輛車目前找不到任何有效或歷史合約參照。",
+                    contractsResult.emptyState,
+                    copy(
+                      locale,
+                      "No active or historical contract references were found for this vehicle.",
+                      "這輛車目前找不到任何有效或歷史合約參照。",
+                    ),
                   ),
+                  contractEmptyAction,
                 )
               )}
             </Card>
@@ -1607,7 +1917,12 @@ export default async function VehicleDetailPage({
                 renderEmptyState(
                   locale,
                   classifyErrorReason(incidentsResult.error),
-                  incidentsResult.error,
+                  getEmptyStateMessage(
+                    locale,
+                    incidentsResult.emptyState,
+                    incidentsResult.error,
+                  ),
+                  incidentEmptyAction,
                 )
               ) : incidentRows.length > 0 ? (
                 <Table
@@ -1618,12 +1933,17 @@ export default async function VehicleDetailPage({
               ) : (
                 renderEmptyState(
                   locale,
-                  "no_data",
-                  copy(
+                  incidentsResult.emptyState?.reason ?? "no_data",
+                  getEmptyStateMessage(
                     locale,
-                    "No incidents in the current incident snapshot reference this vehicle.",
-                    "目前事故快照中沒有任何事件關聯到這輛車。",
+                    incidentsResult.emptyState,
+                    copy(
+                      locale,
+                      "No incidents in the current incident snapshot reference this vehicle.",
+                      "目前事故快照中沒有任何事件關聯到這輛車。",
+                    ),
                   ),
+                  incidentEmptyAction,
                 )
               )}
             </Card>
@@ -1641,7 +1961,12 @@ export default async function VehicleDetailPage({
                 renderEmptyState(
                   locale,
                   classifyErrorReason(auditsResult.error),
-                  auditsResult.error,
+                  getEmptyStateMessage(
+                    locale,
+                    auditsResult.emptyState,
+                    auditsResult.error,
+                  ),
+                  auditEmptyAction,
                 )
               ) : auditTimeline.length > 0 ? (
                 <Timeline
@@ -1655,12 +1980,17 @@ export default async function VehicleDetailPage({
               ) : (
                 renderEmptyState(
                   locale,
-                  "no_data",
-                  copy(
+                  auditsResult.emptyState?.reason ?? "no_data",
+                  getEmptyStateMessage(
                     locale,
-                    "No audit entries for this vehicle or its linked maintenance / contract resources were found.",
-                    "目前找不到這輛車或其關聯 maintenance / contract resource 的稽核紀錄。",
+                    auditsResult.emptyState,
+                    copy(
+                      locale,
+                      "No audit entries for this vehicle or its linked maintenance / contract resources were found.",
+                      "目前找不到這輛車或其關聯 maintenance / contract resource 的稽核紀錄。",
+                    ),
                   ),
+                  auditEmptyAction,
                 )
               )}
             </Card>
