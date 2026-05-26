@@ -114,4 +114,28 @@ describe("ui-read-model helpers", () => {
       },
     });
   });
+
+  it("preserves disabled action descriptors in downstream empty-state envelopes", () => {
+    const response = buildUiReadModelList([], {
+      staleAfterMs: 3000,
+      generatedAt: "2026-05-26T08:00:00.000Z",
+      emptyState: buildEmptyStateEnvelope(
+        "permission_denied",
+        "dispatch.test.empty.permission_denied",
+        {
+          action: "retry",
+          enabled: false,
+          disabledReasonCode: "permissions_missing",
+          riskLevel: "medium",
+        },
+      ),
+    });
+
+    expect(response.emptyState?.nextAction).toEqual({
+      action: "retry",
+      enabled: false,
+      disabledReasonCode: "permissions_missing",
+      riskLevel: "medium",
+    });
+  });
 });

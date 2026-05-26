@@ -125,6 +125,55 @@ describe("Complaint taxonomy and resolution codes", () => {
 });
 
 describe("Complaint reopen with SLA recalculation", () => {
+  it("embeds complaint availableActions for open and closed states", () => {
+    const { complaintService } = createServices();
+
+    const complaint = complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "other",
+      severity: "normal",
+      description: "Action descriptor coverage",
+    });
+
+    expect(complaint.availableActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "assign",
+          enabled: true,
+        }),
+        expect.objectContaining({
+          action: "reopen",
+          enabled: false,
+          disabledReasonCode: "case_not_closed",
+        }),
+      ]),
+    );
+
+    complaintService.resolveComplaintCase(complaint.caseNo, {
+      resolutionCode: "resolved_other",
+      closingNote: "Resolved",
+    });
+    complaintService.closeComplaintCase(complaint.caseNo, {
+      resolutionCode: "resolved_other",
+      closingNote: "Closed",
+    });
+
+    const closed = complaintService.getComplaintCase(complaint.caseNo);
+    expect(closed.availableActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "assign",
+          enabled: false,
+          disabledReasonCode: "case_closed",
+        }),
+        expect.objectContaining({
+          action: "reopen",
+          enabled: true,
+        }),
+      ]),
+    );
+  });
+
   it("recalculates SLA and resets breach on reopen", () => {
     vi.useFakeTimers();
     try {

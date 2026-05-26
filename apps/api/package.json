@@ -6,7 +6,8 @@
   "scripts": {
     "build": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json",
     "dev": "node --watch -r ts-node/register src/main.ts",
-    "lint": "eslint src --max-warnings=0",
+    "lint": "eslint src --max-warnings=0 && pnpm run lint:available-actions",
+    "lint:available-actions": "node scripts/lint-available-actions.ts",
     "start": "node dist/main.js",
     "seed:tenant-governance": "tsx --tsconfig tsconfig.seed.json seed/tenant-governance-default.ts",
     "test": "vitest run --passWithNoTests",

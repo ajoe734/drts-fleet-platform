@@ -58,7 +58,6 @@ import type {
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
-  ResourceActionDescriptor,
   TenantBookingCommandPendingReason,
   TenantBookingCommandResult,
   TenantBookingReadOnlyReasonCode,
@@ -5786,13 +5785,15 @@ export class OwnedMobilityService implements OnModuleInit {
       );
 
       pushAction("release", releaseEnabled, "medium", {
-        disabledReasonCode: releaseEnabled ? undefined : "trip_started",
+        ...(releaseEnabled ? {} : { disabledReasonCode: "trip_started" }),
       });
       pushAction("redispatch", redispatchEnabled, "medium", {
-        disabledReasonCode: redispatchEnabled ? undefined : "on_trip",
+        ...(redispatchEnabled ? {} : { disabledReasonCode: "on_trip" }),
       });
       pushAction("cancel", cancelable, "high", {
-        disabledReasonCode: cancelable ? undefined : "order_not_cancelable",
+        ...(cancelable
+          ? {}
+          : { disabledReasonCode: "order_not_cancelable" }),
         requiresReason: true,
       });
       return actions;
@@ -5810,10 +5811,14 @@ export class OwnedMobilityService implements OnModuleInit {
       )
     ) {
       pushAction("assign", !approvalBlocked, "medium", {
-        disabledReasonCode: approvalBlocked ? "approval_pending" : undefined,
+        ...(approvalBlocked
+          ? { disabledReasonCode: "approval_pending" }
+          : {}),
       });
       pushAction("redispatch", !approvalBlocked, "medium", {
-        disabledReasonCode: approvalBlocked ? "approval_pending" : undefined,
+        ...(approvalBlocked
+          ? { disabledReasonCode: "approval_pending" }
+          : {}),
       });
       pushAction("fare_override", true, "high", {
         requiresReason: true,

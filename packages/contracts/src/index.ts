@@ -100,8 +100,6 @@ export const SUPERVISOR_EXECUTION_MODES = [
 export type SupervisorExecutionMode =
   (typeof SUPERVISOR_EXECUTION_MODES)[number];
 
-import type { EmptyStateEnvelope, UiRefreshMetadata } from "./ui-runtime";
-
 export interface ApiSuccessEnvelope<T> {
   data: T;
   meta: {
@@ -3374,6 +3372,7 @@ export interface ComplaintCaseRecord {
   reopenCount: number;
   resolutionCode: ComplaintResolutionCode | null;
   closingNote: string | null;
+  availableActions?: ResourceActionDescriptor[];
   createdAt: string;
   updatedAt: string;
 }

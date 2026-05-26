@@ -15,6 +15,7 @@ import type {
   ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
   LinkComplaintToIncidentCommand,
+  ResourceActionDescriptor,
   ReopenComplaintCaseCommand,
   ResolveComplaintCaseCommand,
 } from "@drts/contracts";
@@ -872,7 +873,78 @@ export class ComplaintService implements OnModuleInit {
       ...record,
       slaStatus,
       slaBreachedAt,
+      availableActions: this.buildAvailableActions(complaintCase),
     };
+  }
+
+  private buildAvailableActions(
+    complaintCase: PersistedComplaintCaseRecord,
+  ): ResourceActionDescriptor[] {
+    const actions: ResourceActionDescriptor[] = [];
+    const isClosed =
+      complaintCase.status === "resolved" || complaintCase.status === "closed";
+    const hasIncidentLink = Boolean(complaintCase.relatedIncidentId);
+
+    const pushAction = (
+      action: string,
+      enabled: boolean,
+      riskLevel: ResourceActionDescriptor["riskLevel"],
+      disabledReasonCode?: string,
+    ) => {
+      actions.push({
+        action,
+        enabled,
+        riskLevel,
+        ...(disabledReasonCode ? { disabledReasonCode } : {}),
+      });
+    };
+
+    pushAction(
+      "assign",
+      !isClosed,
+      "low",
+      isClosed ? "case_closed" : undefined,
+    );
+    pushAction(
+      "add_note",
+      !isClosed,
+      "low",
+      isClosed ? "case_closed" : undefined,
+    );
+    pushAction(
+      "resolve",
+      !isClosed,
+      "medium",
+      isClosed ? "case_closed" : undefined,
+    );
+    pushAction(
+      "close",
+      complaintCase.status === "resolved",
+      "medium",
+      complaintCase.status === "resolved"
+        ? undefined
+        : complaintCase.status === "closed"
+          ? "already_closed"
+          : "resolution_required",
+    );
+    pushAction(
+      "reopen",
+      isClosed,
+      "medium",
+      isClosed ? undefined : "case_not_closed",
+    );
+    pushAction(
+      "escalate_to_incident",
+      !isClosed && !hasIncidentLink,
+      "high",
+      isClosed
+        ? "case_closed"
+        : hasIncidentLink
+          ? "incident_already_linked"
+          : undefined,
+    );
+
+    return actions;
   }
 
   private computeSlaStatus(
