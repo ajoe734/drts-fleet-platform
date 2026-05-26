@@ -365,7 +365,7 @@ export default async function IncidentDetailPage({
       k: locale === "en" ? "Complaint" : "客訴",
       v: incident.relatedComplaintCaseNo
         ? buildRelatedLink(
-            `/complaints?caseNo=${encodeURIComponent(
+            `/complaints/${encodeURIComponent(
               incident.relatedComplaintCaseNo,
             )}`,
             getOpsLabel(locale, "complaint"),
@@ -682,7 +682,7 @@ export default async function IncidentDetailPage({
                     : null}
                   {incident.relatedComplaintCaseNo
                     ? buildRelatedLink(
-                        `/complaints?caseNo=${encodeURIComponent(
+                        `/complaints/${encodeURIComponent(
                           incident.relatedComplaintCaseNo,
                         )}`,
                         getOpsLabel(locale, "complaint"),

@@ -1330,7 +1330,7 @@ export default function CallcenterPage() {
                         {selectedSession.linkedCaseNo && (
                           <Link
                             className="btn"
-                            href={`/complaints?caseNo=${encodeURIComponent(
+                            href={`/complaints/${encodeURIComponent(
                               selectedSession.linkedCaseNo,
                             )}`}
                           >
@@ -1645,7 +1645,7 @@ export default function CallcenterPage() {
                         {callback.linkedCaseNo ? (
                           <Link
                             className="inline-link"
-                            href={`/complaints?caseNo=${encodeURIComponent(
+                            href={`/complaints/${encodeURIComponent(
                               callback.linkedCaseNo,
                             )}`}
                             onClick={(event) => event.stopPropagation()}

@@ -678,7 +678,15 @@ export default function ComplaintsPage() {
                         }
                         onClick={() => setSelectedCaseNo(record.caseNo)}
                       >
-                        <td>{record.caseNo}</td>
+                        <td>
+                          <Link
+                            className="inline-link"
+                            href={`/complaints/${encodeURIComponent(record.caseNo)}`}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {record.caseNo}
+                          </Link>
+                        </td>
                         <td>{formatOpsCodeLabel(locale, record.category)}</td>
                         <td>
                           <div>{formatOpsCodeLabel(locale, record.status)}</div>
@@ -820,6 +828,14 @@ export default function ComplaintsPage() {
                     </div>
                     <p className="description">{selectedRecord.description}</p>
                     <div className="action-row">
+                      <Link
+                        className="btn"
+                        href={`/complaints/${encodeURIComponent(selectedRecord.caseNo)}`}
+                      >
+                        {locale === "en"
+                          ? "Open full workspace"
+                          : "開啟完整詳情"}
+                      </Link>
                       {!selectedRecord.slaBreach && (
                         <button
                           className="btn"
