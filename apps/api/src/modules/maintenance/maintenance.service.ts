@@ -1,6 +1,14 @@
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
-import type { AuditLogRecord } from "@drts/contracts";
+import type {
+  AuditLogRecord,
+  EmptyStateEnvelope,
+  MaintenanceListView,
+  MaintenanceRuntimeRecord,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "@drts/contracts";
+import { UI_REFRESH_INTERVAL_MS } from "@drts/contracts";
 
 import type { AuditedActionResult } from "../../common/action-receipt";
 import { ApiRequestError } from "../../common/api-envelope";
@@ -17,6 +25,26 @@ import {
   MAINTENANCE_STATUS_VALUES,
   MAINTENANCE_TYPE_VALUES,
 } from "./maintenance.types";
+
+const MAINTENANCE_STALE_AFTER_MS = UI_REFRESH_INTERVAL_MS.medium;
+
+function createActionDescriptor(input: {
+  action: string;
+  enabled: boolean;
+  riskLevel: ResourceActionDescriptor["riskLevel"];
+  disabledReasonCode?: string;
+  requiresReason?: boolean;
+}): ResourceActionDescriptor {
+  return {
+    action: input.action,
+    enabled: input.enabled,
+    riskLevel: input.riskLevel,
+    ...(input.disabledReasonCode
+      ? { disabledReasonCode: input.disabledReasonCode }
+      : {}),
+    ...(input.requiresReason ? { requiresReason: input.requiresReason } : {}),
+  };
+}
 
 @Injectable()
 export class MaintenanceService implements OnModuleInit {
@@ -96,27 +124,32 @@ export class MaintenanceService implements OnModuleInit {
       requestId,
     );
 
-    const snapshot = { ...record };
-    if (options?.captureAudit) {
-      return {
-        data: snapshot,
-        auditLog,
-      };
-    }
-
-    return snapshot;
+    return this.toRuntimeRecord(record);
   }
 
-  listMaintenanceLogs(vehicleId?: string) {
-    let result = this.records.map((r) => this.normalizeStatus(r));
+  listMaintenanceLogs(vehicleId?: string): MaintenanceListView {
+    let result = this.records.map((r) => this.toRuntimeRecord(r));
     if (vehicleId) {
       result = result.filter((r) => r.vehicleId === vehicleId);
     }
-    return result;
+
+    const availableActions = this.buildListActions();
+    const response: MaintenanceListView = {
+      items: result,
+      availableActions,
+      refresh: this.buildRefreshMetadata(),
+      ...(result.length === 0
+        ? {
+            emptyState: this.buildEmptyState(availableActions),
+          }
+        : {}),
+    };
+
+    return response;
   }
 
   getMaintenanceLog(maintenanceId: string) {
-    return this.normalizeStatus(this.require(maintenanceId));
+    return this.toRuntimeRecord(this.require(maintenanceId));
   }
 
   updateMaintenanceLog(
@@ -177,15 +210,7 @@ export class MaintenanceService implements OnModuleInit {
       requestId,
     );
 
-    const normalized = this.normalizeStatus(updated);
-    if (options?.captureAudit) {
-      return {
-        data: normalized,
-        auditLog,
-      };
-    }
-
-    return normalized;
+    return this.toRuntimeRecord(updated);
   }
 
   deleteMaintenanceLog(
@@ -295,6 +320,87 @@ export class MaintenanceService implements OnModuleInit {
     const log = { ...input };
     if (requestId) (log as any).requestId = requestId;
     return this.auditNotificationService.recordAuditLog(log);
+  }
+
+  private buildListActions(): ResourceActionDescriptor[] {
+    return [
+      createActionDescriptor({
+        action: "create_record",
+        enabled: true,
+        riskLevel: "medium",
+      }),
+      createActionDescriptor({
+        action: "search",
+        enabled: true,
+        riskLevel: "low",
+      }),
+      createActionDescriptor({
+        action: "filter",
+        enabled: true,
+        riskLevel: "low",
+      }),
+      createActionDescriptor({
+        action: "refresh",
+        enabled: true,
+        riskLevel: "low",
+      }),
+    ];
+  }
+
+  private buildRecordActions(
+    record: MaintenanceLogRecord,
+  ): ResourceActionDescriptor[] {
+    const editEnabled =
+      record.status !== "completed" && record.status !== "cancelled";
+    const completeEnabled = record.status === "in_progress";
+
+    return [
+      createActionDescriptor({
+        action: "edit_record",
+        enabled: editEnabled,
+        riskLevel: "medium",
+        ...(editEnabled ? {} : { disabledReasonCode: "completed" }),
+      }),
+      createActionDescriptor({
+        action: "complete_record",
+        enabled: completeEnabled,
+        riskLevel: "medium",
+        ...(completeEnabled
+          ? {}
+          : { disabledReasonCode: "not_in_progress" }),
+      }),
+    ];
+  }
+
+  private buildRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: MAINTENANCE_STALE_AFTER_MS,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+  }
+
+  private buildEmptyState(
+    availableActions: readonly ResourceActionDescriptor[],
+  ): EmptyStateEnvelope {
+    const createAction = availableActions.find(
+      (action) => action.action === "create_record",
+    );
+
+    return {
+      reason: "no_data",
+      messageCode: "maintenance.empty.no_data",
+      ...(createAction ? { nextAction: createAction } : {}),
+    };
+  }
+
+  private toRuntimeRecord(record: MaintenanceLogRecord): MaintenanceRuntimeRecord {
+    const normalized = this.normalizeStatus(record);
+    return {
+      ...normalized,
+      availableActions: this.buildRecordActions(normalized),
+    };
   }
 
   private resolveInitialStatus(

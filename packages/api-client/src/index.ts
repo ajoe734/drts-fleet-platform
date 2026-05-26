@@ -101,7 +101,9 @@ import type {
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
   LinkCallOrderCommand,
+  MaintenanceListView,
   MaintenanceRecord,
+  MaintenanceRuntimeRecord,
   MarkReimbursementPaidCommand,
   NotificationRecord,
   OpenCallSessionCommand,
@@ -2464,19 +2466,35 @@ export class ApiClient {
     return this.getList<MaintenanceRecord>(path);
   }
 
-  async createMaintenance(command: CreateMaintenanceRecordCommand) {
-    return this.post("/api/maintenance", { body: command });
+  async getMaintenanceView(vehicleId?: string): Promise<MaintenanceListView> {
+    const path = vehicleId
+      ? `/api/maintenance?vehicleId=${encodeURIComponent(vehicleId)}`
+      : "/api/maintenance";
+    return this.get<MaintenanceListView>(path);
   }
 
-  async getMaintenance(maintenanceId: string) {
-    return this.get(`/api/maintenance/${maintenanceId}`);
+  async createMaintenance(
+    command: CreateMaintenanceRecordCommand,
+  ): Promise<MaintenanceRuntimeRecord> {
+    return this.post<MaintenanceRuntimeRecord>("/api/maintenance", {
+      body: command,
+    });
+  }
+
+  async getMaintenance(maintenanceId: string): Promise<MaintenanceRuntimeRecord> {
+    return this.get<MaintenanceRuntimeRecord>(
+      `/api/maintenance/${maintenanceId}`,
+    );
   }
 
   async updateMaintenance(
     maintenanceId: string,
     command: UpdateMaintenanceRecordCommand,
-  ) {
-    return this.patch(`/api/maintenance/${maintenanceId}`, { body: command });
+  ): Promise<MaintenanceRuntimeRecord> {
+    return this.patch<MaintenanceRuntimeRecord>(
+      `/api/maintenance/${maintenanceId}`,
+      { body: command },
+    );
   }
 
   async deleteMaintenance(maintenanceId: string) {

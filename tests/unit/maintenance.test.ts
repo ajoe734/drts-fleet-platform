@@ -28,8 +28,12 @@ describe("maintenance service", () => {
     expect(record.type).toBe("oil_change");
     expect(record.status).toBe("in_progress");
     expect(record.cost).toBe(75.5);
+    expect(record.availableActions.map((action) => action.action)).toEqual([
+      "edit_record",
+      "complete_record",
+    ]);
 
-    expect(service.listMaintenanceLogs()).toHaveLength(1);
+    expect(service.listMaintenanceLogs().items).toHaveLength(1);
     expect(auditService.listAuditLogs()[0]?.actionName).toBe(
       "create_maintenance_log",
     );
@@ -49,8 +53,8 @@ describe("maintenance service", () => {
       description: "Annual inspection",
     });
 
-    expect(service.listMaintenanceLogs("VEH-001")).toHaveLength(1);
-    expect(service.listMaintenanceLogs()).toHaveLength(2);
+    expect(service.listMaintenanceLogs("VEH-001").items).toHaveLength(1);
+    expect(service.listMaintenanceLogs().items).toHaveLength(2);
   });
 
   it("updates maintenance log status", () => {
@@ -69,6 +73,9 @@ describe("maintenance service", () => {
 
     expect(updated.status).toBe("completed");
     expect(updated.completedAt).toBeDefined();
+    expect(updated.availableActions.find((action) => action.action === "edit_record")?.enabled).toBe(
+      false,
+    );
   });
 
   it("returns the captured audit log when a caller requests receipt metadata", () => {
@@ -137,5 +144,19 @@ describe("maintenance service", () => {
     expect(() => service.getMaintenanceLog("MNT-999999")).toThrow(
       "Api Request Error",
     );
+  });
+
+  it("returns runtime list metadata for the page contract", () => {
+    const { service } = createService();
+
+    const emptyView = service.listMaintenanceLogs();
+    expect(emptyView.availableActions.map((action) => action.action)).toEqual([
+      "create_record",
+      "search",
+      "filter",
+      "refresh",
+    ]);
+    expect(emptyView.refresh.staleAfterMs).toBe(15_000);
+    expect(emptyView.emptyState?.reason).toBe("no_data");
   });
 });
