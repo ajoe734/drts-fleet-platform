@@ -4,7 +4,7 @@
 **Intended owner:** `Codex2`
 **Intended reviewer:** `Codex`
 **Collected:** `2026-05-19 (UTC)`
-**Current read:** `PARTIAL - static evidence consolidated; 2026-05-19 live rerun reconfirmed blocked by credential/ingress gates`
+**Current read:** `PARTIAL - static evidence consolidated; 2026-05-19 live rerun and 2026-05-26 governed-dispatch rerun (run 26450437008 / staging job 77869361661 on origin/codex/ph1gc-fin-gov-001-rebased-20260526@cc7eca66) reconfirmed blocked by credential/ingress gates`
 
 ---
 
@@ -174,6 +174,26 @@ Interpretation:
   longer a usable direct fallback for this session
 - the live collection path is effectively gated on the protected staging host
   plus valid bearer credentials
+
+### 4.4 2026-05-26 governed `workflow_dispatch` rerun reread
+
+After the 2026-05-19 baseline above, the reviewer lane on `origin/codex/ph1gc-fin-gov-001-rebased-20260526@cc7eca66` continued to drive governed `workflow_dispatch` reruns against `ci-integ.yml` `staging-e2e-010`. The latest such rerun (run `26450437008`, staging job `77869361661`, captured at `2026-05-26T15:23Z`) recovered from the prior 2026-05-26 GitHub-side setup outage (run `26447438902`): `typecheck`, `lint`, `integration`, `unit`, `orchestrator-tests`, and `build` all passed, and `staging-e2e-010` again reached the bearer probe ladder. It then failed at `Fail when no staging bearer path works`, with the same external evidence as §4.1–§4.3:
+
+- `auth_token` probe → HTTP 401 `Invalid IAP credentials: Unable to parse JWT`.
+- direct Cloud Run auto-discovery → `gcloud run services describe drts-api` blocked by `403 Permission 'iam.serviceAccounts.getAccessToken' denied`.
+- primary IAP ID-token path → `iam.serviceAccounts.getOpenIdToken` denied for the staging deployer.
+- shared fallback provider → `invalid_target`.
+- dev fallback path → reached IAP only to receive HTTP 403 `Access denied` for `github-actions-deployer@drts-dev-bobo-20260503.iam.gserviceaccount.com`.
+- `DIRECT_API_ORIGIN_INPUT` / `DIRECT_API_ORIGIN_VAR` both empty, so the direct `run.app` branch stayed skipped (`gh variable list --repo ajoe734/drts-fleet-platform` still shows no `STAGING_DIRECT_API_ORIGIN`).
+
+Local ingress checks at `2026-05-26T15:10Z` reproduced the same external state:
+
+- `https://api.staging.drts-fleet.cctech-support.com/api/health` → HTTP 302 into Google OAuth with `Invalid IAP credentials: empty token`.
+- `https://drts-api-kdhu6wzufa-uc.a.run.app/api/health` and `https://drts-api-1071409254673.us-central1.run.app/api/health` → Google frontend HTTP 404 `Page not found`.
+
+The same-session retry chain on the owner branch failed pre-run with `HTTP 500: Failed to run workflow dispatch` on both `codex/ph1gc-fin-gov-001-rebased-20260526@5ee50d96` and `codex/ph1gc-fin-gov-001@dbdedbfc`, so the latest *successfully created* governed-dispatch run remains `26450437008`. The earlier task-branch rerun `26411905501` (`origin/codex/ph1gc-fin-gov-001@91b8b723`, staging job `77747988423`) reconfirmed the same external gate before the GitHub-side setup outage, and the earlier proof of the `direct_api_origin` override (`26382603169` on `origin/codex/ph1gc-fin-gov-001-rebased-20260525@45ad7d22`, staging job `77654656937`) showed that the direct-host branch is mechanically working but the historical `run.app` host now returns Google frontend `404 Page not found`.
+
+This refresh does **not** unblock §4.1–§4.3; it only adds the freshest run handle for the gate-uplift owner. The unblock list (operator action) is unchanged from §5.
 
 ---
 
