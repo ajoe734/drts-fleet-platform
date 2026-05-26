@@ -11,7 +11,6 @@ import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
-  CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasIcon,
@@ -23,6 +22,10 @@ import {
   type CanvasDLItem,
   type TimelineItem,
 } from "@drts/ui-web";
+import {
+  ContractActionBar,
+  ContractRefreshIndicator,
+} from "./contract-detail-controls";
 
 type ContractDetailPageProps = {
   params: Promise<{ contractId: string }>;
@@ -121,15 +124,6 @@ function contractStatusTone(
   if (status === "active") return "success";
   if (status === "terminated") return "danger";
   return "warn";
-}
-
-function pickActionTone(
-  descriptor: ResourceActionDescriptor,
-): "primary" | "secondary" | "ghost" {
-  if (!descriptor.enabled) return "ghost";
-  if (descriptor.riskLevel === "high") return "primary";
-  if (descriptor.riskLevel === "medium") return "secondary";
-  return "ghost";
 }
 
 function actionLinkStyle(
@@ -306,27 +300,6 @@ function EmptyStatePanel({
         empty_reason · {reason}
       </div>
     </div>
-  );
-}
-
-function renderActionButton(descriptor: ResourceActionDescriptor) {
-  const variant = pickActionTone(descriptor);
-  return (
-    <Btn
-      key={descriptor.action}
-      theme={theme}
-      variant={variant}
-      icon={
-        descriptor.riskLevel === "high"
-          ? "warn"
-          : descriptor.requiresReason
-            ? "edit"
-            : "ext"
-      }
-      disabled={!descriptor.enabled}
-    >
-      {descriptor.action}
-    </Btn>
   );
 }
 
@@ -572,10 +545,8 @@ export default async function ContractDetailPage({
     formatDateRange(locale, contract.startAt, contract.endAt),
   ].join(" · ");
 
-  const refreshChip = `${t(
-    "contractDetail.refreshTierLabel",
-    locale,
-  )}: ${refreshTierLabel(locale, refreshTier)} · ${refreshTierCadenceLabel(refreshTier)}`;
+  const tierLabel = refreshTierLabel(locale, refreshTier);
+  const cadenceLabel = refreshTierCadenceLabel(refreshTier);
 
   const timelineItems = buildVersionTimeline(versionHistory, locale);
 
@@ -614,52 +585,22 @@ export default async function ContractDetailPage({
             }}
           >
             <span>{headerSubtitle}</span>
-            <span
-              style={{
-                fontFamily: theme.monoFamily,
-                fontSize: 11,
-                color: theme.textMuted,
-              }}
-            >
-              {refreshChip}
-            </span>
+            <ContractRefreshIndicator
+              locale={locale}
+              tier={refreshTier}
+              tierLabel={tierLabel}
+              cadenceLabel={cadenceLabel}
+              theme={theme}
+            />
           </span>
         }
         actions={
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap",
-              justifyContent: "flex-end",
-            }}
-          >
-            {availableActions.length === 0 ? (
-              <span
-                style={{
-                  fontSize: 11.5,
-                  color: theme.textMuted,
-                  fontFamily: theme.monoFamily,
-                }}
-              >
-                {t("contractDetail.readOnlyHint", locale)}
-              </span>
-            ) : (
-              availableActions.map((descriptor) =>
-                renderActionButton(descriptor),
-              )
-            )}
-            <Link
-              href={platformAdminHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={actionLinkStyle("primary")}
-            >
-              <CanvasIcon name="ext" size={12} />
-              <span>{t("contractDetail.openInPlatformAdmin", locale)}</span>
-            </Link>
-          </div>
+          <ContractActionBar
+            locale={locale}
+            availableActions={availableActions}
+            platformAdminHref={platformAdminHref}
+            theme={theme}
+          />
         }
       />
 
