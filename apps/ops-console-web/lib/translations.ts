@@ -321,12 +321,75 @@ const en = {
   // ── Feature Flags ──
   "flags.title": "Feature Flags",
   "flags.subtitle": "{total} flags — {enabled} enabled",
+  "flags.subtitleReadOnly":
+    "Ops read-only visibility for operational flags. Full governance stays in Platform Admin.",
   "flags.col.key": "Key",
+  "flags.col.scope": "Scope",
   "flags.col.status": "Status",
+  "flags.col.state": "State",
+  "flags.col.currentValue": "Current Value",
+  "flags.col.updatedBy": "Updated By",
+  "flags.col.updatedAt": "Updated At",
   "flags.col.description": "Description",
+  "flags.col.actions": "Actions",
   "flags.registrySummary": "{enabled} enabled · {disabled} disabled",
+  "flags.registryTitle": "Flag Registry",
+  "flags.registrySubtitle":
+    "Search by key and filter by scope to explain gated behavior before escalating as a defect.",
+  "flags.registrySummaryV2":
+    "{total} total · {enabled} enabled · {partial} partial · {tenant} tenant-scoped",
+  "flags.registryFooterV2":
+    "Search is local to the current snapshot. History and governance stay in Platform Admin.",
   "flags.registryFooter":
     "Feature flags stay read-only here and mirror the shared management registry table pattern.",
+  "flags.searchPlaceholder": "Search by flag key",
+  "flags.keepFilters": "Keep current filters",
+  "flags.clearFilters": "Clear filters",
+  "flags.platformAdminLink": "Open Platform Admin /feature-flags",
+  "flags.opsReadOnly": "Ops read-only",
+  "flags.readOnly": "Read only",
+  "flags.midRollout": "Mid-rollout",
+  "flags.partialStateHelp": "Different tenant values are active right now.",
+  "flags.tenantOverrideCount": "{count} tenant override(s)",
+  "flags.crossAppHint": "History opens in Platform Admin",
+  "flags.scope.all": "All scopes",
+  "flags.scope.global": "Global",
+  "flags.scope.tenant": "Tenant",
+  "flags.state.enabled": "enabled",
+  "flags.state.disabled": "disabled",
+  "flags.state.partial": "partial",
+  "flags.action.view_change_history": "View change history",
+  "flags.disabledReason.history_unavailable": "History is not available for this flag yet.",
+  "flags.meta.refreshTier": "Refresh tier",
+  "flags.meta.freshness": "Freshness",
+  "flags.meta.generatedAt": "Generated at",
+  "flags.meta.source": "Source",
+  "flags.refreshTier.manual": "T6 · manual",
+  "flags.freshness.fresh": "Fresh",
+  "flags.freshness.stale": "Stale",
+  "flags.freshness.degraded": "Degraded",
+  "flags.freshness.unknown": "Unknown",
+  "flags.staleBanner.title": "Snapshot may be out of date",
+  "flags.staleBanner.body":
+    "Current snapshot is {freshness}. Last generated at {generatedAt}. Refresh before using this to explain rollout state.",
+  "flags.emptyState.noData.title": "No flags are available yet",
+  "flags.emptyState.noData.body":
+    "The registry returned no flag rows for this ops scope. Refresh to confirm this is not a transient empty snapshot.",
+  "flags.emptyState.notProvisioned.title": "Feature flag registry is not provisioned",
+  "flags.emptyState.notProvisioned.body":
+    "This realm does not expose the operational flag registry yet. Open Platform Admin to confirm setup and ownership.",
+  "flags.emptyState.fetchFailed.title": "Could not load feature flags",
+  "flags.emptyState.fetchFailed.body":
+    "The snapshot request failed before the registry data could be rendered. Try a manual refresh.",
+  "flags.emptyState.permissionDenied.title": "You do not have access to this registry",
+  "flags.emptyState.permissionDenied.body":
+    "The current actor can reach the screen but the upstream registry rejected the request. Refresh after confirming the actor context.",
+  "flags.emptyState.externalUnavailable.title": "Flag history source is unavailable",
+  "flags.emptyState.externalUnavailable.body":
+    "The backing service for operational flag visibility is degraded or unavailable. Retry after the upstream dependency recovers.",
+  "flags.emptyState.filteredEmpty.title": "No flags match the current filters",
+  "flags.emptyState.filteredEmpty.body":
+    "Adjust the search term or scope filter to see other flags in the current snapshot.",
   "flags.empty": "No flags found.",
 
   // ── Attendance ──
@@ -1779,12 +1842,75 @@ const zh: Record<keyof typeof en, string> = {
   // ── Feature Flags ──
   "flags.title": "功能旗標",
   "flags.subtitle": "{total} 個旗標 — {enabled} 個已啟用",
+  "flags.subtitleReadOnly":
+    "營運端僅提供 operational flags 唯讀可見性；完整治理維持在 Platform Admin。",
   "flags.col.key": "鍵名",
+  "flags.col.scope": "範圍",
   "flags.col.status": "狀態",
+  "flags.col.state": "狀態",
+  "flags.col.currentValue": "目前值",
+  "flags.col.updatedBy": "最後變更者",
+  "flags.col.updatedAt": "最後變更時間",
   "flags.col.description": "說明",
+  "flags.col.actions": "動作",
   "flags.registrySummary": "{enabled} 個已啟用 · {disabled} 個已停用",
+  "flags.registryTitle": "旗標總覽",
+  "flags.registrySubtitle":
+    "可依鍵名搜尋、依 scope 篩選，先確認是否為 gated rollout，再判斷是否為真正故障。",
+  "flags.registrySummaryV2":
+    "共 {total} 個 · {enabled} 個啟用 · {partial} 個部分 rollout · {tenant} 個租戶層級",
+  "flags.registryFooterV2":
+    "搜尋只作用在目前快照。歷史與治理操作仍在 Platform Admin。",
   "flags.registryFooter":
     "此處維持唯讀檢視，並與共享 management registry table pattern 對齊。",
+  "flags.searchPlaceholder": "依旗標鍵名搜尋",
+  "flags.keepFilters": "保留目前篩選",
+  "flags.clearFilters": "清除篩選",
+  "flags.platformAdminLink": "前往 Platform Admin /feature-flags",
+  "flags.opsReadOnly": "營運唯讀",
+  "flags.readOnly": "唯讀",
+  "flags.midRollout": "進行中 rollout",
+  "flags.partialStateHelp": "目前不同租戶仍套用不同值。",
+  "flags.tenantOverrideCount": "{count} 個租戶覆寫",
+  "flags.crossAppHint": "歷史會在 Platform Admin 開啟",
+  "flags.scope.all": "全部範圍",
+  "flags.scope.global": "全域",
+  "flags.scope.tenant": "租戶",
+  "flags.state.enabled": "enabled",
+  "flags.state.disabled": "disabled",
+  "flags.state.partial": "partial",
+  "flags.action.view_change_history": "查看變更歷史",
+  "flags.disabledReason.history_unavailable": "此旗標尚未提供歷史紀錄。",
+  "flags.meta.refreshTier": "刷新層級",
+  "flags.meta.freshness": "新鮮度",
+  "flags.meta.generatedAt": "產生時間",
+  "flags.meta.source": "來源",
+  "flags.refreshTier.manual": "T6 · 手動",
+  "flags.freshness.fresh": "Fresh",
+  "flags.freshness.stale": "Stale",
+  "flags.freshness.degraded": "Degraded",
+  "flags.freshness.unknown": "Unknown",
+  "flags.staleBanner.title": "此快照可能已過期",
+  "flags.staleBanner.body":
+    "目前快照狀態為 {freshness}。最後產生時間 {generatedAt}。在用來解釋 rollout 狀態前請先刷新。",
+  "flags.emptyState.noData.title": "目前沒有可見旗標",
+  "flags.emptyState.noData.body":
+    "此營運範圍回傳的快照沒有任何旗標列。請先刷新，確認不是暫時性的空快照。",
+  "flags.emptyState.notProvisioned.title": "功能旗標總覽尚未佈建",
+  "flags.emptyState.notProvisioned.body":
+    "此 realm 尚未提供 operational flag registry。請到 Platform Admin 確認設定與權責。",
+  "flags.emptyState.fetchFailed.title": "無法載入功能旗標",
+  "flags.emptyState.fetchFailed.body":
+    "快照請求在畫面渲染前失敗。請手動刷新後再試一次。",
+  "flags.emptyState.permissionDenied.title": "你沒有此總覽的存取權限",
+  "flags.emptyState.permissionDenied.body":
+    "目前 actor 可以進入此頁，但上游 registry 拒絕了請求。請確認 actor context 後再刷新。",
+  "flags.emptyState.externalUnavailable.title": "旗標來源服務目前不可用",
+  "flags.emptyState.externalUnavailable.body":
+    "提供 operational flag visibility 的上游服務降級或不可用。待依賴恢復後再試。",
+  "flags.emptyState.filteredEmpty.title": "目前篩選條件沒有符合的旗標",
+  "flags.emptyState.filteredEmpty.body":
+    "請調整搜尋字詞或 scope 篩選，查看此快照中的其他旗標。",
   "flags.empty": "未找到旗標。",
 
   // ── Attendance ──
