@@ -2170,7 +2170,13 @@ function IncidentForm({
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <Btn theme={theme} variant="primary" icon="plus" disabled={pending}>
+        <Btn
+          theme={theme}
+          variant="primary"
+          type="submit"
+          icon="plus"
+          disabled={pending || actionDescriptor?.enabled === false}
+        >
           {isDispatchExceptionCreate
             ? locale === "en"
               ? "Create from exception"
@@ -2179,7 +2185,7 @@ function IncidentForm({
               ? "Create incident"
               : "建立事故"}
         </Btn>
-        <Btn theme={theme} variant="secondary" onClick={onCancel}>
+        <Btn theme={theme} variant="secondary" type="button" onClick={onCancel}>
           {t("common.cancel")}
         </Btn>
       </div>
