@@ -1,12 +1,21 @@
 import { HttpStatus } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
+import type {
+  PartnerChannelEntryRecord,
+  TenantSlaProfile,
+} from "@drts/contracts";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 
-function createService() {
+function createService(options?: {
+  tenantPartnerService?: {
+    listPartnerEntries: () => PartnerChannelEntryRecord[];
+    getSlaProfile: (tenantId: string) => TenantSlaProfile;
+  };
+}) {
   const opsDispatchEventsService = {
     publishDriverLocationUpdated: vi.fn(),
     publishSupplyLifecycleUpdated: vi.fn(),
@@ -26,6 +35,7 @@ function createService() {
     auditNotificationService,
     driverProfileService,
     regulatoryRegistryRepository as never,
+    options?.tenantPartnerService as never,
   );
 
   return {
@@ -170,6 +180,96 @@ describe("RegulatoryRegistryService", () => {
       .find((candidate) => candidate.contractId === contract.contractId);
 
     expect(listedContract?.lifecycleStatus).toBe("expired");
+  });
+
+  it("returns owner-aware contract detail links for business dispatch contracts", () => {
+    const tenantPartnerService = {
+      listPartnerEntries: vi.fn((): PartnerChannelEntryRecord[] => [
+        {
+          partnerId: "partner-bank-demo-001",
+          partnerCode: "bank_demo_alpha",
+          partnerType: "bank_partner",
+          programId: "program-airport-alpha",
+          programCode: "AIRPORT_ALPHA",
+          tenantId: "tenant-demo-001",
+          bankCode: "BANK_DEMO_ALPHA",
+          entrySlug: "bank-demo-alpha-airport",
+          displayName: "Bank Demo Alpha Airport Transfer",
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          authMode: "partner_api_key",
+          eligibilityMode: "bank_card_inline",
+          entryHost: null,
+          entryPath: "/partner/bank-demo-alpha-airport",
+          themeAccent: "#0b7285",
+          brandingMetadata: null,
+          eligibilityContract: null,
+          status: "active",
+          activeFlag: true,
+          revokedAt: null,
+          revokedBy: null,
+          revokeReason: null,
+          createdAt: "2026-04-10T00:00:00.000Z",
+          updatedAt: "2026-04-10T00:00:00.000Z",
+          auditMetadata: {
+            source: "seed_bootstrap",
+            requestId: null,
+            createdBy: "system:seed",
+            updatedBy: "system:seed",
+          },
+        },
+      ]),
+      getSlaProfile: vi.fn(
+        (tenantId: string): TenantSlaProfile => ({
+          tenantId,
+          waitThresholdMin: 5,
+          arrivalThresholdMin: 15,
+          completionThresholdMin: 45,
+          updatedAt: "2026-05-20T00:00:00.000Z",
+        }),
+      ),
+    };
+    const { service } = createService({ tenantPartnerService });
+
+    const detail = service.getContractDetail("CTR-310");
+
+    expect(detail.mutationLink).toMatchObject({
+      targetApp: "tenant-console",
+      route: "/settings",
+      resourceType: "tenant_sla",
+      resourceId: "tenant-demo-001",
+    });
+    expect(detail.tenantLinkage).toMatchObject({
+      tenantId: "tenant-demo-001",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      tenantLink: expect.objectContaining({
+        targetApp: "tenant-console",
+        route: "/settings",
+      }),
+      partnerLink: expect.objectContaining({
+        targetApp: "platform-admin",
+        route: "/partners/bank-demo-alpha-airport",
+      }),
+    });
+    expect(detail.availableActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "open_partner_entry",
+          enabled: true,
+        }),
+        expect.objectContaining({
+          action: "open_tenant_sla",
+          enabled: true,
+        }),
+      ]),
+    );
+    expect(detail.operationalTerms).toMatchObject({
+      modifiableWindowMinutes: 60,
+      waitingThresholdMinutes: 5,
+      noShowGraceMinutes: 15,
+      slaProfile: expect.objectContaining({
+        tenantId: "tenant-demo-001",
+      }),
+    });
   });
 
   it("keeps future-dated approvals non-dispatchable until the effective window starts", () => {

@@ -15,10 +15,23 @@ import type { RefreshTier, ResourceActionDescriptor } from "@drts/contracts";
 import { CanvasBtn as Btn, CanvasIcon, type CanvasTheme } from "@drts/ui-web";
 import { t, type Locale } from "@/lib/translations";
 
+export type ContractActionLinkTarget = {
+  action: string;
+  href: string;
+  openMode: "new_tab" | "same_tab";
+};
+
+export type ContractPrimaryLinkTarget = {
+  href: string;
+  openMode: "new_tab" | "same_tab";
+};
+
 type ContractActionBarProps = {
   locale: Locale;
   availableActions: ResourceActionDescriptor[];
-  platformAdminHref: string;
+  actionLinks: ContractActionLinkTarget[];
+  primaryLink: ContractPrimaryLinkTarget;
+  primaryLinkLabel: string;
   theme: CanvasTheme;
 };
 
@@ -27,6 +40,7 @@ type ContractRefreshIndicatorProps = {
   tier: RefreshTier;
   tierLabel: string;
   cadenceLabel: string;
+  initialGeneratedAt: string;
   theme: CanvasTheme;
 };
 
@@ -61,26 +75,22 @@ function pickActionIcon(
   return "ext";
 }
 
-function buildActionHref(
-  baseHref: string,
-  action: string,
-  reason?: string,
-): string {
-  const parsed = (() => {
-    try {
-      return new URL(baseHref);
-    } catch {
-      return null;
-    }
-  })();
-  if (parsed) {
-    parsed.searchParams.set("action", action);
-    if (reason) parsed.searchParams.set("reason", reason);
-    return parsed.toString();
+function getActionLabel(action: string, locale: Locale) {
+  return t(`contractDetail.actions.action.${action}` as never, locale);
+}
+
+function openLink(
+  router: ReturnType<typeof useRouter>,
+  target: ContractPrimaryLinkTarget,
+) {
+  if (target.openMode === "same_tab") {
+    router.push(target.href);
+    return;
   }
-  const join = baseHref.includes("?") ? "&" : "?";
-  const reasonSegment = reason ? `&reason=${encodeURIComponent(reason)}` : "";
-  return `${baseHref}${join}action=${encodeURIComponent(action)}${reasonSegment}`;
+
+  if (typeof window !== "undefined") {
+    window.open(target.href, "_blank", "noopener,noreferrer");
+  }
 }
 
 function linkStyle(
@@ -127,9 +137,12 @@ function linkStyle(
 export function ContractActionBar({
   locale,
   availableActions,
-  platformAdminHref,
+  actionLinks,
+  primaryLink,
+  primaryLinkLabel,
   theme,
 }: ContractActionBarProps) {
+  const router = useRouter();
   const [active, setActive] = useState<ResourceActionDescriptor | null>(null);
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<string | null>(null);
@@ -165,6 +178,12 @@ export function ContractActionBar({
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
   }, []);
 
+  const resolveTarget = useCallback(
+    (action: string): ContractPrimaryLinkTarget | null =>
+      actionLinks.find((link) => link.action === action) ?? null,
+    [actionLinks],
+  );
+
   const handleConfirm = useCallback(() => {
     if (!active) return;
     const trimmed = reason.trim();
@@ -172,32 +191,36 @@ export function ContractActionBar({
       setReasonError(t("contractDetail.actions.reasonRequired", locale));
       return;
     }
-    const href = buildActionHref(
-      platformAdminHref,
-      active.action,
-      trimmed || undefined,
-    );
-    if (typeof window !== "undefined") {
-      window.open(href, "_blank", "noopener,noreferrer");
+
+    const target = resolveTarget(active.action);
+    if (!target) {
+      closeConfirm();
+      return;
     }
-    showToast({ actionLabel: active.action });
+
+    openLink(router, target);
+    showToast({ actionLabel: getActionLabel(active.action, locale) });
     closeConfirm();
-  }, [active, reason, locale, platformAdminHref, closeConfirm, showToast]);
+  }, [active, closeConfirm, locale, reason, resolveTarget, router, showToast]);
 
   const handleActionClick = useCallback(
     (descriptor: ResourceActionDescriptor) => {
       if (!descriptor.enabled) return;
+
+      const target = resolveTarget(descriptor.action);
+      if (!target) return;
+
       if (descriptor.riskLevel === "low") {
-        const href = buildActionHref(platformAdminHref, descriptor.action);
-        if (typeof window !== "undefined") {
-          window.open(href, "_blank", "noopener,noreferrer");
-        }
-        showToast({ actionLabel: descriptor.action });
+        openLink(router, target);
+        showToast({
+          actionLabel: getActionLabel(descriptor.action, locale),
+        });
         return;
       }
+
       openConfirm(descriptor);
     },
-    [platformAdminHref, openConfirm, showToast],
+    [locale, openConfirm, resolveTarget, router, showToast],
   );
 
   const confirmBodyKey = active
@@ -207,6 +230,10 @@ export function ContractActionBar({
         ? "contractDetail.actions.confirmBodyMedium"
         : "contractDetail.actions.confirmBodyLow"
     : null;
+
+  const activeActionLabel = active
+    ? getActionLabel(active.action, locale)
+    : undefined;
 
   return (
     <>
@@ -254,24 +281,28 @@ export function ContractActionBar({
                   disabled={disabled}
                   onClick={() => handleActionClick(descriptor)}
                 >
-                  {descriptor.action}
+                  {getActionLabel(descriptor.action, locale)}
                 </Btn>
               </span>
             );
           })
         )}
         <Link
-          href={platformAdminHref}
-          target="_blank"
-          rel="noopener noreferrer"
+          href={primaryLink.href}
+          target={primaryLink.openMode === "new_tab" ? "_blank" : undefined}
+          rel={
+            primaryLink.openMode === "new_tab"
+              ? "noopener noreferrer"
+              : undefined
+          }
           style={linkStyle(theme, "primary")}
         >
           <CanvasIcon name="ext" size={12} />
-          <span>{t("contractDetail.openInPlatformAdmin", locale)}</span>
+          <span>{primaryLinkLabel}</span>
         </Link>
       </div>
 
-      {active && confirmBodyKey ? (
+      {active && confirmBodyKey && activeActionLabel ? (
         <div
           role="dialog"
           aria-modal="true"
@@ -308,7 +339,7 @@ export function ContractActionBar({
               style={{ fontSize: 14, fontWeight: 600, color: theme.text }}
             >
               {t("contractDetail.actions.confirmTitle", locale, {
-                action: active.action,
+                action: activeActionLabel,
               })}
             </div>
             <div
@@ -448,11 +479,15 @@ export function ContractRefreshIndicator({
   tier,
   tierLabel,
   cadenceLabel,
+  initialGeneratedAt,
   theme,
 }: ContractRefreshIndicatorProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(() => {
+    const parsed = Date.parse(initialGeneratedAt);
+    return Number.isFinite(parsed) ? parsed : null;
+  });
   const [, forceTick] = useState(0);
 
   const cadenceMs = REFRESH_CADENCE_MS[tier];
@@ -463,6 +498,13 @@ export function ContractRefreshIndicator({
     });
     setLastRefreshedAt(Date.now());
   }, [router]);
+
+  useEffect(() => {
+    const parsed = Date.parse(initialGeneratedAt);
+    if (Number.isFinite(parsed)) {
+      setLastRefreshedAt(parsed);
+    }
+  }, [initialGeneratedAt]);
 
   useEffect(() => {
     if (cadenceMs <= 0) return;

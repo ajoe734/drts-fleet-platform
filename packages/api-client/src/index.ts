@@ -220,6 +220,7 @@ import type {
   UpsertTenantCostCenterCommand,
   UpsertTenantPassengerCommand,
   UpsertTenantQuotaPolicyCommand,
+  OpsContractDetailRecord,
   VehicleContractRecord,
   VehicleRegistryRecord,
   VerifyPartnerEligibilityCommand,
@@ -2314,6 +2315,15 @@ export class ApiClient {
   async listContracts(): Promise<VehicleContractRecord[]> {
     return this.getList<VehicleContractRecord>(
       "/api/regulatory-registry/contracts",
+    );
+  }
+
+  async getContractDetail(
+    contractId: string,
+  ): Promise<UnwrappedResponse<OpsContractDetailRecord>> {
+    return this.unwrap<OpsContractDetailRecord>(
+      "GET",
+      `/api/regulatory-registry/contracts/${encodeURIComponent(contractId)}`,
     );
   }
 

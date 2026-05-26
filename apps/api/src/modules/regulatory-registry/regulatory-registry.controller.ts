@@ -12,6 +12,7 @@ import {
 import type {
   ActivateInsurancePolicyCommand,
   ActivateVehicleContractCommand,
+  OpsContractDetailRecord,
   ApproveExclusivityCommand,
   CompleteVehicleDebrandingCommand,
   CreateDriverMasterCommand,
@@ -31,6 +32,7 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { buildUiReadModelEnvelope } from "../../common/ui-read-model";
 import { RegulatoryRegistryService } from "./regulatory-registry.service";
 
 @Controller("regulatory-registry")
@@ -212,6 +214,27 @@ export class RegulatoryRegistryController {
       },
       requestId,
     );
+  }
+
+  @Get("contracts/:contractId")
+  getContractDetail(
+    @Param("contractId") contractId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const detail: OpsContractDetailRecord =
+      this.regulatoryRegistryService.getContractDetail(contractId);
+    const envelope = toApiSuccessEnvelope(detail, requestId);
+    const uiEnvelope = buildUiReadModelEnvelope(detail, {
+      staleAfterMs: 15_000,
+      generatedAt: detail.updatedAt,
+    });
+
+    return {
+      data: envelope.data,
+      meta: envelope.meta,
+      refresh: uiEnvelope.refresh,
+      health: uiEnvelope.health,
+    };
   }
 
   @Post("contracts")

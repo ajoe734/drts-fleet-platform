@@ -1,9 +1,12 @@
 import Link from "next/link";
 import type {
+  CrossAppResourceLink,
   EmptyReason,
+  OpsContractDetailRecord,
+  OpsContractVersionHistoryEntry,
   RefreshTier,
-  ResourceActionDescriptor,
-  VehicleContractRecord,
+  UiHealthEnvelope,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
@@ -18,59 +21,35 @@ import {
   CanvasPill as Pill,
   Timeline,
   buildCanvasTheme,
-  type CanvasTone,
   type CanvasDLItem,
+  type CanvasTone,
   type TimelineItem,
 } from "@drts/ui-web";
 import {
   ContractActionBar,
   ContractRefreshIndicator,
+  type ContractActionLinkTarget,
+  type ContractPrimaryLinkTarget,
 } from "./contract-detail-controls";
 
 type ContractDetailPageProps = {
   params: Promise<{ contractId: string }>;
 };
 
-type ContractVersionHistoryEntry = {
-  version: string;
-  publishedAt: string;
-  status: "active" | "retired" | "pending";
-  actor: string | null;
-  actorRealm: "platform" | "ops" | "tenant" | "driver" | null;
-  note: string | null;
-};
-
-type ContractOperationalView = VehicleContractRecord & {
-  refreshTier?: RefreshTier;
-  availableActions?: ResourceActionDescriptor[];
-  operationalTerms?: {
-    modifiableWindow?: string;
-    proofRequirements?: string;
-    waitingRule?: string;
-    noShowRule?: string;
-    slaProfile?: string;
-    currentEffectiveVersion?: string;
-    partnerProgram?: string;
-    authMode?: string;
-  };
-  tenantLinkage?: {
-    tenantId?: string;
-    tenantDisplayName?: string;
-    partnerEntrySlug?: string;
-    programId?: string;
-  };
-  pendingVersion?: {
-    version: string;
-    effectiveAt: string;
-    note?: string;
-  } | null;
-  versionHistory?: ContractVersionHistoryEntry[];
-  counterpartyDisplayName?: string;
-  platformAdminUrl?: string;
-};
+type LoadContractDetailResult =
+  | {
+      status: "ok";
+      detail: OpsContractDetailRecord;
+      refresh: UiRefreshMetadata;
+      health: UiHealthEnvelope;
+    }
+  | { status: "not_found" }
+  | { status: "fetch_failed" }
+  | { status: "permission_denied" }
+  | { status: "external_unavailable" };
 
 const PLATFORM_ADMIN_BASE_URL = "https://platform-admin.drts.io";
-const CONTRACT_REFRESH_TIER: RefreshTier = "medium";
+const TENANT_CONSOLE_BASE_URL = "https://tenant-console.drts.io";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -78,14 +57,28 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-function formatDateRange(
-  locale: Locale,
-  start: string,
-  end: string | null | undefined,
-) {
-  const startLabel = formatDate(locale, start);
-  const endLabel = end ? formatDate(locale, end) : t("common.dash", locale);
-  return `${startLabel} → ${endLabel}`;
+function resolveAppBaseUrl(targetApp: CrossAppResourceLink["targetApp"]) {
+  if (targetApp === "tenant-console") {
+    return TENANT_CONSOLE_BASE_URL;
+  }
+  if (targetApp === "platform-admin") {
+    return PLATFORM_ADMIN_BASE_URL;
+  }
+  return "";
+}
+
+function resolveCrossAppHref(link: CrossAppResourceLink) {
+  return `${resolveAppBaseUrl(link.targetApp)}${link.route}`;
+}
+
+function toLinkTarget(
+  link: CrossAppResourceLink,
+): ContractPrimaryLinkTarget & { label: string } {
+  return {
+    href: resolveCrossAppHref(link),
+    openMode: link.openMode,
+    label: link.label,
+  };
 }
 
 function formatDate(locale: Locale, value: string | null | undefined) {
@@ -118,8 +111,75 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
     .replace(",", "");
 }
 
+function formatDateRange(
+  locale: Locale,
+  start: string,
+  end: string | null | undefined,
+) {
+  return `${formatDate(locale, start)} → ${end ? formatDate(locale, end) : t("common.dash", locale)}`;
+}
+
+function formatModifiableWindow(
+  locale: Locale,
+  minutes: number | null | undefined,
+) {
+  if (minutes == null) {
+    return t("common.dash", locale);
+  }
+  return t("contractDetail.values.modifiableWindow", locale, {
+    minutes,
+  });
+}
+
+function formatProofRequirements(
+  locale: Locale,
+  proof: OpsContractDetailRecord["operationalTerms"]["proofRequirements"],
+) {
+  if (!proof) {
+    return t("common.dash", locale);
+  }
+
+  return t("contractDetail.values.proofRequirements", locale, {
+    photos: proof.minPhotoCount,
+    signoff: proof.signoffRequired
+      ? t("contractDetail.values.flag.required", locale)
+      : t("contractDetail.values.flag.notRequired", locale),
+    expense: proof.expenseProofRequired
+      ? t("contractDetail.values.flag.required", locale)
+      : t("contractDetail.values.flag.notRequired", locale),
+  });
+}
+
+function formatWaitingRule(locale: Locale, minutes: number | null | undefined) {
+  if (minutes == null) {
+    return t("common.dash", locale);
+  }
+  return t("contractDetail.values.waitingRule", locale, { minutes });
+}
+
+function formatNoShowRule(locale: Locale, minutes: number | null | undefined) {
+  if (minutes == null) {
+    return t("common.dash", locale);
+  }
+  return t("contractDetail.values.noShowRule", locale, { minutes });
+}
+
+function formatSlaProfile(
+  locale: Locale,
+  slaProfile: OpsContractDetailRecord["operationalTerms"]["slaProfile"],
+) {
+  if (!slaProfile) {
+    return t("common.dash", locale);
+  }
+  return t("contractDetail.values.slaProfile", locale, {
+    wait: slaProfile.waitThresholdMin,
+    arrival: slaProfile.arrivalThresholdMin,
+    completion: slaProfile.completionThresholdMin,
+  });
+}
+
 function contractStatusTone(
-  status: VehicleContractRecord["status"],
+  status: OpsContractDetailRecord["status"],
 ): CanvasTone {
   if (status === "active") return "success";
   if (status === "terminated") return "danger";
@@ -273,6 +333,7 @@ function EmptyStatePanel({
       <span>{content.cta.label}</span>
     </Link>
   ) : null;
+
   return (
     <div
       data-empty-reason={reason}
@@ -304,7 +365,7 @@ function EmptyStatePanel({
 }
 
 function buildVersionTimeline(
-  history: ContractVersionHistoryEntry[],
+  history: OpsContractVersionHistoryEntry[],
   locale: Locale,
 ): TimelineItem[] {
   return [...history]
@@ -339,29 +400,94 @@ function buildVersionTimeline(
     });
 }
 
-function findContractRecord(
-  contracts: VehicleContractRecord[],
-  contractId: string,
-): ContractOperationalView | null {
-  const match = contracts.find(
-    (contract) => contract.contractId === contractId,
-  );
-  return match ? (match as ContractOperationalView) : null;
+function buildRefreshBanner(
+  refresh: UiRefreshMetadata,
+  locale: Locale,
+): {
+  tone: Exclude<CanvasTone, "neutral">;
+  icon: "info" | "warn" | "x";
+  title: string;
+  body: string;
+} | null {
+  if (refresh.dataFreshness === "fresh") {
+    return null;
+  }
+  if (refresh.dataFreshness === "stale") {
+    return {
+      tone: "warn",
+      icon: "warn",
+      title: t("contractDetail.refreshBanner.staleTitle", locale),
+      body: t("contractDetail.refreshBanner.staleBody", locale, {
+        generatedAt: formatDateTime(locale, refresh.generatedAt),
+      }),
+    };
+  }
+  if (refresh.dataFreshness === "degraded") {
+    return {
+      tone: "danger",
+      icon: "warn",
+      title: t("contractDetail.refreshBanner.degradedTitle", locale),
+      body: t("contractDetail.refreshBanner.degradedBody", locale),
+    };
+  }
+  return {
+    tone: "info",
+    icon: "info",
+    title: t("contractDetail.refreshBanner.unknownTitle", locale),
+    body: t("contractDetail.refreshBanner.unknownBody", locale),
+  };
 }
 
-async function loadContracts(
+function buildHealthBanner(
+  health: UiHealthEnvelope,
+  locale: Locale,
+): {
+  tone: Exclude<CanvasTone, "neutral">;
+  icon: "info" | "warn" | "x";
+  title: string;
+  body: string;
+} | null {
+  if (health.status === "healthy") {
+    return null;
+  }
+  if (health.status === "degraded") {
+    return {
+      tone: "warn",
+      icon: "warn",
+      title: t("contractDetail.health.degradedTitle", locale),
+      body: t("contractDetail.health.degradedBody", locale, {
+        services: health.degradedServices
+          .map((service) => service.service)
+          .join(", "),
+      }),
+    };
+  }
+  return {
+    tone: "danger",
+    icon: "x",
+    title: t("contractDetail.health.downTitle", locale),
+    body: t("contractDetail.health.downBody", locale),
+  };
+}
+
+async function loadContractDetail(
   client: Awaited<ReturnType<typeof getServerOpsClient>>,
-): Promise<
-  | { status: "ok"; items: VehicleContractRecord[] }
-  | { status: "fetch_failed" }
-  | { status: "permission_denied" }
-  | { status: "external_unavailable" }
-> {
+  contractId: string,
+): Promise<LoadContractDetailResult> {
   try {
-    const items = await client.listContracts();
-    return { status: "ok", items };
+    const { data, refresh, health } =
+      await client.getContractDetail(contractId);
+    return {
+      status: "ok",
+      detail: data,
+      refresh,
+      health,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (/404|CONTRACT_NOT_FOUND/i.test(message)) {
+      return { status: "not_found" };
+    }
     if (/403|forbidden|permission/i.test(message)) {
       return { status: "permission_denied" };
     }
@@ -370,6 +496,49 @@ async function loadContracts(
     }
     return { status: "fetch_failed" };
   }
+}
+
+function getOwnerAppLabel(
+  locale: Locale,
+  targetApp: CrossAppResourceLink["targetApp"],
+) {
+  if (targetApp === "tenant-console") {
+    return t("contractDetail.ownerApp.tenantConsole", locale);
+  }
+  return t("contractDetail.ownerApp.platformAdmin", locale);
+}
+
+function renderReferenceLink(
+  locale: Locale,
+  label: string,
+  link: CrossAppResourceLink | null,
+) {
+  if (!link) {
+    return (
+      <span
+        style={{
+          color: theme.textMuted,
+          fontSize: 11.5,
+          fontFamily: theme.monoFamily,
+        }}
+      >
+        {t("common.dash", locale)}
+      </span>
+    );
+  }
+
+  const target = toLinkTarget(link);
+  return (
+    <Link
+      href={target.href}
+      target={target.openMode === "new_tab" ? "_blank" : undefined}
+      rel={target.openMode === "new_tab" ? "noopener noreferrer" : undefined}
+      style={actionLinkStyle("secondary")}
+    >
+      <CanvasIcon name="ext" size={12} />
+      <span>{label}</span>
+    </Link>
+  );
 }
 
 export default async function ContractDetailPage({
@@ -381,177 +550,161 @@ export default async function ContractDetailPage({
     getServerOpsClient(),
   ]);
 
-  const fetchResult = await loadContracts(client);
+  const detailResult = await loadContractDetail(client, contractId);
 
-  if (fetchResult.status !== "ok") {
+  if (detailResult.status !== "ok") {
+    const reason: EmptyReason =
+      detailResult.status === "permission_denied"
+        ? "permission_denied"
+        : detailResult.status === "external_unavailable"
+          ? "external_unavailable"
+          : detailResult.status === "not_found"
+            ? "no_data"
+            : "fetch_failed";
+
     return (
       <>
         <PageHeader
           theme={theme}
           title={contractId}
-          subtitle={t("contractDetail.headerSubtitle.unavailable", locale)}
-        />
-        <EmptyStatePanel
-          locale={locale}
-          reason={
-            fetchResult.status === "permission_denied"
-              ? "permission_denied"
-              : fetchResult.status === "external_unavailable"
-                ? "external_unavailable"
-                : "fetch_failed"
+          subtitle={
+            detailResult.status === "not_found"
+              ? t("contractDetail.headerSubtitle.notFound", locale)
+              : t("contractDetail.headerSubtitle.unavailable", locale)
           }
         />
+        <EmptyStatePanel locale={locale} reason={reason} />
       </>
     );
   }
 
-  const contract = findContractRecord(fetchResult.items, contractId);
-
-  if (!contract) {
-    const notProvisioned = fetchResult.items.length === 0;
-    return (
-      <>
-        <PageHeader
-          theme={theme}
-          title={contractId}
-          subtitle={t("contractDetail.headerSubtitle.notFound", locale)}
-        />
-        <EmptyStatePanel
-          locale={locale}
-          reason={notProvisioned ? "not_provisioned" : "no_data"}
-        />
-      </>
-    );
-  }
-
-  const ops = contract.operationalTerms ?? {};
-  const linkage = contract.tenantLinkage ?? {};
-  const versionHistory = contract.versionHistory ?? [];
-  const availableActions = contract.availableActions ?? [];
-  const refreshTier = contract.refreshTier ?? CONTRACT_REFRESH_TIER;
-  const counterparty =
-    contract.counterpartyDisplayName ?? contract.partnerId ?? "—";
-  const partnerProgramLabel =
-    ops.partnerProgram ?? formatOpsCodeLabel(locale, contract.partnerType);
-  const platformAdminHref =
-    contract.platformAdminUrl ??
-    `${PLATFORM_ADMIN_BASE_URL}/partners?contractId=${encodeURIComponent(
-      contract.contractId,
-    )}`;
+  const { detail, refresh, health } = detailResult;
+  const refreshBanner = buildRefreshBanner(refresh, locale);
+  const healthBanner = buildHealthBanner(health, locale);
+  const tierLabel = refreshTierLabel(locale, detail.refreshTier);
+  const cadenceLabel = refreshTierCadenceLabel(detail.refreshTier);
+  const ownerAppLabel = getOwnerAppLabel(locale, detail.mutationLink.targetApp);
+  const actionLinks: ContractActionLinkTarget[] = detail.actionLinks.map(
+    ({ action, link }) => ({
+      action,
+      href: resolveCrossAppHref(link),
+      openMode: link.openMode,
+    }),
+  );
+  const mutationLinkTarget = toLinkTarget(detail.mutationLink);
 
   const operationalTermItems: CanvasDLItem[] = [
     {
       k: t("contractDetail.terms.modifiableWindow", locale),
-      v: ops.modifiableWindow ?? t("contractDetail.pendingBackend", locale),
-      mono: Boolean(ops.modifiableWindow),
+      v: formatModifiableWindow(
+        locale,
+        detail.operationalTerms.modifiableWindowMinutes,
+      ),
     },
     {
       k: t("contractDetail.terms.proofRequirements", locale),
-      v: ops.proofRequirements ?? t("contractDetail.pendingBackend", locale),
+      v: formatProofRequirements(
+        locale,
+        detail.operationalTerms.proofRequirements,
+      ),
     },
     {
       k: t("contractDetail.terms.waitingRule", locale),
-      v: ops.waitingRule ?? t("contractDetail.pendingBackend", locale),
+      v: formatWaitingRule(
+        locale,
+        detail.operationalTerms.waitingThresholdMinutes,
+      ),
     },
     {
       k: t("contractDetail.terms.noShowRule", locale),
-      v: ops.noShowRule ?? t("contractDetail.pendingBackend", locale),
-      mono: Boolean(ops.noShowRule),
+      v: formatNoShowRule(locale, detail.operationalTerms.noShowGraceMinutes),
     },
     {
       k: t("contractDetail.terms.slaProfile", locale),
-      v: ops.slaProfile ?? t("contractDetail.pendingBackend", locale),
+      v: formatSlaProfile(locale, detail.operationalTerms.slaProfile),
     },
     {
       k: t("contractDetail.terms.currentEffectiveVersion", locale),
-      v:
-        ops.currentEffectiveVersion ??
-        t("contractDetail.pendingBackend", locale),
-      mono: Boolean(ops.currentEffectiveVersion),
+      v: detail.operationalTerms.currentEffectiveVersion,
+      mono: true,
     },
     {
       k: t("contractDetail.terms.partnerProgram", locale),
-      v: partnerProgramLabel,
+      v: detail.tenantLinkage.programId ?? t("common.dash", locale),
+      mono: Boolean(detail.tenantLinkage.programId),
     },
     {
       k: t("contractDetail.terms.authMode", locale),
-      v: ops.authMode ?? t("contractDetail.pendingBackend", locale),
-      mono: Boolean(ops.authMode),
+      v: detail.tenantLinkage.authMode
+        ? formatOpsCodeLabel(locale, detail.tenantLinkage.authMode)
+        : t("common.dash", locale),
     },
   ];
 
   const linkageItems: CanvasDLItem[] = [
     {
       k: t("contractDetail.linkage.tenant", locale),
-      v: linkage.tenantDisplayName
-        ? `${linkage.tenantId ?? "—"} · ${linkage.tenantDisplayName}`
-        : (linkage.tenantId ?? t("common.dash", locale)),
-      mono: Boolean(linkage.tenantId),
+      v: detail.tenantLinkage.tenantDisplayName ?? t("common.dash", locale),
+      mono: Boolean(detail.tenantLinkage.tenantId),
     },
     {
       k: t("contractDetail.linkage.partnerEntry", locale),
-      v: linkage.partnerEntrySlug ?? t("common.dash", locale),
-      mono: Boolean(linkage.partnerEntrySlug),
+      v: detail.tenantLinkage.partnerEntrySlug ?? t("common.dash", locale),
+      mono: Boolean(detail.tenantLinkage.partnerEntrySlug),
     },
     {
       k: t("contractDetail.linkage.programId", locale),
-      v: linkage.programId ?? t("common.dash", locale),
-      mono: Boolean(linkage.programId),
+      v: detail.tenantLinkage.programId ?? t("common.dash", locale),
+      mono: Boolean(detail.tenantLinkage.programId),
     },
   ];
 
   const metaItems: CanvasDLItem[] = [
     {
       k: t("contractDetail.meta.contractType", locale),
-      v: formatOpsCodeLabel(locale, contract.contractType),
+      v: formatOpsCodeLabel(locale, detail.contractType),
     },
     {
       k: t("contractDetail.meta.partnerType", locale),
-      v: formatOpsCodeLabel(locale, contract.partnerType),
+      v: formatOpsCodeLabel(locale, detail.partnerType),
     },
     {
       k: t("contractDetail.meta.vehicleId", locale),
-      v: contract.vehicleId,
+      v: detail.vehicleId,
       mono: true,
     },
     {
       k: t("contractDetail.meta.operatingArea", locale),
-      v: contract.operatingAreaId ?? t("common.dash", locale),
-      mono: Boolean(contract.operatingAreaId),
+      v: detail.operatingAreaId ?? t("common.dash", locale),
+      mono: Boolean(detail.operatingAreaId),
     },
     {
       k: t("contractDetail.meta.serviceScope", locale),
-      v: contract.serviceScope,
+      v: detail.serviceScope,
     },
     {
       k: t("contractDetail.meta.term", locale),
-      v: formatDateRange(locale, contract.startAt, contract.endAt),
+      v: formatDateRange(locale, detail.startAt, detail.endAt),
       mono: true,
     },
     {
       k: t("contractDetail.meta.approvedBy", locale),
-      v: contract.approvedBy ?? t("common.dash", locale),
+      v: detail.approvedBy ?? t("common.dash", locale),
     },
     {
       k: t("contractDetail.meta.approvedAt", locale),
-      v: formatDateTime(locale, contract.approvedAt),
-      mono: Boolean(contract.approvedAt),
+      v: formatDateTime(locale, detail.approvedAt),
+      mono: Boolean(detail.approvedAt),
     },
   ];
 
   const headerSubtitle = [
-    counterparty,
-    formatOpsCodeLabel(locale, contract.contractType),
-    formatDateRange(locale, contract.startAt, contract.endAt),
+    detail.counterpartyDisplayName ?? detail.partnerId ?? "—",
+    formatOpsCodeLabel(locale, detail.contractType),
+    formatDateRange(locale, detail.startAt, detail.endAt),
   ].join(" · ");
 
-  const tierLabel = refreshTierLabel(locale, refreshTier);
-  const cadenceLabel = refreshTierCadenceLabel(refreshTier);
-
-  const timelineItems = buildVersionTimeline(versionHistory, locale);
-
-  const versionHistoryEmptyReason: EmptyReason =
-    versionHistory.length === 0 ? "no_data" : "no_data";
+  const timelineItems = buildVersionTimeline(detail.versionHistory, locale);
 
   return (
     <>
@@ -566,9 +719,9 @@ export default async function ContractDetailPage({
               flexWrap: "wrap",
             }}
           >
-            <span>{contract.contractId}</span>
-            <Pill theme={theme} tone={contractStatusTone(contract.status)} dot>
-              {formatOpsCodeLabel(locale, contract.status)}
+            <span>{detail.contractId}</span>
+            <Pill theme={theme} tone={contractStatusTone(detail.status)} dot>
+              {formatOpsCodeLabel(locale, detail.status)}
             </Pill>
             <Pill theme={theme} tone="info">
               {t("contractDetail.readOnlyPill", locale)}
@@ -587,9 +740,10 @@ export default async function ContractDetailPage({
             <span>{headerSubtitle}</span>
             <ContractRefreshIndicator
               locale={locale}
-              tier={refreshTier}
+              tier={detail.refreshTier}
               tierLabel={tierLabel}
               cadenceLabel={cadenceLabel}
+              initialGeneratedAt={refresh.generatedAt}
               theme={theme}
             />
           </span>
@@ -597,28 +751,57 @@ export default async function ContractDetailPage({
         actions={
           <ContractActionBar
             locale={locale}
-            availableActions={availableActions}
-            platformAdminHref={platformAdminHref}
+            availableActions={detail.availableActions}
+            actionLinks={actionLinks}
+            primaryLink={{
+              href: mutationLinkTarget.href,
+              openMode: mutationLinkTarget.openMode,
+            }}
+            primaryLinkLabel={ownerAppLabel}
             theme={theme}
           />
         }
       />
 
-      {contract.pendingVersion ? (
+      {healthBanner ? (
+        <div style={{ padding: "16px 24px 0" }}>
+          <Banner
+            theme={theme}
+            tone={healthBanner.tone}
+            icon={healthBanner.icon}
+            title={healthBanner.title}
+            body={healthBanner.body}
+          />
+        </div>
+      ) : null}
+
+      {refreshBanner ? (
+        <div style={{ padding: "16px 24px 0" }}>
+          <Banner
+            theme={theme}
+            tone={refreshBanner.tone}
+            icon={refreshBanner.icon}
+            title={refreshBanner.title}
+            body={refreshBanner.body}
+          />
+        </div>
+      ) : null}
+
+      {detail.pendingVersion ? (
         <div style={{ padding: "16px 24px 0" }}>
           <Banner
             theme={theme}
             tone="warn"
             icon="warn"
             title={t("contractDetail.transitionBanner.title", locale, {
-              version: contract.pendingVersion.version,
+              version: detail.pendingVersion.version,
             })}
             body={
-              contract.pendingVersion.note ??
+              detail.pendingVersion.note ??
               t("contractDetail.transitionBanner.body", locale, {
                 effective: formatDateTime(
                   locale,
-                  contract.pendingVersion.effectiveAt,
+                  detail.pendingVersion.effectiveAt,
                 ),
               })
             }
@@ -660,17 +843,29 @@ export default async function ContractDetailPage({
               theme={theme}
               tone="info"
               icon="info"
-              title={t("contractDetail.authorityRedirect.bannerTitle", locale)}
-              body={t("contractDetail.authorityRedirect.bannerBody", locale)}
+              title={t("contractDetail.authorityRedirect.bannerTitle", locale, {
+                ownerApp: ownerAppLabel,
+              })}
+              body={t("contractDetail.authorityRedirect.bannerBody", locale, {
+                ownerApp: ownerAppLabel,
+              })}
               actions={
                 <Link
-                  href={platformAdminHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href={mutationLinkTarget.href}
+                  target={
+                    mutationLinkTarget.openMode === "new_tab"
+                      ? "_blank"
+                      : undefined
+                  }
+                  rel={
+                    mutationLinkTarget.openMode === "new_tab"
+                      ? "noopener noreferrer"
+                      : undefined
+                  }
                   style={actionLinkStyle("primary")}
                 >
                   <CanvasIcon name="ext" size={12} />
-                  <span>{t("contractDetail.openInNewTab", locale)}</span>
+                  <span>{ownerAppLabel}</span>
                 </Link>
               }
             />
@@ -678,6 +873,25 @@ export default async function ContractDetailPage({
 
           <Card theme={theme} title={t("contractDetail.linkage.title", locale)}>
             <DL theme={theme} cols={1} items={linkageItems} />
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                marginTop: 12,
+              }}
+            >
+              {renderReferenceLink(
+                locale,
+                t("contractDetail.links.openTenant", locale),
+                detail.tenantLinkage.tenantLink,
+              )}
+              {renderReferenceLink(
+                locale,
+                t("contractDetail.links.openPartner", locale),
+                detail.tenantLinkage.partnerLink,
+              )}
+            </div>
           </Card>
 
           <Card
@@ -685,10 +899,7 @@ export default async function ContractDetailPage({
             title={t("contractDetail.versionHistoryTitle", locale)}
           >
             {timelineItems.length === 0 ? (
-              <EmptyStatePanel
-                locale={locale}
-                reason={versionHistoryEmptyReason}
-              />
+              <EmptyStatePanel locale={locale} reason="no_data" />
             ) : (
               <Timeline
                 density="compact"
