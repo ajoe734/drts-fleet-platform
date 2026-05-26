@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import {
   buildCanvasTheme,
+  type CanvasRealmTone,
   type CanvasTheme,
   type CanvasTone,
 } from "../canvas-tokens";
@@ -14,11 +15,26 @@ export {
   buildCanvasTheme,
   CANVAS_DARK_NAVY_PALETTE,
   CANVAS_DENSITY,
+  CANVAS_EMPTY_REASONS,
   CANVAS_LIGHT_PALETTE,
+  CANVAS_REALM_COLORS,
+  CANVAS_REALM_LABELS,
+  CANVAS_REFRESH_TIERS,
+  CANVAS_RISK_LEVELS,
   CANVAS_SURFACE_ACCENTS,
   CANVAS_TYPE,
   type CanvasDensity,
+  type CanvasEmptyReason,
+  type CanvasEmptyReasonKey,
   type CanvasMode,
+  type CanvasRealm,
+  type CanvasRealmChip,
+  type CanvasRealmPalette,
+  type CanvasRealmTone,
+  type CanvasRefreshTier,
+  type CanvasRefreshTierKey,
+  type CanvasRiskLevel,
+  type CanvasRiskLevelKey,
   type CanvasSurface,
   type CanvasTheme,
   type CanvasTone,
@@ -44,7 +60,22 @@ function px(value?: string | number) {
   return typeof value === "number" ? `${value}px` : value;
 }
 
-function toneStyles(theme: CanvasTheme, tone: CanvasTone) {
+const REALM_TONES: ReadonlySet<string> = new Set([
+  "platform",
+  "ops",
+  "tenant",
+  "driver",
+  "system",
+]);
+
+function isRealmTone(tone: PillTone): tone is CanvasRealmTone {
+  return REALM_TONES.has(tone as string);
+}
+
+function toneStyles(theme: CanvasTheme, tone: PillTone) {
+  if (isRealmTone(tone)) {
+    return theme.realm[tone];
+  }
   switch (tone) {
     case "success":
       return {
@@ -69,6 +100,8 @@ function toneStyles(theme: CanvasTheme, tone: CanvasTone) {
       };
   }
 }
+
+export type PillTone = CanvasTone | CanvasRealmTone;
 
 function renderIcon(
   icon: CanvasIconName | ReactNode | undefined,
@@ -755,9 +788,10 @@ export function Btn({
 
 export interface PillProps {
   theme?: CanvasTheme;
-  tone?: CanvasTone;
+  tone?: PillTone;
   children: ReactNode;
   dot?: boolean;
+  en?: ReactNode;
   style?: CSSProperties;
 }
 
@@ -766,6 +800,7 @@ export function Pill({
   tone = "neutral",
   children,
   dot = false,
+  en,
   style,
 }: PillProps) {
   const theme = resolveTheme(providedTheme);
@@ -802,6 +837,17 @@ export function Pill({
         />
       ) : null}
       {children}
+      {en ? (
+        <span
+          style={{
+            fontFamily: theme.monoFamily,
+            opacity: 0.65,
+            fontSize: 9.5,
+          }}
+        >
+          {en}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -1402,6 +1448,742 @@ export function WindowChrome({
         <div style={{ width: "100%", height: "100%", ...contentStyle }}>
           {children}
         </div>
+      </div>
+    </div>
+  );
+}
+
+export interface BiLabelProps {
+  theme?: CanvasTheme;
+  zh: ReactNode;
+  en?: ReactNode;
+  size?: number;
+  opacity?: number;
+  gap?: number;
+  style?: CSSProperties;
+}
+
+export function BiLabel({
+  theme: providedTheme,
+  zh,
+  en,
+  size = 12,
+  opacity = 0.55,
+  gap = 6,
+  style,
+}: BiLabelProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        gap,
+        fontSize: size,
+        lineHeight: 1.3,
+        ...style,
+      }}
+    >
+      <span style={{ color: theme.text, fontWeight: 500 }}>{zh}</span>
+      {en ? (
+        <span
+          style={{
+            opacity,
+            fontFamily: theme.monoFamily,
+            fontSize: size - 1,
+            color: theme.textMuted,
+          }}
+        >
+          · {en}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+export interface CodeProps {
+  theme?: CanvasTheme;
+  children: ReactNode;
+  style?: CSSProperties;
+}
+
+export function Code({ theme: providedTheme, children, style }: CodeProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <pre
+      style={{
+        margin: 0,
+        padding: "10px 12px",
+        borderRadius: 8,
+        background: theme.surfaceLo,
+        border: `1px solid ${theme.border}`,
+        color: theme.text,
+        fontFamily: theme.monoFamily,
+        fontSize: 11.5,
+        lineHeight: 1.55,
+        overflowX: "auto",
+        whiteSpace: "pre",
+        ...style,
+      }}
+    >
+      {children}
+    </pre>
+  );
+}
+
+export interface ToggleProps {
+  theme?: CanvasTheme;
+  on: boolean;
+  label?: ReactNode;
+  onChange?: (next: boolean) => void;
+  disabled?: boolean;
+  style?: CSSProperties;
+}
+
+export function Toggle({
+  theme: providedTheme,
+  on,
+  label,
+  onChange,
+  disabled = false,
+  style,
+}: ToggleProps) {
+  const theme = resolveTheme(providedTheme);
+  const interactive = !disabled && Boolean(onChange);
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-disabled={disabled}
+      disabled={disabled}
+      onClick={interactive ? () => onChange?.(!on) : undefined}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        cursor: disabled ? "not-allowed" : interactive ? "pointer" : "default",
+        opacity: disabled ? 0.55 : 1,
+        fontFamily: theme.fontFamily,
+        color: theme.text,
+        ...style,
+      }}
+    >
+      <span
+        style={{
+          width: 28,
+          height: 16,
+          borderRadius: 8,
+          position: "relative",
+          background: on ? theme.accent : theme.borderStrong,
+          transition: "background .12s",
+          display: "inline-block",
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            position: "absolute",
+            top: 2,
+            left: on ? 14 : 2,
+            width: 12,
+            height: 12,
+            borderRadius: 6,
+            background: "#fff",
+            transition: "left .12s",
+            boxShadow: "0 1px 2px rgba(0,0,0,.2)",
+          }}
+        />
+      </span>
+      {label !== undefined ? (
+        <span style={{ fontSize: 12, color: theme.text }}>{label}</span>
+      ) : null}
+    </button>
+  );
+}
+
+export interface CheckboxProps {
+  theme?: CanvasTheme;
+  on: boolean;
+  label?: ReactNode;
+  onChange?: (next: boolean) => void;
+  disabled?: boolean;
+  style?: CSSProperties;
+}
+
+export function Checkbox({
+  theme: providedTheme,
+  on,
+  label,
+  onChange,
+  disabled = false,
+  style,
+}: CheckboxProps) {
+  const theme = resolveTheme(providedTheme);
+  const interactive = !disabled && Boolean(onChange);
+
+  return (
+    <label
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 7,
+        cursor: disabled ? "not-allowed" : interactive ? "pointer" : "default",
+        opacity: disabled ? 0.55 : 1,
+        fontFamily: theme.fontFamily,
+        ...style,
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={on}
+        disabled={disabled}
+        onChange={
+          interactive ? (event) => onChange?.(event.target.checked) : undefined
+        }
+        readOnly={!interactive}
+        style={{
+          position: "absolute",
+          opacity: 0,
+          pointerEvents: "none",
+          width: 0,
+          height: 0,
+        }}
+      />
+      <span
+        aria-hidden
+        style={{
+          width: 14,
+          height: 14,
+          borderRadius: 4,
+          flexShrink: 0,
+          background: on ? theme.accent : theme.bgRaised,
+          border: `1px solid ${on ? theme.accent : theme.borderStrong}`,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#fff",
+        }}
+      >
+        {on ? <CanvasIcon name="check" size={10} stroke={3} /> : null}
+      </span>
+      {label !== undefined ? (
+        <span style={{ fontSize: 12, color: theme.text }}>{label}</span>
+      ) : null}
+    </label>
+  );
+}
+
+export interface StepperItem {
+  t: ReactNode;
+  s?: ReactNode;
+}
+
+export interface StepperProps {
+  theme?: CanvasTheme;
+  steps: StepperItem[];
+  current?: number;
+  style?: CSSProperties;
+}
+
+export function Stepper({
+  theme: providedTheme,
+  steps,
+  current = 0,
+  style,
+}: StepperProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <ol
+      style={{
+        listStyle: "none",
+        padding: 0,
+        margin: 0,
+        display: "flex",
+        gap: 0,
+        ...style,
+      }}
+    >
+      {steps.map((step, index) => {
+        const done = index < current;
+        const active = index === current;
+        const fg = done ? theme.success : active ? theme.accent : theme.textDim;
+        const bg = done
+          ? theme.successBg
+          : active
+            ? theme.accentBg
+            : theme.surfaceLo;
+        const borderColor = active
+          ? theme.accent
+          : done
+            ? theme.successBorder
+            : theme.border;
+
+        return (
+          <li
+            key={`stepper-${index}`}
+            style={{
+              flex: 1,
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "0 4px",
+            }}
+          >
+            <span
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 11,
+                background: bg,
+                color: fg,
+                border: `1px solid ${borderColor}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 11,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}
+            >
+              {done ? <CanvasIcon name="check" size={11} /> : index + 1}
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: active ? 600 : 500,
+                  color: active || done ? theme.text : theme.textMuted,
+                  lineHeight: 1.2,
+                }}
+              >
+                {step.t}
+              </div>
+              {step.s ? (
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    color: theme.textDim,
+                    marginTop: 1,
+                  }}
+                >
+                  {step.s}
+                </div>
+              ) : null}
+            </div>
+            {index < steps.length - 1 ? (
+              <div
+                style={{
+                  position: "absolute",
+                  right: -3,
+                  top: 11,
+                  width: 14,
+                  height: 1,
+                  background: theme.border,
+                }}
+              />
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export type TimelineTone = "accent" | "success" | "warn" | "danger";
+
+export interface TimelineItem {
+  t: ReactNode;
+  at?: ReactNode;
+  actor?: ReactNode;
+  actorRealm?: CanvasRealmTone;
+  body?: ReactNode;
+  tone?: TimelineTone;
+}
+
+export interface TimelineProps {
+  theme?: CanvasTheme;
+  events: TimelineItem[];
+  style?: CSSProperties;
+}
+
+export function Timeline({
+  theme: providedTheme,
+  events,
+  style,
+}: TimelineProps) {
+  const theme = resolveTheme(providedTheme);
+
+  const toneFg = (tone: TimelineTone) =>
+    tone === "success"
+      ? theme.success
+      : tone === "danger"
+        ? theme.danger
+        : tone === "warn"
+          ? theme.warn
+          : theme.accent;
+  const toneBg = (tone: TimelineTone) =>
+    tone === "success"
+      ? theme.successBg
+      : tone === "danger"
+        ? theme.dangerBg
+        : tone === "warn"
+          ? theme.warnBg
+          : theme.accentBg;
+
+  return (
+    <ol
+      style={{
+        listStyle: "none",
+        padding: 0,
+        margin: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: 0,
+        ...style,
+      }}
+    >
+      {events.map((event, index) => {
+        const tone = event.tone ?? "accent";
+
+        return (
+          <li
+            key={`timeline-${index}`}
+            style={{
+              display: "flex",
+              gap: 10,
+              position: "relative",
+              padding: "6px 0",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: 5,
+                  marginTop: 4,
+                  background: toneFg(tone),
+                  boxShadow: `0 0 0 3px ${toneBg(tone)}`,
+                }}
+              />
+              {index < events.length - 1 ? (
+                <span
+                  style={{
+                    flex: 1,
+                    width: 1,
+                    background: theme.border,
+                    margin: "4px 0",
+                  }}
+                />
+              ) : null}
+            </div>
+            <div style={{ flex: 1, minWidth: 0, paddingBottom: 8 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 8,
+                  justifyContent: "space-between",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: theme.text,
+                  }}
+                >
+                  {event.t}
+                </span>
+                {event.at ? (
+                  <span
+                    style={{
+                      fontSize: 10.5,
+                      color: theme.textDim,
+                      fontFamily: theme.monoFamily,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {event.at}
+                  </span>
+                ) : null}
+              </div>
+              {event.actor || event.actorRealm ? (
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: theme.textMuted,
+                    marginTop: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {event.actorRealm ? (
+                    <Pill theme={theme} tone={event.actorRealm}>
+                      {event.actorRealm}
+                    </Pill>
+                  ) : null}
+                  {event.actor}
+                </div>
+              ) : null}
+              {event.body ? (
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: theme.text,
+                    marginTop: 4,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {event.body}
+                </div>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export interface DrawerProps {
+  theme?: CanvasTheme;
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  footer?: ReactNode;
+  width?: number;
+  children: ReactNode;
+  onClose?: () => void;
+  style?: CSSProperties;
+}
+
+export function Drawer({
+  theme: providedTheme,
+  title,
+  subtitle,
+  footer,
+  width = 480,
+  children,
+  onClose,
+  style,
+}: DrawerProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <div
+      role="dialog"
+      aria-label={typeof title === "string" ? title : undefined}
+      style={{
+        position: "absolute",
+        right: 0,
+        top: 46,
+        bottom: 0,
+        width,
+        background: theme.surface,
+        borderLeft: `1px solid ${theme.border}`,
+        boxShadow: "-12px 0 30px rgba(0,0,0,.08)",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        zIndex: 5,
+        ...style,
+      }}
+    >
+      <header
+        style={{
+          padding: "14px 16px",
+          borderBottom: `1px solid ${theme.border}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          {title ? (
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: theme.text,
+              }}
+            >
+              {title}
+            </div>
+          ) : null}
+          {subtitle ? (
+            <div
+              style={{
+                fontSize: 11.5,
+                color: theme.textMuted,
+                marginTop: 2,
+              }}
+            >
+              {subtitle}
+            </div>
+          ) : null}
+        </div>
+        {onClose ? (
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 7,
+              background: "transparent",
+              border: "1px solid transparent",
+              color: theme.textMuted,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            <CanvasIcon name="x" size={14} />
+          </button>
+        ) : null}
+      </header>
+      <div style={{ flex: 1, overflow: "auto", padding: 16 }}>{children}</div>
+      {footer ? (
+        <footer
+          style={{
+            padding: "12px 16px",
+            borderTop: `1px solid ${theme.border}`,
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+          }}
+        >
+          {footer}
+        </footer>
+      ) : null}
+    </div>
+  );
+}
+
+export interface ModalProps {
+  theme?: CanvasTheme;
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  footer?: ReactNode;
+  width?: number;
+  accent?: string;
+  children: ReactNode;
+  onDismiss?: () => void;
+  style?: CSSProperties;
+}
+
+export function Modal({
+  theme: providedTheme,
+  title,
+  subtitle,
+  footer,
+  width = 480,
+  accent,
+  children,
+  onDismiss,
+  style,
+}: ModalProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <div
+      role="presentation"
+      onClick={onDismiss}
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "rgba(8,12,22,.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backdropFilter: "blur(2px)",
+        zIndex: 10,
+        ...style,
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === "string" ? title : undefined}
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width,
+          background: theme.surface,
+          borderRadius: 12,
+          boxShadow: "0 20px 60px rgba(0,0,0,.25)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          maxHeight: "85%",
+          borderTop: accent ? `3px solid ${accent}` : "none",
+        }}
+      >
+        {title || subtitle ? (
+          <header
+            style={{
+              padding: "14px 16px",
+              borderBottom: `1px solid ${theme.border}`,
+            }}
+          >
+            {title ? (
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: theme.text,
+                }}
+              >
+                {title}
+              </div>
+            ) : null}
+            {subtitle ? (
+              <div
+                style={{
+                  fontSize: 11.5,
+                  color: theme.textMuted,
+                  marginTop: 2,
+                }}
+              >
+                {subtitle}
+              </div>
+            ) : null}
+          </header>
+        ) : null}
+        <div style={{ flex: 1, overflow: "auto", padding: 16 }}>{children}</div>
+        {footer ? (
+          <footer
+            style={{
+              padding: "12px 16px",
+              borderTop: `1px solid ${theme.border}`,
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: 8,
+            }}
+          >
+            {footer}
+          </footer>
+        ) : null}
       </div>
     </div>
   );
