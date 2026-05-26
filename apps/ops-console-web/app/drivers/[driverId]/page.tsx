@@ -20,6 +20,7 @@ import type {
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { DriverAvailableActions } from "@/components/driver-platform-actions";
+import { RefreshOnInterval } from "@/components/refresh-on-interval";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
@@ -358,6 +359,7 @@ function renderEmptyState(
   reason: EmptyReason,
   locale: Locale,
   body?: ReactNode,
+  actions?: ReactNode,
 ) {
   const copy = getEmptyStateCopy(reason, locale);
   const icon =
@@ -381,6 +383,7 @@ function renderEmptyState(
       body={
         <div style={{ display: "grid", gap: 8 }}>
           <div>{body ?? copy.body}</div>
+          {actions ? <div>{actions}</div> : null}
           <div
             style={{
               fontFamily: theme.monoFamily,
@@ -465,6 +468,29 @@ function buildCrossAppHref(path: string) {
   }
 
   return `${baseOrigin.replace(/\/$/, "")}${normalizedPath}`;
+}
+
+function buildDriverDetailHref(
+  driverId: string,
+  options: {
+    period?: string;
+    tab?: string;
+  },
+) {
+  const params = new URLSearchParams();
+  if (options.period) {
+    params.set("period", options.period);
+  }
+  if (options.tab) {
+    params.set("tab", options.tab);
+  }
+
+  const query = params.toString();
+  return `/drivers/${encodeURIComponent(driverId)}${query ? `?${query}` : ""}`;
+}
+
+function readQueryTab(tab: string | string[] | undefined) {
+  return typeof tab === "string" ? tab : undefined;
 }
 
 function pickLatestActiveTask(tasks: DriverTaskRecord[]) {
@@ -773,7 +799,11 @@ export default async function DriverDetailPage({
     locale === "zh" ? "Shifts" : "Shifts",
     locale === "zh" ? "Incidents" : "Incidents",
   ];
-  const refreshHref = `/drivers/${encodeURIComponent(driver.driverId)}?period=${encodeURIComponent(selectedPeriod)}`;
+  const queryTab = readQueryTab(query.tab);
+  const refreshHref = buildDriverDetailHref(driver.driverId, {
+    period: selectedPeriod,
+    ...(queryTab ? { tab: queryTab } : {}),
+  });
   const platformAdminAdapterHref = buildCrossAppHref(
     `/adapter-registry?platform=${encodeURIComponent(
       activeForwardedOrder?.platformCode ?? presences[0]?.platformCode ?? "",
@@ -1246,6 +1276,8 @@ export default async function DriverDetailPage({
 
   return (
     <>
+      <RefreshOnInterval intervalMs={15_000} />
+
       <PageHeader
         theme={theme}
         sticky={false}
@@ -1761,13 +1793,37 @@ export default async function DriverDetailPage({
             }
           >
             {presenceResult.error ? (
-              renderEmptyState("fetch_failed", locale, presenceResult.error)
+              renderEmptyState(
+                "fetch_failed",
+                locale,
+                presenceResult.error,
+                <Link href={refreshHref} style={actionLinkStyle("primary")}>
+                  <CanvasIcon name="clock" size={12} />
+                  {locale === "zh"
+                    ? "重新整理平台資料"
+                    : "Refresh platform data"}
+                </Link>,
+              )
             ) : presences.length === 0 ? (
               renderEmptyState(
                 adapterStatusByPlatform.size > 0
                   ? "external_unavailable"
                   : "no_data",
                 locale,
+                undefined,
+                adapterStatusByPlatform.size > 0 ? (
+                  <a
+                    href={platformAdminAdapterHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={actionLinkStyle("primary")}
+                  >
+                    <CanvasIcon name="ext" size={12} />
+                    {locale === "zh"
+                      ? "在新分頁檢查 adapter"
+                      : "Inspect adapter in admin"}
+                  </a>
+                ) : undefined,
               )
             ) : (
               <Table
@@ -1830,6 +1886,17 @@ export default async function DriverDetailPage({
                     forwardedOrdersResult.error ? "fetch_failed" : "no_data",
                     locale,
                     forwardedOrdersResult.error ?? undefined,
+                    forwardedOrdersResult.error ? (
+                      <Link
+                        href={refreshHref}
+                        style={actionLinkStyle("primary")}
+                      >
+                        <CanvasIcon name="clock" size={12} />
+                        {locale === "zh"
+                          ? "重新整理 relay 狀態"
+                          : "Refresh relay status"}
+                      </Link>
+                    ) : undefined,
                   )
                 )}
               </div>
@@ -1985,11 +2052,39 @@ export default async function DriverDetailPage({
             }
           >
             {statementsResult.error ? (
-              renderEmptyState("fetch_failed", locale, statementsResult.error)
+              renderEmptyState(
+                "fetch_failed",
+                locale,
+                statementsResult.error,
+                <Link href={refreshHref} style={actionLinkStyle("primary")}>
+                  <CanvasIcon name="clock" size={12} />
+                  {locale === "zh"
+                    ? "重新整理帳單資料"
+                    : "Refresh earnings data"}
+                </Link>,
+              )
             ) : statements.length === 0 ? (
               renderEmptyState("no_data", locale)
             ) : filteredStatements.length === 0 ? (
-              renderEmptyState("filtered_empty", locale)
+              renderEmptyState(
+                "filtered_empty",
+                locale,
+                undefined,
+                statements[0] ? (
+                  <Link
+                    href={buildDriverDetailHref(driver.driverId, {
+                      period: statements[0].periodMonth,
+                      ...(queryTab ? { tab: queryTab } : {}),
+                    })}
+                    style={actionLinkStyle("primary")}
+                  >
+                    <CanvasIcon name="clock" size={12} />
+                    {locale === "zh"
+                      ? `切回 ${formatPeriodLabel(locale, statements[0].periodMonth)}`
+                      : `Switch to ${formatPeriodLabel(locale, statements[0].periodMonth)}`}
+                  </Link>
+                ) : undefined,
+              )
             ) : (
               <div style={{ display: "grid", gap: 12 }}>
                 <Table
