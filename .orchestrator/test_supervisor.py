@@ -6247,5 +6247,82 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
         self.assertEqual(result["dirty_paths"], [".orchestrator/skills/renamed.md"])
 
 
+
+
+class DispatchCooldownTests(unittest.TestCase):
+    """Cooldown protects freshly-dispatched workers from voluntary supersede.
+
+    See `worker_in_dispatch_cooldown` in supervisor.py. Cooldown is
+    measured against the timestamp embedded in the worker run_id; for
+    workers whose run_id has no parseable timestamp (legacy / synthetic
+    fixtures), cooldown is bypassed so the historical supersede behaviour
+    is preserved.
+    """
+
+    def test_parse_returns_none_for_short_slug(self) -> None:
+        self.assertIsNone(supervisor.parse_worker_dispatched_at("run-1"))
+        self.assertIsNone(supervisor.parse_worker_dispatched_at(None))
+        self.assertIsNone(supervisor.parse_worker_dispatched_at(""))
+
+    def test_parse_extracts_timestamp_from_production_run_id(self) -> None:
+        dt = supervisor.parse_worker_dispatched_at("codex-20260526T043357Z-d168b9f0")
+        self.assertIsNotNone(dt)
+        from datetime import datetime, timezone
+        self.assertEqual(
+            dt, datetime(2026, 5, 26, 4, 33, 57, tzinfo=timezone.utc)
+        )
+
+    def test_cooldown_false_when_disabled(self) -> None:
+        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
+        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, 0))
+        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, -1))
+
+    def test_cooldown_false_for_non_running_worker(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "stalled", "run_id": "codex-20260526T043357Z-aaa"}
+        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
+        self.assertFalse(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "stalled workers must remain recoverable via supersede",
+        )
+
+    def test_cooldown_true_for_fresh_running_worker(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
+        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
+        self.assertTrue(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "running worker dispatched 3s ago is within 300s cooldown",
+        )
+
+    def test_cooldown_false_for_stale_worker(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
+        now = datetime(2026, 5, 26, 5, 30, 0, tzinfo=timezone.utc)
+        self.assertFalse(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "running worker dispatched 56 min ago is outside 300s cooldown",
+        )
+
+    def test_cooldown_false_when_runid_has_no_timestamp(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "running", "run_id": "run-active"}
+        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
+        self.assertFalse(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "synthetic test fixtures without timestamped run_ids must bypass cooldown",
+        )
+
+    def test_ready_dispatch_settings_default_cooldown(self) -> None:
+        settings = supervisor.ready_dispatch_settings({})
+        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 300)
+
+    def test_ready_dispatch_settings_honors_explicit_zero(self) -> None:
+        settings = supervisor.ready_dispatch_settings({
+            "ready_dispatcher": {"dispatch_cooldown_seconds": 0}
+        })
+        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
