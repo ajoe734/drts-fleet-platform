@@ -6,6 +6,7 @@ import { useDeferredValue, useEffect, useState, useTransition } from "react";
 import { PageHeader } from "@drts/ui-web";
 import { useTranslation } from "@/lib/i18n";
 import type {
+  ActionReceipt,
   CreateMaintenanceRecordCommand,
   EmptyReason,
   EmptyStateEnvelope,
@@ -43,6 +44,8 @@ type PendingMutation = {
 type ToastState = {
   tone: "success" | "danger";
   message: string;
+  receipt?: ActionReceipt;
+  auditHref?: string;
 };
 
 const EMPTY_REASONS: PacketEmptyReason[] = [
@@ -182,6 +185,17 @@ function getDisabledActionHint(
     );
   }
   return action.disabledReasonCode;
+}
+
+function getPlatformAdminAuditHref(auditId: string): string | null {
+  const baseUrl = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL?.trim();
+  const route = `/audit?auditId=${encodeURIComponent(auditId)}`;
+
+  if (!baseUrl) {
+    return route;
+  }
+
+  return `${baseUrl.replace(/\/$/, "")}${route}`;
 }
 
 export default function MaintenancePage() {
@@ -444,26 +458,33 @@ export default function MaintenancePage() {
     const client = getOpsClient();
     try {
       if (pendingMutation.mode === "edit" && pendingMutation.record) {
-        await client.updateMaintenance(
+        const receipt = (await client.updateMaintenance(
           pendingMutation.record.maintenanceId,
           pendingMutation.command as UpdateMaintenanceRecordCommand,
-        );
+        )) as ActionReceipt;
+        const auditHref = getPlatformAdminAuditHref(receipt.auditId);
+        setToast({
+          tone: "success",
+          message: copy(locale, "Maintenance record updated.", "工單已更新。"),
+          receipt,
+          ...(auditHref ? { auditHref } : {}),
+        });
       } else {
-        await client.createMaintenance(
+        const receipt = (await client.createMaintenance(
           pendingMutation.command as CreateMaintenanceRecordCommand,
-        );
+        )) as ActionReceipt;
+        const auditHref = getPlatformAdminAuditHref(receipt.auditId);
+        setToast({
+          tone: "success",
+          message: copy(locale, "Maintenance record created.", "工單已建立。"),
+          receipt,
+          ...(auditHref ? { auditHref } : {}),
+        });
       }
 
       setShowCreate(false);
       setEditingId(null);
       setPendingMutation(null);
-      setToast({
-        tone: "success",
-        message:
-          pendingMutation.mode === "edit"
-            ? copy(locale, "Maintenance record updated.", "工單已更新。")
-            : copy(locale, "Maintenance record created.", "工單已建立。"),
-      });
       await loadRecords("manual");
     } catch (mutationError) {
       setPendingMutation(null);
@@ -491,7 +512,26 @@ export default function MaintenancePage() {
       <div className="maintenance-page">
         {toast ? (
           <div className={`toast-banner toast-${toast.tone}`}>
-            {toast.message}
+            <div className="toast-copy">
+              <strong>{toast.message}</strong>
+              {toast.receipt ? (
+                <span className="toast-meta">
+                  {copy(locale, "Audit", "稽核")} #{toast.receipt.auditId}
+                  {" · "}
+                  {copy(locale, "Action", "動作")} #{toast.receipt.actionId}
+                </span>
+              ) : null}
+            </div>
+            {toast.auditHref ? (
+              <a
+                className="toast-link"
+                href={toast.auditHref}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {copy(locale, "View audit", "查看稽核")}
+              </a>
+            ) : null}
           </div>
         ) : null}
 
@@ -562,7 +602,7 @@ export default function MaintenancePage() {
             <div className="refresh-actions">
               <Link
                 className="ghost-link"
-                href={`/vehicles/${linkedVehicleId}`}
+                href={`/vehicles?vehicleId=${encodeURIComponent(linkedVehicleId)}`}
               >
                 {copy(locale, "Open vehicle", "開啟車輛")}
               </Link>
@@ -663,19 +703,21 @@ export default function MaintenancePage() {
                       )}
                 </p>
               </div>
-              <button
-                className="primary-btn"
-                type="button"
-                onClick={() => {
-                  if (!createAction?.enabled) return;
-                  setShowCreate(true);
-                  setEditingId(null);
-                }}
-                disabled={!createAction?.enabled}
-                title={getDisabledActionHint(createAction, locale)}
-              >
-                {copy(locale, "Create record", "開立工單")}
-              </button>
+              {createAction ? (
+                <button
+                  className="primary-btn"
+                  type="button"
+                  onClick={() => {
+                    if (!createAction.enabled) return;
+                    setShowCreate(true);
+                    setEditingId(null);
+                  }}
+                  disabled={!createAction.enabled}
+                  title={getDisabledActionHint(createAction, locale)}
+                >
+                  {copy(locale, "Create record", "開立工單")}
+                </button>
+              ) : null}
             </div>
 
             <div className="status-tabs">
@@ -693,43 +735,53 @@ export default function MaintenancePage() {
             </div>
 
             <div className="toolbar">
-              <input
-                className="search-input"
-                type="search"
-                placeholder={t("maintenance.search")}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                disabled={!searchAction?.enabled}
-              />
-              <select
-                className="filter-select"
-                value={vehicleFilter}
-                onChange={(event) => setVehicleFilter(event.target.value)}
-                disabled={!filterAction?.enabled}
-              >
-                <option value="all">
-                  {copy(locale, "All vehicles", "全部車輛")}
-                </option>
-                {vehicleOptions.map((vehicleId) => (
-                  <option key={vehicleId} value={vehicleId}>
-                    {vehicleId}
-                  </option>
-                ))}
-              </select>
-              <input
-                className="filter-select"
-                type="date"
-                value={startDate}
-                onChange={(event) => setStartDate(event.target.value)}
-                disabled={!filterAction?.enabled}
-              />
-              <input
-                className="filter-select"
-                type="date"
-                value={endDate}
-                onChange={(event) => setEndDate(event.target.value)}
-                disabled={!filterAction?.enabled}
-              />
+              {searchAction ? (
+                <input
+                  className="search-input"
+                  type="search"
+                  placeholder={t("maintenance.search")}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  disabled={!searchAction.enabled}
+                  title={getDisabledActionHint(searchAction, locale)}
+                />
+              ) : null}
+              {filterAction ? (
+                <>
+                  <select
+                    className="filter-select"
+                    value={vehicleFilter}
+                    onChange={(event) => setVehicleFilter(event.target.value)}
+                    disabled={!filterAction.enabled}
+                    title={getDisabledActionHint(filterAction, locale)}
+                  >
+                    <option value="all">
+                      {copy(locale, "All vehicles", "全部車輛")}
+                    </option>
+                    {vehicleOptions.map((vehicleId) => (
+                      <option key={vehicleId} value={vehicleId}>
+                        {vehicleId}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="filter-select"
+                    type="date"
+                    value={startDate}
+                    onChange={(event) => setStartDate(event.target.value)}
+                    disabled={!filterAction.enabled}
+                    title={getDisabledActionHint(filterAction, locale)}
+                  />
+                  <input
+                    className="filter-select"
+                    type="date"
+                    value={endDate}
+                    onChange={(event) => setEndDate(event.target.value)}
+                    disabled={!filterAction.enabled}
+                    title={getDisabledActionHint(filterAction, locale)}
+                  />
+                </>
+              ) : null}
             </div>
 
             {showCreate || editingRecord ? (
@@ -830,22 +882,27 @@ export default function MaintenancePage() {
                         <td>{formatCost(record.cost)}</td>
                         <td>
                           <div className="row-actions">
-                            <button
-                              className="ghost-btn"
-                              type="button"
-                              onClick={() => {
-                                if (!editAction?.enabled) return;
-                                setEditingId(record.maintenanceId);
-                                setShowCreate(false);
-                              }}
-                              disabled={!editAction?.enabled}
-                              title={getDisabledActionHint(editAction, locale)}
-                            >
-                              {copy(locale, "Edit", "編輯")}
-                            </button>
+                            {editAction ? (
+                              <button
+                                className="ghost-btn"
+                                type="button"
+                                onClick={() => {
+                                  if (!editAction.enabled) return;
+                                  setEditingId(record.maintenanceId);
+                                  setShowCreate(false);
+                                }}
+                                disabled={!editAction.enabled}
+                                title={getDisabledActionHint(
+                                  editAction,
+                                  locale,
+                                )}
+                              >
+                                {copy(locale, "Edit", "編輯")}
+                              </button>
+                            ) : null}
                             <Link
                               className="inline-link"
-                              href={`/vehicles/${record.vehicleId}`}
+                              href={`/vehicles?vehicleId=${encodeURIComponent(record.vehicleId)}`}
                             >
                               {copy(locale, "Open vehicle", "開啟車輛")}
                             </Link>
@@ -884,7 +941,7 @@ export default function MaintenancePage() {
                     <Link
                       key={record.maintenanceId}
                       className={`watch-card watch-${cue.tone}`}
-                      href={`/vehicles/${record.vehicleId}`}
+                      href={`/vehicles?vehicleId=${encodeURIComponent(record.vehicleId)}`}
                     >
                       <div className="watch-head">
                         <strong>{record.vehicleId}</strong>
@@ -982,6 +1039,25 @@ export default function MaintenancePage() {
           .toast-banner {
             padding: 14px 16px;
             color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+          }
+          .toast-copy {
+            display: grid;
+            gap: 4px;
+          }
+          .toast-meta {
+            color: #cbd5e1;
+            font-size: 12px;
+          }
+          .toast-link {
+            color: #fdba74;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 700;
+            white-space: nowrap;
           }
           .toast-success {
             border-color: rgba(45, 212, 191, 0.35);
@@ -1319,6 +1395,7 @@ export default function MaintenancePage() {
             }
           }
           @media (max-width: 820px) {
+            .toast-banner,
             .refresh-strip,
             .entry-banner,
             .attention-banner,
