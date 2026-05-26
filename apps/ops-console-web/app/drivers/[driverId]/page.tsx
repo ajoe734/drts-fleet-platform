@@ -5,6 +5,7 @@ import type {
   AuditLogRecord,
   DriverEligibilityBlockReason,
   DriverLocationSnapshot,
+  DriverMatchingSuppression,
   DriverRegistryRecord,
   DriverStatementRecord,
   DriverTaskRecord,
@@ -429,13 +430,17 @@ function buildCrossAppHref(path: string) {
 function buildPlatformActions(
   presence: PlatformPresenceRecord,
   hasActiveForwardedTask: boolean,
+  hasActiveSosIncident: boolean,
 ): ResourceActionDescriptor[] {
   return [
     {
       action: "force_offline",
-      enabled: presence.status === "online",
-      disabledReasonCode:
-        presence.status === "online" ? undefined : "platform_offline",
+      enabled: presence.status === "online" && !hasActiveSosIncident,
+      disabledReasonCode: hasActiveSosIncident
+        ? "sos_in_response"
+        : presence.status === "online"
+          ? undefined
+          : "platform_offline",
       requiresReason: true,
       riskLevel: "high",
     },
@@ -459,14 +464,18 @@ function buildPlatformActions(
 function buildDriverActions(
   driver: DriverRegistryRecord,
   statementPeriod: string,
+  suppression: DriverMatchingSuppression | null,
+  hasActiveSosIncident: boolean,
 ): ResourceActionDescriptor[] {
   return [
     {
-      action:
-        driver.workState === "incident_hold"
-          ? "lift_suppression"
-          : "suppress_matching",
-      enabled: true,
+      action: suppression?.active ? "lift_suppression" : "suppress_matching",
+      enabled: suppression?.active ? true : !hasActiveSosIncident,
+      disabledReasonCode: suppression?.active
+        ? undefined
+        : hasActiveSosIncident
+          ? "already_active"
+          : undefined,
       requiresReason: true,
       riskLevel: "high",
     },
@@ -499,6 +508,26 @@ function pickLatestActiveTask(tasks: DriverTaskRecord[]) {
       return rightAt.localeCompare(leftAt);
     })[0] ?? null
   );
+}
+
+function deriveSuppressionRecord(
+  driver: DriverRegistryRecord,
+  activeSosIncident: IncidentRecord | null,
+): DriverMatchingSuppression | null {
+  if (driver.workState !== "incident_hold") {
+    return null;
+  }
+
+  const baseAt = activeSosIncident?.updatedAt ?? driver.updatedAt;
+  const expiresAt = new Date(new Date(baseAt).getTime() + 24 * 60 * 60 * 1000);
+
+  return {
+    active: true,
+    reasonCode: activeSosIncident ? "incident" : "manual_ops_hold",
+    sourceIncidentId: activeSosIncident?.incidentId ?? null,
+    expiresAt: expiresAt.toISOString(),
+    liftedAt: null,
+  };
 }
 
 export default async function DriverDetailPage({
@@ -659,6 +688,7 @@ export default async function DriverDetailPage({
         incident.severity === "critical" &&
         (incident.status === "open" || incident.status === "investigating"),
     ) ?? null;
+  const suppression = deriveSuppressionRecord(driver, activeSosIncident);
 
   const hasReadModelGap =
     driver.workState === "incident_hold" &&
@@ -689,10 +719,14 @@ export default async function DriverDetailPage({
   const shiftSubtitle =
     shifts[0]?.shiftId ??
     (locale === "zh" ? "近期無 shift" : "No recent shift");
+  const phoneSummary =
+    locale === "zh"
+      ? "電話未下發至 ops contract"
+      : "Phone not exposed in ops contract";
   const headerSubtitle =
     locale === "zh"
-      ? `${primaryVehicleId} · 班次 ${shiftSubtitle} · T3 / 15s`
-      : `${primaryVehicleId} · shift ${shiftSubtitle} · T3 / 15s`;
+      ? `${phoneSummary} · ${primaryVehicleId} · 班次 ${shiftSubtitle}`
+      : `${phoneSummary} · ${primaryVehicleId} · shift ${shiftSubtitle}`;
   const headerTabs = [
     locale === "zh" ? "Overview" : "Overview",
     locale === "zh" ? "Platform bindings" : "Platform bindings",
@@ -707,6 +741,7 @@ export default async function DriverDetailPage({
       activeForwardedOrder?.platformCode ?? presences[0]?.platformCode ?? "",
     )}`,
   );
+  const platformAdminAuditHref = buildCrossAppHref("/audit");
 
   const platformRows: TableRow[] = presences.map(
     (presence: PlatformPresenceRecord) => {
@@ -812,6 +847,7 @@ export default async function DriverDetailPage({
               activeForwardedTasks.some(
                 (task) => task.platformCode === presence.platformCode,
               ),
+              Boolean(activeSosIncident),
             )}
           />
         ),
@@ -1163,6 +1199,12 @@ export default async function DriverDetailPage({
     { h: locale === "zh" ? "ACTOR" : "ACTOR", k: "actor", w: 120, mono: true },
     { h: locale === "zh" ? "AUDIT" : "AUDIT", k: "requestId", w: 180 },
   ];
+  const driverActionDescriptors = buildDriverActions(
+    driver,
+    selectedPeriod,
+    suppression,
+    Boolean(activeSosIncident),
+  );
 
   return (
     <>
@@ -1190,21 +1232,45 @@ export default async function DriverDetailPage({
         tabs={headerTabs}
         activeTab={headerTabs[0]}
         actions={
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Pill
-              theme={theme}
-              tone={getFreshnessTone(pageFreshness)}
-              dot={pageFreshness !== "fresh"}
-            >
-              {pageFreshness}
-            </Pill>
-            <Link href={refreshHref} style={actionLinkStyle()}>
-              <CanvasIcon name="clock" size={12} />
-              {locale === "zh" ? "重新整理" : "Refresh"}
-            </Link>
-            <Link href="/drivers" style={actionLinkStyle("ghost")}>
-              {locale === "zh" ? "返回列表" : "Back to drivers"}
-            </Link>
+          <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Pill
+                theme={theme}
+                tone={getFreshnessTone(pageFreshness)}
+                dot={pageFreshness !== "fresh"}
+              >
+                {pageFreshness}
+              </Pill>
+              <Pill
+                theme={theme}
+                tone={activeSosIncident ? "danger" : "info"}
+                dot={Boolean(activeSosIncident)}
+              >
+                {activeSosIncident
+                  ? locale === "zh"
+                    ? "SOS active"
+                    : "SOS active"
+                  : locale === "zh"
+                    ? "T3 / 15s"
+                    : "T3 / 15s"}
+              </Pill>
+            </div>
+            <DriverAvailableActions
+              driverId={driver.driverId}
+              workState={driver.workState}
+              statementPeriod={selectedPeriod}
+              actions={driverActionDescriptors}
+              compact
+            />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Link href={refreshHref} style={actionLinkStyle()}>
+                <CanvasIcon name="clock" size={12} />
+                {locale === "zh" ? "重新整理" : "Refresh"}
+              </Link>
+              <Link href="/drivers" style={actionLinkStyle("ghost")}>
+                {locale === "zh" ? "返回列表" : "Back to drivers"}
+              </Link>
+            </div>
           </div>
         }
       />
@@ -1246,27 +1312,38 @@ export default async function DriverDetailPage({
             icon="warn"
             title={
               locale === "zh"
-                ? "此司機目前處於 SOS in_response"
-                : "This driver is currently in SOS in_response"
+                ? "此司機目前處於 SOS in_response · matching suppression active"
+                : "This driver is currently in SOS in_response · matching suppression active"
             }
             body={
               locale === "zh"
-                ? `incident ${activeSosIncident.incidentId} 仍在處理中；matching suppression 已啟用，請即時協調 dispatch 與 incident lane。`
-                : `Incident ${activeSosIncident.incidentId} is still active; matching suppression is enabled. Coordinate dispatch and incident response immediately.`
+                ? `${activeSosIncident.incidentId} · 24h TTL（至 ${formatDateTime(locale, suppression?.expiresAt)}）· ops_manager 可延長。此頁所有 dispatch 影響動作已停用。`
+                : `${activeSosIncident.incidentId} · 24h TTL (until ${formatDateTime(locale, suppression?.expiresAt)}) · ops_manager may extend it. Dispatch-impacting actions on this page are paused.`
             }
             actions={
-              <Link
-                href={`/incidents/${encodeURIComponent(activeSosIncident.incidentId)}`}
-                style={actionLinkStyle("primary")}
-              >
-                <CanvasIcon name="ext" size={12} />
-                {locale === "zh" ? "打開事故詳情" : "Open incident"}
-              </Link>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Link
+                  href={`/incidents/${encodeURIComponent(activeSosIncident.incidentId)}`}
+                  style={actionLinkStyle("primary")}
+                >
+                  <CanvasIcon name="ext" size={12} />
+                  {locale === "zh" ? "前往事故詳情" : "Open incident"}
+                </Link>
+                <a
+                  href={platformAdminAuditHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={actionLinkStyle()}
+                >
+                  <CanvasIcon name="audit" size={12} />
+                  {locale === "zh" ? "在新分頁看 audit" : "Open audit in admin"}
+                </a>
+              </div>
             }
           />
         ) : null}
 
-        {driver.workState === "incident_hold" ? (
+        {suppression && !activeSosIncident ? (
           <Banner
             theme={theme}
             tone="warn"
@@ -1297,18 +1374,16 @@ export default async function DriverDetailPage({
                       ? locale === "zh"
                         ? "未提供 expiresAt；需回 source incident 確認"
                         : "expiresAt not exposed; verify in the source incident"
-                      : locale === "zh"
-                        ? "依來源事件自動解除"
-                        : "Auto-lifts with source incident",
+                      : formatDateTime(locale, suppression.expiresAt),
                   },
                   {
                     k: locale === "zh" ? "Linked incident" : "Linked incident",
-                    v: activeSosIncident ? (
+                    v: suppression.sourceIncidentId ? (
                       <Link
-                        href={`/incidents/${encodeURIComponent(activeSosIncident.incidentId)}`}
+                        href={`/incidents/${encodeURIComponent(suppression.sourceIncidentId)}`}
                         style={{ color: theme.accent, textDecoration: "none" }}
                       >
-                        {activeSosIncident.incidentId}
+                        {suppression.sourceIncidentId}
                       </Link>
                     ) : hasReadModelGap ? (
                       locale === "zh" ? (
@@ -1493,7 +1568,7 @@ export default async function DriverDetailPage({
                 driverId={driver.driverId}
                 workState={driver.workState}
                 statementPeriod={selectedPeriod}
-                actions={buildDriverActions(driver, selectedPeriod)}
+                actions={driverActionDescriptors}
               />
               <div
                 style={{
@@ -1513,6 +1588,17 @@ export default async function DriverDetailPage({
                     ? "Mutation audit 會透過新分頁 deep link 到 platform-admin。"
                     : "Mutation audit opens through a new-tab deep link into platform-admin."}
                 </div>
+                <a
+                  href={platformAdminAuditHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={actionLinkStyle("ghost")}
+                >
+                  <CanvasIcon name="ext" size={12} />
+                  {locale === "zh"
+                    ? "前往 Platform Admin /audit"
+                    : "Open Platform Admin /audit"}
+                </a>
               </div>
             </div>
           </Card>

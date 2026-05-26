@@ -32,6 +32,10 @@ function formatReasonLabel(reason: string, locale: "en" | "zh") {
   const normalized = reason.replace(/_/g, " ");
   if (locale === "zh") {
     switch (reason) {
+      case "sos_in_response":
+        return "SOS 處理中，dispatch 類動作暫停";
+      case "already_active":
+        return "目前已經處於啟用狀態";
       case "platform_offline":
         return "平台目前已離線";
       case "platform_unbound":
@@ -48,6 +52,10 @@ function formatReasonLabel(reason: string, locale: "en" | "zh") {
   }
 
   switch (reason) {
+    case "sos_in_response":
+      return "Dispatch-impacting actions are paused during SOS response";
+    case "already_active":
+      return "This action is already active";
     case "platform_offline":
       return "Platform is already offline";
     case "platform_unbound":
