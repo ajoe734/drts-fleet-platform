@@ -46,6 +46,7 @@ type DriverDetailPageProps = {
   }>;
   searchParams: Promise<{
     period?: string;
+    tab?: string;
   }>;
 };
 
@@ -84,7 +85,7 @@ const layoutStyle: CSSProperties = {
 const heroGridStyle: CSSProperties = {
   display: "grid",
   gap: 16,
-  gridTemplateColumns: "minmax(0, 2.1fr) minmax(320px, 1fr)",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
 };
 
 const pairGridStyle: CSSProperties = {
@@ -104,6 +105,8 @@ const pageSectionNavStyle: CSSProperties = {
   gap: 8,
   flexWrap: "wrap",
 };
+
+type PageFreshness = "fresh" | "stale" | "degraded";
 
 async function loadWithError<T>(
   loader: () => Promise<T>,
@@ -225,6 +228,52 @@ function getAdapterTone(
   if (adapter.status === "healthy") return "success";
   if (adapter.status === "degraded") return "warn";
   return "danger";
+}
+
+function getFreshnessTone(
+  freshness: PageFreshness,
+): "success" | "warn" | "danger" {
+  switch (freshness) {
+    case "fresh":
+      return "success";
+    case "stale":
+      return "warn";
+    default:
+      return "danger";
+  }
+}
+
+function getFreshnessCopy(
+  freshness: PageFreshness,
+  locale: Locale,
+  generatedAt: string | null,
+) {
+  const at = formatShortDateTime(locale, generatedAt);
+  const zh = locale === "zh";
+
+  switch (freshness) {
+    case "fresh":
+      return {
+        title: zh ? "資料目前為 fresh" : "Data is currently fresh",
+        body: zh
+          ? `Driver detail 採 T3 / 15s 更新。最後彙整於 ${at}。`
+          : `Driver detail runs on the T3 / 15s tier. Snapshot assembled at ${at}.`,
+      };
+    case "stale":
+      return {
+        title: zh ? "資料可能已過期" : "Data may be stale",
+        body: zh
+          ? `至少一個關鍵訊號超過新鮮度門檻；最後彙整於 ${at}，請先重新整理再做決策。`
+          : `At least one critical signal crossed the freshness threshold. Snapshot assembled at ${at}; refresh before acting.`,
+      };
+    default:
+      return {
+        title: zh ? "資料面降級" : "Data surface degraded",
+        body: zh
+          ? `至少一個 page-critical dependency 目前不可用；最後彙整於 ${at}。請改用 deep link 或稍後重試。`
+          : `At least one page-critical dependency is unavailable. Snapshot assembled at ${at}. Use the deep links or retry later.`,
+      };
+  }
 }
 
 function getEmptyStateCopy(reason: EmptyReason, locale: Locale) {
@@ -615,120 +664,160 @@ export default async function DriverDetailPage({
     driver.workState === "incident_hold" &&
     !presenceSummary?.notes?.length &&
     driverAuditLogs.length === 0;
+  const derivedGeneratedAt =
+    [
+      driver.updatedAt,
+      locationSnapshot?.recordedAt,
+      presences[0]?.updatedAt,
+      latestActiveTask?.acceptedAt,
+      statements[0]?.updatedAt,
+      incidents[0]?.updatedAt,
+    ].find(Boolean) ?? null;
+  const pageFreshness: PageFreshness =
+    presenceResult.error || locationsResult.error || forwardedOrdersResult.error
+      ? "degraded"
+      : locationStale
+        ? "stale"
+        : "fresh";
+  const freshnessCopy = getFreshnessCopy(
+    pageFreshness,
+    locale,
+    derivedGeneratedAt,
+  );
+  const primaryVehicleId =
+    latestActiveTask?.vehicleId ?? shifts[0]?.vehicleId ?? "—";
+  const shiftSubtitle =
+    shifts[0]?.shiftId ??
+    (locale === "zh" ? "近期無 shift" : "No recent shift");
+  const headerSubtitle =
+    locale === "zh"
+      ? `${primaryVehicleId} · 班次 ${shiftSubtitle} · T3 / 15s`
+      : `${primaryVehicleId} · shift ${shiftSubtitle} · T3 / 15s`;
+  const headerTabs = [
+    locale === "zh" ? "Overview" : "Overview",
+    locale === "zh" ? "Platform bindings" : "Platform bindings",
+    locale === "zh" ? "Active tasks" : "Active tasks",
+    locale === "zh" ? "Earnings" : "Earnings",
+    locale === "zh" ? "Shifts" : "Shifts",
+    locale === "zh" ? "Incidents" : "Incidents",
+  ];
+  const refreshHref = `/drivers/${encodeURIComponent(driver.driverId)}?period=${encodeURIComponent(selectedPeriod)}`;
   const platformAdminAdapterHref = buildCrossAppHref(
     `/adapter-registry?platform=${encodeURIComponent(
       activeForwardedOrder?.platformCode ?? presences[0]?.platformCode ?? "",
     )}`,
   );
 
-  const platformRows: TableRow[] = presences.map((presence) => {
-    const adapter = adapterStatusByPlatform.get(presence.platformCode);
-    const platformName =
-      PLATFORM_CODE_REGISTRY[presence.platformCode]?.displayName ??
-      presence.platformCode;
-    return {
-      platform: (
-        <div style={{ display: "grid", gap: 4 }}>
-          <strong>{platformName}</strong>
-          <a
-            href={buildCrossAppHref(
-              `/adapter-registry?platform=${encodeURIComponent(
-                presence.platformCode,
-              )}`,
-            )}
-            target="_blank"
-            rel="noreferrer"
-            style={actionLinkStyle("ghost")}
-          >
-            <CanvasIcon name="ext" size={12} />
-            {locale === "zh" ? "查看 adapter" : "Inspect adapter"}
-          </a>
-        </div>
-      ),
-      binding: presence.accountId ? (
-        <div style={{ display: "grid", gap: 3 }}>
-          <span style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
-            {presence.accountId}
-          </span>
-          <span style={{ color: theme.textMuted, fontSize: 11 }}>
-            {locale === "zh" ? "更新於" : "Updated"}{" "}
-            {formatShortDateTime(locale, presence.updatedAt)}
-          </span>
-        </div>
-      ) : (
-        <Pill theme={theme} tone="warn">
-          {locale === "zh" ? "未綁定" : "Unbound"}
-        </Pill>
-      ),
-      presence: (
-        <div style={{ display: "grid", gap: 4 }}>
-          <Pill theme={theme} tone={getPresenceTone(presence)} dot>
-            {formatOpsCodeLabel(locale, presence.status)}
-          </Pill>
-          {presence.reauthRequired ? (
-            <Pill theme={theme} tone="warn">
-              {locale === "zh" ? "需重新驗證" : "Re-auth required"}
-            </Pill>
-          ) : null}
-        </div>
-      ),
-      eligibility: (
-        <Pill
-          theme={theme}
-          tone={
-            presence.eligibility === "eligible"
-              ? "success"
-              : presence.eligibility === "pending"
-                ? "warn"
-                : "danger"
-          }
-          dot={presence.eligibility !== "eligible"}
-        >
-          {formatOpsCodeLabel(locale, presence.eligibility)}
-        </Pill>
-      ),
-      token: presence.tokenExpiresAt ? (
-        <div style={{ display: "grid", gap: 4 }}>
-          <span>{formatDateTime(locale, presence.tokenExpiresAt)}</span>
-          {tokenExpirySoon(presence) ? (
-            <span style={{ color: theme.warn }}>
-              {locale === "zh" ? "72 小時內到期" : "Expires within 72h"}
+  const platformRows: TableRow[] = presences.map(
+    (presence: PlatformPresenceRecord) => {
+      const adapter = adapterStatusByPlatform.get(presence.platformCode);
+      const platformName =
+        PLATFORM_CODE_REGISTRY[presence.platformCode]?.displayName ??
+        presence.platformCode;
+      return {
+        platform: (
+          <div style={{ display: "grid", gap: 4 }}>
+            <strong>{platformName}</strong>
+            <a
+              href={buildCrossAppHref(
+                `/adapter-registry?platform=${encodeURIComponent(
+                  presence.platformCode,
+                )}`,
+              )}
+              target="_blank"
+              rel="noreferrer"
+              style={actionLinkStyle("ghost")}
+            >
+              <CanvasIcon name="ext" size={12} />
+              {locale === "zh" ? "查看 adapter" : "Inspect adapter"}
+            </a>
+          </div>
+        ),
+        binding: presence.accountId ? (
+          <div style={{ display: "grid", gap: 3 }}>
+            <span style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+              {presence.accountId}
             </span>
-          ) : null}
-        </div>
-      ) : (
-        "—"
-      ),
-      adapter: (
-        <div style={{ display: "grid", gap: 4 }}>
-          <Pill theme={theme} tone={getAdapterTone(adapter)} dot>
-            {formatOpsCodeLabel(locale, adapter?.status ?? "unknown")}
+            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+              {locale === "zh" ? "更新於" : "Updated"}{" "}
+              {formatShortDateTime(locale, presence.updatedAt)}
+            </span>
+          </div>
+        ) : (
+          <Pill theme={theme} tone="warn">
+            {locale === "zh" ? "未綁定" : "Unbound"}
           </Pill>
-          <span style={{ color: theme.textMuted, fontSize: 11 }}>
-            {adapter?.blockingReason ??
-              adapter?.lastSyncAt ??
-              (locale === "zh" ? "未回報" : "Not reported")}
-          </span>
-        </div>
-      ),
-      actions: (
-        <DriverAvailableActions
-          driverId={driver.driverId}
-          workState={driver.workState}
-          platformCode={presence.platformCode}
-          platformStatus={presence.status}
-          statementPeriod={selectedPeriod}
-          compact
-          actions={buildPlatformActions(
-            presence,
-            activeForwardedTasks.some(
-              (task) => task.platformCode === presence.platformCode,
-            ),
-          )}
-        />
-      ),
-    };
-  });
+        ),
+        presence: (
+          <div style={{ display: "grid", gap: 4 }}>
+            <Pill theme={theme} tone={getPresenceTone(presence)} dot>
+              {formatOpsCodeLabel(locale, presence.status)}
+            </Pill>
+            {presence.reauthRequired ? (
+              <Pill theme={theme} tone="warn">
+                {locale === "zh" ? "需重新驗證" : "Re-auth required"}
+              </Pill>
+            ) : null}
+          </div>
+        ),
+        eligibility: (
+          <Pill
+            theme={theme}
+            tone={
+              presence.eligibility === "eligible"
+                ? "success"
+                : presence.eligibility === "pending"
+                  ? "warn"
+                  : "danger"
+            }
+            dot={presence.eligibility !== "eligible"}
+          >
+            {formatOpsCodeLabel(locale, presence.eligibility)}
+          </Pill>
+        ),
+        token: presence.tokenExpiresAt ? (
+          <div style={{ display: "grid", gap: 4 }}>
+            <span>{formatDateTime(locale, presence.tokenExpiresAt)}</span>
+            {tokenExpirySoon(presence) ? (
+              <span style={{ color: theme.warn }}>
+                {locale === "zh" ? "72 小時內到期" : "Expires within 72h"}
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          "—"
+        ),
+        adapter: (
+          <div style={{ display: "grid", gap: 4 }}>
+            <Pill theme={theme} tone={getAdapterTone(adapter)} dot>
+              {formatOpsCodeLabel(locale, adapter?.status ?? "unknown")}
+            </Pill>
+            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+              {adapter?.blockingReason ??
+                adapter?.lastSyncAt ??
+                (locale === "zh" ? "未回報" : "Not reported")}
+            </span>
+          </div>
+        ),
+        actions: (
+          <DriverAvailableActions
+            driverId={driver.driverId}
+            workState={driver.workState}
+            platformCode={presence.platformCode}
+            platformStatus={presence.status}
+            statementPeriod={selectedPeriod}
+            compact
+            actions={buildPlatformActions(
+              presence,
+              activeForwardedTasks.some(
+                (task) => task.platformCode === presence.platformCode,
+              ),
+            )}
+          />
+        ),
+      };
+    },
+  );
 
   const taskRows: TableRow[] = activeDriverTasks.map((task) => ({
     source: task.sourcePlatform ?? "drts",
@@ -1075,32 +1164,46 @@ export default async function DriverDetailPage({
     { h: locale === "zh" ? "AUDIT" : "AUDIT", k: "requestId", w: 180 },
   ];
 
-  const subtitle =
-    locale === "zh"
-      ? `${driver.name} · ${driver.driverId} · T3 / 15s`
-      : `${driver.name} · ${driver.driverId} · T3 / 15s`;
-
   return (
     <>
       <PageHeader
         theme={theme}
         sticky={false}
         title={
-          locale === "zh"
-            ? "司機詳情 / 收益 / 平台綁定"
-            : "Driver Detail / Earnings / Platform Binding"
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
+            {driver.name}
+            <span
+              style={{
+                fontFamily: theme.monoFamily,
+                fontSize: 12,
+                color: theme.textMuted,
+                fontWeight: 500,
+              }}
+            >
+              {driver.driverId}
+            </span>
+          </span>
         }
-        subtitle={subtitle}
+        subtitle={headerSubtitle}
+        tabs={headerTabs}
+        activeTab={headerTabs[0]}
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Pill theme={theme} tone="info">
-              {locale === "zh" ? "Refresh tier T3" : "Refresh tier T3"}
+            <Pill
+              theme={theme}
+              tone={getFreshnessTone(pageFreshness)}
+              dot={pageFreshness !== "fresh"}
+            >
+              {pageFreshness}
             </Pill>
-            <Pill theme={theme} tone={getWorkStateTone(driver.workState)} dot>
-              {formatOpsCodeLabel(locale, driver.workState)}
-            </Pill>
-            <Link href="/drivers" style={actionLinkStyle()}>
-              {locale === "zh" ? "返回司機列表" : "Back to drivers"}
+            <Link href={refreshHref} style={actionLinkStyle()}>
+              <CanvasIcon name="clock" size={12} />
+              {locale === "zh" ? "重新整理" : "Refresh"}
+            </Link>
+            <Link href="/drivers" style={actionLinkStyle("ghost")}>
+              {locale === "zh" ? "返回列表" : "Back to drivers"}
             </Link>
           </div>
         }
@@ -1109,29 +1212,47 @@ export default async function DriverDetailPage({
       <div style={layoutStyle}>
         <nav style={pageSectionNavStyle} aria-label="driver detail sections">
           <a href="#overview" style={actionLinkStyle()}>
-            {locale === "zh" ? "總覽" : "Overview"}
+            Overview
           </a>
           <a href="#platform-binding" style={actionLinkStyle()}>
-            {locale === "zh" ? "平台綁定" : "Platform binding"}
-          </a>
-          <a href="#earnings" style={actionLinkStyle()}>
-            {locale === "zh" ? "收益" : "Earnings"}
+            Platform bindings
           </a>
           <a href="#activity" style={actionLinkStyle()}>
-            {locale === "zh" ? "事件與稽核" : "Incidents / audit"}
+            Active tasks
+          </a>
+          <a href="#earnings" style={actionLinkStyle()}>
+            Earnings
           </a>
         </nav>
+
+        <Banner
+          theme={theme}
+          tone={getFreshnessTone(pageFreshness)}
+          icon={pageFreshness === "degraded" ? "warn" : "health"}
+          title={freshnessCopy.title}
+          body={freshnessCopy.body}
+          actions={
+            <Link href={refreshHref} style={actionLinkStyle("primary")}>
+              <CanvasIcon name="clock" size={12} />
+              {locale === "zh" ? "立即刷新" : "Refresh now"}
+            </Link>
+          }
+        />
 
         {activeSosIncident ? (
           <Banner
             theme={theme}
             tone="danger"
             icon="warn"
-            title={locale === "zh" ? "SOS active" : "SOS active"}
+            title={
+              locale === "zh"
+                ? "此司機目前處於 SOS in_response"
+                : "This driver is currently in SOS in_response"
+            }
             body={
               locale === "zh"
-                ? `司機目前關聯重大事故 ${activeSosIncident.incidentId}，請即時協調 dispatch 與 incident lane。`
-                : `Driver is linked to critical incident ${activeSosIncident.incidentId}. Coordinate dispatch and incident response immediately.`
+                ? `incident ${activeSosIncident.incidentId} 仍在處理中；matching suppression 已啟用，請即時協調 dispatch 與 incident lane。`
+                : `Incident ${activeSosIncident.incidentId} is still active; matching suppression is enabled. Coordinate dispatch and incident response immediately.`
             }
             actions={
               <Link
@@ -1152,7 +1273,7 @@ export default async function DriverDetailPage({
             icon="warn"
             title={
               locale === "zh"
-                ? "Matching suppression active"
+                ? "matching suppression active"
                 : "Matching suppression active"
             }
             body={
@@ -1174,8 +1295,8 @@ export default async function DriverDetailPage({
                     k: locale === "zh" ? "TTL" : "TTL",
                     v: hasReadModelGap
                       ? locale === "zh"
-                        ? "未提供 expiresAt"
-                        : "expiresAt not exposed"
+                        ? "未提供 expiresAt；需回 source incident 確認"
+                        : "expiresAt not exposed; verify in the source incident"
                       : locale === "zh"
                         ? "依來源事件自動解除"
                         : "Auto-lifts with source incident",
