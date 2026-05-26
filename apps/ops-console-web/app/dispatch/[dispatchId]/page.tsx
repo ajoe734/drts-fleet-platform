@@ -13,6 +13,7 @@ import type {
   EmptyStateEnvelope,
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
+  ReconciliationIssueRecord,
   ResourceActionDescriptor,
   UiRefreshMetadata,
   UnifiedDriverTaskView,
@@ -1432,6 +1433,7 @@ export default async function DispatchDetailPage({
     unifiedDriverTasks,
     adapterHealthResponse,
     reconciliationIssues,
+    settlementReconciliationIssues,
   ] = await Promise.all([
     resolveOrFallback(
       () => client.get<RuntimeListEnvelope<OwnedOrderRecord>>("/api/orders"),
@@ -1465,6 +1467,14 @@ export default async function DispatchDetailPage({
       () => client.listForwarderReconciliationIssues(),
       [] as ForwarderReconciliationIssue[],
     ),
+    resolveOrFallback(
+      () =>
+        client.listReconciliationIssues({
+          channelKey: "forwarded_shadow",
+          issueType: "forwarder_status_mismatch",
+        }),
+      [] as ReconciliationIssueRecord[],
+    ),
   ]);
 
   const ownedRecord =
@@ -1484,6 +1494,11 @@ export default async function DispatchDetailPage({
   const focusedScope = readSearchParam(query.scope);
   const focusedResourceId = readSearchParam(query.resourceId);
   const focusedResourceLabel = readSearchParam(query.resourceLabel);
+  const financeIssueByJobId = new Map(
+    settlementReconciliationIssues
+      .filter((issue) => issue.linkedReconciliationJobId)
+      .map((issue) => [issue.linkedReconciliationJobId!, issue]),
+  );
   const jobsByOrderId = new Map(dispatchJobs.map((job) => [job.orderId, job]));
   const driverById = new Map(
     drivers.map((driver) => [driver.driverId, driver]),
@@ -2359,21 +2374,28 @@ export default async function DispatchDetailPage({
     "adapter",
     forwardedOrder.platformCode,
   );
-  const reconciliationResourceId =
+  const linkedReconciliationJobId =
     issue?.reconciliationJob.reconciliationJobId ??
     forwardedOrder.reconciliationJob?.reconciliationJobId ??
-    forwardedOrder.mirrorOrderId;
+    null;
+  const settlementIssue = linkedReconciliationJobId
+    ? (financeIssueByJobId.get(linkedReconciliationJobId) ?? null)
+    : null;
   const reconciliationLink = buildCrossAppLink(
-    issue ? "/payments" : "/payments#payments-create-issue",
+    settlementIssue
+      ? `/payments/reconciliation/${encodeURIComponent(settlementIssue.issueId)}`
+      : "/payments",
     locale === "zh"
-      ? issue
+      ? settlementIssue
         ? "Open reconciliation queue"
-        : "Create reconciliation issue"
-      : issue
+        : "Open payments owner queue"
+      : settlementIssue
         ? "Open reconciliation queue"
-        : "Create reconciliation issue",
-    issue ? "reconciliation_queue" : "reconciliation_create",
-    reconciliationResourceId,
+        : "Open payments owner queue",
+    settlementIssue ? "reconciliation_issue" : "reconciliation_queue",
+    settlementIssue?.issueId ??
+      linkedReconciliationJobId ??
+      forwardedOrder.mirrorOrderId,
   );
   const focusedForwardedAction =
     forwardedActions.find((action) => action.action === focusedActionId) ??
