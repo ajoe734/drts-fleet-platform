@@ -137,6 +137,20 @@ This branch reconciles the governance-aware billing/reporting artifact chain to 
 - `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md | grep -n 'ownerName\\|approvalEvaluationId'` still returns the older field-set assertions, confirming acceptance item 2 remains open on trunk.
 - No governed staging rerun was executed from this workspace during this refresh, so there is still no reviewer-readable invoice/report artifact and no green live `STRICT_VERIFICATION_BODY=1` run to justify a `PASS (live staging evidence)` uplift.
 
+## 2026-05-26 Dispatch Blocker Refresh (pushed head)
+
+- Another owner-lane revalidation was run after pushing the refreshed anchor to `origin/codex2/ph1gc-fin-gov-001`.
+- `git rev-parse HEAD` = `4577bed2cb0663563caf6a95c135086173871f5f`.
+- `git rev-parse origin/codex2/ph1gc-fin-gov-001` = `4577bed2cb0663563caf6a95c135086173871f5f`.
+- `git rev-parse origin/dev` = `070f9aea91e066ffce138b321e16dd8cda10828d`.
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed.
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` still lists `E2E-010-governance-aware-billing-reporting.sh`.
+- `git diff --check origin/dev...HEAD` passed.
+- `git show origin/dev:docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md | grep -n 'ownerName\\|approvalEvaluationId'` still returns the pre-fix verification-body lines, confirming acceptance item 1 remains open on trunk.
+- `git show origin/dev:docs/04-uat/governance-aware-billing-reporting-uat-20260519.md | grep -n 'ownerName\\|approvalEvaluationId'` still returns the older field-set assertions, confirming acceptance item 2 remains open on trunk.
+- No governed staging rerun was executed from this workspace during this refresh, so there is still no reviewer-readable invoice/report artifact and no green live `STRICT_VERIFICATION_BODY=1` run to justify a `PASS (live staging evidence)` uplift.
+
 ## Blocker
 
 Fresh 2026-05-26 validation still shows:
