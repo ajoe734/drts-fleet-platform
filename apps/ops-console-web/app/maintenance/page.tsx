@@ -225,14 +225,18 @@ export default function MaintenancePage() {
 
   useEffect(() => {
     void loadRecords("initial");
-  }, []);
+  }, [linkedVehicleId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       void loadRecords("poll");
     }, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [linkedVehicleId]);
+
+  useEffect(() => {
+    setVehicleFilter(linkedVehicleId ?? "all");
+  }, [linkedVehicleId]);
 
   useEffect(() => {
     if (!refresh) return;
@@ -257,7 +261,9 @@ export default function MaintenancePage() {
 
     try {
       const client = getOpsClient();
-      const response = await client.listMaintenance();
+      const response = await client.listMaintenance(
+        linkedVehicleId ?? undefined,
+      );
       const nextRecords = response.items.map(toRuntimeRecord);
       setRecords(nextRecords);
       setPageActions(response.availableActions);
@@ -287,11 +293,7 @@ export default function MaintenancePage() {
   }
 
   const filteredRecords = records.filter((record) => {
-    if (
-      statusFilter !== "all" &&
-      record.effectiveStatus !== statusFilter &&
-      record.status !== statusFilter
-    ) {
+    if (statusFilter !== "all" && record.effectiveStatus !== statusFilter) {
       return false;
     }
 
@@ -387,6 +389,16 @@ export default function MaintenancePage() {
       value: "overdue",
       label: formatOpsCodeLabel(locale, "overdue"),
       count: statusCounts.overdue,
+    },
+    {
+      value: "completed",
+      label: formatOpsCodeLabel(locale, "completed"),
+      count: statusCounts.completed,
+    },
+    {
+      value: "cancelled",
+      label: formatOpsCodeLabel(locale, "cancelled"),
+      count: statusCounts.cancelled,
     },
   ];
 
@@ -1107,7 +1119,7 @@ export default function MaintenancePage() {
           }
           .status-tabs {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(6, minmax(0, 1fr));
             gap: 10px;
             margin-bottom: 14px;
           }
