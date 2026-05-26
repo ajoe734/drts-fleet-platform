@@ -141,13 +141,6 @@ const textareaStyle = {
   resize: "vertical" as const,
 };
 
-const splitGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.5fr) minmax(320px, 0.9fr)",
-  gap: 16,
-  alignItems: "start",
-};
-
 const detailStackStyle = {
   display: "flex",
   flexDirection: "column" as const,
@@ -233,6 +226,14 @@ function parseEmptyReason(
   if (error) {
     if (error.includes("401") || error.includes("403")) {
       return "permission_denied";
+    }
+    if (
+      error.includes("404") ||
+      error.includes("501") ||
+      error.includes("NOT_IMPLEMENTED") ||
+      error.includes("APPROVAL_WORKFLOW_NOT_AVAILABLE")
+    ) {
+      return "not_provisioned";
     }
     if (
       error.includes("502") ||
@@ -340,64 +341,8 @@ function getJustification(row: ApprovalQueueRecord, locale: "en" | "zh") {
     : "等待租戶流程補齊審批說明。";
 }
 
-function buildFallbackActions(
-  row: ApprovalQueueRecord,
-): ResourceActionDescriptor[] {
-  const actions: ResourceActionDescriptor[] = [
-    {
-      action: "approve",
-      enabled: row.status === "pending",
-      disabledReasonCode:
-        row.status === "pending" ? undefined : "request_closed",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "reject",
-      enabled: row.status === "pending",
-      disabledReasonCode:
-        row.status === "pending" ? undefined : "request_closed",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "escalate",
-      enabled: row.status === "pending",
-      disabledReasonCode:
-        row.status === "pending" ? undefined : "request_closed",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-  ];
-
-  if (row.status === "pending") {
-    actions.push({
-      action: "nudge",
-      enabled: true,
-      requiresReason: false,
-      riskLevel: "medium",
-    });
-  }
-
-  if (row.slaBreached) {
-    actions.push({
-      action: "acknowledge_breach",
-      enabled: !row.opsSlaAcknowledgedAt,
-      disabledReasonCode: row.opsSlaAcknowledgedAt
-        ? "already_acknowledged"
-        : undefined,
-      requiresReason: false,
-      riskLevel: "medium",
-    });
-  }
-
-  return actions;
-}
-
 function getAvailableActions(row: ApprovalQueueRecord) {
-  return row.availableActions?.length
-    ? row.availableActions
-    : buildFallbackActions(row);
+  return row.availableActions ?? [];
 }
 
 function getActionTone(
@@ -422,6 +367,37 @@ function describeDisabledReason(code: string | undefined, locale: "en" | "zh") {
         ? "Unavailable in current scope"
         : "目前範圍不可用";
   }
+}
+
+function getStatusTone(
+  status: TenantBookingApprovalRequestStatus,
+): "warn" | "success" | "danger" | "neutral" {
+  switch (status) {
+    case "pending":
+      return "warn";
+    case "approved":
+      return "success";
+    case "rejected":
+      return "danger";
+    case "cancelled_by_re_evaluation":
+    case "timeout_escalated":
+    default:
+      return "neutral";
+  }
+}
+
+function hasQueueFilters(
+  statusFilter: StatusFilter,
+  tenantFilter: string,
+  typeFilter: string,
+  searchValue: string,
+) {
+  return (
+    Boolean(searchValue.trim()) ||
+    Boolean(tenantFilter.trim()) ||
+    typeFilter !== "all" ||
+    statusFilter !== "all"
+  );
 }
 
 function getDeepLinkHref(
@@ -665,15 +641,21 @@ export default function ApprovalRequestsPage() {
     { h: locale === "en" ? "Type" : "類型", k: "typeCell", w: 150 },
     { h: locale === "en" ? "Tenant" : "租戶", k: "tenantCell", w: 130 },
     { h: locale === "en" ? "Requester" : "提出者", k: "requesterCell", w: 150 },
+    {
+      h: locale === "en" ? "Requested" : "提出時間",
+      k: "requestedCell",
+      w: 120,
+    },
     { h: locale === "en" ? "Order" : "關聯訂單", k: "orderCell", w: 120 },
     {
       h: locale === "en" ? "Justification" : "理由",
       k: "justificationCell",
-      w: 280,
+      w: 250,
     },
     { h: locale === "en" ? "Age" : "等待", k: "ageCell", w: 80 },
     { h: locale === "en" ? "Timeout" : "逾時", k: "timeoutCell", w: 120 },
-    { h: locale === "en" ? "Actions" : "操作", k: "actionsCell", w: 280 },
+    { h: locale === "en" ? "Status" : "狀態", k: "statusCell", w: 120 },
+    { h: locale === "en" ? "Actions" : "操作", k: "actionsCell", w: 220 },
   ];
 
   const rows: QueueRow[] = filteredItems.map((row) => {
@@ -749,6 +731,11 @@ export default function ApprovalRequestsPage() {
         </Pill>
       ),
       requesterCell: getRequesterLabel(row, locale),
+      requestedCell: (
+        <span style={{ fontFamily: theme.monoFamily }}>
+          {formatDateTime(locale, row.createdAt)}
+        </span>
+      ),
       orderCell: (
         <Link
           href={getDeepLinkHref("dispatch", row)}
@@ -792,8 +779,19 @@ export default function ApprovalRequestsPage() {
             alignItems: "center",
           }}
         >
-          {actionButtons}
+          {actionButtons.length > 0 ? (
+            actionButtons
+          ) : (
+            <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+              {locale === "en" ? "Read-only" : "唯讀"}
+            </span>
+          )}
         </div>
+      ),
+      statusCell: (
+        <Pill theme={theme} tone={getStatusTone(row.status)} dot>
+          {formatOpsCodeLabel(locale, row.status)}
+        </Pill>
       ),
       _selected: row.approvalRequestId === selectedId,
     };
@@ -886,17 +884,29 @@ export default function ApprovalRequestsPage() {
 
         <Banner
           theme={theme}
-          tone={breachedCount > 0 ? "warn" : "info"}
-          icon={breachedCount > 0 ? "warn" : "info"}
+          tone={
+            tenantFilter.trim() ? "accent" : breachedCount > 0 ? "warn" : "info"
+          }
+          icon={
+            tenantFilter.trim() ? "search" : breachedCount > 0 ? "warn" : "info"
+          }
           title={
             locale === "en"
-              ? "Approval actions are rendered from availableActions when present."
-              : "操作按鈕優先依 availableActions 呈現。"
+              ? tenantFilter.trim()
+                ? `Scoped to tenant ${tenantFilter.trim()}`
+                : "Cross-tenant approval queue"
+              : tenantFilter.trim()
+                ? `目前限定租戶 ${tenantFilter.trim()}`
+                : "跨租戶審批佇列"
           }
           body={
             locale === "en"
-              ? "Current contract still returns a plain list in some environments, so the page keeps a conservative fallback action strip until the queue API exposes descriptors everywhere."
-              : "目前部分環境的 contract 仍只回傳陣列，因此在 queue API 全面帶出 descriptor 前，此頁會保守地保留 fallback action strip。"
+              ? tenantFilter.trim()
+                ? "Filter-dependent single-tenant mode keeps the same queue semantics while narrowing the review scope."
+                : "T2 refresh runs every 5 seconds. CTAs render from each row's availableActions, and timeout warnings track the approval_request.timeout_warning window."
+              : tenantFilter.trim()
+                ? "依篩選切成單一租戶檢視時，仍沿用相同的跨租戶審批語意。"
+                : "T2 每 5 秒更新。按鈕依每列 availableActions 呈現，逾時計算對應 approval_request.timeout_warning 規格。"
           }
         />
 
@@ -981,196 +991,206 @@ export default function ApprovalRequestsPage() {
           </div>
         </Card>
 
-        <div style={splitGridStyle}>
-          <Card
-            theme={theme}
-            title={locale === "en" ? "Pending list" : "審批清單"}
-            subtitle={
-              lastRefreshedAt
-                ? locale === "en"
-                  ? `Last refresh ${formatDateTime(locale, lastRefreshedAt)} UTC`
-                  : `最後更新 ${formatDateTime(locale, lastRefreshedAt)} UTC`
-                : undefined
-            }
-            padding={0}
-          >
-            {loading ? (
-              <div style={{ padding: 20 }}>
-                <WorkflowEmptyState
-                  title={
-                    locale === "en" ? "Loading approval queue" : "載入審批佇列"
-                  }
-                  description={
-                    locale === "en"
-                      ? "T2 refresh connects every 5 seconds and preserves the current queue scope."
-                      : "T2 每 5 秒更新，並保留目前的篩選範圍。"
-                  }
-                  tone="neutral"
-                  density="compact"
-                  icon={<CanvasIcon name="arrow" size={18} />}
-                />
-              </div>
-            ) : emptyReason ? (
-              <div style={{ padding: 20 }}>
-                <ApprovalEmptyState
-                  locale={locale}
-                  reason={emptyReason}
-                  onRefresh={() => void loadRows(true)}
-                  hasFilters={
-                    Boolean(searchValue.trim()) ||
-                    Boolean(tenantFilter.trim()) ||
-                    typeFilter !== "all" ||
-                    statusFilter !== "all"
-                  }
-                />
-              </div>
-            ) : (
-              <Table theme={theme} columns={columns} rows={rows} />
-            )}
-          </Card>
-
-          <Card
-            theme={theme}
-            title={locale === "en" ? "Request detail" : "審批詳情"}
-            subtitle={
-              selectedRow
-                ? selectedRow.approvalRequestId
-                : locale === "en"
-                  ? "Select a queue row"
-                  : "選擇一筆佇列項目"
-            }
-          >
-            {selectedRow ? (
-              <div style={detailStackStyle}>
-                <Banner
-                  theme={theme}
-                  tone={selectedRow.slaBreached ? "warn" : "info"}
-                  icon={selectedRow.slaBreached ? "warn" : "info"}
-                  title={
-                    selectedRow.slaBreached
-                      ? locale === "en"
-                        ? "Timeout warning is active on this request."
-                        : "這筆審批已進入逾時處理。"
-                      : locale === "en"
-                        ? "Queue row is still within SLA."
-                        : "這筆審批仍在 SLA 內。"
-                  }
-                  body={
-                    locale === "en"
-                      ? `Status ${formatOpsCodeLabel(locale, selectedRow.status)} · timeout ${formatDateTime(locale, selectedRow.timeoutAt)} UTC`
-                      : `狀態 ${formatOpsCodeLabel(locale, selectedRow.status)} · 截止 ${formatDateTime(locale, selectedRow.timeoutAt)} UTC`
-                  }
-                />
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: 10,
-                    fontSize: 12.5,
-                  }}
-                >
-                  <DetailItem
-                    label={locale === "en" ? "Type" : "類型"}
-                    value={formatOpsCodeLabel(
-                      locale,
-                      getRequestType(selectedRow),
-                    )}
-                  />
-                  <DetailItem
-                    label={locale === "en" ? "Tenant" : "租戶"}
-                    value={selectedRow.tenantId}
-                    mono
-                  />
-                  <DetailItem
-                    label={locale === "en" ? "Requester" : "提出者"}
-                    value={getRequesterLabel(selectedRow, locale)}
-                  />
-                  <DetailItem
-                    label={locale === "en" ? "Requested at" : "提出時間"}
-                    value={`${formatDateTime(locale, selectedRow.createdAt)} UTC`}
-                    mono
-                  />
-                  <DetailItem
-                    label={locale === "en" ? "Booking" : "Booking"}
-                    value={selectedRow.bookingId}
-                    mono
-                  />
-                  <DetailItem
-                    label={locale === "en" ? "Order" : "Order"}
-                    value={selectedRow.orderId}
-                    mono
-                  />
-                </div>
-
-                <Card
-                  theme={theme}
-                  title={locale === "en" ? "Justification" : "申請理由"}
-                  subtitle={
-                    locale === "en"
-                      ? "Derived from evaluation warnings / rules when explicit packet text is absent."
-                      : "若 contract 沒有直接提供文字，會退回 evaluation warning / 規則摘要。"
-                  }
-                >
-                  <p
-                    style={{
-                      margin: 0,
-                      color: theme.text,
-                      fontSize: 12.5,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {getJustification(selectedRow, locale)}
-                  </p>
-                </Card>
-
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  <Link
-                    href={getDeepLinkHref("dispatch", selectedRow)}
-                    style={{ color: theme.accent, textDecoration: "none" }}
-                  >
-                    {locale === "en"
-                      ? "Open dispatch context"
-                      : "回到 dispatch 情境"}{" "}
-                    →
-                  </Link>
-                  <Link
-                    href={getDeepLinkHref("tenant_booking", selectedRow)}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: theme.accent, textDecoration: "none" }}
-                  >
-                    {locale === "en"
-                      ? "Open tenant booking"
-                      : "開啟租戶 booking"}{" "}
-                    <CanvasIcon name="ext" size={12} />
-                  </Link>
-                  <Link
-                    href={getDeepLinkHref("platform_audit", selectedRow)}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: theme.accent, textDecoration: "none" }}
-                  >
-                    {locale === "en" ? "View audit trail" : "檢視稽核軌跡"}{" "}
-                    <CanvasIcon name="ext" size={12} />
-                  </Link>
-                </div>
-              </div>
-            ) : (
+        <Card
+          theme={theme}
+          title={locale === "en" ? "Pending list" : "審批清單"}
+          subtitle={
+            lastRefreshedAt
+              ? locale === "en"
+                ? `Last refresh ${formatDateTime(locale, lastRefreshedAt)} UTC`
+                : `最後更新 ${formatDateTime(locale, lastRefreshedAt)} UTC`
+              : undefined
+          }
+          padding={0}
+        >
+          {loading ? (
+            <div style={{ padding: 20 }}>
               <WorkflowEmptyState
-                title={locale === "en" ? "No row selected" : "尚未選擇項目"}
+                title={
+                  locale === "en" ? "Loading approval queue" : "載入審批佇列"
+                }
                 description={
                   locale === "en"
-                    ? "Pick a request from the queue to inspect timeout state, justification, and cross-app exits."
-                    : "從左側清單選一筆審批，即可查看逾時狀態、理由與跨 app 出口。"
+                    ? "T2 refresh connects every 5 seconds and preserves the current queue scope."
+                    : "T2 每 5 秒更新，並保留目前的篩選範圍。"
                 }
                 tone="neutral"
                 density="compact"
-                icon={<CanvasIcon name="audit" size={18} />}
+                icon={<CanvasIcon name="arrow" size={18} />}
               />
-            )}
-          </Card>
-        </div>
+            </div>
+          ) : emptyReason ? (
+            <div style={{ padding: 20 }}>
+              <ApprovalEmptyState
+                locale={locale}
+                reason={emptyReason}
+                onRefresh={() => void loadRows(true)}
+                hasFilters={hasQueueFilters(
+                  statusFilter,
+                  tenantFilter,
+                  typeFilter,
+                  searchValue,
+                )}
+              />
+            </div>
+          ) : (
+            <Table theme={theme} columns={columns} rows={rows} />
+          )}
+        </Card>
+
+        <Card
+          theme={theme}
+          title={locale === "en" ? "Request detail" : "審批詳情"}
+          subtitle={
+            selectedRow
+              ? selectedRow.approvalRequestId
+              : locale === "en"
+                ? "Select a queue row"
+                : "選擇一筆佇列項目"
+          }
+        >
+          {selectedRow ? (
+            <div style={detailStackStyle}>
+              <Banner
+                theme={theme}
+                tone={selectedRow.slaBreached ? "warn" : "info"}
+                icon={selectedRow.slaBreached ? "warn" : "info"}
+                title={
+                  selectedRow.slaBreached
+                    ? locale === "en"
+                      ? "Timeout warning is active on this request."
+                      : "這筆審批已進入逾時預警 / 逾時處理。"
+                    : locale === "en"
+                      ? "Queue row is still within SLA."
+                      : "這筆審批仍在 SLA 內。"
+                }
+                body={
+                  locale === "en"
+                    ? `Status ${formatOpsCodeLabel(locale, selectedRow.status)} · timeout ${formatDateTime(locale, selectedRow.timeoutAt)} UTC`
+                    : `狀態 ${formatOpsCodeLabel(locale, selectedRow.status)} · 截止 ${formatDateTime(locale, selectedRow.timeoutAt)} UTC`
+                }
+              />
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                  gap: 10,
+                  fontSize: 12.5,
+                }}
+              >
+                <DetailItem
+                  label={locale === "en" ? "Type" : "類型"}
+                  value={formatOpsCodeLabel(
+                    locale,
+                    getRequestType(selectedRow),
+                  )}
+                />
+                <DetailItem
+                  label={locale === "en" ? "Tenant" : "租戶"}
+                  value={selectedRow.tenantId}
+                  mono
+                />
+                <DetailItem
+                  label={locale === "en" ? "Requester" : "提出者"}
+                  value={getRequesterLabel(selectedRow, locale)}
+                />
+                <DetailItem
+                  label={locale === "en" ? "Requested at" : "提出時間"}
+                  value={`${formatDateTime(locale, selectedRow.createdAt)} UTC`}
+                  mono
+                />
+                <DetailItem
+                  label={locale === "en" ? "Order" : "訂單"}
+                  value={selectedRow.orderId}
+                  mono
+                />
+                <DetailItem
+                  label={locale === "en" ? "Booking" : "Booking"}
+                  value={selectedRow.bookingId}
+                  mono
+                />
+                <DetailItem
+                  label={locale === "en" ? "Status" : "狀態"}
+                  value={formatOpsCodeLabel(locale, selectedRow.status)}
+                />
+                <DetailItem
+                  label={locale === "en" ? "Visible actions" : "可用操作"}
+                  value={
+                    getAvailableActions(selectedRow)
+                      .map((descriptor: ResourceActionDescriptor) =>
+                        formatOpsCodeLabel(locale, descriptor.action),
+                      )
+                      .join(" / ") || (locale === "en" ? "Read-only" : "唯讀")
+                  }
+                />
+              </div>
+
+              <Card
+                theme={theme}
+                title={locale === "en" ? "Justification" : "申請理由"}
+                subtitle={
+                  locale === "en"
+                    ? "Derived from evaluation warnings / rules when explicit packet text is absent."
+                    : "若 contract 沒有直接提供文字，會退回 evaluation warning / 規則摘要。"
+                }
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    color: theme.text,
+                    fontSize: 12.5,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {getJustification(selectedRow, locale)}
+                </p>
+              </Card>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <Link
+                  href={getDeepLinkHref("dispatch", selectedRow)}
+                  style={{ color: theme.accent, textDecoration: "none" }}
+                >
+                  {locale === "en"
+                    ? "Open dispatch context"
+                    : "回到 dispatch 情境"}{" "}
+                  →
+                </Link>
+                <Link
+                  href={getDeepLinkHref("tenant_booking", selectedRow)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: theme.accent, textDecoration: "none" }}
+                >
+                  {locale === "en" ? "Open tenant booking" : "開啟租戶 booking"}{" "}
+                  <CanvasIcon name="ext" size={12} />
+                </Link>
+                <Link
+                  href={getDeepLinkHref("platform_audit", selectedRow)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: theme.accent, textDecoration: "none" }}
+                >
+                  {locale === "en" ? "View audit trail" : "檢視稽核軌跡"}{" "}
+                  <CanvasIcon name="ext" size={12} />
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <WorkflowEmptyState
+              title={locale === "en" ? "No row selected" : "尚未選擇項目"}
+              description={
+                locale === "en"
+                  ? "Pick a request from the queue to inspect timeout state, justification, and cross-app exits."
+                  : "從清單選一筆審批，即可查看逾時狀態、理由與跨 app 出口。"
+              }
+              tone="neutral"
+              density="compact"
+              icon={<CanvasIcon name="audit" size={18} />}
+            />
+          )}
+        </Card>
       </div>
 
       {dialog ? (
@@ -1364,7 +1384,7 @@ function ApprovalEmptyState({
               ? "This environment has not enabled the cross-tenant approval queue contract yet."
               : "此環境尚未開啟跨租戶審批佇列 contract。"
           }
-          tone="warn"
+          tone="warning"
           density="compact"
           icon={<CanvasIcon name="flags" size={18} />}
           actions={
@@ -1402,7 +1422,7 @@ function ApprovalEmptyState({
               ? "Only ops_approval_triage, ops_manager, and ops_compliance can view this queue."
               : "只有 ops_approval_triage、ops_manager、ops_compliance 可以看到此佇列。"
           }
-          tone="warn"
+          tone="warning"
           density="compact"
           icon={<CanvasIcon name="audit" size={18} />}
         />
@@ -1420,7 +1440,7 @@ function ApprovalEmptyState({
               ? "The queue backend or proxy did not respond within the refresh window."
               : "queue backend 或 proxy 未在 refresh window 內回應。"
           }
-          tone="warn"
+          tone="warning"
           density="compact"
           icon={<CanvasIcon name="health" size={18} />}
           actions={
