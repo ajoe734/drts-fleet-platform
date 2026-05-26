@@ -251,7 +251,7 @@ const en = {
   "drivers.tabs.licenseWarn": "License 30d",
   "drivers.tabs.suppression": "Suppression",
   "drivers.filters.searchPlaceholder":
-    "Search by driver ID, name, platform, or order",
+    "Search by driver ID, name, phone, platform, or order",
   "drivers.filters.allShift": "All shifts",
   "drivers.filters.allPlatforms": "All platforms",
   "drivers.filters.allEligibility": "All eligibility",
@@ -1792,7 +1792,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.tabs.offline": "下班",
   "drivers.tabs.licenseWarn": "30 天內到期",
   "drivers.tabs.suppression": "Suppression",
-  "drivers.filters.searchPlaceholder": "搜尋司機編號、姓名、平台或訂單",
+  "drivers.filters.searchPlaceholder": "搜尋司機編號、姓名、電話、平台或訂單",
   "drivers.filters.allShift": "全部班次",
   "drivers.filters.allPlatforms": "全部平台",
   "drivers.filters.allEligibility": "全部資格",

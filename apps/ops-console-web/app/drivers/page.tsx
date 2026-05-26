@@ -60,7 +60,7 @@ type DriverListFilters = {
 };
 
 type DriverRowModel = {
-  driver: DriverRegistryListItem;
+  driver: DriverRegistryRecord;
   location: DriverLocationSnapshot | undefined;
   locationState: "live" | "stale" | "missing" | "unknown";
   presences: PlatformPresenceRecord[];
@@ -86,11 +86,6 @@ type EmptyStateModel = {
 type LoadResult<T> = {
   data: T | null;
   error: string | null;
-};
-
-type DriverRegistryListItem = DriverRegistryRecord & {
-  availableActions?: ResourceActionDescriptor[];
-  matchingSuppression?: DriverMatchingSuppression | null;
 };
 
 type LoadedListEnvelope<T> = {
@@ -340,55 +335,6 @@ function readActions(value: unknown): ResourceActionDescriptor[] | undefined {
   });
 }
 
-function readRefreshMetadata(value: unknown): UiRefreshMetadata | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  if (
-    typeof value.generatedAt !== "string" ||
-    typeof value.staleAfterMs !== "number" ||
-    (value.dataFreshness !== "fresh" &&
-      value.dataFreshness !== "stale" &&
-      value.dataFreshness !== "degraded" &&
-      value.dataFreshness !== "unknown") ||
-    (value.source !== "live" &&
-      value.source !== "cache" &&
-      value.source !== "sandbox" &&
-      value.source !== "static")
-  ) {
-    return null;
-  }
-
-  return {
-    generatedAt: value.generatedAt,
-    staleAfterMs: value.staleAfterMs,
-    dataFreshness: value.dataFreshness,
-    source: value.source,
-  };
-}
-
-function readEmptyStateEnvelope(value: unknown): EmptyStateEnvelope | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const reason =
-    typeof value.reason === "string" && isEmptyReason(value.reason)
-      ? value.reason
-      : null;
-  if (!reason || typeof value.messageCode !== "string") {
-    return null;
-  }
-  const nextAction = readActions(
-    value.nextAction ? [value.nextAction] : undefined,
-  )?.[0];
-
-  return {
-    reason,
-    messageCode: value.messageCode,
-    ...(nextAction ? { nextAction } : {}),
-  };
-}
-
 function readMatchingSuppression(
   value: unknown,
 ): DriverMatchingSuppression | null | undefined {
@@ -423,7 +369,7 @@ function readMatchingSuppression(
 
 function readDriverRegistryListItem(
   value: unknown,
-): DriverRegistryListItem | null {
+): DriverRegistryRecord | null {
   if (
     !isRecord(value) ||
     typeof value.driverId !== "string" ||
@@ -442,51 +388,6 @@ function readDriverRegistryListItem(
     ...(availableActions ? { availableActions } : {}),
     ...(matchingSuppression !== undefined ? { matchingSuppression } : {}),
   };
-}
-
-async function loadListWithEnvelope<T>(
-  loader: () => Promise<unknown>,
-  locale: "en" | "zh",
-): Promise<LoadResult<LoadedListEnvelope<T>>> {
-  try {
-    const value = await loader();
-    if (Array.isArray(value)) {
-      return {
-        data: {
-          items: value as T[],
-          emptyState: null,
-          refreshMetadata: null,
-        },
-        error: null,
-      };
-    }
-
-    if (isRecord(value) && Array.isArray(value.items)) {
-      return {
-        data: {
-          items: value.items as T[],
-          emptyState: readEmptyStateEnvelope(value.emptyState),
-          refreshMetadata: readRefreshMetadata(value.refreshMetadata),
-        },
-        error: null,
-      };
-    }
-
-    return {
-      data: {
-        items: [],
-        emptyState: null,
-        refreshMetadata: null,
-      },
-      error: t("common.unknown", locale),
-    };
-  } catch (error) {
-    return {
-      data: null,
-      error:
-        error instanceof Error ? error.message : t("common.unknown", locale),
-    };
-  }
 }
 
 function isLocationStale(
@@ -620,6 +521,7 @@ function matchesFilters(
     const haystack = [
       row.driver.driverId,
       row.driver.name,
+      row.driver.phone ?? "",
       ...row.driver.supportedServiceBuckets,
       ...row.presences.map((presence) => presence.accountId ?? ""),
       ...row.presences.map((presence) => presence.platformCode),
@@ -977,8 +879,13 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   const generatedAt = new Date().toISOString();
 
   const [driversResult, locationsResult, forwardedResult] = await Promise.all([
-    loadListWithEnvelope<DriverRegistryListItem>(
-      () => client.listDrivers() as Promise<unknown>,
+    loadWithError<LoadedListEnvelope<DriverRegistryRecord>>(
+      () =>
+        client.listDriversEnvelope().then((envelope) => ({
+          items: envelope.items,
+          emptyState: envelope.emptyState ?? null,
+          refreshMetadata: envelope.refreshMetadata ?? null,
+        })),
       locale,
     ),
     loadWithError<DriverLocationSnapshot[]>(
@@ -1410,7 +1317,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                           secondary={`${row.driver.driverId} · ${formatOpsCodeLabel(
                             locale,
                             row.driver.lifecycleStatus,
-                          )}`}
+                          )}${row.driver.phone ? ` · ${row.driver.phone}` : ""}`}
                           tertiary={
                             row.suppressionActive ? (
                               row.matchingSuppression?.sourceIncidentId ? (
@@ -1523,8 +1430,10 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                             row.driver.dispatchEligible
                               ? t("drivers.list.eligibilityClear", locale)
                               : row.driver.eligibilityBlockedReasons
-                                  .map((reason) =>
-                                    formatOpsCodeLabel(locale, reason),
+                                  .map(
+                                    (
+                                      reason: DriverRegistryRecord["eligibilityBlockedReasons"][number],
+                                    ) => formatOpsCodeLabel(locale, reason),
                                   )
                                   .join("、")
                           }

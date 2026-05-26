@@ -1,5 +1,9 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  DriverMatchingSuppression,
+  ResourceActionDescriptor,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -2760,12 +2764,15 @@ export interface VehicleRegistryRecord {
 export interface DriverRegistryRecord {
   driverId: string;
   name: string;
+  phone?: string | null;
   supportedServiceBuckets: Phase1ServiceBucket[];
   workState: DriverWorkState;
   licensesValid: boolean;
   lifecycleStatus: DriverMasterLifecycleStatus;
   eligibilityBlockedReasons: DriverEligibilityBlockReason[];
   dispatchEligible: boolean;
+  availableActions?: ResourceActionDescriptor[];
+  matchingSuppression?: DriverMatchingSuppression | null;
   createdAt: string;
   updatedAt: string;
   activatedAt: string | null;

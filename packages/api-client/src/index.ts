@@ -67,6 +67,7 @@ import type {
   DriverDeviceProvisioningSession,
   DriverEtaResponse,
   DriverLocationSnapshot,
+  DriverMatchingSuppression,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
   DriverLocationHeartbeatCommand,
@@ -232,6 +233,9 @@ import type {
   ForwarderReconciliationIssue,
   InviteTenantRoleCommand,
   AcknowledgeTenantRoleCommand,
+  ResourceActionDescriptor,
+  EmptyStateEnvelope,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -252,7 +256,14 @@ export interface RequestOptions {
 
 interface ListEnvelope<T> {
   items: T[];
+  emptyState?: EmptyStateEnvelope | null;
+  refreshMetadata?: UiRefreshMetadata | null;
 }
+
+export type DriverRegistryListItem = DriverRegistryRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  matchingSuppression?: DriverMatchingSuppression | null;
+};
 
 function snakeToCamelCase(key: string): string {
   return key.replace(/_([a-z])/g, (_match, letter: string) =>
@@ -351,6 +362,14 @@ export class ApiClient {
   ): Promise<T[]> {
     const result = await this.get<T[] | ListEnvelope<T>>(path, options);
     return Array.isArray(result) ? result : (result.items ?? []);
+  }
+
+  private async getListEnvelope<T>(
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ListEnvelope<T>> {
+    const result = await this.get<T[] | ListEnvelope<T>>(path, options);
+    return Array.isArray(result) ? { items: result } : result;
   }
 
   private async request<T>(
@@ -2172,6 +2191,12 @@ export class ApiClient {
 
   async listDrivers(): Promise<DriverRegistryRecord[]> {
     return this.getList<DriverRegistryRecord>(
+      "/api/regulatory-registry/drivers",
+    );
+  }
+
+  async listDriversEnvelope(): Promise<ListEnvelope<DriverRegistryListItem>> {
+    return this.getListEnvelope<DriverRegistryListItem>(
       "/api/regulatory-registry/drivers",
     );
   }

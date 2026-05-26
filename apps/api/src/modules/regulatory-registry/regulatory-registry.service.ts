@@ -1849,6 +1849,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
     return {
       ...driver,
+      phone: profile?.phone ?? null,
       supportedServiceBuckets: [...driver.supportedServiceBuckets],
       eligibilityBlockedReasons,
       dispatchEligible: eligibilityBlockedReasons.length === 0,

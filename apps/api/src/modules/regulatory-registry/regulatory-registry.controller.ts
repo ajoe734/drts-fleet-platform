@@ -119,9 +119,23 @@ export class RegulatoryRegistryController {
 
   @Get("drivers")
   listDrivers(@Headers("x-request-id") requestId?: string) {
+    const items = this.regulatoryRegistryService.listDrivers();
     return toApiSuccessEnvelope(
       {
-        items: this.regulatoryRegistryService.listDrivers(),
+        items,
+        emptyState:
+          items.length === 0
+            ? {
+                reason: "no_data",
+                messageCode: "drivers.emptyState.noDataBody",
+              }
+            : null,
+        refreshMetadata: {
+          generatedAt: new Date().toISOString(),
+          staleAfterMs: 15_000,
+          dataFreshness: "fresh",
+          source: "live",
+        },
       },
       requestId,
     );
