@@ -33,13 +33,12 @@ RestartSec=10
 MemoryMax=4G
 MemoryHigh=3G
 
-# Watchdog: systemd will SIGKILL the supervisor if it goes silent for
-# WatchdogSec. Supervisor itself does NOT currently call sd_notify so this
-# acts as a coarse hang detector via the parent-process aliveness check
-# only — refining this requires a small patch to supervisor.py to emit
-# periodic notifications. Leaving the value set so the future patch is a
-# config-only change.
-WatchdogSec=900
+# Watchdog: DISABLED. supervisor.py does not yet call sd_notify(WATCHDOG=1),
+# so a non-zero WatchdogSec fired every interval on a healthy supervisor and
+# killed it mid-dispatch (observed: ~every 15 min, NRestarts climbed to 19,
+# codex lane repeatedly dropped to 0). Re-enable ONLY after supervisor.py
+# implements periodic sd_notify. Restart=on-failure still covers real crashes.
+WatchdogSec=0
 
 # Journald is the canonical log; the .orchestrator/logs/supervisor-bg.log
 # trail is still written by supervisor itself for backward compatibility
