@@ -467,14 +467,6 @@ function clearFiltersLabel(locale: Locale) {
   return copy(locale, "Clear filters", "清除篩選");
 }
 
-function defaultSearchAction(): ResourceActionDescriptor {
-  return {
-    action: "search",
-    enabled: true,
-    riskLevel: "low",
-  };
-}
-
 function normalizeAppBaseUrl(value: string | undefined, fallback: string) {
   const resolved = (value ?? fallback).trim();
   return resolved.replace(/\/+$/, "");
@@ -561,14 +553,9 @@ function normalizeResponse(
   locale: Locale,
 ): FeatureFlagVisibilityListResponse {
   const ownerAppLink = response.ownerAppLink ?? defaultOwnerAppLink(locale);
-  const pageActions = [...(response.availableActions ?? [])];
   const normalizedEmptyState = normalizeFeatureFlagsEmptyState(
     response.emptyState,
   );
-
-  if (!pageActions.some((action) => action.action === "search")) {
-    pageActions.push(defaultSearchAction());
-  }
 
   return {
     items: (response.items ?? []).map((item) => ({
@@ -586,7 +573,7 @@ function normalizeResponse(
       dataFreshness: "unknown",
       source: "static",
     },
-    availableActions: pageActions,
+    availableActions: response.availableActions ?? [],
     ...(normalizedEmptyState ? { emptyState: normalizedEmptyState } : {}),
     ...(ownerAppLink ? { ownerAppLink } : {}),
   };
@@ -620,7 +607,7 @@ async function loadFeatureFlags(locale: Locale) {
             reason: "fetch_failed",
             messageCode: message,
           },
-          availableActions: [defaultSearchAction()],
+          availableActions: [],
           ownerAppLink: defaultOwnerAppLink(locale),
         },
         locale,
@@ -681,11 +668,17 @@ function findAction(
   return actions.find((action) => candidates.includes(action.action));
 }
 
-function searchAction(actions: ResourceActionDescriptor[]) {
+function isSearchAction(action: ResourceActionDescriptor) {
+  const normalizedAction = action.action.toLowerCase();
   return (
-    findAction(actions, ["search", "search_by_key", "filter"]) ??
-    defaultSearchAction()
+    normalizedAction === "search" ||
+    normalizedAction === "search_by_key" ||
+    normalizedAction === "filter"
   );
+}
+
+function searchAction(actions: ResourceActionDescriptor[]) {
+  return findAction(actions, ["search", "search_by_key", "filter"]);
 }
 
 function ownerAppAction(actions: ResourceActionDescriptor[]) {
@@ -702,6 +695,15 @@ function historyAction(record: FeatureFlagVisibilityRecord) {
     "view_change_history",
     "view_history",
     "audit_history",
+  ]);
+}
+
+function refreshAction(actions: ResourceActionDescriptor[]) {
+  return findAction(actions, [
+    "refresh",
+    "manual_refresh",
+    "retry",
+    "retry_fetch",
   ]);
 }
 
@@ -1144,23 +1146,18 @@ type ResolvedActionTarget = {
   link?: CrossAppResourceLink;
 };
 
-function resolveEmptyStateActionTarget(
+function resolveActionTarget(
   action: ResourceActionDescriptor,
   filters: FeatureFlagFilters,
   ownerAppLink: CrossAppResourceLink,
 ): ResolvedActionTarget | null {
-  const normalizedAction = action.action.toLowerCase();
-
-  if (
-    normalizedAction === "search" ||
-    normalizedAction === "search_by_key" ||
-    normalizedAction === "filter"
-  ) {
+  if (isSearchAction(action)) {
     return {
       href: `${buildPageHref(filters)}#feature-flag-search`,
     };
   }
 
+  const normalizedAction = action.action.toLowerCase();
   if (
     normalizedAction === "clear_filters" ||
     normalizedAction === "reset_filters" ||
@@ -1200,6 +1197,58 @@ function resolveEmptyStateActionTarget(
   return null;
 }
 
+function actionDisplayLabel(
+  locale: Locale,
+  action: ResourceActionDescriptor,
+  target?: ResolvedActionTarget | null,
+) {
+  if (
+    target?.link &&
+    ownerAppAction([action]) &&
+    target.link.label.trim().length > 0
+  ) {
+    return target.link.label;
+  }
+
+  return actionLabel(locale, action);
+}
+
+function renderResolvedAction(
+  locale: Locale,
+  action: ResourceActionDescriptor,
+  filters: FeatureFlagFilters,
+  ownerAppLink: CrossAppResourceLink,
+  variant: "primary" | "secondary" | "ghost" = "secondary",
+) {
+  const target = resolveActionTarget(action, filters, ownerAppLink);
+  const label = actionDisplayLabel(locale, action, target);
+
+  if (target && action.enabled) {
+    return (
+      <a
+        href={target.href}
+        style={buttonStyle(variant)}
+        title={actionTooltip(locale, action)}
+        {...(target.link ? externalAnchorProps(target.link) : {})}
+      >
+        <span>{label}</span>
+        {target.link && shouldOpenInNewTab(target.link) ? (
+          <CanvasIcon name="ext" size={12} />
+        ) : null}
+      </a>
+    );
+  }
+
+  return (
+    <span
+      style={buttonStyle(variant, !action.enabled)}
+      title={actionTooltip(locale, action)}
+    >
+      {label}
+    </span>
+  );
+}
+
 function renderEmptyState(
   locale: Locale,
   state: OpsFeatureFlagEmptyState,
@@ -1207,20 +1256,12 @@ function renderEmptyState(
   ownerAppLink: CrossAppResourceLink,
 ) {
   const copyBlock = emptyStateCopy(locale, state);
-  const resetHref = "/feature-flags";
-  const ownerHref = resolveCrossAppHref(ownerAppLink);
   const nextActionTarget = state.nextAction
-    ? resolveEmptyStateActionTarget(state.nextAction, filters, ownerAppLink)
+    ? resolveActionTarget(state.nextAction, filters, ownerAppLink)
     : null;
-  const nextActionHref = nextActionTarget?.href;
   const showResetButton =
     state.reason === "filtered_empty" &&
-    nextActionHref !== "/feature-flags#feature-flag-search";
-  const showOwnerAppButton =
-    (state.reason === "fetch_failed" ||
-      state.reason === "not_provisioned" ||
-      state.reason === "permission_denied") &&
-    nextActionHref !== ownerHref;
+    nextActionTarget?.href !== "/feature-flags#feature-flag-search";
 
   return (
     <div style={emptyStateStyle}>
@@ -1245,40 +1286,18 @@ function renderEmptyState(
       </div>
       <div style={emptyActionsStyle}>
         {showResetButton ? (
-          <a href={resetHref} style={buttonStyle("secondary")}>
+          <a href="/feature-flags" style={buttonStyle("secondary")}>
             {clearFiltersLabel(locale)}
           </a>
         ) : null}
-        {showOwnerAppButton ? (
-          <a
-            href={ownerHref}
-            style={buttonStyle("primary")}
-            {...externalAnchorProps(ownerAppLink)}
-          >
-            {platformAdminLabel(locale)}
-          </a>
-        ) : null}
-        {state.nextAction ? (
-          nextActionTarget && state.nextAction.enabled ? (
-            <a
-              href={nextActionTarget.href}
-              style={buttonStyle("secondary")}
-              title={actionTooltip(locale, state.nextAction)}
-              {...(nextActionTarget.link
-                ? externalAnchorProps(nextActionTarget.link)
-                : {})}
-            >
-              {actionLabel(locale, state.nextAction)}
-            </a>
-          ) : (
-            <span
-              style={buttonStyle("secondary", !state.nextAction.enabled)}
-              title={actionTooltip(locale, state.nextAction)}
-            >
-              {actionLabel(locale, state.nextAction)}
-            </span>
-          )
-        ) : null}
+        {state.nextAction
+          ? renderResolvedAction(
+              locale,
+              state.nextAction,
+              filters,
+              ownerAppLink,
+            )
+          : null}
       </div>
       {filters.q || filters.scope !== "all" ? (
         <span style={secondaryTextStyle}>
@@ -1304,15 +1323,11 @@ export default async function FeatureFlagsPage({
   const filters = resolveFilters(resolvedSearchParams);
   const { response } = await loadFeatureFlags(locale);
   const ownerAppLink = response.ownerAppLink ?? defaultOwnerAppLink(locale);
-  const refreshHref = buildPageHref(
-    filters,
-    {},
-    { refresh: String(Date.now()) },
-  );
   const visibleItems = sortItems(filterItems(response.items, filters));
   const emptyState = resolveEmptyState(response, visibleItems, filters);
   const searchDescriptor = searchAction(response.availableActions);
   const ownerDescriptor = ownerAppAction(response.availableActions);
+  const refreshDescriptor = refreshAction(response.availableActions);
 
   const visibleEnabledCount = visibleItems.filter(
     (item) => item.enabled,
@@ -1366,19 +1381,15 @@ export default async function FeatureFlagsPage({
         title={t("flags.title", locale)}
         subtitle={t("flags.subtitleReadOnly", locale)}
         actions={
-          ownerDescriptor ? (
-            <a
-              href={resolveCrossAppHref(ownerAppLink)}
-              title={actionTooltip(locale, ownerDescriptor)}
-              style={buttonStyle("primary")}
-              {...externalAnchorProps(ownerAppLink)}
-            >
-              <span>{actionLabel(locale, ownerDescriptor)}</span>
-              {shouldOpenInNewTab(ownerAppLink) ? (
-                <CanvasIcon name="ext" size={12} />
-              ) : null}
-            </a>
-          ) : null
+          ownerDescriptor
+            ? renderResolvedAction(
+                locale,
+                ownerDescriptor,
+                filters,
+                ownerAppLink,
+                "primary",
+              )
+            : null
         }
       />
 
@@ -1388,48 +1399,79 @@ export default async function FeatureFlagsPage({
         <Card theme={theme} padding={0}>
           <div style={toolbarStyle}>
             <div style={searchPanelStyle}>
-              <form
-                action="/feature-flags"
-                method="get"
-                style={searchFormStyle}
-              >
-                {filters.scope !== "all" ? (
-                  <input type="hidden" name="scope" value={filters.scope} />
-                ) : null}
-                <div style={{ flex: "1 1 260px", minWidth: 0 }}>
-                  <Field
-                    theme={theme}
-                    label={t("flags.searchPlaceholder", locale)}
-                    hint={copy(
-                      locale,
-                      "Low-risk local filter. Use exact prefixes like dispatch., forwarder., partner.",
-                      "低風險本地篩選。可直接用 dispatch.、forwarder.、partner. 等 prefix。",
-                    )}
-                  >
-                    <input
-                      id="feature-flag-search"
-                      name="q"
-                      defaultValue={filters.q}
-                      placeholder={t("flags.searchPlaceholder", locale)}
-                      aria-label={t("flags.searchPlaceholder", locale)}
-                      style={searchInputStyle}
-                    />
-                  </Field>
-                </div>
-                <button
-                  type="submit"
-                  disabled={!searchDescriptor.enabled}
-                  title={actionTooltip(locale, searchDescriptor)}
-                  style={buttonStyle("secondary", !searchDescriptor.enabled)}
+              {searchDescriptor ? (
+                <form
+                  action="/feature-flags"
+                  method="get"
+                  style={searchFormStyle}
                 >
-                  {searchActionLabel(locale)}
-                </button>
-                {(filters.q || filters.scope !== "all") && (
-                  <a href="/feature-flags" style={buttonStyle("ghost")}>
-                    {clearFiltersLabel(locale)}
-                  </a>
-                )}
-              </form>
+                  {filters.scope !== "all" ? (
+                    <input type="hidden" name="scope" value={filters.scope} />
+                  ) : null}
+                  <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+                    <Field
+                      theme={theme}
+                      label={t("flags.searchPlaceholder", locale)}
+                      hint={copy(
+                        locale,
+                        "Low-risk local filter. Use exact prefixes like dispatch., forwarder., partner.",
+                        "低風險本地篩選。可直接用 dispatch.、forwarder.、partner. 等 prefix。",
+                      )}
+                    >
+                      <input
+                        id="feature-flag-search"
+                        name="q"
+                        defaultValue={filters.q}
+                        placeholder={t("flags.searchPlaceholder", locale)}
+                        aria-label={t("flags.searchPlaceholder", locale)}
+                        style={searchInputStyle}
+                      />
+                    </Field>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!searchDescriptor.enabled}
+                    title={actionTooltip(locale, searchDescriptor)}
+                    style={buttonStyle("secondary", !searchDescriptor.enabled)}
+                  >
+                    {searchActionLabel(locale)}
+                  </button>
+                  {(filters.q || filters.scope !== "all") && (
+                    <a href="/feature-flags" style={buttonStyle("ghost")}>
+                      {clearFiltersLabel(locale)}
+                    </a>
+                  )}
+                </form>
+              ) : (
+                <div style={searchFormStyle}>
+                  <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+                    <Field
+                      theme={theme}
+                      label={t("flags.searchPlaceholder", locale)}
+                      hint={copy(
+                        locale,
+                        "Search is not available for this snapshot. Scope filters remain visible for context only.",
+                        "這個快照目前不提供搜尋操作；scope 篩選會保留作為閱讀輔助。",
+                      )}
+                    >
+                      <input
+                        id="feature-flag-search"
+                        value={filters.q}
+                        placeholder={t("flags.searchPlaceholder", locale)}
+                        aria-label={t("flags.searchPlaceholder", locale)}
+                        style={searchInputStyle}
+                        disabled
+                        readOnly
+                      />
+                    </Field>
+                  </div>
+                  {(filters.q || filters.scope !== "all") && (
+                    <a href="/feature-flags" style={buttonStyle("ghost")}>
+                      {clearFiltersLabel(locale)}
+                    </a>
+                  )}
+                </div>
+              )}
 
               <div style={scopeRowStyle}>
                 <span style={scopeLabelStyle}>
@@ -1476,9 +1518,14 @@ export default async function FeatureFlagsPage({
                   ),
                 })}
               </span>
-              <a href={refreshHref} style={buttonStyle("secondary")}>
-                {t("common.refresh", locale)}
-              </a>
+              {refreshDescriptor
+                ? renderResolvedAction(
+                    locale,
+                    refreshDescriptor,
+                    filters,
+                    ownerAppLink,
+                  )
+                : null}
             </div>
           </div>
 
