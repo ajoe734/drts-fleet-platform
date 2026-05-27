@@ -11,6 +11,11 @@ Source baseline: aj0e734/drts-fleet-platform@origin/dev + System Design Answers 
 
 Platform Admin state transitions must be backend-owned and represented through state-machine records and action descriptors. Platform Admin UI must not infer rollout, readiness, credential, pricing, or legal-hold actions locally.
 
+For tenant rollout specifically, the canonical state-machine entry point is now
+[`tenant-rollout-state-machine.md`](./tenant-rollout-state-machine.md). This
+document remains the broader control-plane summary, but it should not drift from
+that focused tenant-rollout contract.
+
 ## 2. Required contract: TenantRolloutStateMachineRecord
 
 ```ts
