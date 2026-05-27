@@ -2,7 +2,6 @@ import type { CSSProperties, ReactNode } from "react";
 import type {
   CrossAppResourceLink,
   EmptyStateEnvelope,
-  FeatureFlagSummary,
   FeatureFlagVisibilityListResponse,
   FeatureFlagVisibilityRecord,
   FeatureFlagVisibilityScope,
@@ -510,10 +509,6 @@ function defaultOwnerAppLink(locale: Locale): CrossAppResourceLink {
   };
 }
 
-function isOperationalLegacyFlag(key: string) {
-  return !key.startsWith("driver-app.") && !key.startsWith("tenant-portal.");
-}
-
 function normalizeFeatureFlagsEmptyState(
   emptyState: EmptyStateEnvelope | null | undefined,
 ): OpsFeatureFlagEmptyState | undefined {
@@ -541,55 +536,6 @@ function normalizeFeatureFlagsEmptyState(
   return {
     ...emptyState,
     reason,
-  };
-}
-
-function mapLegacySummary(
-  summary: FeatureFlagSummary,
-  locale: Locale,
-): FeatureFlagVisibilityListResponse {
-  const ownerAppLink = defaultOwnerAppLink(locale);
-
-  const items: FeatureFlagVisibilityRecord[] = summary.flags
-    .filter((flag) => isOperationalLegacyFlag(flag.key))
-    .map((flag) => ({
-      key: flag.key,
-      description: flag.description || "—",
-      enabled: Boolean(flag.enabled),
-      scope: flag.tenantId ? "tenant" : "global",
-      tenantId: flag.tenantId ?? null,
-      tenantLabel: flag.tenantId ?? null,
-      rolloutState: "uniform",
-      rolloutSummary: null,
-      lastChangedAt: flag.updatedAt,
-      lastChangedBy: copy(
-        locale,
-        "Contract not exposed",
-        "contract 尚未帶出操作者",
-      ),
-      availableActions: [],
-      historyLink: null,
-      ownerLink: ownerAppLink,
-    }));
-
-  return {
-    items,
-    refresh: {
-      generatedAt: new Date().toISOString(),
-      staleAfterMs: 0,
-      dataFreshness: "unknown",
-      source: "cache",
-    },
-    ...(items.length === 0
-      ? {
-          emptyState: {
-            reason: "no_data",
-            messageCode: "flags.empty",
-          } satisfies EmptyStateEnvelope,
-        }
-      : {}),
-    availableActions: [defaultSearchAction()],
-    ownerAppLink,
   };
 }
 
@@ -636,49 +582,33 @@ async function loadFeatureFlags(locale: Locale) {
     const response = await client.getOpsFeatureFlags();
     return {
       response: normalizeResponse(response, locale),
-      fallbackNotice: null as string | null,
     };
-  } catch (opsError) {
-    try {
-      const legacySummary = await client.getFeatureFlags();
-      return {
-        response: mapLegacySummary(legacySummary, locale),
-        fallbackNotice: copy(
-          locale,
-          "Using legacy admin flag summary until the actor-filtered ops endpoint is available.",
-          "目前先以 legacy admin flag summary 呈現，直到 actor-filtered 的 ops endpoint 完成對接。",
-        ),
-      };
-    } catch (legacyError) {
-      const message =
-        legacyError instanceof Error
-          ? legacyError.message
-          : opsError instanceof Error
-            ? opsError.message
-            : copy(locale, "Unknown error", "未知錯誤");
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : copy(locale, "Unknown error", "未知錯誤");
 
-      return {
-        response: normalizeResponse(
-          {
-            items: [],
-            refresh: {
-              generatedAt: new Date().toISOString(),
-              staleAfterMs: 0,
-              dataFreshness: "unknown",
-              source: "static",
-            },
-            emptyState: {
-              reason: "fetch_failed",
-              messageCode: message,
-            },
-            availableActions: [defaultSearchAction()],
-            ownerAppLink: defaultOwnerAppLink(locale),
+    return {
+      response: normalizeResponse(
+        {
+          items: [],
+          refresh: {
+            generatedAt: new Date().toISOString(),
+            staleAfterMs: 0,
+            dataFreshness: "unknown",
+            source: "static",
           },
-          locale,
-        ),
-        fallbackNotice: null,
-      };
-    }
+          emptyState: {
+            reason: "fetch_failed",
+            messageCode: message,
+          },
+          availableActions: [defaultSearchAction()],
+          ownerAppLink: defaultOwnerAppLink(locale),
+        },
+        locale,
+      ),
+    };
   }
 }
 
@@ -1314,7 +1244,7 @@ export default async function FeatureFlagsPage({
   ]);
 
   const filters = resolveFilters(resolvedSearchParams);
-  const { response, fallbackNotice } = await loadFeatureFlags(locale);
+  const { response } = await loadFeatureFlags(locale);
   const ownerAppLink = response.ownerAppLink ?? defaultOwnerAppLink(locale);
   const refreshHref = buildPageHref(
     filters,
@@ -1393,20 +1323,6 @@ export default async function FeatureFlagsPage({
       />
 
       <div style={pageBodyStyle}>
-        {fallbackNotice ? (
-          <Banner
-            theme={theme}
-            tone="info"
-            icon="flags"
-            title={copy(
-              locale,
-              "Legacy fallback in use",
-              "目前使用 legacy fallback",
-            )}
-            body={fallbackNotice}
-          />
-        ) : null}
-
         {bannerForFreshness(locale, response.refresh)}
 
         <Card theme={theme} padding={0}>

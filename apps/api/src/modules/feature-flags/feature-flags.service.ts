@@ -1,10 +1,11 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
+  CrossAppResourceLink,
   EmptyStateEnvelope,
   FeatureFlag,
-  OpsFeatureFlagRecord,
-  OpsFeatureFlagSummary,
+  FeatureFlagVisibilityListResponse,
+  FeatureFlagVisibilityRecord,
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "@drts/contracts";
@@ -21,8 +22,19 @@ export interface FeatureFlagSeed {
 @Injectable()
 export class FeatureFlagsService {
   private readonly logger = new Logger(FeatureFlagsService.name);
-  private static readonly VIEW_CHANGE_HISTORY_ACTION: ResourceActionDescriptor = {
-    action: "view_change_history",
+  private static readonly VIEW_CHANGE_HISTORY_ACTION: ResourceActionDescriptor =
+    {
+      action: "view_change_history",
+      enabled: true,
+      riskLevel: "low",
+    };
+  private static readonly SEARCH_ACTION: ResourceActionDescriptor = {
+    action: "search",
+    enabled: true,
+    riskLevel: "low",
+  };
+  private static readonly OPEN_OWNER_APP_ACTION: ResourceActionDescriptor = {
+    action: "open_platform_admin",
     enabled: true,
     riskLevel: "low",
   };
@@ -199,14 +211,12 @@ export class FeatureFlagsService {
     return flags.filter((flag) => !flag.tenantId);
   }
 
-  async getOpsSummary(tenantId?: string): Promise<OpsFeatureFlagSummary> {
+  async getOpsSummary(
+    tenantId?: string,
+  ): Promise<FeatureFlagVisibilityListResponse> {
     const flags = await this.getAll(tenantId);
     const refresh = this.buildRefreshMetadata();
-    const notes = [
-      "Read-only operational visibility surface for feature-flag rollout checks.",
-      "History and governance stay in Platform Admin.",
-      "availableActions controls which deep-link CTA the UI renders per row.",
-    ];
+    const ownerAppLink = this.buildOwnerAppLink();
 
     if (flags.length === 0) {
       const emptyState: EmptyStateEnvelope = {
@@ -215,19 +225,25 @@ export class FeatureFlagsService {
       };
 
       return {
-        flags: [],
-        notes,
+        items: [],
         refresh,
-        refreshTier: "manual",
         emptyState,
+        availableActions: [
+          FeatureFlagsService.SEARCH_ACTION,
+          FeatureFlagsService.OPEN_OWNER_APP_ACTION,
+        ],
+        ownerAppLink,
       };
     }
 
     return {
-      flags: flags.map((flag) => this.toOpsFlagRecord(flag)),
-      notes,
+      items: flags.map((flag) => this.toOpsFlagRecord(flag, ownerAppLink)),
       refresh,
-      refreshTier: "manual",
+      availableActions: [
+        FeatureFlagsService.SEARCH_ACTION,
+        FeatureFlagsService.OPEN_OWNER_APP_ACTION,
+      ],
+      ownerAppLink,
     };
   }
 
@@ -306,13 +322,35 @@ export class FeatureFlagsService {
     };
   }
 
-  private toOpsFlagRecord(flag: FeatureFlag): OpsFeatureFlagRecord {
+  private buildOwnerAppLink(): CrossAppResourceLink {
+    return {
+      targetApp: "platform-admin",
+      route: "/feature-flags",
+      resourceType: "feature_flag_registry",
+      resourceId: "platform-defaults",
+      openMode: "new_tab",
+      label: "Platform Admin",
+    };
+  }
+
+  private toOpsFlagRecord(
+    flag: FeatureFlag,
+    ownerAppLink: CrossAppResourceLink,
+  ): FeatureFlagVisibilityRecord {
     const scope = flag.tenantId ? "tenant" : "global";
     return {
-      ...flag,
+      key: flag.key,
+      description: flag.description,
+      enabled: flag.enabled,
       scope,
-      currentValue: flag.enabled ? "enabled" : "disabled",
-      lastChangedBy: flag.tenantId ? `tenant:${flag.tenantId}` : "platform_admin",
+      tenantId: flag.tenantId ?? null,
+      tenantLabel: flag.tenantId ?? null,
+      rolloutState: "uniform",
+      rolloutSummary: null,
+      lastChangedAt: flag.updatedAt,
+      lastChangedBy: flag.tenantId
+        ? `tenant:${flag.tenantId}`
+        : "platform_admin",
       availableActions: [FeatureFlagsService.VIEW_CHANGE_HISTORY_ACTION],
       historyLink: {
         targetApp: "platform-admin",
@@ -322,6 +360,7 @@ export class FeatureFlagsService {
         openMode: "new_tab",
         label: "Platform Admin",
       },
+      ownerLink: ownerAppLink,
     };
   }
 }
