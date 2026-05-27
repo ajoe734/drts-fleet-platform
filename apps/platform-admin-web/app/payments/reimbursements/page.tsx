@@ -4,23 +4,29 @@
  * Q-ADM12 promotes batches to a dedicated route with a 6-state state machine:
  *   draft → pending_approval → approved → exported → paid → reconciled
  *
- * Backend (`ReimbursementBatchRecord`) currently emits `status` ("pending" / "paid")
- * plus `approvedAt` / `remittanceProofId` / `paidAt`. The 6 Q-ADM12 states are
- * derived from those fields until UI-BE-006 ships the explicit `state` +
- * `availableActions` envelope; the derivation lives in `deriveBatchState` so it
- * can be swapped for the contract field without touching the render layer.
+ * The page consumes the raw list envelope directly so it can adopt the
+ * UI-BE-006 runtime fields (`state`, `availableActions`, `emptyState`,
+ * `refreshMetadata`) as soon as they appear, while still falling back to the
+ * current `ReimbursementBatchRecord` shape.
  */
 
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import type {
+  ApiListData,
+  ApiSuccessEnvelope,
+  CrossAppResourceLink,
   EmptyReason,
+  EmptyStateEnvelope,
   MoneyAmount,
   ReimbursementBatchRecord,
+  RefreshTier,
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "@drts/contracts";
@@ -30,7 +36,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -48,8 +53,18 @@ const PLATFORM_THEME = buildCanvasTheme({
   surface: "platform",
   density: "compact",
 });
-const POLL_INTERVAL_MS = 30_000;
-const STALE_AFTER_MS = 60_000;
+const REFRESH_TIER: RefreshTier = "medium_slow";
+const REFRESH_CADENCE_MS: Record<RefreshTier, number> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 0,
+};
+const POLL_INTERVAL_MS = REFRESH_CADENCE_MS[REFRESH_TIER];
+const STALE_AFTER_MS = POLL_INTERVAL_MS * 2;
 const PENDING_BACKLOG_WARN_THRESHOLD = 3;
 const EXPORT_STUCK_HOURS = 48;
 const REIMBURSEMENT_STATES = [
@@ -72,9 +87,28 @@ type BatchRow = ReimbursementBatchRecord & {
   submittedAt: string;
   updatedAt: string;
   availableActions: ResourceActionDescriptor[];
+  approverLabel: string | null;
+  exportArtifactUrl: string | null;
+  opsMirrorLink: CrossAppResourceLink | null;
 };
 
 type TableRowBag = BatchRow & Record<string, unknown>;
+type RawBatchRecord = ReimbursementBatchRecord &
+  Partial<{
+    state: ReimbursementState;
+    availableActions: ResourceActionDescriptor[];
+    submittedAt: string;
+    updatedAt: string;
+    approvedByActorId: string | null;
+    approverActorId: string | null;
+    exportArtifactUrl: string | null;
+    opsMirrorLink: CrossAppResourceLink | null;
+  }>;
+type ListEnvelopeWithRuntime = ApiListData<RawBatchRecord> &
+  Partial<{
+    emptyState: EmptyStateEnvelope;
+    refreshMetadata: UiRefreshMetadata;
+  }>;
 
 function deriveBatchState(batch: ReimbursementBatchRecord): ReimbursementState {
   if (batch.status === "paid") {
@@ -120,8 +154,9 @@ function deriveAvailableActions(
       return [
         {
           action: "submit_for_approval",
-          enabled: true,
+          enabled: false,
           riskLevel: "medium",
+          disabledReasonCode: "pending_backend_support",
         },
       ];
     case "pending_approval":
@@ -143,14 +178,16 @@ function deriveAvailableActions(
       return [
         {
           action: "export",
-          enabled: true,
+          enabled: false,
           riskLevel: "low",
+          disabledReasonCode: "pending_backend_support",
         },
         {
           action: "mark_paid",
-          enabled: true,
+          enabled: false,
           riskLevel: "high",
           requiresReason: true,
+          disabledReasonCode: "export_required",
         },
       ];
     case "exported":
@@ -161,19 +198,33 @@ function deriveAvailableActions(
           riskLevel: "high",
           requiresReason: true,
         },
+        {
+          action: "mark_reconciled",
+          enabled: false,
+          riskLevel: "medium",
+          disabledReasonCode: "pending_backend_support",
+        },
       ];
     case "paid":
       return [
         {
           action: "mark_reconciled",
-          enabled: true,
+          enabled: false,
           riskLevel: "medium",
+          disabledReasonCode: "pending_backend_support",
         },
       ];
     case "reconciled":
     default:
       return [];
   }
+}
+
+function isReimbursementState(value: unknown): value is ReimbursementState {
+  return (
+    typeof value === "string" &&
+    REIMBURSEMENT_STATES.includes(value as ReimbursementState)
+  );
 }
 
 function batchSubmittedAt(batch: ReimbursementBatchRecord): string {
@@ -184,17 +235,25 @@ function batchUpdatedAt(batch: ReimbursementBatchRecord): string {
   return batch.paidAt ?? batch.approvedAt ?? batchSubmittedAt(batch);
 }
 
-function expandBatch(batch: ReimbursementBatchRecord): BatchRow {
-  const derivedState = deriveBatchState(batch);
+function expandBatch(batch: RawBatchRecord): BatchRow {
+  const derivedState = isReimbursementState(batch.state)
+    ? batch.state
+    : deriveBatchState(batch);
   const { scope, kind } = deriveScope(batch);
   return {
     ...batch,
     derivedState,
     derivedScope: scope,
     derivedScopeKind: kind,
-    submittedAt: batchSubmittedAt(batch),
-    updatedAt: batchUpdatedAt(batch),
-    availableActions: deriveAvailableActions(derivedState),
+    submittedAt: batch.submittedAt ?? batchSubmittedAt(batch),
+    updatedAt: batch.updatedAt ?? batchUpdatedAt(batch),
+    availableActions:
+      batch.availableActions?.length !== undefined
+        ? batch.availableActions
+        : deriveAvailableActions(derivedState),
+    approverLabel: batch.approvedByActorId ?? batch.approverActorId ?? null,
+    exportArtifactUrl: batch.exportArtifactUrl ?? null,
+    opsMirrorLink: batch.opsMirrorLink ?? null,
   };
 }
 
@@ -231,10 +290,6 @@ function tabMatches(state: ReimbursementState, tab: TabKey): boolean {
 function formatMoney(money?: MoneyAmount | null) {
   if (!money) return "—";
   return `${money.amountMinor.toLocaleString()} ${money.currency}`;
-}
-
-function formatMinor(amountMinor: number, currency: string) {
-  return `${amountMinor.toLocaleString()} ${currency}`;
 }
 
 function hoursSince(iso?: string | null) {
@@ -370,6 +425,7 @@ type CopyBundle = {
     amount: string;
     state: string;
     submitter: string;
+    approver: string;
     submitted: string;
     updated: string;
     actions: string;
@@ -448,6 +504,8 @@ function buildCopy(locale: "en" | "zh"): CopyBundle {
       },
       disabledReason: {
         awaiting_approval: "blocked: needs approval first",
+        export_required: "blocked: export artifact before marking paid",
+        pending_backend_support: "waiting on runtime support",
       },
       pendingBacklog: {
         title: "Pending-approval backlog above threshold",
@@ -507,6 +565,7 @@ function buildCopy(locale: "en" | "zh"): CopyBundle {
         amount: "Amount",
         state: "State",
         submitter: "Submitter",
+        approver: "Approver",
         submitted: "Submitted",
         updated: "Updated",
         actions: "Actions",
@@ -580,6 +639,8 @@ function buildCopy(locale: "en" | "zh"): CopyBundle {
     },
     disabledReason: {
       awaiting_approval: "blocked: 需先核准",
+      export_required: "blocked: 需先匯出批次",
+      pending_backend_support: "等待後端支援",
     },
     pendingBacklog: {
       title: "Pending-approval 積壓過高",
@@ -639,6 +700,7 @@ function buildCopy(locale: "en" | "zh"): CopyBundle {
       amount: "AMOUNT",
       state: "STATE",
       submitter: "SUBMITTER",
+      approver: "APPROVER",
       submitted: "SUBMITTED",
       updated: "UPDATED",
       actions: "ACTIONS",
@@ -670,21 +732,41 @@ type PendingActionState =
 export default function ReimbursementBatchQueuePage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const theme = PLATFORM_THEME;
   const copy = useMemo(() => buildCopy(locale), [locale]);
 
-  const [batches, setBatches] = useState<ReimbursementBatchRecord[]>([]);
+  const [batches, setBatches] = useState<RawBatchRecord[]>([]);
   const [refreshMetadata, setRefreshMetadata] = useState<UiRefreshMetadata>({
     generatedAt: new Date().toISOString(),
     staleAfterMs: STALE_AFTER_MS,
     dataFreshness: "unknown",
     source: "live",
   });
-  const [tab, setTab] = useState<TabKey>("all");
-  const [scopeFilter, setScopeFilter] = useState("");
-  const [periodFilter, setPeriodFilter] = useState("");
+  const [tab, setTab] = useState<TabKey>(
+    TAB_KEYS.includes((searchParams.get("tab") as TabKey) ?? "all")
+      ? ((searchParams.get("tab") as TabKey) ?? "all")
+      : "all",
+  );
+  const [scopeFilter, setScopeFilter] = useState(
+    searchParams.get("scope") ?? "",
+  );
+  const [periodFilter, setPeriodFilter] = useState(
+    searchParams.get("period") ?? "",
+  );
+  const [stateFilter, setStateFilter] = useState<ReimbursementState | "">(
+    (() => {
+      const initialState = searchParams.get("state");
+      return isReimbursementState(initialState) ? initialState : "";
+    })(),
+  );
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<EmptyReason | null>(null);
+  const [emptyReasonFromServer, setEmptyReasonFromServer] =
+    useState<EmptyReason | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingActionState>(null);
   const [actionReason, setActionReason] = useState("");
   const [remittanceProofId, setRemittanceProofId] = useState("");
@@ -694,14 +776,34 @@ export default function ReimbursementBatchQueuePage() {
   const loadBatches = useCallback(async () => {
     setLoading((current) => current || batches.length === 0);
     try {
-      const records = await client.listReimbursementBatches();
-      setBatches(records ?? []);
-      setRefreshMetadata({
-        generatedAt: new Date().toISOString(),
-        staleAfterMs: STALE_AFTER_MS,
-        dataFreshness: "fresh",
-        source: "live",
+      const params = new URLSearchParams();
+      if (periodFilter) params.set("periodMonth", periodFilter);
+      const url = `${apiBaseUrl}/api/reimbursements${
+        params.toString() ? `?${params.toString()}` : ""
+      }`;
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
       });
+      const payload =
+        (await response.json()) as ApiSuccessEnvelope<ListEnvelopeWithRuntime>;
+      if (!response.ok) {
+        const errorBody = payload as unknown as {
+          error?: { message?: string; code?: string };
+        };
+        throw new Error(errorBody.error?.message ?? `HTTP ${response.status}`);
+      }
+      const listData = payload.data;
+      setBatches(listData?.items ?? []);
+      setEmptyReasonFromServer(listData?.emptyState?.reason ?? null);
+      setRefreshMetadata(
+        listData?.refreshMetadata ?? {
+          generatedAt: new Date().toISOString(),
+          staleAfterMs: STALE_AFTER_MS,
+          dataFreshness: "fresh",
+          source: "live",
+        },
+      );
       setFetchError(null);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
@@ -711,6 +813,7 @@ export default function ReimbursementBatchQueuePage() {
           ? "external_unavailable"
           : "fetch_failed";
       setFetchError(reason);
+      setEmptyReasonFromServer(null);
       setRefreshMetadata((current) => ({
         ...current,
         dataFreshness: "degraded",
@@ -718,21 +821,71 @@ export default function ReimbursementBatchQueuePage() {
     } finally {
       setLoading(false);
     }
-  }, [client, batches.length]);
+  }, [apiBaseUrl, batches.length, periodFilter]);
 
   useEffect(() => {
     void loadBatches();
+    if (POLL_INTERVAL_MS <= 0) {
+      return;
+    }
     const id = window.setInterval(() => {
       void loadBatches();
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, [loadBatches]);
 
+  useEffect(() => {
+    const query = new URLSearchParams(searchParams.toString());
+    if (tab === "all") query.delete("tab");
+    else query.set("tab", tab);
+    if (scopeFilter) query.set("scope", scopeFilter);
+    else query.delete("scope");
+    if (periodFilter) query.set("period", periodFilter);
+    else query.delete("period");
+    if (stateFilter) query.set("state", stateFilter);
+    else query.delete("state");
+    const next = query.toString();
+    const current = searchParams.toString();
+    if (next !== current) {
+      router.replace(next ? `${pathname}?${next}` : pathname, {
+        scroll: false,
+      });
+    }
+  }, [
+    pathname,
+    periodFilter,
+    router,
+    scopeFilter,
+    searchParams,
+    stateFilter,
+    tab,
+  ]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setRefreshMetadata((current) => {
+        if (!current.generatedAt || current.dataFreshness === "degraded") {
+          return current;
+        }
+        const ageMs = Date.now() - Date.parse(current.generatedAt);
+        if (Number.isNaN(ageMs) || ageMs < current.staleAfterMs) {
+          return current;
+        }
+        if (current.dataFreshness === "stale") {
+          return current;
+        }
+        return { ...current, dataFreshness: "stale" };
+      });
+    }, 1_000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const rows = useMemo(() => batches.map(expandBatch), [batches]);
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (!tabMatches(row.derivedState, tab)) return false;
+      if (stateFilter && row.derivedState !== stateFilter) return false;
       if (
         scopeFilter &&
         !row.derivedScope.toLowerCase().includes(scopeFilter.toLowerCase())
@@ -755,23 +908,12 @@ export default function ReimbursementBatchQueuePage() {
     };
     for (const row of rows) {
       if (row.derivedState === "pending_approval") result.pending += 1;
-      if (row.derivedState === "exported" || row.derivedState === "approved")
-        result.exported += 1;
+      if (row.derivedState === "exported") result.exported += 1;
       if (row.derivedState === "paid" || row.derivedState === "reconciled")
         result.done += 1;
     }
     return result;
   }, [rows]);
-
-  const currency = batches[0]?.totalAmount?.currency ?? "TWD";
-  const pendingAmount = rows
-    .filter((row) => row.derivedState === "pending_approval")
-    .reduce((sum, row) => sum + row.totalAmount.amountMinor, 0);
-  const settledAmount = rows
-    .filter(
-      (row) => row.derivedState === "paid" || row.derivedState === "reconciled",
-    )
-    .reduce((sum, row) => sum + row.totalAmount.amountMinor, 0);
 
   const pendingBacklogCount = counts.pending;
   const stuckExportedCount = rows.filter((row) => {
@@ -1066,6 +1208,18 @@ export default function ReimbursementBatchQueuePage() {
       ),
     },
     {
+      h: copy.columns.approver,
+      w: 150,
+      r: (row) => (
+        <div style={cellStackStyle()}>
+          <span>{row.approverLabel ?? "—"}</span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {row.approvedAt ? formatDateTime(row.approvedAt) : "pending"}
+          </span>
+        </div>
+      ),
+    },
+    {
       h: copy.columns.submitted,
       w: 160,
       mono: true,
@@ -1124,6 +1278,20 @@ export default function ReimbursementBatchQueuePage() {
           >
             {copy.columns.view} →
           </Link>
+          {row.exportArtifactUrl ? (
+            <a
+              href={row.exportArtifactUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                color: theme.textMuted,
+                fontSize: 11,
+                textDecoration: "none",
+              }}
+            >
+              artifact ↗
+            </a>
+          ) : null}
         </div>
       ),
     },
@@ -1131,7 +1299,7 @@ export default function ReimbursementBatchQueuePage() {
 
   const emptyReason: EmptyReason = (() => {
     if (fetchError) return fetchError;
-    if (rows.length === 0) return "no_data";
+    if (rows.length === 0) return emptyReasonFromServer ?? "no_data";
     if (filteredRows.length === 0) return "filtered_empty";
     return "no_data";
   })();
@@ -1194,6 +1362,7 @@ export default function ReimbursementBatchQueuePage() {
           <div
             style={{
               display: "flex",
+              flexWrap: "wrap",
               alignItems: "center",
               gap: 10,
               color: theme.textMuted,
@@ -1219,6 +1388,15 @@ export default function ReimbursementBatchQueuePage() {
             <span style={{ fontFamily: theme.monoFamily }}>
               · {lastGenerated}
             </span>
+            <CanvasPill theme={theme} tone="warn">
+              {copy.tabPending}: {counts.pending}
+            </CanvasPill>
+            <CanvasPill theme={theme} tone="accent">
+              {copy.tabExported}: {counts.exported}
+            </CanvasPill>
+            <CanvasPill theme={theme} tone="success">
+              {copy.tabDone}: {counts.done}
+            </CanvasPill>
           </div>
 
           {fetchError ? (
@@ -1248,118 +1426,91 @@ export default function ReimbursementBatchQueuePage() {
             />
           ) : null}
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: 12,
-            }}
-          >
-            <CanvasKPI
-              theme={theme}
-              label={copy.kpi.totalLabel}
-              value={String(counts.all)}
-              sub={`${counts.exported + counts.pending} ${locale === "en" ? "active" : "進行中"}`}
-            />
-            <CanvasKPI
-              theme={theme}
-              label={copy.kpi.pendingLabel}
-              value={String(counts.pending)}
-              sub={`${formatMinor(pendingAmount, currency)} ${copy.kpi.pendingAmount}`}
-              deltaTone={counts.pending > 0 ? "down" : "up"}
-              delta={
-                counts.pending >= PENDING_BACKLOG_WARN_THRESHOLD
-                  ? locale === "en"
-                    ? "backlog"
-                    : "積壓"
-                  : locale === "en"
-                    ? "ok"
-                    : "正常"
-              }
-            />
-            <CanvasKPI
-              theme={theme}
-              label={copy.kpi.exportedLabel}
-              value={String(counts.exported)}
-              sub={
-                stuckExportedCount > 0
-                  ? locale === "en"
-                    ? `${stuckExportedCount} stuck >${EXPORT_STUCK_HOURS}h`
-                    : `${stuckExportedCount} 筆超過 ${EXPORT_STUCK_HOURS}h`
-                  : locale === "en"
-                    ? "all within SLA"
-                    : "皆在 SLA 內"
-              }
-            />
-            <CanvasKPI
-              theme={theme}
-              label={copy.kpi.settledLabel}
-              value={String(counts.done)}
-              sub={`${formatMinor(settledAmount, currency)} ${copy.kpi.settledAmount}`}
-            />
-          </div>
-
-          <CanvasCard
-            theme={theme}
-            title={copy.filtersTitle}
-            subtitle={copy.filtersSubtitle}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: 12,
-                alignItems: "end",
-              }}
-            >
-              <CanvasField theme={theme} label={copy.scopeLabel}>
-                <input
-                  value={scopeFilter}
-                  onChange={(event) => setScopeFilter(event.target.value)}
-                  placeholder={copy.scopePlaceholder}
-                  style={nativeControlStyle(theme, { mono: true })}
-                />
-              </CanvasField>
-              <CanvasField theme={theme} label={copy.periodLabel}>
-                <input
-                  value={periodFilter}
-                  onChange={(event) => setPeriodFilter(event.target.value)}
-                  placeholder={copy.periodPlaceholder}
-                  style={nativeControlStyle(theme, { mono: true })}
-                />
-              </CanvasField>
-              <div style={{ display: "flex", gap: 8 }}>
-                <CanvasBtn
-                  theme={theme}
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setScopeFilter("");
-                    setPeriodFilter("");
-                  }}
-                >
-                  {copy.resetFilters}
-                </CanvasBtn>
-              </div>
-            </div>
-            <p
-              style={{
-                marginTop: 10,
-                color: theme.textMuted,
-                fontSize: 11.5,
-                lineHeight: 1.5,
-              }}
-            >
-              {copy.filtersHint}
-            </p>
-          </CanvasCard>
-
           <CanvasCard
             theme={theme}
             title={copy.pageTitle}
             subtitle={`${filteredRows.length} / ${rows.length}`}
             padding={0}
           >
+            <div
+              style={{ padding: 16, borderBottom: `1px solid ${theme.border}` }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                  gap: 12,
+                  alignItems: "end",
+                }}
+              >
+                <CanvasField theme={theme} label={copy.scopeLabel}>
+                  <input
+                    value={scopeFilter}
+                    onChange={(event) => setScopeFilter(event.target.value)}
+                    placeholder={copy.scopePlaceholder}
+                    style={nativeControlStyle(theme, { mono: true })}
+                  />
+                </CanvasField>
+                <CanvasField theme={theme} label={copy.periodLabel}>
+                  <input
+                    value={periodFilter}
+                    onChange={(event) => setPeriodFilter(event.target.value)}
+                    placeholder={copy.periodPlaceholder}
+                    style={nativeControlStyle(theme, { mono: true })}
+                  />
+                </CanvasField>
+                <CanvasField
+                  theme={theme}
+                  label={locale === "en" ? "Exact state" : "狀態篩選"}
+                >
+                  <select
+                    value={stateFilter}
+                    onChange={(event) =>
+                      setStateFilter(
+                        isReimbursementState(event.target.value)
+                          ? event.target.value
+                          : "",
+                      )
+                    }
+                    style={nativeControlStyle(theme, { mono: true })}
+                  >
+                    <option value="">
+                      {locale === "en" ? "All states" : "全部狀態"}
+                    </option>
+                    {REIMBURSEMENT_STATES.map((state) => (
+                      <option key={state} value={state}>
+                        {copy.state[state]}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setTab("all");
+                      setStateFilter("");
+                      setScopeFilter("");
+                      setPeriodFilter("");
+                    }}
+                  >
+                    {copy.resetFilters}
+                  </CanvasBtn>
+                </div>
+              </div>
+              <p
+                style={{
+                  margin: "10px 0 0",
+                  color: theme.textMuted,
+                  fontSize: 11.5,
+                  lineHeight: 1.5,
+                }}
+              >
+                {copy.filtersHint}
+              </p>
+            </div>
             {filteredRows.length > 0 ? (
               <CanvasTable
                 theme={theme}
@@ -1373,6 +1524,7 @@ export default function ReimbursementBatchQueuePage() {
                 reason={emptyReason}
                 onReset={() => {
                   setTab("all");
+                  setStateFilter("");
                   setScopeFilter("");
                   setPeriodFilter("");
                 }}
@@ -1380,59 +1532,6 @@ export default function ReimbursementBatchQueuePage() {
                 locale={locale}
               />
             )}
-          </CanvasCard>
-
-          <CanvasCard
-            theme={theme}
-            title={locale === "en" ? "Operating reference" : "操作說明"}
-            subtitle={
-              locale === "en"
-                ? "Decision points & cross-app linkage (per packet §5.12)"
-                : "決策點 + 跨應用連結 (依 packet §5.12)"
-            }
-          >
-            <CanvasDL
-              theme={theme}
-              cols={1}
-              items={[
-                {
-                  k: locale === "en" ? "Refresh tier" : "Refresh tier",
-                  v: `T4 medium_slow · ${refreshSeconds}s · ${freshnessLabel}`,
-                  mono: true,
-                },
-                {
-                  k: locale === "en" ? "Approval gate" : "核准閘",
-                  v:
-                    locale === "en"
-                      ? "approve is high-risk → modal confirm + required reason (Q-ADM12)"
-                      : "approve 為 high-risk，需 modal + 必填理由 (Q-ADM12)",
-                },
-                {
-                  k: locale === "en" ? "Paid gate" : "已付閘",
-                  v:
-                    locale === "en"
-                      ? "mark_paid requires confirmation that the external remit landed before flipping state"
-                      : "mark_paid 需確認外部匯款落地後再切狀態",
-                },
-                {
-                  k:
-                    locale === "en"
-                      ? "Empty-state taxonomy"
-                      : "Empty-state 6 種",
-                  v: REIMBURSEMENT_STATES.length
-                    ? "no_data, not_provisioned, fetch_failed, permission_denied, external_unavailable, filtered_empty"
-                    : "—",
-                  mono: true,
-                },
-                {
-                  k: locale === "en" ? "Cross-app" : "跨應用",
-                  v:
-                    locale === "en"
-                      ? "ops mirror at /revenue (new tab) · audit deep link via action receipt"
-                      : "ops mirror /revenue (新分頁) · 動作 receipt 帶 audit 連結",
-                },
-              ]}
-            />
           </CanvasCard>
         </div>
 
