@@ -278,6 +278,19 @@ function addDays(value: string, days: number) {
   return parsed.toISOString();
 }
 
+function parseArtifactExpiry(artifactUrl: string | null) {
+  if (!artifactUrl) return null;
+
+  try {
+    const parsed = new URL(artifactUrl);
+    const expiresAt = parsed.searchParams.get("expires_at");
+    if (!expiresAt) return null;
+    return Number.isFinite(Date.parse(expiresAt)) ? expiresAt : null;
+  } catch {
+    return null;
+  }
+}
+
 function deriveInvoiceStatus(invoice: TenantInvoiceRecord) {
   if (
     invoice.status === "issued" &&
@@ -337,11 +350,13 @@ function buildInvoiceDeepLinks(
 }
 
 function normalizeInvoice(invoice: TenantInvoiceRecord): InvoiceViewRecord {
+  const expiresAt = parseArtifactExpiry(invoice.artifactUrl);
+
   return {
     ...invoice,
     statusView: deriveInvoiceStatus(invoice),
     dueDate: invoice.status === "paid" ? null : addDays(invoice.periodEnd, 14),
-    expiresAt: null,
+    expiresAt,
     availableActions: buildInvoiceActions(invoice),
     deepLinks: buildInvoiceDeepLinks(invoice),
   };
@@ -589,6 +604,40 @@ function formatStatusLabel(status: InvoiceViewRecord["statusView"]) {
   return status === "overdue" ? "overdue" : status;
 }
 
+function getArtifactAction(
+  invoice: InvoiceViewRecord | null,
+  actionName: string,
+): InvoiceActionView | null {
+  return (
+    invoice?.availableActions.find((action) => action.action === actionName) ??
+    null
+  );
+}
+
+function renderActionLink(action: InvoiceActionView) {
+  if (action.enabled && action.href) {
+    return (
+      <Link
+        key={action.action}
+        href={action.href}
+        style={{
+          ...actionChipStyle,
+          color: th.accent,
+          textDecoration: "none",
+        }}
+      >
+        {describeAction(action)}
+      </Link>
+    );
+  }
+
+  return (
+    <span key={action.action} style={{ ...actionChipStyle, opacity: 0.7 }}>
+      {describeAction(action)}
+    </span>
+  );
+}
+
 export default async function InvoicesPage({
   searchParams,
 }: {
@@ -638,6 +687,10 @@ export default async function InvoicesPage({
     allInvoices.find((invoice) => invoice.invoiceId === filters.invoiceId) ??
     allInvoices[0] ??
     null;
+  const selectedDownloadAction = getArtifactAction(
+    selectedInvoice,
+    "download_artifact",
+  );
 
   const rows: InvoiceRow[] = filteredInvoices.map((invoice) => ({
     ...invoice,
@@ -719,6 +772,34 @@ export default async function InvoicesPage({
       mono: true,
       r: (row) => formatDateInput(row.dueDate) || "—",
     },
+    {
+      h: "ARTIFACT",
+      w: 220,
+      mono: true,
+      r: (row) =>
+        row.artifactUrl ? (
+          <Link href={row.artifactUrl} style={inlineLinkStyle}>
+            signed url
+          </Link>
+        ) : (
+          "unavailable"
+        ),
+    },
+    {
+      h: "EXPIRES",
+      w: 120,
+      mono: true,
+      r: (row) => formatDateInput(row.expiresAt) || "—",
+    },
+    {
+      h: "ACTIONS",
+      w: 260,
+      r: (row) => (
+        <div style={actionListStyle}>
+          {row.availableActions.map((action) => renderActionLink(action))}
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -732,14 +813,23 @@ export default async function InvoicesPage({
             <CanvasBtn theme={th} size="sm" icon="filter" disabled>
               Refresh tier {REFRESH_TIER}
             </CanvasBtn>
-            <CanvasBtn
-              theme={th}
-              size="sm"
-              icon="export"
-              disabled={!selectedInvoice?.artifactUrl}
-            >
-              Signed artifact
-            </CanvasBtn>
+            {selectedDownloadAction?.enabled && selectedDownloadAction.href ? (
+              <Link
+                href={selectedDownloadAction.href}
+                style={{
+                  ...actionChipStyle,
+                  minHeight: 32,
+                  color: th.accent,
+                  textDecoration: "none",
+                }}
+              >
+                {selectedDownloadAction.label}
+              </Link>
+            ) : (
+              <CanvasBtn theme={th} size="sm" icon="export" disabled>
+                Signed artifact
+              </CanvasBtn>
+            )}
           </>
         }
       />
@@ -768,6 +858,7 @@ export default async function InvoicesPage({
           }
         >
           <form action="/invoices" method="get" style={controlCardStyle}>
+            <input type="hidden" name="invoiceId" value={filters.invoiceId} />
             <div style={fieldStackStyle}>
               <label htmlFor="invoice-query" style={fieldLabelStyle}>
                 Search by invoice id
@@ -994,6 +1085,17 @@ export default async function InvoicesPage({
                     />
                   ) : null}
 
+                  {selectedInvoice.expiresAt &&
+                  isIsoPast(selectedInvoice.expiresAt) ? (
+                    <CanvasBanner
+                      theme={th}
+                      tone="danger"
+                      icon="warn"
+                      title="Artifact expired"
+                      body="The signed artifact URL is present, but its controlled-download expiry has already passed."
+                    />
+                  ) : null}
+
                   <dl
                     style={{
                       margin: 0,
@@ -1017,6 +1119,19 @@ export default async function InvoicesPage({
                     <dd style={{ margin: 0 }}>
                       {formatDateInput(selectedInvoice.expiresAt) || "—"}
                     </dd>
+                    <dt style={fieldLabelStyle}>Artifact URL</dt>
+                    <dd style={{ margin: 0, overflowWrap: "anywhere" }}>
+                      {selectedInvoice.artifactUrl ? (
+                        <Link
+                          href={selectedInvoice.artifactUrl}
+                          style={inlineLinkStyle}
+                        >
+                          {selectedInvoice.artifactUrl}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
+                    </dd>
                     <dt style={fieldLabelStyle}>Pricing snapshot</dt>
                     <dd style={{ margin: 0, fontFamily: th.monoFamily }}>
                       {selectedInvoice.pricingVersionSnapshot}
@@ -1027,26 +1142,7 @@ export default async function InvoicesPage({
                     <div style={fieldLabelStyle}>Available actions</div>
                     <div style={actionListStyle}>
                       {selectedInvoice.availableActions.map((action) =>
-                        action.enabled && action.href ? (
-                          <Link
-                            key={action.action}
-                            href={action.href}
-                            style={{
-                              ...actionChipStyle,
-                              color: th.accent,
-                              textDecoration: "none",
-                            }}
-                          >
-                            {describeAction(action)}
-                          </Link>
-                        ) : (
-                          <span
-                            key={action.action}
-                            style={{ ...actionChipStyle, opacity: 0.7 }}
-                          >
-                            {describeAction(action)}
-                          </span>
-                        ),
+                        renderActionLink(action),
                       )}
                     </div>
                   </div>
