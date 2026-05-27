@@ -45,12 +45,15 @@ import {
 } from "@/lib/completion-proof";
 import {
   acceptForwardedDriverOffer,
+  dismissDriverSosAcknowledgement,
+  getDriverSosAcknowledgement,
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
   rejectForwardedDriverOffer,
   replayPendingDriverTaskCompletion,
   submitDriverTaskCompletion,
+  type DriverSosAcknowledgement,
 } from "@/lib/api-client";
 import {
   accumulateTripDistanceKm,
@@ -826,12 +829,29 @@ export default function TripScreen() {
     string | null
   >(null);
   const [trackingRetryKey, setTrackingRetryKey] = useState(0);
+  const [sosAcknowledgement, setSosAcknowledgement] =
+    useState<DriverSosAcknowledgement | null>(null);
   const lastTrackedCoordinateRef = useRef<TripCoordinate | null>(null);
   const tripStartTimeRef = useRef<number | null>(null);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
   const router = useRouter();
+
+  useEffect(() => {
+    let active = true;
+    void getDriverSosAcknowledgement().then((acknowledgement) => {
+      if (!active || acknowledgement?.dismissedAt) {
+        return;
+      }
+
+      setSosAcknowledgement(acknowledgement);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const proofRequirements = getCompletionProofRequirements(orderDetail);
   const proofRequirementsUnavailable = Boolean(
@@ -1610,6 +1630,46 @@ export default function TripScreen() {
           }
           title="資料同步異常"
           body={error}
+        />
+      ) : null}
+
+      {sosAcknowledgement ? (
+        <Banner
+          theme={driverCanvasTheme}
+          tone={sosAcknowledgement.status === "queued" ? "warn" : "danger"}
+          icon={
+            <Ionicons
+              name={
+                sosAcknowledgement.status === "queued"
+                  ? "cloud-offline-outline"
+                  : "warning-outline"
+              }
+              size={16}
+              color={
+                sosAcknowledgement.status === "queued"
+                  ? driverCanvasTheme.warn
+                  : driverCanvasTheme.danger
+              }
+            />
+          }
+          title={
+            sosAcknowledgement.status === "queued" ? "SOS 待重送" : "SOS 已送出"
+          }
+          body={sosAcknowledgement.message}
+          actions={
+            <Btn
+              theme={driverCanvasTheme}
+              variant="secondary"
+              size="sm"
+              onPress={() => {
+                void dismissDriverSosAcknowledgement().then(() =>
+                  setSosAcknowledgement(null),
+                );
+              }}
+            >
+              關閉
+            </Btn>
+          }
         />
       ) : null}
 

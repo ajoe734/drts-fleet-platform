@@ -35,10 +35,13 @@ import {
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
 import {
+  dismissDriverSosAcknowledgement,
+  getDriverSosAcknowledgement,
   getDriverClient,
   getDriverId,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
+  type DriverSosAcknowledgement,
 } from "@/lib/api-client";
 import {
   formatAmountNumber,
@@ -484,10 +487,7 @@ function PrimaryAlertCard({
     >
       <View style={styles.alertBodyRow}>
         <View
-          style={[
-            styles.alertIconWrap,
-            { backgroundColor: `${accent.fg}25` },
-          ]}
+          style={[styles.alertIconWrap, { backgroundColor: `${accent.fg}25` }]}
         >
           <Ionicons name={item.iconName} size={16} color={accent.fg} />
         </View>
@@ -525,7 +525,9 @@ function PlatformStatusSwitch({ enabled }: { enabled: boolean }) {
       <View
         style={[
           styles.platformSwitchThumb,
-          enabled ? styles.platformSwitchThumbOn : styles.platformSwitchThumbOff,
+          enabled
+            ? styles.platformSwitchThumbOn
+            : styles.platformSwitchThumbOff,
         ]}
       />
     </View>
@@ -549,10 +551,7 @@ function PlatformPresenceRow({
       style={({ pressed }) => [pressed ? styles.tilePressed : null]}
     >
       <View
-        style={[
-          styles.platformRow,
-          !isLast ? styles.platformRowBorder : null,
-        ]}
+        style={[styles.platformRow, !isLast ? styles.platformRowBorder : null]}
       >
         <View style={styles.platformRowCopy}>
           <Text style={styles.platformRowName}>{row.name}</Text>
@@ -641,6 +640,8 @@ export default function WorkspaceIndex() {
     useState<WorkspaceLoadResult>(INITIAL_WORKSPACE);
   const [loading, setLoading] = useState(false);
   const [refreshSeed, setRefreshSeed] = useState(0);
+  const [sosAcknowledgement, setSosAcknowledgement] =
+    useState<DriverSosAcknowledgement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -708,6 +709,21 @@ export default function WorkspaceIndex() {
       cancelled = true;
     };
   }, [provisioned, ready, refreshSeed]);
+
+  useEffect(() => {
+    let active = true;
+    void getDriverSosAcknowledgement().then((acknowledgement) => {
+      if (!active || acknowledgement?.dismissedAt) {
+        return;
+      }
+
+      setSosAcknowledgement(acknowledgement);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const navigate = (route: WorkspaceRoute) => () => router.push(route);
 
@@ -801,11 +817,7 @@ export default function WorkspaceIndex() {
       });
 
     return [ownedRow, ...externalRows];
-  }, [
-    externalPresences,
-    isDriverOnShift,
-    workspace.activeShift,
-  ]);
+  }, [externalPresences, isDriverOnShift, workspace.activeShift]);
 
   const onlinePlatformCount = useMemo(
     () => platformRows.filter((row) => row.enabled).length,
@@ -1093,6 +1105,33 @@ export default function WorkspaceIndex() {
           tone="warn"
           title="平台就緒狀態待確認"
           body={workspace.platformLoadError}
+        />
+      ) : null}
+
+      {sosAcknowledgement ? (
+        <Banner
+          theme={THEME}
+          tone={sosAcknowledgement.status === "queued" ? "warn" : "danger"}
+          title={
+            sosAcknowledgement.status === "queued"
+              ? "SOS 待重送"
+              : "SOS 處理提醒"
+          }
+          body={sosAcknowledgement.message}
+          actions={
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              onPress={() => {
+                void dismissDriverSosAcknowledgement().then(() =>
+                  setSosAcknowledgement(null),
+                );
+              }}
+            >
+              關閉
+            </Btn>
+          }
         />
       ) : null}
 

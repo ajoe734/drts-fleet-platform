@@ -1,32 +1,44 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
+  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
+  TextInput,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
-import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
-import type { DriverTaskRecord, UnifiedDriverTaskView } from "@drts/contracts";
+import {
+  PLATFORM_CODE_REGISTRY,
+  type DriverTaskRecord,
+  type EmptyReason,
+  type ResourceActionDescriptor,
+  type UnifiedDriverTaskView,
+} from "@drts/contracts";
 
-import { ActionButton } from "@/components/ui/ActionButton";
-import { AppScreen } from "@/components/ui/AppScreen";
-import { BottomActionBar } from "@/components/ui/BottomActionBar";
-import { confirmDangerAction } from "@/components/ui/confirm-danger-action";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { FormField } from "@/components/ui/FormField";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { PlatformBadge } from "@/components/ui/PlatformBadge";
-import { StatusChip } from "@/components/ui/StatusChip";
-import { Tokens } from "@/components/ui/tokens";
+import {
+  Banner,
+  Btn,
+  Card,
+  Field,
+  PageHeader,
+  Pill,
+  driverCanvasTheme,
+} from "@/components/canvas-primitives";
+import {
+  getDriverClient,
+  getPendingDriverIncidentSubmission,
+  replayPendingDriverIncidentSubmission,
+  saveDriverSosAcknowledgement,
+  submitDriverIncident,
+} from "@/lib/api-client";
 import {
   buildFallbackUnifiedDriverTaskView,
   isUnifiedTaskPlatformClosed,
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
-import { getDriverClient } from "@/lib/api-client";
 import {
   driverForwardedTaskStatusLabels,
   driverIncidentSituations,
@@ -42,11 +54,88 @@ type IncidentPlatformContext = {
   nativeStatus: string | null;
 };
 
+type IncidentEntry = "trip" | "cockpit" | "push";
+
+type IncidentSearchParams = {
+  emptyReason?: string | string[];
+  entry?: string | string[];
+};
+
 const SOS_SITUATIONS = driverIncidentSituations;
+const SOS_HOLD_DURATION_MS = 2000;
+const HOLD_PROGRESS_INTERVAL_MS = 50;
+const EMPTY_REASONS: EmptyReason[] = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "driver_not_eligible",
+  "filtered_empty",
+];
 
 type SosSituationId = (typeof SOS_SITUATIONS)[number]["id"];
 
-const SOS_LONG_PRESS_DELAY_MS = 800;
+const EMPTY_REASON_COPY: Record<
+  EmptyReason,
+  {
+    tone: "info" | "warn" | "danger";
+    icon: keyof typeof Ionicons.glyphMap;
+    title: string;
+    body: string;
+    actionLabel: string;
+  }
+> = {
+  no_data: {
+    tone: "info",
+    icon: "compass-outline",
+    title: "目前沒有額外事件上下文",
+    body: "你仍可送出一般安全事件；若稍後有行程或平台任務，系統會自動補上對應上下文。",
+    actionLabel: "返回行程",
+  },
+  not_provisioned: {
+    tone: "warn",
+    icon: "phone-portrait-outline",
+    title: "裝置尚未完成註冊",
+    body: "此裝置還沒有完整的司機綁定，暫時無法建立 SOS 事件。",
+    actionLabel: "回到註冊",
+  },
+  fetch_failed: {
+    tone: "danger",
+    icon: "cloud-offline-outline",
+    title: "SOS 畫面初始化失敗",
+    body: "目前無法讀取安全求援所需資料。請稍後重試，若持續失敗請通知派車台。",
+    actionLabel: "稍後重試",
+  },
+  permission_denied: {
+    tone: "warn",
+    icon: "lock-closed-outline",
+    title: "目前身分無法送出 SOS",
+    body: "裝置已登入，但目前權限不足以建立安全事件；請聯絡管理員確認司機權限。",
+    actionLabel: "返回工作台",
+  },
+  external_unavailable: {
+    tone: "warn",
+    icon: "warning-outline",
+    title: "外部平台上下文暫時不可用",
+    body: "外部平台狀態同步中斷，若需立即求援仍可送出一般 SOS，安全官稍後補查平台資訊。",
+    actionLabel: "仍返回行程",
+  },
+  driver_not_eligible: {
+    tone: "warn",
+    icon: "ban-outline",
+    title: "司機目前不在可接單資格內",
+    body: "這代表你目前不會收到新任務；若此狀態不符合預期，請聯絡派車台確認資格或暫停原因。",
+    actionLabel: "查看工作台",
+  },
+  filtered_empty: {
+    tone: "info",
+    icon: "filter-outline",
+    title: "目前條件下沒有可附加資料",
+    body: "既有條件沒有找到可綁定的行程或平台上下文，仍可建立不含訂單的安全事件。",
+    actionLabel: "返回行程",
+  },
+};
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -196,115 +285,285 @@ function pickForwardedTaskContext(
   return buildIncidentPlatformContext(preferredForwardedTask);
 }
 
-async function resolveIncidentPlatformContext(): Promise<IncidentPlatformContext | null> {
+async function resolveIncidentPlatformContext(): Promise<{
+  platformContext: IncidentPlatformContext | null;
+  externalUnavailable: boolean;
+}> {
   const client = getDriverClient();
 
   try {
     const unifiedTasks = await client.listUnifiedDriverTasks();
-    return pickForwardedTaskContext(unifiedTasks);
+    return {
+      platformContext: pickForwardedTaskContext(unifiedTasks),
+      externalUnavailable: false,
+    };
   } catch {
     try {
       const legacyTasks = await client.listDriverTasks();
-      return pickForwardedTaskContext(
-        legacyTasks.map((task: DriverTaskRecord) =>
-          buildFallbackUnifiedDriverTaskView(task),
+      return {
+        platformContext: pickForwardedTaskContext(
+          legacyTasks.map((task: DriverTaskRecord) =>
+            buildFallbackUnifiedDriverTaskView(task),
+          ),
         ),
-      );
+        externalUnavailable: true,
+      };
     } catch {
-      return null;
+      return {
+        platformContext: null,
+        externalUnavailable: true,
+      };
     }
   }
 }
 
-function SectionCard({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: ReactNode;
-}) {
-  return (
-    <View style={styles.sectionCard}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {subtitle ? (
-          <Text style={styles.sectionSubtitle}>{subtitle}</Text>
-        ) : null}
-      </View>
-      {children}
-    </View>
-  );
+function normalizeParam(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+
+  return value;
+}
+
+function parseEmptyReason(raw: string | undefined): EmptyReason | null {
+  if (!raw) {
+    return null;
+  }
+
+  return EMPTY_REASONS.includes(raw as EmptyReason)
+    ? (raw as EmptyReason)
+    : null;
+}
+
+function parseEntry(raw: string | undefined): IncidentEntry {
+  if (raw === "cockpit" || raw === "push") {
+    return raw;
+  }
+
+  return "trip";
+}
+
+function getExitRoute(entry: IncidentEntry): "/" | "/trip" | "/onboarding" {
+  if (entry === "cockpit") {
+    return "/";
+  }
+
+  return "/trip";
+}
+
+function getEmptyStateExitRoute(reason: EmptyReason, entry: IncidentEntry) {
+  if (reason === "not_provisioned") {
+    return "/onboarding" as const;
+  }
+
+  return getExitRoute(entry);
+}
+
+function buildAvailableActions(params: {
+  submitting: boolean;
+  readyToSubmit: boolean;
+  replayQueued: boolean;
+  entry: IncidentEntry;
+  emptyReason: EmptyReason | null;
+}): ResourceActionDescriptor[] {
+  const primaryAction: ResourceActionDescriptor = {
+    action: params.replayQueued ? "retry_submit" : "submit_sos",
+    enabled: params.readyToSubmit,
+    disabledReasonCode: params.emptyReason
+      ? `empty_reason:${params.emptyReason}`
+      : params.submitting
+        ? "submit_in_progress"
+        : undefined,
+    riskLevel: "high",
+  };
+
+  const cancelAction: ResourceActionDescriptor = {
+    action: params.entry === "cockpit" ? "return_cockpit" : "return_trip",
+    enabled: !params.submitting,
+    disabledReasonCode: params.submitting ? "submit_in_progress" : undefined,
+    riskLevel: "low",
+  };
+
+  return [primaryAction, cancelAction];
 }
 
 export default function IncidentScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<IncidentSearchParams>();
+  const entry = parseEntry(normalizeParam(params.entry));
+  const forcedEmptyReason = parseEmptyReason(
+    normalizeParam(params.emptyReason),
+  );
   const [details, setDetails] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [selectedSituation, setSelectedSituation] =
+    useState<SosSituationId | null>(null);
   const [incidentsEnabled, setIncidentsEnabled] = useState<boolean | null>(
     null,
   );
-  const [selectedSituation, setSelectedSituation] =
-    useState<SosSituationId | null>(null);
   const [incidentContextPreview, setIncidentContextPreview] =
     useState<IncidentPlatformContext | null>(null);
   const [incidentContextReady, setIncidentContextReady] = useState(false);
-  const [longPressHintVisible, setLongPressHintVisible] = useState(false);
+  const [externalContextUnavailable, setExternalContextUnavailable] =
+    useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [replayingPending, setReplayingPending] = useState(false);
+  const [replayQueued, setReplayQueued] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
-  const router = useRouter();
+  const [holdProgress, setHoldProgress] = useState(0);
+  const [holdActive, setHoldActive] = useState(false);
+  const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdStartedAtRef = useRef<number | null>(null);
+  const holdTriggeredRef = useRef(false);
+
+  const emptyReason =
+    forcedEmptyReason ??
+    (incidentsEnabled === false ? "permission_denied" : null);
+
+  const availableActions = useMemo(
+    () =>
+      buildAvailableActions({
+        submitting: submitting || replayingPending,
+        readyToSubmit:
+          incidentsEnabled === true &&
+          !submitting &&
+          !replayingPending &&
+          emptyReason == null,
+        replayQueued,
+        entry,
+        emptyReason,
+      }),
+    [
+      emptyReason,
+      entry,
+      incidentsEnabled,
+      replayQueued,
+      replayingPending,
+      submitting,
+    ],
+  );
+
+  const primaryAction = availableActions[0];
+  const cancelAction = availableActions[1];
 
   useEffect(() => {
-    const client = getDriverClient();
-    client
-      .isFeatureEnabled("driver-app.incidents")
-      .then((enabled) => setIncidentsEnabled(enabled))
-      .catch(() => setIncidentsEnabled(true));
-  }, []);
+    let active = true;
 
-  useEffect(() => {
-    if (incidentsEnabled !== true) {
-      return;
+    async function load() {
+      const client = getDriverClient();
+      try {
+        const enabled = await client.isFeatureEnabled("driver-app.incidents");
+        if (!active) {
+          return;
+        }
+        setIncidentsEnabled(enabled);
+        if (!enabled) {
+          setIncidentContextReady(true);
+          return;
+        }
+
+        const pending = await getPendingDriverIncidentSubmission();
+        if (!active) {
+          return;
+        }
+        if (pending) {
+          setReplayQueued(true);
+          setReplayingPending(true);
+          try {
+            const replayedIncident =
+              await replayPendingDriverIncidentSubmission();
+            if (!active || !replayedIncident) {
+              return;
+            }
+            await saveDriverSosAcknowledgement({
+              incidentId: replayedIncident.incidentId,
+              createdAt: new Date().toISOString(),
+              relatedOrderId: replayedIncident.relatedOrderId,
+              status: "submitted",
+              message:
+                "先前排入重送的 SOS 已成功送達，安全官與派車台已收到通知。",
+              dismissedAt: null,
+            });
+            router.replace("/trip");
+            return;
+          } catch (error: unknown) {
+            if (!active) {
+              return;
+            }
+            setSubmissionError(
+              `待重送 SOS 仍未送達：${getErrorMessage(error)}`,
+            );
+          } finally {
+            if (active) {
+              setReplayingPending(false);
+            }
+          }
+        }
+
+        const resolvedContext = await resolveIncidentPlatformContext();
+        if (!active) {
+          return;
+        }
+        setIncidentContextPreview(resolvedContext.platformContext);
+        setExternalContextUnavailable(resolvedContext.externalUnavailable);
+        setIncidentContextReady(true);
+      } catch (error: unknown) {
+        if (!active) {
+          return;
+        }
+        setIncidentsEnabled(false);
+        setSubmissionError(getErrorMessage(error));
+        setIncidentContextReady(true);
+      }
     }
 
-    let active = true;
-    setIncidentContextReady(false);
-    void resolveIncidentPlatformContext().then((platformContext) => {
-      if (!active) {
-        return;
-      }
-
-      setIncidentContextPreview(platformContext);
-      setIncidentContextReady(true);
-    });
+    void load();
 
     return () => {
       active = false;
+      if (holdIntervalRef.current) {
+        clearInterval(holdIntervalRef.current);
+      }
     };
-  }, [incidentsEnabled]);
+  }, [router]);
 
-  const handleBackToTrip = () => {
-    if (submitting) {
-      return;
+  function stopHold(reset = true) {
+    if (holdIntervalRef.current) {
+      clearInterval(holdIntervalRef.current);
+      holdIntervalRef.current = null;
     }
+    holdStartedAtRef.current = null;
+    setHoldActive(false);
+    if (reset) {
+      setHoldProgress(0);
+    }
+  }
 
-    router.replace("/trip");
+  const handleClose = () => {
+    stopHold();
+    router.replace(getExitRoute(entry));
   };
 
-  const submitIncident = async () => {
-    if (submitting) {
+  const handleEmptyStateAction = () => {
+    router.replace(getEmptyStateExitRoute(emptyReason!, entry));
+  };
+
+  const executeSubmit = async () => {
+    if (submitting || replayingPending || incidentsEnabled !== true) {
       return;
     }
 
+    stopHold(false);
     setSubmitting(true);
     setSubmissionError(null);
-    setLongPressHintVisible(false);
-    const client = getDriverClient();
     try {
       const latestPlatformContext = await resolveIncidentPlatformContext();
-      const platformContext = latestPlatformContext ?? incidentContextPreview;
+      const platformContext =
+        latestPlatformContext.platformContext ?? incidentContextPreview;
       setIncidentContextPreview(platformContext);
-      setIncidentContextReady(true);
-      const created = await client.createIncident({
+      setExternalContextUnavailable(latestPlatformContext.externalUnavailable);
+      const created = await submitDriverIncident({
         title: "司機 SOS 緊急通報",
         description: buildIncidentDescription(
           details,
@@ -317,550 +576,697 @@ export default function IncidentScreen() {
           ? { relatedOrderId: platformContext.mirrorOrderId }
           : {}),
         reportedBy: "driver",
+        occurredAt: new Date().toISOString(),
       });
-      if (created?.incidentId) {
-        await client.updateIncident(created.incidentId, {
-          escalationTarget: "safety_officer",
-        });
-      }
-      setDetails("");
-      setSelectedSituation(null);
-      setSubmissionError(null);
+      await saveDriverSosAcknowledgement({
+        incidentId: created.incidentId,
+        createdAt: new Date().toISOString(),
+        relatedOrderId: created.relatedOrderId,
+        status: "submitted",
+        message: "SOS 已送出，安全官與派車台會收到持續顯示的處理提醒。",
+        dismissedAt: null,
+      });
       router.replace("/trip");
     } catch (error: unknown) {
-      setSubmissionError(getErrorMessage(error));
+      const message = getErrorMessage(error);
+      setReplayQueued(true);
+      setSubmissionError(`SOS 未即時送達，已排入重送：${message}`);
+      await saveDriverSosAcknowledgement({
+        incidentId: `queued-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        relatedOrderId: incidentContextPreview?.mirrorOrderId ?? null,
+        status: "queued",
+        message:
+          "SOS 已排入重送佇列。恢復連線後重新開啟此頁，系統會自動再送一次。",
+        dismissedAt: null,
+      });
     } finally {
       setSubmitting(false);
+      stopHold();
     }
   };
 
-  const handleSubmitPress = () => {
-    if (submitting) {
+  const handleHoldStart = () => {
+    if (!primaryAction.enabled || submitting || replayingPending) {
       return;
     }
 
-    setSubmissionError(null);
-    confirmDangerAction({
-      title: "確認送出 SOS",
-      message:
-        "送出後，營運與安全主管會立即收到重大安全警示。若尚未準備好，請先取消並補充現場資訊。",
-      confirmLabel: "確認送出",
-      cancelLabel: "取消",
-      onConfirm: () => {
-        void submitIncident();
-      },
-    });
+    stopHold(false);
+    holdTriggeredRef.current = false;
+    holdStartedAtRef.current = Date.now();
+    setHoldActive(true);
+    setHoldProgress(0);
+    holdIntervalRef.current = setInterval(() => {
+      if (holdStartedAtRef.current == null) {
+        return;
+      }
+
+      const elapsed = Date.now() - holdStartedAtRef.current;
+      const nextProgress = Math.min(elapsed / SOS_HOLD_DURATION_MS, 1);
+      setHoldProgress(nextProgress);
+
+      if (nextProgress >= 1 && !holdTriggeredRef.current) {
+        holdTriggeredRef.current = true;
+        void executeSubmit();
+      }
+    }, HOLD_PROGRESS_INTERVAL_MS);
   };
 
-  const handleSituationPress = (situationId: SosSituationId) => {
-    if (submitting) {
+  const handleHoldEnd = () => {
+    if (holdTriggeredRef.current || submitting) {
       return;
     }
 
-    setSelectedSituation(situationId);
-    setLongPressHintVisible(false);
+    stopHold();
   };
 
-  const handleLongPressCtaPress = () => {
-    if (submitting) {
-      return;
-    }
-
-    setLongPressHintVisible(true);
-  };
-
-  const handleLongPressCtaConfirm = () => {
-    if (submitting) {
-      return;
-    }
-
-    setLongPressHintVisible(false);
-    handleSubmitPress();
-  };
-
+  const holdProgressPercent = Math.round(holdProgress * 100);
   const selectedSituationLabel = getSituationLabel(selectedSituation);
-  const orderContextSubtitle = incidentContextPreview
-    ? "平台與訂單資訊會跟著 SOS 一起送到安全事件。"
-    : "若目前沒有外部平台任務，SOS 仍會以一般安全事件建立。";
-
-  if (incidentsEnabled === null) {
-    return (
-      <AppScreen scrollable={false} backgroundColor={Tokens.colors.appBg}>
-        <PageHeader
-          title={driverStrings.incident.title}
-          subtitle={driverStrings.incident.subtitle}
-          rightElement={
-            <StatusChip
-              label={driverStrings.incident.loadingTitle}
-              variant="info"
-            />
-          }
-        />
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={Tokens.colors.primary} />
-          <Text style={styles.loadingLabel}>載入 SOS 流程中…</Text>
-        </View>
-      </AppScreen>
-    );
-  }
-
-  if (!incidentsEnabled) {
-    return (
-      <AppScreen scrollable={false} backgroundColor={Tokens.colors.appBg}>
-        <PageHeader
-          title={driverStrings.incident.title}
-          subtitle={driverStrings.incident.subtitle}
-          rightElement={
-            <StatusChip
-              label={driverStrings.incident.disabledTitle}
-              variant="warning"
-            />
-          }
-        />
-        <EmptyState
-          title="SOS 緊急通報暫停提供"
-          description="此功能目前未啟用，請返回行程或稍後再試。"
-          icon="warning-outline"
-          actionTitle="返回行程"
-          onAction={handleBackToTrip}
-          style={styles.fillState}
-        />
-      </AppScreen>
-    );
-  }
+  const contextSubtitle = incidentContextPreview
+    ? "平台 code、mirror order、外部單號與 native status 會一併寫進 SOS 描述。"
+    : "若目前不是外部平台任務，SOS 仍會建立成一般安全事件。";
 
   return (
-    <View style={styles.screen}>
-      <AppScreen backgroundColor={Tokens.colors.appBg}>
+    <View style={styles.overlay}>
+      <Pressable style={styles.backdrop} onPress={handleClose} />
+      <View style={styles.sheet}>
+        <View style={styles.sheetHandleWrap}>
+          <View style={styles.sheetHandle} />
+        </View>
+
         <PageHeader
+          theme={driverCanvasTheme}
           title={driverStrings.incident.title}
-          subtitle={driverStrings.incident.subtitle}
-          rightElement={
-            <StatusChip
-              label={driverStrings.incident.urgentTitle}
-              variant="danger"
-              strong
-              dot
-            />
+          subtitle="高風險流程：開啟 sheet 後需按住 2 秒才會送出"
+          actions={
+            <Btn
+              theme={driverCanvasTheme}
+              variant="ghost"
+              size="sm"
+              onPress={handleClose}
+            >
+              關閉
+            </Btn>
           }
         />
 
-        <View style={styles.content}>
-          <View style={styles.heroCard}>
-            <View style={styles.heroIconBadge}>
-              <Text style={styles.heroIconLabel}>SOS</Text>
-            </View>
-            <View style={styles.heroCopy}>
-              <Text style={styles.heroEyebrow}>
-                {driverStrings.incident.heroEyebrow}
-              </Text>
-              <Text style={styles.heroTitle}>
-                {driverStrings.incident.heroTitle}
-              </Text>
-              <Text style={styles.heroBody}>
-                送出後會建立重大安全事件，並立刻升級給派車台與安全主管優先處理。
-              </Text>
-            </View>
-          </View>
-
-          {submissionError ? (
-            <ErrorBanner message={`送出失敗：${submissionError}`} />
-          ) : null}
-
-          <SectionCard
-            title={driverStrings.incident.sections.situation}
-            subtitle="先標記事件類型，安全官收到後可更快分流。"
-          >
-            <View style={styles.situationGrid}>
-              {SOS_SITUATIONS.map((situation) => {
-                const selected = selectedSituation === situation.id;
-
-                return (
-                  <ActionButton
-                    key={situation.id}
-                    title={situation.label}
-                    onPress={() => handleSituationPress(situation.id)}
-                    variant="secondary"
-                    disabled={submitting}
-                    style={[
-                      styles.situationButton,
-                      selected
-                        ? styles.situationButtonSelected
-                        : styles.situationButtonIdle,
-                    ]}
-                    textStyle={[
-                      styles.situationButtonText,
-                      selected ? styles.situationButtonTextSelected : null,
-                    ]}
-                  />
-                );
-              })}
-            </View>
-          </SectionCard>
-
-          <SectionCard
-            title={driverStrings.incident.sections.context}
-            subtitle={orderContextSubtitle}
-          >
-            {incidentContextReady ? (
-              incidentContextPreview ? (
-                <View style={styles.contextCard}>
-                  <View style={styles.contextBadgeRow}>
-                    <PlatformBadge
-                      code={incidentContextPreview.platformCode}
-                      name={incidentContextPreview.platformLabel}
-                      forwarded
-                      size="sm"
-                    />
-                    <StatusChip label="外部訂單" variant="forwarded" />
-                  </View>
-                  <Text style={styles.contextTitle}>
-                    {incidentContextPreview.mirrorOrderId}
-                  </Text>
-                  <Text style={styles.contextBody}>
-                    平台訂單上下文會隨 SOS
-                    一起送出，安全官可直接對照鏡像與外部單號。
-                  </Text>
-                  <View style={styles.contextMetaRow}>
-                    <Text style={styles.contextMetaLabel}>外部訂單</Text>
-                    <Text style={styles.contextMetaValue}>
-                      {incidentContextPreview.externalOrderId ?? "未提供"}
-                    </Text>
-                  </View>
-                  {incidentContextPreview.nativeStatus ? (
-                    <View style={styles.contextMetaRow}>
-                      <Text style={styles.contextMetaLabel}>平台狀態</Text>
-                      <Text style={styles.contextMetaValue}>
-                        {formatPlatformStatusLabel(
-                          incidentContextPreview.nativeStatus,
-                        ) ?? incidentContextPreview.nativeStatus}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-              ) : (
-                <View style={styles.contextCard}>
-                  <View style={styles.contextBadgeRow}>
-                    <PlatformBadge code="DR" name="DRTS" size="sm" />
-                    <StatusChip label="一般安全事件" variant="owned" />
-                  </View>
-                  <Text style={styles.contextTitle}>
-                    目前未偵測到外部平台訂單
-                  </Text>
-                  <Text style={styles.contextBody}>
-                    若此刻是自營任務或非訂單情境，SOS
-                    仍會照常建立，並在成功後返回行程頁。
-                  </Text>
-                </View>
-              )
-            ) : (
-              <View style={styles.contextLoadingRow}>
-                <ActivityIndicator size="small" color={Tokens.colors.primary} />
-                <Text style={styles.contextLoadingLabel}>
-                  正在檢查目前訂單情境…
-                </Text>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <Card theme={driverCanvasTheme} padding={18} style={styles.heroCard}>
+            <View style={styles.heroRow}>
+              <View style={styles.heroIconWrap}>
+                <Ionicons name="warning-outline" size={22} color="#FFFFFF" />
               </View>
-            )}
-          </SectionCard>
+              <View style={styles.heroCopy}>
+                <Text style={styles.heroTitle}>緊急求援</Text>
+                <Text style={styles.heroBody}>
+                  送出後將立即通知安全官與派車台，並在 `/trip` 與工作台保留 SOS
+                  處理提醒，直到司機手動關閉或事件結案。
+                </Text>
+                <View style={styles.heroMetaRow}>
+                  <Pill theme={driverCanvasTheme} tone="danger" dot>
+                    press-and-hold 2s
+                  </Pill>
+                  <Pill theme={driverCanvasTheme} tone="accent">
+                    entry:{entry}
+                  </Pill>
+                </View>
+              </View>
+            </View>
+          </Card>
 
-          <SectionCard
-            title={driverStrings.incident.sections.details}
-            subtitle="可補充目前位置、乘客狀況或即時風險。"
-          >
-            <FormField
-              label="現場補充（選填）"
-              value={details}
-              onChangeText={(value) => {
-                setDetails(value);
-                if (submissionError) {
-                  setSubmissionError(null);
-                }
-              }}
-              placeholder="例如乘客情緒升高、車上有人受傷、需警方或醫療支援…"
-              multiline
-              numberOfLines={5}
-              editable={!submitting}
-              containerStyle={styles.detailsField}
-              style={styles.detailsInput}
-              helpText={
-                selectedSituationLabel
-                  ? `已選情況：${selectedSituationLabel}。若留白，系統仍會送出預設 SOS 說明。`
-                  : "若留白，系統會送出預設 SOS 說明。"
+          {replayQueued ? (
+            <Banner
+              theme={driverCanvasTheme}
+              tone="warn"
+              icon={
+                replayingPending ? (
+                  <ActivityIndicator
+                    color={driverCanvasTheme.warn}
+                    size="small"
+                  />
+                ) : (
+                  <Ionicons
+                    name="cloud-offline-outline"
+                    size={16}
+                    color={driverCanvasTheme.warn}
+                  />
+                )
+              }
+              title="偵測到待重送 SOS"
+              body={
+                replayingPending
+                  ? "系統正在用原始 request id 自動重送前一筆 SOS。"
+                  : "上一筆 SOS 尚未確認送達。重新長按送出前，系統會優先嘗試重播待送命令。"
               }
             />
-          </SectionCard>
+          ) : null}
 
-          <SectionCard
-            title={driverStrings.incident.sections.review}
-            subtitle="SOS 不會因為單次點擊而直接送出。"
-          >
-            <Text style={styles.confirmationBody}>
-              長按底部按鈕約 0.8
-              秒後，系統仍會再要求一次確認；若情況已排除，可按取消返回行程。
-            </Text>
-            <View style={styles.confirmationChipRow}>
-              <StatusChip label="兩階段確認" variant="danger" />
-              <StatusChip label="可返回行程" variant="default" />
-            </View>
-          </SectionCard>
-        </View>
-      </AppScreen>
+          {submissionError ? (
+            <Banner
+              theme={driverCanvasTheme}
+              tone="danger"
+              icon={
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={16}
+                  color={driverCanvasTheme.danger}
+                />
+              }
+              title="SOS 狀態異常"
+              body={submissionError}
+            />
+          ) : null}
 
-      <BottomActionBar
-        style={styles.actionBar}
-        notice={
-          longPressHintVisible
-            ? "請長按右側按鈕約 0.8 秒，接著再於確認視窗送出 SOS。"
-            : "SOS 送出前仍會再確認一次，避免誤觸。"
-        }
-      >
-        <ActionButton
-          title={driverStrings.incident.cancelAction}
-          onPress={handleBackToTrip}
-          variant="secondary"
-          disabled={submitting}
-          style={styles.secondaryAction}
-        />
-        <TouchableOpacity
-          accessibilityLabel="長按確認求援"
-          accessibilityRole="button"
-          activeOpacity={0.82}
-          delayLongPress={SOS_LONG_PRESS_DELAY_MS}
-          disabled={submitting}
-          onLongPress={handleLongPressCtaConfirm}
-          onPress={handleLongPressCtaPress}
-          style={[
-            styles.longPressAction,
-            submitting ? styles.longPressActionDisabled : null,
-          ]}
-        >
-          {submitting ? (
-            <ActivityIndicator color={Tokens.colors.textInverse} size="small" />
+          {externalContextUnavailable ? (
+            <Banner
+              theme={driverCanvasTheme}
+              tone="warn"
+              icon={
+                <Ionicons
+                  name="warning-outline"
+                  size={16}
+                  color={driverCanvasTheme.warn}
+                />
+              }
+              title="外部平台上下文降級"
+              body="目前改用本地可得資料建立 SOS；若平台原生狀態尚未同步，安全官會在派車台補查。"
+            />
+          ) : null}
+
+          {incidentsEnabled === null || !incidentContextReady ? (
+            <Card theme={driverCanvasTheme} title="初始化安全流程" padding={18}>
+              <View style={styles.loadingRow}>
+                <ActivityIndicator color={driverCanvasTheme.accent} />
+                <Text style={styles.loadingText}>
+                  正在檢查功能旗標、待重送佇列與訂單情境…
+                </Text>
+              </View>
+            </Card>
+          ) : emptyReason ? (
+            <Card
+              theme={driverCanvasTheme}
+              title={EMPTY_REASON_COPY[emptyReason].title}
+              subtitle={`emptyReason · ${emptyReason}`}
+              padding={18}
+            >
+              <View style={styles.emptyStateBody}>
+                <Ionicons
+                  name={EMPTY_REASON_COPY[emptyReason].icon}
+                  size={34}
+                  color={
+                    EMPTY_REASON_COPY[emptyReason].tone === "danger"
+                      ? driverCanvasTheme.danger
+                      : EMPTY_REASON_COPY[emptyReason].tone === "warn"
+                        ? driverCanvasTheme.warn
+                        : driverCanvasTheme.accent
+                  }
+                />
+                <Text style={styles.emptyStateText}>
+                  {EMPTY_REASON_COPY[emptyReason].body}
+                </Text>
+                <Btn
+                  theme={driverCanvasTheme}
+                  variant="secondary"
+                  size="md"
+                  onPress={handleEmptyStateAction}
+                >
+                  {EMPTY_REASON_COPY[emptyReason].actionLabel}
+                </Btn>
+              </View>
+            </Card>
           ) : (
             <>
-              <Text style={styles.longPressActionEyebrow}>需長按 0.8 秒</Text>
-              <Text style={styles.longPressActionLabel}>
-                {driverStrings.incident.confirmAction}
-              </Text>
+              <Card
+                theme={driverCanvasTheme}
+                title={driverStrings.incident.sections.situation}
+                subtitle="讓安全官能先依 incident category 進行分流"
+              >
+                <View style={styles.situationGrid}>
+                  {SOS_SITUATIONS.map((situation) => {
+                    const selected = selectedSituation === situation.id;
+
+                    return (
+                      <Pressable
+                        key={situation.id}
+                        accessibilityRole="button"
+                        disabled={submitting}
+                        onPress={() => {
+                          setSelectedSituation(situation.id);
+                          setSubmissionError(null);
+                        }}
+                        style={[
+                          styles.situationButton,
+                          selected
+                            ? styles.situationButtonSelected
+                            : styles.situationButtonIdle,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.situationLabel,
+                            selected ? styles.situationLabelSelected : null,
+                          ]}
+                        >
+                          {situation.label}
+                        </Text>
+                        <Text style={styles.situationCode}>{situation.id}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </Card>
+
+              <Card
+                theme={driverCanvasTheme}
+                title={driverStrings.incident.sections.context}
+                subtitle={contextSubtitle}
+              >
+                {incidentContextPreview ? (
+                  <View style={styles.contextWrap}>
+                    <View style={styles.contextPillRow}>
+                      <Pill theme={driverCanvasTheme} tone="accent" dot>
+                        {incidentContextPreview.platformLabel} · forwarded
+                      </Pill>
+                    </View>
+                    <Text style={styles.contextCode}>
+                      {incidentContextPreview.mirrorOrderId}
+                    </Text>
+                    <Text style={styles.contextBody}>
+                      平台 order id、mirror order 與 native status
+                      會隨這次求援一併寫入 incident。
+                    </Text>
+                    <View style={styles.metaRow}>
+                      <Text style={styles.metaLabel}>platform code</Text>
+                      <Text style={styles.metaValue}>
+                        {incidentContextPreview.platformCode}
+                      </Text>
+                    </View>
+                    <View style={styles.metaRow}>
+                      <Text style={styles.metaLabel}>external order</Text>
+                      <Text style={styles.metaValue}>
+                        {incidentContextPreview.externalOrderId ?? "未提供"}
+                      </Text>
+                    </View>
+                    <View style={styles.metaRow}>
+                      <Text style={styles.metaLabel}>native status</Text>
+                      <Text style={styles.metaValue}>
+                        {formatPlatformStatusLabel(
+                          incidentContextPreview.nativeStatus,
+                        ) ?? "未提供"}
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.contextWrap}>
+                    <View style={styles.contextPillRow}>
+                      <Pill theme={driverCanvasTheme} tone="neutral" dot>
+                        DRTS · owned
+                      </Pill>
+                    </View>
+                    <Text style={styles.contextCode}>一般安全事件</Text>
+                    <Text style={styles.contextBody}>
+                      目前未偵測到需附加的外部平台訂單，送出後會建立不含跨平台
+                      metadata 的 SOS。
+                    </Text>
+                  </View>
+                )}
+              </Card>
+
+              <Card
+                theme={driverCanvasTheme}
+                title={driverStrings.incident.sections.details}
+                subtitle="自由文字是選填，但可幫助派車台判斷是否需要警方、醫療或平台聯繫"
+              >
+                <Field
+                  theme={driverCanvasTheme}
+                  label="補充說明"
+                  hint={
+                    selectedSituationLabel
+                      ? `已選情況：${selectedSituationLabel}`
+                      : "未選情況也可直接送出 SOS"
+                  }
+                >
+                  <TextInput
+                    value={details}
+                    onChangeText={(value) => {
+                      setDetails(value);
+                      setSubmissionError(null);
+                    }}
+                    editable={!submitting}
+                    multiline
+                    numberOfLines={5}
+                    placeholder="例如：乘客衝突升高、車禍需要警消、有人受傷…"
+                    placeholderTextColor={driverCanvasTheme.textDim}
+                    style={styles.detailsInput}
+                    textAlignVertical="top"
+                  />
+                </Field>
+              </Card>
+
+              <Card
+                theme={driverCanvasTheme}
+                title={driverStrings.trip.sections.availableActions}
+                subtitle="CTA 以 availableActions contract shape 統一渲染；高風險 submit 永遠不會退化成單擊"
+              >
+                <View style={styles.actionSummaryList}>
+                  {availableActions.map((action) => (
+                    <View key={action.action} style={styles.actionSummaryRow}>
+                      <View style={styles.actionSummaryCopy}>
+                        <Text style={styles.actionSummaryName}>
+                          {action.action}
+                        </Text>
+                        <Text style={styles.actionSummaryMeta}>
+                          risk={action.riskLevel} ·{" "}
+                          {action.enabled
+                            ? "enabled"
+                            : (action.disabledReasonCode ?? "disabled")}
+                        </Text>
+                      </View>
+                      <Pill
+                        theme={driverCanvasTheme}
+                        tone={action.enabled ? "accent" : "neutral"}
+                      >
+                        {action.enabled ? "可執行" : "受限"}
+                      </Pill>
+                    </View>
+                  ))}
+                </View>
+              </Card>
             </>
           )}
-        </TouchableOpacity>
-      </BottomActionBar>
+        </ScrollView>
+
+        <View style={styles.footer}>
+          <Text style={styles.footerHint}>
+            {holdActive
+              ? `保持按住直到 100% 以送出 SOS。現在進度 ${holdProgressPercent}%。`
+              : "Q-DRV11: 開啟 sheet 後必須再按住 2 秒。中途放開不會送出。"}
+          </Text>
+          <View style={styles.footerActions}>
+            <Btn
+              theme={driverCanvasTheme}
+              variant="secondary"
+              size="md"
+              disabled={!cancelAction.enabled}
+              onPress={handleClose}
+              style={styles.footerCancel}
+            >
+              {entry === "cockpit"
+                ? "返回工作台"
+                : driverStrings.incident.cancelAction}
+            </Btn>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="按住 2 秒送出 SOS"
+              disabled={!primaryAction.enabled}
+              onPressIn={handleHoldStart}
+              onPressOut={handleHoldEnd}
+              style={[
+                styles.holdButton,
+                !primaryAction.enabled ? styles.holdButtonDisabled : null,
+              ]}
+            >
+              <View
+                style={[
+                  styles.holdProgressFill,
+                  { width: `${holdProgressPercent}%` },
+                ]}
+              />
+              <View style={styles.holdButtonContent}>
+                {submitting || replayingPending ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Text style={styles.holdEyebrow}>
+                      {replayQueued ? "待重送佇列優先" : "press-and-hold 2s"}
+                    </Text>
+                    <Text style={styles.holdLabel}>
+                      {holdActive
+                        ? `持續按住 ${holdProgressPercent}%`
+                        : "按住送出 SOS"}
+                    </Text>
+                  </>
+                )}
+              </View>
+            </Pressable>
+          </View>
+        </View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
+  overlay: {
     flex: 1,
-    backgroundColor: Tokens.colors.appBg,
+    backgroundColor: "rgba(4, 10, 18, 0.64)",
+    justifyContent: "flex-end",
   },
-  center: {
-    flex: 1,
-    justifyContent: "center",
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  sheet: {
+    maxHeight: "92%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    backgroundColor: driverCanvasTheme.bg,
+    borderWidth: 1,
+    borderColor: driverCanvasTheme.border,
+    overflow: "hidden",
+  },
+  sheetHandleWrap: {
     alignItems: "center",
-    padding: Tokens.spacing.xl,
+    paddingTop: 10,
+    paddingBottom: 4,
   },
-  fillState: {
+  sheetHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: driverCanvasTheme.borderStrong,
+  },
+  scroll: {
     flex: 1,
   },
-  loadingLabel: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textBody,
-    marginTop: Tokens.spacing.md,
-  },
-  content: {
-    paddingVertical: Tokens.spacing.lg,
-    gap: Tokens.spacing.lg,
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+    gap: 12,
   },
   heroCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Tokens.colors.dangerBg,
-    borderRadius: Tokens.radius.lg,
-    padding: Tokens.spacing.xl,
-    borderWidth: 1,
-    borderColor: `${Tokens.colors.danger}33`,
-    gap: Tokens.spacing.lg,
+    backgroundColor: driverCanvasTheme.dangerBg,
+    borderColor: driverCanvasTheme.dangerBorder,
   },
-  heroIconBadge: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: Tokens.colors.danger,
+  heroRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  heroIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    ...Tokens.shadows.sm,
-  },
-  heroIconLabel: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textInverse,
-    fontWeight: "700",
-    letterSpacing: 0.3,
+    backgroundColor: driverCanvasTheme.danger,
   },
   heroCopy: {
     flex: 1,
-  },
-  heroEyebrow: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.danger,
-    marginBottom: Tokens.spacing.xs,
+    gap: 8,
   },
   heroTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
-    marginBottom: Tokens.spacing.sm,
+    color: driverCanvasTheme.text,
+    fontSize: 18,
+    fontWeight: "700",
   },
   heroBody: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textBody,
+    color: driverCanvasTheme.textMuted,
+    fontSize: 12.5,
+    lineHeight: 19,
   },
-  sectionCard: {
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.lg,
+  heroMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
-  sectionHeader: {
-    marginBottom: Tokens.spacing.md,
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
-  sectionTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
+  loadingText: {
+    flex: 1,
+    color: driverCanvasTheme.textMuted,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
-  sectionSubtitle: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-    marginTop: Tokens.spacing.xs,
+  emptyStateBody: {
+    alignItems: "flex-start",
+    gap: 14,
+  },
+  emptyStateText: {
+    color: driverCanvasTheme.textMuted,
+    fontSize: 12.5,
+    lineHeight: 19,
   },
   situationGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: Tokens.spacing.sm,
+    gap: 8,
   },
   situationButton: {
-    flexBasis: "48%",
-    minHeight: 52,
-    justifyContent: "flex-start",
-    paddingHorizontal: Tokens.spacing.md,
-    shadowOpacity: 0,
-    elevation: 0,
+    width: "48%",
+    minHeight: 72,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    justifyContent: "space-between",
+    backgroundColor: driverCanvasTheme.surface,
   },
   situationButtonIdle: {
-    backgroundColor: Tokens.colors.surface,
-    borderColor: Tokens.colors.border,
+    borderColor: driverCanvasTheme.border,
   },
   situationButtonSelected: {
-    backgroundColor: Tokens.colors.dangerBg,
-    borderColor: Tokens.colors.danger,
+    borderColor: driverCanvasTheme.danger,
+    backgroundColor: driverCanvasTheme.dangerBg,
   },
-  situationButtonText: {
-    color: Tokens.colors.textStrong,
-    textAlign: "left",
+  situationLabel: {
+    color: driverCanvasTheme.text,
+    fontSize: 13,
+    fontWeight: "700",
   },
-  situationButtonTextSelected: {
-    color: Tokens.colors.danger,
+  situationLabelSelected: {
+    color: driverCanvasTheme.danger,
   },
-  contextCard: {
-    borderRadius: Tokens.radius.md,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    backgroundColor: Tokens.colors.surfaceLo,
-    padding: Tokens.spacing.lg,
+  situationCode: {
+    color: driverCanvasTheme.textDim,
+    fontSize: 10.5,
   },
-  contextBadgeRow: {
+  contextWrap: {
+    gap: 8,
+  },
+  contextPillRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: Tokens.spacing.sm,
-    marginBottom: Tokens.spacing.sm,
-    flexWrap: "wrap",
   },
-  contextTitle: {
-    ...Tokens.type.title,
-    color: Tokens.colors.textStrong,
-    marginBottom: Tokens.spacing.xs,
+  contextCode: {
+    color: driverCanvasTheme.text,
+    fontSize: 14,
+    fontWeight: "700",
   },
   contextBody: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textBody,
+    color: driverCanvasTheme.textMuted,
+    fontSize: 12.5,
+    lineHeight: 19,
   },
-  contextMetaRow: {
+  metaRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: Tokens.spacing.md,
-    gap: Tokens.spacing.md,
+    gap: 12,
   },
-  contextMetaLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
+  metaLabel: {
+    color: driverCanvasTheme.textDim,
+    fontSize: 11,
+    textTransform: "uppercase",
   },
-  contextMetaValue: {
-    ...Tokens.type.code,
-    color: Tokens.colors.textStrong,
+  metaValue: {
     flexShrink: 1,
+    color: driverCanvasTheme.text,
+    fontSize: 11.5,
     textAlign: "right",
   },
-  contextLoadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Tokens.spacing.sm,
-  },
-  contextLoadingLabel: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-  },
-  detailsField: {
-    marginBottom: 0,
-  },
   detailsInput: {
-    minHeight: 120,
-    paddingTop: Tokens.spacing.md,
-    paddingBottom: Tokens.spacing.md,
-    textAlignVertical: "top",
-  },
-  confirmationBody: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textBody,
-  },
-  confirmationChipRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Tokens.spacing.sm,
-    flexWrap: "wrap",
-    marginTop: Tokens.spacing.md,
-  },
-  actionBar: {
-    justifyContent: "space-between",
-  },
-  secondaryAction: {
-    flex: 1,
-    marginRight: Tokens.spacing.sm,
-  },
-  longPressAction: {
-    flex: 1,
-    minHeight: 54,
-    borderRadius: Tokens.radius.lg,
-    backgroundColor: Tokens.colors.danger,
+    minHeight: 112,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: Tokens.colors.danger,
-    paddingHorizontal: Tokens.spacing.lg,
-    paddingVertical: Tokens.spacing.sm,
-    justifyContent: "center",
+    borderColor: driverCanvasTheme.border,
+    backgroundColor: driverCanvasTheme.bgRaised,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    color: driverCanvasTheme.text,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  actionSummaryList: {
+    gap: 10,
+  },
+  actionSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    ...Tokens.shadows.sm,
+    gap: 12,
   },
-  longPressActionDisabled: {
-    opacity: 0.7,
+  actionSummaryCopy: {
+    flex: 1,
+    gap: 3,
   },
-  longPressActionEyebrow: {
-    ...Tokens.type.micro,
-    color: "#FFD5D0",
-    marginBottom: 2,
+  actionSummaryName: {
+    color: driverCanvasTheme.text,
+    fontSize: 12.5,
+    fontWeight: "700",
   },
-  longPressActionLabel: {
-    ...Tokens.type.bodyStrong,
-    color: Tokens.colors.textInverse,
+  actionSummaryMeta: {
+    color: driverCanvasTheme.textDim,
+    fontSize: 11,
+  },
+  footer: {
+    borderTopWidth: 1,
+    borderTopColor: driverCanvasTheme.border,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 22,
+    gap: 10,
+    backgroundColor: driverCanvasTheme.bg,
+  },
+  footerHint: {
+    color: driverCanvasTheme.textMuted,
+    fontSize: 11.5,
+    lineHeight: 17,
+  },
+  footerActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  footerCancel: {
+    minWidth: 110,
+    justifyContent: "center",
+  },
+  holdButton: {
+    flex: 1,
+    minHeight: 62,
+    borderRadius: 18,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: driverCanvasTheme.danger,
+    backgroundColor: "#7F1D1D",
+    justifyContent: "center",
+  },
+  holdButtonDisabled: {
+    opacity: 0.5,
+  },
+  holdProgressFill: {
+    ...StyleSheet.absoluteFillObject,
+    right: undefined,
+    backgroundColor: "#DC2626",
+  },
+  holdButtonContent: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  holdEyebrow: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 10.5,
+    fontWeight: "600",
+  },
+  holdLabel: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
   },
 });
