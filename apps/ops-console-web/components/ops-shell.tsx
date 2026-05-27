@@ -1,12 +1,13 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   CanvasShell,
   buildCanvasTheme,
   type CanvasShellNavItem,
 } from "@drts/ui-web";
+import { getOpsClient } from "@/lib/api-client";
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -24,6 +25,16 @@ const theme = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
+
+const APPROVAL_QUEUE_ROLE_SET = new Set([
+  "ops_approval_triage",
+  "ops_manager",
+  "ops_compliance",
+]);
+
+type IdentitySummary = {
+  roles?: string[];
+} | null;
 
 function deriveBreadcrumb(
   nav: CanvasShellNavItem[],
@@ -53,12 +64,57 @@ export function OpsShell({
   children,
 }: OpsShellProps) {
   const pathname = usePathname() ?? "";
-  const breadcrumb = deriveBreadcrumb(nav, pathname);
+  const [visibleNav, setVisibleNav] = useState(() =>
+    nav.filter(
+      (item) =>
+        item.key !== "approval-requests" ||
+        pathname.startsWith("/approval-requests"),
+    ),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadIdentityContext() {
+      try {
+        const identity = (await getOpsClient().getIdentityContext()) as
+          | IdentitySummary
+          | undefined;
+        if (cancelled) {
+          return;
+        }
+
+        const canSeeApprovalQueue = Boolean(
+          identity?.roles?.some((role) => APPROVAL_QUEUE_ROLE_SET.has(role)),
+        );
+
+        setVisibleNav(
+          nav.filter(
+            (item) =>
+              item.key !== "approval-requests" ||
+              canSeeApprovalQueue ||
+              pathname.startsWith("/approval-requests"),
+          ),
+        );
+      } catch {
+        if (!cancelled) {
+          setVisibleNav(nav);
+        }
+      }
+    }
+
+    void loadIdentityContext();
+    return () => {
+      cancelled = true;
+    };
+  }, [nav, pathname]);
+
+  const breadcrumb = deriveBreadcrumb(visibleNav, pathname);
 
   return (
     <CanvasShell
       theme={theme}
-      nav={nav}
+      nav={visibleNav}
       currentPath={pathname}
       brandLabel={brandLabel}
       brandSubLabel={brandSubLabel}

@@ -1,5 +1,10 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  EmptyStateEnvelope,
+  RefreshTier,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -1402,6 +1407,13 @@ export interface OpsPendingApprovalRequestRecord extends TenantBookingApprovalRe
   opsSlaAcknowledgedAt: string | null;
   opsSlaAcknowledgedByActorId: string | null;
   opsSlaAcknowledgedByActorType: IdentityContext["actorType"] | null;
+}
+
+export interface OpsPendingApprovalRequestQueueView {
+  items: OpsPendingApprovalRequestRecord[];
+  refreshTier: RefreshTier;
+  refreshMetadata: UiRefreshMetadata;
+  emptyState: EmptyStateEnvelope | null;
 }
 
 export interface ListTenantBookingApprovalRequestsQuery {

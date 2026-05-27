@@ -16,6 +16,7 @@ import {
 } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   AcknowledgeOpsApprovalRequestBreachCommand,
   AuditLogRecord,
   ApproveTenantBookingApprovalRequestCommand,
@@ -52,6 +53,7 @@ import type {
   ListTenantBookingApprovalRequestsQuery,
   NudgeOpsApprovalRequestCommand,
   OpsPendingApprovalRequestRecord,
+  OpsPendingApprovalRequestQueueView,
   ListTenantCostCentersQuery,
   ListTenantApprovalRulesQuery,
   RejectTenantBookingApprovalRequestCommand,
@@ -97,6 +99,7 @@ import type {
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
+  UiRefreshMetadata,
   UpsertTenantAddressCommand,
   UpsertTenantApprovalRuleCommand,
   UpsertTenantCostCenterCommand,
@@ -106,6 +109,7 @@ import type {
   WebhookEventPayload,
   WebhookDeliveryRecord,
   WebhookRetryPolicyRecord,
+  type RefreshTier,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -292,6 +296,8 @@ const OPS_APPROVAL_REQUEST_NUDGE_ACTION =
   "booking.approval_request.nudged_by_ops";
 const OPS_APPROVAL_REQUEST_SLA_ACK_ACTION =
   "booking.approval_request.sla_breach_acknowledged_by_ops";
+const OPS_APPROVAL_QUEUE_REFRESH_TIER: RefreshTier = "dispatch";
+const OPS_APPROVAL_QUEUE_STALE_AFTER_MS = 5_000;
 const OPS_APPROVAL_QUEUE_ACTOR_TYPES = new Set<AuditLogRecord["actorType"]>([
   "ops_user",
   "platform_admin",
@@ -2085,6 +2091,52 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         query.expiresBefore ? request.timeoutAt <= query.expiresBefore : true,
       )
       .map((request) => this.buildOpsPendingApprovalRequestRecord(request));
+  }
+
+  getOpsPendingApprovalRequestQueueView(
+    query: ListOpsPendingApprovalRequestsQuery = {},
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): OpsPendingApprovalRequestQueueView {
+    const items = this.listOpsPendingApprovalRequests(
+      query,
+      requestId,
+      identity,
+    );
+    return {
+      items,
+      refreshTier: OPS_APPROVAL_QUEUE_REFRESH_TIER,
+      refreshMetadata: this.buildOpsApprovalQueueRefreshMetadata(),
+      emptyState:
+        items.length === 0
+          ? {
+              reason: "no_data",
+              messageCode: "ops_approval_queue_empty",
+            }
+          : null,
+    };
+  }
+
+  getLatestOpsApprovalQueueActionReceipt(
+    approvalRequestId: string,
+    requestId?: string,
+  ): ActionReceipt | null {
+    const auditLog = this.auditNotificationService
+      .getAuditLogsSnapshot()
+      .filter(
+        (candidate) =>
+          candidate.moduleName === "tenant-partner" &&
+          candidate.resourceType === "tenant_approval_request" &&
+          candidate.resourceId === approvalRequestId &&
+          (!requestId || candidate.requestId === requestId),
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+
+    if (!auditLog) {
+      return null;
+    }
+
+    return this.buildActionReceiptFromAuditLog(auditLog);
   }
 
   getApprovalRequest(tenantId: string, approvalRequestId: string) {
@@ -6618,6 +6670,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actorType: "tenant_admin",
         tenantId: input.tenantId,
         moduleName: "tenant-partner",
+        actionName: "booking.approval_request.escalated",
+        resourceType: "tenant_approval_request",
+        resourceId: input.approvalRequestId,
+        newValuesSummary: {
+          bookingId: escalated.bookingId,
+          orderId: escalated.orderId,
+          escalationTarget: escalated.escalationTarget,
+          reasonNote: input.reasonNote,
+          status: escalated.status,
+        },
+      },
+      input.requestId,
+    );
+    this.recordTenantAudit(
+      {
+        actorId: input.actorUserId,
+        actorType: "tenant_admin",
+        tenantId: input.tenantId,
+        moduleName: "tenant-partner",
         actionName: "booking.approval_request.timeout_escalated",
         resourceType: "booking",
         resourceId: escalated.bookingId,
@@ -6719,6 +6790,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       approvalDecisions: [decision],
       context: "record approval decision",
     });
+    this.recordTenantAudit(
+      {
+        actorId: input.actorUserId,
+        actorType: "tenant_admin",
+        tenantId: input.tenantId,
+        moduleName: "tenant-partner",
+        actionName:
+          input.decision === "approve"
+            ? "booking.approval_request.approve_recorded"
+            : "booking.approval_request.reject_recorded",
+        resourceType: "tenant_approval_request",
+        resourceId: input.approvalRequestId,
+        newValuesSummary: {
+          bookingId: persistedRequest.bookingId,
+          orderId: persistedRequest.orderId,
+          decision: input.decision,
+          reasonCode: input.reasonCode,
+          reasonNote: input.reasonNote,
+          status: persistedRequest.status,
+        },
+      },
+      input.requestId,
+    );
 
     if (persistedRequest.status !== "pending") {
       this.recordTenantAudit(
@@ -6951,7 +7045,46 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     if (requestId) {
       auditLogInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditLogInput);
+    return this.auditNotificationService.recordAuditLog(auditLogInput);
+  }
+
+  private buildOpsApprovalQueueRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: OPS_APPROVAL_QUEUE_STALE_AFTER_MS,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+  }
+
+  private buildActionReceiptFromAuditLog(
+    auditLog: AuditLogRecord,
+  ): ActionReceipt {
+    return {
+      actionId: auditLog.auditId,
+      auditId: auditLog.auditId,
+      resourceType: auditLog.resourceType,
+      resourceId: auditLog.resourceId ?? auditLog.auditId,
+      status: "completed",
+      message: this.describeApprovalQueueActionMessage(auditLog),
+    };
+  }
+
+  private describeApprovalQueueActionMessage(auditLog: AuditLogRecord): string {
+    switch (auditLog.actionName) {
+      case OPS_APPROVAL_REQUEST_NUDGE_ACTION:
+        return "Approval request nudged.";
+      case OPS_APPROVAL_REQUEST_SLA_ACK_ACTION:
+        return "SLA breach acknowledged.";
+      case "booking.approval_request.approve_recorded":
+        return "Approval decision recorded.";
+      case "booking.approval_request.reject_recorded":
+        return "Rejection recorded.";
+      case "booking.approval_request.escalated":
+        return "Approval request escalated.";
+      default:
+        return "Approval action completed.";
+    }
   }
 
   getTenantGovernanceMetricsSnapshot(

@@ -12,6 +12,7 @@ import {
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  ActionReceipt,
   AcknowledgeOpsApprovalRequestBreachCommand,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
@@ -31,7 +32,7 @@ import type {
   ListTenantApprovalRulesQuery,
   ListTenantCostCentersQuery,
   NudgeOpsApprovalRequestCommand,
-  OpsPendingApprovalRequestRecord,
+  OpsPendingApprovalRequestQueueView,
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
   PartnerChannelEntryRecord,
@@ -348,13 +349,13 @@ export class TenantPartnerController {
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items: OpsPendingApprovalRequestRecord[] =
-      this.tenantPartnerService.listOpsPendingApprovalRequests(
+    const view: OpsPendingApprovalRequestQueueView =
+      this.tenantPartnerService.getOpsPendingApprovalRequestQueueView(
         query,
         requestId,
         identity,
       );
-    return toApiSuccessEnvelope(toApiListData(items), requestId);
+    return toApiSuccessEnvelope(view, requestId);
   }
 
   @Post("ops/approval-requests/:approvalRequestId/nudge")
@@ -365,15 +366,25 @@ export class TenantPartnerController {
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      await this.tenantPartnerService.nudgeOpsApprovalRequest(
-        approvalRequestId,
-        command,
-        identity,
-        requestId,
-      ),
+    await this.tenantPartnerService.nudgeOpsApprovalRequest(
+      approvalRequestId,
+      command,
+      identity,
       requestId,
     );
+    const receipt: ActionReceipt =
+      this.tenantPartnerService.getLatestOpsApprovalQueueActionReceipt(
+        approvalRequestId,
+        requestId,
+      ) ?? {
+        actionId: requestId ?? approvalRequestId,
+        auditId: requestId ?? approvalRequestId,
+        resourceType: "tenant_approval_request",
+        resourceId: approvalRequestId,
+        status: "completed",
+        message: "Approval request nudged.",
+      };
+    return toApiSuccessEnvelope(receipt, requestId);
   }
 
   @Post("ops/approval-requests/:approvalRequestId/acknowledge-breach")
@@ -384,15 +395,25 @@ export class TenantPartnerController {
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      await this.tenantPartnerService.acknowledgeOpsApprovalRequestBreach(
-        approvalRequestId,
-        command,
-        identity,
-        requestId,
-      ),
+    await this.tenantPartnerService.acknowledgeOpsApprovalRequestBreach(
+      approvalRequestId,
+      command,
+      identity,
       requestId,
     );
+    const receipt: ActionReceipt =
+      this.tenantPartnerService.getLatestOpsApprovalQueueActionReceipt(
+        approvalRequestId,
+        requestId,
+      ) ?? {
+        actionId: requestId ?? approvalRequestId,
+        auditId: requestId ?? approvalRequestId,
+        resourceType: "tenant_approval_request",
+        resourceId: approvalRequestId,
+        status: "completed",
+        message: "SLA breach acknowledged.",
+      };
+    return toApiSuccessEnvelope(receipt, requestId);
   }
 
   @Get("tenant/passengers")
@@ -752,17 +773,27 @@ export class TenantPartnerController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      await this.ownedMobilityService.approveTenantBookingApprovalRequest(
-        this.requireTenantId(tenantId),
-        approvalRequestId,
-        this.requireTenantActorUserId(identity),
-        this.resolveTenantActorRoleCode(identity),
-        command,
-        requestId,
-      ),
+    await this.ownedMobilityService.approveTenantBookingApprovalRequest(
+      this.requireTenantId(tenantId),
+      approvalRequestId,
+      this.requireTenantActorUserId(identity),
+      this.resolveTenantActorRoleCode(identity),
+      command,
       requestId,
     );
+    const receipt: ActionReceipt =
+      this.tenantPartnerService.getLatestOpsApprovalQueueActionReceipt(
+        approvalRequestId,
+        requestId,
+      ) ?? {
+        actionId: requestId ?? approvalRequestId,
+        auditId: requestId ?? approvalRequestId,
+        resourceType: "tenant_approval_request",
+        resourceId: approvalRequestId,
+        status: "completed",
+        message: "Approval decision recorded.",
+      };
+    return toApiSuccessEnvelope(receipt, requestId);
   }
 
   @Post("tenant/approval-requests/:approvalRequestId/reject")
@@ -773,17 +804,27 @@ export class TenantPartnerController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      await this.ownedMobilityService.rejectTenantBookingApprovalRequest(
-        this.requireTenantId(tenantId),
-        approvalRequestId,
-        this.requireTenantActorUserId(identity),
-        this.resolveTenantActorRoleCode(identity),
-        command,
-        requestId,
-      ),
+    await this.ownedMobilityService.rejectTenantBookingApprovalRequest(
+      this.requireTenantId(tenantId),
+      approvalRequestId,
+      this.requireTenantActorUserId(identity),
+      this.resolveTenantActorRoleCode(identity),
+      command,
       requestId,
     );
+    const receipt: ActionReceipt =
+      this.tenantPartnerService.getLatestOpsApprovalQueueActionReceipt(
+        approvalRequestId,
+        requestId,
+      ) ?? {
+        actionId: requestId ?? approvalRequestId,
+        auditId: requestId ?? approvalRequestId,
+        resourceType: "tenant_approval_request",
+        resourceId: approvalRequestId,
+        status: "completed",
+        message: "Rejection recorded.",
+      };
+    return toApiSuccessEnvelope(receipt, requestId);
   }
 
   @Post("tenant/approval-requests/:approvalRequestId/escalate")
@@ -794,17 +835,27 @@ export class TenantPartnerController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      await this.ownedMobilityService.escalateTenantBookingApprovalRequest(
-        this.requireTenantId(tenantId),
-        approvalRequestId,
-        this.requireTenantActorUserId(identity),
-        this.resolveTenantActorRoleCode(identity),
-        command,
-        requestId,
-      ),
+    await this.ownedMobilityService.escalateTenantBookingApprovalRequest(
+      this.requireTenantId(tenantId),
+      approvalRequestId,
+      this.requireTenantActorUserId(identity),
+      this.resolveTenantActorRoleCode(identity),
+      command,
       requestId,
     );
+    const receipt: ActionReceipt =
+      this.tenantPartnerService.getLatestOpsApprovalQueueActionReceipt(
+        approvalRequestId,
+        requestId,
+      ) ?? {
+        actionId: requestId ?? approvalRequestId,
+        auditId: requestId ?? approvalRequestId,
+        resourceType: "tenant_approval_request",
+        resourceId: approvalRequestId,
+        status: "completed",
+        message: "Approval request escalated.",
+      };
+    return toApiSuccessEnvelope(receipt, requestId);
   }
 
   @Post("tenant/approval-requests/process-timeouts")

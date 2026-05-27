@@ -1,5 +1,6 @@
 type RuntimeConfig = {
   apiBaseUrl: string;
+  platformAdminBaseUrl: string | null;
 };
 
 const DEFAULT_SERVER_API_BASE_URL = "http://localhost:3001";
@@ -24,6 +25,10 @@ function resolveBrowserApiBaseUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL || DEFAULT_BROWSER_API_BASE_URL;
 }
 
+function resolvePlatformAdminBaseUrl(): string | null {
+  return process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL || null;
+}
+
 export function getRuntimeApiBaseUrl(): string {
   if (typeof window === "undefined") {
     return resolveServerApiBaseUrl();
@@ -34,9 +39,21 @@ export function getRuntimeApiBaseUrl(): string {
   );
 }
 
+export function getRuntimePlatformAdminBaseUrl(): string | null {
+  if (typeof window === "undefined") {
+    return resolvePlatformAdminBaseUrl();
+  }
+
+  return (
+    window.__DRTS_RUNTIME_CONFIG__?.platformAdminBaseUrl ??
+    resolvePlatformAdminBaseUrl()
+  );
+}
+
 export function RuntimeConfigScript() {
   const config: RuntimeConfig = {
     apiBaseUrl: resolveBrowserApiBaseUrl(),
+    platformAdminBaseUrl: resolvePlatformAdminBaseUrl(),
   };
   const serializedConfig = JSON.stringify(config).replace(/</g, "\\u003c");
 

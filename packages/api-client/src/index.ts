@@ -6,6 +6,7 @@
  */
 
 import type {
+  ActionReceipt,
   AcknowledgeOpsApprovalRequestBreachCommand,
   AddComplaintCaseNoteCommand,
   AddReconciliationIssueCommentCommand,
@@ -180,6 +181,7 @@ import type {
   ListTenantApprovalRulesQuery,
   NudgeOpsApprovalRequestCommand,
   OpsPendingApprovalRequestRecord,
+  OpsPendingApprovalRequestQueueView,
   ReorderTenantApprovalRulesCommand,
   RejectTenantBookingApprovalRequestCommand,
   TenantCostCenterCoverageReport,
@@ -512,6 +514,13 @@ export class ApiClient {
   async listOpsPendingApprovalRequests(
     query: ListOpsPendingApprovalRequestsQuery = {},
   ): Promise<OpsPendingApprovalRequestRecord[]> {
+    const view = await this.getOpsPendingApprovalRequestQueueView(query);
+    return view.items;
+  }
+
+  async getOpsPendingApprovalRequestQueueView(
+    query: ListOpsPendingApprovalRequestsQuery = {},
+  ): Promise<OpsPendingApprovalRequestQueueView> {
     const params = new URLSearchParams();
     if (query.tenantId) {
       params.set("tenantId", query.tenantId);
@@ -522,7 +531,7 @@ export class ApiClient {
     if (query.expiresBefore) {
       params.set("expiresBefore", query.expiresBefore);
     }
-    return this.getList<OpsPendingApprovalRequestRecord>(
+    return this.get<OpsPendingApprovalRequestQueueView>(
       `/api/ops/approval-requests${params.size > 0 ? `?${params.toString()}` : ""}`,
     );
   }
@@ -530,8 +539,8 @@ export class ApiClient {
   async nudgeOpsApprovalRequest(
     approvalRequestId: string,
     command: NudgeOpsApprovalRequestCommand = {},
-  ): Promise<OpsPendingApprovalRequestRecord> {
-    return this.post<OpsPendingApprovalRequestRecord>(
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
       `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/nudge`,
       {
         body: command,
@@ -542,8 +551,8 @@ export class ApiClient {
   async acknowledgeOpsBreach(
     approvalRequestId: string,
     command: AcknowledgeOpsApprovalRequestBreachCommand = {},
-  ): Promise<OpsPendingApprovalRequestRecord> {
-    return this.post<OpsPendingApprovalRequestRecord>(
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
       `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/acknowledge-breach`,
       {
         body: command,
