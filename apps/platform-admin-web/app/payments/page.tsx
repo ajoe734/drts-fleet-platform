@@ -5,6 +5,7 @@
 
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import React, { useCallback, useEffect, useState } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -17,9 +18,13 @@ import {
   RECONCILIATION_ISSUE_TYPES,
 } from "@drts/contracts";
 import type {
+  CrossAppResourceLink,
   DriverStatementRecord,
+  EmptyReason,
+  RefreshTier,
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
+  ResourceActionDescriptor,
   SettlementMatrixRecord,
   TenantInvoiceRecord,
 } from "@drts/contracts";
@@ -46,6 +51,7 @@ import type {
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_FINANCE_ACTOR_ID = "finance.console";
 const REOPEN_WARN_THRESHOLD = 5;
+const PAYMENTS_REFRESH_TIER: RefreshTier = "medium_slow";
 const PLATFORM_THEME = buildCanvasTheme({
   surface: "platform",
   density: "compact",
@@ -74,18 +80,43 @@ const RECONCILIATION_RESOLUTION_OPTIONS: (typeof RECONCILIATION_ISSUE_RESOLUTION
     "no_action_required",
     "resolved_other",
   ];
-const ISSUE_STATUS_PRIORITY: Record<ReconciliationIssueRecord["status"], number> =
-  {
-    reopened: 0,
-    open: 1,
-    assigned: 2,
-    resolved: 3,
-  };
+const ISSUE_STATUS_PRIORITY: Record<
+  ReconciliationIssueRecord["status"],
+  number
+> = {
+  reopened: 0,
+  open: 1,
+  assigned: 2,
+  resolved: 3,
+};
 type IssueTableRow = ReconciliationIssueRecord & Record<string, unknown>;
 type MatrixTableRow = SettlementMatrixRecord & Record<string, unknown>;
 type InvoiceTableRow = TenantInvoiceRecord & Record<string, unknown>;
 type StatementTableRow = DriverStatementRecord & Record<string, unknown>;
-type ReimbursementTableRow = ReimbursementBatchRecord & Record<string, unknown>;
+type RuntimeActionedResource = {
+  availableActions?: ResourceActionDescriptor[];
+  crossAppLinks?: CrossAppResourceLink[];
+};
+type RuntimeIssueRecord = ReconciliationIssueRecord & RuntimeActionedResource;
+type RuntimeInvoiceRecord = TenantInvoiceRecord & RuntimeActionedResource;
+type RuntimeStatementRecord = DriverStatementRecord & RuntimeActionedResource;
+type RuntimeReimbursementRecord = ReimbursementBatchRecord &
+  RuntimeActionedResource;
+type RuntimeSettlementMatrixRecord = SettlementMatrixRecord &
+  RuntimeActionedResource;
+type ReimbursementTableRow = RuntimeReimbursementRecord &
+  Record<string, unknown>;
+type EmptyStateConfig = {
+  reason: EmptyReason;
+  message: string;
+  nextAction?: ResourceActionDescriptor;
+};
+type EmptyStateToneConfig = {
+  icon: string;
+  tone: CanvasTone;
+  background: string;
+  border: string;
+};
 
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -114,6 +145,25 @@ function toPeriodStartIso(value: string) {
 
 function toPeriodEndIso(value: string) {
   return `${value}T23:59:59.000Z`;
+}
+
+function refreshIntervalForTier(tier: RefreshTier) {
+  switch (tier) {
+    case "urgent":
+      return 5_000;
+    case "fast":
+      return 3_000;
+    case "dispatch":
+      return 5_000;
+    case "medium":
+      return 15_000;
+    case "medium_slow":
+    case "slow":
+      return 30_000;
+    case "manual":
+    default:
+      return null;
+  }
 }
 
 function formatMoney(
@@ -272,7 +322,8 @@ function hoursBetween(startAt?: string | null, endAt?: string | null) {
 
 function average(values: Array<number | null>) {
   const list = values.filter(
-    (value): value is number => typeof value === "number" && Number.isFinite(value),
+    (value): value is number =>
+      typeof value === "number" && Number.isFinite(value),
   );
   if (list.length === 0) {
     return null;
@@ -378,14 +429,6 @@ function sectionGridStyle(columns: string): React.CSSProperties {
   };
 }
 
-function emptyStateStyle(theme: CanvasTheme): React.CSSProperties {
-  return {
-    padding: 18,
-    color: theme.textMuted,
-    fontSize: 12.5,
-  };
-}
-
 function cellStackStyle(options?: {
   mono?: boolean;
   align?: "left" | "right";
@@ -400,27 +443,206 @@ function cellStackStyle(options?: {
   };
 }
 
+function listAction(
+  action: string,
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+  options?: {
+    enabled?: boolean;
+    disabledReasonCode?: string;
+    requiresReason?: boolean;
+  },
+): ResourceActionDescriptor {
+  return {
+    action,
+    enabled: options?.enabled ?? true,
+    riskLevel,
+    ...(options?.disabledReasonCode
+      ? { disabledReasonCode: options.disabledReasonCode }
+      : {}),
+    ...(options?.requiresReason ? { requiresReason: true } : {}),
+  };
+}
+
+function getActionDescriptor(
+  actions: ResourceActionDescriptor[],
+  action: string,
+): ResourceActionDescriptor | null {
+  return actions.find((descriptor) => descriptor.action === action) ?? null;
+}
+
+function resourceActions(
+  record: RuntimeActionedResource | null | undefined,
+  fallbackActions: ResourceActionDescriptor[],
+) {
+  return record?.availableActions?.length
+    ? record.availableActions
+    : fallbackActions;
+}
+
+function detectEmptyReason(error: string | null): EmptyReason | null {
+  if (!error) {
+    return null;
+  }
+  const normalized = error.toLowerCase();
+  if (
+    normalized.includes("403") ||
+    normalized.includes("permission") ||
+    normalized.includes("forbidden")
+  ) {
+    return "permission_denied";
+  }
+  if (
+    normalized.includes("provision") ||
+    normalized.includes("not configured") ||
+    normalized.includes("not setup")
+  ) {
+    return "not_provisioned";
+  }
+  if (
+    normalized.includes("eligible") ||
+    normalized.includes("driver_not_eligible")
+  ) {
+    return "driver_not_eligible";
+  }
+  if (
+    normalized.includes("external") ||
+    normalized.includes("dependency") ||
+    normalized.includes("unavailable")
+  ) {
+    return "external_unavailable";
+  }
+  return "fetch_failed";
+}
+
+function emptyStateTone(
+  theme: CanvasTheme,
+  reason: EmptyReason,
+): EmptyStateToneConfig {
+  switch (reason) {
+    case "not_provisioned":
+      return {
+        icon: "info",
+        tone: "info",
+        background: theme.infoBg,
+        border: theme.infoBorder,
+      };
+    case "fetch_failed":
+      return {
+        icon: "warning",
+        tone: "danger",
+        background: theme.dangerBg,
+        border: theme.dangerBorder,
+      };
+    case "permission_denied":
+      return {
+        icon: "lock",
+        tone: "warn",
+        background: theme.warnBg,
+        border: theme.warnBorder,
+      };
+    case "external_unavailable":
+      return {
+        icon: "warning",
+        tone: "warn",
+        background: theme.warnBg,
+        border: theme.warnBorder,
+      };
+    case "filtered_empty":
+      return {
+        icon: "search",
+        tone: "neutral",
+        background: theme.surface,
+        border: theme.border,
+      };
+    case "driver_not_eligible":
+      return {
+        icon: "lock",
+        tone: "warn",
+        background: theme.warnBg,
+        border: theme.warnBorder,
+      };
+    case "no_data":
+    default:
+      return {
+        icon: "check",
+        tone: "neutral",
+        background: theme.surface,
+        border: theme.border,
+      };
+  }
+}
+
+function defaultEmptyMessage(
+  locale: string,
+  reason: EmptyReason,
+  fallback: string,
+): string {
+  if (locale === "en") {
+    switch (reason) {
+      case "not_provisioned":
+        return "This finance surface is not provisioned yet. Complete setup before retrying.";
+      case "fetch_failed":
+        return "The latest settlement data could not be loaded. Retry or check upstream health.";
+      case "permission_denied":
+        return "Your current role can view this screen but cannot access this dataset.";
+      case "external_unavailable":
+        return "An upstream settlement dependency is unavailable. Retry after the external system recovers.";
+      case "filtered_empty":
+        return "No rows match the current filter slice. Adjust filters or broaden the period.";
+      case "driver_not_eligible":
+        return "This dataset is currently blocked by an eligibility or authority gate.";
+      case "no_data":
+      default:
+        return fallback;
+    }
+  }
+
+  switch (reason) {
+    case "not_provisioned":
+      return "這個 finance surface 尚未完成 provision，需先完成設定後再重試。";
+    case "fetch_failed":
+      return "目前無法載入最新結算資料，請重試或先確認上游健康狀態。";
+    case "permission_denied":
+      return "你目前的角色可見此頁，但無權讀取這組資料。";
+    case "external_unavailable":
+      return "上游結算相依服務暫時不可用，需等外部系統恢復後再試。";
+    case "filtered_empty":
+      return "目前篩選條件沒有符合資料，請調整 filter 或放寬期間。";
+    case "driver_not_eligible":
+      return "目前資料受到 eligibility 或 authority gate 限制，暫時不可用。";
+    case "no_data":
+    default:
+      return fallback;
+  }
+}
+
 export default function PaymentsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const searchParams = useSearchParams();
   const defaults = getPreviousMonthDefaults();
   const theme = PLATFORM_THEME;
+  const refreshIntervalMs = refreshIntervalForTier(PAYMENTS_REFRESH_TIER);
+  const focusedIssueId = searchParams.get("issueId");
+  const focusedBatchId = searchParams.get("batchId");
+  const sourceApp = searchParams.get("fromApp");
   const [financeActorId, setFinanceActorId] = useState(
     DEFAULT_FINANCE_ACTOR_ID,
   );
-  const [invoices, setInvoices] = useState<TenantInvoiceRecord[]>([]);
-  const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
+  const [invoices, setInvoices] = useState<RuntimeInvoiceRecord[]>([]);
+  const [statements, setStatements] = useState<RuntimeStatementRecord[]>([]);
   const [reimbursements, setReimbursements] = useState<
-    ReimbursementBatchRecord[]
+    RuntimeReimbursementRecord[]
   >([]);
   const [reconciliationIssues, setReconciliationIssues] = useState<
-    ReconciliationIssueRecord[]
+    RuntimeIssueRecord[]
   >([]);
   const [settlementMatrix, setSettlementMatrix] = useState<
-    SettlementMatrixRecord[]
+    RuntimeSettlementMatrixRecord[]
   >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [invoiceFilter, setInvoiceFilter] = useState<
     "all" | "paid" | "draft" | "issued"
   >("all");
@@ -435,6 +657,9 @@ export default function PaymentsPage() {
   const [invoicePending, setInvoicePending] = useState(false);
   const [statementPending, setStatementPending] = useState(false);
   const [batchActionId, setBatchActionId] = useState<string | null>(null);
+  const [batchActionReasons, setBatchActionReasons] = useState<
+    Record<string, string>
+  >({});
   const [issueActionId, setIssueActionId] = useState<string | null>(null);
   const [issueDraftPending, setIssueDraftPending] = useState(false);
   const [remittanceProofs, setRemittanceProofs] = useState<
@@ -504,6 +729,7 @@ export default function PaymentsPage() {
       setReimbursements(reimbursementRecords ?? []);
       setReconciliationIssues(issueRecords ?? []);
       setSettlementMatrix(settlementMatrixRecords ?? []);
+      setLastRefreshedAt(new Date().toISOString());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -545,6 +771,31 @@ export default function PaymentsPage() {
   useEffect(() => {
     void loadFinance();
   }, [loadFinance]);
+
+  useEffect(() => {
+    if (refreshIntervalMs === null) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadFinance();
+    }, refreshIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [loadFinance, refreshIntervalMs]);
+
+  useEffect(() => {
+    const targetId = focusedIssueId
+      ? "payments-reconciliation-queue"
+      : focusedBatchId
+        ? "payments-reimbursements"
+        : null;
+    if (!targetId) {
+      return;
+    }
+    document.getElementById(targetId)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [focusedBatchId, focusedIssueId]);
 
   async function handleGenerateInvoice(event: React.FormEvent) {
     event.preventDefault();
@@ -764,6 +1015,25 @@ export default function PaymentsPage() {
   }
 
   async function handleApproveBatch(batch: ReimbursementBatchRecord) {
+    const descriptor = getActionDescriptor(
+      [
+        listAction("approve_batch", "high", {
+          enabled: !batch.approvedAt,
+          disabledReasonCode: "already_approved",
+          requiresReason: true,
+        }),
+      ],
+      "approve_batch",
+    );
+    const reason = batchActionReasons[batch.batchId]?.trim() ?? "";
+    if (descriptor?.requiresReason && !reason) {
+      setError(
+        locale === "en"
+          ? "Approval reason is required."
+          : "核准代墊批次前必須填寫原因。",
+      );
+      return;
+    }
     setBatchActionId(batch.batchId);
     setError(null);
     try {
@@ -779,6 +1049,25 @@ export default function PaymentsPage() {
   }
 
   async function handleMarkPaid(batch: ReimbursementBatchRecord) {
+    const descriptor = getActionDescriptor(
+      [
+        listAction("mark_paid", "high", {
+          enabled: batch.status !== "paid",
+          disabledReasonCode: "already_paid",
+          requiresReason: true,
+        }),
+      ],
+      "mark_paid",
+    );
+    const reason = batchActionReasons[batch.batchId]?.trim() ?? "";
+    if (descriptor?.requiresReason && !reason) {
+      setError(
+        locale === "en"
+          ? "Paid confirmation reason is required."
+          : "標記已付款前必須填寫確認原因。",
+      );
+      return;
+    }
     setBatchActionId(batch.batchId);
     setError(null);
     try {
@@ -831,15 +1120,19 @@ export default function PaymentsPage() {
   const recentIssues = reconciliationIssues.filter((issue) =>
     withinDays(issue.updatedAt || issue.createdAt, 30),
   );
-  const issueWindow = recentIssues.length > 0 ? recentIssues : reconciliationIssues;
+  const issueWindow =
+    recentIssues.length > 0 ? recentIssues : reconciliationIssues;
   const reopenedWindowCount = issueWindow.filter(
     (issue) => issue.reopenCount > 0 || issue.status === "reopened",
   ).length;
   const reopenRate =
-    issueWindow.length > 0 ? (reopenedWindowCount / issueWindow.length) * 100 : 0;
+    issueWindow.length > 0
+      ? (reopenedWindowCount / issueWindow.length) * 100
+      : 0;
   const reopenRateWarning = reopenRate >= REOPEN_WARN_THRESHOLD;
   const resolvedWindow = issueWindow.filter((issue) => issue.resolvedAt);
-  const handlingWindow = resolvedWindow.length > 0 ? resolvedWindow : openIssues;
+  const handlingWindow =
+    resolvedWindow.length > 0 ? resolvedWindow : openIssues;
   const averageHandlingHours = average(
     handlingWindow.map((issue) =>
       hoursBetween(issue.createdAt, issue.resolvedAt ?? issue.updatedAt),
@@ -867,7 +1160,9 @@ export default function PaymentsPage() {
     (issue) => issue.channelKey === "phone_dispatch",
   ).length;
 
-  const invoicesById = new Map(invoices.map((invoice) => [invoice.invoiceId, invoice]));
+  const invoicesById = new Map(
+    invoices.map((invoice) => [invoice.invoiceId, invoice]),
+  );
   const reimbursementsById = new Map(
     reimbursements.map((batch) => [batch.batchId, batch]),
   );
@@ -911,6 +1206,150 @@ export default function PaymentsPage() {
       statement.lines.map((line) => line.channelKey),
       describeMatrixChannel,
     );
+
+  const paymentsPageActions: ResourceActionDescriptor[] = [
+    listAction("generate_invoices", "medium"),
+    listAction("generate_driver_statements", "medium"),
+    listAction("create_reconciliation_issue", "medium"),
+  ];
+
+  const issueActionsFor = (
+    issue: ReconciliationIssueRecord,
+  ): ResourceActionDescriptor[] => [
+    listAction("assign_issue", "medium", {
+      enabled: issue.status !== "resolved",
+      disabledReasonCode: "already_resolved",
+    }),
+    listAction("comment_with_artifacts", "medium", {
+      enabled: issue.status !== "resolved",
+      disabledReasonCode: "already_resolved",
+    }),
+    listAction(
+      "resolve_issue",
+      issue.status === "reopened" ? "high" : "medium",
+      {
+        enabled: issue.status !== "resolved",
+        disabledReasonCode: "already_resolved",
+        requiresReason: issue.status === "reopened",
+      },
+    ),
+    listAction("reopen_issue", "high", {
+      enabled: issue.status === "resolved",
+      disabledReasonCode: "issue_not_resolved",
+      requiresReason: true,
+    }),
+  ];
+
+  const reimbursementActionsFor = (
+    batch: ReimbursementBatchRecord,
+  ): ResourceActionDescriptor[] => [
+    listAction("approve_batch", "high", {
+      enabled: !batch.approvedAt,
+      disabledReasonCode: "already_approved",
+      requiresReason: true,
+    }),
+    listAction("mark_paid", "high", {
+      enabled: batch.status !== "paid",
+      disabledReasonCode: "already_paid",
+      requiresReason: true,
+    }),
+  ];
+
+  const issueOpsLinkFor = (
+    issue: ReconciliationIssueRecord,
+  ): CrossAppResourceLink => ({
+    targetApp: "ops-console",
+    route: `/revenue?issueId=${encodeURIComponent(issue.issueId)}`,
+    resourceType: "reconciliation_issue",
+    resourceId: issue.issueId,
+    openMode: "new_tab",
+    label: locale === "en" ? "Open ops mirror" : "開啟 ops mirror",
+  });
+
+  const rootEmptyReason = detectEmptyReason(error);
+  const issueEmptyConfig: EmptyStateConfig = {
+    reason: rootEmptyReason ?? "no_data",
+    message: defaultEmptyMessage(
+      locale,
+      rootEmptyReason ?? "no_data",
+      t("payments.reconciliation.empty"),
+    ),
+    ...((
+      rootEmptyReason === "fetch_failed"
+        ? listAction("retry_refresh", "low")
+        : getActionDescriptor(
+            paymentsPageActions,
+            "create_reconciliation_issue",
+          )
+    )
+      ? {
+          nextAction:
+            rootEmptyReason === "fetch_failed"
+              ? listAction("retry_refresh", "low")
+              : getActionDescriptor(
+                  paymentsPageActions,
+                  "create_reconciliation_issue",
+                )!,
+        }
+      : {}),
+  };
+  const matrixEmptyConfig: EmptyStateConfig = {
+    reason: rootEmptyReason ?? "no_data",
+    message: defaultEmptyMessage(
+      locale,
+      rootEmptyReason ?? "no_data",
+      t("payments.matrix.empty"),
+    ),
+  };
+  const invoiceEmptyConfig: EmptyStateConfig = {
+    reason:
+      filteredInvoices.length === 0 && invoices.length > 0
+        ? "filtered_empty"
+        : (rootEmptyReason ?? "no_data"),
+    message: defaultEmptyMessage(
+      locale,
+      filteredInvoices.length === 0 && invoices.length > 0
+        ? "filtered_empty"
+        : (rootEmptyReason ?? "no_data"),
+      t("payments.noInvoices"),
+    ),
+    ...((
+      filteredInvoices.length === 0 && invoices.length > 0
+        ? listAction("clear_invoice_filter", "low")
+        : getActionDescriptor(paymentsPageActions, "generate_invoices")
+    )
+      ? {
+          nextAction:
+            filteredInvoices.length === 0 && invoices.length > 0
+              ? listAction("clear_invoice_filter", "low")
+              : getActionDescriptor(paymentsPageActions, "generate_invoices")!,
+        }
+      : {}),
+  };
+  const statementEmptyConfig: EmptyStateConfig = {
+    reason: rootEmptyReason ?? "no_data",
+    message: defaultEmptyMessage(
+      locale,
+      rootEmptyReason ?? "no_data",
+      t("payments.noStatements"),
+    ),
+    ...(getActionDescriptor(paymentsPageActions, "generate_driver_statements")
+      ? {
+          nextAction: getActionDescriptor(
+            paymentsPageActions,
+            "generate_driver_statements",
+          )!,
+        }
+      : {}),
+  };
+  const reimbursementEmptyConfig: EmptyStateConfig = {
+    reason: rootEmptyReason ?? "no_data",
+    message: defaultEmptyMessage(
+      locale,
+      rootEmptyReason ?? "no_data",
+      t("payments.noReimbursements"),
+    ),
+  };
 
   const navLabels =
     locale === "en"
@@ -1004,11 +1443,14 @@ export default function PaymentsPage() {
           queueProfileTitle: "Queue 總覽",
           queueProfileSubtitle: "目前治理切面",
           releaseControlsTitle: "產出控制",
-          releaseControlsSubtitle: "不離開 payments route 直接產 invoice 與 statements。",
+          releaseControlsSubtitle:
+            "不離開 payments route 直接產 invoice 與 statements。",
           issueActionsTitle: "Reconciliation workflow actions",
-          issueActionsSubtitle: "指派、補 evidence、結案與重開都維持在同一個 control plane。",
+          issueActionsSubtitle:
+            "指派、補 evidence、結案與重開都維持在同一個 control plane。",
           createIssueTitle: "開立 reconciliation issue",
-          createIssueSubtitle: "一次補齊 actor、context 與第一筆 evidence note。",
+          createIssueSubtitle:
+            "一次補齊 actor、context 與第一筆 evidence note。",
           outstandingLabel: "當期 outstanding",
           exposureLabel: "差額累計",
           handlingLabel: "平均處理時間",
@@ -1025,6 +1467,13 @@ export default function PaymentsPage() {
           actorLabel: "財務操作人 ID",
           loading: t("payments.loading"),
         };
+  const freshnessLabel = lastRefreshedAt
+    ? locale === "en"
+      ? `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)}s` : "manual"} · ${formatDateTime(lastRefreshedAt)}`
+      : `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)} 秒` : "手動"} · ${formatDateTime(lastRefreshedAt)}`
+    : locale === "en"
+      ? `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)}s` : "manual"}`
+      : `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)} 秒` : "手動"}`;
 
   const tabs = [
     t("payments.matrix.title"),
@@ -1033,6 +1482,14 @@ export default function PaymentsPage() {
     t("payments.tab.reimbursements"),
     t("payments.reconciliation.title"),
   ];
+  const generateInvoicesAction = getActionDescriptor(
+    paymentsPageActions,
+    "generate_invoices",
+  );
+  const generateStatementsAction = getActionDescriptor(
+    paymentsPageActions,
+    "generate_driver_statements",
+  );
 
   const shellNav: CanvasShellNavItem[] = [
     { key: "home", href: "/", label: navLabels.home, icon: "dashboard" },
@@ -1043,7 +1500,12 @@ export default function PaymentsPage() {
       icon: "health",
     },
     { divider: navLabels.tenantGroup },
-    { key: "tenants", href: "/tenants", label: navLabels.tenants, icon: "tenants" },
+    {
+      key: "tenants",
+      href: "/tenants",
+      label: navLabels.tenants,
+      icon: "tenants",
+    },
     {
       key: "partners",
       href: "/partners",
@@ -1071,7 +1533,10 @@ export default function PaymentsPage() {
       href: "/payments",
       label: navLabels.payments,
       icon: "payments",
-      badge: openReconciliationCount > 0 ? String(openReconciliationCount) : undefined,
+      badge:
+        openReconciliationCount > 0
+          ? String(openReconciliationCount)
+          : undefined,
       badgeTone: openReconciliationCount > 0 ? "danger" : "neutral",
       matchPaths: ["/payments"],
     },
@@ -1107,6 +1572,13 @@ export default function PaymentsPage() {
           <span style={{ color: theme.accent, fontWeight: 700 }}>
             {issue.issueId}
           </span>
+          {focusedIssueId === issue.issueId ? (
+            <span style={{ color: theme.warn, fontSize: 11, fontWeight: 600 }}>
+              {locale === "en"
+                ? "Deep-linked from ops"
+                : "由 ops deep link 進入"}
+            </span>
+          ) : null}
           {issue.reopenCount > 0 ? (
             <span style={{ color: theme.textMuted, fontSize: 11 }}>
               {t("payments.reconciliation.reopenCount", {
@@ -1156,6 +1628,19 @@ export default function PaymentsPage() {
         issue.externalOrderId ?? issue.mirrorOrderId ?? issue.orderId ?? "—",
     },
     {
+      h: "Context",
+      w: 236,
+      mono: true,
+      r: (issue) => (
+        <div style={cellStackStyle({ mono: true })}>
+          <span>{issue.partnerProgramId ?? issue.partnerId ?? "—"}</span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {issue.sponsorReference ?? issue.linkedReconciliationJobId ?? "—"}
+          </span>
+        </div>
+      ),
+    },
+    {
       h: "Owner",
       w: 120,
       r: (issue) => issue.ownerId ?? "—",
@@ -1173,6 +1658,11 @@ export default function PaymentsPage() {
               count: String(issue.evidenceArtifactIds.length),
             })}
           </span>
+          {issue.resolutionSummary ? (
+            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+              {issue.resolutionSummary}
+            </span>
+          ) : null}
         </div>
       ),
     },
@@ -1231,9 +1721,7 @@ export default function PaymentsPage() {
         issue.status === "resolved" ? (
           <div style={cellStackStyle()}>
             <span>
-              {issue.resolutionSummary ??
-                issue.comments.at(-1)?.message ??
-                "—"}
+              {issue.resolutionSummary ?? issue.comments.at(-1)?.message ?? "—"}
             </span>
             <span style={{ color: theme.textMuted, fontSize: 11 }}>
               {t("payments.reconciliation.commentCount", {
@@ -1310,7 +1798,9 @@ export default function PaymentsPage() {
               }
               style={nativeControlStyle(theme)}
             >
-              <option value="">{t("payments.reconciliation.resolveCode")}</option>
+              <option value="">
+                {t("payments.reconciliation.resolveCode")}
+              </option>
               {RECONCILIATION_RESOLUTION_OPTIONS.map((code) => (
                 <option key={code} value={code}>
                   {formatPlatformCodeLabel(locale, code)}
@@ -1345,51 +1835,75 @@ export default function PaymentsPage() {
     {
       h: "Actions",
       w: 206,
-      r: (issue) => (
-        <div style={{ display: "grid", gap: 8, minWidth: 180 }}>
-          {issue.status !== "resolved" ? (
-            <>
-              <CanvasBtn
-                theme={theme}
-                variant="secondary"
-                icon="copy"
-                disabled={issueActionId === issue.issueId}
-                onClick={() => void handleAssignIssue(issue)}
-              >
-                {t("payments.reconciliation.assign")}
-              </CanvasBtn>
-              <CanvasBtn
-                theme={theme}
-                variant="secondary"
-                icon="plus"
-                disabled={issueActionId === issue.issueId}
-                onClick={() => void handleCommentIssue(issue)}
-              >
-                {t("payments.reconciliation.addComment")}
-              </CanvasBtn>
-              <CanvasBtn
-                theme={theme}
-                variant="primary"
-                icon="check"
-                disabled={issueActionId === issue.issueId}
-                onClick={() => void handleResolveIssue(issue)}
-              >
-                {t("payments.reconciliation.resolve")}
-              </CanvasBtn>
-            </>
-          ) : (
-            <CanvasBtn
-              theme={theme}
-              variant="secondary"
-              icon="arrow"
-              disabled={issueActionId === issue.issueId}
-              onClick={() => void handleReopenIssue(issue)}
+      r: (issue) => {
+        const issueActions = resourceActions(
+          issue as RuntimeIssueRecord,
+          issueActionsFor(issue),
+        );
+        const assignAction = getActionDescriptor(issueActions, "assign_issue");
+        const commentAction = getActionDescriptor(
+          issueActions,
+          "comment_with_artifacts",
+        );
+        const resolveAction = getActionDescriptor(
+          issueActions,
+          "resolve_issue",
+        );
+        const reopenAction = getActionDescriptor(issueActions, "reopen_issue");
+        const opsLink = issueOpsLinkFor(issue);
+
+        return (
+          <div style={{ display: "grid", gap: 8, minWidth: 180 }}>
+            {issue.status !== "resolved"
+              ? renderContractAction(assignAction, {
+                  label: t("payments.reconciliation.assign"),
+                  icon: "copy",
+                  disabled: issueActionId === issue.issueId,
+                  onClick: () => void handleAssignIssue(issue),
+                })
+              : null}
+            {issue.status !== "resolved"
+              ? renderContractAction(commentAction, {
+                  label: t("payments.reconciliation.addComment"),
+                  icon: "plus",
+                  disabled: issueActionId === issue.issueId,
+                  onClick: () => void handleCommentIssue(issue),
+                })
+              : null}
+            {issue.status !== "resolved"
+              ? renderContractAction(resolveAction, {
+                  label: t("payments.reconciliation.resolve"),
+                  icon: "check",
+                  primary: true,
+                  disabled: issueActionId === issue.issueId,
+                  onClick: () => void handleResolveIssue(issue),
+                })
+              : null}
+            {issue.status === "resolved"
+              ? renderContractAction(reopenAction, {
+                  label: t("payments.reconciliation.reopen"),
+                  icon: "arrow",
+                  danger: true,
+                  disabled: issueActionId === issue.issueId,
+                  onClick: () => void handleReopenIssue(issue),
+                })
+              : null}
+            <a
+              href={opsLink.route}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                color: theme.accent,
+                textDecoration: "none",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
             >
-              {t("payments.reconciliation.reopen")}
-            </CanvasBtn>
-          )}
-        </div>
-      ),
+              {opsLink.label}
+            </a>
+          </div>
+        );
+      },
     },
   ];
 
@@ -1421,7 +1935,9 @@ export default function PaymentsPage() {
       w: 216,
       r: (row) => (
         <div style={cellStackStyle()}>
-          <span>{describeMatrixField("invoiceOwner", row, row.invoiceOwner)}</span>
+          <span>
+            {describeMatrixField("invoiceOwner", row, row.invoiceOwner)}
+          </span>
           <span style={{ color: theme.textMuted, fontSize: 11 }}>
             {describeMatrixField("invoice", row, row.invoicePath)}
           </span>
@@ -1436,8 +1952,7 @@ export default function PaymentsPage() {
     {
       h: t("payments.matrix.col.payout"),
       w: 172,
-      r: (row) =>
-        describeMatrixField("payout", row, row.driverPayoutAuthority),
+      r: (row) => describeMatrixField("payout", row, row.driverPayoutAuthority),
     },
     {
       h: t("payments.matrix.col.discount"),
@@ -1456,14 +1971,26 @@ export default function PaymentsPage() {
     {
       h: t("payments.matrix.col.reconciliation"),
       w: 176,
-      r: (row) =>
-        describeMatrixField("reconciliation", row, row.reconciliationPath),
+      r: (row) => (
+        <div style={cellStackStyle()}>
+          <span>
+            {describeMatrixField("reconciliation", row, row.reconciliationPath)}
+          </span>
+          <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            {row.reportingArtifacts.join(", ") || row.notes || "—"}
+          </span>
+        </div>
+      ),
     },
     {
       h: t("payments.matrix.col.ledger"),
       w: 112,
       r: (row) => (
-        <CanvasPill theme={theme} tone={ledgerModeTone(row.localLedgerMode)} dot>
+        <CanvasPill
+          theme={theme}
+          tone={ledgerModeTone(row.localLedgerMode)}
+          dot
+        >
           {describeLedgerMode(row.localLedgerMode)}
         </CanvasPill>
       ),
@@ -1525,7 +2052,8 @@ export default function PaymentsPage() {
       w: 200,
       r: (invoice) => (
         <div style={{ ...cellStackStyle(), maxWidth: 200 }}>
-          {formatDateTime(invoice.periodStart)} - {formatDateTime(invoice.periodEnd)}
+          {formatDateTime(invoice.periodStart)} -{" "}
+          {formatDateTime(invoice.periodEnd)}
         </div>
       ),
     },
@@ -1538,7 +2066,11 @@ export default function PaymentsPage() {
             href={invoice.artifactUrl}
             target="_blank"
             rel="noreferrer"
-            style={{ color: theme.accent, textDecoration: "none", fontWeight: 600 }}
+            style={{
+              color: theme.accent,
+              textDecoration: "none",
+              fontWeight: 600,
+            }}
           >
             {t("payments.downloadPdf")}
           </a>
@@ -1689,18 +2221,35 @@ export default function PaymentsPage() {
       h: getPlatformLabel(locale, "remittance"),
       w: 220,
       r: (batch) => (
-        <input
-          value={remittanceProofs[batch.batchId] ?? batch.remittanceProofId ?? ""}
-          onChange={(event) =>
-            setRemittanceProofs((current) => ({
-              ...current,
-              [batch.batchId]: event.target.value,
-            }))
-          }
-          placeholder={getPlatformLabel(locale, "remittanceProofExample")}
-          style={nativeControlStyle(theme)}
-          disabled={batch.status === "paid"}
-        />
+        <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
+          <input
+            value={
+              remittanceProofs[batch.batchId] ?? batch.remittanceProofId ?? ""
+            }
+            onChange={(event) =>
+              setRemittanceProofs((current) => ({
+                ...current,
+                [batch.batchId]: event.target.value,
+              }))
+            }
+            placeholder={getPlatformLabel(locale, "remittanceProofExample")}
+            style={nativeControlStyle(theme)}
+            disabled={batch.status === "paid"}
+          />
+          <input
+            value={batchActionReasons[batch.batchId] ?? ""}
+            onChange={(event) =>
+              setBatchActionReasons((current) => ({
+                ...current,
+                [batch.batchId]: event.target.value,
+              }))
+            }
+            placeholder={
+              locale === "en" ? "Reason for state change" : "狀態異動原因"
+            }
+            style={nativeControlStyle(theme)}
+          />
+        </div>
       ),
     },
     {
@@ -1715,36 +2264,158 @@ export default function PaymentsPage() {
     {
       h: t("common.actions"),
       w: 160,
-      r: (batch) => (
-        <div style={{ display: "grid", gap: 8, minWidth: 140 }}>
-          {!batch.approvedAt ? (
-            <CanvasBtn
-              theme={theme}
-              variant="secondary"
-              icon="check"
-              disabled={batchActionId === batch.batchId}
-              onClick={() => void handleApproveBatch(batch)}
+      r: (batch) => {
+        const batchActions = resourceActions(
+          batch as RuntimeReimbursementRecord,
+          reimbursementActionsFor(batch),
+        );
+        const approveAction = getActionDescriptor(
+          batchActions,
+          "approve_batch",
+        );
+        const markPaidAction = getActionDescriptor(batchActions, "mark_paid");
+        return (
+          <div style={{ display: "grid", gap: 8, minWidth: 140 }}>
+            {!batch.approvedAt
+              ? renderContractAction(approveAction, {
+                  label: t("payments.approve"),
+                  icon: "check",
+                  disabled: batchActionId === batch.batchId,
+                  onClick: () => void handleApproveBatch(batch),
+                })
+              : null}
+            {batch.status !== "paid"
+              ? renderContractAction(markPaidAction, {
+                  label:
+                    batchActionId === batch.batchId
+                      ? t("payments.saving")
+                      : t("payments.markPaid"),
+                  icon: "billing",
+                  primary: true,
+                  danger: true,
+                  disabled: batchActionId === batch.batchId,
+                  onClick: () => void handleMarkPaid(batch),
+                })
+              : null}
+            <a
+              href={`/payments?batchId=${encodeURIComponent(batch.batchId)}#payments-reimbursements`}
+              style={{
+                color: theme.accent,
+                textDecoration: "none",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
             >
-              {t("payments.approve")}
-            </CanvasBtn>
-          ) : null}
-          {batch.status !== "paid" ? (
-            <CanvasBtn
-              theme={theme}
-              variant="primary"
-              icon="billing"
-              disabled={batchActionId === batch.batchId}
-              onClick={() => void handleMarkPaid(batch)}
-            >
-              {batchActionId === batch.batchId
-                ? t("payments.saving")
-                : t("payments.markPaid")}
-            </CanvasBtn>
-          ) : null}
-        </div>
-      ),
+              {locale === "en" ? "Open batch queue" : "開啟批次佇列"}
+            </a>
+          </div>
+        );
+      },
     },
   ];
+
+  function renderContractAction(
+    descriptor: ResourceActionDescriptor | null,
+    options: {
+      label: string;
+      icon?: React.ReactNode | string;
+      onClick?: () => void;
+      danger?: boolean;
+      primary?: boolean;
+      disabled?: boolean;
+      size?: "xs" | "sm" | "md";
+    },
+  ) {
+    if (!descriptor) {
+      return null;
+    }
+    const disabled = options.disabled || !descriptor.enabled;
+    const tooltip = !descriptor.enabled
+      ? (descriptor.disabledReasonCode ?? descriptor.action)
+      : descriptor.requiresReason
+        ? locale === "en"
+          ? "Reason required"
+          : "需填原因"
+        : undefined;
+    return (
+      <span title={tooltip}>
+        <CanvasBtn
+          theme={theme}
+          variant={options.primary ? "primary" : "secondary"}
+          disabled={disabled}
+          {...(options.size ? { size: options.size } : {})}
+          {...(options.danger ? { danger: true } : {})}
+          {...(options.icon ? { icon: options.icon } : {})}
+          {...(options.onClick ? { onClick: options.onClick } : {})}
+        >
+          {options.label}
+        </CanvasBtn>
+      </span>
+    );
+  }
+
+  function renderEmptyState(config: EmptyStateConfig) {
+    const tone = emptyStateTone(theme, config.reason);
+    return (
+      <div
+        style={{
+          padding: 18,
+          display: "grid",
+          gap: 12,
+          justifyItems: "start",
+          border: `1px dashed ${tone.border}`,
+          background: tone.background,
+          borderRadius: 10,
+          margin: 14,
+        }}
+      >
+        <div style={{ display: "grid", gap: 4 }}>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              color: theme.text,
+              fontWeight: 600,
+            }}
+          >
+            <CanvasPill theme={theme} tone={tone.tone}>
+              {config.reason}
+            </CanvasPill>
+          </div>
+          <div
+            style={{ color: theme.textMuted, fontSize: 12.5, lineHeight: 1.5 }}
+          >
+            {config.message}
+          </div>
+        </div>
+        {config.nextAction
+          ? renderContractAction(config.nextAction, {
+              label:
+                config.nextAction.action === "retry_refresh"
+                  ? t("common.refresh")
+                  : config.nextAction.action === "clear_invoice_filter"
+                    ? locale === "en"
+                      ? "Clear filter"
+                      : "清除篩選"
+                    : formatPlatformCodeLabel(locale, config.nextAction.action),
+              icon:
+                config.nextAction.action === "retry_refresh"
+                  ? "arrow"
+                  : config.nextAction.action === "clear_invoice_filter"
+                    ? "arrow"
+                    : "plus",
+              ...(config.nextAction.action === "retry_refresh"
+                ? { onClick: () => void loadFinance() }
+                : {}),
+              ...(config.nextAction.action === "clear_invoice_filter"
+                ? { onClick: () => setInvoiceFilter("all") }
+                : {}),
+            })
+          : null}
+      </div>
+    );
+  }
 
   return (
     <div style={viewportStyle(theme)}>
@@ -1764,7 +2435,7 @@ export default function PaymentsPage() {
         <CanvasPageHeader
           theme={theme}
           title={copy.pageTitle}
-          subtitle={copy.pageSubtitle}
+          subtitle={`${copy.pageSubtitle} · ${freshnessLabel}`}
           tabs={tabs}
           activeTab={tabs[4]}
           actions={
@@ -1772,25 +2443,32 @@ export default function PaymentsPage() {
               <CanvasBtn theme={theme} icon="reports" disabled>
                 {copy.export}
               </CanvasBtn>
-              <CanvasBtn
-                theme={theme}
-                variant="primary"
-                icon="plus"
-                onClick={() =>
-                  document
-                    .getElementById("payments-create-issue")
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                }
-              >
-                {copy.openIssue}
-              </CanvasBtn>
+              {renderContractAction(
+                getActionDescriptor(
+                  paymentsPageActions,
+                  "create_reconciliation_issue",
+                ),
+                {
+                  label: copy.openIssue,
+                  icon: "plus",
+                  primary: true,
+                  onClick: () =>
+                    document
+                      .getElementById("payments-create-issue")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+                },
+              )}
             </>
           }
         />
 
         <div style={pageBodyStyle(theme)}>
           {loading ? (
-            <CanvasCard theme={theme} title={copy.pageTitle} subtitle={copy.loading}>
+            <CanvasCard
+              theme={theme}
+              title={copy.pageTitle}
+              subtitle={copy.loading}
+            >
               <div style={{ color: theme.textMuted, fontSize: 12.5 }}>
                 {copy.loading}
               </div>
@@ -1800,9 +2478,28 @@ export default function PaymentsPage() {
               {error ? (
                 <CanvasBanner
                   theme={theme}
-                  tone="danger"
+                  tone={
+                    rootEmptyReason === "permission_denied" ? "warn" : "danger"
+                  }
                   title={`${getPlatformLabel(locale, "error")}: ${error}`}
                   body={copy.queueSubtitle}
+                />
+              ) : null}
+
+              {sourceApp === "ops-console" && focusedIssueId ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="info"
+                  title={
+                    locale === "en"
+                      ? `Ops mirror opened ${focusedIssueId}`
+                      : `已從 ops mirror 開啟 ${focusedIssueId}`
+                  }
+                  body={
+                    locale === "en"
+                      ? "This route owns reconciliation mutation. Review evidence and resolve or reopen from this control plane."
+                      : "這個 route 擁有 reconciliation mutation 權限；請在這個 control plane 補證據、結案或重開。"
+                  }
                 />
               ) : null}
 
@@ -1871,7 +2568,11 @@ export default function PaymentsPage() {
                   theme={theme}
                   label={copy.reopenRateLabel}
                   value={`${reopenRate.toFixed(1)}%`}
-                  delta={reopenRateWarning ? copy.reopenDeltaWarn : copy.reopenDeltaOk}
+                  delta={
+                    reopenRateWarning
+                      ? copy.reopenDeltaWarn
+                      : copy.reopenDeltaOk
+                  }
                   deltaTone={reopenRateWarning ? "down" : "up"}
                   sub={`${copy.queueWindow} · ${issueWindow.length}`}
                 />
@@ -1880,34 +2581,34 @@ export default function PaymentsPage() {
               <div
                 style={sectionGridStyle("minmax(0, 2.1fr) minmax(280px, 1fr)")}
               >
-                <CanvasCard
-                  theme={theme}
-                  title={t("payments.reconciliation.title")}
-                  subtitle={copy.queueSubtitle}
-                  padding={0}
-                  actions={
-                    <CanvasBtn
-                      theme={theme}
-                      variant="secondary"
-                      icon="arrow"
-                      onClick={() => void loadFinance()}
-                    >
-                      {t("common.refresh")}
-                    </CanvasBtn>
-                  }
-                >
-                  {sortedIssues.length > 0 ? (
-                    <CanvasTable
-                      theme={theme}
-                      columns={issueColumns}
-                      rows={sortedIssues as IssueTableRow[]}
-                    />
-                  ) : (
-                    <div style={emptyStateStyle(theme)}>
-                      {t("payments.reconciliation.empty")}
-                    </div>
-                  )}
-                </CanvasCard>
+                <div id="payments-reconciliation-queue">
+                  <CanvasCard
+                    theme={theme}
+                    title={t("payments.reconciliation.title")}
+                    subtitle={copy.queueSubtitle}
+                    padding={0}
+                    actions={
+                      <CanvasBtn
+                        theme={theme}
+                        variant="secondary"
+                        icon="arrow"
+                        onClick={() => void loadFinance()}
+                      >
+                        {t("common.refresh")}
+                      </CanvasBtn>
+                    }
+                  >
+                    {sortedIssues.length > 0 ? (
+                      <CanvasTable
+                        theme={theme}
+                        columns={issueColumns}
+                        rows={sortedIssues as IssueTableRow[]}
+                      />
+                    ) : (
+                      renderEmptyState(issueEmptyConfig)
+                    )}
+                  </CanvasCard>
+                </div>
 
                 <CanvasCard
                   theme={theme}
@@ -1960,7 +2661,9 @@ export default function PaymentsPage() {
                     <CanvasField theme={theme} label={copy.actorLabel}>
                       <input
                         value={financeActorId}
-                        onChange={(event) => setFinanceActorId(event.target.value)}
+                        onChange={(event) =>
+                          setFinanceActorId(event.target.value)
+                        }
                         style={nativeControlStyle(theme, { mono: true })}
                       />
                     </CanvasField>
@@ -2007,11 +2710,13 @@ export default function PaymentsPage() {
                             }
                             style={nativeControlStyle(theme)}
                           >
-                            {RECONCILIATION_ISSUE_TYPE_OPTIONS.map((issueType) => (
-                              <option key={issueType} value={issueType}>
-                                {formatPlatformCodeLabel(locale, issueType)}
-                              </option>
-                            ))}
+                            {RECONCILIATION_ISSUE_TYPE_OPTIONS.map(
+                              (issueType) => (
+                                <option key={issueType} value={issueType}>
+                                  {formatPlatformCodeLabel(locale, issueType)}
+                                </option>
+                              ),
+                            )}
                           </select>
                         </CanvasField>
                         <CanvasField
@@ -2029,11 +2734,13 @@ export default function PaymentsPage() {
                             }
                             style={nativeControlStyle(theme)}
                           >
-                            {RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => (
-                              <option key={channelKey} value={channelKey}>
-                                {describeMatrixChannel(channelKey)}
-                              </option>
-                            ))}
+                            {RECONCILIATION_CHANNEL_OPTIONS.map(
+                              (channelKey) => (
+                                <option key={channelKey} value={channelKey}>
+                                  {describeMatrixChannel(channelKey)}
+                                </option>
+                              ),
+                            )}
                           </select>
                         </CanvasField>
                         <CanvasField
@@ -2210,7 +2917,9 @@ export default function PaymentsPage() {
                           <CanvasField
                             theme={theme}
                             label={t("payments.reconciliation.artifactIds")}
-                            hint={t("payments.reconciliation.artifactPlaceholder")}
+                            hint={t(
+                              "payments.reconciliation.artifactPlaceholder",
+                            )}
                           >
                             <input
                               value={newIssue.artifactIds}
@@ -2231,7 +2940,8 @@ export default function PaymentsPage() {
                         disabled={issueDraftPending || !newIssue.summary.trim()}
                         style={nativeSubmitStyle(theme, {
                           primary: true,
-                          disabled: issueDraftPending || !newIssue.summary.trim(),
+                          disabled:
+                            issueDraftPending || !newIssue.summary.trim(),
                         })}
                       >
                         {issueDraftPending
@@ -2254,7 +2964,9 @@ export default function PaymentsPage() {
                     >
                       <input
                         value={invoiceTenantId}
-                        onChange={(event) => setInvoiceTenantId(event.target.value)}
+                        onChange={(event) =>
+                          setInvoiceTenantId(event.target.value)
+                        }
                         style={nativeControlStyle(theme, { mono: true })}
                       />
                     </CanvasField>
@@ -2278,16 +2990,32 @@ export default function PaymentsPage() {
                       <input
                         type="date"
                         value={invoicePeriodEnd}
-                        onChange={(event) => setInvoicePeriodEnd(event.target.value)}
+                        onChange={(event) =>
+                          setInvoicePeriodEnd(event.target.value)
+                        }
                         style={nativeControlStyle(theme)}
                       />
                     </CanvasField>
                     <button
                       type="submit"
-                      disabled={invoicePending}
+                      title={
+                        !generateInvoicesAction?.enabled
+                          ? generateInvoicesAction?.disabledReasonCode
+                          : generateInvoicesAction?.requiresReason
+                            ? locale === "en"
+                              ? "Reason required"
+                              : "需填原因"
+                            : undefined
+                      }
+                      disabled={
+                        invoicePending ||
+                        generateInvoicesAction?.enabled === false
+                      }
                       style={nativeSubmitStyle(theme, {
                         primary: true,
-                        disabled: invoicePending,
+                        disabled:
+                          invoicePending ||
+                          generateInvoicesAction?.enabled === false,
                       })}
                     >
                       {invoicePending
@@ -2320,10 +3048,24 @@ export default function PaymentsPage() {
                     </CanvasField>
                     <button
                       type="submit"
-                      disabled={statementPending}
+                      title={
+                        !generateStatementsAction?.enabled
+                          ? generateStatementsAction?.disabledReasonCode
+                          : generateStatementsAction?.requiresReason
+                            ? locale === "en"
+                              ? "Reason required"
+                              : "需填原因"
+                            : undefined
+                      }
+                      disabled={
+                        statementPending ||
+                        generateStatementsAction?.enabled === false
+                      }
                       style={nativeSubmitStyle(theme, {
                         primary: true,
-                        disabled: statementPending,
+                        disabled:
+                          statementPending ||
+                          generateStatementsAction?.enabled === false,
                       })}
                     >
                       {statementPending
@@ -2347,9 +3089,7 @@ export default function PaymentsPage() {
                     rows={sortedIssues as IssueTableRow[]}
                   />
                 ) : (
-                  <div style={emptyStateStyle(theme)}>
-                    {t("payments.reconciliation.empty")}
-                  </div>
+                  renderEmptyState(issueEmptyConfig)
                 )}
               </CanvasCard>
 
@@ -2366,9 +3106,7 @@ export default function PaymentsPage() {
                     rows={sortedMatrix as MatrixTableRow[]}
                   />
                 ) : (
-                  <div style={emptyStateStyle(theme)}>
-                    {t("payments.matrix.empty")}
-                  </div>
+                  renderEmptyState(matrixEmptyConfig)
                 )}
               </CanvasCard>
 
@@ -2379,17 +3117,21 @@ export default function PaymentsPage() {
                 padding={0}
                 actions={
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {(["all", "paid", "issued", "draft"] as const).map((value) => (
-                      <CanvasBtn
-                        key={value}
-                        theme={theme}
-                        size="xs"
-                        variant={invoiceFilter === value ? "primary" : "secondary"}
-                        onClick={() => setInvoiceFilter(value)}
-                      >
-                        {formatPlatformCodeLabel(locale, value)}
-                      </CanvasBtn>
-                    ))}
+                    {(["all", "paid", "issued", "draft"] as const).map(
+                      (value) => (
+                        <CanvasBtn
+                          key={value}
+                          theme={theme}
+                          size="xs"
+                          variant={
+                            invoiceFilter === value ? "primary" : "secondary"
+                          }
+                          onClick={() => setInvoiceFilter(value)}
+                        >
+                          {formatPlatformCodeLabel(locale, value)}
+                        </CanvasBtn>
+                      ),
+                    )}
                   </div>
                 }
               >
@@ -2400,7 +3142,7 @@ export default function PaymentsPage() {
                     rows={filteredInvoices as InvoiceTableRow[]}
                   />
                 ) : (
-                  <div style={emptyStateStyle(theme)}>{t("payments.noInvoices")}</div>
+                  renderEmptyState(invoiceEmptyConfig)
                 )}
               </CanvasCard>
 
@@ -2417,9 +3159,7 @@ export default function PaymentsPage() {
                     rows={statements as StatementTableRow[]}
                   />
                 ) : (
-                  <div style={emptyStateStyle(theme)}>
-                    {t("payments.noStatements")}
-                  </div>
+                  renderEmptyState(statementEmptyConfig)
                 )}
               </CanvasCard>
 
@@ -2428,18 +3168,33 @@ export default function PaymentsPage() {
                 title={t("payments.reimbursementsTitle")}
                 subtitle={`${pendingReimbursements.length} pending · ${paidReimbursementMinor.toLocaleString()} settled`}
                 padding={0}
+                actions={
+                  <a
+                    href="/payments#payments-reimbursements"
+                    style={{
+                      color: theme.accent,
+                      textDecoration: "none",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {locale === "en"
+                      ? "Open reimbursement queue"
+                      : "開啟 reimbursement queue"}
+                  </a>
+                }
               >
-                {reimbursements.length > 0 ? (
-                  <CanvasTable
-                    theme={theme}
-                    columns={reimbursementColumns}
-                    rows={reimbursements as ReimbursementTableRow[]}
-                  />
-                ) : (
-                  <div style={emptyStateStyle(theme)}>
-                    {t("payments.noReimbursements")}
-                  </div>
-                )}
+                <div id="payments-reimbursements">
+                  {reimbursements.length > 0 ? (
+                    <CanvasTable
+                      theme={theme}
+                      columns={reimbursementColumns}
+                      rows={reimbursements as ReimbursementTableRow[]}
+                    />
+                  ) : (
+                    renderEmptyState(reimbursementEmptyConfig)
+                  )}
+                </div>
               </CanvasCard>
 
               <div
@@ -2456,18 +3211,27 @@ export default function PaymentsPage() {
                     items={[
                       {
                         k: t("payments.invoiceTotal"),
-                        v: formatMinorMoney(totalInvoiceAmountMinor, exposureCurrency),
+                        v: formatMinorMoney(
+                          totalInvoiceAmountMinor,
+                          exposureCurrency,
+                        ),
                         mono: true,
                       },
                       {
                         k: t("payments.statementNet"),
-                        v: formatMinorMoney(totalStatementNetMinor, exposureCurrency),
+                        v: formatMinorMoney(
+                          totalStatementNetMinor,
+                          exposureCurrency,
+                        ),
                         mono: true,
                       },
                     ]}
                   />
                 </CanvasCard>
-                <CanvasCard theme={theme} title={t("payments.pendingReimbursements")}>
+                <CanvasCard
+                  theme={theme}
+                  title={t("payments.pendingReimbursements")}
+                >
                   <CanvasDL
                     theme={theme}
                     cols={1}
