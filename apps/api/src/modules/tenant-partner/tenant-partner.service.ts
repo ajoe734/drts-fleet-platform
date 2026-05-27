@@ -17,6 +17,7 @@ import {
 
 import type {
   AcknowledgeOpsApprovalRequestBreachCommand,
+  ActionableResourceRuntimeFields,
   AuditLogRecord,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
@@ -102,6 +103,7 @@ import type {
   UpsertTenantCostCenterCommand,
   UpsertTenantPassengerCommand,
   UpsertTenantQuotaPolicyCommand,
+  UiListResourceEnvelope,
   VerifyPartnerEligibilityCommand,
   WebhookEventPayload,
   WebhookDeliveryRecord,
@@ -2803,8 +2805,35 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((entry) => this.clonePartnerEntry(entry));
   }
 
-  listPlatformPartnerEntries() {
-    return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
+  listPlatformPartnerEntries(
+    identity?: IdentityContext | null,
+  ): UiListResourceEnvelope<
+    PartnerChannelEntryRecord & ActionableResourceRuntimeFields
+  > {
+    const refreshedAt = new Date().toISOString();
+    const availableActions = this.buildPlatformPartnerListActions(identity);
+    const createAction = availableActions.find(
+      (action) => action.action === "create",
+    );
+    const items = this.partnerEntries.map((entry) =>
+      this.toPlatformPartnerListItem(entry, identity),
+    );
+
+    return {
+      items,
+      availableActions,
+      refreshTier: "medium_slow",
+      refreshedAt,
+      ...(items.length === 0
+        ? {
+            emptyState: {
+              reason: "no_data" as const,
+              messageCode: "platform_admin.partners.empty.no_data",
+              ...(createAction ? { nextAction: createAction } : {}),
+            },
+          }
+        : {}),
+    };
   }
 
   listPlatformPartnerIngressCredentials(entrySlug: string) {
@@ -2821,6 +2850,88 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         return right.createdAt.localeCompare(left.createdAt);
       })
       .map((credential) => this.toPartnerIngressCredentialResponse(credential));
+  }
+
+  private buildPlatformPartnerListActions(identity?: IdentityContext | null) {
+    const canMutate = identity?.actorType === "platform_admin";
+
+    return [
+      {
+        action: "refresh",
+        enabled: true,
+        riskLevel: "low" as const,
+      },
+      {
+        action: "create",
+        enabled: canMutate,
+        riskLevel: "medium" as const,
+        ...(!canMutate
+          ? { disabledReasonCode: "PLATFORM_ADMIN_REQUIRED" }
+          : {}),
+      },
+    ];
+  }
+
+  private buildPlatformPartnerRowActionsForActor(
+    entry: PartnerChannelEntryRecord,
+    canMutate: boolean,
+  ) {
+    if (entry.status === "active") {
+      return [
+        {
+          action: "deactivate",
+          enabled: canMutate,
+          riskLevel: "medium" as const,
+          ...(!canMutate
+            ? { disabledReasonCode: "PLATFORM_ADMIN_REQUIRED" }
+            : {}),
+        },
+      ];
+    }
+
+    if (entry.status === "inactive") {
+      return [
+        {
+          action: "activate",
+          enabled: canMutate,
+          riskLevel: "medium" as const,
+          ...(!canMutate
+            ? { disabledReasonCode: "PLATFORM_ADMIN_REQUIRED" }
+            : {}),
+        },
+      ];
+    }
+
+    return [];
+  }
+
+  private buildPlatformPartnerResourceLinks(entry: PartnerChannelEntryRecord) {
+    return [
+      {
+        targetApp: "platform-admin" as const,
+        route: `/audit?resourceType=partner_entry&resourceId=${encodeURIComponent(entry.entrySlug)}`,
+        resourceType: "audit",
+        resourceId: entry.entrySlug,
+        openMode: "same_tab" as const,
+        label: "View audit",
+      },
+    ];
+  }
+
+  private toPlatformPartnerListItem(
+    entry: PartnerChannelEntryRecord,
+    identity?: IdentityContext | null,
+  ): PartnerChannelEntryRecord & ActionableResourceRuntimeFields {
+    const canMutate = identity?.actorType === "platform_admin";
+
+    return {
+      ...this.clonePartnerEntry(entry),
+      availableActions: this.buildPlatformPartnerRowActionsForActor(
+        entry,
+        canMutate,
+      ),
+      resourceLinks: this.buildPlatformPartnerResourceLinks(entry),
+    };
   }
 
   listPartnerEligibilityReviewQueue(
