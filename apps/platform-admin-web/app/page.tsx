@@ -220,6 +220,22 @@ const actionRowStyle = {
   alignItems: "center",
 } satisfies CSSProperties;
 
+const actionStackStyle = {
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const actionItemStyle = {
+  display: "grid",
+  gap: 4,
+} satisfies CSSProperties;
+
+const actionMetaStyle = {
+  color: theme.textMuted,
+  fontSize: 11,
+  lineHeight: 1.4,
+} satisfies CSSProperties;
+
 const inlineEmptyStateStyle = {
   display: "grid",
   gap: 10,
@@ -569,7 +585,7 @@ function describeEmptyState(
   locale: string,
   reason: EmptyReason,
 ): EmptyStatePresentation {
-  const copy =
+  const copy: Record<EmptyReason, EmptyStatePresentation> =
     locale === "en"
       ? {
           no_data: {
@@ -672,6 +688,59 @@ function describeEmptyState(
   return copy[reason];
 }
 
+function formatActionMeta(locale: string, action: HomeAction) {
+  const parts: string[] = [];
+
+  parts.push(`risk:${action.riskLevel}`);
+
+  if (!action.enabled && action.disabledReasonCode) {
+    parts.push(
+      locale === "en"
+        ? `disabled:${action.disabledReasonCode}`
+        : `停用原因:${action.disabledReasonCode}`,
+    );
+  }
+
+  if (action.resourceLink?.openMode === "new_tab") {
+    parts.push(locale === "en" ? "opens in new tab" : "新分頁開啟");
+  }
+
+  if (action.requiresReason) {
+    parts.push(locale === "en" ? "reason required" : "需填原因");
+  }
+
+  return parts.join(" · ");
+}
+
+function renderActionButtons(
+  locale: string,
+  actions: HomeAction[],
+  router: ReturnType<typeof useRouter>,
+) {
+  return (
+    <div style={actionStackStyle}>
+      <div style={actionRowStyle}>
+        {actions.map((action, index) => (
+          <div key={action.action} style={actionItemStyle}>
+            <CanvasBtn
+              theme={theme}
+              variant={index === 0 ? "primary" : "secondary"}
+              disabled={!action.enabled}
+              onClick={() => openAction(router, action)}
+              title={formatActionMeta(locale, action)}
+            >
+              {action.label}
+            </CanvasBtn>
+            <span style={actionMetaStyle}>
+              {formatActionMeta(locale, action)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function renderEmptyState(
   locale: string,
   emptyState: ModuleCard["emptyState"],
@@ -698,15 +767,21 @@ function renderEmptyState(
       <div style={moduleDetailStyle}>{emptyState.message}</div>
       <div style={inlineEmptyStateHintStyle}>{presentation.hint}</div>
       {emptyState.nextAction ? (
-        <div style={actionRowStyle}>
-          <CanvasBtn
-            theme={theme}
-            variant="secondary"
-            disabled={!emptyState.nextAction.enabled}
-            onClick={() => onAction(emptyState.nextAction!)}
-          >
-            {emptyState.nextAction.label}
-          </CanvasBtn>
+        <div style={actionStackStyle}>
+          <div style={actionRowStyle}>
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              disabled={!emptyState.nextAction.enabled}
+              onClick={() => onAction(emptyState.nextAction!)}
+              title={formatActionMeta(locale, emptyState.nextAction)}
+            >
+              {emptyState.nextAction.label}
+            </CanvasBtn>
+          </div>
+          <span style={actionMetaStyle}>
+            {formatActionMeta(locale, emptyState.nextAction)}
+          </span>
         </div>
       ) : emptyState.reason === "filtered_empty" && onClearFilter ? (
         <div style={actionRowStyle}>
@@ -1858,25 +1933,7 @@ export default function HomePage() {
                     tone={item.tone}
                     title={item.title}
                     body={item.description}
-                    actions={
-                      <div style={actionRowStyle}>
-                        {item.actions.map((action) => (
-                          <CanvasBtn
-                            key={action.action}
-                            theme={theme}
-                            variant={
-                              action.action === item.actions[0]?.action
-                                ? "primary"
-                                : "secondary"
-                            }
-                            disabled={!action.enabled}
-                            onClick={() => openAction(router, action)}
-                          >
-                            {action.label}
-                          </CanvasBtn>
-                        ))}
-                      </div>
-                    }
+                    actions={renderActionButtons(locale, item.actions, router)}
                   />
                 ))
               )}
@@ -2046,24 +2103,11 @@ export default function HomePage() {
                             openAction(router, action),
                           )}
 
-                          <div style={actionRowStyle}>
-                            {card.availableActions.map((action) => (
-                              <CanvasBtn
-                                key={action.action}
-                                theme={theme}
-                                variant={
-                                  action.action ===
-                                  card.availableActions[0]?.action
-                                    ? "primary"
-                                    : "secondary"
-                                }
-                                disabled={!action.enabled}
-                                onClick={() => openAction(router, action)}
-                              >
-                                {action.label}
-                              </CanvasBtn>
-                            ))}
-                          </div>
+                          {renderActionButtons(
+                            locale,
+                            card.availableActions,
+                            router,
+                          )}
                         </div>
                       </CanvasCard>
                     ))}
