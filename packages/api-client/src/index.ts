@@ -185,6 +185,7 @@ import type {
   TenantCostCenterCoverageReport,
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
+  TenantFeatureFlagVisibilityList,
   TenantIntegrationGovernancePackage,
   TenantInvoiceRecord,
   TenantPassengerRecord,
@@ -414,6 +415,12 @@ export class ApiClient {
     const qs = searchParams.toString();
     const path = qs ? `/api/admin/flags?${qs}` : "/api/admin/flags";
     return this.get<FeatureFlagSummary>(path);
+  }
+
+  async getTenantFeatureFlags(): Promise<TenantFeatureFlagVisibilityList> {
+    return this.get<TenantFeatureFlagVisibilityList>(
+      "/api/tenant/feature-flags",
+    );
   }
 
   async getFeatureFlag(key: string): Promise<FeatureFlag> {

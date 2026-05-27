@@ -117,6 +117,10 @@ export class FeatureFlagsService {
     return this.featureFlagRepository?.isEnabled() ?? false;
   }
 
+  usesPersistentStore(): boolean {
+    return this.getDb();
+  }
+
   private inMemoryOverrideKey(key: string, tenantId: string): string {
     return `${key}:${tenantId}`;
   }
