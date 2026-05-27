@@ -87,6 +87,11 @@ type VehicleListRow = Record<string, unknown> & {
   crossLinks: CrossAppResourceLink[];
 };
 
+type VehicleRuntimeRecord = VehicleRegistryRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  crossLinks?: CrossAppResourceLink[];
+};
+
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: true,
@@ -405,7 +410,7 @@ function buildPageActionDescriptors(
 
 function buildVehicleRow(
   locale: Locale,
-  vehicle: VehicleRegistryRecord,
+  vehicle: VehicleRuntimeRecord,
   driverById: Map<string, DriverRegistryRecord>,
   activeShiftByVehicleId: Map<string, ShiftRecord>,
   maintenanceByVehicleId: Map<string, MaintenanceRecord[]>,
@@ -446,7 +451,7 @@ function buildVehicleRow(
           .map((reason) => formatOpsCodeLabel(locale, reason))
           .join(" · ")
       : copy(locale, "Dispatch gates clear", "派遣閘門正常");
-  const crossLinks: CrossAppResourceLink[] = [
+  const fallbackCrossLinks: CrossAppResourceLink[] = [
     {
       targetApp: "platform-admin",
       route: `/fleet?vehicleId=${encodeURIComponent(vehicle.vehicleId)}`,
@@ -456,10 +461,7 @@ function buildVehicleRow(
       label: copy(locale, "Platform Admin fleet", "Platform Admin 車隊"),
     },
   ];
-
-  // Backend `availableActions[]` has not been added to vehicle records yet,
-  // so this page emits descriptors in the shared ui-runtime shape.
-  const actionDescriptors: ResourceActionDescriptor[] = [
+  const fallbackActionDescriptors: ResourceActionDescriptor[] = [
     {
       action: "open_vehicle_detail",
       enabled: true,
@@ -484,6 +486,14 @@ function buildVehicleRow(
       riskLevel: "medium",
     },
   ];
+  const actionDescriptors =
+    vehicle.availableActions && vehicle.availableActions.length > 0
+      ? vehicle.availableActions
+      : fallbackActionDescriptors;
+  const crossLinks =
+    vehicle.crossLinks && vehicle.crossLinks.length > 0
+      ? vehicle.crossLinks
+      : fallbackCrossLinks;
 
   return {
     vehicleId: vehicle.vehicleId,
