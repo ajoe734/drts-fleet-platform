@@ -60,6 +60,15 @@ type WorkspaceRoute =
   | "/incident"
   | "/settings";
 
+type WorkspaceNavigationTarget =
+  | WorkspaceRoute
+  | {
+      pathname: "/incident";
+      params: {
+        entry: "cockpit";
+      };
+    };
+
 type WorkspaceLoadResult = {
   taskViews: UnifiedDriverTaskView[];
   orderMap: Record<string, OwnedOrderRecord>;
@@ -725,7 +734,8 @@ export default function WorkspaceIndex() {
     };
   }, []);
 
-  const navigate = (route: WorkspaceRoute) => () => router.push(route);
+  const navigate = (route: WorkspaceNavigationTarget) => () =>
+    router.push(route);
 
   const isDriverOnShift = workspace.activeShift !== null;
   const taskSummary = useMemo(
@@ -1057,7 +1067,10 @@ export default function WorkspaceIndex() {
         actions={
           <HeaderAlertButton
             count={notificationCount}
-            onPress={navigate("/incident")}
+            onPress={navigate({
+              pathname: "/incident",
+              params: { entry: "cockpit" },
+            })}
           />
         }
       />
@@ -1233,7 +1246,10 @@ export default function WorkspaceIndex() {
           label={driverStrings.onboarding.footerActions.sos}
           helper="安全求援"
           tone="danger"
-          onPress={navigate("/incident")}
+          onPress={navigate({
+            pathname: "/incident",
+            params: { entry: "cockpit" },
+          })}
         />
       </View>
     </Shell>
