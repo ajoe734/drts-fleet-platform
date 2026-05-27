@@ -27,7 +27,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -56,12 +55,6 @@ const bodyStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const kpiGridStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-} satisfies CSSProperties;
-
 const controlsGridStyle = {
   display: "grid",
   gap: 16,
@@ -78,7 +71,7 @@ const mainGridStyle = {
 const listGridStyle = {
   display: "grid",
   gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
 } satisfies CSSProperties;
 
 const controlRowStyle = {
@@ -162,6 +155,41 @@ const emptyStateBodyStyle = {
 const linkListStyle = {
   display: "grid",
   gap: 8,
+} satisfies CSSProperties;
+
+const cardTitleRowStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 8,
+} satisfies CSSProperties;
+
+const cardMetaStyle = {
+  marginTop: 10,
+  color: theme.textMuted,
+  fontSize: 12,
+  lineHeight: 1.5,
+} satisfies CSSProperties;
+
+const cardSectionStyle = {
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const cardActionRailStyle = {
+  marginTop: 12,
+  paddingTop: 12,
+  borderTop: `1px solid ${theme.border}`,
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+} satisfies CSSProperties;
+
+const detailColumnStyle = {
+  display: "grid",
+  gap: 14,
+  minWidth: 0,
 } satisfies CSSProperties;
 
 const textLinkStyle = (th: CanvasTheme): CSSProperties => ({
@@ -1115,6 +1143,20 @@ function freshnessLabel(value: FreshnessState, locale: string) {
   return labels[value];
 }
 
+function adapterTypeTone(value: string): CanvasTone {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.includes("webhook") || normalized.includes("forward")) {
+    return "info";
+  }
+  if (normalized.includes("combined") || normalized.includes("auth")) {
+    return "accent";
+  }
+  if (normalized.includes("rest")) {
+    return "success";
+  }
+  return "neutral";
+}
+
 function environmentTone(value: string): CanvasTone {
   switch (value.trim().toLowerCase()) {
     case "production":
@@ -1450,6 +1492,13 @@ export default function AdapterRegistryPage() {
           none: "None",
           noneConfigured: "No adapter is selected.",
           noDescription: "No description provided.",
+          focusDetail: "Inspect detail",
+          detailSelected: "Detail selected",
+          visibleCount: "Visible adapters",
+          healthLabel: "Health",
+          rotatedAt: "Rotated",
+          expiresAt: "Expires",
+          rotationOwner: "Rotation owner",
         }
       : {
           breadcrumbParent: "平台與商務",
@@ -1544,6 +1593,13 @@ export default function AdapterRegistryPage() {
           none: "None",
           noneConfigured: "尚未選擇 adapter。",
           noDescription: "目前沒有 description。",
+          focusDetail: "查看 detail",
+          detailSelected: "已選取 detail",
+          visibleCount: "目前可見 adapter",
+          healthLabel: "Health",
+          rotatedAt: "Rotated",
+          expiresAt: "Expires",
+          rotationOwner: "Rotation owner",
         };
 
   const loadRegistry = useCallback(
@@ -2124,46 +2180,6 @@ export default function AdapterRegistryPage() {
           />
         ) : null}
 
-        <CanvasBanner
-          theme={theme}
-          tone="info"
-          title={copy.splitTitle}
-          body={copy.splitBody}
-        />
-
-        <div style={kpiGridStyle}>
-          <CanvasKPI
-            theme={theme}
-            label={copy.noAdapters}
-            value={stats.total}
-            sub={copy.listTitle}
-            hint={copy.envSummary}
-          />
-          <CanvasKPI
-            theme={theme}
-            label={copy.urgency}
-            value={stats.urgent}
-            delta={`${stats.paused} ${copy.paused}`}
-            deltaTone={stats.urgent > 0 ? "down" : "up"}
-            sub={copy.secretTitle}
-          />
-          <CanvasKPI
-            theme={theme}
-            label={copy.freshness}
-            value={freshnessLabel(effectiveFreshness, locale)}
-            sub={copy.refreshTitle}
-            hint={registry.refresh.source}
-          />
-          <CanvasKPI
-            theme={theme}
-            label={copy.readOnly}
-            value={stats.readOnly}
-            delta={`${visibleAdapters.length} visible`}
-            deltaTone={stats.readOnly > 0 ? "neutral" : "up"}
-            sub={copy.controlHint}
-          />
-        </div>
-
         <div style={controlsGridStyle}>
           <CanvasCard
             theme={theme}
@@ -2209,12 +2225,35 @@ export default function AdapterRegistryPage() {
               </CanvasField>
             </div>
             <div style={fieldHintStyle}>{copy.controlHint}</div>
+            <div style={{ ...pillRowStyle, marginTop: 12 }}>
+              <CanvasPill theme={theme} tone="neutral">
+                {`${copy.visibleCount}: ${visibleAdapters.length}`}
+              </CanvasPill>
+              <CanvasPill
+                theme={theme}
+                tone={stats.urgent > 0 ? "warn" : "success"}
+              >
+                {`${copy.urgency}: ${stats.urgent}`}
+              </CanvasPill>
+              <CanvasPill
+                theme={theme}
+                tone={stats.paused > 0 ? "warn" : "neutral"}
+              >
+                {`${copy.paused}: ${stats.paused}`}
+              </CanvasPill>
+              <CanvasPill
+                theme={theme}
+                tone={stats.readOnly > 0 ? "neutral" : "success"}
+              >
+                {`${copy.readOnly}: ${stats.readOnly}`}
+              </CanvasPill>
+            </div>
           </CanvasCard>
 
           <CanvasCard
             theme={theme}
             title={copy.refreshTitle}
-            subtitle={copy.refreshBody}
+            subtitle={copy.splitBody}
           >
             <CanvasDL
               theme={theme}
@@ -2240,6 +2279,16 @@ export default function AdapterRegistryPage() {
                 {
                   label: copy.sourcedFrom,
                   value: registry.refresh.source,
+                  mono: true,
+                },
+                {
+                  label: copy.noAdapters,
+                  value: stats.total,
+                  mono: true,
+                },
+                {
+                  label: copy.readOnly,
+                  value: stats.readOnly,
                   mono: true,
                 },
               ]}
@@ -2281,82 +2330,95 @@ export default function AdapterRegistryPage() {
             </div>
           </CanvasCard>
         ) : (
-          <div style={mainGridStyle}>
-            <CanvasCard
-              theme={theme}
-              title={copy.listTitle}
-              subtitle={copy.listSubtitle}
-            >
-              <div style={listGridStyle}>
-                {visibleAdapters.map((item) => {
-                  const selected = item.id === selectedAdapterId;
-                  const attention = isAttentionAdapter(item);
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setSelectedAdapterId(item.id)}
-                      style={{
-                        textAlign: "left",
-                        borderRadius: 12,
-                        border: `1px solid ${
-                          selected
-                            ? theme.accentBorder
-                            : attention
-                              ? theme.warnBorder
-                              : theme.border
-                        }`,
-                        background: selected
-                          ? theme.accentBg
-                          : attention
-                            ? theme.surfaceHi
-                            : theme.surface,
-                        padding: 14,
-                        cursor: "pointer",
-                        display: "grid",
-                        gap: 12,
-                        boxShadow: selected ? theme.shadowSm : "none",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "space-between",
-                          gap: 12,
-                        }}
-                      >
-                        <div style={{ minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontSize: 14,
-                              fontWeight: 700,
-                              color: theme.text,
-                              lineHeight: 1.2,
-                            }}
-                          >
-                            {item.displayName}
-                          </div>
-                          <div
-                            style={{
-                              marginTop: 4,
-                              fontFamily: theme.monoFamily,
-                              fontSize: 11.5,
-                              color: theme.textDim,
-                            }}
-                          >
-                            {item.platformCode}
-                          </div>
-                        </div>
+          <>
+            <div style={listGridStyle}>
+              {visibleAdapters.map((item) => {
+                const selected = item.id === selectedAdapterId;
+                const attention = isAttentionAdapter(item);
+                const quickActions = item.availableActions.slice(0, 4);
+
+                return (
+                  <CanvasCard
+                    key={item.id}
+                    theme={theme}
+                    title={
+                      <span style={cardTitleRowStyle}>
+                        <span>{item.displayName}</span>
                         <CanvasPill
                           theme={theme}
-                          tone={healthTone(item.health)}
-                          dot
+                          tone={adapterTypeTone(item.adapterType)}
                         >
-                          {item.health}
+                          {formatPlatformCodeLabel(
+                            locale as "en" | "zh",
+                            item.adapterType,
+                          )}
                         </CanvasPill>
-                      </div>
+                      </span>
+                    }
+                    subtitle={item.platformCode}
+                    actions={
+                      <CanvasPill
+                        theme={theme}
+                        tone={healthTone(item.health)}
+                        dot
+                      >
+                        {item.health}
+                      </CanvasPill>
+                    }
+                    style={{
+                      borderColor: selected
+                        ? theme.accentBorder
+                        : attention
+                          ? theme.warnBorder
+                          : theme.border,
+                      background: selected ? theme.accentBg : theme.surface,
+                      boxShadow: selected ? theme.shadowSm : "none",
+                    }}
+                  >
+                    <div style={cardMetaStyle}>
+                      {item.description || copy.noDescription}
+                    </div>
 
+                    <div style={{ marginTop: 12 }}>
+                      <CanvasDL
+                        theme={theme}
+                        cols={3}
+                        items={[
+                          {
+                            label: copy.env,
+                            value: formatPlatformCodeLabel(
+                              locale as "en" | "zh",
+                              item.environment,
+                            ),
+                          },
+                          {
+                            label: copy.enabled,
+                            value: item.enabled ? copy.enabled : "Disabled",
+                          },
+                          {
+                            label: copy.rollout,
+                            value: formatPlatformCodeLabel(
+                              locale as "en" | "zh",
+                              item.rolloutStage,
+                            ),
+                          },
+                          { label: copy.webhook, value: item.webhookUrlStatus },
+                          {
+                            label: copy.credential,
+                            value: item.credentialSummary,
+                          },
+                          {
+                            label: copy.lastCheck,
+                            value: formatDateTime(
+                              item.lastHealthCheck || item.updatedAt || "",
+                            ),
+                            mono: true,
+                          },
+                        ]}
+                      />
+                    </div>
+
+                    <div style={{ ...cardSectionStyle, marginTop: 12 }}>
                       <div style={pillRowStyle}>
                         <CanvasPill
                           theme={theme}
@@ -2366,12 +2428,6 @@ export default function AdapterRegistryPage() {
                             locale as "en" | "zh",
                             item.environment,
                           )}
-                        </CanvasPill>
-                        <CanvasPill
-                          theme={theme}
-                          tone={item.enabled ? "success" : "neutral"}
-                        >
-                          {item.enabled ? copy.enabled : "Disabled"}
                         </CanvasPill>
                         <CanvasPill theme={theme} tone={item.credentialTone}>
                           {item.credentialStatus}
@@ -2387,102 +2443,83 @@ export default function AdapterRegistryPage() {
                           </CanvasPill>
                         ) : null}
                       </div>
+                    </div>
 
-                      <CanvasDL
-                        theme={theme}
-                        cols={2}
-                        items={[
-                          { label: copy.webhook, value: item.webhookUrlStatus },
-                          {
-                            label: copy.credential,
-                            value: item.credentialSummary,
-                          },
-                          {
-                            label: copy.rollout,
-                            value: formatPlatformCodeLabel(
-                              locale as "en" | "zh",
-                              item.rolloutStage,
-                            ),
-                          },
-                          {
-                            label: copy.lastCheck,
-                            value: formatDateTime(
-                              item.lastHealthCheck || item.updatedAt || "",
-                            ),
-                            mono: true,
-                          },
-                        ]}
-                      />
-
-                      <div style={{ display: "grid", gap: 8 }}>
-                        <div style={sectionLabelStyle}>
-                          {copy.supportedActions}
-                        </div>
-                        <div style={pillRowStyle}>
-                          {item.supportedActions.length > 0 ? (
-                            item.supportedActions.map((action) => (
-                              <CanvasPill
-                                key={`${item.id}-${action}`}
-                                theme={theme}
-                                tone="neutral"
-                              >
-                                {action}
-                              </CanvasPill>
-                            ))
-                          ) : (
-                            <span style={bodyCopyStyle}>{copy.none}</span>
-                          )}
-                        </div>
+                    <div style={{ ...cardSectionStyle, marginTop: 12 }}>
+                      <div style={sectionLabelStyle}>
+                        {copy.supportedActions}
                       </div>
-
-                      <div style={{ display: "grid", gap: 8 }}>
-                        <div style={sectionLabelStyle}>{copy.quickActions}</div>
-                        <div style={pillRowStyle}>
-                          {item.availableActions.length > 0 ? (
-                            item.availableActions
-                              .slice(0, 3)
-                              .map((descriptor, index) => (
-                                <ActionButton
-                                  key={`${item.id}-${descriptor.action}-${index}`}
-                                  descriptor={descriptor}
-                                  locale={locale}
-                                  onPress={() =>
-                                    stageAction(descriptor, item.id, "adapter")
-                                  }
-                                />
-                              ))
-                          ) : (
-                            <span style={bodyCopyStyle}>
-                              {copy.readOnlyBody}
-                            </span>
-                          )}
-                        </div>
+                      <div style={pillRowStyle}>
+                        {item.supportedActions.length > 0 ? (
+                          item.supportedActions.map((action) => (
+                            <CanvasPill
+                              key={`${item.id}-${action}`}
+                              theme={theme}
+                              tone="neutral"
+                            >
+                              {action}
+                            </CanvasPill>
+                          ))
+                        ) : (
+                          <span style={bodyCopyStyle}>{copy.none}</span>
+                        )}
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </CanvasCard>
+                    </div>
 
-            <div style={detailStackStyle}>
-              <CanvasCard
-                theme={theme}
-                title={copy.detailTitle}
-                subtitle={copy.detailSubtitle}
-              >
-                {selectedAdapter ? (
-                  <div style={detailStackStyle}>
-                    <div>
-                      <div
+                    <div style={cardActionRailStyle}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAdapterId(item.id)}
                         style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "space-between",
-                          gap: 12,
+                          borderRadius: 999,
+                          border: `1px solid ${
+                            selected ? theme.accent : theme.border
+                          }`,
+                          background: selected ? theme.accent : theme.surfaceLo,
+                          color: selected ? "#ffffff" : theme.text,
+                          fontFamily: theme.fontFamily,
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          padding: "6px 10px",
+                          cursor: "pointer",
                         }}
                       >
-                        <div>
-                          <div
+                        {selected ? copy.detailSelected : copy.focusDetail}
+                      </button>
+                      {quickActions.length > 0 ? (
+                        quickActions.map((descriptor, index) => (
+                          <ActionButton
+                            key={`${item.id}-${descriptor.action}-${index}`}
+                            descriptor={descriptor}
+                            locale={locale}
+                            onPress={() =>
+                              stageAction(descriptor, item.id, "adapter")
+                            }
+                          />
+                        ))
+                      ) : (
+                        <span style={bodyCopyStyle}>{copy.readOnlyBody}</span>
+                      )}
+                    </div>
+                  </CanvasCard>
+                );
+              })}
+            </div>
+
+            <CanvasCard
+              theme={theme}
+              title={copy.detailTitle}
+              subtitle={
+                selectedAdapter ? copy.detailSubtitle : copy.noneConfigured
+              }
+            >
+              {selectedAdapter ? (
+                <div style={mainGridStyle}>
+                  <div style={detailColumnStyle}>
+                    <div style={detailStackStyle}>
+                      <div>
+                        <div style={cardTitleRowStyle}>
+                          <span
                             style={{
                               fontSize: 15,
                               fontWeight: 700,
@@ -2490,19 +2527,16 @@ export default function AdapterRegistryPage() {
                             }}
                           >
                             {selectedAdapter.displayName}
-                          </div>
-                          <div
-                            style={{
-                              marginTop: 4,
-                              fontSize: 12,
-                              color: theme.textMuted,
-                              fontFamily: theme.monoFamily,
-                            }}
+                          </span>
+                          <CanvasPill
+                            theme={theme}
+                            tone={adapterTypeTone(selectedAdapter.adapterType)}
                           >
-                            {selectedAdapter.platformCode}
-                          </div>
-                        </div>
-                        <div style={pillRowStyle}>
+                            {formatPlatformCodeLabel(
+                              locale as "en" | "zh",
+                              selectedAdapter.adapterType,
+                            )}
+                          </CanvasPill>
                           <CanvasPill
                             theme={theme}
                             tone={healthTone(selectedAdapter.health)}
@@ -2510,229 +2544,255 @@ export default function AdapterRegistryPage() {
                           >
                             {selectedAdapter.health}
                           </CanvasPill>
+                          {selectedAdapter.operationalPauseState.active ? (
+                            <CanvasPill theme={theme} tone="warn">
+                              {copy.paused}
+                            </CanvasPill>
+                          ) : null}
+                        </div>
+                        <div style={cardMetaStyle}>
+                          {selectedAdapter.description || copy.noDescription}
+                        </div>
+                      </div>
+
+                      <CanvasDL
+                        theme={theme}
+                        cols={2}
+                        items={[
+                          {
+                            label: copy.env,
+                            value: formatPlatformCodeLabel(
+                              locale as "en" | "zh",
+                              selectedAdapter.environment,
+                            ),
+                          },
+                          {
+                            label: copy.healthLabel,
+                            value: (
+                              <CanvasPill
+                                theme={theme}
+                                tone={healthTone(selectedAdapter.health)}
+                                dot
+                              >
+                                {selectedAdapter.health}
+                              </CanvasPill>
+                            ),
+                          },
+                          {
+                            label: copy.credential,
+                            value: selectedAdapter.credentialSummary,
+                          },
+                          {
+                            label: copy.webhook,
+                            value: selectedAdapter.webhookUrlStatus,
+                          },
+                          {
+                            label: copy.lastCheck,
+                            value: formatDateTime(
+                              selectedAdapter.lastHealthCheck ||
+                                selectedAdapter.updatedAt ||
+                                "",
+                            ),
+                            mono: true,
+                          },
+                          {
+                            label: copy.rotatedAt,
+                            value: formatDateTime(
+                              selectedAdapter.credentialRotatedAt ||
+                                selectedAdapter.updatedAt ||
+                                "",
+                            ),
+                            mono: true,
+                          },
+                          {
+                            label: copy.expiresAt,
+                            value: selectedAdapter.credentialExpiresAt
+                              ? formatDateTime(
+                                  selectedAdapter.credentialExpiresAt,
+                                )
+                              : copy.none,
+                            mono: Boolean(selectedAdapter.credentialExpiresAt),
+                          },
+                          {
+                            label: copy.rotationOwner,
+                            value:
+                              selectedAdapter.credentialRotationOwner ??
+                              copy.none,
+                          },
+                        ]}
+                      />
+
+                      <div style={detailStackStyle}>
+                        <div style={sectionLabelStyle}>
+                          {copy.capabilityFlags}
+                        </div>
+                        <div style={featureGridStyle}>
                           <CanvasPill
                             theme={theme}
-                            tone={selectedAdapter.credentialTone}
+                            tone={
+                              selectedAdapter.capabilityFlags.canRelayAccept
+                                ? "success"
+                                : "neutral"
+                            }
                           >
-                            {selectedAdapter.credentialStatus}
+                            canRelayAccept:{" "}
+                            {selectedAdapter.capabilityFlags.canRelayAccept
+                              ? "true"
+                              : "false"}
+                          </CanvasPill>
+                          <CanvasPill
+                            theme={theme}
+                            tone={
+                              selectedAdapter.capabilityFlags.canRelayReject
+                                ? "success"
+                                : "neutral"
+                            }
+                          >
+                            canRelayReject:{" "}
+                            {selectedAdapter.capabilityFlags.canRelayReject
+                              ? "true"
+                              : "false"}
                           </CanvasPill>
                         </div>
                       </div>
-                      <div style={{ ...bodyCopyStyle, marginTop: 10 }}>
-                        {selectedAdapter.description || copy.noDescription}
-                      </div>
-                    </div>
 
-                    <CanvasDL
-                      theme={theme}
-                      cols={2}
-                      items={[
-                        {
-                          label: copy.adapterType,
-                          value: formatPlatformCodeLabel(
-                            locale as "en" | "zh",
-                            selectedAdapter.adapterType,
-                          ),
-                        },
-                        {
-                          label: copy.env,
-                          value: formatPlatformCodeLabel(
-                            locale as "en" | "zh",
-                            selectedAdapter.environment,
-                          ),
-                        },
-                        {
-                          label: copy.credential,
-                          value: selectedAdapter.credentialSummary,
-                        },
-                        {
-                          label: copy.webhook,
-                          value: selectedAdapter.webhookUrlStatus,
-                        },
-                        {
-                          label: copy.generatedAt,
-                          value: formatDateTime(
-                            selectedAdapter.updatedAt || "",
-                          ),
-                          mono: true,
-                        },
-                        {
-                          label: copy.lastCheck,
-                          value: formatDateTime(
-                            selectedAdapter.lastHealthCheck ||
-                              selectedAdapter.updatedAt ||
-                              "",
-                          ),
-                          mono: true,
-                        },
-                      ]}
-                    />
-
-                    <div style={detailStackStyle}>
-                      <div style={sectionLabelStyle}>
-                        {copy.capabilityFlags}
+                      <div style={detailStackStyle}>
+                        <div style={sectionLabelStyle}>{copy.featureFlags}</div>
+                        <div style={featureGridStyle}>
+                          {[
+                            [
+                              "driver external order accept",
+                              selectedAdapter.featureFlags.externalOrderAccept,
+                            ],
+                            [
+                              "driver external order reject",
+                              selectedAdapter.featureFlags.externalOrderReject,
+                            ],
+                            [
+                              "platform earnings",
+                              selectedAdapter.featureFlags.platformEarnings,
+                            ],
+                            [
+                              "platform presence",
+                              selectedAdapter.featureFlags.platformPresence,
+                            ],
+                          ].map(([label, enabled]) => (
+                            <CanvasPill
+                              key={`${selectedAdapter.id}-${label}`}
+                              theme={theme}
+                              tone={enabled ? "accent" : "neutral"}
+                            >
+                              {label}: {enabled ? "on" : "off"}
+                            </CanvasPill>
+                          ))}
+                        </div>
                       </div>
-                      <div style={featureGridStyle}>
-                        <CanvasPill
+
+                      <div style={detailStackStyle}>
+                        <div style={sectionLabelStyle}>
+                          {copy.configMetadata}
+                        </div>
+                        <CanvasDL
                           theme={theme}
-                          tone={
-                            selectedAdapter.capabilityFlags.canRelayAccept
-                              ? "success"
-                              : "neutral"
-                          }
-                        >
-                          canRelayAccept:{" "}
-                          {selectedAdapter.capabilityFlags.canRelayAccept
-                            ? "true"
-                            : "false"}
-                        </CanvasPill>
-                        <CanvasPill
+                          cols={2}
+                          items={[
+                            {
+                              label: copy.serviceBuckets,
+                              value:
+                                selectedAdapter.configMetadata.allowedServiceBuckets.join(
+                                  ", ",
+                                ) || copy.none,
+                            },
+                            {
+                              label: copy.eligibility,
+                              value:
+                                selectedAdapter.configMetadata.driverEligibilityRules.join(
+                                  ", ",
+                                ) || copy.none,
+                            },
+                            {
+                              label: copy.maxCandidates,
+                              value:
+                                selectedAdapter.configMetadata.maxCandidates ??
+                                "—",
+                              mono: true,
+                            },
+                            {
+                              label: copy.acceptTimeout,
+                              value:
+                                selectedAdapter.configMetadata
+                                  .acceptTimeoutSeconds != null
+                                  ? `${selectedAdapter.configMetadata.acceptTimeoutSeconds}s`
+                                  : "—",
+                              mono: true,
+                            },
+                            {
+                              label: copy.fallbackThreshold,
+                              value:
+                                selectedAdapter.configMetadata
+                                  .manualFallbackThresholdSeconds != null
+                                  ? `${selectedAdapter.configMetadata.manualFallbackThresholdSeconds}s`
+                                  : "—",
+                              mono: true,
+                            },
+                            {
+                              label: copy.financeMode,
+                              value: formatPlatformCodeLabel(
+                                locale as "en" | "zh",
+                                selectedAdapter.configMetadata
+                                  .financeAuthorityMode,
+                              ),
+                            },
+                          ]}
+                        />
+                      </div>
+
+                      <div style={detailStackStyle}>
+                        <div style={sectionLabelStyle}>{copy.pauseState}</div>
+                        <CanvasDL
                           theme={theme}
-                          tone={
-                            selectedAdapter.capabilityFlags.canRelayReject
-                              ? "success"
-                              : "neutral"
-                          }
-                        >
-                          canRelayReject:{" "}
-                          {selectedAdapter.capabilityFlags.canRelayReject
-                            ? "true"
-                            : "false"}
-                        </CanvasPill>
+                          cols={2}
+                          items={[
+                            {
+                              label: copy.pauseOwner,
+                              value:
+                                selectedAdapter.operationalPauseState.owner ??
+                                copy.none,
+                            },
+                            {
+                              label: copy.pauseTtl,
+                              value: selectedAdapter.operationalPauseState
+                                .ttlExpiresAt
+                                ? formatDateTime(
+                                    selectedAdapter.operationalPauseState
+                                      .ttlExpiresAt,
+                                  )
+                                : copy.none,
+                              mono: Boolean(
+                                selectedAdapter.operationalPauseState
+                                  .ttlExpiresAt,
+                              ),
+                            },
+                            {
+                              label: copy.pauseReason,
+                              value:
+                                selectedAdapter.operationalPauseState.reason ??
+                                copy.none,
+                            },
+                            {
+                              label: copy.enabled,
+                              value: selectedAdapter.operationalPauseState
+                                .active
+                                ? copy.paused
+                                : copy.none,
+                            },
+                          ]}
+                        />
                       </div>
                     </div>
+                  </div>
 
-                    <div style={detailStackStyle}>
-                      <div style={sectionLabelStyle}>{copy.featureFlags}</div>
-                      <div style={featureGridStyle}>
-                        {[
-                          [
-                            "driver external order accept",
-                            selectedAdapter.featureFlags.externalOrderAccept,
-                          ],
-                          [
-                            "driver external order reject",
-                            selectedAdapter.featureFlags.externalOrderReject,
-                          ],
-                          [
-                            "platform earnings",
-                            selectedAdapter.featureFlags.platformEarnings,
-                          ],
-                          [
-                            "platform presence",
-                            selectedAdapter.featureFlags.platformPresence,
-                          ],
-                        ].map(([label, enabled]) => (
-                          <CanvasPill
-                            key={`${selectedAdapter.id}-${label}`}
-                            theme={theme}
-                            tone={enabled ? "accent" : "neutral"}
-                          >
-                            {label}: {enabled ? "on" : "off"}
-                          </CanvasPill>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div style={detailStackStyle}>
-                      <div style={sectionLabelStyle}>{copy.configMetadata}</div>
-                      <CanvasDL
-                        theme={theme}
-                        cols={2}
-                        items={[
-                          {
-                            label: copy.serviceBuckets,
-                            value:
-                              selectedAdapter.configMetadata.allowedServiceBuckets.join(
-                                ", ",
-                              ) || copy.none,
-                          },
-                          {
-                            label: copy.eligibility,
-                            value:
-                              selectedAdapter.configMetadata.driverEligibilityRules.join(
-                                ", ",
-                              ) || copy.none,
-                          },
-                          {
-                            label: copy.maxCandidates,
-                            value:
-                              selectedAdapter.configMetadata.maxCandidates ??
-                              "—",
-                            mono: true,
-                          },
-                          {
-                            label: copy.acceptTimeout,
-                            value:
-                              selectedAdapter.configMetadata
-                                .acceptTimeoutSeconds != null
-                                ? `${selectedAdapter.configMetadata.acceptTimeoutSeconds}s`
-                                : "—",
-                            mono: true,
-                          },
-                          {
-                            label: copy.fallbackThreshold,
-                            value:
-                              selectedAdapter.configMetadata
-                                .manualFallbackThresholdSeconds != null
-                                ? `${selectedAdapter.configMetadata.manualFallbackThresholdSeconds}s`
-                                : "—",
-                            mono: true,
-                          },
-                          {
-                            label: copy.financeMode,
-                            value: formatPlatformCodeLabel(
-                              locale as "en" | "zh",
-                              selectedAdapter.configMetadata
-                                .financeAuthorityMode,
-                            ),
-                          },
-                        ]}
-                      />
-                    </div>
-
-                    <div style={detailStackStyle}>
-                      <div style={sectionLabelStyle}>{copy.pauseState}</div>
-                      <CanvasDL
-                        theme={theme}
-                        cols={2}
-                        items={[
-                          {
-                            label: copy.pauseOwner,
-                            value:
-                              selectedAdapter.operationalPauseState.owner ??
-                              copy.none,
-                          },
-                          {
-                            label: copy.pauseTtl,
-                            value: selectedAdapter.operationalPauseState
-                              .ttlExpiresAt
-                              ? formatDateTime(
-                                  selectedAdapter.operationalPauseState
-                                    .ttlExpiresAt,
-                                )
-                              : copy.none,
-                            mono: Boolean(
-                              selectedAdapter.operationalPauseState
-                                .ttlExpiresAt,
-                            ),
-                          },
-                          {
-                            label: copy.pauseReason,
-                            value:
-                              selectedAdapter.operationalPauseState.reason ??
-                              copy.none,
-                          },
-                          {
-                            label: copy.enabled,
-                            value: selectedAdapter.operationalPauseState.active
-                              ? copy.paused
-                              : copy.none,
-                          },
-                        ]}
-                      />
-                    </div>
-
+                  <div style={detailColumnStyle}>
                     <div style={detailStackStyle}>
                       <div style={sectionLabelStyle}>
                         {copy.platformAuthority}
@@ -2783,6 +2843,54 @@ export default function AdapterRegistryPage() {
                       </div>
                     </div>
 
+                    <div
+                      style={{
+                        border: `1px solid ${theme.border}`,
+                        borderRadius: 10,
+                        background: theme.surfaceLo,
+                        padding: 14,
+                        display: "grid",
+                        gap: 10,
+                      }}
+                    >
+                      <div style={sectionLabelStyle}>{copy.secretTitle}</div>
+                      <div style={bodyCopyStyle}>{copy.secretBody}</div>
+                      <CanvasDL
+                        theme={theme}
+                        cols={1}
+                        items={[
+                          {
+                            label: copy.credential,
+                            value: selectedAdapter.credentialSummary,
+                          },
+                          {
+                            label: copy.rotatedAt,
+                            value: formatDateTime(
+                              selectedAdapter.credentialRotatedAt ||
+                                selectedAdapter.updatedAt ||
+                                "",
+                            ),
+                            mono: true,
+                          },
+                          {
+                            label: copy.rotationOwner,
+                            value:
+                              selectedAdapter.credentialRotationOwner ??
+                              copy.none,
+                          },
+                          {
+                            label: copy.expiresAt,
+                            value: selectedAdapter.credentialExpiresAt
+                              ? formatDateTime(
+                                  selectedAdapter.credentialExpiresAt,
+                                )
+                              : copy.none,
+                            mono: Boolean(selectedAdapter.credentialExpiresAt),
+                          },
+                        ]}
+                      />
+                    </div>
+
                     <div style={detailStackStyle}>
                       <div style={sectionLabelStyle}>{copy.crossAppLinks}</div>
                       <div style={linkListStyle}>
@@ -2816,34 +2924,12 @@ export default function AdapterRegistryPage() {
                       </div>
                     </div>
                   </div>
-                ) : (
-                  <div style={bodyCopyStyle}>{copy.noneConfigured}</div>
-                )}
-              </CanvasCard>
-
-              <CanvasCard
-                theme={theme}
-                title={copy.secretTitle}
-                subtitle={copy.secretBody}
-              >
-                <div style={bodyCopyStyle}>
-                  {selectedAdapter
-                    ? [
-                        `${copy.credential}: ${selectedAdapter.credentialSummary}`,
-                        `${copy.generatedAt}: ${formatDateTime(
-                          selectedAdapter.credentialRotatedAt ||
-                            selectedAdapter.updatedAt ||
-                            "",
-                        )}`,
-                        `${copy.pauseOwner}: ${
-                          selectedAdapter.credentialRotationOwner || copy.none
-                        }`,
-                      ].join(" · ")
-                    : copy.emptySelection}
                 </div>
-              </CanvasCard>
-            </div>
-          </div>
+              ) : (
+                <div style={bodyCopyStyle}>{copy.noneConfigured}</div>
+              )}
+            </CanvasCard>
+          </>
         )}
       </div>
     </CanvasShell>
