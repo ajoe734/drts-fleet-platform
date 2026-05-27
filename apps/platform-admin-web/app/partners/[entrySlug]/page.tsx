@@ -511,52 +511,72 @@ function toCanvasTone(
 function fallbackActions(
   entry: PartnerDetailRecord,
 ): ResourceActionDescriptor[] {
+  const activateDisabledReason =
+    entry.status !== "inactive" ? "entry_not_inactive" : null;
+  const deactivateDisabledReason =
+    entry.status !== "active" ? "entry_not_active" : null;
+  const credentialDisabledReason =
+    entry.authMode !== "partner_api_key"
+      ? "auth_mode_does_not_use_partner_credentials"
+      : entry.status === "revoked"
+        ? "entry_revoked"
+        : null;
+
+  const withOptionalDisabledReason = (
+    action: string,
+    enabled: boolean,
+    riskLevel: "medium" | "high",
+    options?: { disabledReasonCode?: string; requiresReason?: true },
+  ): ResourceActionDescriptor => ({
+    action,
+    enabled,
+    riskLevel,
+    ...(options?.disabledReasonCode
+      ? { disabledReasonCode: options.disabledReasonCode }
+      : {}),
+    ...(options?.requiresReason ? { requiresReason: true } : {}),
+  });
+
   return [
-    {
-      action: "edit",
-      enabled: entry.status !== "revoked",
-      riskLevel: "medium",
-    },
-    {
-      action: "activate",
-      enabled: entry.status === "inactive",
-      disabledReasonCode:
-        entry.status !== "inactive" ? "entry_not_inactive" : undefined,
-      riskLevel: "medium",
-    },
-    {
-      action: "deactivate",
-      enabled: entry.status === "active",
-      disabledReasonCode:
-        entry.status !== "active" ? "entry_not_active" : undefined,
-      riskLevel: "medium",
-    },
-    {
-      action: "issue_credential",
-      enabled:
-        entry.status !== "revoked" && entry.authMode === "partner_api_key",
-      disabledReasonCode:
-        entry.authMode !== "partner_api_key"
-          ? "auth_mode_does_not_use_partner_credentials"
-          : entry.status === "revoked"
-            ? "entry_revoked"
-            : undefined,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "rotate_credential",
-      enabled:
-        entry.status !== "revoked" && entry.authMode === "partner_api_key",
-      disabledReasonCode:
-        entry.authMode !== "partner_api_key"
-          ? "auth_mode_does_not_use_partner_credentials"
-          : entry.status === "revoked"
-            ? "entry_revoked"
-            : undefined,
-      requiresReason: true,
-      riskLevel: "high",
-    },
+    withOptionalDisabledReason("edit", entry.status !== "revoked", "medium"),
+    withOptionalDisabledReason(
+      "activate",
+      entry.status === "inactive",
+      "medium",
+      activateDisabledReason
+        ? { disabledReasonCode: activateDisabledReason }
+        : undefined,
+    ),
+    withOptionalDisabledReason(
+      "deactivate",
+      entry.status === "active",
+      "medium",
+      deactivateDisabledReason
+        ? { disabledReasonCode: deactivateDisabledReason }
+        : undefined,
+    ),
+    withOptionalDisabledReason(
+      "issue_credential",
+      entry.status !== "revoked" && entry.authMode === "partner_api_key",
+      "high",
+      credentialDisabledReason
+        ? {
+            disabledReasonCode: credentialDisabledReason,
+            requiresReason: true,
+          }
+        : { requiresReason: true },
+    ),
+    withOptionalDisabledReason(
+      "rotate_credential",
+      entry.status !== "revoked" && entry.authMode === "partner_api_key",
+      "high",
+      credentialDisabledReason
+        ? {
+            disabledReasonCode: credentialDisabledReason,
+            requiresReason: true,
+          }
+        : { requiresReason: true },
+    ),
   ];
 }
 
