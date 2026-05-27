@@ -7,11 +7,13 @@ import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
+  CrossAppResourceLink,
   CreateDriverMasterCommand,
   CreateVehicleContractCommand,
   DispatchExclusivityRecord,
   DriverDeviceBindingSummary,
   DriverRegistryRecord,
+  EmptyStateEnvelope,
   EmptyReason,
   ResourceActionDescriptor,
   UpdateDriverMasterLifecycleCommand,
@@ -114,21 +116,45 @@ type TabKey =
 
 type ActionContext =
   | { kind: "page"; tab: TabKey }
-  | { kind: "vehicle"; vehicle: VehicleRegistryRecord }
-  | { kind: "driver"; driver: DriverRegistryRecord }
-  | { kind: "contract"; contract: VehicleContractRecord }
+  | { kind: "vehicle"; vehicle: GovernedVehicleRecord }
+  | { kind: "driver"; driver: GovernedDriverRecord }
+  | { kind: "contract"; contract: GovernedContractRecord }
   | {
       kind: "binding";
-      driver: DriverRegistryRecord;
+      driver: GovernedDriverRecord;
       binding: DriverDeviceBindingSummary;
     }
-  | { kind: "exclusivity"; exclusivity: DispatchExclusivityRecord }
-  | { kind: "offboarding"; vehicle: VehicleRegistryRecord };
+  | { kind: "exclusivity"; exclusivity: GovernedExclusivityRecord }
+  | { kind: "offboarding"; vehicle: GovernedVehicleRecord };
 
 type EmptyStateConfig = {
   tone: "info" | "warning" | "danger";
   title: string;
   description: string;
+};
+
+type PageRuntimeState = {
+  availableActions?: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope | null;
+};
+
+type GovernedVehicleRecord = VehicleRegistryRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  offboardingAvailableActions?: ResourceActionDescriptor[];
+  opsLink?: CrossAppResourceLink | null;
+};
+
+type GovernedDriverRecord = DriverRegistryRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  opsLink?: CrossAppResourceLink | null;
+};
+
+type GovernedContractRecord = VehicleContractRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type GovernedExclusivityRecord = DispatchExclusivityRecord & {
+  availableActions?: ResourceActionDescriptor[];
 };
 
 const TAB_ORDER: TabKey[] = [
@@ -158,6 +184,82 @@ function formatFreshness(
 
 function opsHref(route: string) {
   return OPS_CONSOLE_ORIGIN ? `${OPS_CONSOLE_ORIGIN}${route}` : route;
+}
+
+function resolveCrossAppHref(
+  link: CrossAppResourceLink | null | undefined,
+  fallbackRoute: string,
+) {
+  return link?.route?.trim() ? link.route : opsHref(fallbackRoute);
+}
+
+function resolveActions(
+  runtimeActions: ResourceActionDescriptor[] | undefined,
+  fallbackActions: ResourceActionDescriptor[],
+) {
+  return runtimeActions ?? fallbackActions;
+}
+
+function buildActionKey(
+  descriptor: ResourceActionDescriptor,
+  context: ActionContext,
+) {
+  switch (context.kind) {
+    case "page":
+      return `${descriptor.action}:page:${context.tab}`;
+    case "vehicle":
+      return `${descriptor.action}:vehicle:${context.vehicle.vehicleId}`;
+    case "driver":
+      return `${descriptor.action}:driver:${context.driver.driverId}`;
+    case "contract":
+      return `${descriptor.action}:contract:${context.contract.contractId}`;
+    case "binding":
+      return `${descriptor.action}:binding:${context.binding.bindingId}`;
+    case "exclusivity":
+      return `${descriptor.action}:exclusivity:${context.exclusivity.vehicleId}`;
+    case "offboarding":
+      return `${descriptor.action}:offboarding:${context.vehicle.vehicleId}`;
+  }
+}
+
+function deriveOffboardingWorkflowState(vehicle: VehicleRegistryRecord) {
+  const offboarding = vehicle.supplyLifecycle.offboarding;
+  if (offboarding.status === "none") {
+    return "none";
+  }
+  if (offboarding.status === "completed") {
+    return "completed";
+  }
+  if (offboarding.debrandingStatus === "completed") {
+    return "debranding_verified";
+  }
+  if (offboarding.debrandingStatus === "pending") {
+    return "debranding_pending";
+  }
+  if (!vehicle.dispatchableFlag) {
+    return "dispatch_disabled";
+  }
+  return "initiated";
+}
+
+function formatWorkflowState(locale: string, state: string) {
+  const en: Record<string, string> = {
+    none: "Not started",
+    initiated: "Initiated",
+    dispatch_disabled: "Dispatch disabled",
+    debranding_pending: "Debranding pending",
+    debranding_verified: "Debranding verified",
+    completed: "Completed",
+  };
+  const zh: Record<string, string> = {
+    none: "未開始",
+    initiated: "已啟動",
+    dispatch_disabled: "已停用派遣",
+    debranding_pending: "等待除標識",
+    debranding_verified: "除標識已驗證",
+    completed: "已完成",
+  };
+  return (locale === "en" ? en : zh)[state] ?? state;
 }
 
 function emptyStateConfig(
@@ -330,16 +432,24 @@ export default function FleetPage() {
     requestedTab && TAB_ORDER.includes(requestedTab) ? requestedTab : "drivers";
 
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
-  const [vehicles, setVehicles] = useState<VehicleRegistryRecord[]>([]);
-  const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
-  const [contracts, setContracts] = useState<VehicleContractRecord[]>([]);
+  const [vehicles, setVehicles] = useState<GovernedVehicleRecord[]>([]);
+  const [drivers, setDrivers] = useState<GovernedDriverRecord[]>([]);
+  const [contracts, setContracts] = useState<GovernedContractRecord[]>([]);
   const [exclusivities, setExclusivities] = useState<
-    DispatchExclusivityRecord[]
+    GovernedExclusivityRecord[]
   >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [pageRuntimeState] = useState<Record<TabKey, PageRuntimeState>>({
+    vehicles: {},
+    drivers: {},
+    contracts: {},
+    device_binding: {},
+    exclusivity: {},
+    offboarding: {},
+  });
 
   useEffect(() => {
     if (requestedTab && TAB_ORDER.includes(requestedTab)) {
@@ -403,10 +513,7 @@ export default function FleetPage() {
         }
       }
 
-      const actionKey =
-        context.kind === "page"
-          ? `${descriptor.action}:${context.tab}`
-          : `${descriptor.action}:${descriptor.riskLevel}`;
+      const actionKey = buildActionKey(descriptor, context);
       setBusyAction(actionKey);
       setError(null);
 
@@ -547,7 +654,10 @@ export default function FleetPage() {
               return;
             }
             window.open(
-              opsHref(`/vehicles/${context.vehicle.vehicleId}`),
+              resolveCrossAppHref(
+                context.vehicle.opsLink,
+                `/vehicles/${context.vehicle.vehicleId}`,
+              ),
               "_blank",
               "noopener,noreferrer",
             );
@@ -557,7 +667,10 @@ export default function FleetPage() {
               return;
             }
             window.open(
-              opsHref(`/drivers/${context.driver.driverId}`),
+              resolveCrossAppHref(
+                context.driver.opsLink,
+                `/drivers/${context.driver.driverId}`,
+              ),
               "_blank",
               "noopener,noreferrer",
             );
@@ -643,9 +756,11 @@ export default function FleetPage() {
     previewEmptyReason ||
     (error
       ? ("fetch_failed" as EmptyReason)
-      : tabCounts[activeTab] === 0
-        ? ("no_data" as EmptyReason)
-        : null);
+      : pageRuntimeState[activeTab].emptyState?.reason
+        ? pageRuntimeState[activeTab].emptyState.reason
+        : tabCounts[activeTab] === 0
+          ? ("no_data" as EmptyReason)
+          : null);
 
   function renderActionButtons(
     actions: ResourceActionDescriptor[],
@@ -654,10 +769,7 @@ export default function FleetPage() {
     return (
       <div style={inlineActionsStyle}>
         {actions.map((action) => {
-          const key =
-            context.kind === "page"
-              ? `${action.action}:${context.tab}`
-              : `${action.action}:${action.riskLevel}`;
+          const key = buildActionKey(action, context);
           const disabled = busyAction === key || !action.enabled;
           return (
             <button
@@ -691,7 +803,12 @@ export default function FleetPage() {
   function renderEmptyState(reason: EmptyReason) {
     const config = emptyStateConfig(locale, reason);
     const nextAction =
-      pageActions[activeTab][0] ?? makeAction("refresh_tab", "low");
+      pageRuntimeState[activeTab].emptyState?.nextAction ??
+      resolveActions(
+        pageRuntimeState[activeTab].availableActions,
+        pageActions[activeTab],
+      )[0] ??
+      makeAction("refresh_tab", "low");
     return (
       <div style={emptyStateStyle}>
         <StatusChip tone={config.tone} label={config.title} />
@@ -849,10 +966,16 @@ export default function FleetPage() {
               ? "CTAs are rendered from per-resource availableActions so role scope stays backend-owned."
               : "CTA 由各資源的 availableActions 驅動，角色權限不在前端硬編。"
           }
-          actions={renderActionButtons(pageActions[activeTab], {
-            kind: "page",
-            tab: activeTab,
-          })}
+          actions={renderActionButtons(
+            resolveActions(
+              pageRuntimeState[activeTab].availableActions,
+              pageActions[activeTab],
+            ),
+            {
+              kind: "page",
+              tab: activeTab,
+            },
+          )}
         >
           {activeEmptyReason ? (
             renderEmptyState(activeEmptyReason)
@@ -888,7 +1011,7 @@ export default function FleetPage() {
                 const currentDriver = drivers.find((driver) =>
                   driver.driverId.endsWith(vehicle.vehicleId.slice(-3)),
                 );
-                const rowActions = [
+                const rowActions = resolveActions(vehicle.availableActions, [
                   makeAction(
                     "update_vehicle_compliance",
                     "medium",
@@ -896,7 +1019,7 @@ export default function FleetPage() {
                     false,
                   ),
                   makeAction("open_ops_vehicle", "low"),
-                ];
+                ]);
                 return (
                   <Tr key={vehicle.vehicleId}>
                     <Td>
@@ -912,10 +1035,16 @@ export default function FleetPage() {
                     <Td>
                       <DataCellStack
                         primary={vehicle.supportedServiceBuckets.join(", ")}
-                        secondary={formatPlatformCodeLabel(
-                          locale,
-                          vehicle.supplyLifecycle.exclusivity.lifecycleStatus,
-                        )}
+                        secondary={[
+                          formatPlatformCodeLabel(
+                            locale,
+                            vehicle.operatingArea,
+                          ),
+                          formatPlatformCodeLabel(
+                            locale,
+                            vehicle.supplyLifecycle.exclusivity.lifecycleStatus,
+                          ),
+                        ].join(" · ")}
                       />
                     </Td>
                     <Td>
@@ -968,7 +1097,17 @@ export default function FleetPage() {
                               )
                               .join(" · ")}
                           </span>
-                        ) : null}
+                        ) : (
+                          <span style={{ color: "#64748b", fontSize: 12.5 }}>
+                            {vehicle.exclusivityApproved
+                              ? locale === "en"
+                                ? "Compliance clear"
+                                : "合規可派遣"
+                              : locale === "en"
+                                ? "Exclusivity approval pending"
+                                : "等待排他核准"}
+                          </span>
+                        )}
                       </div>
                     </Td>
                     <Td>
@@ -1020,7 +1159,7 @@ export default function FleetPage() {
               ]}
             >
               {drivers.map((driver) => {
-                const rowActions = [
+                const rowActions = resolveActions(driver.availableActions, [
                   makeAction(
                     "activate_driver",
                     "medium",
@@ -1042,7 +1181,7 @@ export default function FleetPage() {
                       : undefined,
                   ),
                   makeAction("open_ops_driver", "low"),
-                ];
+                ]);
                 return (
                   <Tr key={driver.driverId}>
                     <Td>
@@ -1151,7 +1290,7 @@ export default function FleetPage() {
               ]}
             >
               {contracts.map((contract) => {
-                const rowActions = [
+                const rowActions = resolveActions(contract.availableActions, [
                   makeAction(
                     "edit_contract_terms",
                     "medium",
@@ -1159,7 +1298,7 @@ export default function FleetPage() {
                     false,
                     "not_provisioned",
                   ),
-                ];
+                ]);
                 return (
                   <Tr key={contract.contractId}>
                     <Td>
@@ -1190,6 +1329,9 @@ export default function FleetPage() {
                           contract.lifecycleStatus,
                         )}
                       />
+                      <span style={{ color: "#64748b", fontSize: 12.5 }}>
+                        {formatPlatformCodeLabel(locale, contract.status)}
+                      </span>
                     </Td>
                     <Td mono>
                       {contract.startAt} → {contract.endAt}
@@ -1223,14 +1365,14 @@ export default function FleetPage() {
               ]}
             >
               {activeBindings.map(({ driver, binding }) => {
-                const rowActions = [
+                const rowActions = resolveActions(driver.availableActions, [
                   makeAction(
                     "revoke_device_binding",
                     "high",
                     binding.status === "active",
                     true,
                   ),
-                ];
+                ]);
                 return (
                   <Tr key={binding.bindingId}>
                     <Td>
@@ -1288,20 +1430,23 @@ export default function FleetPage() {
               ]}
             >
               {exclusivities.map((exclusivity) => {
-                const rowActions = [
-                  makeAction(
-                    "approve_exclusivity",
-                    "high",
-                    exclusivity.reviewStatus !== "approved",
-                    true,
-                  ),
-                  makeAction(
-                    "reject_exclusivity",
-                    "high",
-                    exclusivity.reviewStatus !== "rejected",
-                    true,
-                  ),
-                ];
+                const rowActions = resolveActions(
+                  exclusivity.availableActions,
+                  [
+                    makeAction(
+                      "approve_exclusivity",
+                      "high",
+                      exclusivity.reviewStatus !== "approved",
+                      true,
+                    ),
+                    makeAction(
+                      "reject_exclusivity",
+                      "high",
+                      exclusivity.reviewStatus !== "rejected",
+                      true,
+                    ),
+                  ],
+                );
                 return (
                   <Tr key={exclusivity.vehicleId}>
                     <Td mono>{exclusivity.vehicleId}</Td>
@@ -1334,7 +1479,11 @@ export default function FleetPage() {
                         " → " +
                         (exclusivity.effectiveEnd ?? "—")}
                     </Td>
-                    <Td mono>{formatDateTime(exclusivity.reviewedAt ?? "")}</Td>
+                    <Td mono>
+                      {formatDateTime(
+                        exclusivity.reviewedAt ?? exclusivity.updatedAt,
+                      )}
+                    </Td>
                     <Td>
                       {renderActionButtons(rowActions, {
                         kind: "exclusivity",
@@ -1371,27 +1520,32 @@ export default function FleetPage() {
             >
               {offboardingVehicles.map((vehicle) => {
                 const offboarding = vehicle.supplyLifecycle.offboarding;
-                const rowActions = [
-                  makeAction(
-                    "initiate_offboarding",
-                    "high",
-                    offboarding.status === "none",
-                    true,
-                  ),
-                  makeAction(
-                    "advance_offboarding_step",
-                    "medium",
-                    false,
-                    false,
-                    "not_provisioned",
-                  ),
-                  makeAction(
-                    "complete_debranding",
-                    "medium",
-                    offboarding.debrandingStatus === "pending",
-                    true,
-                  ),
-                ];
+                const rowActions = resolveActions(
+                  vehicle.offboardingAvailableActions ??
+                    vehicle.availableActions,
+                  [
+                    makeAction(
+                      "initiate_offboarding",
+                      "high",
+                      offboarding.status === "none",
+                      true,
+                    ),
+                    makeAction(
+                      "advance_offboarding_step",
+                      "medium",
+                      false,
+                      false,
+                      "not_provisioned",
+                    ),
+                    makeAction(
+                      "complete_debranding",
+                      "medium",
+                      offboarding.debrandingStatus === "pending",
+                      true,
+                    ),
+                  ],
+                );
+                const workflowState = deriveOffboardingWorkflowState(vehicle);
                 return (
                   <Tr key={vehicle.vehicleId}>
                     <Td>
@@ -1404,20 +1558,18 @@ export default function FleetPage() {
                       <div style={{ display: "grid", gap: 8 }}>
                         <StatusChip
                           tone={
-                            offboarding.status === "completed"
-                              ? "success"
-                              : "danger"
+                            workflowState === "completed" ? "success" : "danger"
                           }
-                          label={formatPlatformCodeLabel(
-                            locale,
-                            offboarding.status,
-                          )}
+                          label={formatWorkflowState(locale, workflowState)}
                         />
                         <span style={{ color: "#64748b", fontSize: 12.5 }}>
-                          {formatPlatformCodeLabel(
-                            locale,
-                            offboarding.debrandingStatus,
-                          )}
+                          {[
+                            formatPlatformCodeLabel(locale, offboarding.status),
+                            formatPlatformCodeLabel(
+                              locale,
+                              offboarding.debrandingStatus,
+                            ),
+                          ].join(" · ")}
                         </span>
                       </div>
                     </Td>
@@ -1426,6 +1578,13 @@ export default function FleetPage() {
                       <DataCellStack
                         primary={offboarding.debrandingTicketId ?? "—"}
                         secondary={offboarding.reason ?? "—"}
+                        tertiary={
+                          offboarding.debrandingDueAt
+                            ? locale === "en"
+                              ? `Due ${offboarding.debrandingDueAt}`
+                              : `應完成 ${offboarding.debrandingDueAt}`
+                            : undefined
+                        }
                       />
                     </Td>
                     <Td mono>
