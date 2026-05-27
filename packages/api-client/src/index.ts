@@ -30,6 +30,7 @@ import type {
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
   CreateDriverMasterCommand,
+  CreateVehicleContractCommand,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
   DriverForwardedOrderAcceptCommand,
@@ -2240,6 +2241,17 @@ export class ApiClient {
   async listContracts(): Promise<VehicleContractRecord[]> {
     return this.getList<VehicleContractRecord>(
       "/api/regulatory-registry/contracts",
+    );
+  }
+
+  async createContract(
+    command: CreateVehicleContractCommand,
+  ): Promise<VehicleContractRecord> {
+    return this.post<VehicleContractRecord>(
+      "/api/regulatory-registry/contracts",
+      {
+        body: command,
+      },
     );
   }
 
