@@ -125,6 +125,40 @@ Finalize `UI-FE-OPS-DSPID` `done` against:
 
 Do **not** finalize against `c60c7113` / `codex/ui-fe-ops-dspid`.
 
+## 3a. Post-finalization outcome — divergence actually realized (⚠ reviewer attention)
+
+While this repair was being written, an `owned_finalize_dispatch` Codex worker closed the
+parent **before** the recommended reconciliation was applied:
+
+- `UI-FE-OPS-DSPID` → `done` at `2026-05-27T04:40:37Z`.
+- The closeout `next` records the finalize was made against **`c60c7113`**
+  (`UI-FE-OPS-DSPID: owner closeout`, pushed to `origin/codex/ui-fe-ops-dspid`), claiming
+  `@drts/contracts`, `@drts/ui-tokens`, `@drts/ops-console-web` typecheck + build PASS.
+
+This contradicts the review-approval anchor:
+
+- The `review_approved` decision (04:35 review note) was recorded against **`ff21a362`**
+  (`codex2/...`), the commit the reviewer said *"now passes typecheck/build"*. The very
+  existence of `ff21a362` ("fix dispatch workspace **tone typing**") implies the earlier
+  state needed a typing fix to build.
+- The task therefore closed on a **different implementation** (`c60c7113`) than the one the
+  reviewer approved (`ff21a362`). They diverge by +372/-225 lines — this is not a no-op.
+
+**Recommended reconciliation (for owner Codex / reviewer Codex2 / chairman):**
+
+1. Confirm which tip is authoritative. If the approval intent was `ff21a362`, the `done`
+   evidence should point there, not `c60c7113`.
+2. If `ff21a362` is authoritative, reconcile non-destructively: cherry-pick / re-apply the
+   approved `ff21a362` content onto the closeout branch (or re-point the merge/PR at
+   `codex2/ui-fe-ops-dspid`) as a **new** commit — still no force-push of shared history.
+3. If `c60c7113` is in fact correct and independently verified, record an explicit note that
+   the approval anchor moved from `ff21a362` to `c60c7113` and why, so machine truth and the
+   review record agree.
+
+This helper does not own `UI-FE-OPS-DSPID` and does not change its `done` status; the
+discrepancy is surfaced via an `ai-status.sh note` on the parent and left for the
+owner/reviewer to resolve.
+
 ## 4. Evidence (this helper task)
 
 - Diagnosis derived from `git log/merge-base/diff` on the two lane branches and
