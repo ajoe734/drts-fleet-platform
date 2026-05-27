@@ -13,18 +13,16 @@ import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type { Locale } from "@/lib/translations";
 import type {
-  PlatformAdminUserRecord,
-  PlatformAdminUserRole,
-  PlatformAdminUserStatus,
-} from "@drts/contracts";
-import type {
   ActionReceipt,
   CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
+  PlatformAdminUserRecord,
+  PlatformAdminUserRole,
+  PlatformAdminUserStatus,
   ResourceActionDescriptor,
   UiRefreshMetadata,
-} from "@drts/contracts/ui-runtime";
+} from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -470,6 +468,11 @@ function emptyReasonCopy(
       body: "上游 identity 或 directory 依賴目前不可用，因此此頁無法建立可信快照。",
       tone: "warn",
     },
+    driver_not_eligible: {
+      title: "此空狀態不適用於平台人員",
+      body: "driver_not_eligible 屬於 driver-app 專用原因；若平台人員頁收到此代碼，代表後端回傳不符合合約。",
+      tone: "warn",
+    },
     filtered_empty: {
       title: "目前篩選條件沒有結果",
       body: "目前檢視範圍內沒有符合的人員資料；原始 roster 仍可能存在。",
@@ -504,6 +507,11 @@ function emptyReasonCopy(
     external_unavailable: {
       title: "External dependency unavailable",
       body: "An upstream identity or directory dependency is unavailable, so this screen cannot present a trusted roster.",
+      tone: "warn",
+    },
+    driver_not_eligible: {
+      title: "Unsupported empty state for platform users",
+      body: "driver_not_eligible is reserved for the driver app. If this screen receives it, the backend returned a contract-invalid reason.",
       tone: "warn",
     },
     filtered_empty: {
@@ -1072,6 +1080,15 @@ export default function UsersPage() {
     pageActions.find(
       (action: ResourceActionDescriptor) => action.action === "refresh",
     ) ?? defaultPageActions()[0];
+  const emptyStateNextAction =
+    effectiveEmptyState?.nextAction ??
+    (effectiveEmptyState?.reason === "no_data" ||
+    effectiveEmptyState?.reason === "not_provisioned"
+      ? primaryCreateAction
+      : effectiveEmptyState?.reason === "fetch_failed" ||
+          effectiveEmptyState?.reason === "external_unavailable"
+        ? refreshAction
+        : undefined);
 
   const totalUsers = users.length;
   const invitedUsers = users.filter((user) => user.status === "invited").length;
@@ -1473,13 +1490,17 @@ export default function UsersPage() {
               tone={refreshTone}
               title={staleCopy.title}
               body={staleCopy.body}
-              actions={
-                <UsersActionButton
-                  locale={locale}
-                  descriptor={refreshAction}
-                  onClick={() => void loadUsers()}
-                />
-              }
+              {...(refreshAction
+                ? {
+                    actions: (
+                      <UsersActionButton
+                        locale={locale}
+                        descriptor={refreshAction}
+                        onClick={() => void loadUsers()}
+                      />
+                    ),
+                  }
+                : {})}
             />
           ) : null}
 
@@ -1500,7 +1521,11 @@ export default function UsersPage() {
                         theme={theme}
                         variant="secondary"
                         size="xs"
-                        onClick={() => openCrossAppLink(lastReceipt.auditLink)}
+                        onClick={() => {
+                          if (lastReceipt.auditLink) {
+                            openCrossAppLink(lastReceipt.auditLink);
+                          }
+                        }}
                       >
                         {locale === "en"
                           ? lastReceipt.auditId
@@ -1584,11 +1609,13 @@ export default function UsersPage() {
                       </CanvasBtn>
                     ))}
                   </div>
-                  <UsersActionButton
-                    locale={locale}
-                    descriptor={refreshAction}
-                    onClick={() => void loadUsers()}
-                  />
+                  {refreshAction ? (
+                    <UsersActionButton
+                      locale={locale}
+                      descriptor={refreshAction}
+                      onClick={() => void loadUsers()}
+                    />
+                  ) : null}
                 </div>
               </div>
 
@@ -1607,16 +1634,9 @@ export default function UsersPage() {
                 <EmptyStatePanel
                   locale={locale}
                   reason={effectiveEmptyState.reason}
-                  nextAction={
-                    effectiveEmptyState.nextAction ??
-                    (effectiveEmptyState.reason === "no_data" ||
-                    effectiveEmptyState.reason === "not_provisioned"
-                      ? (primaryCreateAction ?? undefined)
-                      : effectiveEmptyState.reason === "fetch_failed" ||
-                          effectiveEmptyState.reason === "external_unavailable"
-                        ? refreshAction
-                        : undefined)
-                  }
+                  {...(emptyStateNextAction
+                    ? { nextAction: emptyStateNextAction }
+                    : {})}
                   onNextAction={() => {
                     if (
                       effectiveEmptyState.reason === "no_data" ||
