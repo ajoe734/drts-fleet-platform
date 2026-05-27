@@ -149,6 +149,11 @@ const noteListStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
+const disabledActionWrapStyle: CSSProperties = {
+  display: "inline-flex",
+  cursor: "not-allowed",
+};
+
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
@@ -192,6 +197,16 @@ const defaultPageActions: ResourceActionDescriptor[] = [
     riskLevel: "low",
   },
 ];
+
+const refreshTierMeta = {
+  urgent: { code: "T0", label: "urgent", cadence: "push + 5s fallback" },
+  fast: { code: "T1", label: "fast", cadence: "3s auto poll" },
+  dispatch: { code: "T2", label: "dispatch", cadence: "5s auto poll" },
+  medium: { code: "T3", label: "medium", cadence: "15s auto poll" },
+  medium_slow: { code: "T4", label: "medium_slow", cadence: "30s auto poll" },
+  slow: { code: "T5", label: "slow", cadence: "30s auto poll" },
+  manual: { code: "T6", label: "manual", cadence: "manual refresh" },
+} as const;
 
 function parseDate(value: string | null | undefined) {
   if (!value) return null;
@@ -240,6 +255,55 @@ function getScopeLabel(scope: TenantFeatureFlagScope) {
 
 function getScopeTone(scope: TenantFeatureFlagScope): CanvasTone {
   return scope === "tenant_override" ? "accent" : "neutral";
+}
+
+function getActionDescriptor(
+  actions: ResourceActionDescriptor[],
+  target: string,
+  fallback?: ResourceActionDescriptor,
+) {
+  return actions.find((action) => action.action === target) ?? fallback ?? null;
+}
+
+function getRefreshMeta(
+  tier: TenantFeatureFlagVisibilityList["refreshTier"] | null | undefined,
+) {
+  return refreshTierMeta[tier ?? "slow"];
+}
+
+function getFreshnessTone(
+  freshness: TenantFeatureFlagVisibilityList["refresh"]["dataFreshness"] | null | undefined,
+): Exclude<CanvasTone, "neutral"> {
+  return freshness === "degraded" ? "danger" : "warn";
+}
+
+function getFreshnessTitle(
+  freshness: TenantFeatureFlagVisibilityList["refresh"]["dataFreshness"] | null | undefined,
+) {
+  switch (freshness) {
+    case "degraded":
+      return "資料來源降級";
+    case "unknown":
+      return "資料新鮮度未知";
+    case "stale":
+    default:
+      return "資料已過時";
+  }
+}
+
+function getFreshnessBody(
+  freshness: TenantFeatureFlagVisibilityList["refresh"]["dataFreshness"] | null | undefined,
+  generatedAt: string | null | undefined,
+  tier: TenantFeatureFlagVisibilityList["refreshTier"] | null | undefined,
+) {
+  const meta = getRefreshMeta(tier);
+  const snapshotAt = formatDateTime(generatedAt);
+  const suffix =
+    freshness === "unknown"
+      ? "目前請以快照資訊為準，必要時改到 Platform Admin 或稍後再試。"
+      : "請手動 refresh 或等候下次自動 poll。";
+
+  return `目前顯示的內容於 ${snapshotAt} 從後端產生 (refresh tier ${meta.code} · ${meta.label} · ${meta.cadence})；${suffix}`;
 }
 
 function getButtonLinkStyle(variant: "secondary" | "ghost" = "secondary") {
@@ -347,15 +411,6 @@ function rowMatchesQuery(row: FlagRow, query: string) {
   );
 }
 
-function actionEnabled(
-  actions: ResourceActionDescriptor[],
-  target: string,
-  fallback = true,
-) {
-  const match = actions.find((action) => action.action === target);
-  return match ? match.enabled : fallback;
-}
-
 async function loadFeatureFlags() {
   const client = getTenantClient();
 
@@ -402,6 +457,20 @@ export default async function FeatureFlagsPage({ searchParams }: PageProps) {
   const pageActions = data?.availableActions?.length
     ? data.availableActions
     : defaultPageActions;
+  const searchAction = getActionDescriptor(pageActions, "search", {
+    action: "search",
+    enabled: true,
+    riskLevel: "low",
+  });
+  const platformAdminAction = getActionDescriptor(
+    pageActions,
+    "open_platform_admin_feature_flags",
+    {
+      action: "open_platform_admin_feature_flags",
+      enabled: true,
+      riskLevel: "low",
+    },
+  );
   const allRows = (data?.items ?? []).map(toFlagRow).filter((row: FlagRow) => {
     if (scopeFilter && scopeFilter !== "all" && row.scope !== scopeFilter) {
       return false;
@@ -433,6 +502,8 @@ export default async function FeatureFlagsPage({ searchParams }: PageProps) {
   }
 
   const emptyCopy = emptyReason ? getEmptyStateCopy(emptyReason) : null;
+  const refreshMeta = getRefreshMeta(data?.refreshTier);
+  const refreshGeneratedAt = data?.refresh.generatedAt ?? latestUpdatedAt;
 
   const columns: CanvasTableColumn<FlagRow>[] = [
     {
@@ -493,21 +564,40 @@ export default async function FeatureFlagsPage({ searchParams }: PageProps) {
     {
       h: "ACTIONS",
       w: 130,
-      r: (row) =>
-        actionEnabled(row.availableActions, "view_change_history") &&
-        row.historyLink ? (
-          <Link
-            href={row.historyLink.route}
-            style={getButtonLinkStyle()}
-            target={row.historyLink.openMode === "new_tab" ? "_blank" : undefined}
+      r: (row) => {
+        const historyAction = getActionDescriptor(
+          row.availableActions,
+          "view_change_history",
+        );
+
+        if (historyAction?.enabled && row.historyLink) {
+          return (
+            <Link
+              href={row.historyLink.route}
+              style={getButtonLinkStyle()}
+              target={row.historyLink.openMode === "new_tab" ? "_blank" : undefined}
+            >
+              歷程
+            </Link>
+          );
+        }
+
+        return (
+          <span
+            style={disabledActionWrapStyle}
+            title={
+              historyAction?.disabledReasonCode ??
+              (row.historyLink
+                ? "目前不可查看變更歷程"
+                : "authority snapshot 尚未附上歷程 deep link")
+            }
           >
-            歷程
-          </Link>
-        ) : (
-          <CanvasBtn theme={th} icon="audit" size="sm" disabled>
-            歷程
-          </CanvasBtn>
-        ),
+            <CanvasBtn theme={th} icon="audit" size="sm" disabled>
+              歷程
+            </CanvasBtn>
+          </span>
+        );
+      },
     },
   ];
 
@@ -525,10 +615,7 @@ export default async function FeatureFlagsPage({ searchParams }: PageProps) {
             <Link href="/audit" style={getButtonLinkStyle()}>
               稽核
             </Link>
-            {actionEnabled(
-              pageActions,
-              "open_platform_admin_feature_flags",
-            ) ? (
+            {platformAdminAction?.enabled ? (
               <Link
                 href={getPlatformAdminFlagsHref()}
                 style={getButtonLinkStyle()}
@@ -536,12 +623,38 @@ export default async function FeatureFlagsPage({ searchParams }: PageProps) {
               >
                 Platform Admin
               </Link>
-            ) : null}
+            ) : (
+              <span
+                style={disabledActionWrapStyle}
+                title={
+                  platformAdminAction?.disabledReasonCode ??
+                  "目前不可開啟 Platform Admin feature flags"
+                }
+              >
+                <CanvasBtn theme={th} icon="link" size="sm" disabled>
+                  Platform Admin
+                </CanvasBtn>
+              </span>
+            )}
           </>
         }
       />
 
       <div style={pageBodyStyle}>
+        {data?.refresh && data.refresh.dataFreshness !== "fresh" ? (
+          <CanvasBanner
+            theme={th}
+            tone={getFreshnessTone(data.refresh.dataFreshness)}
+            icon="clock"
+            title={getFreshnessTitle(data.refresh.dataFreshness)}
+            body={getFreshnessBody(
+              data.refresh.dataFreshness,
+              refreshGeneratedAt,
+              data.refreshTier,
+            )}
+          />
+        ) : null}
+
         {error ? (
           <CanvasBanner
             theme={th}
@@ -574,8 +687,8 @@ export default async function FeatureFlagsPage({ searchParams }: PageProps) {
           <CanvasKPI
             theme={th}
             label="REFRESH"
-            value="T5"
-            sub={`slow · ${formatDateTime(data?.refresh.generatedAt ?? latestUpdatedAt)}`}
+            value={refreshMeta.code}
+            sub={`${refreshMeta.label} · ${formatDateTime(refreshGeneratedAt)}`}
           />
         </div>
 
@@ -602,7 +715,16 @@ export default async function FeatureFlagsPage({ searchParams }: PageProps) {
                 </select>
               </CanvasField>
               <div style={{ display: "flex", gap: 8 }}>
-                <button style={submitButtonStyle} type="submit">
+                <button
+                  style={submitButtonStyle}
+                  type="submit"
+                  disabled={!searchAction?.enabled}
+                  title={
+                    searchAction?.enabled
+                      ? undefined
+                      : (searchAction?.disabledReasonCode ?? "目前不可搜尋")
+                  }
+                >
                   Search
                 </button>
                 {(query || scopeFilter) && (
@@ -621,9 +743,7 @@ export default async function FeatureFlagsPage({ searchParams }: PageProps) {
           <CanvasCard theme={th} title="Governance notes" padding={16}>
             <div style={metaStackStyle}>
               <div style={hintStyle}>
-                Refresh tier `T5` maps to the shared `slow` cadence. This page
-                shows the tenant-effective value, and rows with
-                `tenant_override` are surfaced as `rolling_out`.
+                {`Refresh tier ${refreshMeta.code} maps to the shared ${refreshMeta.label} cadence. This page shows the tenant-effective value, and rows with tenant_override are surfaced as rolling_out.`}
               </div>
               <ul style={noteListStyle}>
                 {(data?.notes ?? []).map((note: string, index: number) => (
