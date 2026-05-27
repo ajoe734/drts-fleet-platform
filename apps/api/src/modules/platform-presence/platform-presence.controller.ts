@@ -74,6 +74,7 @@ export class PlatformPresenceController {
       driverId,
       body.platformCode,
       body.tokenExpiresAt ?? null,
+      requestId,
     );
     return toApiSuccessEnvelope(rec, requestId);
   }
@@ -88,7 +89,11 @@ export class PlatformPresenceController {
   ) {
     const driverId = this.resolveDriverId(identity, requestedDriverId);
 
-    const rec = await this.service.setOffline(driverId, body.platformCode);
+    const rec = await this.service.setOffline(
+      driverId,
+      body.platformCode,
+      requestId,
+    );
     return toApiSuccessEnvelope(rec, requestId);
   }
 }

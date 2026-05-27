@@ -18,6 +18,7 @@ import type {
   DriverEtaResponse,
   DriverLocationHeartbeatCommand,
   DriverLocationSnapshot,
+  DriverMatchingSuppression,
   DriverMasterLifecycleStatus,
   DriverRegistryRecord,
   InitiateVehicleOffboardingCommand,
@@ -321,6 +322,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
   );
 
   private policies = POLICY_SEED.map((policy) => this.clonePolicy(policy));
+  private matchingSuppressions = new Map<string, DriverMatchingSuppression>();
 
   private exclusivities = EXCLUSIVITY_SEED.map((exclusivity) =>
     this.cloneExclusivity(exclusivity),
@@ -1232,6 +1234,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
   updateDriverWorkState(
     driverId: string,
     command: UpdateDriverWorkStateCommand,
+    requestId?: string,
+    auditOptions?: {
+      actionNameOverride?: string;
+      newValuesSummary?: Record<string, unknown>;
+    },
   ) {
     const driver = this.requireDriver(driverId);
     const previousWorkState = driver.workState;
@@ -1251,12 +1258,13 @@ export class RegulatoryRegistryService implements OnModuleInit {
         tenantId: null,
         moduleName: "regulatory-registry",
         actionName:
-          previousWorkState === "incident_hold" &&
+          auditOptions?.actionNameOverride ??
+          (previousWorkState === "incident_hold" &&
           command.workState !== "incident_hold"
             ? "lift_suppression"
             : command.workState === "incident_hold"
               ? "suppress_matching"
-              : "update_driver_work_state",
+              : "update_driver_work_state"),
         resourceType: "driver",
         resourceId: driverId,
         oldValuesSummary: {
@@ -1267,11 +1275,28 @@ export class RegulatoryRegistryService implements OnModuleInit {
           workState: updated.workState,
           dispatchEligible: updated.dispatchEligible,
           eligibilityBlockedReasons: [...updated.eligibilityBlockedReasons],
+          ...(auditOptions?.newValuesSummary ?? {}),
         },
       },
-      `driver-work-state:${updated.updatedAt}:${driverId}`,
+      requestId ?? `driver-work-state:${updated.updatedAt}:${driverId}`,
     );
     return this.cloneDriver(updated);
+  }
+
+  setMatchingSuppression(
+    driverId: string,
+    suppression: DriverMatchingSuppression | null,
+  ) {
+    if (suppression?.active) {
+      this.matchingSuppressions.set(driverId, { ...suppression });
+      return;
+    }
+    this.matchingSuppressions.delete(driverId);
+  }
+
+  getMatchingSuppression(driverId: string): DriverMatchingSuppression | null {
+    const suppression = this.matchingSuppressions.get(driverId);
+    return suppression ? { ...suppression } : null;
   }
 
   getEligibleCandidates(
@@ -1860,12 +1885,14 @@ export class RegulatoryRegistryService implements OnModuleInit {
   }
 
   private cloneDriver(driver: DriverRegistryRecord): DriverRegistryRecord {
+    const suppression = this.getMatchingSuppression(driver.driverId);
     return {
       ...driver,
       supportedServiceBuckets: [...driver.supportedServiceBuckets],
       eligibilityBlockedReasons: [...driver.eligibilityBlockedReasons],
       deviceBindings: driver.deviceBindings.map((binding) => ({ ...binding })),
-    };
+      ...(suppression ? { matchingSuppression: suppression } : {}),
+    } as DriverRegistryRecord;
   }
 
   private decorateDriver(driver: DriverRegistryRecord): DriverRegistryRecord {
@@ -1875,6 +1902,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
     const eligibilityBlockedReasons =
       this.computeDriverEligibilityBlockedReasons(driver);
 
+    const suppression = this.getMatchingSuppression(driver.driverId);
     return {
       ...driver,
       supportedServiceBuckets: [...driver.supportedServiceBuckets],
@@ -1884,7 +1912,8 @@ export class RegulatoryRegistryService implements OnModuleInit {
       deviceBindings: profile
         ? profile.deviceBindings.map((binding) => ({ ...binding }))
         : [],
-    };
+      ...(suppression ? { matchingSuppression: suppression } : {}),
+    } as DriverRegistryRecord;
   }
 
   private computeDriverEligibilityBlockedReasons(

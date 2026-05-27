@@ -66,6 +66,7 @@ export class PlatformPresenceService {
     driverId: string,
     platformCode: PlatformCode,
     tokenExpiresAt?: string | null,
+    requestId?: string,
   ): Promise<PlatformPresenceRecord> {
     const existing = (await this.listForDriver(driverId)).find(
       (r) => r.platformCode === platformCode,
@@ -120,7 +121,7 @@ export class PlatformPresenceService {
           reauthRequired: persisted.reauthRequired,
         },
       },
-      persisted.updatedAt,
+      requestId ?? persisted.updatedAt,
     );
 
     return persisted;
@@ -129,6 +130,13 @@ export class PlatformPresenceService {
   async setOffline(
     driverId: string,
     platformCode: PlatformCode,
+    requestId?: string,
+    auditDetails?: {
+      reasonCode?: string | null;
+      note?: string | null;
+      expiresAt?: string | null;
+      relatedIncidentId?: string | null;
+    },
   ): Promise<PlatformPresenceRecord> {
     const existing = (await this.listForDriver(driverId)).find(
       (r) => r.platformCode === platformCode,
@@ -181,9 +189,13 @@ export class PlatformPresenceService {
           status: persisted.status,
           tokenExpiresAt: persisted.tokenExpiresAt,
           reauthRequired: persisted.reauthRequired,
+          reasonCode: auditDetails?.reasonCode ?? null,
+          note: auditDetails?.note ?? null,
+          expiresAt: auditDetails?.expiresAt ?? null,
+          relatedIncidentId: auditDetails?.relatedIncidentId ?? null,
         },
       },
-      persisted.updatedAt,
+      requestId ?? persisted.updatedAt,
     );
 
     return persisted;

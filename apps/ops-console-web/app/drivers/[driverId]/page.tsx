@@ -729,18 +729,6 @@ export default async function DriverDetailPage({
     ) ?? null;
   const suppressionState = readMatchingSuppression(driver);
   const suppression = suppressionState?.active ? suppressionState : null;
-  const suppressionStateExposed = suppressionState !== undefined;
-  const inferredSosSuppressionExpiry =
-    activeSosIncident && !suppression
-      ? new Date(
-          new Date(activeSosIncident.updatedAt).getTime() + 24 * 60 * 60 * 1000,
-        ).toISOString()
-      : null;
-
-  const hasReadModelGap =
-    driver.workState === "incident_hold" &&
-    !presenceSummary?.notes?.length &&
-    driverAuditLogs.length === 0;
   const derivedGeneratedAt =
     [
       driver.updatedAt,
@@ -912,10 +900,10 @@ export default async function DriverDetailPage({
         actions: hasAvailableActionsField(presence) ? (
           <DriverAvailableActions
             driverId={driver.driverId}
-            workState={driver.workState}
             platformCode={presence.platformCode}
             platformStatus={presence.status}
             statementPeriod={selectedPeriod}
+            activeForwardedOrderId={activeForwardedOrder?.mirrorOrderId ?? null}
             compact
             actions={readAvailableActions(presence)}
           />
@@ -1327,8 +1315,10 @@ export default async function DriverDetailPage({
             </div>
             <DriverAvailableActions
               driverId={driver.driverId}
-              workState={driver.workState}
               statementPeriod={selectedPeriod}
+              activeForwardedOrderId={
+                activeForwardedOrder?.mirrorOrderId ?? null
+              }
               actions={driverActionDescriptors}
               compact
             />
@@ -1382,17 +1372,13 @@ export default async function DriverDetailPage({
             icon="warn"
             title={
               locale === "zh"
-                ? "此司機目前處於 SOS in_response · matching suppression active"
-                : "This driver is currently in SOS in_response · matching suppression active"
+                ? "此司機目前處於 SOS in_response"
+                : "This driver is currently in SOS in_response"
             }
             body={
               locale === "zh"
-                ? suppression?.expiresAt || inferredSosSuppressionExpiry
-                  ? `${activeSosIncident.incidentId} · 24h TTL（至 ${formatDateTime(locale, suppression?.expiresAt ?? inferredSosSuppressionExpiry)}）· ops_manager 可延長。此頁所有 dispatch 影響動作已停用。`
-                  : `${activeSosIncident.incidentId} · suppression 已啟用，但目前 contract 尚未回傳 TTL；請改從 incident / audit deep link 驗證。此頁所有 dispatch 影響動作已停用。`
-                : suppression?.expiresAt || inferredSosSuppressionExpiry
-                  ? `${activeSosIncident.incidentId} · 24h TTL (until ${formatDateTime(locale, suppression?.expiresAt ?? inferredSosSuppressionExpiry)}) · ops_manager may extend it. Dispatch-impacting actions on this page are paused.`
-                  : `${activeSosIncident.incidentId} · suppression is active, but the current contract does not expose TTL yet. Verify through the incident or audit deep links. Dispatch-impacting actions on this page are paused.`
+                ? `${activeSosIncident.incidentId} · 此頁需要同時檢查 incident 狀態與 driver matching suppression。`
+                : `${activeSosIncident.incidentId} · Review the incident state together with the driver matching suppression record.`
             }
             actions={
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1415,22 +1401,6 @@ export default async function DriverDetailPage({
               </div>
             }
           />
-        ) : driver.workState === "incident_hold" && !suppressionStateExposed ? (
-          <Banner
-            theme={theme}
-            tone="warn"
-            icon="warn"
-            title={
-              locale === "zh"
-                ? "suppression read model 尚未佈建"
-                : "Suppression read model not provisioned"
-            }
-            body={
-              locale === "zh"
-                ? "目前 contract 尚未提供 DriverMatchingSuppression；請改從 incident / audit deep link 驗證實際 reason、TTL 與 source incident。"
-                : "The current contract does not expose DriverMatchingSuppression. Verify the active reason, TTL, and source incident through the incident or audit deep links."
-            }
-          />
         ) : null}
 
         {suppression && !activeSosIncident ? (
@@ -1450,21 +1420,22 @@ export default async function DriverDetailPage({
                 items={[
                   {
                     k: locale === "zh" ? "Reason" : "Reason",
-                    v: hasReadModelGap
-                      ? locale === "zh"
-                        ? "contract 未提供"
-                        : "Not exposed by the current contract"
-                      : locale === "zh"
-                        ? "事故 / 合規檢查中"
-                        : "Incident / compliance hold",
+                    v:
+                      suppression.reasonCode === "incident"
+                        ? locale === "zh"
+                          ? "事故處理中"
+                          : "Incident hold"
+                        : suppression.reasonCode === "compliance_hold"
+                          ? locale === "zh"
+                            ? "合規暫停"
+                            : "Compliance hold"
+                          : locale === "zh"
+                            ? "人工營運暫停"
+                            : "Manual ops hold",
                   },
                   {
                     k: locale === "zh" ? "TTL" : "TTL",
-                    v: hasReadModelGap
-                      ? locale === "zh"
-                        ? "未提供 expiresAt；需回 source incident 確認"
-                        : "expiresAt not exposed; verify in the source incident"
-                      : formatDateTime(locale, suppression.expiresAt),
+                    v: formatDateTime(locale, suppression.expiresAt),
                   },
                   {
                     k: locale === "zh" ? "Linked incident" : "Linked incident",
@@ -1475,12 +1446,6 @@ export default async function DriverDetailPage({
                       >
                         {suppression.sourceIncidentId}
                       </Link>
-                    ) : hasReadModelGap ? (
-                      locale === "zh" ? (
-                        "read model 未提供"
-                      ) : (
-                        "Read model not provisioned"
-                      )
                     ) : (
                       "—"
                     ),
@@ -1662,8 +1627,10 @@ export default async function DriverDetailPage({
               <div style={{ display: "grid", gap: 12 }}>
                 <DriverAvailableActions
                   driverId={driver.driverId}
-                  workState={driver.workState}
                   statementPeriod={selectedPeriod}
+                  activeForwardedOrderId={
+                    activeForwardedOrder?.mirrorOrderId ?? null
+                  }
                   actions={driverActionDescriptors}
                 />
                 <div

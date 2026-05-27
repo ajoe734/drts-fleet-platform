@@ -674,6 +674,7 @@ export class ForwarderService implements OnModuleInit {
     orderId: string,
     command: EngageForwarderManualFallbackCommand,
     requestId?: string,
+    auditActionName = "engage_manual_fallback",
   ) {
     const forwardedOrder = this.requireOrder(orderId);
     if (
@@ -722,7 +723,7 @@ export class ForwarderService implements OnModuleInit {
         actorType: "ops_user",
         tenantId: null,
         moduleName: "forwarder",
-        actionName: "engage_manual_fallback",
+        actionName: auditActionName,
         resourceType: "forwarded_order",
         resourceId: forwardedOrder.mirrorOrderId,
         newValuesSummary: {
