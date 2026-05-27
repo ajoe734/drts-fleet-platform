@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import type {
   ApiSuccessEnvelope,
+  CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
   MoneyAmount,
@@ -35,6 +36,8 @@ const th = buildCanvasTheme({
 
 const REFRESH_TIER: RefreshTier = "slow";
 const REFRESH_INTERVAL_MS = 30_000;
+const PLATFORM_ADMIN_URL =
+  process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3102";
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -228,6 +231,17 @@ const detailStatValueStyle: CSSProperties = {
   lineHeight: 1.4,
 };
 
+const detailLinkListStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const externalLinkStyle: CSSProperties = {
+  ...actionLinkBaseStyle,
+  justifyContent: "space-between",
+  width: "100%",
+};
+
 const detailLineListStyle: CSSProperties = {
   display: "grid",
   gap: 10,
@@ -272,6 +286,7 @@ type InvoiceViewRecord = Omit<TenantInvoiceRecord, "status"> &
     artifactState: "ready" | "expired" | "missing";
     availableActions: InvoiceAction[];
     auditHref: string;
+    crossAppLinks: CrossAppResourceLink[];
   };
 
 type InvoicesPageData = {
@@ -298,6 +313,41 @@ function parseArtifactExpiry(artifactUrl: string | null) {
   } catch {
     return null;
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function readOptionalString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function isResourceActionDescriptor(
+  value: unknown,
+): value is ResourceActionDescriptor {
+  const record = asRecord(value);
+  return (
+    record !== null &&
+    typeof record.action === "string" &&
+    typeof record.enabled === "boolean" &&
+    typeof record.riskLevel === "string"
+  );
+}
+
+function isCrossAppResourceLink(value: unknown): value is CrossAppResourceLink {
+  const record = asRecord(value);
+  return (
+    record !== null &&
+    (record.targetApp === "ops-console" ||
+      record.targetApp === "platform-admin" ||
+      record.targetApp === "tenant-console") &&
+    typeof record.route === "string" &&
+    typeof record.resourceType === "string" &&
+    typeof record.resourceId === "string" &&
+    (record.openMode === "new_tab" || record.openMode === "same_tab") &&
+    typeof record.label === "string"
+  );
 }
 
 function formatDateTime(value: string | null | undefined) {
@@ -464,6 +514,36 @@ function buildRefreshMetadata(
   };
 }
 
+function buildCrossAppHref(link: CrossAppResourceLink) {
+  if (link.targetApp === "platform-admin") {
+    return `${PLATFORM_ADMIN_URL}${link.route}`;
+  }
+  return link.route;
+}
+
+function buildFallbackCrossAppLinks(
+  invoice: Pick<InvoiceViewRecord, "invoiceId" | "tenantId">,
+): CrossAppResourceLink[] {
+  return [
+    {
+      targetApp: "platform-admin",
+      route: `/payments?invoiceId=${encodeURIComponent(invoice.invoiceId)}`,
+      resourceType: "settlement_invoice",
+      resourceId: invoice.invoiceId,
+      openMode: "new_tab",
+      label: "平台結算檢視",
+    },
+    {
+      targetApp: "platform-admin",
+      route: `/audit?resourceType=tenant_invoice&resourceId=${encodeURIComponent(invoice.invoiceId)}&tenantId=${encodeURIComponent(invoice.tenantId)}`,
+      resourceType: "tenant_invoice",
+      resourceId: invoice.invoiceId,
+      openMode: "new_tab",
+      label: "平台稽核",
+    },
+  ];
+}
+
 function buildInvoiceActions(invoice: InvoiceViewRecord): InvoiceAction[] {
   return [
     {
@@ -491,24 +571,73 @@ function buildInvoiceActions(invoice: InvoiceViewRecord): InvoiceAction[] {
   ];
 }
 
+function toInvoiceAction(
+  descriptor: ResourceActionDescriptor,
+  invoice: InvoiceViewRecord,
+): InvoiceAction {
+  if (descriptor.action === "download_artifact") {
+    return {
+      ...descriptor,
+      label: "下載 PDF",
+      ...(invoice.artifactState === "ready" && invoice.artifactUrl
+        ? { href: invoice.artifactUrl, target: "_blank" as const }
+        : {}),
+    };
+  }
+
+  if (descriptor.action === "view_detail") {
+    return {
+      ...descriptor,
+      href: `/invoices?invoice=${encodeURIComponent(invoice.invoiceId)}`,
+      label: "查看明細",
+    };
+  }
+
+  return {
+    ...descriptor,
+    label: descriptor.action,
+  };
+}
+
 function toInvoiceViewRecord(invoice: TenantInvoiceRecord): InvoiceViewRecord {
-  const expiresAt = parseArtifactExpiry(invoice.artifactUrl);
+  const invoiceRecord = invoice as TenantInvoiceRecord & Record<string, unknown>;
+  const dueAt = readOptionalString(invoiceRecord.dueAt);
+  const expiresAt =
+    readOptionalString(invoiceRecord.expiresAt) ??
+    parseArtifactExpiry(invoice.artifactUrl);
   const artifactState = !invoice.artifactUrl
     ? "missing"
     : isExpired(expiresAt)
       ? "expired"
       : "ready";
+  const normalizedStatus =
+    invoice.status === "issued" && dueAt && isExpired(dueAt)
+      ? "overdue"
+      : invoice.status;
 
   const record: InvoiceViewRecord = {
     ...invoice,
-    dueAt: null,
+    status: normalizedStatus,
+    dueAt,
     expiresAt,
     artifactState,
     auditHref: `/audit?resourceType=tenant_invoice&resourceId=${encodeURIComponent(invoice.invoiceId)}`,
+    crossAppLinks: [],
     availableActions: [],
   };
 
-  record.availableActions = buildInvoiceActions(record);
+  const rawActions = Array.isArray(invoiceRecord.availableActions)
+    ? invoiceRecord.availableActions.filter(isResourceActionDescriptor)
+    : [];
+  record.availableActions =
+    rawActions.length > 0
+      ? rawActions.map((descriptor) => toInvoiceAction(descriptor, record))
+      : buildInvoiceActions(record);
+  const rawLinks = Array.isArray(invoiceRecord.crossAppLinks)
+    ? invoiceRecord.crossAppLinks.filter(isCrossAppResourceLink)
+    : [];
+  record.crossAppLinks =
+    rawLinks.length > 0 ? rawLinks : buildFallbackCrossAppLinks(record);
   return record;
 }
 
@@ -1184,6 +1313,29 @@ export default async function InvoicesPage({
                       {formatArtifactExpiry(selectedInvoice.expiresAt)}
                     </span>
                   </div>
+                  <div style={detailStatStyle}>
+                    <span style={detailStatLabelStyle}>Artifact URL</span>
+                    <span style={detailStatValueStyle}>
+                      {selectedInvoice.artifactUrl ? (
+                        <a
+                          href={selectedInvoice.artifactUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={invoicePrimaryStyle}
+                        >
+                          {selectedInvoice.artifactUrl}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </span>
+                  </div>
+                  <div style={detailStatStyle}>
+                    <span style={detailStatLabelStyle}>Pricing snapshot</span>
+                    <span style={detailStatValueStyle}>
+                      {selectedInvoice.pricingVersionSnapshot}
+                    </span>
+                  </div>
                 </div>
 
                 <div style={actionRowStyle}>
@@ -1207,6 +1359,24 @@ export default async function InvoicesPage({
                   >
                     稽核檢視
                   </Link>
+                </div>
+
+                <div style={detailLinkListStyle}>
+                  <div style={subheadingStyle}>Cross-app deep links</div>
+                  {selectedInvoice.crossAppLinks.map((link) => (
+                    <a
+                      key={`${link.targetApp}-${link.resourceType}-${link.resourceId}-${link.route}`}
+                      href={buildCrossAppHref(link)}
+                      target={link.openMode === "new_tab" ? "_blank" : undefined}
+                      rel={
+                        link.openMode === "new_tab" ? "noreferrer" : undefined
+                      }
+                      style={externalLinkStyle}
+                    >
+                      <span>{link.label}</span>
+                      <span style={mutedMonoStyle}>{link.targetApp}</span>
+                    </a>
+                  ))}
                 </div>
               </div>
             </CanvasCard>
