@@ -92,6 +92,13 @@ export class FeatureFlagsService {
         description: "Enable ops console report job management",
       },
       {
+        key: "ops-console.reports",
+        enabled: false,
+        description:
+          "Disable ops console report job management for pilot tenant",
+        tenantId: "tenant-acme-mobility",
+      },
+      {
         key: "driver-app.tasks",
         enabled: true,
         description: "Enable driver app task lifecycle",
@@ -110,6 +117,13 @@ export class FeatureFlagsService {
         key: "driver-app.shift",
         enabled: false,
         description: "Enable driver app shift/attendance tracking",
+      },
+      {
+        key: "driver-app.shift",
+        enabled: true,
+        description:
+          "Enable driver app shift/attendance tracking for beta tenant",
+        tenantId: "tenant-beta-dispatch",
       },
       {
         key: "phase1.read-models",
@@ -133,7 +147,12 @@ export class FeatureFlagsService {
       if (flag.tenantId) {
         ff.tenantId = flag.tenantId;
       }
-      this.inMemoryFlags.set(flag.key, ff);
+      this.inMemoryFlags.set(
+        flag.tenantId
+          ? this.inMemoryOverrideKey(flag.key, flag.tenantId)
+          : flag.key,
+        ff,
+      );
     }
   }
 
@@ -155,68 +174,105 @@ export class FeatureFlagsService {
     return this.inMemoryFlags.get(this.inMemoryOverrideKey(key, tenantId));
   }
 
-  async getAll(tenantId?: string): Promise<FeatureFlag[]> {
+  private async getRawFlags(): Promise<FeatureFlag[]> {
     if (this.getDb()) {
-      const dbFlags = await this.featureFlagRepository!.findAll();
-      // Filter to global + tenant-specific overrides
-      if (tenantId) {
-        const globalKeys = new Set<string>();
-        const result: FeatureFlag[] = [];
-        // First pass: collect tenant overrides
-        for (const f of dbFlags) {
-          if (f.tenantId === tenantId) {
-            globalKeys.add(f.key);
-            result.push(f);
-          }
-        }
-        // Second pass: add globals not overridden
-        for (const f of dbFlags) {
-          if (!f.tenantId && !globalKeys.has(f.key)) {
-            result.push(f);
-          }
-        }
-        return result;
-      }
-      // Return only global flags
-      return dbFlags.filter((f) => !f.tenantId);
+      return this.featureFlagRepository!.findAll();
     }
-    // In-memory fallback
-    const flags = Array.from(this.inMemoryFlags.values());
+
+    return Array.from(this.inMemoryFlags.values());
+  }
+
+  private filterFlagsForTenant(
+    flags: FeatureFlag[],
+    tenantId: string,
+  ): FeatureFlag[] {
+    const tenantOverrides = new Map<string, FeatureFlag>();
+    const globalFlags: FeatureFlag[] = [];
+
+    for (const flag of flags) {
+      if (flag.tenantId === tenantId) {
+        tenantOverrides.set(flag.key, flag);
+        continue;
+      }
+
+      if (!flag.tenantId) {
+        globalFlags.push(flag);
+      }
+    }
+
+    const mergedFlags = globalFlags.map(
+      (flag) => tenantOverrides.get(flag.key) ?? flag,
+    );
+
+    for (const override of tenantOverrides.values()) {
+      if (!mergedFlags.some((flag) => flag.key === override.key)) {
+        mergedFlags.push(override);
+      }
+    }
+
+    return mergedFlags;
+  }
+
+  private filterFlagsForOps(flags: FeatureFlag[]): FeatureFlag[] {
+    return [...flags].sort((left, right) => {
+      const keyCompare = left.key.localeCompare(right.key);
+      if (keyCompare !== 0) {
+        return keyCompare;
+      }
+
+      if (!!left.tenantId !== !!right.tenantId) {
+        return left.tenantId ? 1 : -1;
+      }
+
+      return (left.tenantId ?? "").localeCompare(right.tenantId ?? "");
+    });
+  }
+
+  private collectRelatedFlags(
+    flags: FeatureFlag[],
+  ): Map<string, { globalFlag?: FeatureFlag; tenantOverrides: FeatureFlag[] }> {
+    const relatedByKey = new Map<
+      string,
+      { globalFlag?: FeatureFlag; tenantOverrides: FeatureFlag[] }
+    >();
+
+    for (const flag of flags) {
+      const bucket = relatedByKey.get(flag.key) ?? {
+        tenantOverrides: [],
+      };
+
+      if (flag.tenantId) {
+        bucket.tenantOverrides.push(flag);
+      } else {
+        bucket.globalFlag = flag;
+      }
+
+      relatedByKey.set(flag.key, bucket);
+    }
+
+    return relatedByKey;
+  }
+
+  async getAll(tenantId?: string): Promise<FeatureFlag[]> {
+    const flags = await this.getRawFlags();
+
     if (tenantId) {
-      const tenantOverrides = new Map<string, FeatureFlag>();
-      const globalFlags: FeatureFlag[] = [];
-
-      for (const flag of flags) {
-        if (flag.tenantId === tenantId) {
-          tenantOverrides.set(flag.key, flag);
-          continue;
-        }
-        if (!flag.tenantId) {
-          globalFlags.push(flag);
-        }
-      }
-
-      const mergedFlags = globalFlags.map(
-        (flag) => tenantOverrides.get(flag.key) ?? flag,
-      );
-
-      for (const override of tenantOverrides.values()) {
-        if (!mergedFlags.some((flag) => flag.key === override.key)) {
-          mergedFlags.push(override);
-        }
-      }
-
-      return mergedFlags;
+      return this.filterFlagsForTenant(flags, tenantId);
     }
+
     return flags.filter((flag) => !flag.tenantId);
   }
 
   async getOpsSummary(
     tenantId?: string,
   ): Promise<FeatureFlagVisibilityListResponse> {
-    const flags = await this.getAll(tenantId);
+    const rawFlags = await this.getRawFlags();
+    const flags = tenantId
+      ? this.filterFlagsForTenant(rawFlags, tenantId)
+      : this.filterFlagsForOps(rawFlags);
     const refresh = this.buildRefreshMetadata();
     const ownerAppLink = this.buildOwnerAppLink();
+    const relatedByKey = this.collectRelatedFlags(rawFlags);
 
     if (flags.length === 0) {
       const emptyState: EmptyStateEnvelope = {
@@ -237,7 +293,14 @@ export class FeatureFlagsService {
     }
 
     return {
-      items: flags.map((flag) => this.toOpsFlagRecord(flag, ownerAppLink)),
+      items: flags.map((flag) =>
+        this.toOpsFlagRecord(
+          flag,
+          ownerAppLink,
+          relatedByKey.get(flag.key),
+          tenantId,
+        ),
+      ),
       refresh,
       availableActions: [
         FeatureFlagsService.SEARCH_ACTION,
@@ -336,8 +399,47 @@ export class FeatureFlagsService {
   private toOpsFlagRecord(
     flag: FeatureFlag,
     ownerAppLink: CrossAppResourceLink,
+    related:
+      | {
+          globalFlag?: FeatureFlag;
+          tenantOverrides: FeatureFlag[];
+        }
+      | undefined,
+    filteredTenantId?: string,
   ): FeatureFlagVisibilityRecord {
     const scope = flag.tenantId ? "tenant" : "global";
+    const visibleRelatedFlags = filteredTenantId
+      ? [
+          ...(related?.globalFlag ? [related.globalFlag] : []),
+          ...(related?.tenantOverrides ?? []).filter(
+            (item) => item.tenantId === filteredTenantId,
+          ),
+        ]
+      : [
+          ...(related?.globalFlag ? [related.globalFlag] : []),
+          ...(related?.tenantOverrides ?? []),
+        ];
+    const distinctValues = new Set(
+      visibleRelatedFlags.map((relatedFlag) => relatedFlag.enabled),
+    );
+    const rolloutState = distinctValues.size > 1 ? "partial" : "uniform";
+    const divergingOverrides =
+      related?.globalFlag == null
+        ? 0
+        : related.tenantOverrides.filter(
+            (override) => override.enabled !== related.globalFlag!.enabled,
+          ).length;
+    const rolloutSummary =
+      rolloutState === "partial"
+        ? filteredTenantId && flag.tenantId === filteredTenantId
+          ? "Tenant override differs from the platform default."
+          : divergingOverrides > 0
+            ? `${divergingOverrides} tenant override${
+                divergingOverrides === 1 ? "" : "s"
+              } differ from the platform default.`
+            : "Visible scopes do not currently resolve to the same value."
+        : null;
+
     return {
       key: flag.key,
       description: flag.description,
@@ -345,8 +447,8 @@ export class FeatureFlagsService {
       scope,
       tenantId: flag.tenantId ?? null,
       tenantLabel: flag.tenantId ?? null,
-      rolloutState: "uniform",
-      rolloutSummary: null,
+      rolloutState,
+      rolloutSummary,
       lastChangedAt: flag.updatedAt,
       lastChangedBy: flag.tenantId
         ? `tenant:${flag.tenantId}`
@@ -354,9 +456,11 @@ export class FeatureFlagsService {
       availableActions: [FeatureFlagsService.VIEW_CHANGE_HISTORY_ACTION],
       historyLink: {
         targetApp: "platform-admin",
-        route: `/feature-flags?flag=${encodeURIComponent(flag.key)}`,
+        route: `/feature-flags?flag=${encodeURIComponent(flag.key)}${
+          flag.tenantId ? `&tenantId=${encodeURIComponent(flag.tenantId)}` : ""
+        }`,
         resourceType: "feature_flag",
-        resourceId: flag.key,
+        resourceId: flag.tenantId ? `${flag.key}:${flag.tenantId}` : flag.key,
         openMode: "new_tab",
         label: "Platform Admin",
       },
