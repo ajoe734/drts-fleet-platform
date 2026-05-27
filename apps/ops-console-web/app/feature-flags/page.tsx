@@ -510,19 +510,6 @@ function defaultOwnerAppLink(locale: Locale): CrossAppResourceLink {
   };
 }
 
-function defaultHistoryLink(key: string, locale: Locale): CrossAppResourceLink {
-  return {
-    targetApp: "platform-admin",
-    route: `/audit?resourceType=feature_flag&resourceId=${encodeURIComponent(
-      key,
-    )}`,
-    resourceType: "feature_flag",
-    resourceId: key,
-    openMode: "new_tab",
-    label: viewHistoryLabel(locale),
-  };
-}
-
 function isOperationalLegacyFlag(key: string) {
   return !key.startsWith("driver-app.") && !key.startsWith("tenant-portal.");
 }
@@ -580,14 +567,8 @@ function mapLegacySummary(
         "Contract not exposed",
         "contract 尚未帶出操作者",
       ),
-      availableActions: [
-        {
-          action: "view_change_history",
-          enabled: true,
-          riskLevel: "low",
-        },
-      ],
-      historyLink: defaultHistoryLink(flag.key, locale),
+      availableActions: [],
+      historyLink: null,
       ownerLink: ownerAppLink,
     }));
 
@@ -801,7 +782,15 @@ function renderHistoryLink(
     );
   }
 
-  const link = record.historyLink ?? defaultHistoryLink(record.key, locale);
+  if (!record.historyLink) {
+    return (
+      <span style={{ ...secondaryTextStyle, color: theme.textDim }}>
+        {copy(locale, "History link unavailable", "未提供歷史紀錄連結")}
+      </span>
+    );
+  }
+
+  const link = record.historyLink;
   return (
     <a
       href={resolveCrossAppHref(link)}
@@ -1125,6 +1114,31 @@ function emptyStateCopy(
 }
 
 function actionLabel(locale: Locale, action: ResourceActionDescriptor) {
+  const normalizedAction = action.action.toLowerCase();
+  if (
+    normalizedAction === "open_owner_app" ||
+    normalizedAction === "view_owner_app" ||
+    normalizedAction === "open_platform_admin" ||
+    normalizedAction === "manage_feature_flags"
+  ) {
+    return platformAdminLabel(locale);
+  }
+  if (
+    normalizedAction === "refresh" ||
+    normalizedAction === "manual_refresh" ||
+    normalizedAction === "retry" ||
+    normalizedAction === "retry_fetch"
+  ) {
+    return t("common.refresh", locale);
+  }
+  if (
+    normalizedAction === "clear_filters" ||
+    normalizedAction === "reset_filters" ||
+    normalizedAction === "clear_search" ||
+    normalizedAction === "reset_search"
+  ) {
+    return clearFiltersLabel(locale);
+  }
   if (action.action === "search" || action.action === "search_by_key") {
     return searchActionLabel(locale);
   }
@@ -1137,6 +1151,67 @@ function actionLabel(locale: Locale, action: ResourceActionDescriptor) {
   return formatOpsCodeLabel(locale, action.action);
 }
 
+type ResolvedActionTarget = {
+  href: string;
+  link?: CrossAppResourceLink;
+};
+
+function resolveEmptyStateActionTarget(
+  action: ResourceActionDescriptor,
+  filters: FeatureFlagFilters,
+  ownerAppLink: CrossAppResourceLink,
+): ResolvedActionTarget | null {
+  const normalizedAction = action.action.toLowerCase();
+
+  if (
+    normalizedAction === "search" ||
+    normalizedAction === "search_by_key" ||
+    normalizedAction === "filter"
+  ) {
+    return {
+      href: `${buildPageHref(filters)}#feature-flag-search`,
+    };
+  }
+
+  if (
+    normalizedAction === "clear_filters" ||
+    normalizedAction === "reset_filters" ||
+    normalizedAction === "clear_search" ||
+    normalizedAction === "reset_search"
+  ) {
+    return {
+      href: "/feature-flags#feature-flag-search",
+    };
+  }
+
+  if (
+    normalizedAction === "refresh" ||
+    normalizedAction === "manual_refresh" ||
+    normalizedAction === "retry" ||
+    normalizedAction === "retry_fetch"
+  ) {
+    return {
+      href: buildPageHref(filters, {}, { refresh: String(Date.now()) }),
+    };
+  }
+
+  if (
+    normalizedAction === "open_owner_app" ||
+    normalizedAction === "view_owner_app" ||
+    normalizedAction === "open_platform_admin" ||
+    normalizedAction === "manage_feature_flags" ||
+    normalizedAction.includes("owner_app") ||
+    normalizedAction.includes("platform_admin")
+  ) {
+    return {
+      href: resolveCrossAppHref(ownerAppLink),
+      link: ownerAppLink,
+    };
+  }
+
+  return null;
+}
+
 function renderEmptyState(
   locale: Locale,
   state: OpsFeatureFlagEmptyState,
@@ -1146,6 +1221,18 @@ function renderEmptyState(
   const copyBlock = emptyStateCopy(locale, state);
   const resetHref = "/feature-flags";
   const ownerHref = resolveCrossAppHref(ownerAppLink);
+  const nextActionTarget = state.nextAction
+    ? resolveEmptyStateActionTarget(state.nextAction, filters, ownerAppLink)
+    : null;
+  const nextActionHref = nextActionTarget?.href;
+  const showResetButton =
+    state.reason === "filtered_empty" &&
+    nextActionHref !== "/feature-flags#feature-flag-search";
+  const showOwnerAppButton =
+    (state.reason === "fetch_failed" ||
+      state.reason === "not_provisioned" ||
+      state.reason === "permission_denied") &&
+    nextActionHref !== ownerHref;
 
   return (
     <div style={emptyStateStyle}>
@@ -1169,14 +1256,12 @@ function renderEmptyState(
         <div style={emptyMessageStyle}>{copyBlock.body}</div>
       </div>
       <div style={emptyActionsStyle}>
-        {state.reason === "filtered_empty" ? (
+        {showResetButton ? (
           <a href={resetHref} style={buttonStyle("secondary")}>
             {clearFiltersLabel(locale)}
           </a>
         ) : null}
-        {state.reason === "fetch_failed" ||
-        state.reason === "not_provisioned" ||
-        state.reason === "permission_denied" ? (
+        {showOwnerAppButton ? (
           <a
             href={ownerHref}
             style={buttonStyle("primary")}
@@ -1186,12 +1271,25 @@ function renderEmptyState(
           </a>
         ) : null}
         {state.nextAction ? (
-          <span
-            style={buttonStyle("secondary", !state.nextAction.enabled)}
-            title={actionTooltip(locale, state.nextAction)}
-          >
-            {actionLabel(locale, state.nextAction)}
-          </span>
+          nextActionTarget && state.nextAction.enabled ? (
+            <a
+              href={nextActionTarget.href}
+              style={buttonStyle("secondary")}
+              title={actionTooltip(locale, state.nextAction)}
+              {...(nextActionTarget.link
+                ? externalAnchorProps(nextActionTarget.link)
+                : {})}
+            >
+              {actionLabel(locale, state.nextAction)}
+            </a>
+          ) : (
+            <span
+              style={buttonStyle("secondary", !state.nextAction.enabled)}
+              title={actionTooltip(locale, state.nextAction)}
+            >
+              {actionLabel(locale, state.nextAction)}
+            </span>
+          )
         ) : null}
       </div>
       {filters.q || filters.scope !== "all" ? (
@@ -1333,6 +1431,7 @@ export default async function FeatureFlagsPage({
                     )}
                   >
                     <input
+                      id="feature-flag-search"
                       name="q"
                       defaultValue={filters.q}
                       placeholder={copy(
