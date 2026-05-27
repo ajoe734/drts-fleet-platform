@@ -154,15 +154,14 @@ export class PlatformAdminHealthService {
     let expiringCount = 0;
     let expiredCount = 0;
     for (const adapter of adapters) {
-      const credentialStatus = String(adapter.credentialStatus);
-      if (credentialStatus === "expiring") {
+      if (adapter.authStatus === "reauth_required") {
         expiringCount += 1;
         continue;
       }
       if (
-        credentialStatus === "expired" ||
-        credentialStatus === "invalid" ||
-        credentialStatus === "not_configured"
+        adapter.credentialStatus === "expired" ||
+        adapter.credentialStatus === "invalid" ||
+        adapter.credentialStatus === "not_configured"
       ) {
         expiredCount += 1;
       }

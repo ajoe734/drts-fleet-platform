@@ -144,7 +144,8 @@ describe("PlatformAdminHealthService", () => {
       adapters: [
         createAdapter({
           status: "degraded",
-          credentialStatus: "expiring",
+          credentialStatus: "valid",
+          authStatus: "reauth_required",
         }),
       ],
     });
