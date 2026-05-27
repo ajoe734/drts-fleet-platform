@@ -91,7 +91,17 @@ type GovernanceQueueItem = {
   actions: HomeAction[];
 };
 
-type AuditTableRow = AuditLogRecord & Record<string, unknown>;
+type AuditTableRow = {
+  [key: string]: unknown;
+  auditId: string;
+  createdAt: string;
+  module: string;
+  action: string;
+  actorId: string | null;
+  actorType: AuditLogRecord["actorType"];
+  tenantId: string | null;
+  requestId: string;
+};
 type EmptyStatePresentation = {
   title: string;
   summary: string;
@@ -727,7 +737,6 @@ function renderActionButtons(
               variant={index === 0 ? "primary" : "secondary"}
               disabled={!action.enabled}
               onClick={() => openAction(router, action)}
-              title={formatActionMeta(locale, action)}
             >
               {action.label}
             </CanvasBtn>
@@ -774,7 +783,6 @@ function renderEmptyState(
               variant="secondary"
               disabled={!emptyState.nextAction.enabled}
               onClick={() => onAction(emptyState.nextAction!)}
-              title={formatActionMeta(locale, emptyState.nextAction)}
             >
               {emptyState.nextAction.label}
             </CanvasBtn>
@@ -1734,7 +1742,20 @@ export default function HomePage() {
     return Array.from(groups.entries());
   }, [filteredModules]);
 
-  const recentAudit = sources.audit.data.slice(0, 5);
+  const recentAudit = useMemo<AuditTableRow[]>(
+    () =>
+      sources.audit.data.slice(0, 5).map((record) => ({
+        auditId: record.auditId,
+        createdAt: record.createdAt,
+        module: record.moduleName,
+        action: record.actionName,
+        actorId: record.actorId,
+        actorType: record.actorType,
+        tenantId: record.tenantId,
+        requestId: record.requestId,
+      })),
+    [sources.audit.data],
+  );
   const workspaceLinks = useMemo(() => {
     const links = new Map<string, HomeAction>();
 
