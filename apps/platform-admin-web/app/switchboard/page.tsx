@@ -72,6 +72,11 @@ type PlacardFormState = {
   templateName: string;
   artifactFileId: string;
 };
+type ActionContext = {
+  version?: PublicInfoWithRuntime;
+  placard?: PlacardWithRuntime;
+  link?: CrossAppResourceLink;
+};
 
 const EMPTY_PUBLIC_INFO_FORM = {
   title: "",
@@ -329,6 +334,24 @@ function disabledActionStyle(disabled: boolean): CSSProperties | undefined {
   };
 }
 
+function actionTone(descriptor: ResourceActionDescriptor) {
+  if (!descriptor.enabled) {
+    return "secondary" as const;
+  }
+  if (descriptor.riskLevel === "high") {
+    return "primary" as const;
+  }
+  return "secondary" as const;
+}
+
+function openCrossAppLink(link: CrossAppResourceLink) {
+  if (link.openMode === "new_tab") {
+    window.open(link.route, "_blank", "noopener,noreferrer");
+    return;
+  }
+  window.location.href = link.route;
+}
+
 function SectionEmptyState({
   locale,
   emptyState,
@@ -498,6 +521,7 @@ export default function SwitchboardPage() {
           refresh: "Refresh now",
         },
         sections: {
+          sitemap: "Switchboard IA",
           versions: "Public info versions",
           placards: "Placard artifacts",
           livePreview: "Current issued placard",
@@ -540,6 +564,18 @@ export default function SwitchboardPage() {
           historyEmpty: "No publication history yet.",
           publishedBy: "Published by",
           updatedAt: "Updated",
+          readOnly: "Read-only",
+          noActions: "Visible but no row actions are currently available.",
+          resourceLinks: "Resource links",
+          sitemapEntry: "Entry",
+          sitemapExit: "Exit",
+          sitemapPath: "Path",
+          sitemapTask: "Primary task",
+          auditTrail: "View audit trail",
+          placardSourceGroup: "Source public info",
+          sourceState: "Source state",
+          downloadState: "Download validity",
+          opensNewTab: "Opens in new tab",
         },
         quickLinks: {
           ops: "Open ops-console distribution board",
@@ -572,6 +608,7 @@ export default function SwitchboardPage() {
           refresh: "立即刷新",
         },
         sections: {
+          sitemap: "Switchboard IA",
           versions: "Public info versions",
           placards: "Placard artifacts",
           livePreview: "目前發行牌貼",
@@ -613,6 +650,18 @@ export default function SwitchboardPage() {
           historyEmpty: "目前還沒有可顯示的發布歷史。",
           publishedBy: "發布人",
           updatedAt: "更新時間",
+          readOnly: "唯讀",
+          noActions: "可見但目前沒有可執行的列級動作。",
+          resourceLinks: "資源連結",
+          sitemapEntry: "入口",
+          sitemapExit: "出口",
+          sitemapPath: "路徑",
+          sitemapTask: "主要任務",
+          auditTrail: "查看稽核軌跡",
+          placardSourceGroup: "來源公開資訊",
+          sourceState: "來源狀態",
+          downloadState: "下載有效期",
+          opensNewTab: "新分頁開啟",
         },
         quickLinks: {
           ops: "開啟 ops-console 發放看板",
@@ -868,7 +917,7 @@ export default function SwitchboardPage() {
       return payloadLinks;
     }
 
-    return [
+    const fallbackLinks: CrossAppResourceLink[] = [
       {
         targetApp: "ops-console",
         route: "/dispatch?switchboard=switchboard",
@@ -894,6 +943,7 @@ export default function SwitchboardPage() {
         label: copy.quickLinks.notices,
       },
     ];
+    return fallbackLinks;
   }, [
     copy.quickLinks.audit,
     copy.quickLinks.notices,
@@ -931,6 +981,72 @@ export default function SwitchboardPage() {
       right.at.localeCompare(left.at),
     );
   }, [placards, publicInfo]);
+
+  const placardsByPublicInfo = useMemo(() => {
+    const grouped = new Map<string, PlacardWithRuntime[]>();
+    for (const placard of placards) {
+      const key = placard.publicInfoVersionId;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.push(placard);
+      } else {
+        grouped.set(key, [placard]);
+      }
+    }
+    return Array.from(grouped.entries()).map(
+      ([publicInfoVersionId, items]) => ({
+        publicInfoVersionId,
+        sourceVersion: publicInfoById[publicInfoVersionId] ?? null,
+        items,
+      }),
+    );
+  }, [placards, publicInfoById]);
+
+  function getVersionLinks(
+    version: PublicInfoWithRuntime,
+  ): CrossAppResourceLink[] {
+    if (version.crossAppLinks && version.crossAppLinks.length > 0) {
+      return version.crossAppLinks;
+    }
+
+    return [
+      {
+        targetApp: "platform-admin",
+        route: `/audit?resourceType=public_info&resourceId=${encodeURIComponent(version.versionId)}`,
+        resourceType: "public_info_version",
+        resourceId: version.versionId,
+        openMode: "same_tab",
+        label: copy.labels.auditTrail,
+      },
+    ];
+  }
+
+  function getPlacardLinks(
+    placard: PlacardWithRuntime,
+  ): CrossAppResourceLink[] {
+    if (placard.crossAppLinks && placard.crossAppLinks.length > 0) {
+      return placard.crossAppLinks;
+    }
+
+    return [
+      {
+        targetApp: "ops-console",
+        route: `/dispatch?placardVersionId=${encodeURIComponent(placard.placardVersionId)}`,
+        resourceType: "placard_distribution",
+        resourceId: placard.placardVersionId,
+        openMode: "new_tab",
+        label: copy.quickLinks.ops,
+      },
+      {
+        targetApp: "platform-admin",
+        route: `/audit?resourceType=placard_version&resourceId=${encodeURIComponent(placard.placardVersionId)}`,
+        resourceType: "placard_version",
+        resourceId: placard.placardVersionId,
+        openMode: "same_tab",
+        label: copy.labels.auditTrail,
+      },
+    ];
+  }
 
   async function confirmDescriptorAction(
     descriptor: ResourceActionDescriptor,
@@ -1121,7 +1237,10 @@ export default function SwitchboardPage() {
     }
   }
 
-  async function handleActionDescriptor(descriptor: ResourceActionDescriptor) {
+  async function handleActionDescriptor(
+    descriptor: ResourceActionDescriptor,
+    context?: ActionContext,
+  ) {
     if (
       descriptor.action === "create" ||
       descriptor.action === "create_version"
@@ -1135,7 +1254,10 @@ export default function SwitchboardPage() {
       descriptor.action === "publish" ||
       descriptor.action === "publish_public_info"
     ) {
-      const draft = draftVersions[0];
+      const draft =
+        context?.version && context.version.status === "draft"
+          ? context.version
+          : draftVersions[0];
       if (draft) {
         await handlePublishVersion(draft.versionId, descriptor);
       } else {
@@ -1153,7 +1275,13 @@ export default function SwitchboardPage() {
       return;
     }
     if (descriptor.action === "download") {
-      if (livePlacardVersion?.artifactDownloadUrl) {
+      if (context?.placard?.artifactDownloadUrl) {
+        window.open(
+          context.placard.artifactDownloadUrl,
+          "_blank",
+          "noopener,noreferrer",
+        );
+      } else if (livePlacardVersion?.artifactDownloadUrl) {
         window.open(
           livePlacardVersion.artifactDownloadUrl,
           "_blank",
@@ -1163,11 +1291,23 @@ export default function SwitchboardPage() {
       return;
     }
     if (descriptor.action === "view_audit") {
-      window.location.href = "/audit?resourceType=public_info";
+      if (context?.link) {
+        openCrossAppLink(context.link);
+      } else if (context?.placard) {
+        window.location.href = `/audit?resourceType=placard_version&resourceId=${encodeURIComponent(context.placard.placardVersionId)}`;
+      } else if (context?.version) {
+        window.location.href = `/audit?resourceType=public_info&resourceId=${encodeURIComponent(context.version.versionId)}`;
+      } else {
+        window.location.href = "/audit?resourceType=public_info";
+      }
       return;
     }
     if (descriptor.action === "refresh") {
       await loadData();
+      return;
+    }
+    if (descriptor.action === "open_link" && context?.link) {
+      openCrossAppLink(context.link);
     }
   }
 
@@ -1299,6 +1439,36 @@ export default function SwitchboardPage() {
           <div style={sectionEyebrowStyle}>{copy.historySignal}</div>
           <div style={supportCopyStyle}>{copy.historyNote}</div>
         </div>
+      </div>
+
+      <div style={mergeStyles(surfaceCardStyle, sitemapGridStyle)}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={sectionTitleStyle}>{copy.sections.sitemap}</div>
+          <div style={supportCopyStyle}>
+            {isEnglish
+              ? "Platform & Commerce / Public Info & Placards"
+              : "平台與商務 / Public Info & Placards"}
+          </div>
+        </div>
+        <DetailItem label={copy.labels.sitemapPath} value="/switchboard" mono />
+        <DetailItem
+          label={copy.labels.sitemapEntry}
+          value={isEnglish ? "Sidebar navigation" : "側邊欄導覽"}
+        />
+        <DetailItem
+          label={copy.labels.sitemapExit}
+          value={
+            isEnglish ? "Placard PDF artifact download" : "牌貼 PDF 成品下載"
+          }
+        />
+        <DetailItem
+          label={copy.labels.sitemapTask}
+          value={
+            isEnglish
+              ? "Maintain disclosure versions and publish placards per scope."
+              : "維護法定揭露版本，並依 scope 產生與發布牌貼。"
+          }
+        />
       </div>
 
       <div style={toolbarRowStyle}>
@@ -1678,10 +1848,16 @@ export default function SwitchboardPage() {
                         {version.fareText ?? copy.labels.retention}
                       </div>
 
+                      <AvailableActionsList
+                        locale={locale}
+                        descriptors={getVersionActions(version)}
+                        emptyLabel={copy.labels.noActions}
+                      />
+
                       <div style={resourceActionsStyle}>
                         {getVersionActions(version).length === 0 ? (
                           <span style={supportCopyStyle}>
-                            {copy.labels.retention}
+                            {copy.labels.readOnly}
                           </span>
                         ) : (
                           getVersionActions(version).map((descriptor) => {
@@ -1708,10 +1884,9 @@ export default function SwitchboardPage() {
                                 )}
                                 onClick={() => {
                                   if (descriptor.action === "publish") {
-                                    void handlePublishVersion(
-                                      version.versionId,
-                                      descriptor,
-                                    );
+                                    void handleActionDescriptor(descriptor, {
+                                      version,
+                                    });
                                   } else if (
                                     descriptor.action === "delete" ||
                                     descriptor.action === "delete_draft"
@@ -1720,6 +1895,10 @@ export default function SwitchboardPage() {
                                       version.versionId,
                                       descriptor,
                                     );
+                                  } else {
+                                    void handleActionDescriptor(descriptor, {
+                                      version,
+                                    });
                                   }
                                 }}
                               >
@@ -1733,6 +1912,8 @@ export default function SwitchboardPage() {
                           })
                         )}
                       </div>
+
+                      <ResourceLinkList links={getVersionLinks(version)} />
                     </div>
                   ))}
                 </div>
@@ -1821,19 +2002,7 @@ export default function SwitchboardPage() {
 
             <section style={surfaceCardStyle}>
               <div style={sectionTitleStyle}>{copy.sections.links}</div>
-              <div style={stackListStyle}>
-                {deepLinks.map((link) => (
-                  <a
-                    key={`${link.targetApp}-${link.route}`}
-                    href={link.route}
-                    target={link.openMode === "new_tab" ? "_blank" : undefined}
-                    rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
-                    style={linkStyle}
-                  >
-                    {link.label}
-                  </a>
-                ))}
-              </div>
+              <ResourceLinkList links={deepLinks} />
             </section>
           </div>
         </div>
@@ -1850,133 +2019,216 @@ export default function SwitchboardPage() {
             />
           ) : (
             <div style={stackListStyle}>
-              {placards.map((placard) => {
-                const sourceVersion =
-                  publicInfoById[placard.publicInfoVersionId];
+              {placardsByPublicInfo.map((group) => {
+                const sourceVersion = group.sourceVersion;
                 return (
-                  <div key={placard.placardVersionId} style={resourceCardStyle}>
+                  <div
+                    key={group.publicInfoVersionId}
+                    style={resourceCardStyle}
+                  >
                     <div style={resourceCardHeaderStyle}>
                       <div>
                         <div style={resourceTitleStyle}>
-                          {placard.versionCode}
+                          {copy.labels.placardSourceGroup}:{" "}
+                          {sourceVersion?.title ?? group.publicInfoVersionId}
                         </div>
                         <div style={resourceMetaStyle}>
-                          {placard.placardVersionId}
+                          {group.publicInfoVersionId}
                         </div>
                       </div>
                       <span
-                        style={statusBadgeStyle(placardStatusTone(placard))}
+                        style={statusBadgeStyle(
+                          publicInfoStatusTone(
+                            sourceVersion?.status ?? "draft",
+                          ),
+                        )}
                       >
                         {formatPlatformCodeLabel(
                           locale,
-                          placard.publishedAt ? "published" : "draft",
+                          sourceVersion?.status ?? "draft",
                         )}
                       </span>
                     </div>
 
                     <div style={detailGridStyle}>
                       <DetailItem
-                        label={copy.labels.sourceVersion}
+                        label={copy.labels.sourceState}
                         value={
-                          sourceVersion?.title ?? placard.publicInfoVersionId
+                          sourceVersion
+                            ? formatPlatformCodeLabel(
+                                locale,
+                                sourceVersion.status,
+                              )
+                            : "—"
                         }
                       />
                       <DetailItem
-                        label={copy.labels.scope}
-                        value={formatPlatformCodeLabel(
-                          locale,
-                          placard.scope ??
-                            inferPlacardScope(placard.templateName),
-                        )}
-                      />
-                      <DetailItem
-                        label={copy.labels.template}
-                        value={placard.templateName}
-                      />
-                      <DetailItem
-                        label={copy.labels.artifact}
+                        label={copy.labels.effectiveWindow}
                         value={
-                          placard.artifactFileId ?? copy.labels.pendingArtifact
+                          sourceVersion
+                            ? `${sourceVersion.effectiveFrom ?? "—"} → ${sourceVersion.effectiveTo ?? "—"}`
+                            : "—"
                         }
                       />
-                    </div>
-
-                    <div style={detailGridStyle}>
                       <DetailItem
-                        label="Manifest"
-                        value={shortHash(placard.artifactManifestHash)}
-                        mono
+                        label={copy.labels.publishedBy}
+                        value={sourceVersion?.publishedBy ?? "—"}
                       />
                       <DetailItem
-                        label="Published"
-                        value={formatDateTime(placard.publishedAt ?? "")}
-                      />
-                      <DetailItem
-                        label="Created"
-                        value={formatDateTime(placard.createdAt)}
-                      />
-                      <DetailItem
-                        label="Expires"
-                        value={formatDateTime(placard.artifactExpiresAt ?? "")}
+                        label={copy.labels.placardCount}
+                        value={String(group.items.length)}
                       />
                     </div>
 
-                    <div style={resourceActionsStyle}>
-                      {placard.artifactDownloadUrl ? (
-                        <a
-                          href={placard.artifactDownloadUrl}
-                          target="_blank"
-                          rel="noreferrer"
+                    <div style={stackListStyle}>
+                      {group.items.map((placard) => (
+                        <div
+                          key={placard.placardVersionId}
                           style={mergeStyles(
-                            actionButtonStyle({ size: "sm" }),
-                            {
-                              textDecoration: "none",
-                            },
+                            resourceCardStyle,
+                            nestedPlacardCardStyle,
                           )}
                         >
-                          {copy.labels.download}
-                        </a>
-                      ) : (
-                        <span style={supportCopyStyle}>
-                          {copy.labels.placardFlight}
-                        </span>
-                      )}
-                      {getPlacardActions(placard).map((descriptor) => (
-                        <button
-                          key={`${placard.placardVersionId}-${descriptor.action}`}
-                          type="button"
-                          title={descriptor.disabledReasonCode}
-                          disabled={
-                            !descriptor.enabled ||
-                            publishingPlacardId === placard.placardVersionId
-                          }
-                          style={mergeStyles(
-                            actionButtonStyle({
-                              tone:
-                                descriptor.action === "publish"
-                                  ? "primary"
-                                  : "secondary",
-                              size: "sm",
-                            }),
-                            disabledActionStyle(
-                              !descriptor.enabled ||
-                                publishingPlacardId ===
-                                  placard.placardVersionId,
-                            ),
-                          )}
-                          onClick={() =>
-                            void handlePublishPlacard(
-                              placard.placardVersionId,
-                              descriptor,
-                            )
-                          }
-                        >
-                          {actionLabel(
-                            descriptor.action,
-                            locale,
-                            descriptor.action,
-                          )}
-                        </button>
+                          <div style={resourceCardHeaderStyle}>
+                            <div>
+                              <div style={resourceTitleStyle}>
+                                {placard.versionCode}
+                              </div>
+                              <div style={resourceMetaStyle}>
+                                {placard.placardVersionId}
+                              </div>
+                            </div>
+                            <span
+                              style={statusBadgeStyle(
+                                placardStatusTone(placard),
+                              )}
+                            >
+                              {formatPlatformCodeLabel(
+                                locale,
+                                placard.publishedAt ? "published" : "draft",
+                              )}
+                            </span>
+                          </div>
+
+                          <div style={detailGridStyle}>
+                            <DetailItem
+                              label={copy.labels.scope}
+                              value={formatPlatformCodeLabel(
+                                locale,
+                                placard.scope ??
+                                  inferPlacardScope(placard.templateName),
+                              )}
+                            />
+                            <DetailItem
+                              label={copy.labels.template}
+                              value={placard.templateName}
+                            />
+                            <DetailItem
+                              label={copy.labels.artifact}
+                              value={
+                                placard.artifactFileId ??
+                                copy.labels.pendingArtifact
+                              }
+                            />
+                            <DetailItem
+                              label={copy.labels.downloadState}
+                              value={formatDateTime(
+                                placard.artifactExpiresAt ?? "",
+                              )}
+                            />
+                          </div>
+
+                          <div style={detailGridStyle}>
+                            <DetailItem
+                              label="Manifest"
+                              value={shortHash(placard.artifactManifestHash)}
+                              mono
+                            />
+                            <DetailItem
+                              label="Published"
+                              value={formatDateTime(placard.publishedAt ?? "")}
+                            />
+                            <DetailItem
+                              label="Created"
+                              value={formatDateTime(placard.createdAt)}
+                            />
+                            <DetailItem
+                              label="Updated"
+                              value={formatDateTime(placard.updatedAt)}
+                            />
+                          </div>
+
+                          <AvailableActionsList
+                            locale={locale}
+                            descriptors={getPlacardActions(placard)}
+                            emptyLabel={copy.labels.noActions}
+                          />
+
+                          <div style={resourceActionsStyle}>
+                            {placard.artifactDownloadUrl ? (
+                              <a
+                                href={placard.artifactDownloadUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={mergeStyles(
+                                  actionButtonStyle({ size: "sm" }),
+                                  {
+                                    textDecoration: "none",
+                                  },
+                                )}
+                              >
+                                {copy.labels.download}
+                              </a>
+                            ) : (
+                              <span style={supportCopyStyle}>
+                                {copy.labels.placardFlight}
+                              </span>
+                            )}
+                            {getPlacardActions(placard).map((descriptor) => (
+                              <button
+                                key={`${placard.placardVersionId}-${descriptor.action}`}
+                                type="button"
+                                title={descriptor.disabledReasonCode}
+                                disabled={
+                                  !descriptor.enabled ||
+                                  publishingPlacardId ===
+                                    placard.placardVersionId
+                                }
+                                style={mergeStyles(
+                                  actionButtonStyle({
+                                    tone: actionTone(descriptor),
+                                    size: "sm",
+                                  }),
+                                  disabledActionStyle(
+                                    !descriptor.enabled ||
+                                      publishingPlacardId ===
+                                        placard.placardVersionId,
+                                  ),
+                                )}
+                                onClick={() => {
+                                  if (descriptor.action === "publish") {
+                                    void handlePublishPlacard(
+                                      placard.placardVersionId,
+                                      descriptor,
+                                    );
+                                  } else {
+                                    void handleActionDescriptor(descriptor, {
+                                      placard,
+                                    });
+                                  }
+                                }}
+                              >
+                                {actionLabel(
+                                  descriptor.action,
+                                  locale,
+                                  descriptor.action,
+                                )}
+                              </button>
+                            ))}
+                          </div>
+
+                          <ResourceLinkList links={getPlacardLinks(placard)} />
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -2097,6 +2349,66 @@ function DetailItem({
   );
 }
 
+function AvailableActionsList({
+  locale,
+  descriptors,
+  emptyLabel,
+}: {
+  locale: string;
+  descriptors: ResourceActionDescriptor[];
+  emptyLabel: string;
+}) {
+  if (descriptors.length === 0) {
+    return <div style={supportCopyStyle}>{emptyLabel}</div>;
+  }
+
+  return (
+    <div style={actionChipRowStyle}>
+      {descriptors.map((descriptor) => (
+        <span
+          key={`${descriptor.action}-${descriptor.riskLevel}-${descriptor.enabled}`}
+          style={mergeStyles(
+            actionChipStyle,
+            descriptor.enabled
+              ? descriptor.riskLevel === "high"
+                ? enabledHighActionChipStyle
+                : enabledActionChipStyle
+              : disabledActionChipStyle,
+          )}
+          title={descriptor.disabledReasonCode}
+        >
+          {actionLabel(descriptor.action, locale, descriptor.action)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ResourceLinkList({ links }: { links: CrossAppResourceLink[] }) {
+  return (
+    <div style={stackListStyle}>
+      {links.map((link) => (
+        <div
+          key={`${link.targetApp}-${link.route}`}
+          style={resourceLinkRowStyle}
+        >
+          <a
+            href={link.route}
+            target={link.openMode === "new_tab" ? "_blank" : undefined}
+            rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
+            style={linkStyle}
+          >
+            {link.label}
+          </a>
+          <span style={resourceLinkMetaStyle}>
+            {link.targetApp} · {link.resourceType}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const kpiGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
@@ -2119,6 +2431,13 @@ const spotlightStatStyle: CSSProperties = {
   borderRadius: 16,
   background: "#ffffff",
   border: "1px solid rgba(148,163,184,0.16)",
+};
+
+const sitemapGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 14,
+  gridTemplateColumns: "1.1fr repeat(4, minmax(0, 1fr))",
+  alignItems: "start",
 };
 
 const toolbarRowStyle: CSSProperties = {
@@ -2189,6 +2508,35 @@ const supportCopyStyle: CSSProperties = {
   lineHeight: 1.6,
 };
 
+const actionChipRowStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const actionChipStyle: CSSProperties = {
+  borderRadius: 999,
+  padding: "4px 10px",
+  fontSize: 12,
+  fontWeight: 700,
+  letterSpacing: "0.01em",
+};
+
+const enabledActionChipStyle: CSSProperties = {
+  color: "#1e3a8a",
+  background: "rgba(37, 99, 235, 0.1)",
+};
+
+const enabledHighActionChipStyle: CSSProperties = {
+  color: "#991b1b",
+  background: "rgba(248, 113, 113, 0.12)",
+};
+
+const disabledActionChipStyle: CSSProperties = {
+  color: "#64748b",
+  background: "rgba(148, 163, 184, 0.14)",
+};
+
 const stackListStyle: CSSProperties = {
   display: "grid",
   gap: 12,
@@ -2202,6 +2550,11 @@ const resourceCardStyle: CSSProperties = {
   border: "1px solid rgba(148,163,184,0.18)",
   background: "#ffffff",
   boxShadow: "0 16px 32px rgba(15, 23, 42, 0.04)",
+};
+
+const nestedPlacardCardStyle: CSSProperties = {
+  background: "rgba(248, 250, 252, 0.92)",
+  boxShadow: "none",
 };
 
 const resourceCardHeaderStyle: CSSProperties = {
@@ -2239,6 +2592,19 @@ const resourceActionsStyle: CSSProperties = {
   gap: 8,
   flexWrap: "wrap",
   alignItems: "center",
+};
+
+const resourceLinkRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const resourceLinkMetaStyle: CSSProperties = {
+  ...monoTextStyle,
+  color: "#94a3b8",
+  fontSize: 11,
 };
 
 const placardPreviewStyle: CSSProperties = {
