@@ -31,7 +31,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -113,12 +112,6 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const kpiGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-} satisfies CSSProperties;
-
 const pillRowStyle = {
   display: "flex",
   flexWrap: "wrap",
@@ -133,6 +126,12 @@ const actionRowStyle = {
   justifyContent: "flex-end",
 } satisfies CSSProperties;
 
+const actionCellStyle = {
+  display: "grid",
+  gap: 6,
+  justifyItems: "end",
+} satisfies CSSProperties;
+
 const cardHeaderMetaStyle = {
   display: "flex",
   justifyContent: "space-between",
@@ -141,16 +140,32 @@ const cardHeaderMetaStyle = {
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
-const metaGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+const summaryBarStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
   gap: 12,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const summaryMetaStyle = {
+  display: "grid",
+  gap: 8,
+  alignContent: "start",
 } satisfies CSSProperties;
 
 const inlineMetaStyle = {
   fontSize: 11.5,
   color: theme.textMuted,
   lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const actionHintStyle = {
+  maxWidth: 240,
+  textAlign: "right",
+  fontSize: 11,
+  lineHeight: 1.4,
+  color: theme.textDim,
 } satisfies CSSProperties;
 
 const inputStyle = {
@@ -340,6 +355,37 @@ function actionLabel(
     return locale === "en" ? value.en : value.zh;
   }
   return fallback ?? action;
+}
+
+function reasonLabel(locale: Locale, reasonCode?: string): string {
+  if (!reasonCode) {
+    return locale === "en" ? "Unavailable right now." : "目前不可執行。";
+  }
+
+  const normalized = reasonCode.trim().toLowerCase();
+  const labels: Record<string, { en: string; zh: string }> = {
+    already_suspended: {
+      en: "Already suspended.",
+      zh: "此帳號已停用。",
+    },
+    invite_pending: {
+      en: "Invitation is still pending.",
+      zh: "邀請仍在等待接受。",
+    },
+    last_superadmin: {
+      en: "The last superadmin cannot be changed here.",
+      zh: "最後一位超級管理員不可在此調整。",
+    },
+  };
+
+  if (labels[normalized]) {
+    return locale === "en" ? labels[normalized].en : labels[normalized].zh;
+  }
+
+  const humanized = normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+  return locale === "en" ? `${humanized}.` : `${humanized}。`;
 }
 
 function classifyErrorReason(message: string): EmptyReason {
@@ -541,16 +587,24 @@ function UsersActionButton({
   const tone = actionTone(descriptor);
 
   return (
-    <CanvasBtn
-      theme={theme}
-      size="xs"
-      variant={tone.variant}
-      danger={tone.danger}
-      disabled={!descriptor.enabled}
-      {...(onClick ? { onClick } : {})}
+    <span
+      title={
+        !descriptor.enabled
+          ? reasonLabel(locale, descriptor.disabledReasonCode)
+          : undefined
+      }
     >
-      {actionLabel(locale, descriptor.action)}
-    </CanvasBtn>
+      <CanvasBtn
+        theme={theme}
+        size="xs"
+        variant={tone.variant}
+        danger={tone.danger}
+        disabled={!descriptor.enabled}
+        {...(onClick ? { onClick } : {})}
+      >
+        {actionLabel(locale, descriptor.action)}
+      </CanvasBtn>
+    </span>
   );
 }
 
@@ -1020,7 +1074,6 @@ export default function UsersPage() {
     ) ?? defaultPageActions()[0];
 
   const totalUsers = users.length;
-  const activeUsers = users.filter((user) => user.status === "active").length;
   const invitedUsers = users.filter((user) => user.status === "invited").length;
   const suspendedUsers = users.filter(
     (user) => user.status === "suspended",
@@ -1344,21 +1397,39 @@ export default function UsersPage() {
         w: 260,
         align: "right",
         r: (row) => (
-          <div style={actionRowStyle}>
-            {row.availableActions.length === 0 ? (
-              <CanvasPill theme={theme} tone="neutral">
-                {locale === "en" ? "Read only" : "唯讀"}
-              </CanvasPill>
-            ) : (
-              row.availableActions.map((action: ResourceActionDescriptor) => (
-                <UsersActionButton
-                  key={`${row.userId}-${action.action}`}
-                  locale={locale}
-                  descriptor={action}
-                  onClick={() => openRowAction(row, action)}
-                />
-              ))
-            )}
+          <div style={actionCellStyle}>
+            <div style={actionRowStyle}>
+              {row.availableActions.length === 0 ? (
+                <CanvasPill theme={theme} tone="neutral">
+                  {locale === "en" ? "Read only" : "唯讀"}
+                </CanvasPill>
+              ) : (
+                row.availableActions.map((action: ResourceActionDescriptor) => (
+                  <UsersActionButton
+                    key={`${row.userId}-${action.action}`}
+                    locale={locale}
+                    descriptor={action}
+                    onClick={() => openRowAction(row, action)}
+                  />
+                ))
+              )}
+            </div>
+            {row.availableActions.some(
+              (action: ResourceActionDescriptor) => !action.enabled,
+            ) ? (
+              <div style={actionHintStyle}>
+                {row.availableActions
+                  .filter((action: ResourceActionDescriptor) => !action.enabled)
+                  .map(
+                    (action: ResourceActionDescriptor) =>
+                      `${actionLabel(locale, action.action)}: ${reasonLabel(
+                        locale,
+                        action.disabledReasonCode,
+                      )}`,
+                  )
+                  .join(" ")}
+              </div>
+            ) : null}
           </div>
         ),
       },
@@ -1445,71 +1516,6 @@ export default function UsersPage() {
             />
           ) : null}
 
-          <div style={kpiGridStyle}>
-            <CanvasKPI
-              theme={theme}
-              label={locale === "en" ? "Platform users" : "平台人員"}
-              value={totalUsers}
-              sub={
-                locale === "en"
-                  ? "Must-show roster fields per §5.7"
-                  : "依 §5.7 顯示 roster 必備欄位"
-              }
-            />
-            <CanvasKPI
-              theme={theme}
-              label={locale === "en" ? "Active" : "啟用"}
-              value={activeUsers}
-              delta={
-                locale === "en"
-                  ? `${invitedUsers} invited`
-                  : `${invitedUsers} 位邀請中`
-              }
-              deltaTone={invitedUsers > 0 ? "neutral" : "up"}
-              sub={
-                locale === "en"
-                  ? "Pending invitations remain visible"
-                  : "邀請中的帳號仍需可見"
-              }
-            />
-            <CanvasKPI
-              theme={theme}
-              label={locale === "en" ? "Suspended" : "停用"}
-              value={suspendedUsers}
-              delta={
-                locale === "en"
-                  ? `${readOnlyUsers} read-only`
-                  : `${readOnlyUsers} 筆唯讀`
-              }
-              deltaTone={suspendedUsers > 0 ? "down" : "up"}
-              sub={
-                locale === "en"
-                  ? "High-risk actions require a reason"
-                  : "高風險操作需填寫原因"
-              }
-            />
-            <CanvasKPI
-              theme={theme}
-              label={locale === "en" ? "Refresh tier" : "刷新層級"}
-              value={REFRESH_TIER_LABEL}
-              delta={
-                locale === "en"
-                  ? refreshMeta.dataFreshness
-                  : formatPlatformCodeLabel(locale, refreshMeta.dataFreshness)
-              }
-              deltaTone={refreshTone === "danger" ? "down" : "neutral"}
-              sub={
-                latestUpdatedAt
-                  ? locale === "en"
-                    ? `Latest update ${formatDateTime(latestUpdatedAt)}`
-                    : `最新更新 ${formatDateTime(latestUpdatedAt)}`
-                  : locale === "en"
-                    ? `Generated ${formatDateTime(refreshMeta.generatedAt)}`
-                    : `快照產生於 ${formatDateTime(refreshMeta.generatedAt)}`
-              }
-            />
-          </div>
-
           <CanvasCard
             theme={theme}
             title={locale === "en" ? "Platform users" : "平台人員"}
@@ -1520,95 +1526,70 @@ export default function UsersPage() {
             }
           >
             <div style={cardBodyStackStyle}>
-              <div style={metaGridStyle}>
-                <CanvasCard
-                  theme={theme}
-                  title={locale === "en" ? "State visibility" : "狀態可見性"}
-                  subtitle={
-                    locale === "en"
-                      ? "Pending invitation and suspended users stay visible."
-                      : "邀請中與停用狀態都必須保留可見。"
-                  }
-                >
-                  <div style={cardBodyStackStyle}>
-                    <div style={pillRowStyle}>
-                      <CanvasPill theme={theme} tone="success" dot>
-                        {locale === "en" ? "Active" : "啟用"}
-                      </CanvasPill>
-                      <CanvasPill theme={theme} tone="warn" dot>
-                        {locale === "en" ? "Pending invitation" : "邀請中"}
-                      </CanvasPill>
-                      <CanvasPill theme={theme} tone="danger" dot>
-                        {locale === "en" ? "Suspended" : "停用"}
-                      </CanvasPill>
-                    </div>
-                    <div style={hintTextStyle}>
+              <div style={summaryBarStyle}>
+                <div style={summaryMetaStyle}>
+                  <div style={pillRowStyle}>
+                    <CanvasPill theme={theme} tone="accent">
+                      {REFRESH_TIER_LABEL} · 30s
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone={refreshTone}>
+                      {formatPlatformCodeLabel(
+                        locale,
+                        refreshMeta.dataFreshness,
+                      )}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="warn">
                       {locale === "en"
-                        ? "Refresh follows packet tier T4 (30s). High-risk actions collect a reason in the confirmation modal; the current write contract does not yet persist that reason."
-                        : "刷新依 packet 的 T4（30 秒）執行。高風險操作會在確認 modal 蒐集原因，但目前寫入 contract 尚未提供持久化原因欄位。"}
-                    </div>
+                        ? `${invitedUsers} invited`
+                        : `${invitedUsers} 位邀請中`}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="danger">
+                      {locale === "en"
+                        ? `${suspendedUsers} suspended`
+                        : `${suspendedUsers} 位停用`}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {locale === "en"
+                        ? `${readOnlyUsers} read-only`
+                        : `${readOnlyUsers} 筆唯讀`}
+                    </CanvasPill>
                   </div>
-                </CanvasCard>
-
-                <CanvasCard
-                  theme={theme}
-                  title={locale === "en" ? "Operational context" : "操作脈絡"}
-                  subtitle={
-                    locale === "en"
-                      ? "Refresh, audit, and cross-app deep links."
-                      : "刷新、稽核與跨應用 deep link。"
-                  }
-                >
-                  <div style={cardBodyStackStyle}>
-                    <CanvasDL
-                      theme={theme}
-                      cols={2}
-                      items={[
-                        {
-                          k: locale === "en" ? "Refresh tier" : "刷新層級",
-                          v: `${REFRESH_TIER_LABEL} · 30s`,
-                        },
-                        {
-                          k: locale === "en" ? "Snapshot" : "快照",
-                          v: formatDateTime(refreshMeta.generatedAt),
-                          mono: true,
-                        },
-                        {
-                          k: locale === "en" ? "Freshness" : "新鮮度",
-                          v: formatPlatformCodeLabel(
-                            locale,
-                            refreshMeta.dataFreshness,
-                          ),
-                        },
-                        {
-                          k: locale === "en" ? "Source" : "來源",
-                          v: refreshMeta.source,
-                          mono: true,
-                        },
-                      ]}
-                    />
-                    <div style={cardHeaderMetaStyle}>
-                      <div style={pillRowStyle}>
-                        {deepLinks.map((link) => (
-                          <CanvasBtn
-                            key={`inline-${link.targetApp}-${link.route}`}
-                            theme={theme}
-                            variant="ghost"
-                            size="xs"
-                            onClick={() => openCrossAppLink(link)}
-                          >
-                            {link.label}
-                          </CanvasBtn>
-                        ))}
-                      </div>
-                      <UsersActionButton
-                        locale={locale}
-                        descriptor={refreshAction}
-                        onClick={() => void loadUsers()}
-                      />
-                    </div>
+                  <div style={inlineMetaStyle}>
+                    {locale === "en"
+                      ? `Snapshot ${formatDateTime(refreshMeta.generatedAt)} · source ${refreshMeta.source} · ${totalUsers} roster records`
+                      : `快照 ${formatDateTime(refreshMeta.generatedAt)} · 來源 ${refreshMeta.source} · 共 ${totalUsers} 筆名單`}
+                    {latestUpdatedAt
+                      ? locale === "en"
+                        ? ` · latest update ${formatDateTime(latestUpdatedAt)}`
+                        : ` · 最新更新 ${formatDateTime(latestUpdatedAt)}`
+                      : ""}
                   </div>
-                </CanvasCard>
+                  <div style={hintTextStyle}>
+                    {locale === "en"
+                      ? "Pending invitations and suspended users remain visible. High-risk actions collect a required reason before mutation."
+                      : "邀請中與停用帳號都會保留可見；高風險操作在寫入前必須先填原因。"}
+                  </div>
+                </div>
+                <div style={cardHeaderMetaStyle}>
+                  <div style={pillRowStyle}>
+                    {deepLinks.map((link) => (
+                      <CanvasBtn
+                        key={`inline-${link.targetApp}-${link.route}`}
+                        theme={theme}
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => openCrossAppLink(link)}
+                      >
+                        {`${link.label} · ${locale === "en" ? "new tab" : "新分頁"}`}
+                      </CanvasBtn>
+                    ))}
+                  </div>
+                  <UsersActionButton
+                    locale={locale}
+                    descriptor={refreshAction}
+                    onClick={() => void loadUsers()}
+                  />
+                </div>
               </div>
 
               {loading ? (
