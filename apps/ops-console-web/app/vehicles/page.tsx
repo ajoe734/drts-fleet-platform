@@ -12,6 +12,7 @@ import type {
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { OpsAutoRefresh } from "@/components/ops-auto-refresh";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
@@ -68,6 +69,13 @@ type VehicleListRow = Record<string, unknown> & {
   currentDriverLabel: string;
   currentDriverDetail: string;
   currentDriverHref?: string;
+  contractLabel: string;
+  contractDetail: string;
+  insuranceLabel: string;
+  insuranceTone: CanvasTone;
+  debrandDueLabel: string;
+  debrandTone: CanvasTone;
+  debrandDetail: string;
   overdueMaintenance: boolean;
   overdueLabel: string;
   overdueTone: CanvasTone;
@@ -220,6 +228,18 @@ function formatDateTime(value: string | null | undefined, locale: Locale) {
   });
 }
 
+function formatDateOnly(value: string | null | undefined, locale: Locale) {
+  if (!value) return copy(locale, "n/a", "未設定");
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "UTC",
+  });
+}
+
 function inferEmptyReasonFromError(message: string): VehiclePageEmptyReason {
   const normalized = message.toLowerCase();
   if (
@@ -337,7 +357,11 @@ function withDisabledReason(
 function buildPageActionDescriptors(
   filteredCount: number,
   filters: VehicleFilters,
-): [ResourceActionDescriptor, ResourceActionDescriptor] {
+): [
+  ResourceActionDescriptor,
+  ResourceActionDescriptor,
+  ResourceActionDescriptor,
+] {
   const canClearFilters =
     filteredCount === 0 ||
     filters.q.length > 0 ||
@@ -350,6 +374,11 @@ function buildPageActionDescriptors(
   return [
     {
       action: "search",
+      enabled: true,
+      riskLevel: "low",
+    },
+    {
+      action: "refresh",
       enabled: true,
       riskLevel: "low",
     },
@@ -393,6 +422,8 @@ function buildVehicleRow(
   const primaryServiceType =
     vehicle.supportedServiceBuckets[0] ?? "standard_taxi";
   const blockedReasons = vehicle.supplyLifecycle.dispatch.blockedReasons;
+  const contractId = vehicle.supplyLifecycle.contract.contractId;
+  const debrandDueAt = vehicle.supplyLifecycle.offboarding.debrandingDueAt;
   const currentDriverLabel =
     currentDriver?.name ?? copy(locale, "Unassigned", "未綁定");
   const currentDriverDetail = activeShift
@@ -473,6 +504,32 @@ function buildVehicleRow(
           currentDriverHref: `/drivers/${encodeURIComponent(activeShift.driverId)}`,
         }
       : {}),
+    contractLabel: contractId ?? copy(locale, "No contract", "無合約"),
+    contractDetail: `${formatOpsCodeLabel(
+      locale,
+      vehicle.supplyLifecycle.contract.lifecycleStatus,
+    )} · ${formatOpsCodeLabel(locale, vehicle.operatingArea)}`,
+    insuranceLabel:
+      vehicle.insuranceStatus === "valid"
+        ? copy(locale, "valid", "有效")
+        : copy(locale, "expired", "已過期"),
+    insuranceTone: vehicle.insuranceStatus === "valid" ? "success" : "danger",
+    debrandDueLabel: formatDateOnly(debrandDueAt, locale),
+    debrandTone:
+      vehicle.supplyLifecycle.offboarding.status !== "none" ||
+      vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"
+        ? "warn"
+        : "neutral",
+    debrandDetail:
+      vehicle.supplyLifecycle.offboarding.status !== "none"
+        ? `${formatOpsCodeLabel(
+            locale,
+            vehicle.supplyLifecycle.offboarding.status,
+          )} · ${formatOpsCodeLabel(
+            locale,
+            vehicle.supplyLifecycle.offboarding.debrandingStatus,
+          )}`
+        : copy(locale, "No offboarding workflow", "目前沒有退場流程"),
     overdueMaintenance,
     overdueLabel: overdueMaintenance
       ? copy(locale, "overdue", "逾期")
@@ -865,7 +922,7 @@ export default async function VehiclesPage({
   const effectiveEmptyState: VehiclePageEmptyReason | undefined =
     emptyReason ?? (filteredRows.length === 0 ? "filtered_empty" : undefined);
 
-  const [refreshAction, resetAction] = buildPageActionDescriptors(
+  const [searchAction, refreshAction, resetAction] = buildPageActionDescriptors(
     filteredRows.length,
     filters,
   );
@@ -916,8 +973,8 @@ export default async function VehiclesPage({
 
   const tableColumns: CanvasTableColumn<VehicleListRow>[] = [
     {
-      h: copy(locale, "Plate / ID", "車牌 / 編號"),
-      w: 180,
+      h: "PLATE",
+      w: 170,
       r: (row) => (
         <div style={{ display: "grid", gap: 4 }}>
           <span style={{ fontWeight: 700 }}>{row.plateNo}</span>
@@ -928,37 +985,45 @@ export default async function VehiclesPage({
               fontFamily: theme.monoFamily,
             }}
           >
-            {row.vehicleId}
+            {row.vehicleId} · {row.lastSeenLabel}
           </span>
         </div>
       ),
     },
     {
-      h: copy(locale, "Type / Scope", "類型 / 服務範圍"),
-      w: 170,
+      h: "MODEL / STATUS",
+      w: 190,
       r: (row) => (
         <div style={{ display: "grid", gap: 4 }}>
-          <Pill theme={theme} tone="info">
-            {row.serviceTypeLabel}
-          </Pill>
-          <span style={{ fontSize: 11.5, color: theme.textMuted }}>
+          <Pill theme={theme} tone={row.statusTone} dot>
             {row.statusLabel}
+          </Pill>
+          <span style={{ fontWeight: 600 }}>{row.serviceTypeLabel}</span>
+          <span style={{ fontSize: 11.5, color: theme.textMuted }}>
+            {row.lastSeenDetail}
           </span>
         </div>
       ),
     },
     {
-      h: copy(locale, "Dispatchable", "可派遣"),
-      w: 140,
+      h: "DISPATCHABLE",
+      w: 132,
       r: (row) => (
-        <Pill theme={theme} tone={row.dispatchableTone} dot>
-          {row.dispatchableLabel}
-        </Pill>
+        <div style={{ display: "grid", gap: 4 }}>
+          <Pill theme={theme} tone={row.dispatchableTone} dot>
+            {row.dispatchableLabel}
+          </Pill>
+          <span style={{ fontSize: 11.5, color: theme.textMuted }}>
+            {row.overdueMaintenance
+              ? copy(locale, "maintenance overdue", "保修逾期")
+              : copy(locale, "maintenance clear", "保修正常")}
+          </span>
+        </div>
       ),
     },
     {
-      h: copy(locale, "Current driver binding", "目前司機綁定"),
-      w: 220,
+      h: "CURRENT DRIVER",
+      w: 188,
       r: (row) => (
         <div style={{ display: "grid", gap: 4 }}>
           {row.currentDriverHref ? (
@@ -982,41 +1047,56 @@ export default async function VehiclesPage({
       ),
     },
     {
-      h: copy(locale, "Maintenance", "保修"),
-      w: 130,
-      r: (row) => (
-        <Pill theme={theme} tone={row.overdueTone} dot>
-          {row.overdueLabel}
-        </Pill>
-      ),
-    },
-    {
-      h: copy(locale, "Lifecycle / gates", "Lifecycle / 閘門"),
-      w: 260,
+      h: "CONTRACT",
+      w: 144,
       r: (row) => (
         <div style={{ display: "grid", gap: 4 }}>
-          <span>{row.healthSummary}</span>
+          <span
+            style={{
+              fontFamily: theme.monoFamily,
+              fontWeight: 600,
+              fontSize: 12,
+            }}
+          >
+            {row.contractLabel}
+          </span>
           <span style={{ fontSize: 11.5, color: theme.textMuted }}>
-            {row.healthDetail}
+            {row.contractDetail}
           </span>
         </div>
       ),
     },
     {
-      h: copy(locale, "Last seen", "最近訊號"),
-      w: 180,
+      h: "INSURANCE",
+      w: 132,
       r: (row) => (
         <div style={{ display: "grid", gap: 4 }}>
-          <span>{row.lastSeenLabel}</span>
+          <Pill theme={theme} tone={row.insuranceTone} dot>
+            {row.insuranceLabel}
+          </Pill>
           <span style={{ fontSize: 11.5, color: theme.textMuted }}>
-            {row.lastSeenDetail}
+            {row.healthSummary}
           </span>
         </div>
       ),
     },
     {
-      h: copy(locale, "Actions", "操作"),
-      w: 260,
+      h: "DEBRAND DUE",
+      w: 160,
+      r: (row) => (
+        <div style={{ display: "grid", gap: 4 }}>
+          <Pill theme={theme} tone={row.debrandTone}>
+            {row.debrandDueLabel}
+          </Pill>
+          <span style={{ fontSize: 11.5, color: theme.textMuted }}>
+            {row.debrandDetail}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: "ACTIONS",
+      w: 220,
       r: (row) => {
         const detailAction = row.actionDescriptors.find(
           (descriptor) => descriptor.action === "open_vehicle_detail",
@@ -1075,13 +1155,14 @@ export default async function VehiclesPage({
 
   return (
     <>
+      <OpsAutoRefresh intervalMs={REFRESH_INTERVAL_MS} />
       <PageHeader
         theme={theme}
         title={copy(locale, "Vehicles", "車輛")}
         subtitle={copy(
           locale,
-          "Vehicle registry rebuilt to T3. Must-show data: dispatchable flag, driver binding, overdue maintenance, last seen. CTAs are driven from per-row availableActions.",
-          "車輛 registry 已對齊 T3。必備資料含可派遣、司機綁定、逾期保修、最近訊號；CTA 依每列 availableActions 驅動。",
+          "dispatchable · contract · insurance · debrand",
+          "dispatchable · 合約 · 保險 · debrand",
         )}
         tabs={[tabAll, tabDispatchable, tabOffboarding]}
         activeTab={activeTab}
@@ -1090,6 +1171,11 @@ export default async function VehiclesPage({
             <Pill theme={theme} tone="info">
               {copy(locale, "T3 · 15s refresh", "T3 · 15 秒刷新")}
             </Pill>
+            <Link href="#vehicle-filters" style={{ textDecoration: "none" }}>
+              <Btn theme={theme} variant="secondary" size="sm" icon="filter">
+                {copy(locale, "Filters", "篩選")}
+              </Btn>
+            </Link>
             {renderActionLink(
               locale,
               refreshAction,
@@ -1167,112 +1253,127 @@ export default async function VehiclesPage({
         </div>
 
         <div style={topGridStyle}>
-          <Card
-            theme={theme}
-            title={copy(locale, "Filters", "篩選條件")}
-            subtitle={copy(
-              locale,
-              "Status, type, dispatchable, overdue, plus low-risk search.",
-              "包含狀態、類型、可派遣、逾期，以及 low-risk 搜尋。",
-            )}
-          >
-            <form action="/vehicles" method="get" style={filterGridStyle}>
-              <Field
-                theme={theme}
-                label={copy(locale, "Search", "搜尋")}
-                hint={copy(
-                  locale,
-                  "Vehicle ID, plate, or driver",
-                  "車輛編號、車牌或司機",
-                )}
-              >
-                <input
-                  name="q"
-                  defaultValue={filters.q}
-                  placeholder={copy(
+          <div id="vehicle-filters">
+            <Card
+              theme={theme}
+              title={copy(locale, "Filters", "篩選條件")}
+              subtitle={copy(
+                locale,
+                "Status, type, dispatchable, overdue, plus low-risk search.",
+                "包含狀態、類型、可派遣、逾期，以及 low-risk 搜尋。",
+              )}
+            >
+              <form action="/vehicles" method="get" style={filterGridStyle}>
+                <Field
+                  theme={theme}
+                  label={copy(locale, "Search", "搜尋")}
+                  hint={copy(
                     locale,
-                    "veh-demo-001 / ABC-1001",
-                    "veh-demo-001 / ABC-1001",
+                    "Vehicle ID, plate, or driver",
+                    "車輛編號、車牌或司機",
                   )}
-                  style={inputStyle}
-                />
-              </Field>
-              <Field theme={theme} label={copy(locale, "Status", "狀態")}>
-                <select
-                  name="status"
-                  defaultValue={filters.status}
-                  style={inputStyle}
                 >
-                  <option value="all">{copy(locale, "All", "全部")}</option>
-                  <option value="dispatchable">
-                    {copy(locale, "Dispatchable", "可派")}
-                  </option>
-                  <option value="offline">
-                    {copy(locale, "Offline", "離線")}
-                  </option>
-                  <option value="offboarding">
-                    {copy(locale, "Offboarding", "退場中")}
-                  </option>
-                  <option value="attention">
-                    {copy(locale, "Attention", "需留意")}
-                  </option>
-                </select>
-              </Field>
-              <Field theme={theme} label={copy(locale, "Type", "類型")}>
-                <select
-                  name="type"
-                  defaultValue={filters.type}
-                  style={inputStyle}
-                >
-                  <option value="all">
-                    {copy(locale, "All types", "全部類型")}
-                  </option>
-                  {typeOptions.map((serviceType) => (
-                    <option key={serviceType} value={serviceType}>
-                      {formatOpsCodeLabel(locale, serviceType)}
+                  <input
+                    name="q"
+                    defaultValue={filters.q}
+                    placeholder={copy(
+                      locale,
+                      "veh-demo-001 / ABC-1001",
+                      "veh-demo-001 / ABC-1001",
+                    )}
+                    style={inputStyle}
+                  />
+                </Field>
+                <Field theme={theme} label={copy(locale, "Status", "狀態")}>
+                  <select
+                    name="status"
+                    defaultValue={filters.status}
+                    style={inputStyle}
+                  >
+                    <option value="all">{copy(locale, "All", "全部")}</option>
+                    <option value="dispatchable">
+                      {copy(locale, "Dispatchable", "可派")}
                     </option>
-                  ))}
-                </select>
-              </Field>
-              <Field
-                theme={theme}
-                label={copy(locale, "Dispatchable", "可派遣")}
-              >
-                <select
-                  name="dispatchable"
-                  defaultValue={filters.dispatchable}
-                  style={inputStyle}
+                    <option value="offline">
+                      {copy(locale, "Offline", "離線")}
+                    </option>
+                    <option value="offboarding">
+                      {copy(locale, "Offboarding", "退場中")}
+                    </option>
+                    <option value="attention">
+                      {copy(locale, "Attention", "需留意")}
+                    </option>
+                  </select>
+                </Field>
+                <Field theme={theme} label={copy(locale, "Type", "類型")}>
+                  <select
+                    name="type"
+                    defaultValue={filters.type}
+                    style={inputStyle}
+                  >
+                    <option value="all">
+                      {copy(locale, "All types", "全部類型")}
+                    </option>
+                    {typeOptions.map((serviceType) => (
+                      <option key={serviceType} value={serviceType}>
+                        {formatOpsCodeLabel(locale, serviceType)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  theme={theme}
+                  label={copy(locale, "Dispatchable", "可派遣")}
                 >
-                  <option value="all">{copy(locale, "All", "全部")}</option>
-                  <option value="yes">{copy(locale, "Yes", "是")}</option>
-                  <option value="no">{copy(locale, "No", "否")}</option>
-                </select>
-              </Field>
-              <Field theme={theme} label={copy(locale, "Overdue", "逾期")}>
-                <select
-                  name="overdue"
-                  defaultValue={filters.overdue}
-                  style={inputStyle}
-                >
-                  <option value="all">{copy(locale, "All", "全部")}</option>
-                  <option value="yes">{copy(locale, "Yes", "是")}</option>
-                  <option value="no">{copy(locale, "No", "否")}</option>
-                </select>
-              </Field>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Btn theme={theme} variant="primary" size="sm" icon="search">
-                  {copy(locale, "Apply", "套用")}
-                </Btn>
-                {resetAction.enabled ? (
-                  <Link href="/vehicles" style={{ textDecoration: "none" }}>
-                    <Btn theme={theme} variant="ghost" size="sm">
-                      {copy(locale, "Reset", "重設")}
+                  <select
+                    name="dispatchable"
+                    defaultValue={filters.dispatchable}
+                    style={inputStyle}
+                  >
+                    <option value="all">{copy(locale, "All", "全部")}</option>
+                    <option value="yes">{copy(locale, "Yes", "是")}</option>
+                    <option value="no">{copy(locale, "No", "否")}</option>
+                  </select>
+                </Field>
+                <Field theme={theme} label={copy(locale, "Overdue", "逾期")}>
+                  <select
+                    name="overdue"
+                    defaultValue={filters.overdue}
+                    style={inputStyle}
+                  >
+                    <option value="all">{copy(locale, "All", "全部")}</option>
+                    <option value="yes">{copy(locale, "Yes", "是")}</option>
+                    <option value="no">{copy(locale, "No", "否")}</option>
+                  </select>
+                </Field>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span
+                    title={getDisabledReasonLabel(
+                      locale,
+                      searchAction.disabledReasonCode,
+                    )}
+                  >
+                    <Btn
+                      theme={theme}
+                      variant="primary"
+                      size="sm"
+                      icon="search"
+                      disabled={!searchAction.enabled}
+                    >
+                      {copy(locale, "Apply", "套用")}
                     </Btn>
-                  </Link>
-                ) : null}
-              </div>
-            </form>
-          </Card>
+                  </span>
+                  {resetAction.enabled ? (
+                    <Link href="/vehicles" style={{ textDecoration: "none" }}>
+                      <Btn theme={theme} variant="ghost" size="sm">
+                        {copy(locale, "Reset", "重設")}
+                      </Btn>
+                    </Link>
+                  ) : null}
+                </div>
+              </form>
+            </Card>
+          </div>
 
           <Card
             theme={theme}
