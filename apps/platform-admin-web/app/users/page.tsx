@@ -18,6 +18,7 @@ import type {
   PlatformAdminUserStatus,
 } from "@drts/contracts";
 import type {
+  ActionReceipt,
   CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
@@ -28,7 +29,9 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
+  CanvasDL,
   CanvasField,
+  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -62,6 +65,14 @@ type PendingAction =
       descriptor: ResourceActionDescriptor;
       user: UserRow;
     };
+
+type ReceiptBannerState = {
+  title: string;
+  body: string;
+  auditId: string | null;
+  actionId: string | null;
+  auditLink: CrossAppResourceLink | null;
+};
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -102,6 +113,12 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
+const kpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+} satisfies CSSProperties;
+
 const pillRowStyle = {
   display: "flex",
   flexWrap: "wrap",
@@ -119,14 +136,15 @@ const actionRowStyle = {
 const cardHeaderMetaStyle = {
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "center",
+  alignItems: "flex-start",
   gap: 12,
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
-const cardMetaStyle = {
+const metaGridStyle = {
   display: "grid",
-  gap: 4,
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: 12,
 } satisfies CSSProperties;
 
 const inlineMetaStyle = {
@@ -178,6 +196,12 @@ const monoMetaStyle = {
   fontSize: 11,
   color: theme.textDim,
   fontFamily: theme.monoFamily,
+} satisfies CSSProperties;
+
+const hintTextStyle = {
+  fontSize: 12,
+  color: theme.textMuted,
+  lineHeight: 1.45,
 } satisfies CSSProperties;
 
 function buildPlatformNav(locale: Locale): CanvasShellNavItem[] {
@@ -524,7 +548,6 @@ function UsersActionButton({
       danger={tone.danger}
       disabled={!descriptor.enabled}
       {...(onClick ? { onClick } : {})}
-      style={!descriptor.enabled ? { opacity: 0.48 } : undefined}
     >
       {actionLabel(locale, descriptor.action)}
     </CanvasBtn>
@@ -543,6 +566,42 @@ function EmptyStatePanel({
   onNextAction?: () => void;
 }) {
   const copy = emptyReasonCopy(reason, locale);
+  const toneLabel =
+    copy.tone === "danger"
+      ? locale === "en"
+        ? "Needs recovery"
+        : "需先排除錯誤"
+      : copy.tone === "warn"
+        ? locale === "en"
+          ? "Attention"
+          : "需注意"
+        : copy.tone === "info"
+          ? locale === "en"
+            ? "Provisioning"
+            : "待佈建"
+          : locale === "en"
+            ? "No results"
+            : "目前為空";
+  const guidance =
+    reason === "not_provisioned"
+      ? locale === "en"
+        ? "Next: complete bootstrap, then re-open this roster."
+        : "下一步：先完成 bootstrap，再重新開啟此名單。"
+      : reason === "permission_denied"
+        ? locale === "en"
+          ? "Next: request pa_super_admin scope rather than retrying blindly."
+          : "下一步：先申請 pa_super_admin 範圍，不要只重試。"
+        : reason === "fetch_failed" || reason === "external_unavailable"
+          ? locale === "en"
+            ? "Next: recover the dependency or refresh after runtime health returns."
+            : "下一步：先恢復依賴健康，再重新整理。"
+          : reason === "filtered_empty"
+            ? locale === "en"
+              ? "Next: widen the current scope or clear filters."
+              : "下一步：放寬目前檢視範圍或清除篩選。"
+            : locale === "en"
+              ? "Next: invite the first governed user if write scope is available."
+              : "下一步：若具寫入權限，可先邀請第一位治理人員。";
 
   return (
     <CanvasCard
@@ -561,7 +620,16 @@ function EmptyStatePanel({
       }}
     >
       <div style={{ display: "grid", gap: 12 }}>
+        <div style={pillRowStyle}>
+          <CanvasPill theme={theme} tone={copy.tone}>
+            {toneLabel}
+          </CanvasPill>
+          <CanvasPill theme={theme} tone="neutral">
+            {reason}
+          </CanvasPill>
+        </div>
         <div style={{ ...inlineMetaStyle, fontSize: 12.5 }}>{copy.body}</div>
+        <div style={hintTextStyle}>{guidance}</div>
         {nextAction ? (
           <div>
             <UsersActionButton
@@ -853,6 +921,9 @@ export default function UsersPage() {
   const [reason, setReason] = useState("");
   const [creating, setCreating] = useState(false);
   const [mutatingUserId, setMutatingUserId] = useState<string | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<ReceiptBannerState | null>(
+    null,
+  );
 
   const emptyReasonOverride = useMemo(() => {
     const value = searchParams.get("emptyReason");
@@ -883,7 +954,7 @@ export default function UsersPage() {
           };
         }),
       );
-      setPageActions(payload.availableActions ?? []);
+      setPageActions(payload.availableActions ?? defaultPageActions());
       setServerEmptyState(payload.emptyState ?? null);
       setRefreshMeta(buildFallbackRefresh(payload.refresh));
     } catch (caughtError) {
@@ -948,6 +1019,56 @@ export default function UsersPage() {
       (action: ResourceActionDescriptor) => action.action === "refresh",
     ) ?? defaultPageActions()[0];
 
+  const totalUsers = users.length;
+  const activeUsers = users.filter((user) => user.status === "active").length;
+  const invitedUsers = users.filter((user) => user.status === "invited").length;
+  const suspendedUsers = users.filter(
+    (user) => user.status === "suspended",
+  ).length;
+  const readOnlyUsers = users.filter(
+    (user) => user.availableActions.length === 0,
+  ).length;
+  const latestUpdatedAt = users.reduce<string | null>((latest, user) => {
+    if (!latest || user.updatedAt > latest) {
+      return user.updatedAt;
+    }
+    return latest;
+  }, null);
+  const refreshTone: CanvasTone =
+    refreshMeta.dataFreshness === "fresh"
+      ? "info"
+      : refreshMeta.dataFreshness === "degraded"
+        ? "warn"
+        : "danger";
+  const staleCopy =
+    refreshMeta.dataFreshness === "degraded"
+      ? locale === "en"
+        ? {
+            title: "Roster freshness is degraded",
+            body: `Snapshot generated ${formatDateTime(
+              refreshMeta.generatedAt,
+            )}. This T4 surface is still readable, but confirm before governance changes.`,
+          }
+        : {
+            title: "名單新鮮度已降級",
+            body: `快照產生於 ${formatDateTime(
+              refreshMeta.generatedAt,
+            )}。此 T4 頁面仍可閱讀，但治理操作前應再次確認。`,
+          }
+      : locale === "en"
+        ? {
+            title: "Roster snapshot is stale",
+            body: `Last trusted snapshot: ${formatDateTime(
+              refreshMeta.generatedAt,
+            )}. Refresh before changing access, roles, or suspension state.`,
+          }
+        : {
+            title: "名單快照已過期",
+            body: `最後可信快照：${formatDateTime(
+              refreshMeta.generatedAt,
+            )}。變更權限、角色或停用狀態前請先刷新。`,
+          };
+
   const deepLinks = useMemo<CrossAppResourceLink[]>(
     () => [
       {
@@ -966,14 +1087,6 @@ export default function UsersPage() {
         openMode: "new_tab",
         label: locale === "en" ? "Ops dispatch board" : "Ops 調度看板",
       },
-      {
-        targetApp: "ops-console",
-        route: "/revenue",
-        resourceType: "reconciliation_issue",
-        resourceId: "mirror",
-        openMode: "new_tab",
-        label: locale === "en" ? "Revenue mirror" : "Revenue 鏡像",
-      },
     ],
     [locale],
   );
@@ -986,6 +1099,7 @@ export default function UsersPage() {
     setFormDisplayName("");
     setFormRoleCode("operator");
     setReason("");
+    setLastReceipt(null);
     setPendingAction({ kind: "create", descriptor: primaryCreateAction });
   }, [primaryCreateAction]);
 
@@ -993,6 +1107,7 @@ export default function UsersPage() {
     (user: UserRow, action: ResourceActionDescriptor) => {
       setFormRoleCode(user.roleCode);
       setReason("");
+      setLastReceipt(null);
       if (action.action === "view_audit") {
         openCrossAppLink(user.auditLink);
         return;
@@ -1015,6 +1130,81 @@ export default function UsersPage() {
     setReason("");
   }, []);
 
+  const buildReceiptBanner = useCallback(
+    (
+      action: PendingAction,
+      response: Partial<ActionReceipt> & Partial<PlatformAdminUserRecord>,
+    ): ReceiptBannerState => {
+      const targetUserId =
+        action.kind === "create"
+          ? (response.userId ?? null)
+          : action.user.userId;
+      const targetAuditLink = targetUserId
+        ? buildAuditLink({
+            userId: targetUserId,
+            email:
+              action.kind === "create"
+                ? (response.email ?? formEmail.trim())
+                : action.user.email,
+            displayName:
+              action.kind === "create"
+                ? (response.displayName ?? formDisplayName.trim())
+                : action.user.displayName,
+            roleCode:
+              action.kind === "create"
+                ? (response.roleCode ?? formRoleCode)
+                : action.kind === "update_role"
+                  ? formRoleCode
+                  : action.user.roleCode,
+            status:
+              action.kind === "create"
+                ? (response.status ?? "invited")
+                : action.kind === "reactivate"
+                  ? "active"
+                  : action.kind === "suspend"
+                    ? "suspended"
+                    : action.user.status,
+            createdAt: response.createdAt ?? new Date().toISOString(),
+            updatedAt: response.updatedAt ?? new Date().toISOString(),
+          })
+        : null;
+
+      const title =
+        locale === "en"
+          ? action.kind === "create"
+            ? "Invite sent"
+            : action.kind === "update_role"
+              ? "Role updated"
+              : action.kind === "suspend"
+                ? "User suspended"
+                : "User reactivated"
+          : action.kind === "create"
+            ? "邀請已送出"
+            : action.kind === "update_role"
+              ? "角色已更新"
+              : action.kind === "suspend"
+                ? "人員已停用"
+                : "人員已重新啟用";
+      const body =
+        locale === "en"
+          ? response.auditId
+            ? `Action recorded with audit ID ${response.auditId}.`
+            : "Action succeeded. Open the user audit trail for evidence."
+          : response.auditId
+            ? `操作已寫入稽核，audit ID 為 ${response.auditId}。`
+            : "操作已成功，可開啟此使用者的稽核軌跡查看證據。";
+
+      return {
+        title,
+        body,
+        auditId: response.auditId ?? null,
+        actionId: response.actionId ?? null,
+        auditLink: targetAuditLink,
+      };
+    },
+    [formDisplayName, formEmail, formRoleCode, locale],
+  );
+
   const submitPendingAction = useCallback(async () => {
     if (!pendingAction) return;
 
@@ -1022,11 +1212,12 @@ export default function UsersPage() {
       setCreating(true);
       try {
         setError(null);
-        await client.createPlatformAdminUser({
+        const response = (await client.createPlatformAdminUser({
           email: formEmail.trim(),
           displayName: formDisplayName.trim(),
           roleCode: formRoleCode,
-        });
+        })) as Partial<ActionReceipt> & Partial<PlatformAdminUserRecord>;
+        setLastReceipt(buildReceiptBanner(pendingAction, response));
         closeModal();
         await loadUsers();
       } catch (caughtError) {
@@ -1047,15 +1238,23 @@ export default function UsersPage() {
     try {
       setError(null);
       if (pendingAction.kind === "update_role") {
-        await client.updatePlatformAdminUserRole(user.userId, {
-          roleCode: formRoleCode,
-          status: user.status,
-        });
+        const response = (await client.updatePlatformAdminUserRole(
+          user.userId,
+          {
+            roleCode: formRoleCode,
+            status: user.status,
+          },
+        )) as Partial<ActionReceipt> & Partial<PlatformAdminUserRecord>;
+        setLastReceipt(buildReceiptBanner(pendingAction, response));
       } else {
-        await client.updatePlatformAdminUserRole(user.userId, {
-          roleCode: user.roleCode,
-          status: pendingAction.kind === "suspend" ? "suspended" : "active",
-        });
+        const response = (await client.updatePlatformAdminUserRole(
+          user.userId,
+          {
+            roleCode: user.roleCode,
+            status: pendingAction.kind === "suspend" ? "suspended" : "active",
+          },
+        )) as Partial<ActionReceipt> & Partial<PlatformAdminUserRecord>;
+        setLastReceipt(buildReceiptBanner(pendingAction, response));
       }
       closeModal();
       await loadUsers();
@@ -1074,6 +1273,7 @@ export default function UsersPage() {
     formDisplayName,
     formEmail,
     formRoleCode,
+    buildReceiptBanner,
     loadUsers,
     pendingAction,
   ]);
@@ -1150,7 +1350,7 @@ export default function UsersPage() {
                 {locale === "en" ? "Read only" : "唯讀"}
               </CanvasPill>
             ) : (
-              row.availableActions.map((action) => (
+              row.availableActions.map((action: ResourceActionDescriptor) => (
                 <UsersActionButton
                   key={`${row.userId}-${action.action}`}
                   locale={locale}
@@ -1181,112 +1381,234 @@ export default function UsersPage() {
           title={locale === "en" ? "Platform users" : "平台人員"}
           subtitle={
             locale === "en"
-              ? "Internal identity governance. Action authority remains backend-driven."
-              : "平台內部身分治理，操作權限仍由後端 authority 決定。"
+              ? "Internal users and roles. RBAC authority remains backend-driven."
+              : "平台內部使用者與角色，RBAC 守門仍以後端 authority 為準。"
           }
           actions={
-            <>
-              <CanvasPill theme={theme} tone="neutral">
-                {REFRESH_TIER_LABEL} · 30s
-              </CanvasPill>
-              {primaryCreateAction ? (
-                <UsersActionButton
-                  locale={locale}
-                  descriptor={primaryCreateAction}
-                  onClick={openCreateModal}
-                />
-              ) : null}
-            </>
+            primaryCreateAction ? (
+              <UsersActionButton
+                locale={locale}
+                descriptor={primaryCreateAction}
+                onClick={openCreateModal}
+              />
+            ) : null
           }
         />
 
         <div style={pageStackStyle}>
-          <CanvasBanner
-            theme={theme}
-            tone={
-              refreshMeta.dataFreshness === "fresh"
-                ? "info"
-                : refreshMeta.dataFreshness === "degraded"
-                  ? "warn"
-                  : "danger"
-            }
-            title={
-              locale === "en"
-                ? `Refresh tier ${REFRESH_TIER_LABEL} · ${refreshMeta.dataFreshness}`
-                : `Refresh tier ${REFRESH_TIER_LABEL} · ${refreshMeta.dataFreshness}`
-            }
-            body={
-              locale === "en"
-                ? `Generated ${formatDateTime(refreshMeta.generatedAt)} from ${refreshMeta.source}. This screen follows the T4 medium-slow cadence from the packet.`
-                : `資料於 ${formatDateTime(refreshMeta.generatedAt)} 由 ${refreshMeta.source} 來源產生。此頁依 packet 指定的 T4 medium-slow cadence 輪詢。`
-            }
-            actions={
-              <UsersActionButton
-                locale={locale}
-                descriptor={refreshAction}
-                onClick={() => void loadUsers()}
-              />
-            }
-          />
+          {refreshMeta.dataFreshness !== "fresh" ? (
+            <CanvasBanner
+              theme={theme}
+              tone={refreshTone}
+              title={staleCopy.title}
+              body={staleCopy.body}
+              actions={
+                <UsersActionButton
+                  locale={locale}
+                  descriptor={refreshAction}
+                  onClick={() => void loadUsers()}
+                />
+              }
+            />
+          ) : null}
+
+          {lastReceipt ? (
+            <CanvasBanner
+              theme={theme}
+              tone="success"
+              title={lastReceipt.title}
+              body={
+                lastReceipt.actionId
+                  ? `${lastReceipt.body} actionId=${lastReceipt.actionId}`
+                  : lastReceipt.body
+              }
+              {...(lastReceipt.auditLink
+                ? {
+                    actions: (
+                      <CanvasBtn
+                        theme={theme}
+                        variant="secondary"
+                        size="xs"
+                        onClick={() => openCrossAppLink(lastReceipt.auditLink)}
+                      >
+                        {locale === "en"
+                          ? lastReceipt.auditId
+                            ? "View audit"
+                            : "Open audit trail"
+                          : lastReceipt.auditId
+                            ? "查看稽核"
+                            : "開啟稽核軌跡"}
+                      </CanvasBtn>
+                    ),
+                  }
+                : {})}
+            />
+          ) : null}
+
+          <div style={kpiGridStyle}>
+            <CanvasKPI
+              theme={theme}
+              label={locale === "en" ? "Platform users" : "平台人員"}
+              value={totalUsers}
+              sub={
+                locale === "en"
+                  ? "Must-show roster fields per §5.7"
+                  : "依 §5.7 顯示 roster 必備欄位"
+              }
+            />
+            <CanvasKPI
+              theme={theme}
+              label={locale === "en" ? "Active" : "啟用"}
+              value={activeUsers}
+              delta={
+                locale === "en"
+                  ? `${invitedUsers} invited`
+                  : `${invitedUsers} 位邀請中`
+              }
+              deltaTone={invitedUsers > 0 ? "neutral" : "up"}
+              sub={
+                locale === "en"
+                  ? "Pending invitations remain visible"
+                  : "邀請中的帳號仍需可見"
+              }
+            />
+            <CanvasKPI
+              theme={theme}
+              label={locale === "en" ? "Suspended" : "停用"}
+              value={suspendedUsers}
+              delta={
+                locale === "en"
+                  ? `${readOnlyUsers} read-only`
+                  : `${readOnlyUsers} 筆唯讀`
+              }
+              deltaTone={suspendedUsers > 0 ? "down" : "up"}
+              sub={
+                locale === "en"
+                  ? "High-risk actions require a reason"
+                  : "高風險操作需填寫原因"
+              }
+            />
+            <CanvasKPI
+              theme={theme}
+              label={locale === "en" ? "Refresh tier" : "刷新層級"}
+              value={REFRESH_TIER_LABEL}
+              delta={
+                locale === "en"
+                  ? refreshMeta.dataFreshness
+                  : formatPlatformCodeLabel(locale, refreshMeta.dataFreshness)
+              }
+              deltaTone={refreshTone === "danger" ? "down" : "neutral"}
+              sub={
+                latestUpdatedAt
+                  ? locale === "en"
+                    ? `Latest update ${formatDateTime(latestUpdatedAt)}`
+                    : `最新更新 ${formatDateTime(latestUpdatedAt)}`
+                  : locale === "en"
+                    ? `Generated ${formatDateTime(refreshMeta.generatedAt)}`
+                    : `快照產生於 ${formatDateTime(refreshMeta.generatedAt)}`
+              }
+            />
+          </div>
 
           <CanvasCard
             theme={theme}
             title={locale === "en" ? "Platform users" : "平台人員"}
             subtitle={
               locale === "en"
-                ? "Must-show roster fields from spec §5.7. CTAs render strictly from availableActions."
-                : "對應 spec §5.7 的必顯欄位，CTA 嚴格由 availableActions 驅動。"
+                ? "ID, name, email, role, status, and updated time. CTAs render strictly from availableActions."
+                : "顯示 ID、姓名、Email、角色、狀態與更新時間；CTA 嚴格由 availableActions 驅動。"
             }
           >
             <div style={cardBodyStackStyle}>
-              <div style={cardHeaderMetaStyle}>
-                <div style={cardMetaStyle}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: theme.textMuted,
-                    }}
-                  >
-                    {locale === "en" ? "Visible states" : "可見狀態"}
+              <div style={metaGridStyle}>
+                <CanvasCard
+                  theme={theme}
+                  title={locale === "en" ? "State visibility" : "狀態可見性"}
+                  subtitle={
+                    locale === "en"
+                      ? "Pending invitation and suspended users stay visible."
+                      : "邀請中與停用狀態都必須保留可見。"
+                  }
+                >
+                  <div style={cardBodyStackStyle}>
+                    <div style={pillRowStyle}>
+                      <CanvasPill theme={theme} tone="success" dot>
+                        {locale === "en" ? "Active" : "啟用"}
+                      </CanvasPill>
+                      <CanvasPill theme={theme} tone="warn" dot>
+                        {locale === "en" ? "Pending invitation" : "邀請中"}
+                      </CanvasPill>
+                      <CanvasPill theme={theme} tone="danger" dot>
+                        {locale === "en" ? "Suspended" : "停用"}
+                      </CanvasPill>
+                    </div>
+                    <div style={hintTextStyle}>
+                      {locale === "en"
+                        ? "Refresh follows packet tier T4 (30s). High-risk actions collect a reason in the confirmation modal; the current write contract does not yet persist that reason."
+                        : "刷新依 packet 的 T4（30 秒）執行。高風險操作會在確認 modal 蒐集原因，但目前寫入 contract 尚未提供持久化原因欄位。"}
+                    </div>
                   </div>
-                  <div style={pillRowStyle}>
-                    <CanvasPill theme={theme} tone="success" dot>
-                      {locale === "en" ? "Active" : "啟用"}
-                    </CanvasPill>
-                    <CanvasPill theme={theme} tone="warn" dot>
-                      {locale === "en" ? "Pending invitation" : "邀請中"}
-                    </CanvasPill>
-                    <CanvasPill theme={theme} tone="danger" dot>
-                      {locale === "en" ? "Suspended" : "停用"}
-                    </CanvasPill>
-                  </div>
-                </div>
+                </CanvasCard>
 
-                <div style={cardMetaStyle}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: theme.textMuted,
-                    }}
-                  >
-                    {locale === "en" ? "Cross-app links" : "跨應用連結"}
+                <CanvasCard
+                  theme={theme}
+                  title={locale === "en" ? "Operational context" : "操作脈絡"}
+                  subtitle={
+                    locale === "en"
+                      ? "Refresh, audit, and cross-app deep links."
+                      : "刷新、稽核與跨應用 deep link。"
+                  }
+                >
+                  <div style={cardBodyStackStyle}>
+                    <CanvasDL
+                      theme={theme}
+                      cols={2}
+                      items={[
+                        {
+                          k: locale === "en" ? "Refresh tier" : "刷新層級",
+                          v: `${REFRESH_TIER_LABEL} · 30s`,
+                        },
+                        {
+                          k: locale === "en" ? "Snapshot" : "快照",
+                          v: formatDateTime(refreshMeta.generatedAt),
+                          mono: true,
+                        },
+                        {
+                          k: locale === "en" ? "Freshness" : "新鮮度",
+                          v: formatPlatformCodeLabel(
+                            locale,
+                            refreshMeta.dataFreshness,
+                          ),
+                        },
+                        {
+                          k: locale === "en" ? "Source" : "來源",
+                          v: refreshMeta.source,
+                          mono: true,
+                        },
+                      ]}
+                    />
+                    <div style={cardHeaderMetaStyle}>
+                      <div style={pillRowStyle}>
+                        {deepLinks.map((link) => (
+                          <CanvasBtn
+                            key={`inline-${link.targetApp}-${link.route}`}
+                            theme={theme}
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => openCrossAppLink(link)}
+                          >
+                            {link.label}
+                          </CanvasBtn>
+                        ))}
+                      </div>
+                      <UsersActionButton
+                        locale={locale}
+                        descriptor={refreshAction}
+                        onClick={() => void loadUsers()}
+                      />
+                    </div>
                   </div>
-                  <div style={pillRowStyle}>
-                    {deepLinks.map((link) => (
-                      <CanvasBtn
-                        key={`inline-${link.targetApp}-${link.route}`}
-                        theme={theme}
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => openCrossAppLink(link)}
-                      >
-                        {link.label}
-                      </CanvasBtn>
-                    ))}
-                  </div>
-                </div>
+                </CanvasCard>
               </div>
 
               {loading ? (
@@ -1333,7 +1655,16 @@ export default function UsersPage() {
                 />
               )}
 
-              {error ? <div style={inlineMetaStyle}>{error}</div> : null}
+              {error ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="danger"
+                  title={
+                    locale === "en" ? "Last request failed" : "最近一次請求失敗"
+                  }
+                  body={error}
+                />
+              ) : null}
             </div>
           </CanvasCard>
         </div>
