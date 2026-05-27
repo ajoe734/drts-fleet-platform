@@ -251,23 +251,10 @@ const overlayActionsStyle = {
   alignItems: "center",
 } satisfies CSSProperties;
 
-const deepLinkStyle = {
+const statusSummaryGridStyle = {
   display: "grid",
-  gap: 10,
-} satisfies CSSProperties;
-
-const miniListStyle = {
-  display: "grid",
-  gap: 10,
-} satisfies CSSProperties;
-
-const miniRowStyle = {
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 12,
-  padding: "10px 0",
-  borderBottom: `1px solid ${theme.border}`,
 } satisfies CSSProperties;
 
 const filterRowStyle = {
@@ -1786,6 +1773,61 @@ export default function PartnerDetailPage() {
     ],
   );
 
+  const promotionSnapshotItems = useMemo(
+    () => [
+      {
+        k: locale === "en" ? "Entry route" : "Entry route",
+        v: previewUrl ?? "—",
+        mono: true,
+      },
+      {
+        k: locale === "en" ? "Support contact" : "Support contact",
+        v: supportValue,
+      },
+      {
+        k: locale === "en" ? "Credential coverage" : "Credential coverage",
+        v: `${activeCredentialCount} ${locale === "en" ? "active" : "有效"}`,
+        mono: true,
+      },
+      {
+        k: locale === "en" ? "Refresh target" : "Refresh target",
+        v: `${refreshTier} · 30s`,
+        mono: true,
+      },
+    ],
+    [activeCredentialCount, locale, previewUrl, refreshTier, supportValue],
+  );
+
+  const credentialSummaryItems = useMemo(
+    () => [
+      {
+        k: locale === "en" ? "Latest active key" : "最新有效 key",
+        v: latestActiveCredential
+          ? `${latestActiveCredential.keyPrefix}${latestActiveCredential.maskedSuffix}`
+          : "—",
+        mono: true,
+      },
+      {
+        k: locale === "en" ? "Last rotation" : "最近輪替",
+        v: latestCredential ? formatDateTime(latestCredential.createdAt) : "—",
+        mono: true,
+      },
+      {
+        k: locale === "en" ? "Last used" : "最後使用",
+        v: latestActiveCredential?.lastUsedAt
+          ? formatDateTime(latestActiveCredential.lastUsedAt)
+          : "—",
+        mono: true,
+      },
+      {
+        k: locale === "en" ? "Actions exposed" : "已暴露動作",
+        v: availableActions.length,
+        mono: true,
+      },
+    ],
+    [availableActions.length, latestActiveCredential, latestCredential, locale],
+  );
+
   const jumpToSection = useCallback((sectionId: DetailSectionId) => {
     setActiveSection(sectionId);
     if (typeof document === "undefined") {
@@ -1961,8 +2003,8 @@ export default function PartnerDetailPage() {
         <div style={pageStackStyle}>
           <PageHeader
             theme={theme}
-            title={`${entry.bankCode ?? entry.partnerCode} · ${entry.programId}`}
-            subtitle={`/${entry.entrySlug} · ${entry.displayName}`}
+            title={entry.displayName}
+            subtitle={`/${entry.entrySlug} · ${entry.partnerCode} · ${entry.programId}`}
             actions={
               <div style={buttonRowStyle}>
                 <Link href="/partners" style={{ textDecoration: "none" }}>
@@ -2061,11 +2103,15 @@ export default function PartnerDetailPage() {
 
           <Card
             theme={theme}
-            title={locale === "en" ? "Detail workspace" : "Detail workspace"}
+            title={
+              locale === "en"
+                ? "Partner entry sitemap"
+                : "Partner entry sitemap"
+            }
             subtitle={
               locale === "en"
-                ? "Canvas-aligned partner detail flow: overview, branding, auth, eligibility, credential governance, and audit."
-                : "依 canvas 對齊 partner detail 流程：overview、branding、auth、eligibility、credential governance 與 audit。"
+                ? "Canvas-aligned route map for overview, branding, auth, eligibility, credential governance, readiness, and audit."
+                : "依 canvas 對齊 partner detail 路徑地圖：overview、branding、auth、eligibility、credential governance、readiness 與 audit。"
             }
             actions={
               <div style={shellBadgeRowStyle}>
@@ -2159,11 +2205,11 @@ export default function PartnerDetailPage() {
             <div style={sectionStackStyle}>
               <Card
                 theme={theme}
-                title={locale === "en" ? "Entry basic data" : "Entry 基本資料"}
+                title={locale === "en" ? "Entry overview" : "Entry overview"}
                 subtitle={
                   locale === "en"
-                    ? "Partner identity, routing, auth, and support fields stay visible on the credential governance surface."
-                    : "將 partner identity、routing、auth 與 support 欄位集中在 credential 治理視圖。"
+                    ? "Core identity, routing, readiness inputs, and support metadata stay visible before any credential or activation decision."
+                    : "在任何 credential 或啟用決策前，先固定呈現核心識別、routing、readiness 來源與 support metadata。"
                 }
                 actions={
                   <div style={shellBadgeRowStyle}>
@@ -2190,11 +2236,13 @@ export default function PartnerDetailPage() {
             <div style={sectionStackStyle}>
               <Card
                 theme={theme}
-                title={locale === "en" ? "Readiness" : "Readiness"}
+                title={
+                  locale === "en" ? "Promotion posture" : "Promotion posture"
+                }
                 subtitle={
                   locale === "en"
-                    ? "Launch posture, lifecycle, and activation actions stay co-located before external traffic is allowed."
-                    : "在允許外部流量前，將 launch posture、lifecycle 與啟用動作維持在同一視角。"
+                    ? "Keep lifecycle authority, readiness posture, and activation controls in one decision lane before partner-facing traffic is opened."
+                    : "在打開 partner-facing traffic 前，把 lifecycle authority、readiness posture 與啟用控制留在同一個決策視角。"
                 }
                 actions={
                   <div style={shellBadgeRowStyle}>
@@ -2210,6 +2258,17 @@ export default function PartnerDetailPage() {
                 }
               >
                 <div style={sectionStackStyle}>
+                  <div style={shellBadgeRowStyle}>
+                    <Pill theme={theme} tone={statusTone} dot>
+                      {formatPlatformCodeLabel(locale, entry.status)}
+                    </Pill>
+                    <Pill theme={theme} tone="info">
+                      {formatPlatformCodeLabel(locale, entry.authMode)}
+                    </Pill>
+                    <Pill theme={theme} tone="accent">
+                      {formatPlatformCodeLabel(locale, entry.eligibilityMode)}
+                    </Pill>
+                  </div>
                   <Banner
                     theme={theme}
                     tone={
@@ -2295,139 +2354,37 @@ export default function PartnerDetailPage() {
                   <DL
                     theme={theme}
                     cols={isCompactViewport ? 1 : 2}
-                    items={[
-                      {
-                        k: locale === "en" ? "Route preview" : "Route preview",
-                        v: previewUrl ?? "—",
-                        mono: true,
-                      },
-                      {
-                        k:
-                          locale === "en"
-                            ? "Support contact"
-                            : "Support contact",
-                        v: supportValue,
-                      },
-                      {
-                        k: locale === "en" ? "Refresh" : "Refresh",
-                        v: (
-                          <span style={shellBadgeRowStyle}>
-                            <Pill theme={theme} tone={freshnessTone}>
-                              {refreshTier}
-                            </Pill>
-                            <span style={mutedTextStyle}>
-                              {lastLoadedAt
-                                ? `${locale === "en" ? "loaded" : "載入於"} ${formatDateTime(
-                                    lastLoadedAt,
-                                  )}`
-                                : "—"}
-                            </span>
-                          </span>
-                        ),
-                      },
-                      {
-                        k:
-                          locale === "en"
-                            ? "Available actions"
-                            : "Available actions",
-                        v: availableActions.length,
-                        mono: true,
-                      },
-                    ]}
+                    items={promotionSnapshotItems}
                   />
                 </div>
               </Card>
 
               <Card
                 theme={theme}
-                title={
-                  locale === "en" ? "Active credentials" : "Active credentials"
-                }
+                title={locale === "en" ? "Credential lane" : "Credential lane"}
                 subtitle={
                   locale === "en"
-                    ? "Masked-only summary stays visible even after the plaintext-once modal is dismissed."
-                    : "即使 plaintext-once modal 關閉後，仍要維持 masked-only 的 credential 摘要。"
+                    ? "Keep the plaintext-once rule visible while preserving a masked-only summary for ongoing governance."
+                    : "在維持 plaintext-once 規則的同時，也保留後續治理需要的 masked-only 摘要。"
                 }
               >
                 {activeCredentialCount > 0 ? (
-                  <div style={miniListStyle}>
-                    <div style={miniRowStyle}>
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            color: theme.text,
-                          }}
-                        >
-                          {locale === "en"
-                            ? "Latest active key"
-                            : "最新有效 key"}
-                        </div>
-                        <div style={mutedTextStyle}>
-                          {locale === "en"
-                            ? "Most recent active ingress credential"
-                            : "最近一次仍有效的 ingress credential"}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          fontFamily: theme.monoFamily,
-                          fontSize: 11.5,
-                          color: theme.text,
-                        }}
-                      >
-                        {latestActiveCredential
-                          ? `${latestActiveCredential.keyPrefix}${latestActiveCredential.maskedSuffix}`
-                          : "—"}
-                      </span>
-                    </div>
-                    <div style={miniRowStyle}>
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            color: theme.text,
-                          }}
-                        >
-                          {locale === "en" ? "Last rotation" : "最近輪替"}
-                        </div>
-                        <div style={mutedTextStyle}>
-                          {locale === "en"
-                            ? "Derived from latest credential issue timestamp"
-                            : "以最新 credential 核發時間代表最近輪替"}
-                        </div>
-                      </div>
-                      <span style={mutedTextStyle}>
-                        {latestCredential
-                          ? formatDateTime(latestCredential.createdAt)
-                          : "—"}
-                      </span>
-                    </div>
-                    <div style={{ ...miniRowStyle, borderBottom: "none" }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            color: theme.text,
-                          }}
-                        >
-                          {locale === "en" ? "Last used" : "最後使用"}
-                        </div>
-                        <div style={mutedTextStyle}>
-                          {locale === "en"
-                            ? "Latest observed ingress usage telemetry"
-                            : "最近一次 ingress 使用遙測"}
-                        </div>
-                      </div>
-                      <span style={mutedTextStyle}>
-                        {latestActiveCredential?.lastUsedAt
-                          ? formatDateTime(latestActiveCredential.lastUsedAt)
-                          : "—"}
-                      </span>
-                    </div>
+                  <div style={sectionStackStyle}>
+                    <Banner
+                      theme={theme}
+                      tone="info"
+                      title={
+                        locale === "en"
+                          ? "Plaintext material is shown once"
+                          : "Plaintext material 僅顯示一次"
+                      }
+                      body={
+                        locale === "en"
+                          ? "Issue and rotate actions can open the Q-ADM07 modal. After dismissal, only masked metadata remains on this route."
+                          : "核發與輪替動作會開啟 Q-ADM07 modal；關閉後，此路由只保留 masked metadata。"
+                      }
+                    />
+                    <DL theme={theme} items={credentialSummaryItems} cols={1} />
                   </div>
                 ) : credentialEmptyReason ? (
                   <WorkflowEmptyState
@@ -2442,72 +2399,53 @@ export default function PartnerDetailPage() {
 
               <Card
                 theme={theme}
-                title={locale === "en" ? "Linkage" : "Linkage"}
+                title={locale === "en" ? "Companion links" : "Companion links"}
                 subtitle={
                   locale === "en"
-                    ? "Webhook, adapter, and companion admin routes stay visible with the credential governance workflow."
-                    : "將 webhook、adapter 與 companion admin routes 固定顯示在 credential governance workflow 旁。"
+                    ? "Webhook linkage, adapter linkage, and cross-app context stay in-frame so high-risk actions are not taken blind."
+                    : "把 webhook linkage、adapter linkage 與 cross-app context 固定在同一視角，避免高風險動作在資訊不足時發生。"
                 }
               >
-                <DL theme={theme} items={linkageItems} cols={1} />
-              </Card>
-
-              <Card
-                theme={theme}
-                title={
-                  locale === "en"
-                    ? "Cross-app deep links"
-                    : "Cross-app deep links"
-                }
-                subtitle={
-                  locale === "en"
-                    ? "Use new-tab operational links and companion admin routes before acting on production traffic."
-                    : "在動到 production traffic 前，先使用 new-tab operational links 與 companion admin routes 補齊上下文。"
-                }
-              >
-                <div style={deepLinkStyle}>
-                  {deepLinks.map((link) => (
-                    <div
-                      key={link.key}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        padding: "10px 0",
-                        borderBottom: `1px solid ${theme.border}`,
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            color: theme.text,
-                          }}
-                        >
-                          {link.label}
-                        </div>
-                        <div style={mutedTextStyle}>{link.helper}</div>
-                      </div>
-                      <a
-                        href={link.href}
-                        target={link.openInNewTab ? "_blank" : undefined}
-                        rel={link.openInNewTab ? "noreferrer" : undefined}
-                        style={{ textDecoration: "none" }}
+                <div style={sectionStackStyle}>
+                  <DL theme={theme} items={linkageItems} cols={1} />
+                  <div style={statusSummaryGridStyle}>
+                    {deepLinks.map((link) => (
+                      <Card
+                        key={link.key}
+                        theme={theme}
+                        title={link.label}
+                        subtitle={link.helper}
+                        actions={
+                          <a
+                            href={link.href}
+                            target={link.openInNewTab ? "_blank" : undefined}
+                            rel={link.openInNewTab ? "noreferrer" : undefined}
+                            style={{ textDecoration: "none" }}
+                          >
+                            <Btn theme={theme} variant="secondary" size="xs">
+                              {link.openInNewTab
+                                ? locale === "en"
+                                  ? "Open"
+                                  : "開啟"
+                                : locale === "en"
+                                  ? "View"
+                                  : "查看"}
+                            </Btn>
+                          </a>
+                        }
                       >
-                        <Btn theme={theme} variant="secondary">
+                        <div style={mutedTextStyle}>
                           {link.openInNewTab
                             ? locale === "en"
-                              ? "Open"
-                              : "開啟"
+                              ? "Opens in a new tab for cross-app operational context."
+                              : "會以新分頁開啟 cross-app operational context。"
                             : locale === "en"
-                              ? "View"
-                              : "查看"}
-                        </Btn>
-                      </a>
-                    </div>
-                  ))}
+                              ? "Companion route inside Platform Admin."
+                              : "Platform Admin 內的 companion route。"}
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
                 </div>
               </Card>
             </div>
