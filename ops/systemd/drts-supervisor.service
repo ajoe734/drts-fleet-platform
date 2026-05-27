@@ -1,0 +1,61 @@
+[Unit]
+Description=DRTS Fleet Platform supervisor (orchestrator)
+Documentation=file:%h/workspace/drts-fleet-platform/ops/systemd/README.md
+# Tied to user session bus so journald log labelling and resource accounting
+# stay scoped to the developer account that owns the workspace.
+After=default.target network-online.target
+Wants=network-online.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+
+# WorkingDirectory + ExecStart are placeholders templated by
+# scripts/install-supervisor-systemd.sh at install time. The installed unit
+# under ~/.config/systemd/user/ has the literal paths substituted; this
+# tracked copy keeps the variables for readability and so checks in CI can
+# diff against the canonical version.
+WorkingDirectory=%h/workspace/drts-fleet-platform
+ExecStart=/usr/bin/env bash %h/workspace/drts-fleet-platform/scripts/run-supervisor.sh --config %h/workspace/drts-fleet-platform/.orchestrator/config.json --verbose
+
+# Restart policy: any non-zero exit, SIGKILL, OOM kill, or watchdog timeout
+# triggers a restart after RestartSec. The cap (StartLimitBurst+IntervalSec)
+# prevents a thrashing supervisor from melting the host.
+Restart=on-failure
+RestartSec=10
+
+# Memory ceiling: supervisor RSS has historically grown to ~1.5 GB under
+# availability-first thrashing (see feedback_supervisor_oom_from_thrashing).
+# Killing at 4 GB gives plenty of headroom for healthy operation but stops
+# pathological growth from taking down the dev box.
+MemoryMax=4G
+MemoryHigh=3G
+
+# Watchdog: systemd will SIGKILL the supervisor if it goes silent for
+# WatchdogSec. Supervisor itself does NOT currently call sd_notify so this
+# acts as a coarse hang detector via the parent-process aliveness check
+# only — refining this requires a small patch to supervisor.py to emit
+# periodic notifications. Leaving the value set so the future patch is a
+# config-only change.
+WatchdogSec=900
+
+# Journald is the canonical log; the .orchestrator/logs/supervisor-bg.log
+# trail is still written by supervisor itself for backward compatibility
+# with chair-review scripts that grep it.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drts-supervisor
+
+# Run as the invoking user; do NOT escalate privileges.
+NoNewPrivileges=true
+
+# Keep child process group together so SIGTERM cleans up dispatched worker
+# CLIs (claude / codex / gemini) instead of orphaning them to PID 1.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
