@@ -1606,7 +1606,12 @@ export default function TripScreen() {
               variant="primary"
               size="sm"
               danger
-              onPress={() => router.push("/incident")}
+              onPress={() =>
+                router.push({
+                  pathname: "/incident",
+                  params: { entry: "trip" },
+                })
+              }
               icon={
                 <Ionicons name="warning-outline" size={14} color="#FFFFFF" />
               }
