@@ -53,6 +53,7 @@ type FeatureFlagTableRow = Record<string, unknown> & {
   rowKey: string;
   keyCell: ReactNode;
   scopeCell: ReactNode;
+  currentValueCell: ReactNode;
   stateCell: ReactNode;
   updatedByCell: ReactNode;
   atCell: ReactNode;
@@ -218,6 +219,22 @@ const timeCellStyle = {
   gap: 5,
   minWidth: 0,
   whiteSpace: "normal" as const,
+} satisfies CSSProperties;
+
+const boundaryPanelStyle = {
+  display: "grid",
+  gap: 6,
+  padding: "14px 16px",
+  borderTop: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+} satisfies CSSProperties;
+
+const boundaryTitleStyle = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: theme.text,
+  textTransform: "uppercase" as const,
+  letterSpacing: 0.4,
 } satisfies CSSProperties;
 
 const emptyStateStyle = {
@@ -671,6 +688,15 @@ function searchAction(actions: ResourceActionDescriptor[]) {
   );
 }
 
+function ownerAppAction(actions: ResourceActionDescriptor[]) {
+  return findAction(actions, [
+    "open_owner_app",
+    "view_owner_app",
+    "open_platform_admin",
+    "manage_feature_flags",
+  ]);
+}
+
 function historyAction(record: FeatureFlagVisibilityRecord) {
   return findAction(record.availableActions, [
     "view_change_history",
@@ -733,35 +759,65 @@ function renderHistoryLink(
   );
 }
 
-function stateSummary(record: FeatureFlagVisibilityRecord, locale: Locale) {
-  const stateLabel = record.enabled
-    ? t("common.enabled", locale)
-    : t("common.disabled", locale);
-  const stateTone: CanvasTone = record.enabled ? "success" : "neutral";
-
+function currentValueSummary(
+  record: FeatureFlagVisibilityRecord,
+  locale: Locale,
+) {
   return (
     <div style={stateCellStyle}>
       <div style={pillRowStyle}>
-        <Pill theme={theme} tone={stateTone} dot>
-          {stateLabel}
+        <Pill theme={theme} tone={record.enabled ? "success" : "neutral"} dot>
+          {record.enabled
+            ? t("flags.state.enabled", locale)
+            : t("flags.state.disabled", locale)}
         </Pill>
+      </div>
+      <span style={secondaryTextStyle}>
+        {record.enabled
+          ? copy(
+              locale,
+              "Current scope resolves to enabled.",
+              "目前此範圍解析為 enabled。",
+            )
+          : copy(
+              locale,
+              "Current scope resolves to disabled.",
+              "目前此範圍解析為 disabled。",
+            )}
+      </span>
+    </div>
+  );
+}
+
+function stateSummary(record: FeatureFlagVisibilityRecord, locale: Locale) {
+  return (
+    <div style={stateCellStyle}>
+      <div style={pillRowStyle}>
         {record.rolloutState === "partial" ? (
           <Pill theme={theme} tone="warn">
-            {copy(locale, "Mid-rollout", "進行中 rollout")}
+            {t("flags.midRollout", locale)}
           </Pill>
-        ) : null}
+        ) : (
+          <Pill theme={theme} tone="info">
+            {copy(locale, "Uniform", "一致")}
+          </Pill>
+        )}
       </div>
       {record.rolloutSummary ? (
         <span style={secondaryTextStyle}>{record.rolloutSummary}</span>
       ) : record.rolloutState === "partial" ? (
         <span style={secondaryTextStyle}>
+          {t("flags.partialStateHelp", locale)}
+        </span>
+      ) : (
+        <span style={secondaryTextStyle}>
           {copy(
             locale,
-            "Visible scopes diverge from the platform default.",
-            "可見範圍內仍有 tenant override 與平台預設不一致。",
+            "No tenant-visible divergence in this snapshot.",
+            "目前快照中沒有 tenant 可見差異。",
           )}
         </span>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -785,15 +841,16 @@ function rowForRecord(
             theme={theme}
             tone={record.scope === "tenant" ? "warn" : "info"}
           >
-            {copy(
+            {t(
+              record.scope === "tenant"
+                ? "flags.scope.tenant"
+                : "flags.scope.global",
               locale,
-              record.scope === "tenant" ? "Tenant" : "Global",
-              record.scope === "tenant" ? "租戶" : "全域",
             )}
           </Pill>
           {record.rolloutState === "partial" ? (
             <Pill theme={theme} tone="warn">
-              {formatOpsCodeLabel(locale, "partial")}
+              {t("flags.state.partial", locale)}
             </Pill>
           ) : null}
         </div>
@@ -812,6 +869,7 @@ function rowForRecord(
         )}
       </div>
     ),
+    currentValueCell: currentValueSummary(record, locale),
     stateCell: stateSummary(record, locale),
     updatedByCell: (
       <div style={updatedByCellStyle}>
@@ -1254,10 +1312,12 @@ export default async function FeatureFlagsPage({
   const visibleItems = sortItems(filterItems(response.items, filters));
   const emptyState = resolveEmptyState(response, visibleItems, filters);
   const searchDescriptor = searchAction(response.availableActions);
+  const ownerDescriptor = ownerAppAction(response.availableActions);
 
   const visibleEnabledCount = visibleItems.filter(
     (item) => item.enabled,
   ).length;
+  const visibleDisabledCount = visibleItems.length - visibleEnabledCount;
   const partialCount = visibleItems.filter(
     (item) => item.rolloutState === "partial",
   ).length;
@@ -1268,27 +1328,32 @@ export default async function FeatureFlagsPage({
   const rows = visibleItems.map((record) => rowForRecord(record, locale));
   const columns: CanvasTableColumn<FeatureFlagTableRow>[] = [
     {
-      h: "KEY",
-      w: 380,
+      h: t("flags.col.key", locale).toUpperCase(),
+      w: 340,
       r: (row) => row.keyCell as ReactNode,
     },
     {
-      h: copy(locale, "Scope", "範圍"),
-      w: 190,
+      h: t("flags.col.scope", locale),
+      w: 180,
       r: (row) => row.scopeCell as ReactNode,
     },
     {
-      h: copy(locale, "State", "狀態"),
-      w: 230,
+      h: t("flags.col.currentValue", locale),
+      w: 180,
+      r: (row) => row.currentValueCell as ReactNode,
+    },
+    {
+      h: t("flags.col.state", locale),
+      w: 210,
       r: (row) => row.stateCell as ReactNode,
     },
     {
-      h: copy(locale, "Updated by", "更新者"),
+      h: t("flags.col.updatedBy", locale),
       w: 240,
       r: (row) => row.updatedByCell as ReactNode,
     },
     {
-      h: "AT",
+      h: t("flags.col.updatedAt", locale),
       w: 220,
       r: (row) => row.atCell as ReactNode,
     },
@@ -1298,27 +1363,22 @@ export default async function FeatureFlagsPage({
     <>
       <PageHeader
         theme={theme}
-        title={copy(
-          locale,
-          "Feature Flags · read only",
-          "功能旗標 · read only",
-        )}
-        subtitle={copy(
-          locale,
-          "Ops sees operational flags only. Write authority stays in Platform Admin. Endpoint: GET /api/ops/feature-flags",
-          "ops 只看 operational flags。完整寫入權限在 Platform Admin。endpoint：GET /api/ops/feature-flags",
-        )}
+        title={t("flags.title", locale)}
+        subtitle={t("flags.subtitleReadOnly", locale)}
         actions={
-          <a
-            href={resolveCrossAppHref(ownerAppLink)}
-            style={buttonStyle("primary")}
-            {...externalAnchorProps(ownerAppLink)}
-          >
-            <span>{platformAdminLabel(locale)}</span>
-            {shouldOpenInNewTab(ownerAppLink) ? (
-              <CanvasIcon name="ext" size={12} />
-            ) : null}
-          </a>
+          ownerDescriptor ? (
+            <a
+              href={resolveCrossAppHref(ownerAppLink)}
+              title={actionTooltip(locale, ownerDescriptor)}
+              style={buttonStyle("primary")}
+              {...externalAnchorProps(ownerAppLink)}
+            >
+              <span>{actionLabel(locale, ownerDescriptor)}</span>
+              {shouldOpenInNewTab(ownerAppLink) ? (
+                <CanvasIcon name="ext" size={12} />
+              ) : null}
+            </a>
+          ) : null
         }
       />
 
@@ -1339,7 +1399,7 @@ export default async function FeatureFlagsPage({
                 <div style={{ flex: "1 1 260px", minWidth: 0 }}>
                   <Field
                     theme={theme}
-                    label={copy(locale, "Search by key", "依 key 搜尋")}
+                    label={t("flags.searchPlaceholder", locale)}
                     hint={copy(
                       locale,
                       "Low-risk local filter. Use exact prefixes like dispatch., forwarder., partner.",
@@ -1350,12 +1410,8 @@ export default async function FeatureFlagsPage({
                       id="feature-flag-search"
                       name="q"
                       defaultValue={filters.q}
-                      placeholder={copy(
-                        locale,
-                        "dispatch., forwarder., partner...",
-                        "dispatch.、forwarder.、partner…",
-                      )}
-                      aria-label={copy(locale, "Search by key", "依 key 搜尋")}
+                      placeholder={t("flags.searchPlaceholder", locale)}
+                      aria-label={t("flags.searchPlaceholder", locale)}
                       style={searchInputStyle}
                     />
                   </Field>
@@ -1377,7 +1433,7 @@ export default async function FeatureFlagsPage({
 
               <div style={scopeRowStyle}>
                 <span style={scopeLabelStyle}>
-                  {copy(locale, "Scope", "範圍")}
+                  {t("flags.col.scope", locale)}
                 </span>
                 {(["all", "global", "tenant"] as const).map((scope) => (
                   <a
@@ -1385,13 +1441,14 @@ export default async function FeatureFlagsPage({
                     href={buildPageHref(filters, { scope })}
                     style={filterChipStyle(scope === filters.scope)}
                   >
-                    {scope === "all"
-                      ? copy(locale, "All visible", "全部可見")
-                      : copy(
-                          locale,
-                          scope === "global" ? "Global" : "Tenant",
-                          scope === "global" ? "全域" : "租戶",
-                        )}
+                    {t(
+                      scope === "all"
+                        ? "flags.scope.all"
+                        : scope === "global"
+                          ? "flags.scope.global"
+                          : "flags.scope.tenant",
+                      locale,
+                    )}
                   </a>
                 ))}
               </div>
@@ -1399,26 +1456,25 @@ export default async function FeatureFlagsPage({
 
             <div style={snapshotPanelStyle}>
               <Pill theme={theme} tone="info">
-                T6 · manual
+                {t("flags.refreshTier.manual", locale)}
               </Pill>
               <Pill
                 theme={theme}
                 tone={dataFreshnessTone(response.refresh.dataFreshness)}
               >
-                {formatOpsCodeLabel(locale, response.refresh.dataFreshness)}
+                {t(`flags.freshness.${response.refresh.dataFreshness}`, locale)}
               </Pill>
               <span style={snapshotMetaStyle}>
-                {copy(
-                  locale,
-                  `Snapshot ${formatDateTime(locale, response.refresh.generatedAt)} · ${formatOpsCodeLabel(
+                {t("flags.staleBanner.body", locale, {
+                  freshness: t(
+                    `flags.freshness.${response.refresh.dataFreshness}`,
                     locale,
-                    response.refresh.source,
-                  )}`,
-                  `快照 ${formatDateTime(locale, response.refresh.generatedAt)} · ${formatOpsCodeLabel(
+                  ),
+                  generatedAt: formatDateTime(
                     locale,
-                    response.refresh.source,
-                  )}`,
-                )}
+                    response.refresh.generatedAt,
+                  ),
+                })}
               </span>
               <a href={refreshHref} style={buttonStyle("secondary")}>
                 {t("common.refresh", locale)}
@@ -1428,34 +1484,23 @@ export default async function FeatureFlagsPage({
 
           <div style={registryMetaStyle}>
             <span style={registryMetaTextStyle}>
-              {copy(
-                locale,
-                `${visibleItems.length} visible / ${response.items.length} total`,
-                `${visibleItems.length} 筆可見 / 共 ${response.items.length} 筆`,
-              )}
+              {t("flags.registrySummaryV2", locale, {
+                total: response.items.length,
+                enabled: visibleEnabledCount,
+                partial: partialCount,
+                tenant: tenantScopedCount,
+              })}
             </span>
             <Pill theme={theme} tone="success">
-              {copy(
-                locale,
-                `${visibleEnabledCount} enabled`,
-                `${visibleEnabledCount} 個已啟用`,
-              )}
+              {t("flags.state.enabled", locale)} · {visibleEnabledCount}
+            </Pill>
+            <Pill theme={theme} tone="neutral">
+              {t("flags.state.disabled", locale)} · {visibleDisabledCount}
             </Pill>
             <Pill theme={theme} tone="warn">
-              {copy(
-                locale,
-                `${partialCount} mid-rollout`,
-                `${partialCount} 筆 mid-rollout`,
-              )}
+              {t("flags.midRollout", locale)} · {partialCount}
             </Pill>
-            <Pill theme={theme} tone="info">
-              {copy(
-                locale,
-                `${tenantScopedCount} tenant rows`,
-                `${tenantScopedCount} 筆租戶列`,
-              )}
-            </Pill>
-            <span style={codeStyle}>GET /api/ops/feature-flags</span>
+            <span style={codeStyle}>GET /api/ops/feature-flags · T6</span>
           </div>
 
           {emptyState ? (
@@ -1463,6 +1508,23 @@ export default async function FeatureFlagsPage({
           ) : (
             <Table theme={theme} columns={columns} rows={rows} />
           )}
+          <div style={boundaryPanelStyle}>
+            <div style={boundaryTitleStyle}>
+              {t("flags.registryTitle", locale)}
+            </div>
+            <span style={secondaryTextStyle}>
+              {t("flags.registrySubtitle", locale)}
+            </span>
+            <span style={secondaryTextStyle}>
+              {t("flags.registryFooterV2", locale)}
+            </span>
+            <span style={secondaryTextStyle}>
+              {t("flags.boundary.readOnly", locale)}
+            </span>
+            <span style={secondaryTextStyle}>
+              {t("flags.boundary.deepLink", locale)}
+            </span>
+          </div>
         </Card>
       </div>
     </>
