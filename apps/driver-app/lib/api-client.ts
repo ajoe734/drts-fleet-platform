@@ -14,10 +14,12 @@ import {
   createPublicClient,
 } from "@drts/api-client";
 import type {
+  CreateIncidentCommand,
   DriverCompleteTaskCommand,
   DriverDeviceProvisioningSession,
   DriverTaskRecord,
   ForwardedDriverActionResponse,
+  IncidentRecord,
 } from "@drts/contracts";
 
 type DriverExpoExtra = {
@@ -39,6 +41,9 @@ const DEV_DRIVER_ID: string | undefined =
 const DRIVER_DEVICE_ID_KEY = "drts.driver.deviceId";
 const DRIVER_SESSION_KEY = "drts.driver.session";
 const DRIVER_PENDING_TASK_COMPLETION_KEY = "drts.driver.pendingTaskCompletion";
+const DRIVER_PENDING_INCIDENT_SUBMISSION_KEY =
+  "drts.driver.pendingIncidentSubmission";
+const DRIVER_SOS_ACKNOWLEDGEMENT_KEY = "drts.driver.sosAcknowledgement";
 
 const publicClient = createPublicClient(API_URL);
 
@@ -54,6 +59,22 @@ export type PendingDriverTaskCompletion = {
   command: DriverCompleteTaskCommand;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PendingDriverIncidentSubmission = {
+  requestId: string;
+  command: CreateIncidentCommand;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DriverSosAcknowledgement = {
+  incidentId: string;
+  createdAt: string;
+  relatedOrderId?: string | null;
+  status: "submitted" | "queued";
+  message: string;
+  dismissedAt: string | null;
 };
 
 function createLocalId(prefix: string): string {
@@ -249,6 +270,80 @@ async function clearPendingDriverTaskCompletion(): Promise<void> {
   await SecureStore.deleteItemAsync(DRIVER_PENDING_TASK_COMPLETION_KEY);
 }
 
+async function persistPendingDriverIncidentSubmission(
+  pending: PendingDriverIncidentSubmission,
+): Promise<void> {
+  await SecureStore.setItemAsync(
+    DRIVER_PENDING_INCIDENT_SUBMISSION_KEY,
+    JSON.stringify(pending),
+  );
+}
+
+async function loadPendingDriverIncidentSubmission(): Promise<PendingDriverIncidentSubmission | null> {
+  const raw = await SecureStore.getItemAsync(
+    DRIVER_PENDING_INCIDENT_SUBMISSION_KEY,
+  );
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const pending = JSON.parse(raw) as PendingDriverIncidentSubmission;
+    if (
+      !pending.requestId?.trim() ||
+      !pending.command?.title?.trim() ||
+      !pending.command?.description?.trim() ||
+      !pending.command?.category ||
+      !pending.command?.severity ||
+      !pending.command?.reportedBy?.trim()
+    ) {
+      throw new Error("Pending driver incident payload is incomplete.");
+    }
+
+    return pending;
+  } catch {
+    await SecureStore.deleteItemAsync(DRIVER_PENDING_INCIDENT_SUBMISSION_KEY);
+    return null;
+  }
+}
+
+async function clearPendingDriverIncidentSubmission(): Promise<void> {
+  await SecureStore.deleteItemAsync(DRIVER_PENDING_INCIDENT_SUBMISSION_KEY);
+}
+
+async function persistDriverSosAcknowledgement(
+  acknowledgement: DriverSosAcknowledgement,
+): Promise<void> {
+  await SecureStore.setItemAsync(
+    DRIVER_SOS_ACKNOWLEDGEMENT_KEY,
+    JSON.stringify(acknowledgement),
+  );
+}
+
+async function loadDriverSosAcknowledgement(): Promise<DriverSosAcknowledgement | null> {
+  const raw = await SecureStore.getItemAsync(DRIVER_SOS_ACKNOWLEDGEMENT_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const acknowledgement = JSON.parse(raw) as DriverSosAcknowledgement;
+    if (
+      !acknowledgement.incidentId?.trim() ||
+      !acknowledgement.createdAt?.trim() ||
+      !acknowledgement.status ||
+      !acknowledgement.message?.trim()
+    ) {
+      throw new Error("SOS acknowledgement payload is incomplete.");
+    }
+
+    return acknowledgement;
+  } catch {
+    await SecureStore.deleteItemAsync(DRIVER_SOS_ACKNOWLEDGEMENT_KEY);
+    return null;
+  }
+}
+
 async function persistSession(session: DriverDeviceProvisioningSession) {
   provisionedSession = session;
   await SecureStore.setItemAsync(DRIVER_SESSION_KEY, JSON.stringify(session));
@@ -371,6 +466,10 @@ export async function getPendingDriverTaskCompletion(): Promise<PendingDriverTas
   return loadPendingDriverTaskCompletion();
 }
 
+export async function getPendingDriverIncidentSubmission(): Promise<PendingDriverIncidentSubmission | null> {
+  return loadPendingDriverIncidentSubmission();
+}
+
 export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRecord | null> {
   const pending = await loadPendingDriverTaskCompletion();
   if (!pending) {
@@ -394,6 +493,31 @@ export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRec
 
     if (isTerminalDriverCompletionError(error)) {
       await clearPendingDriverTaskCompletion();
+    }
+
+    throw error;
+  }
+}
+
+export async function replayPendingDriverIncidentSubmission(): Promise<IncidentRecord | null> {
+  const pending = await loadPendingDriverIncidentSubmission();
+  if (!pending) {
+    return null;
+  }
+
+  try {
+    const incident = await getDriverClient().post<IncidentRecord>(
+      "/api/incidents",
+      {
+        body: pending.command,
+        headers: getReplayHeaders(pending.requestId),
+      },
+    );
+    await clearPendingDriverIncidentSubmission();
+    return incident;
+  } catch (error) {
+    if (await recoverDriverSessionFromApiError(error)) {
+      throw error;
     }
 
     throw error;
@@ -447,6 +571,51 @@ export async function submitDriverTaskCompletion(
   }
 
   return task;
+}
+
+export async function submitDriverIncident(
+  command: CreateIncidentCommand,
+): Promise<IncidentRecord> {
+  const now = new Date().toISOString();
+  await persistPendingDriverIncidentSubmission({
+    requestId: createLocalId("driver-incident"),
+    command,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const incident = await replayPendingDriverIncidentSubmission();
+  if (!incident) {
+    throw new Error("Pending driver incident disappeared before replay.");
+  }
+
+  return incident;
+}
+
+export async function getDriverSosAcknowledgement(): Promise<DriverSosAcknowledgement | null> {
+  return loadDriverSosAcknowledgement();
+}
+
+export async function saveDriverSosAcknowledgement(
+  acknowledgement: DriverSosAcknowledgement,
+): Promise<void> {
+  await persistDriverSosAcknowledgement(acknowledgement);
+}
+
+export async function dismissDriverSosAcknowledgement(): Promise<void> {
+  const current = await loadDriverSosAcknowledgement();
+  if (!current) {
+    return;
+  }
+
+  await persistDriverSosAcknowledgement({
+    ...current,
+    dismissedAt: new Date().toISOString(),
+  });
+}
+
+export async function clearDriverSosAcknowledgement(): Promise<void> {
+  await SecureStore.deleteItemAsync(DRIVER_SOS_ACKNOWLEDGEMENT_KEY);
 }
 
 export function getDriverClient(): ApiClient {

@@ -119,7 +119,14 @@ export default function RootLayout() {
         <Stack.Screen name="trip" options={{ title: driverRouteTitles.trip }} />
         <Stack.Screen
           name="incident"
-          options={{ title: driverRouteTitles.incident }}
+          options={{
+            title: driverRouteTitles.incident,
+            presentation: "transparentModal",
+            animation: "slide_from_bottom",
+            contentStyle: {
+              backgroundColor: "transparent",
+            },
+          }}
         />
         <Stack.Screen
           name="earnings"

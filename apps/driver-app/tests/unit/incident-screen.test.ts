@@ -1,22 +1,30 @@
 import React from "react";
 import { act, create } from "react-test-renderer";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
-  confirmDangerAction: vi.fn(),
+  useLocalSearchParams: vi.fn(() => ({})),
   isFeatureEnabled: vi.fn(),
   listUnifiedDriverTasks: vi.fn(),
   listDriverTasks: vi.fn(),
-  createIncident: vi.fn(),
-  updateIncident: vi.fn(),
+  getPendingDriverIncidentSubmission: vi.fn(),
+  replayPendingDriverIncidentSubmission: vi.fn(),
+  submitDriverIncident: vi.fn(),
+  saveDriverSosAcknowledgement: vi.fn(),
+}));
+
+vi.mock("@expo/vector-icons", () => ({
+  Ionicons: "Ionicons",
 }));
 
 vi.mock("react-native", () => ({
   ActivityIndicator: "ActivityIndicator",
-  StyleSheet: { create: <T>(styles: T) => styles },
+  Pressable: "Pressable",
+  ScrollView: "ScrollView",
+  StyleSheet: { create: <T>(styles: T) => styles, absoluteFillObject: {} },
   Text: "Text",
-  TouchableOpacity: "TouchableOpacity",
+  TextInput: "TextInput",
   View: "View",
 }));
 
@@ -24,50 +32,37 @@ vi.mock("expo-router", () => ({
   useRouter: () => ({
     replace: mocks.replace,
   }),
+  useLocalSearchParams: () => mocks.useLocalSearchParams(),
 }));
 
-vi.mock("@/components/ui/ActionButton", () => ({
-  ActionButton: (props: Record<string, unknown>) =>
-    React.createElement("ActionButton", props),
-}));
-
-vi.mock("@/components/ui/AppScreen", () => ({
-  AppScreen: (props: { children?: React.ReactNode }) =>
-    React.createElement("AppScreen", props, props.children),
-}));
-
-vi.mock("@/components/ui/BottomActionBar", () => ({
-  BottomActionBar: (props: { children?: React.ReactNode }) =>
-    React.createElement("BottomActionBar", props, props.children),
-}));
-
-vi.mock("@/components/ui/EmptyState", () => ({
-  EmptyState: (props: Record<string, unknown>) =>
-    React.createElement("EmptyState", props),
-}));
-
-vi.mock("@/components/ui/ErrorBanner", () => ({
-  ErrorBanner: (props: Record<string, unknown>) =>
-    React.createElement("ErrorBanner", props),
-}));
-
-vi.mock("@/components/ui/FormField", () => ({
-  FormField: (props: Record<string, unknown>) =>
-    React.createElement("FormField", props),
-}));
-
-vi.mock("@/components/ui/PageHeader", () => ({
+vi.mock("@/components/canvas-primitives", () => ({
+  Banner: (props: Record<string, unknown>) =>
+    React.createElement("Banner", props as any, (props as any).children),
+  Btn: (props: Record<string, unknown>) =>
+    React.createElement("Btn", props as any, (props as any).children),
+  Card: (props: Record<string, unknown>) =>
+    React.createElement("Card", props as any, (props as any).children),
+  Field: (props: Record<string, unknown>) =>
+    React.createElement("Field", props as any, (props as any).children),
   PageHeader: (props: Record<string, unknown>) =>
-    React.createElement("PageHeader", props),
-}));
-
-vi.mock("@/components/ui/StatusChip", () => ({
-  StatusChip: (props: Record<string, unknown>) =>
-    React.createElement("StatusChip", props),
-}));
-
-vi.mock("@/components/ui/confirm-danger-action", () => ({
-  confirmDangerAction: mocks.confirmDangerAction,
+    React.createElement("PageHeader", props as any, (props as any).children),
+  Pill: (props: Record<string, unknown>) =>
+    React.createElement("Pill", props as any, (props as any).children),
+  driverCanvasTheme: {
+    danger: "#ef4444",
+    warn: "#f59e0b",
+    accent: "#7BC0FF",
+    bg: "#0f172a",
+    border: "#334155",
+    borderStrong: "#64748b",
+    dangerBg: "#450a0a",
+    dangerBorder: "#7f1d1d",
+    surface: "#111827",
+    bgRaised: "#1f2937",
+    text: "#ffffff",
+    textMuted: "#94a3b8",
+    textDim: "#64748b",
+  },
 }));
 
 vi.mock("@/lib/api-client", () => ({
@@ -75,9 +70,12 @@ vi.mock("@/lib/api-client", () => ({
     isFeatureEnabled: mocks.isFeatureEnabled,
     listUnifiedDriverTasks: mocks.listUnifiedDriverTasks,
     listDriverTasks: mocks.listDriverTasks,
-    createIncident: mocks.createIncident,
-    updateIncident: mocks.updateIncident,
   }),
+  getPendingDriverIncidentSubmission: mocks.getPendingDriverIncidentSubmission,
+  replayPendingDriverIncidentSubmission:
+    mocks.replayPendingDriverIncidentSubmission,
+  saveDriverSosAcknowledgement: mocks.saveDriverSosAcknowledgement,
+  submitDriverIncident: mocks.submitDriverIncident,
 }));
 
 import IncidentScreen from "../../app/incident";
@@ -87,148 +85,110 @@ async function flushEffects() {
   await Promise.resolve();
 }
 
-function findActionButton(renderer: any, title: string) {
-  return renderer.root.find(
-    (node: any) => node.type === "ActionButton" && node.props.title === title,
-  );
-}
-
-function findLongPressButton(renderer: any) {
+function findHoldButton(renderer: any) {
   return renderer.root.find(
     (node: any) =>
-      node.type === "TouchableOpacity" &&
-      node.props.accessibilityLabel === "長按確認求援",
+      node.type === "Pressable" &&
+      node.props.accessibilityLabel === "按住 2 秒送出 SOS",
   );
 }
 
 describe("IncidentScreen", () => {
   beforeEach(() => {
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
     mocks.replace.mockReset();
-    mocks.confirmDangerAction.mockReset();
+    mocks.useLocalSearchParams.mockReset().mockReturnValue({});
     mocks.isFeatureEnabled.mockReset().mockResolvedValue(true);
     mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
     mocks.listDriverTasks.mockReset().mockResolvedValue([]);
-    mocks.createIncident
+    mocks.getPendingDriverIncidentSubmission
       .mockReset()
-      .mockResolvedValue({ incidentId: "INC-001" });
-    mocks.updateIncident.mockReset().mockResolvedValue(undefined);
+      .mockResolvedValue(null);
+    mocks.replayPendingDriverIncidentSubmission
+      .mockReset()
+      .mockResolvedValue(null);
+    mocks.submitDriverIncident.mockReset().mockResolvedValue({
+      incidentId: "INC-001",
+      relatedOrderId: null,
+    });
+    mocks.saveDriverSosAcknowledgement.mockReset().mockResolvedValue(undefined);
+    let now = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.spyOn(global, "setInterval").mockImplementation((callback: any) => {
+      now = 1000;
+      callback();
+      now = 2000;
+      callback();
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    });
+    vi.spyOn(global, "clearInterval").mockImplementation(() => undefined);
   });
 
-  it("requires long press plus confirmation before creating a critical SOS incident", async () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("submits SOS only after a full 2-second hold", async () => {
     let renderer: any;
 
     await act(async () => {
       renderer = create(React.createElement(IncidentScreen));
       await flushEffects();
+      await flushEffects();
     });
 
-    const detailField = renderer.root.findByType("FormField");
+    const detailField = renderer.root.findByType("TextInput");
     await act(async () => {
       detailField.props.onChangeText("乘客情緒激動，需立即支援");
     });
 
-    await act(async () => {
-      findActionButton(renderer, "交通事故").props.onPress();
-    });
+    const holdButton = findHoldButton(renderer);
+    expect(holdButton.props.disabled).toBe(false);
 
     await act(async () => {
-      findLongPressButton(renderer).props.onPress();
-    });
-
-    expect(mocks.confirmDangerAction).not.toHaveBeenCalled();
-    expect(mocks.createIncident).not.toHaveBeenCalled();
-
-    await act(async () => {
-      findLongPressButton(renderer).props.onLongPress();
-    });
-
-    expect(mocks.confirmDangerAction).toHaveBeenCalledTimes(1);
-
-    const options = mocks.confirmDangerAction.mock.calls[0]?.[0] as {
-      title: string;
-      confirmLabel: string;
-      cancelLabel: string;
-      onConfirm: () => void;
-    };
-
-    expect(options.title).toBe("確認送出 SOS");
-    expect(options.confirmLabel).toBe("確認送出");
-    expect(options.cancelLabel).toBe("取消");
-
-    await act(async () => {
-      options.onConfirm();
+      holdButton.props.onPressIn();
+      holdButton.props.onPressOut?.();
+      await flushEffects();
       await flushEffects();
     });
 
-    expect(mocks.createIncident).toHaveBeenCalledWith({
+    expect(mocks.submitDriverIncident).toHaveBeenCalledWith({
       title: "司機 SOS 緊急通報",
-      description: "事件情況：交通事故\n乘客情緒激動，需立即支援",
+      description: "乘客情緒激動，需立即支援",
       category: "safety",
       severity: "critical",
       reportedBy: "driver",
+      occurredAt: expect.any(String),
     });
-    expect(mocks.updateIncident).toHaveBeenCalledWith("INC-001", {
-      escalationTarget: "safety_officer",
+    expect(mocks.saveDriverSosAcknowledgement).toHaveBeenCalledWith({
+      incidentId: "INC-001",
+      createdAt: expect.any(String),
+      relatedOrderId: null,
+      status: "submitted",
+      message: "SOS 已送出，安全官與派車台會收到持續顯示的處理提醒。",
+      dismissedAt: null,
     });
     expect(mocks.replace).toHaveBeenCalledWith("/trip");
   });
 
-  it("preserves forwarded task context in the SOS incident payload", async () => {
-    mocks.listUnifiedDriverTasks.mockResolvedValue([
-      {
-        taskId: "task-forwarded-001",
-        orderId: "mirror-001",
-        orderDomain: "forwarded",
-        sourcePlatform: "grab",
-        platformDisplayName: "Grab",
-        externalOrderId: "ext-777",
-        nativeStatus: "confirmed_by_platform",
-        localStatus: "accepted",
-        driverActionState: "in_progress",
-        allowedActions: ["depart"],
-        routeLocked: true,
-        fareAuthority: "external_platform",
-        settlementAuthority: "external_platform",
-        driverPayoutAuthority: "external_platform",
-        requiresManualFallback: false,
-        requiresReauth: false,
-        syncIssueSummary: null,
-        blockingReason: null,
-        pickupSummary: null,
-        dropoffSummary: null,
-        deadlineAt: null,
-        updatedAt: "2026-05-08T03:40:00.000Z",
-      },
-    ]);
+  it("renders the requested emptyReason variant from deep-link params", async () => {
+    mocks.useLocalSearchParams.mockReturnValue({
+      emptyReason: "driver_not_eligible",
+      entry: "cockpit",
+    });
 
     let renderer: any;
 
     await act(async () => {
       renderer = create(React.createElement(IncidentScreen));
       await flushEffects();
-    });
-
-    await act(async () => {
-      findLongPressButton(renderer).props.onLongPress();
-    });
-
-    const options = mocks.confirmDangerAction.mock.calls[0]?.[0] as {
-      onConfirm: () => void;
-    };
-
-    await act(async () => {
-      options.onConfirm();
       await flushEffects();
     });
 
-    expect(mocks.createIncident).toHaveBeenCalledWith({
-      title: "司機 SOS 緊急通報",
-      description:
-        "已由司機 App 送出 SOS 緊急通報。\n\n[SOS 平台任務上下文]\n來源平台：Grab（grab）\n本地鏡像訂單：mirror-001\n外部訂單：ext-777\n目前平台狀態：平台已確認",
-      category: "safety",
-      severity: "critical",
-      relatedOrderId: "mirror-001",
-      reportedBy: "driver",
-    });
+    const emptyStateCard = renderer.root.find(
+      (node: any) =>
+        node.type === "Card" && node.props.title === "司機目前不在可接單資格內",
+    );
+    expect(emptyStateCard).toBeTruthy();
   });
 });
