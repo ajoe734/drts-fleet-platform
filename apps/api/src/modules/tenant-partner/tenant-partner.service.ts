@@ -109,7 +109,7 @@ import type {
   WebhookEventPayload,
   WebhookDeliveryRecord,
   WebhookRetryPolicyRecord,
-  type RefreshTier,
+  RefreshTier,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
