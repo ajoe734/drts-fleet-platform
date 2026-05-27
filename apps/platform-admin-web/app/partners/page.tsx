@@ -41,6 +41,7 @@ import {
 } from "@drts/ui-web";
 
 type PartnerFilter = "all" | "active" | "inactive" | "revoked" | "attention";
+type PartnerEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
 type PartnerRow = PartnerChannelEntryRecord & ActionableResourceRuntimeFields;
 type PartnerTableRow = PartnerRow & Record<string, unknown>;
 type PartnerMutationKind = "create" | "activate" | "deactivate" | "revoke";
@@ -74,6 +75,32 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
+const kpiGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+} satisfies CSSProperties;
+
+const kpiCardStyle = (tone: "platform" | "warn" | "danger"): CSSProperties => ({
+  borderRadius: 20,
+  border: `1px solid ${
+    tone === "danger"
+      ? theme.dangerBorder
+      : tone === "warn"
+        ? theme.warnBorder
+        : theme.border
+  }`,
+  background:
+    tone === "danger"
+      ? theme.dangerBg
+      : tone === "warn"
+        ? theme.warnBg
+        : theme.bgRaised,
+  padding: 18,
+  display: "grid",
+  gap: 8,
+});
+
 const headerActionsStyle = {
   display: "flex",
   gap: 8,
@@ -94,7 +121,25 @@ const infoBarStyle = {
 const filtersGridStyle = {
   display: "grid",
   gap: 12,
-  gridTemplateColumns: "minmax(220px, 1.6fr) repeat(3, minmax(140px, 1fr))",
+  gridTemplateColumns:
+    "minmax(220px, 1.6fr) repeat(auto-fit, minmax(140px, 1fr))",
+} satisfies CSSProperties;
+
+const filtersCardStyle = {
+  border: `1px solid ${theme.border}`,
+  borderRadius: 18,
+  background: theme.surfaceLo,
+  padding: 16,
+  display: "grid",
+  gap: 14,
+} satisfies CSSProperties;
+
+const filterCardHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap",
 } satisfies CSSProperties;
 
 const inputStyle = (mono = false): CSSProperties => ({
@@ -114,6 +159,21 @@ const toolbarClusterStyle = {
   gap: 8,
   flexWrap: "wrap",
   alignItems: "center",
+} satisfies CSSProperties;
+
+const watchlistGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+} satisfies CSSProperties;
+
+const watchlistCardStyle = {
+  border: `1px solid ${theme.border}`,
+  borderRadius: 18,
+  background: theme.bgRaised,
+  padding: 16,
+  display: "grid",
+  gap: 10,
 } satisfies CSSProperties;
 
 const rosterHeaderStyle = {
@@ -170,6 +230,23 @@ const secondaryLinkStyle = {
   color: theme.textMuted,
   fontSize: 11.5,
   textDecoration: "none",
+} satisfies CSSProperties;
+
+const textButtonStyle = {
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  color: theme.textMuted,
+  fontSize: 11.5,
+  fontWeight: 600,
+  cursor: "pointer",
+} satisfies CSSProperties;
+
+const linkRailStyle = {
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+  alignItems: "center",
 } satisfies CSSProperties;
 
 const chipButtonStyle = (disabled: boolean): CSSProperties => ({
@@ -398,7 +475,14 @@ function statusTone(
   }
 }
 
-function emptyTone(reason: EmptyReason): "danger" | "warn" | "neutral" {
+function toPartnerEmptyReason(reason: EmptyReason): PartnerEmptyReason {
+  if (reason === "driver_not_eligible") {
+    return "fetch_failed";
+  }
+  return reason;
+}
+
+function emptyTone(reason: PartnerEmptyReason): "danger" | "warn" | "neutral" {
   switch (reason) {
     case "fetch_failed":
       return "danger";
@@ -407,6 +491,25 @@ function emptyTone(reason: EmptyReason): "danger" | "warn" | "neutral" {
       return "warn";
     default:
       return "neutral";
+  }
+}
+
+function emptyReasonEyebrow(reason: PartnerEmptyReason) {
+  switch (reason) {
+    case "no_data":
+      return "Roster empty";
+    case "not_provisioned":
+      return "Provisioning gap";
+    case "fetch_failed":
+      return "Refresh failed";
+    case "permission_denied":
+      return "Access boundary";
+    case "external_unavailable":
+      return "Upstream dependency";
+    case "filtered_empty":
+      return "Filter result";
+    default:
+      return "Empty state";
   }
 }
 
@@ -482,6 +585,38 @@ function humanizeActionLabel(action: string) {
     .replace(/\b\w/g, (segment) => segment.toUpperCase());
 }
 
+function buildAuditHref(requestId?: string | null) {
+  const query = new URLSearchParams();
+  if (requestId?.trim()) {
+    query.set("requestId", requestId.trim());
+  }
+  const suffix = query.toString();
+  return suffix ? `/audit?${suffix}` : "/audit";
+}
+
+function crossAppLinkLabel(
+  route: string,
+  targetApp: string,
+  fallbackLabel: string,
+  copy: {
+    openAudit: string;
+    openOps: string;
+    openTenant: string;
+    openExternal: string;
+  },
+) {
+  if (route.startsWith("/audit")) {
+    return copy.openAudit;
+  }
+  if (targetApp === "ops-console") {
+    return copy.openOps;
+  }
+  if (targetApp === "tenant-console") {
+    return copy.openTenant;
+  }
+  return fallbackLabel || copy.openExternal;
+}
+
 export default function PartnersPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -502,6 +637,7 @@ export default function PartnersPage() {
   const [actionReason, setActionReason] = useState("");
   const [actionReceipt, setActionReceipt] =
     useState<PartnerActionReceiptState | null>(null);
+  const [showFilters, setShowFilters] = useState(true);
   const [filter, setFilter] = useState<PartnerFilter>("all");
   const [search, setSearch] = useState("");
   const [tenantFilter, setTenantFilter] = useState("all");
@@ -523,6 +659,11 @@ export default function PartnersPage() {
           tenantLabel: "Tenant",
           typeLabel: "Type",
           statusLabel: "Status",
+          endpointLabel: "Endpoint",
+          filtersTitle: "Filters",
+          filtersSubtitle:
+            "Filter by tenant, type, status, or search term before drilling into a partner entry.",
+          jumpToFilters: "Filters",
           searchPlaceholder: "Search entry slug, tenant, program, bank code…",
           refresh: "Refresh",
           create: "Create entry",
@@ -534,6 +675,20 @@ export default function PartnersPage() {
             "Tenant mapping, dispatch subtype, auth posture, readiness, and cross-app inspection in one governance table.",
           rosterSummary:
             "List CTAs are driven by availableActions. Inactive entries and readiness gaps stay visibly flagged.",
+          kpiActiveLabel: "Active entries",
+          kpiAttentionLabel: "Needs attention",
+          kpiRevokedLabel: "Revoked entries",
+          watchlistTitle: "Readiness watchlist",
+          watchlistSubtitle:
+            "Keep inactive, revoked, and readiness-gap entries in a single governance lane before opening detail.",
+          watchlistEmpty:
+            "No watchlist entries right now. The roster is active and readiness-complete.",
+          watchlistOpen: "Open detail",
+          crossAppLabel: "Cross-app",
+          openAudit: "Audit",
+          openOps: "Ops",
+          openTenant: "Tenant",
+          openExternal: "Open link",
           openDetail: "Open detail",
           clearFilters: "Clear filters",
           readOnly: "Read-only",
@@ -550,6 +705,9 @@ export default function PartnersPage() {
           inactiveRisk: "Inactive risk",
           auditPending:
             "Audit trail recorded on the backend. Open audit for the full event.",
+          totalCountLabel: "Total entries",
+          riskCountLabel: "Needs attention",
+          activeFiltersLabel: "Active filters",
           receiptTitle: "Partner action recorded",
           receiptFallback:
             "The partner entry changed and the roster has been refreshed.",
@@ -590,11 +748,10 @@ export default function PartnersPage() {
               title: "No rows match the current filters",
               body: "Clear search and filters to recover the wider roster.",
             },
-            driver_not_eligible: {
-              title: "Unexpected empty reason for platform admin",
-              body: "This driver-specific state should not appear on the platform-admin partners route.",
-            },
-          } satisfies Record<EmptyReason, { title: string; body: string }>,
+          } satisfies Record<
+            PartnerEmptyReason,
+            { title: string; body: string }
+          >,
         }
       : {
           title: "合作夥伴 entry",
@@ -607,6 +764,11 @@ export default function PartnersPage() {
           tenantLabel: "租戶",
           typeLabel: "類型",
           statusLabel: "狀態",
+          endpointLabel: "端點",
+          filtersTitle: "篩選",
+          filtersSubtitle:
+            "先以 tenant、type、status 與搜尋條件縮小範圍，再往 partner entry drill down。",
+          jumpToFilters: "篩選",
           searchPlaceholder: "搜尋 entry slug、tenant、program、bank code…",
           refresh: "重新整理",
           create: "建立 entry",
@@ -618,6 +780,20 @@ export default function PartnersPage() {
             "tenant 對應、dispatch subtype、auth posture、readiness 與跨 app 檢視集中在同一張治理表。",
           rosterSummary:
             "清單級 CTA 由 availableActions 決定；inactive 與 readiness 缺口會持續顯示風險標記。",
+          kpiActiveLabel: "啟用中的 entries",
+          kpiAttentionLabel: "待處理",
+          kpiRevokedLabel: "已撤銷",
+          watchlistTitle: "Readiness watchlist",
+          watchlistSubtitle:
+            "先把 inactive、revoked 與 readiness 缺口條目集中在同一條治理清單，再進入 detail。",
+          watchlistEmpty:
+            "目前沒有 watchlist 項目，代表 roster 已啟用且 readiness 完整。",
+          watchlistOpen: "查看詳情",
+          crossAppLabel: "跨 app",
+          openAudit: "Audit",
+          openOps: "Ops",
+          openTenant: "Tenant",
+          openExternal: "開啟連結",
           openDetail: "查看詳情",
           clearFilters: "清除篩選",
           readOnly: "唯讀",
@@ -632,6 +808,9 @@ export default function PartnersPage() {
           viewAudit: "查看 audit",
           inactiveRisk: "停用風險",
           auditPending: "後端已記錄稽核事件；可前往 audit 查看完整紀錄。",
+          totalCountLabel: "總筆數",
+          riskCountLabel: "待處理",
+          activeFiltersLabel: "已啟用篩選",
           receiptTitle: "Partner 動作已記錄",
           receiptFallback: "partner entry 已變更，且 roster 已重新整理。",
           riskCopy: {
@@ -671,11 +850,10 @@ export default function PartnersPage() {
               title: "目前篩選條件沒有任何結果",
               body: "清除搜尋與篩選即可回到完整 roster。",
             },
-            driver_not_eligible: {
-              title: "這是 platform admin 不應出現的 empty reason",
-              body: "此狀態屬於 driver-app 專用；若出現代表 contract 或後端有偏差。",
-            },
-          } satisfies Record<EmptyReason, { title: string; body: string }>,
+          } satisfies Record<
+            PartnerEmptyReason,
+            { title: string; body: string }
+          >,
         };
 
   const navItems = useMemo(() => buildPlatformNav(locale), [locale]);
@@ -727,6 +905,29 @@ export default function PartnersPage() {
       attention: entries.filter(partnerNeedsAttention).length,
     }),
     [entries],
+  );
+
+  const watchlistEntries = useMemo(
+    () =>
+      entries
+        .filter((entry) => partnerNeedsAttention(entry))
+        .sort((left, right) => {
+          const leftScore =
+            (left.status === "revoked"
+              ? 3
+              : left.status === "inactive"
+                ? 2
+                : 0) + readinessSummary(left, t).gaps.length;
+          const rightScore =
+            (right.status === "revoked"
+              ? 3
+              : right.status === "inactive"
+                ? 2
+                : 0) + readinessSummary(right, t).gaps.length;
+          return rightScore - leftScore;
+        })
+        .slice(0, 6),
+    [entries, t],
   );
 
   const tenantOptions = useMemo(
@@ -802,6 +1003,9 @@ export default function PartnersPage() {
       }
     );
   }, [emptyState, entries.length, loading, visibleEntries.length]);
+  const displayEmptyReason = effectiveEmptyState
+    ? toPartnerEmptyReason(effectiveEmptyState.reason)
+    : null;
 
   const refreshAction = findAction(listActions, ["refresh", "reload"]);
   const createAction = findAction(listActions, ["create", "new"]);
@@ -861,7 +1065,7 @@ export default function PartnersPage() {
             requestId !== null
               ? `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"} • request ${requestId}.${reasonSuffix}`
               : `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"}. ${copy.receiptFallback}${reasonSuffix}`,
-          href: "/audit",
+          href: buildAuditHref(requestId),
           hrefLabel: copy.viewAudit,
         });
       } catch (cause: unknown) {
@@ -1003,6 +1207,176 @@ export default function PartnersPage() {
           />
         ) : null}
 
+        <div style={kpiGridStyle}>
+          <div style={kpiCardStyle("platform")}>
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              {copy.kpiActiveLabel}
+            </span>
+            <strong style={{ fontSize: 32, lineHeight: 1 }}>
+              {counts.active}
+            </strong>
+            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+              {locale === "en"
+                ? `${counts.all} total entries with ${counts.inactive} inactive still visible for governance.`
+                : `${counts.all} 筆 entries 中，${counts.inactive} 筆停用仍保留在治理清單。`}
+            </span>
+          </div>
+          <div style={kpiCardStyle("warn")}>
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              {copy.kpiAttentionLabel}
+            </span>
+            <strong style={{ fontSize: 32, lineHeight: 1 }}>
+              {counts.attention}
+            </strong>
+            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+              {locale === "en"
+                ? "Readiness gaps, inactive posture, or missing partner runtime signals."
+                : "包含 readiness 缺口、停用狀態或 partner runtime 訊號不完整。"}
+            </span>
+          </div>
+          <div style={kpiCardStyle("danger")}>
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              {copy.kpiRevokedLabel}
+            </span>
+            <strong style={{ fontSize: 32, lineHeight: 1 }}>
+              {counts.revoked}
+            </strong>
+            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+              {locale === "en"
+                ? "Revoked entries remain visible for audit lineage and deep-link investigation."
+                : "已撤銷 entries 仍需保留，以支援 audit lineage 與 deep link 調查。"}
+            </span>
+          </div>
+        </div>
+
+        {counts.attention > 0 ? (
+          <CanvasBanner
+            theme={theme}
+            tone="warn"
+            title={copy.watchlistTitle}
+            body={
+              locale === "en"
+                ? `${counts.attention} entries still need readiness or lifecycle follow-up before activation decisions.`
+                : `${counts.attention} 筆 entries 在 activation 決策前仍需補 readiness 或 lifecycle 後續處理。`
+            }
+          />
+        ) : null}
+
+        <CanvasCard
+          theme={theme}
+          title={copy.watchlistTitle}
+          subtitle={copy.watchlistSubtitle}
+        >
+          {watchlistEntries.length > 0 ? (
+            <div style={watchlistGridStyle}>
+              {watchlistEntries.map((entry) => {
+                const readiness = readinessSummary(entry, t);
+                const crossLinks = (entry.resourceLinks ?? []).filter(
+                  (link) => link.targetApp !== "platform-admin",
+                );
+                return (
+                  <div key={entry.entrySlug} style={watchlistCardStyle}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        alignItems: "flex-start",
+                      }}
+                    >
+                      <div style={entryCellStyle}>
+                        <span
+                          style={entryAvatarStyle(
+                            entry.themeAccent?.trim() || theme.accent,
+                          )}
+                        >
+                          {entry.partnerCode.slice(0, 2).toUpperCase() || "PE"}
+                        </span>
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <strong style={{ fontSize: 13.5 }}>
+                            {entry.displayName}
+                          </strong>
+                          <span style={monoTextStyle}>/{entry.entrySlug}</span>
+                          <span
+                            style={{ color: theme.textMuted, fontSize: 12 }}
+                          >
+                            {entry.tenantId} · {entry.programId}
+                          </span>
+                        </div>
+                      </div>
+                      <CanvasPill
+                        theme={theme}
+                        tone={statusTone(entry.status)}
+                        dot
+                      >
+                        {entry.status}
+                      </CanvasPill>
+                    </div>
+                    <div style={toolbarClusterStyle}>
+                      <CanvasPill
+                        theme={theme}
+                        tone={readiness.tone}
+                        dot={readiness.gaps.length > 0}
+                      >
+                        {readiness.label}
+                      </CanvasPill>
+                      <CanvasPill theme={theme} tone="neutral">
+                        {formatPlatformCodeLabel(locale, entry.authMode)}
+                      </CanvasPill>
+                      <CanvasPill theme={theme} tone="neutral">
+                        {formatPlatformCodeLabel(locale, entry.eligibilityMode)}
+                      </CanvasPill>
+                    </div>
+                    <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                      {readiness.gaps.length > 0
+                        ? readiness.gaps
+                            .slice(0, 2)
+                            .map((gap) => gap.label)
+                            .join(" · ")
+                        : locale === "en"
+                          ? "No readiness gaps detected."
+                          : "目前沒有 readiness 缺口。"}
+                    </span>
+                    <div style={linkRailStyle}>
+                      <Link
+                        href={`/partners/${entry.entrySlug}`}
+                        style={secondaryLinkStyle}
+                      >
+                        {copy.watchlistOpen}
+                      </Link>
+                      {crossLinks.map((link) => (
+                        <a
+                          key={`${entry.entrySlug}:${link.targetApp}:${link.route}`}
+                          href={link.route}
+                          target={
+                            link.openMode === "new_tab" ? "_blank" : undefined
+                          }
+                          rel={
+                            link.openMode === "new_tab"
+                              ? "noreferrer noopener"
+                              : undefined
+                          }
+                          style={secondaryLinkStyle}
+                        >
+                          {crossAppLinkLabel(
+                            link.route,
+                            link.targetApp,
+                            link.label,
+                            copy,
+                          )}{" "}
+                          {link.openMode === "new_tab" ? "↗" : ""}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={infoBarStyle}>{copy.watchlistEmpty}</div>
+          )}
+        </CanvasCard>
+
         <CanvasCard
           theme={theme}
           title={copy.rosterTitle}
@@ -1060,94 +1434,119 @@ export default function PartnersPage() {
               </div>
             </div>
 
-            <div style={filtersGridStyle}>
-              <label>
-                <div
-                  style={{
-                    marginBottom: 6,
-                    fontSize: 11,
-                    color: theme.textMuted,
-                  }}
-                >
-                  {copy.searchLabel}
+            <div style={filtersCardStyle}>
+              <div style={filterCardHeaderStyle}>
+                <div style={{ display: "grid", gap: 4 }}>
+                  <strong style={{ fontSize: 13 }}>{copy.filtersTitle}</strong>
+                  <span style={filterSummaryStyle}>{copy.filtersSubtitle}</span>
                 </div>
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={copy.searchPlaceholder}
-                  style={inputStyle()}
-                />
-              </label>
-              <label>
-                <div
-                  style={{
-                    marginBottom: 6,
-                    fontSize: 11,
-                    color: theme.textMuted,
-                  }}
+                <button
+                  type="button"
+                  onClick={() => setShowFilters((current) => !current)}
+                  style={textButtonStyle}
                 >
-                  {copy.tenantLabel}
+                  {showFilters
+                    ? locale === "en"
+                      ? "Hide filters"
+                      : "收合篩選"
+                    : copy.jumpToFilters}
+                </button>
+              </div>
+              {showFilters ? (
+                <div style={filtersGridStyle}>
+                  <label>
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        fontSize: 11,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {copy.searchLabel}
+                    </div>
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder={copy.searchPlaceholder}
+                      style={inputStyle()}
+                    />
+                  </label>
+                  <label>
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        fontSize: 11,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {copy.tenantLabel}
+                    </div>
+                    <select
+                      value={tenantFilter}
+                      onChange={(event) => setTenantFilter(event.target.value)}
+                      style={inputStyle(true)}
+                    >
+                      {tenantOptions.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        fontSize: 11,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {copy.typeLabel}
+                    </div>
+                    <select
+                      value={typeFilter}
+                      onChange={(event) => setTypeFilter(event.target.value)}
+                      style={inputStyle(true)}
+                    >
+                      {typeOptions.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        fontSize: 11,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {copy.statusLabel}
+                    </div>
+                    <select
+                      value={filter}
+                      onChange={(event) =>
+                        setFilter(event.target.value as PartnerFilter)
+                      }
+                      style={inputStyle(true)}
+                    >
+                      <option value="all">{copy.filterLabels.all}</option>
+                      <option value="active">{copy.filterLabels.active}</option>
+                      <option value="inactive">
+                        {copy.filterLabels.inactive}
+                      </option>
+                      <option value="attention">
+                        {copy.filterLabels.attention}
+                      </option>
+                      <option value="revoked">
+                        {copy.filterLabels.revoked}
+                      </option>
+                    </select>
+                  </label>
                 </div>
-                <select
-                  value={tenantFilter}
-                  onChange={(event) => setTenantFilter(event.target.value)}
-                  style={inputStyle(true)}
-                >
-                  {tenantOptions.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <div
-                  style={{
-                    marginBottom: 6,
-                    fontSize: 11,
-                    color: theme.textMuted,
-                  }}
-                >
-                  {copy.typeLabel}
-                </div>
-                <select
-                  value={typeFilter}
-                  onChange={(event) => setTypeFilter(event.target.value)}
-                  style={inputStyle(true)}
-                >
-                  {typeOptions.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <div
-                  style={{
-                    marginBottom: 6,
-                    fontSize: 11,
-                    color: theme.textMuted,
-                  }}
-                >
-                  {copy.statusLabel}
-                </div>
-                <select
-                  value={filter}
-                  onChange={(event) =>
-                    setFilter(event.target.value as PartnerFilter)
-                  }
-                  style={inputStyle(true)}
-                >
-                  <option value="all">{copy.filterLabels.all}</option>
-                  <option value="active">{copy.filterLabels.active}</option>
-                  <option value="inactive">{copy.filterLabels.inactive}</option>
-                  <option value="attention">
-                    {copy.filterLabels.attention}
-                  </option>
-                  <option value="revoked">{copy.filterLabels.revoked}</option>
-                </select>
-              </label>
+              ) : null}
             </div>
 
             <div style={toolbarClusterStyle}>
@@ -1212,23 +1611,30 @@ export default function PartnersPage() {
               <div style={infoBarStyle}>{t("partners.loading")}</div>
             ) : effectiveEmptyState ? (
               <div style={emptyStateStyle(effectiveEmptyState.reason)}>
+                {displayEmptyReason ? (
+                  <span
+                    style={{
+                      color: theme.textMuted,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {emptyReasonEyebrow(displayEmptyReason)}
+                  </span>
+                ) : null}
                 <CanvasPill
                   theme={theme}
-                  tone={emptyTone(effectiveEmptyState.reason)}
+                  tone={emptyTone(displayEmptyReason ?? "fetch_failed")}
                 >
-                  {effectiveEmptyState.reason}
+                  {displayEmptyReason ?? effectiveEmptyState.reason}
                 </CanvasPill>
                 <strong>
-                  {
-                    copy.emptyStates[effectiveEmptyState.reason as EmptyReason]
-                      .title
-                  }
+                  {copy.emptyStates[displayEmptyReason ?? "fetch_failed"].title}
                 </strong>
                 <span style={{ color: theme.textMuted, maxWidth: 720 }}>
-                  {
-                    copy.emptyStates[effectiveEmptyState.reason as EmptyReason]
-                      .body
-                  }
+                  {copy.emptyStates[displayEmptyReason ?? "fetch_failed"].body}
                 </span>
                 <span style={{ color: theme.textDim, fontSize: 12 }}>
                   {error || effectiveEmptyState.messageCode}
@@ -1491,7 +1897,12 @@ export default function PartnersPage() {
                                 }
                                 style={secondaryLinkStyle}
                               >
-                                {link.label}{" "}
+                                {crossAppLinkLabel(
+                                  link.route,
+                                  link.targetApp,
+                                  link.label,
+                                  copy,
+                                )}{" "}
                                 {link.openMode === "new_tab" ? "↗" : ""}
                               </a>
                             ))}
