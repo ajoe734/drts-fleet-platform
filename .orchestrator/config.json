@@ -24,7 +24,8 @@
     "heartbeat_warn_after_seconds": 10.0,
     "stall_after_seconds": 300,
     "max_worker_history": 200,
-    "auto_refresh_provider_capabilities": false
+    "auto_refresh_provider_capabilities": false,
+    "git_reconcile_interval_seconds": 600
   },
   "worker_retry": {
     "enabled": true,
