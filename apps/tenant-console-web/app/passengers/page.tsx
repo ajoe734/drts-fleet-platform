@@ -362,6 +362,7 @@ function normalizeEmptyReason(value: string | undefined): EmptyReason | null {
     case "fetch_failed":
     case "permission_denied":
     case "external_unavailable":
+    case "driver_not_eligible":
     case "filtered_empty":
       return value;
     default:
@@ -1003,6 +1004,7 @@ export default async function PassengersPage({
                 <option value="external_unavailable">
                   external_unavailable
                 </option>
+                <option value="driver_not_eligible">driver_not_eligible</option>
                 <option value="filtered_empty">filtered_empty</option>
               </select>
             </label>
