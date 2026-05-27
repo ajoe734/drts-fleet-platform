@@ -433,3 +433,25 @@ export interface TenantRolloutStateMachineRecord {
   lastUpdatedAt: string;
   availableActions: ResourceActionDescriptor[];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ops Console — revenue review runtime surface
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Minimal page-scope runtime envelope for ops revenue review.
+ *
+ * The page consumes multiple domain read models (`orders`, `driver tasks`,
+ * `driver statements`, `forwarder reconciliation`, `settlement matrix`) but
+ * still needs a single backend-owned authority for:
+ *   - page-level `availableActions[]`
+ *   - refresh metadata / cadence
+ *   - whether the surface is provisioned for the current environment
+ *   - whether the current actor is authorized to operate it
+ */
+export interface OpsRevenueReviewRuntime {
+  availableActions: ResourceActionDescriptor[];
+  refreshMetadata: UiRefreshMetadata;
+  authorized: boolean;
+  provisioned: boolean;
+}

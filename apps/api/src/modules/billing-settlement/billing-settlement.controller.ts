@@ -15,6 +15,7 @@ import type {
   CreateReconciliationIssueCommand,
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
+  IdentityContext,
   MarkReimbursementPaidCommand,
   ResolveReconciliationIssueCommand,
   ReopenReconciliationIssueCommand,
@@ -27,6 +28,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { CurrentIdentity } from "../../common/auth";
 import { BillingSettlementService } from "./billing-settlement.service";
 
 @Controller()
@@ -129,6 +131,17 @@ export class BillingSettlementController {
   listSettlementMatrix(@Headers("x-request-id") requestId?: string) {
     const items = this.billingSettlementService.listSettlementMatrix();
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("ops/revenue-review")
+  getOpsRevenueReviewRuntime(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.billingSettlementService.getOpsRevenueReviewRuntime(identity),
+      requestId,
+    );
   }
 
   @Get("driver-fee-plans")

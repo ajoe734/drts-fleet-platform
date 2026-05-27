@@ -8,9 +8,9 @@ import type {
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
   OwnedOrderRecord,
+  OpsRevenueReviewRuntime,
   ReconciliationIssueRecord,
   ResourceActionDescriptor,
-  RefreshTier,
   SettlementMatrixRecord,
   UiHealthEnvelope,
   UiRefreshMetadata,
@@ -54,19 +54,6 @@ import {
 } from "@/lib/ops-empty-state";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
-
-const REVENUE_REFRESH_TIER: RefreshTier = "medium";
-const STALE_AFTER_MS_BY_TIER: Record<RefreshTier, number> = {
-  urgent: 5_000,
-  fast: 3_000,
-  dispatch: 5_000,
-  medium: 15_000,
-  medium_slow: 30_000,
-  slow: 30_000,
-  manual: 60_000,
-};
-const REVENUE_STALE_AFTER_MS =
-  STALE_AFTER_MS_BY_TIER[REVENUE_REFRESH_TIER] ?? 15_000;
 
 const DEFAULT_REVENUE_PERIOD: RevenuePeriod = "today";
 
@@ -209,21 +196,8 @@ function classifyOrderChannel(order: OwnedOrderRecord): string {
   return "platform";
 }
 
-function isoMinusMs(ms: number): string {
-  return new Date(Date.now() - ms).toISOString();
-}
-
 function matchRevenueWindow(timestamp: string, period: RevenuePeriod): boolean {
   return matchesRevenuePeriod(timestamp, period);
-}
-
-function buildRefreshMetadata(anyFetchFailed: boolean): UiRefreshMetadata {
-  return {
-    generatedAt: isoMinusMs(REVENUE_STALE_AFTER_MS / 5),
-    staleAfterMs: REVENUE_STALE_AFTER_MS,
-    dataFreshness: anyFetchFailed ? "degraded" : "fresh",
-    source: anyFetchFailed ? "cache" : "live",
-  };
 }
 
 function dataFreshnessSummary(metadata: UiRefreshMetadata): {
@@ -761,6 +735,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const locale = await getServerLocale();
 
   const [
+    revenueRuntime,
     ordersOutcome,
     tasksOutcome,
     statementsOutcome,
@@ -770,6 +745,9 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     forwarderIssuesOutcome,
     financeIssuesOutcome,
   ] = await Promise.all([
+    client
+      .getOpsRevenueReviewRuntime()
+      .catch<OpsRevenueReviewRuntime | null>(() => null),
     fetchListWithOutcome<OwnedOrderRecord>(() => client.listOrders()),
     fetchListWithOutcome<DriverTaskRecord>(() => client.listDriverTasks()),
     fetchListWithOutcome<DriverStatementRecord>(() =>
@@ -791,13 +769,20 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   ]);
 
   const anyFailed =
+    revenueRuntime === null ||
     !ordersOutcome.ok ||
     !tasksOutcome.ok ||
     !matrixOutcome.ok ||
     !forwarderIssuesOutcome.ok ||
     !financeIssuesOutcome.ok;
 
-  const refreshMetadata = buildRefreshMetadata(anyFailed);
+  const refreshMetadata: UiRefreshMetadata =
+    revenueRuntime?.refreshMetadata ?? {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: 15_000,
+      dataFreshness: anyFailed ? "degraded" : "fresh",
+      source: anyFailed ? "cache" : "live",
+    };
   const healthEnvelope = buildHealthEnvelope({
     ordersOk: ordersOutcome.ok,
     matrixOk: matrixOutcome.ok,
@@ -959,43 +944,42 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       .sort((left, right) => right.revenueMinor - left.revenueMinor);
   })();
 
-  // availableActions[] drives all CTAs per Q-X13. 0-length list means
-  // the surface is read-only for the current actor. Until backend wires
-  // per-actor scopes, period/serviceBucket/vehicle filters and refresh
-  // are always enabled (low risk); export is gated as not-yet-enabled.
-  const pageActions: ResourceActionDescriptor[] = [
-    {
-      action: "filterPeriod",
-      enabled: true,
-      riskLevel: "low",
-    },
-    {
-      action: "filterServiceBucket",
-      enabled: true,
-      riskLevel: "low",
-    },
-    {
-      action: "filterVehicle",
-      enabled: vehicleOptions.length > 0,
-      riskLevel: "low",
-    },
-    {
-      action: "openMismatchDrawer",
-      enabled: true,
-      riskLevel: "low",
-    },
-    {
-      action: "refresh",
-      enabled: true,
-      riskLevel: "low",
-    },
-    {
-      action: "export",
-      enabled: false,
-      disabledReasonCode: "phase1_no_export",
-      riskLevel: "low",
-    },
-  ];
+  const runtimeAuthorized = revenueRuntime?.authorized ?? true;
+  const runtimeProvisioned = revenueRuntime?.provisioned ?? true;
+  const pageActions: ResourceActionDescriptor[] =
+    revenueRuntime?.availableActions ?? [
+      {
+        action: "filterPeriod",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "filterServiceBucket",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "filterVehicle",
+        enabled: vehicleOptions.length > 0,
+        riskLevel: "low",
+      },
+      {
+        action: "openMismatchDrawer",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "refresh",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "export",
+        enabled: false,
+        disabledReasonCode: "phase1_no_export",
+        riskLevel: "low",
+      },
+    ];
   const actionById = new Map(
     pageActions.map((descriptor) => [descriptor.action, descriptor] as const),
   );
@@ -1366,11 +1350,15 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       ok: ordersOutcome.ok && tasksOutcome.ok,
       itemCount: insights.serviceBuckets.length,
       filtersActive,
+      provisioned: runtimeProvisioned,
+      authorized: runtimeAuthorized,
     });
     const vehicleEmpty = resolveEmptyReason({
       ok: ordersOutcome.ok && tasksOutcome.ok && vehiclesOutcome.ok,
       itemCount: insights.vehicles.length,
       filtersActive,
+      provisioned: runtimeProvisioned,
+      authorized: runtimeAuthorized,
     });
 
     const productColumns: CanvasTableColumn<{
@@ -1500,6 +1488,8 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       ok: ordersOutcome.ok && tasksOutcome.ok,
       itemCount: channelBuckets.length,
       filtersActive,
+      provisioned: runtimeProvisioned,
+      authorized: runtimeAuthorized,
     });
 
     const columns: CanvasTableColumn<{
@@ -1556,6 +1546,8 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       ok: matrixOutcome.ok,
       itemCount: settlementChannels.length,
       filtersActive: false,
+      provisioned: runtimeProvisioned,
+      authorized: runtimeAuthorized,
     });
 
     if (matrixEmpty) {
@@ -1728,6 +1720,8 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       ok: forwarderIssuesOutcome.ok && financeIssuesOutcome.ok,
       itemCount: filteredForwarderIssues.length,
       filtersActive,
+      provisioned: runtimeProvisioned,
+      authorized: runtimeAuthorized,
       externalAvailable: forwardedOutcome.ok,
     });
 

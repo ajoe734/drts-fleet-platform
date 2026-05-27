@@ -13,12 +13,15 @@ import type {
   DriverStatementRecord,
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
+  IdentityContext,
   InvoiceLineRecord,
   MarkReimbursementPaidCommand,
   MoneyAmount,
+  OpsRevenueReviewRuntime,
   PublishDriverFeePlanCommand,
   ReconciliationIssueCommentRecord,
   ReconciliationIssueRecord,
+  ResourceActionDescriptor,
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
   ResolveReconciliationIssueCommand,
@@ -26,6 +29,7 @@ import type {
   SettlementMatrixRecord,
   TenantBillingProfile,
   TenantInvoiceRecord,
+  UiRefreshMetadata,
   UpdateTenantBillingProfileCommand,
 } from "@drts/contracts";
 
@@ -54,6 +58,12 @@ import { ForwarderService } from "../forwarder/forwarder.service";
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = "NTD";
 const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
+const OPS_REVENUE_REVIEW_STALE_AFTER_MS = 15_000;
+const OPS_REVENUE_REVIEW_AUTHORIZED_ROLES = new Set([
+  "ops_finance_reviewer",
+  "ops_manager",
+  "ops_user",
+]);
 
 type SettlementTripSnapshot = {
   settlementId: string;
@@ -545,6 +555,68 @@ export class BillingSettlementService implements OnModuleInit {
 
   listSettlementMatrix(): SettlementMatrixRecord[] {
     return buildSettlementMatrix();
+  }
+
+  getOpsRevenueReviewRuntime(
+    identity: IdentityContext | null,
+  ): OpsRevenueReviewRuntime {
+    const roles = new Set(identity?.roles ?? []);
+    const authorized =
+      identity?.realm === "ops" &&
+      [...roles].some((role) => OPS_REVENUE_REVIEW_AUTHORIZED_ROLES.has(role));
+    const provisioned = Boolean(this.forwarderService);
+    const refreshMetadata: UiRefreshMetadata = {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: OPS_REVENUE_REVIEW_STALE_AFTER_MS,
+      dataFreshness: provisioned ? "fresh" : "degraded",
+      source: provisioned ? "live" : "cache",
+    };
+    const canOperate = authorized && provisioned;
+    const lowRiskAction = (
+      action: string,
+      enabled: boolean,
+      disabledReasonCode?: string,
+    ): ResourceActionDescriptor => ({
+      action,
+      enabled,
+      riskLevel: "low",
+      ...(disabledReasonCode ? { disabledReasonCode } : {}),
+    });
+    const availableActions: ResourceActionDescriptor[] = [
+      lowRiskAction(
+        "filterPeriod",
+        canOperate,
+        canOperate ? undefined : "permission_denied",
+      ),
+      lowRiskAction(
+        "filterServiceBucket",
+        canOperate,
+        canOperate ? undefined : "permission_denied",
+      ),
+      lowRiskAction(
+        "filterVehicle",
+        canOperate,
+        canOperate ? undefined : "permission_denied",
+      ),
+      lowRiskAction(
+        "openMismatchDrawer",
+        canOperate,
+        canOperate ? undefined : "permission_denied",
+      ),
+      lowRiskAction(
+        "refresh",
+        canOperate,
+        canOperate ? undefined : "permission_denied",
+      ),
+      lowRiskAction("export", false, "phase1_no_export"),
+    ];
+
+    return {
+      availableActions,
+      refreshMetadata,
+      authorized,
+      provisioned,
+    };
   }
 
   getTenantInvoice(tenantId: string, invoiceId: string) {

@@ -106,6 +106,7 @@ import type {
   NotificationRecord,
   OpenCallSessionCommand,
   OperationalObservabilitySnapshot,
+  OpsRevenueReviewRuntime,
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
   PartnerBootstrapSession,
@@ -1136,6 +1137,10 @@ export class ApiClient {
       ? `/api/settlement/reconciliation-issues?${query}`
       : "/api/settlement/reconciliation-issues";
     return this.getList<ReconciliationIssueRecord>(url);
+  }
+
+  async getOpsRevenueReviewRuntime(): Promise<OpsRevenueReviewRuntime> {
+    return this.get<OpsRevenueReviewRuntime>("/api/ops/revenue-review");
   }
 
   async createReconciliationIssue(
