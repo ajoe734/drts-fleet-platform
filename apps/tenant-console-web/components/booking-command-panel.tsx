@@ -40,6 +40,19 @@ function getActionLabel(action: string) {
   }
 }
 
+function getActionSupportCopy(action: string) {
+  switch (action) {
+    case "update":
+      return "Medium-risk update command against the tenant booking record.";
+    case "cancel":
+      return "High-risk command. A reason is required whenever cancellation is available.";
+    case "resubmit_approval":
+      return "Re-open the approval path when the backend republishes this action for the booking.";
+    default:
+      return "Additional action published by the backend descriptor set for this booking.";
+  }
+}
+
 function getDisabledReasonText(
   code: string | null | undefined,
   editableUntil: string | null,
@@ -229,6 +242,12 @@ export function BookingCommandPanel({
             <span>{receipt.actionId}</span>
           </div>
           <p>{receipt.message}</p>
+          {receipt.status === "accepted" ? (
+            <p>
+              The command reached the backend, but the tenant snapshot is still
+              waiting on downstream confirmation before the lifecycle settles.
+            </p>
+          ) : null}
           <div className="booking-command-receipt-links">
             <Link
               className="text-link"
@@ -245,9 +264,7 @@ export function BookingCommandPanel({
           <div className="booking-action-card">
             <div className="booking-action-card-copy">
               <strong>{getActionLabel(updateAction.action)}</strong>
-              <p>
-                Medium-risk update command against the tenant booking record.
-              </p>
+              <p>{getActionSupportCopy(updateAction.action)}</p>
             </div>
             <button
               className="action-button action-button-secondary"
@@ -279,10 +296,7 @@ export function BookingCommandPanel({
           <div className="booking-action-card">
             <div className="booking-action-card-copy">
               <strong>{getActionLabel(cancelAction.action)}</strong>
-              <p>
-                High-risk command. A reason is required whenever cancellation is
-                available.
-              </p>
+              <p>{getActionSupportCopy(cancelAction.action)}</p>
             </div>
             <button
               className="action-button action-button-danger"
@@ -310,21 +324,31 @@ export function BookingCommandPanel({
           <div className="booking-action-card" key={action.action}>
             <div className="booking-action-card-copy">
               <strong>{getActionLabel(action.action)}</strong>
-              <p>
-                Additional action published by the backend descriptor set for
-                this booking.
-              </p>
+              <p>{getActionSupportCopy(action.action)}</p>
             </div>
-            <button
-              className="action-button action-button-secondary"
-              disabled
-              type="button"
-            >
-              {getActionLabel(action.action)}
-            </button>
+            {action.action === "resubmit_approval" ? (
+              <Link
+                className="action-button action-button-secondary"
+                href="/rules"
+              >
+                Review approval rules
+              </Link>
+            ) : (
+              <button
+                className="action-button action-button-secondary"
+                disabled
+                type="button"
+              >
+                {getActionLabel(action.action)}
+              </button>
+            )}
             <p className="action-note">
               {action.enabled
-                ? "This demo route does not yet implement the published command."
+                ? action.action === "resubmit_approval"
+                  ? booking.approvalRequestIds.length > 0
+                    ? `Published request ids: ${booking.approvalRequestIds.join(", ")}.`
+                    : "Approval is waiting on a republished request identifier."
+                  : "This route surfaces the published descriptor but does not yet invoke the command directly."
                 : getDisabledReasonText(
                     action.disabledReasonCode ?? readOnlyReasonCode,
                     editableUntil,

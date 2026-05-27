@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type {
   BookingRecord,
+  EmptyReason,
   ResourceActionDescriptor,
   TenantInvoiceRecord,
   UiRefreshMetadata,
@@ -50,11 +51,30 @@ type BookingActivityRow = {
 
 type RefreshSummary = {
   tierLabel: string;
+  tierCode: string;
   cadenceLabel: string;
   freshness: NonNullable<UiRefreshMetadata["dataFreshness"]>;
   generatedAt: string;
   source: NonNullable<UiRefreshMetadata["source"]>;
   staleAfterMs: number;
+};
+
+type TenantEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+
+type DetailRouteLink = {
+  href: string;
+  label: string;
+  app: "tenant-console" | "ops-console" | "platform-admin";
+  external?: boolean;
+  note: string;
+};
+
+type EmptyReasonCard = {
+  reason: TenantEmptyReason;
+  lane: string;
+  title: string;
+  description: string;
+  active: boolean;
 };
 
 function getEditableUntil(booking: BookingDetailRecord) {
@@ -273,12 +293,225 @@ function buildRefreshSummary(booking: BookingDetailRecord): RefreshSummary {
 
   return {
     tierLabel: "T5",
+    tierCode: "medium_slow",
     cadenceLabel: "slow / 30s cadence",
     freshness: refreshMetadata.dataFreshness,
     generatedAt: refreshMetadata.generatedAt,
     source: refreshMetadata.source,
     staleAfterMs: refreshMetadata.staleAfterMs,
   };
+}
+
+function getEditableCountdownLabel(editableUntil: string | null) {
+  if (!editableUntil) {
+    return "No published tenant cutoff";
+  }
+
+  const deltaMs = new Date(editableUntil).getTime() - Date.now();
+  if (deltaMs <= 0) {
+    return "Edit window closed";
+  }
+
+  const totalMinutes = Math.ceil(deltaMs / 60_000);
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min left`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0 ? `${hours}h ${minutes}m left` : `${hours}h left`;
+}
+
+function getRefreshTone(
+  freshness: RefreshSummary["freshness"],
+): "fresh" | "stale" | "warning" {
+  switch (freshness) {
+    case "fresh":
+      return "fresh";
+    case "stale":
+      return "stale";
+    default:
+      return "warning";
+  }
+}
+
+function buildConsoleHref(
+  targetApp: DetailRouteLink["app"],
+  route: string,
+): string {
+  const baseByApp: Record<
+    Exclude<DetailRouteLink["app"], "tenant-console">,
+    string | undefined
+  > = {
+    "ops-console": process.env.NEXT_PUBLIC_OPS_CONSOLE_URL,
+    "platform-admin": process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL,
+  };
+
+  if (targetApp === "tenant-console") {
+    return route;
+  }
+
+  const base = baseByApp[targetApp];
+  if (base && /^https?:\/\//.test(base)) {
+    return new URL(route, base.endsWith("/") ? base : `${base}/`).toString();
+  }
+
+  return `/${targetApp}${route}`;
+}
+
+function buildDetailRouteLinks(
+  booking: BookingDetailRecord,
+  source: ReturnType<typeof getBookingSourceVisibility>,
+): DetailRouteLink[] {
+  const links: DetailRouteLink[] = [
+    {
+      href: `/audit?resourceId=${encodeURIComponent(booking.orderId)}`,
+      label: "Tenant audit trail",
+      app: "tenant-console",
+      note: "Audit subset for this booking and tenant-visible follow-up.",
+    },
+    {
+      href: `/passengers?query=${encodeURIComponent(booking.passenger.name)}`,
+      label: "Passenger directory",
+      app: "tenant-console",
+      note: "Re-open the linked passenger directory context.",
+    },
+    {
+      href: `/cost-centers?query=${encodeURIComponent(booking.costCenter ?? "")}`,
+      label: "Cost center policy",
+      app: "tenant-console",
+      note: "Inspect quota and approval context for this booking.",
+    },
+  ];
+
+  if (booking.partnerEntrySlug) {
+    links.push({
+      href: buildConsoleHref(
+        "ops-console",
+        `/partners/entries/${encodeURIComponent(booking.partnerEntrySlug)}`,
+      ),
+      label: "Partner fulfillment lane",
+      app: "ops-console",
+      external: true,
+      note: "Cross-app read path for partner entry and dispatch provenance.",
+    });
+  }
+
+  if (
+    source.domain === "forwarded_authority" ||
+    booking.orderStatus === "assigned"
+  ) {
+    links.push({
+      href: buildConsoleHref(
+        "ops-console",
+        `/orders/${encodeURIComponent(booking.orderId)}`,
+      ),
+      label: "Ops order lane",
+      app: "ops-console",
+      external: true,
+      note: "Deep link to ops-only execution details in a new tab.",
+    });
+  }
+
+  if (booking.approvalRequestIds.length > 0) {
+    links.push({
+      href: buildConsoleHref(
+        "platform-admin",
+        `/tenants/${encodeURIComponent(booking.tenantId)}/approval-requests?bookingId=${encodeURIComponent(booking.bookingId)}`,
+      ),
+      label: "Approval governance",
+      app: "platform-admin",
+      external: true,
+      note: "Cross-app approval trail for tenant-affecting admin or ops actions.",
+    });
+  }
+
+  return links;
+}
+
+function buildEmptyReasonCards(
+  booking: BookingDetailRecord,
+  source: ReturnType<typeof getBookingSourceVisibility>,
+  invoicesFailed: boolean,
+  relatedInvoices: TenantInvoiceRecord[],
+): EmptyReasonCard[] {
+  const assignmentActive =
+    booking.orderStatus === "assigned" ||
+    booking.orderStatus === "driver_accepted" ||
+    booking.orderStatus === "enroute_pickup" ||
+    booking.orderStatus === "arrived_pickup" ||
+    booking.orderStatus === "on_trip";
+
+  return [
+    {
+      reason: "no_data",
+      lane: "Finance",
+      title: "No downstream invoice yet",
+      description:
+        "The booking exists, but no tenant-visible invoice row has been linked to this order.",
+      active: relatedInvoices.length === 0 && !invoicesFailed,
+    },
+    {
+      reason: "not_provisioned",
+      lane: "Policy",
+      title: "Tenant policy metadata not provisioned",
+      description:
+        "Cost-center or compliance metadata was not published for this booking slice.",
+      active:
+        booking.costCenter == null &&
+        (booking.complianceGates == null ||
+          booking.complianceGates.length === 0),
+    },
+    {
+      reason: "fetch_failed",
+      lane: "Finance",
+      title: "Related ledger fetch failed",
+      description:
+        "A supporting tenant ledger read failed, so the page keeps the booking snapshot visible and marks the auxiliary lane degraded.",
+      active: invoicesFailed,
+    },
+    {
+      reason: "permission_denied",
+      lane: "Execution",
+      title: "Ops-only trace hidden",
+      description:
+        "Tenant detail can reference execution progress, but driver / adapter internals remain masked on this authority boundary.",
+      active: source.domain === "forwarded_authority",
+    },
+    {
+      reason: "external_unavailable",
+      lane: "Execution",
+      title: "External confirmation still pending",
+      description:
+        "Execution is active but the external or partner lane has not published fresh assignment detail into the tenant-safe snapshot.",
+      active:
+        assignmentActive &&
+        booking.assignment?.driverName == null &&
+        source.domain !== "owned",
+    },
+    {
+      reason: "filtered_empty",
+      lane: "Approval",
+      title: "Approval subset filtered empty",
+      description:
+        "Approval is pending, but no request identifiers were published into this tenant detail snapshot yet.",
+      active:
+        booking.approvalState === "pending" &&
+        booking.approvalRequestIds.length === 0,
+    },
+  ];
+}
+
+function getEmptyReasonTone(reason: TenantEmptyReason) {
+  switch (reason) {
+    case "fetch_failed":
+    case "permission_denied":
+      return "warning";
+    case "external_unavailable":
+      return "attention";
+    default:
+      return "neutral";
+  }
 }
 
 function getActivityToneClassName(realm: BookingActivityRow["realm"]) {
@@ -318,16 +551,37 @@ export default async function BookingDetailPage({
   const editableUntil = getEditableUntil(booking);
   const readOnlyReasonCode = getReadOnlyReasonCode(booking);
   const refreshSummary = buildRefreshSummary(booking);
+  const refreshTone = getRefreshTone(refreshSummary.freshness);
   const relatedInvoices =
     invoicesResult.status === "fulfilled"
       ? findRelatedInvoices(invoicesResult.value, booking.orderId)
       : [];
+  const detailRouteLinks = buildDetailRouteLinks(booking, source);
+  const emptyReasonCards = buildEmptyReasonCards(
+    booking,
+    source,
+    invoicesResult.status === "rejected",
+    relatedInvoices,
+  );
   const assignment = booking.assignment ?? null;
   const approvalState = describeApprovalState(booking.approvalState);
   const isApprovalWaiting = booking.approvalState === "pending";
+  const editableCountdownLabel = getEditableCountdownLabel(editableUntil);
 
   return (
     <div className="page-shell">
+      <div className="booking-detail-breadcrumbs">
+        <Link className="text-link" href="/">
+          Home
+        </Link>
+        <span>/</span>
+        <Link className="text-link" href="/bookings">
+          Bookings
+        </Link>
+        <span>/</span>
+        <span>{booking.bookingId}</span>
+      </div>
+
       <PageHero
         eyebrow="Booking detail"
         title={`${booking.bookingId} · ${booking.businessDispatchSubtype}`}
@@ -352,31 +606,52 @@ export default async function BookingDetailPage({
             <span className="metric-label">
               Refresh {refreshSummary.tierLabel}
             </span>
-            <span className="muted-copy">
-              {refreshSummary.cadenceLabel} · {refreshSummary.freshness} ·{" "}
-              {refreshSummary.source}
+            <span
+              className={`booking-refresh-pill booking-refresh-pill-${refreshTone}`}
+            >
+              {refreshSummary.tierCode} · {refreshSummary.cadenceLabel} ·{" "}
+              {refreshSummary.freshness} · {refreshSummary.source}
+            </span>
+            <span className="booking-deadline-chip">
+              Editable window · {editableCountdownLabel}
             </span>
           </div>
         </div>
+        <div className="booking-detail-highlights">
+          <div className="booking-highlight-card">
+            <span className="booking-highlight-label">Editable until</span>
+            <strong>
+              {editableUntil ? formatDateTime(editableUntil) : "Not published"}
+            </strong>
+            <p>{editableCountdownLabel}</p>
+          </div>
+          <div className="booking-highlight-card">
+            <span className="booking-highlight-label">Approval state</span>
+            <strong>{approvalState}</strong>
+            <p>
+              {booking.approvalRequestIds.length > 0
+                ? `${booking.approvalRequestIds.length} request id(s) published`
+                : "No request identifiers published"}
+            </p>
+          </div>
+          <div className="booking-highlight-card">
+            <span className="booking-highlight-label">Dispatch state</span>
+            <strong>{booking.orderStatus}</strong>
+            <p>{source.statusBoundary}</p>
+          </div>
+        </div>
         <div className="booking-detail-link-row">
-          <Link
-            className="text-link"
-            href={`/audit?resourceId=${booking.orderId}`}
-          >
-            Open tenant audit trail
-          </Link>
-          <Link className="text-link" href="/invoices">
-            Open invoice ledger
-          </Link>
-          {booking.partnerEntrySlug ? (
+          {detailRouteLinks.map((link) => (
             <Link
-              className="text-link"
-              href={`/partner/booking/${booking.bookingId}`}
-              target="_blank"
+              className="booking-link-chip"
+              href={link.href}
+              key={`${link.app}-${link.label}`}
+              target={link.external ? "_blank" : undefined}
             >
-              Open partner booking view
+              <span>{link.app}</span>
+              {link.label}
             </Link>
-          ) : null}
+          ))}
         </div>
       </section>
 
@@ -415,9 +690,9 @@ export default async function BookingDetailPage({
       <section className="booking-detail-layout">
         <div className="booking-detail-main">
           <SurfaceCard
-            kicker="Trip context"
-            title="Booking facts and editability"
-            description="Booking detail follows Q-TEN05: editable state comes from backend action descriptors plus the published cutoff window, not from status text alone."
+            kicker="Booking facts"
+            title="Full booking context and editability"
+            description="Q-TEN05 keeps this page availability-first: CTAs come from backend descriptors and the published cutoff window, never from status text alone."
           >
             <dl className="definition-grid booking-detail-grid">
               <div>
@@ -430,7 +705,14 @@ export default async function BookingDetailPage({
               </div>
               <div>
                 <dt>Passenger</dt>
-                <dd>{booking.passenger.name}</dd>
+                <dd>
+                  <Link
+                    className="text-link"
+                    href={`/passengers?query=${encodeURIComponent(booking.passenger.name)}`}
+                  >
+                    {booking.passenger.name}
+                  </Link>
+                </dd>
               </div>
               <div>
                 <dt>Passenger phone</dt>
@@ -469,7 +751,18 @@ export default async function BookingDetailPage({
               </div>
               <div>
                 <dt>Cost center</dt>
-                <dd>{booking.costCenter ?? "Not provided"}</dd>
+                <dd>
+                  {booking.costCenter ? (
+                    <Link
+                      className="text-link"
+                      href={`/cost-centers?query=${encodeURIComponent(booking.costCenter)}`}
+                    >
+                      {booking.costCenter}
+                    </Link>
+                  ) : (
+                    "Not provided"
+                  )}
+                </dd>
               </div>
               <div>
                 <dt>Onsite contact</dt>
@@ -501,9 +794,9 @@ export default async function BookingDetailPage({
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Activity"
+            kicker="Audit subset"
             title="Recent booking updates"
-            description="Cross-actor timeline stays concise here: tenant, system, ops, and driver contributions share one audit-safe lane."
+            description="Q-TEN13 keeps actor realm visible inside the tenant-safe audit subset so follow-up stays anchored when actions cross tenant, ops, platform, and system lanes."
           >
             <ul className="booking-activity-list">
               {activity.map((item) => (
@@ -575,6 +868,11 @@ export default async function BookingDetailPage({
                 <dd>{assignment?.contactMode ?? "Platform-mediated only"}</dd>
               </div>
             </dl>
+            {assignment == null ? (
+              <div className="empty-panel booking-inline-empty">
+                Assignment summary is not published for this snapshot yet.
+              </div>
+            ) : null}
           </SurfaceCard>
 
           <SurfaceCard
@@ -612,16 +910,16 @@ export default async function BookingDetailPage({
                 ))}
               </ul>
             ) : (
-              <p className="muted-copy">
+              <div className="empty-panel booking-inline-empty">
                 No tenant invoice row is currently linked to this order.
-              </p>
+              </div>
             )}
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Snapshot"
-            title="Refresh and routing metadata"
-            description="Q-X01 freshness metadata and cross-app routing hints keep the operator honest about how live this snapshot is."
+            kicker="Routing"
+            title="Refresh and cross-app deep links"
+            description="Q-X01 freshness metadata and Q-X03 deep links keep this tenant detail honest about both data age and the lane that owns the next action."
           >
             <dl className="definition-grid">
               <div>
@@ -648,6 +946,49 @@ export default async function BookingDetailPage({
                 <dd>{refreshSummary.source}</dd>
               </div>
             </dl>
+            <div className="booking-route-link-list">
+              {detailRouteLinks.map((link) => (
+                <div className="booking-route-link-card" key={link.label}>
+                  <div className="booking-route-link-header">
+                    <span className="metric-label">{link.app}</span>
+                    {link.external ? (
+                      <span className="status-chip">new tab</span>
+                    ) : null}
+                  </div>
+                  <strong>{link.label}</strong>
+                  <p>{link.note}</p>
+                  <Link
+                    className="text-link"
+                    href={link.href}
+                    target={link.external ? "_blank" : undefined}
+                  >
+                    Open route
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </SurfaceCard>
+
+          <SurfaceCard
+            kicker="Empty states"
+            title="Tenant empty-reason handling"
+            description="Q-X15 requires tenant detail to distinguish why a support lane is blank or degraded. Active reasons are highlighted; the rest stay documented for this route."
+          >
+            <div className="booking-empty-reason-grid">
+              {emptyReasonCards.map((card) => (
+                <div
+                  className={`booking-empty-reason-card booking-empty-reason-card-${getEmptyReasonTone(card.reason)}${card.active ? " is-active" : ""}`}
+                  key={card.reason}
+                >
+                  <div className="booking-empty-reason-header">
+                    <span className="metric-label">{card.reason}</span>
+                    <span className="status-chip">{card.lane}</span>
+                  </div>
+                  <strong>{card.title}</strong>
+                  <p>{card.description}</p>
+                </div>
+              ))}
+            </div>
           </SurfaceCard>
         </div>
       </section>
