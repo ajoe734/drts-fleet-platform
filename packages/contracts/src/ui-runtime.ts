@@ -50,28 +50,45 @@ export type UiSeverity = "info" | "warning" | "critical";
 // Q-X12 — UiHealthEnvelope
 // ─────────────────────────────────────────────────────────────────────────────
 
+export type UiHealthStatus = "healthy" | "degraded" | "unhealthy" | "unknown";
+
 /**
- * Per-service degradation entry inside `UiHealthEnvelope`.
+ * Point-in-time indicator row rendered inside a chrome-level health card.
  */
-export interface UiHealthDegradedService {
-  service: string;
-  impact: string;
-  severity: "warning" | "critical";
+export interface UiHealthIndicator {
+  key: string;
+  label: string;
+  status: UiHealthStatus;
+  value?: string | number | boolean | null;
+  unit?: string | null;
+  description?: string | null;
 }
 
 /**
- * Backend-emitted health envelope every page consumes. Replaces the
- * per-page `try/catch -> []` fallback pattern: explicit `degraded` or
- * `down` status with itemized impacted services + last-checked time so
- * the chrome can render an honest banner instead of silently empty data.
+ * Blocker record emitted when a health issue needs direct operator action.
+ */
+export interface UiHealthBlocker {
+  code: string;
+  message: string;
+  severity: UiSeverity;
+  resourceType?: string | null;
+  resourceId?: string | null;
+}
+
+/**
+ * Backend-emitted health envelope every page consumes. Summarizes the
+ * current chrome-level health view with indicator rows and actionable
+ * blockers so the UI can render degraded or unhealthy states honestly.
  *
  * Consumed by: all 4 app shells (sidebar footer per packets §3.3,
  * page-level degraded banner per packets §3.3).
  */
 export interface UiHealthEnvelope {
-  status: "healthy" | "degraded" | "down";
-  degradedServices: UiHealthDegradedService[];
-  lastCheckedAt: string;
+  status: UiHealthStatus;
+  summary: string;
+  refresh: UiRefreshMetadata;
+  indicators: UiHealthIndicator[];
+  blockers?: UiHealthBlocker[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
