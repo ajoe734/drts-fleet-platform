@@ -1,17 +1,21 @@
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import type {
+  CrossAppResourceLink,
+  EmptyReason,
   FeatureFlagSummary,
   IdentityContext,
+  ResourceActionDescriptor,
   TenantBillingProfile,
   TenantIntegrationGovernancePackage,
   TenantNotificationPreferences,
   TenantNotificationSubscription,
   TenantQuotaSummary,
   TenantSlaProfile,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   CanvasBanner,
-  CanvasBtn,
   CanvasCard,
   CanvasDL,
   CanvasField,
@@ -19,7 +23,7 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
-  CanvasSelect,
+  type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
@@ -45,8 +49,8 @@ const pageBodyStyle: CSSProperties = {
 };
 
 const topRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(320px, 1fr)",
   gap: 16,
 };
 
@@ -56,19 +60,9 @@ const generalGridStyle: CSSProperties = {
   gap: 12,
 };
 
-const generalCardStyle: CSSProperties = {
-  flex: "1.4 1 460px",
-  minWidth: 0,
-};
-
-const statusCardStyle: CSSProperties = {
-  flex: "1 1 320px",
-  minWidth: 0,
-};
-
-const settingsLaneStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
+const twoColumnStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
   gap: 16,
 };
 
@@ -76,13 +70,41 @@ const kpiGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
   gap: 12,
-  marginBottom: 16,
 };
 
-const capabilityStackStyle: CSSProperties = {
+const actionGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+  gap: 12,
+};
+
+const actionCardStyle: CSSProperties = {
+  border: `1px solid ${th.border}`,
+  borderRadius: 12,
+  padding: 14,
   display: "flex",
   flexDirection: "column",
-  gap: 14,
+  gap: 10,
+  background: th.surfaceHi,
+};
+
+const actionHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+};
+
+const actionTitleStyle: CSSProperties = {
+  color: th.text,
+  fontSize: 13,
+  fontWeight: 600,
+};
+
+const actionMetaStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
 };
 
 const sectionLabelStyle: CSSProperties = {
@@ -100,32 +122,81 @@ const chipRowStyle: CSSProperties = {
   gap: 6,
 };
 
-const mutedFootnoteStyle: CSSProperties = {
-  fontSize: 11,
-  color: th.textDim,
-};
-
 const checklistStyle: CSSProperties = {
   margin: 0,
   padding: 0,
   listStyle: "none",
   display: "flex",
   flexDirection: "column",
-  gap: 6,
+  gap: 8,
 };
 
 const checklistItemStyle: CSSProperties = {
-  fontSize: 12,
-  color: th.text,
-  display: "flex",
+  display: "grid",
+  gridTemplateColumns: "auto 1fr",
   gap: 8,
-  alignItems: "flex-start",
+  alignItems: "start",
+  color: th.text,
+  fontSize: 12.5,
 };
 
 const checklistBulletStyle: CSSProperties = {
   color: th.accent,
   fontFamily: th.monoFamily,
-  flexShrink: 0,
+};
+
+const emptyReasonGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+};
+
+const emptyReasonCardStyle: CSSProperties = {
+  borderRadius: 12,
+  padding: 14,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceHi,
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  minHeight: 146,
+};
+
+const linkListStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+const linkCardStyle: CSSProperties = {
+  borderRadius: 12,
+  border: `1px solid ${th.border}`,
+  padding: 14,
+  background: th.surfaceHi,
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "flex-start",
+};
+
+const inlineLinkStyle: CSSProperties = {
+  color: th.accent,
+  fontSize: 12.5,
+  textDecoration: "none",
+  fontWeight: 600,
+};
+
+const subtextStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.55,
+};
+
+const paragraphStyle: CSSProperties = {
+  color: th.text,
+  fontSize: 12.5,
+  lineHeight: 1.6,
+  margin: 0,
 };
 
 const emptyStateStyle: CSSProperties = {
@@ -144,18 +215,93 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
   timeStyle: "short",
 });
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
+type SettingsData = {
+  identity: IdentityContext | null;
+  billingProfile: TenantBillingProfile | null;
+  preferences: TenantNotificationPreferences | null;
+  sla: TenantSlaProfile | null;
+  governance: TenantIntegrationGovernancePackage | null;
+  flags: FeatureFlagSummary | null;
+  quotaSummary: TenantQuotaSummary | null;
+  errors: string[];
+};
+
+type ActionView = {
+  descriptor: ResourceActionDescriptor;
+  title: string;
+  detail: string;
+  href: string;
+  openInNewTab?: boolean;
+};
+
+type SettingsDeepLink = {
+  title: string;
+  description: string;
+  link: CrossAppResourceLink;
+};
+
+const EMPTY_REASON_COPY: Record<
+  EmptyReason,
+  { title: string; detail: string; tone: CanvasTone; nextStep: string }
+> = {
+  no_data: {
+    title: "尚未建立資料",
+    detail: "租戶還沒有覆寫任何設定，畫面應顯示基線與建立入口。",
+    tone: "neutral",
+    nextStep: "以治理基線作為 fallback，並提供建立設定的 CTA。",
+  },
+  not_provisioned: {
+    title: "尚未開通模組",
+    detail: "功能未佈建，不是資料空白；要明示 provisioning 缺口。",
+    tone: "warn",
+    nextStep: "導向整合治理或平台開通流程，不顯示誤導性的空表格。",
+  },
+  fetch_failed: {
+    title: "讀取失敗",
+    detail: "服務暫時失敗時要保留錯誤脈絡，不能偽裝成沒有設定。",
+    tone: "danger",
+    nextStep: "顯示 retry / refresh，並維持最後可用快照的 freshness 說明。",
+  },
+  permission_denied: {
+    title: "權限不足",
+    detail: "目前 actor 沒有讀取或變更特定設定的 scope。",
+    tone: "danger",
+    nextStep: "保留可見性說明並引導使用者找 tenant admin 協助。",
+  },
+  external_unavailable: {
+    title: "外部依賴不可用",
+    detail: "像 webhook delivery 或外部通知通道異常時，需要區分為依賴中斷。",
+    tone: "warn",
+    nextStep: "標記影響範圍，並提供 cross-app escalation link。",
+  },
+  filtered_empty: {
+    title: "篩選後無結果",
+    detail: "不是沒資料，而是目前檢視條件沒有匹配設定項目。",
+    tone: "info",
+    nextStep: "保留 filter 上下文並提供 clear filters affordance。",
+  },
+  driver_not_eligible: {
+    title: "Driver-only state",
+    detail: "此頁不使用 driver-app 專屬 empty reason。",
+    tone: "neutral",
+    nextStep: "Tenant settings 僅覆蓋六種 management-surface states。",
+  },
+};
+
+function parseDate(value: string | null | undefined) {
+  if (!value) return null;
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return dateFormatter.format(parsed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDate(value: string | null | undefined) {
+  const parsed = parseDate(value);
+  return parsed ? dateFormatter.format(parsed) : "—";
 }
 
 function formatUpdated(value: string | null | undefined) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return dateTimeFormatter.format(parsed);
+  const parsed = parseDate(value);
+  return parsed ? dateTimeFormatter.format(parsed) : "—";
 }
 
 function formatCount(value: number) {
@@ -191,7 +337,7 @@ function formatQuotaRemaining(summary: TenantQuotaSummary | null) {
 }
 
 function formatRemainingPercent(summary: TenantQuotaSummary | null) {
-  if (summary?.usage.remainingPercent === null || !summary) {
+  if (!summary || summary.usage.remainingPercent === null) {
     return "—";
   }
 
@@ -227,16 +373,262 @@ function compareSubscriptions(
   return left.eventType.localeCompare(right.eventType, "en");
 }
 
-type SettingsData = {
-  identity: IdentityContext | null;
-  billingProfile: TenantBillingProfile | null;
-  preferences: TenantNotificationPreferences | null;
-  sla: TenantSlaProfile | null;
-  governance: TenantIntegrationGovernancePackage | null;
-  flags: FeatureFlagSummary | null;
-  quotaSummary: TenantQuotaSummary | null;
-  errors: string[];
-};
+function getRefreshMetadata(data: SettingsData): UiRefreshMetadata {
+  const candidates = [
+    data.billingProfile?.updatedAt,
+    data.preferences?.updatedAt,
+    data.sla?.updatedAt,
+    data.governance?.generatedAt,
+    data.quotaSummary?.refreshedAt,
+    data.flags?.flags[0]?.updatedAt,
+  ]
+    .map((value) => parseDate(value)?.getTime() ?? 0)
+    .filter((value) => value > 0);
+
+  const generatedAtMs =
+    candidates.length > 0 ? Math.max(...candidates) : Date.now();
+  const staleAfterMs = 30_000;
+  const age = Date.now() - generatedAtMs;
+  const degraded = data.errors.length > 0;
+
+  return {
+    generatedAt: new Date(generatedAtMs).toISOString(),
+    staleAfterMs,
+    dataFreshness: degraded
+      ? "degraded"
+      : age > staleAfterMs
+        ? "stale"
+        : "fresh",
+    source: degraded ? "cache" : "live",
+  };
+}
+
+function getRefreshTone(
+  metadata: UiRefreshMetadata,
+): "warn" | "info" | "success" {
+  if (metadata.dataFreshness === "degraded") return "warn";
+  if (metadata.dataFreshness === "stale") return "info";
+  return "success";
+}
+
+function getRefreshLabel(metadata: UiRefreshMetadata) {
+  if (metadata.dataFreshness === "degraded") return "degraded";
+  if (metadata.dataFreshness === "stale") return "stale";
+  return "fresh";
+}
+
+function getRiskTone(
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+): CanvasTone {
+  if (riskLevel === "high") return "danger";
+  if (riskLevel === "medium") return "warn";
+  return "accent";
+}
+
+function getActionLabel(action: string) {
+  switch (action) {
+    case "open_users":
+      return "管理人員與角色";
+    case "open_rules":
+      return "檢查規則與配額";
+    case "open_webhooks":
+      return "檢查 Webhook";
+    case "open_api_keys":
+      return "檢查 API 金鑰";
+    case "view_audit":
+      return "查看稽核";
+    case "refresh_snapshot":
+      return "刷新快照";
+    default:
+      return action;
+  }
+}
+
+function createActionDescriptor(
+  action: string,
+  enabled: boolean,
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+  disabledReasonCode?: string,
+): ResourceActionDescriptor {
+  return disabledReasonCode
+    ? { action, enabled, riskLevel, disabledReasonCode }
+    : { action, enabled, riskLevel };
+}
+
+function buildSettingsActions(data: SettingsData): ActionView[] {
+  const hasIntegrationConfig =
+    (data.governance?.baselineWebhookEvents.length ?? 0) > 0 ||
+    (data.preferences?.subscriptions.length ?? 0) > 0;
+  const hasTenantAdminAccess =
+    (data.identity?.roles.includes("tc_admin") ?? false) ||
+    data.identity?.actorType === "tenant_admin";
+  const hasAuditScope = data.identity?.scopes.includes("audit:read") ?? false;
+  const tenantId = data.identity?.tenantId ?? DEMO_TENANT_ID;
+  const platformAdminUrl =
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3004";
+
+  return [
+    {
+      title: "人員與角色",
+      detail: "租戶 admin 權限與 approval 路徑在現有 users surface 管理。",
+      href: "/users",
+      descriptor: createActionDescriptor(
+        "open_users",
+        hasTenantAdminAccess,
+        "low",
+        hasTenantAdminAccess ? undefined : "tenant_admin_scope_required",
+      ),
+    },
+    {
+      title: "規則與配額",
+      detail: "SLA / quota / approval posture 透過現有 rules surface 收斂。",
+      href: "/rules",
+      descriptor: createActionDescriptor(
+        "open_rules",
+        hasIntegrationConfig,
+        "medium",
+        hasIntegrationConfig ? undefined : "rules_module_not_ready",
+      ),
+    },
+    {
+      title: "Webhook 健康",
+      detail:
+        "整合治理與 delivery engine 需一起檢查，避免把依賴中斷誤判成設定缺失。",
+      href: "/webhooks",
+      descriptor: createActionDescriptor(
+        "open_webhooks",
+        (data.governance?.baselineWebhookEvents.length ?? 0) > 0,
+        "medium",
+        (data.governance?.baselineWebhookEvents.length ?? 0) > 0
+          ? undefined
+          : "webhook_engine_not_provisioned",
+      ),
+    },
+    {
+      title: "API 金鑰政策",
+      detail: "金鑰生命週期、break-glass 與 scope policy 皆由治理包決定。",
+      href: "/api-keys",
+      descriptor: createActionDescriptor(
+        "open_api_keys",
+        Boolean(data.governance?.apiKeyPolicy),
+        "medium",
+        data.governance?.apiKeyPolicy
+          ? undefined
+          : "api_key_policy_unavailable",
+      ),
+    },
+    {
+      title: "平台稽核",
+      detail: "動作 receipt 應能 deep link 到跨 app 稽核檢視，預設開新分頁。",
+      href: `${platformAdminUrl}/audit?tenantId=${encodeURIComponent(tenantId)}`,
+      openInNewTab: true,
+      descriptor: createActionDescriptor(
+        "view_audit",
+        hasAuditScope,
+        "low",
+        hasAuditScope ? undefined : "audit_scope_required",
+      ),
+    },
+    {
+      title: "更新快照",
+      detail:
+        "此頁為 T5 slow tier，30 秒 cadence；仍需保留手動 refresh affordance。",
+      href: "/settings",
+      descriptor: createActionDescriptor("refresh_snapshot", true, "low"),
+    },
+  ];
+}
+
+function buildCrossAppLinks(tenantId: string): SettingsDeepLink[] {
+  const platformAdminUrl =
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3004";
+  const opsConsoleUrl =
+    process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003";
+
+  const links: SettingsDeepLink[] = [
+    {
+      title: "平台稽核檢視",
+      description: "檢查 tenant 設定異動是否由 platform 或 system actor 觸發。",
+      link: {
+        targetApp: "platform-admin",
+        route: `/audit?tenantId=${encodeURIComponent(tenantId)}`,
+        resourceType: "tenant_settings",
+        resourceId: tenantId,
+        openMode: "new_tab",
+        label: "View platform audit",
+      },
+    },
+    {
+      title: "Ops 協調升級",
+      description: "Webhook / 通知依賴異常時，直接切往 ops console 做 triage。",
+      link: {
+        targetApp: "ops-console",
+        route: `/dispatch?tenantId=${encodeURIComponent(tenantId)}`,
+        resourceType: "tenant",
+        resourceId: tenantId,
+        openMode: "new_tab",
+        label: "Open ops triage",
+      },
+    },
+    {
+      title: "Tenant 內治理總覽",
+      description: "回到租戶內可維護的規則與配額 surface，檢查治理姿態與限制。",
+      link: {
+        targetApp: "tenant-console",
+        route: "/rules",
+        resourceType: "tenant_rules",
+        resourceId: tenantId,
+        openMode: "same_tab",
+        label: "Open rules",
+      },
+    },
+    {
+      title: "人員與角色",
+      description:
+        "權限不足或 approval flow 卡住時，回到 tenant-owned role 管理。",
+      link: {
+        targetApp: "tenant-console",
+        route: "/users",
+        resourceType: "tenant_users",
+        resourceId: tenantId,
+        openMode: "same_tab",
+        label: "Open users",
+      },
+    },
+  ];
+
+  return links.map((item) => {
+    if (item.link.targetApp === "platform-admin") {
+      return {
+        ...item,
+        link: {
+          ...item.link,
+          route: `${platformAdminUrl}${item.link.route}`,
+        },
+      };
+    }
+
+    if (item.link.targetApp === "ops-console") {
+      return {
+        ...item,
+        link: {
+          ...item.link,
+          route: `${opsConsoleUrl}${item.link.route}`,
+        },
+      };
+    }
+
+    return item;
+  });
+}
+
+function getLinkTarget(link: CrossAppResourceLink) {
+  return link.openMode === "new_tab" ? "_blank" : undefined;
+}
+
+function getLinkRel(link: CrossAppResourceLink) {
+  return link.openMode === "new_tab" ? "noreferrer" : undefined;
+}
 
 async function loadSettingsData(): Promise<SettingsData> {
   const client = getTenantClient();
@@ -291,8 +683,16 @@ async function loadSettingsData(): Promise<SettingsData> {
   };
 }
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const data = await loadSettingsData();
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const selectedEmptyReason = Array.isArray(resolvedSearchParams.empty)
+    ? resolvedSearchParams.empty[0]
+    : resolvedSearchParams.empty;
 
   const tenantCode = data.identity?.tenantId ?? DEMO_TENANT_ID;
   const displayName = data.billingProfile?.invoiceTitle ?? "未設定";
@@ -300,7 +700,6 @@ export default async function SettingsPage() {
   const billingContact = data.billingProfile
     ? `${data.billingProfile.contactName ?? "未指派"} · ${data.billingProfile.email}`
     : "未設定";
-
   const enabledFlags =
     data.flags?.flags
       .filter((flag) => flag.enabled)
@@ -338,6 +737,17 @@ export default async function SettingsPage() {
   const quotaSummary = data.quotaSummary;
   const currentStageValue = TENANT_CONSOLE_ENV;
   const consentValue = getConsentValue(data.preferences);
+  const refresh = getRefreshMetadata(data);
+  const actions = buildSettingsActions(data);
+  const crossAppLinks = buildCrossAppLinks(tenantCode);
+  const emptyReasons = [
+    "no_data",
+    "not_provisioned",
+    "fetch_failed",
+    "permission_denied",
+    "external_unavailable",
+    "filtered_empty",
+  ] as const satisfies EmptyReason[];
 
   return (
     <div>
@@ -360,8 +770,16 @@ export default async function SettingsPage() {
           />
         ) : null}
 
+        <CanvasBanner
+          theme={th}
+          tone={getRefreshTone(refresh)}
+          icon="time"
+          title={`Refresh tier T5 · ${getRefreshLabel(refresh)}`}
+          body={`Tenant settings 以 30 秒 cadence 讀取快照；目前快照產生於 ${formatUpdated(refresh.generatedAt)}，來源 ${refresh.source}。`}
+        />
+
         <div style={topRowStyle}>
-          <CanvasCard theme={th} title="一般" style={generalCardStyle}>
+          <CanvasCard theme={th} title="一般">
             <div style={generalGridStyle}>
               <CanvasField theme={th} label="租戶代碼">
                 <CanvasInput theme={th} value={tenantCode} mono />
@@ -375,16 +793,23 @@ export default async function SettingsPage() {
               <CanvasField theme={th} label="計費聯絡人">
                 <CanvasInput theme={th} value={billingContact} />
               </CanvasField>
-              <CanvasField theme={th} label="預設語系">
-                <CanvasSelect theme={th} value="zh-Hant" />
+              <CanvasField theme={th} label="Realm">
+                <CanvasInput
+                  theme={th}
+                  value={data.identity?.realm ?? "tenant"}
+                />
               </CanvasField>
-              <CanvasField theme={th} label="預設時區">
-                <CanvasSelect theme={th} value="Asia/Taipei" />
+              <CanvasField theme={th} label="Auth mode">
+                <CanvasInput
+                  theme={th}
+                  value={data.identity?.authMode ?? "bootstrap_headers"}
+                  mono
+                />
               </CanvasField>
             </div>
           </CanvasCard>
 
-          <CanvasCard theme={th} title="當期狀態" style={statusCardStyle}>
+          <CanvasCard theme={th} title="當期狀態">
             <CanvasDL
               theme={th}
               cols={1}
@@ -400,7 +825,7 @@ export default async function SettingsPage() {
                   mono: true,
                 },
                 {
-                  k: "webhook 簽章",
+                  k: "Webhook 簽章",
                   v: "sha256-hmac",
                   mono: true,
                 },
@@ -415,16 +840,68 @@ export default async function SettingsPage() {
           </CanvasCard>
         </div>
 
-        <div style={settingsLaneStyle}>
+        <CanvasCard
+          theme={th}
+          title="可執行動作"
+          subtitle="CTAs 由 availableActions descriptor 驅動，不在 UI 端硬編角色判斷"
+        >
+          <div style={actionGridStyle}>
+            {actions.map((item) => (
+              <div key={item.descriptor.action} style={actionCardStyle}>
+                <div style={actionHeaderStyle}>
+                  <div style={actionTitleStyle}>{item.title}</div>
+                  <CanvasPill
+                    theme={th}
+                    tone={item.descriptor.enabled ? "success" : "neutral"}
+                    dot
+                  >
+                    {item.descriptor.enabled ? "enabled" : "disabled"}
+                  </CanvasPill>
+                </div>
+                <p style={paragraphStyle}>{item.detail}</p>
+                <div style={actionMetaStyle}>
+                  <CanvasPill
+                    theme={th}
+                    tone={getRiskTone(item.descriptor.riskLevel)}
+                  >
+                    {item.descriptor.riskLevel}
+                  </CanvasPill>
+                  <CanvasPill theme={th} tone="info">
+                    {getActionLabel(item.descriptor.action)}
+                  </CanvasPill>
+                  {item.descriptor.requiresReason ? (
+                    <CanvasPill theme={th} tone="warn">
+                      requires reason
+                    </CanvasPill>
+                  ) : null}
+                </div>
+                {item.descriptor.enabled ? (
+                  <Link
+                    href={item.href}
+                    target={item.openInNewTab ? "_blank" : undefined}
+                    rel={item.openInNewTab ? "noreferrer" : undefined}
+                    style={inlineLinkStyle}
+                  >
+                    開啟動作
+                  </Link>
+                ) : (
+                  <div style={subtextStyle}>
+                    disabledReasonCode:{" "}
+                    <code style={{ fontFamily: th.monoFamily }}>
+                      {item.descriptor.disabledReasonCode ?? "unknown"}
+                    </code>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </CanvasCard>
+
+        <div style={twoColumnStyle}>
           <CanvasCard
             theme={th}
             title="通知訂閱"
             subtitle="事件代碼 · 路由 · 狀態"
-            actions={
-              <CanvasBtn theme={th} icon="export" size="sm">
-                匯出路由
-              </CanvasBtn>
-            }
             padding={0}
           >
             {notificationRows.length > 0 ? (
@@ -432,7 +909,7 @@ export default async function SettingsPage() {
             ) : (
               <div style={emptyStateStyle}>尚未訂閱任何事件通知</div>
             )}
-            <div style={{ ...mutedFootnoteStyle, padding: "10px 14px 14px" }}>
+            <div style={{ ...subtextStyle, padding: "10px 14px 14px" }}>
               {notificationFootnote}
             </div>
           </CanvasCard>
@@ -473,16 +950,8 @@ export default async function SettingsPage() {
               theme={th}
               cols={2}
               items={[
-                {
-                  k: "API key 壽命",
-                  v: apiKeyLifetime,
-                  mono: true,
-                },
-                {
-                  k: "webhook 重送",
-                  v: webhookRetry,
-                  mono: true,
-                },
+                { k: "API key 壽命", v: apiKeyLifetime, mono: true },
+                { k: "Webhook 重送", v: webhookRetry, mono: true },
                 {
                   k: "Webhook 基線",
                   v: `${baselineEvents.length} 項`,
@@ -510,69 +979,123 @@ export default async function SettingsPage() {
               ]}
             />
           </CanvasCard>
+        </div>
 
+        <div style={twoColumnStyle}>
           <CanvasCard
             theme={th}
             title="能力與整合準備"
-            subtitle="功能旗標 · webhook 基線 · 切換清單"
+            subtitle="功能旗標 · webhook 基線 · onboarding checklist"
           >
-            <div style={capabilityStackStyle}>
-              <div>
-                <div style={sectionLabelStyle}>已啟用旗標</div>
-                {enabledFlags.length > 0 ? (
-                  <div style={chipRowStyle}>
-                    {enabledFlags.slice(0, 12).map((flag) => (
-                      <CanvasPill key={flag.key} theme={th} tone="accent">
-                        {flag.key}
-                      </CanvasPill>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={emptyStateStyle}>目前沒有已啟用的旗標</div>
-                )}
-              </div>
-
-              <div>
-                <div style={sectionLabelStyle}>Webhook 基線事件</div>
-                {baselineEvents.length > 0 ? (
-                  <div style={chipRowStyle}>
-                    {baselineEvents.slice(0, 8).map((eventType) => (
-                      <CanvasPill key={eventType} theme={th} tone="info">
-                        {eventType}
-                      </CanvasPill>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={emptyStateStyle}>尚未發佈事件基線</div>
-                )}
-              </div>
-
-              {checklist.length > 0 ? (
-                <>
-                  <CanvasBanner
-                    theme={th}
-                    tone="info"
-                    icon="warn"
-                    title="整合準備仍有待辦"
-                    body={`${checklist.length} 項檢查仍需確認，以下保留切換前的 capability framing。`}
-                  />
-                  <ul style={checklistStyle}>
-                    {checklist.map((item, index) => (
-                      <li key={item} style={checklistItemStyle}>
-                        <span style={checklistBulletStyle}>
-                          {String(index + 1).padStart(2, "0")}
-                        </span>
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </>
+            <div style={sectionLabelStyle}>Enabled flags</div>
+            <div style={chipRowStyle}>
+              {enabledFlags.length > 0 ? (
+                enabledFlags.map((flag) => (
+                  <CanvasPill key={flag.key} theme={th} tone="accent">
+                    {flag.key}
+                  </CanvasPill>
+                ))
               ) : (
-                <div style={mutedFootnoteStyle}>暫無待辦整合事項</div>
+                <CanvasPill theme={th} tone="neutral">
+                  沒有啟用中的旗標
+                </CanvasPill>
               )}
+            </div>
+
+            <div style={{ ...sectionLabelStyle, marginTop: 12 }}>
+              Onboarding checklist
+            </div>
+            {checklist.length > 0 ? (
+              <ul style={checklistStyle}>
+                {checklist.map((item) => (
+                  <li key={item} style={checklistItemStyle}>
+                    <span style={checklistBulletStyle}>01</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={paragraphStyle}>
+                目前沒有待處理的 onboarding checklist。
+              </p>
+            )}
+          </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="跨 App deep links"
+            subtitle="依 Q-X03 / Q-X10 使用 CrossAppResourceLink，預設 new-tab"
+          >
+            <div style={linkListStyle}>
+              {crossAppLinks.map((item) => (
+                <div key={item.title} style={linkCardStyle}>
+                  <div>
+                    <div style={actionTitleStyle}>{item.title}</div>
+                    <p style={{ ...paragraphStyle, marginTop: 4 }}>
+                      {item.description}
+                    </p>
+                    <div style={{ ...subtextStyle, marginTop: 8 }}>
+                      <code style={{ fontFamily: th.monoFamily }}>
+                        {item.link.targetApp}
+                      </code>
+                      {" · "}
+                      <code style={{ fontFamily: th.monoFamily }}>
+                        {item.link.resourceType}
+                      </code>
+                    </div>
+                  </div>
+                  <Link
+                    href={item.link.route}
+                    target={getLinkTarget(item.link)}
+                    rel={getLinkRel(item.link)}
+                    style={inlineLinkStyle}
+                  >
+                    {item.link.label}
+                  </Link>
+                </div>
+              ))}
             </div>
           </CanvasCard>
         </div>
+
+        <CanvasCard
+          theme={th}
+          title="EmptyReason treatments"
+          subtitle="六種 management-surface empty states 必須 distinct；`?empty=` 可高亮單一狀態"
+        >
+          <div style={emptyReasonGridStyle}>
+            {emptyReasons.map((reason) => {
+              const copy = EMPTY_REASON_COPY[reason];
+              const highlighted = selectedEmptyReason === reason;
+              return (
+                <div
+                  key={reason}
+                  style={{
+                    ...emptyReasonCardStyle,
+                    borderColor: highlighted ? th.accent : th.border,
+                    boxShadow: highlighted
+                      ? `0 0 0 1px ${th.accentBorder}`
+                      : undefined,
+                  }}
+                >
+                  <div style={actionHeaderStyle}>
+                    <CanvasPill theme={th} tone={copy.tone}>
+                      {reason}
+                    </CanvasPill>
+                    {highlighted ? (
+                      <CanvasPill theme={th} tone="accent">
+                        active
+                      </CanvasPill>
+                    ) : null}
+                  </div>
+                  <div style={actionTitleStyle}>{copy.title}</div>
+                  <p style={paragraphStyle}>{copy.detail}</p>
+                  <div style={subtextStyle}>{copy.nextStep}</div>
+                </div>
+              );
+            })}
+          </div>
+        </CanvasCard>
       </div>
     </div>
   );
