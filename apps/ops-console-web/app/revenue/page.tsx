@@ -32,6 +32,7 @@ import {
 } from "@drts/ui-web";
 
 import { getOpsClient } from "@/lib/api-client";
+import { RevenueRefreshController } from "@/components/revenue-refresh-controller";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import {
   buildRevenueInsights,
@@ -84,6 +85,13 @@ const kpiGridStyle: CSSProperties = {
 };
 
 const filterRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const sectionNavStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
@@ -967,6 +975,36 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
   const drawerOpen = mismatchId !== null;
   const closeDrawerHref = buildHref(filters, { mismatch: null });
+  const headerTabs = [
+    <a
+      key="insight"
+      href="#revenue-insight"
+      style={{ color: "inherit", textDecoration: "none" }}
+    >
+      {t("revenue.tab.insight", locale)}
+    </a>,
+    <a
+      key="channel"
+      href="#revenue-channel-mix"
+      style={{ color: "inherit", textDecoration: "none" }}
+    >
+      {t("revenue.tab.channelMix", locale)}
+    </a>,
+    <a
+      key="matrix"
+      href="#revenue-settlement-matrix"
+      style={{ color: "inherit", textDecoration: "none" }}
+    >
+      {t("revenue.tab.matrix", locale)}
+    </a>,
+    <a
+      key="mismatch"
+      href="#revenue-mismatch-review"
+      style={{ color: "inherit", textDecoration: "none" }}
+    >
+      {t("revenue.tab.mismatch", locale)}
+    </a>,
+  ];
   const mismatchSlot = drawerOpen ? (
     <div style={drawerLayoutStyle}>
       <div style={{ minWidth: 0 }}>{renderMismatch()}</div>
@@ -988,9 +1026,17 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         title={t("revenue.canvas.title", locale)}
         subtitle={t("revenue.canvas.subtitle", locale)}
         actions={renderHeaderActions()}
+        tabs={headerTabs}
+        activeTab={headerTabs[0]}
       />
 
       <div style={pageStackStyle}>
+        <RevenueRefreshController
+          refreshTier="medium"
+          staleAfterMs={refreshMetadata.staleAfterMs}
+          enabled={!pageStateReason}
+        />
+
         {healthEnvelope.status !== "healthy" ? (
           <Banner
             theme={theme}
@@ -1089,7 +1135,46 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
             {renderFilterChips()}
 
-            <div
+            <div style={sectionNavStyle}>
+              <Pill theme={theme} tone="accent" dot>
+                T3 · 15s
+              </Pill>
+              <Pill theme={theme} tone="neutral">
+                <a
+                  href="#revenue-insight"
+                  style={{ color: "inherit", textDecoration: "none" }}
+                >
+                  {t("revenue.tab.insight", locale)}
+                </a>
+              </Pill>
+              <Pill theme={theme} tone="neutral">
+                <a
+                  href="#revenue-channel-mix"
+                  style={{ color: "inherit", textDecoration: "none" }}
+                >
+                  {t("revenue.tab.channelMix", locale)}
+                </a>
+              </Pill>
+              <Pill theme={theme} tone="neutral">
+                <a
+                  href="#revenue-settlement-matrix"
+                  style={{ color: "inherit", textDecoration: "none" }}
+                >
+                  {t("revenue.tab.matrix", locale)}
+                </a>
+              </Pill>
+              <Pill theme={theme} tone="neutral">
+                <a
+                  href="#revenue-mismatch-review"
+                  style={{ color: "inherit", textDecoration: "none" }}
+                >
+                  {t("revenue.tab.mismatch", locale)}
+                </a>
+              </Pill>
+            </div>
+
+            <section
+              id="revenue-insight"
               style={{
                 display: "grid",
                 gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)",
@@ -1098,12 +1183,14 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               }}
             >
               <div style={{ minWidth: 0 }}>{renderInsight()}</div>
-              <div style={{ minWidth: 0 }}>{renderChannelMix()}</div>
-            </div>
+              <div id="revenue-channel-mix" style={{ minWidth: 0 }}>
+                {renderChannelMix()}
+              </div>
+            </section>
 
-            {renderMatrix()}
+            <section id="revenue-settlement-matrix">{renderMatrix()}</section>
 
-            {mismatchSlot}
+            <section id="revenue-mismatch-review">{mismatchSlot}</section>
           </>
         )}
       </div>
@@ -1884,11 +1971,10 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               </Btn>
             </Link>
           ) : (
-            <span
-              style={{ color: theme.textMuted, fontSize: 11.5 }}
-              title={openMismatchDisabledReason()}
-            >
-              {t("revenue.action.requestAccess", locale)}
+            <span title={openMismatchDisabledReason()}>
+              <Btn theme={theme} variant="secondary" icon="arrow" disabled>
+                {t("revenue.mismatch.openDrawer", locale)}
+              </Btn>
             </span>
           ),
       },
