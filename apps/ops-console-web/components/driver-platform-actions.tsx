@@ -40,6 +40,22 @@ type ActionReceiptState = {
   requestId: string | null;
 };
 
+function getActionContractGap(action: string, locale: "en" | "zh") {
+  if (action === "force_offline") {
+    return locale === "zh"
+      ? "依 spec 需提交 reasonCode / note / TTL，但目前 ops-console command contract 只接受 platformCode。"
+      : "Spec requires reasonCode / note / TTL, but the current ops-console command contract only accepts platformCode.";
+  }
+
+  if (action === "suppress_matching") {
+    return locale === "zh"
+      ? "依 spec 需提交 suppression reason 與 TTL，但目前 ops-console command contract 只能切換 workState。"
+      : "Spec requires a suppression reason and TTL, but the current ops-console command contract can only toggle workState.";
+  }
+
+  return null;
+}
+
 function formatReasonLabel(reason: string, locale: "en" | "zh") {
   const normalized = reason.replace(/_/g, " ");
   if (locale === "zh") {
@@ -58,6 +74,8 @@ function formatReasonLabel(reason: string, locale: "en" | "zh") {
         return "目前 contract 尚未提供完整欄位";
       case "action_not_supported":
         return "目前 API 尚未支援此操作";
+      case "missing_command_fields":
+        return "現有 command contract 缺少 spec 要求欄位";
       default:
         return normalized;
     }
@@ -78,6 +96,8 @@ function formatReasonLabel(reason: string, locale: "en" | "zh") {
       return "Current contract does not expose this state";
     case "action_not_supported":
       return "No writable API is available for this action";
+    case "missing_command_fields":
+      return "The current command contract is missing spec-required fields";
     default:
       return normalized;
   }
@@ -158,11 +178,30 @@ export function DriverAvailableActions({
   const [, startTransition] = useTransition();
 
   const visibleActions = actions.filter(Boolean);
+  const actionContractGaps = visibleActions
+    .map((descriptor) => ({
+      action: descriptor.action,
+      message: getActionContractGap(descriptor.action, locale),
+    }))
+    .filter(
+      (
+        gap,
+      ): gap is {
+        action: string;
+        message: string;
+      } => Boolean(gap.message),
+    );
 
   async function runAction(descriptor: ResourceActionDescriptor) {
     const { action, requiresReason, riskLevel } = descriptor;
     const highRisk = riskLevel === "high";
     const mediumRisk = riskLevel === "medium";
+    const contractGap = getActionContractGap(action, locale);
+
+    if (contractGap) {
+      setError(contractGap);
+      return;
+    }
 
     let reason = "";
     if (requiresReason || highRisk) {
@@ -295,8 +334,10 @@ export function DriverAvailableActions({
     <div style={{ display: "grid", gap: compact ? "0.35rem" : "0.5rem" }}>
       <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
         {visibleActions.map((descriptor) => {
+          const contractGap = getActionContractGap(descriptor.action, locale);
           const unsupported =
             descriptor.action === "mark_forwarded_unavailable" ||
+            Boolean(contractGap) ||
             (descriptor.action === "force_offline" && !platformCode) ||
             (descriptor.action === "request_reauth" && !platformCode);
           const disabled =
@@ -329,6 +370,7 @@ export function DriverAvailableActions({
       {visibleActions.some(
         (descriptor) =>
           !descriptor.enabled ||
+          Boolean(getActionContractGap(descriptor.action, locale)) ||
           descriptor.disabledReasonCode ||
           descriptor.action === "mark_forwarded_unavailable",
       ) ? (
@@ -344,6 +386,7 @@ export function DriverAvailableActions({
             .filter(
               (descriptor) =>
                 !descriptor.enabled ||
+                Boolean(getActionContractGap(descriptor.action, locale)) ||
                 descriptor.disabledReasonCode ||
                 descriptor.action === "mark_forwarded_unavailable",
             )
@@ -351,7 +394,9 @@ export function DriverAvailableActions({
               <div key={`${descriptor.action}-hint`}>
                 {getActionLabel(descriptor.action, locale)}:{" "}
                 {formatReasonLabel(
-                  descriptor.disabledReasonCode ??
+                  (getActionContractGap(descriptor.action, locale)
+                    ? "missing_command_fields"
+                    : descriptor.disabledReasonCode) ??
                     (descriptor.action === "mark_forwarded_unavailable"
                       ? "action_not_supported"
                       : platformStatus !== "online" &&
@@ -363,6 +408,28 @@ export function DriverAvailableActions({
               </div>
             ))}
         </div>
+      ) : null}
+
+      {actionContractGaps.length > 0 ? (
+        <Banner
+          theme={theme}
+          tone="warn"
+          icon="warn"
+          title={
+            locale === "zh"
+              ? "部分高風險動作因 command contract 缺口而暫停"
+              : "Some high-risk actions are paused due to command-contract gaps"
+          }
+          body={
+            <div style={{ display: "grid", gap: "0.35rem" }}>
+              {actionContractGaps.map((gap) => (
+                <div key={gap.action}>
+                  {getActionLabel(gap.action, locale)}: {gap.message}
+                </div>
+              ))}
+            </div>
+          }
+        />
       ) : null}
 
       {error ? (
