@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -9,22 +11,42 @@ import {
   Text,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
-import type { DriverProfileRecord, DriverSettings } from "@drts/contracts";
-import { PlatformBinding } from "@/components/platform-binding";
-import { ActionButton } from "@/components/ui/ActionButton";
-import { AppScreen } from "@/components/ui/AppScreen";
-import { BottomActionBar } from "@/components/ui/BottomActionBar";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { FormField } from "@/components/ui/FormField";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { StatusChip, type StatusChipVariant } from "@/components/ui/StatusChip";
-import { Tokens } from "@/components/ui/tokens";
 import {
+  PLATFORM_CODE_REGISTRY,
+  type DriverProfileRecord,
+  type DriverSettings,
+  type EmptyReason,
+  type PlatformCode,
+  type PlatformPresenceAdapterStatusRecord,
+  type PlatformPresenceRecord,
+  type PlatformPresenceSummary,
+  type ResourceActionDescriptor,
+  type UiRefreshMetadata,
+} from "@drts/contracts";
+import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
+
+import {
+  Banner,
+  Btn,
+  Card,
+  DL,
+  Field,
+  Input,
+  KPI,
+  PageHeader,
+  Pill,
+  Shell,
+  driverCanvasTheme,
+} from "@/components/canvas-primitives";
+import {
+  assessPlatformHealth,
+  getPlatformHealthSeverity,
+  type PlatformHealthAssessment,
+} from "@/components/platform-status-card";
+import {
+  clearDriverProvisioning,
   getDriverClient,
   getDriverId,
-  clearDriverProvisioning,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 import {
@@ -44,7 +66,91 @@ import {
   type SaveState,
   type SettingsFormValues,
 } from "@/lib/settings-form";
-import { driverSaveStatusLabels, driverStrings } from "@/lib/strings";
+import { driverSaveStatusLabels } from "@/lib/strings";
+
+const THEME = driverCanvasTheme;
+
+type BindingFilter = "all" | "attention" | "bound";
+type PlatformAuthMechanism =
+  | "external_browser_oauth"
+  | "native_app_deeplink"
+  | "manual_credential"
+  | "ops_managed";
+type BindingActionId = "bind" | "unbind" | "reauth" | "view_status";
+
+type SettingsBindingRow = {
+  record: PlatformPresenceRecord;
+  adapterStatus?: PlatformPresenceAdapterStatusRecord;
+  assessment: PlatformHealthAssessment;
+  displayName: string;
+  authMechanism: PlatformAuthMechanism;
+  driverSelfServiceBinding: boolean;
+  autoAcceptAllowed: boolean;
+  availableActions: ResourceActionDescriptor[];
+  relaySummary: string[];
+  attention: boolean;
+  accountLabel: string;
+};
+
+const PLATFORM_RULES: Partial<
+  Record<
+    PlatformCode,
+    {
+      authMechanism: PlatformAuthMechanism;
+      driverSelfServiceBinding: boolean;
+      autoAcceptAllowed: boolean;
+      canRelayAccept: boolean;
+      canRelayReject: boolean;
+      relayUnavailableReasonCode?: string;
+    }
+  >
+> = {
+  uber: {
+    authMechanism: "external_browser_oauth",
+    driverSelfServiceBinding: true,
+    autoAcceptAllowed: true,
+    canRelayAccept: true,
+    canRelayReject: true,
+  },
+  grab: {
+    authMechanism: "native_app_deeplink",
+    driverSelfServiceBinding: true,
+    autoAcceptAllowed: false,
+    canRelayAccept: true,
+    canRelayReject: false,
+    relayUnavailableReasonCode: "platform_reject_not_supported",
+  },
+  "line-taxi": {
+    authMechanism: "manual_credential",
+    driverSelfServiceBinding: true,
+    autoAcceptAllowed: false,
+    canRelayAccept: true,
+    canRelayReject: true,
+  },
+  grab_taiwan: {
+    authMechanism: "ops_managed",
+    driverSelfServiceBinding: false,
+    autoAcceptAllowed: false,
+    canRelayAccept: false,
+    canRelayReject: false,
+    relayUnavailableReasonCode: "ops_managed_binding",
+  },
+  indriver: {
+    authMechanism: "manual_credential",
+    driverSelfServiceBinding: true,
+    autoAcceptAllowed: false,
+    canRelayAccept: true,
+    canRelayReject: true,
+  },
+  forwarder_sandbox: {
+    authMechanism: "ops_managed",
+    driverSelfServiceBinding: false,
+    autoAcceptAllowed: false,
+    canRelayAccept: false,
+    canRelayReject: false,
+    relayUnavailableReasonCode: "sandbox_ops_only",
+  },
+};
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -63,12 +169,49 @@ function formatSectionList(labels: string[]): string {
   return `${labels.slice(0, -1).join("、")}和${labels.at(-1)}`;
 }
 
-interface SaveStatusDescriptor {
-  label: string;
-  variant: StatusChipVariant;
+function formatCompactDateTime(value: string | null | undefined): string {
+  if (!value) {
+    return "尚未同步";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString("zh-TW", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function describeSaveStatus(state: SaveState): SaveStatusDescriptor {
+function createRefreshMetadata(
+  state: UiRefreshMetadata["dataFreshness"],
+): UiRefreshMetadata {
+  return {
+    generatedAt: new Date().toISOString(),
+    staleAfterMs: 0,
+    dataFreshness: state,
+    source: "live",
+  };
+}
+
+function toPageEmptyReason(loadError: string | null): EmptyReason {
+  if (!loadError) {
+    return "fetch_failed";
+  }
+  const lower = loadError.toLowerCase();
+  if (
+    lower.includes("403") ||
+    lower.includes("permission") ||
+    lower.includes("forbidden")
+  ) {
+    return "permission_denied";
+  }
+  return "fetch_failed";
+}
+
+function describeSaveStatus(state: SaveState) {
   switch (state) {
     case "saving":
       return driverSaveStatusLabels.saving;
@@ -83,98 +226,591 @@ function describeSaveStatus(state: SaveState): SaveStatusDescriptor {
   }
 }
 
-interface FormSectionProps {
+function getBannerToneForEmptyReason(reason: EmptyReason): CanvasTone {
+  switch (reason) {
+    case "fetch_failed":
+    case "permission_denied":
+      return "danger";
+    case "external_unavailable":
+    case "driver_not_eligible":
+      return "warn";
+    default:
+      return "info";
+  }
+}
+
+function getEmptyReasonCopy(reason: EmptyReason): {
   title: string;
-  description?: string;
-  children: React.ReactNode;
+  body: string;
+  icon: keyof typeof Ionicons.glyphMap;
+} {
+  switch (reason) {
+    case "no_data":
+      return {
+        title: "尚未偵測到可顯示的平台資料",
+        body: "目前沒有可呈現的平台帳號資訊。稍後重新整理，或等派車台完成平台開通。",
+        icon: "albums-outline" as const,
+      };
+    case "not_provisioned":
+      return {
+        title: "此裝置尚未完成平台配置",
+        body: "先完成裝置啟用與司機身份配置，設定與平台綁定才會開放。",
+        icon: "lock-closed-outline" as const,
+      };
+    case "fetch_failed":
+      return {
+        title: "設定資料同步失敗",
+        body: "目前無法取得最新設定。請手動重新整理；若持續失敗，改由派車台協助確認。",
+        icon: "alert-circle-outline" as const,
+      };
+    case "permission_denied":
+      return {
+        title: "您目前沒有修改這份設定的權限",
+        body: "這個司機身份或平台帳號不允許自助操作。請聯絡派車台或管理端協助處理。",
+        icon: "shield-outline" as const,
+      };
+    case "external_unavailable":
+      return {
+        title: "外部平台暫時無法使用",
+        body: "平台轉接器目前降級或中斷。您仍可查看本機設定，但綁定與驗證可能暫時無法完成。",
+        icon: "cloud-offline-outline" as const,
+      };
+    case "driver_not_eligible":
+      return {
+        title: "目前沒有任何平台可以派單給您",
+        body: "您的平台資格受限或仍在審核中。先查看原因，再決定要重新驗證或請派車台處理。",
+        icon: "warning-outline" as const,
+      };
+    case "filtered_empty":
+      return {
+        title: "這個篩選條件下沒有項目",
+        body: "切回全部平台，或先完成綁定與重新驗證後再查看。",
+        icon: "funnel-outline" as const,
+      };
+    default:
+      return {
+        title: "設定資料暫時不可用",
+        body: "請稍後重新整理，或改由派車台協助確認目前狀態。",
+        icon: "help-circle-outline" as const,
+      };
+  }
 }
 
-function FormSection({ title, description, children }: FormSectionProps) {
-  return (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {description ? (
-          <Text style={styles.sectionDescription}>{description}</Text>
-        ) : null}
-      </View>
-      <View style={styles.sectionBody}>{children}</View>
-    </View>
-  );
+function getAuthMechanismMeta(mechanism: PlatformAuthMechanism) {
+  switch (mechanism) {
+    case "external_browser_oauth":
+      return {
+        label: "OAuth · 外部瀏覽器",
+        code: "external_browser_oauth",
+        icon: "open-outline" as const,
+      };
+    case "native_app_deeplink":
+      return {
+        label: "原生 App 跳轉",
+        code: "native_app_deeplink",
+        icon: "phone-portrait-outline" as const,
+      };
+    case "manual_credential":
+      return {
+        label: "手動帳密驗證",
+        code: "manual_credential",
+        icon: "key-outline" as const,
+      };
+    case "ops_managed":
+      return {
+        label: "派車台協助處理",
+        code: "ops_managed",
+        icon: "call-outline" as const,
+      };
+    default:
+      return {
+        label: "OAuth · 外部瀏覽器",
+        code: "external_browser_oauth",
+        icon: "open-outline" as const,
+      };
+  }
 }
 
-interface SwitchRowProps {
-  label: string;
-  description?: string;
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-  disabled?: boolean;
+function getDisplayName(platformCode: PlatformCode) {
+  return PLATFORM_CODE_REGISTRY[platformCode]?.displayName ?? platformCode;
 }
 
-function SwitchRow({
-  label,
-  description,
-  value,
-  onValueChange,
-  disabled = false,
-}: SwitchRowProps) {
-  return (
-    <View style={styles.switchRow}>
-      <View style={styles.switchTextBlock}>
-        <Text style={styles.switchLabel}>{label}</Text>
-        {description ? (
-          <Text style={styles.switchDescription}>{description}</Text>
-        ) : null}
-      </View>
-      <Switch value={value} onValueChange={onValueChange} disabled={disabled} />
-    </View>
-  );
+function buildCompatPresence(
+  platformCode: PlatformCode,
+  driverId: string,
+): PlatformPresenceRecord {
+  return {
+    driverId,
+    platformCode,
+    accountId: null,
+    status: "offline",
+    eligibility: "pending",
+    tokenExpiresAt: null,
+    reauthRequired: false,
+    lastOnlineAt: null,
+    lastOfflineAt: null,
+    updatedAt: new Date(0).toISOString(),
+  };
 }
 
-interface UtilityRowProps {
-  label: string;
-  detail?: string;
-  tone?: "default" | "danger";
-  onPress?: () => void;
-}
+function deriveBindingActions(
+  record: PlatformPresenceRecord,
+  driverSelfServiceBinding: boolean,
+): ResourceActionDescriptor[] {
+  const disabledReasonCode = driverSelfServiceBinding
+    ? undefined
+    : "driver_self_service_binding_disabled";
+  const actions: ResourceActionDescriptor[] = [
+    {
+      action: "view_status",
+      enabled: true,
+      riskLevel: "low",
+    },
+  ];
 
-function UtilityRow({
-  label,
-  detail,
-  tone = "default",
-  onPress,
-}: UtilityRowProps) {
-  const content = (
-    <View style={styles.utilityRow}>
-      <View style={styles.utilityTextBlock}>
-        <Text
-          style={[
-            styles.utilityLabel,
-            tone === "danger" ? styles.utilityLabelDanger : null,
-          ]}
-        >
-          {label}
-        </Text>
-        {detail ? <Text style={styles.utilityDetail}>{detail}</Text> : null}
-      </View>
-      <Ionicons
-        name={onPress ? "chevron-forward" : "information-circle-outline"}
-        size={18}
-        color={
-          tone === "danger" ? Tokens.colors.danger : Tokens.colors.textMuted
-        }
-      />
-    </View>
-  );
-
-  if (!onPress) {
-    return content;
+  if (record.accountId) {
+    actions.push({
+      action: "unbind",
+      enabled: driverSelfServiceBinding,
+      disabledReasonCode,
+      requiresReason: true,
+      riskLevel: "high",
+    });
+  } else {
+    actions.push({
+      action: "bind",
+      enabled: driverSelfServiceBinding,
+      disabledReasonCode,
+      riskLevel: "medium",
+    });
   }
 
+  if (record.accountId) {
+    actions.push({
+      action: "reauth",
+      enabled: record.reauthRequired || record.status === "offline",
+      disabledReasonCode:
+        record.reauthRequired || record.status === "offline"
+          ? undefined
+          : "token_still_valid",
+      riskLevel: "medium",
+    });
+  }
+
+  return actions;
+}
+
+function deriveBindingRows(
+  summary: PlatformPresenceSummary | null,
+  driverId: string,
+): SettingsBindingRow[] {
+  const presenceMap = new Map<PlatformCode, PlatformPresenceRecord>(
+    (summary?.presences ?? []).map((record: PlatformPresenceRecord) => [
+      record.platformCode,
+      record,
+    ]),
+  );
+  const adapterMap = new Map<PlatformCode, PlatformPresenceAdapterStatusRecord>(
+    (summary?.adapterStatuses ?? []).map(
+      (record: PlatformPresenceAdapterStatusRecord) => [
+        record.platformCode,
+        record,
+      ],
+    ),
+  );
+
+  return Object.keys(PLATFORM_CODE_REGISTRY)
+    .map((code) => code as PlatformCode)
+    .map<SettingsBindingRow>((platformCode) => {
+      const record =
+        presenceMap.get(platformCode) ??
+        buildCompatPresence(platformCode, driverId);
+      const adapterStatus = adapterMap.get(platformCode);
+      const assessment = assessPlatformHealth(record, adapterStatus);
+      const rules = PLATFORM_RULES[platformCode] ?? {
+        authMechanism: "external_browser_oauth",
+        driverSelfServiceBinding: true,
+        autoAcceptAllowed: false,
+        canRelayAccept: true,
+        canRelayReject: true,
+      };
+      const availableActions = deriveBindingActions(
+        record,
+        rules.driverSelfServiceBinding,
+      );
+      const relaySummary = [
+        `relayAccept=${String(rules.canRelayAccept)}`,
+        `relayReject=${String(rules.canRelayReject)}`,
+        rules.relayUnavailableReasonCode
+          ? `reason=${rules.relayUnavailableReasonCode}`
+          : null,
+      ].filter(Boolean) as string[];
+
+      return {
+        record,
+        adapterStatus,
+        assessment,
+        displayName: getDisplayName(platformCode),
+        authMechanism: rules.authMechanism,
+        driverSelfServiceBinding: rules.driverSelfServiceBinding,
+        autoAcceptAllowed: rules.autoAcceptAllowed,
+        availableActions,
+        relaySummary,
+        attention:
+          record.reauthRequired ||
+          assessment.statusTone !== "healthy" ||
+          adapterStatus?.status === "degraded" ||
+          adapterStatus?.status === "down",
+        accountLabel: record.accountId
+          ? maskAccountId(record.accountId)
+          : "未綁定",
+      };
+    })
+    .sort((left, right) => {
+      const severityDelta =
+        getPlatformHealthSeverity(right.assessment) -
+        getPlatformHealthSeverity(left.assessment);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+      return left.displayName.localeCompare(right.displayName, "zh-TW");
+    });
+}
+
+function maskAccountId(accountId: string): string {
+  if (accountId.length <= 6) {
+    return accountId;
+  }
+  return `${accountId.slice(0, 3)}•••${accountId.slice(-3)}`;
+}
+
+function toBindingFilterLabel(filter: BindingFilter) {
+  switch (filter) {
+    case "attention":
+      return "需處理";
+    case "bound":
+      return "已綁定";
+    default:
+      return "全部";
+  }
+}
+
+function getActionLabel(action: BindingActionId) {
+  switch (action) {
+    case "bind":
+      return "綁定";
+    case "unbind":
+      return "解除綁定";
+    case "reauth":
+      return "重新驗證";
+    case "view_status":
+      return "查看狀態";
+  }
+}
+
+function getActionTone(action: BindingActionId): {
+  variant: "primary" | "secondary" | "ghost";
+  danger?: boolean;
+} {
+  switch (action) {
+    case "bind":
+    case "reauth":
+      return { variant: "primary" };
+    case "unbind":
+      return { variant: "secondary", danger: true };
+    default:
+      return { variant: "secondary" };
+  }
+}
+
+function BindingEmptyState({
+  reason,
+  action,
+}: {
+  reason: EmptyReason;
+  action?: ReactNode;
+}) {
+  const copy = getEmptyReasonCopy(reason);
+  const tone = getBannerToneForEmptyReason(reason);
+
   return (
-    <Pressable onPress={onPress} style={styles.utilityPressable}>
-      {content}
-    </Pressable>
+    <Banner
+      theme={THEME}
+      tone={tone === "neutral" ? "info" : tone}
+      title={copy.title}
+      body={copy.body}
+      icon={
+        <Ionicons
+          name={copy.icon}
+          size={16}
+          color={
+            tone === "danger"
+              ? THEME.danger
+              : tone === "warn"
+                ? THEME.warn
+                : THEME.info
+          }
+        />
+      }
+      actions={action}
+    />
+  );
+}
+
+function SaveStatePill({ state }: { state: SaveState }) {
+  const status = describeSaveStatus(state);
+  const tone: CanvasTone =
+    status.variant === "success"
+      ? "success"
+      : status.variant === "warning"
+        ? "warn"
+        : status.variant === "danger"
+          ? "danger"
+          : status.variant === "info"
+            ? "info"
+            : "neutral";
+
+  return (
+    <Pill theme={THEME} tone={tone}>
+      {status.label}
+    </Pill>
+  );
+}
+
+function SectionTitle({
+  title,
+  subtitle,
+  action,
+}: {
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <View style={styles.sectionTitleRow}>
+      <View style={styles.sectionTitleCopy}>
+        <Text style={[styles.sectionTitle, { color: THEME.text }]}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={[styles.sectionSubtitle, { color: THEME.textMuted }]}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      {action ? <View>{action}</View> : null}
+    </View>
+  );
+}
+
+function PlatformBindingRow({
+  row,
+  busy,
+  onAction,
+}: {
+  row: SettingsBindingRow;
+  busy: boolean;
+  onAction: (action: BindingActionId, row: SettingsBindingRow) => void;
+}) {
+  const authMeta = getAuthMechanismMeta(row.authMechanism);
+  const statusTone: CanvasTone =
+    row.record.reauthRequired || row.assessment.statusTone === "warning"
+      ? "warn"
+      : row.assessment.statusTone === "danger"
+        ? "danger"
+        : row.record.accountId
+          ? "success"
+          : "neutral";
+
+  return (
+    <View
+      style={[
+        styles.bindingRow,
+        {
+          borderBottomColor: THEME.border,
+        },
+      ]}
+    >
+      <View style={styles.bindingRowTop}>
+        <View
+          style={[
+            styles.bindingMark,
+            {
+              backgroundColor:
+                statusTone === "success"
+                  ? THEME.successBg
+                  : statusTone === "warn"
+                    ? THEME.warnBg
+                    : statusTone === "danger"
+                      ? THEME.dangerBg
+                      : THEME.neutralBg,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.bindingMarkText,
+              {
+                color:
+                  statusTone === "success"
+                    ? THEME.success
+                    : statusTone === "warn"
+                      ? THEME.warn
+                      : statusTone === "danger"
+                        ? THEME.danger
+                        : THEME.textMuted,
+                fontFamily: THEME.monoFamily,
+              },
+            ]}
+          >
+            {row.record.platformCode.slice(0, 3).toUpperCase()}
+          </Text>
+        </View>
+        <View style={styles.bindingMain}>
+          <View style={styles.bindingNameRow}>
+            <Text style={[styles.bindingName, { color: THEME.text }]}>
+              {row.displayName}
+            </Text>
+            {row.record.reauthRequired ? (
+              <Pill theme={THEME} tone="warn">
+                需處理
+              </Pill>
+            ) : null}
+          </View>
+          <Text style={[styles.bindingMeta, { color: THEME.textMuted }]}>
+            {row.record.accountId ? "已綁定" : "未綁定"} · {row.accountLabel}
+          </Text>
+          <Text
+            style={[
+              styles.bindingStatus,
+              {
+                color:
+                  statusTone === "success"
+                    ? THEME.success
+                    : statusTone === "warn"
+                      ? THEME.warn
+                      : statusTone === "danger"
+                        ? THEME.danger
+                        : THEME.textMuted,
+              },
+            ]}
+          >
+            {row.assessment.readinessLabel}
+          </Text>
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.bindingMechanismBar,
+          {
+            backgroundColor: THEME.surfaceLo,
+          },
+        ]}
+      >
+        <Ionicons name={authMeta.icon} size={12} color={THEME.textMuted} />
+        <Text
+          style={[styles.bindingMechanismLabel, { color: THEME.textMuted }]}
+        >
+          {authMeta.label}
+        </Text>
+        <Text
+          style={[
+            styles.bindingMechanismCode,
+            { color: THEME.textDim, fontFamily: THEME.monoFamily },
+          ]}
+        >
+          {authMeta.code}
+        </Text>
+      </View>
+
+      <View style={styles.bindingFacts}>
+        <Pill
+          theme={THEME}
+          tone={row.driverSelfServiceBinding ? "success" : "warn"}
+        >
+          {row.driverSelfServiceBinding
+            ? "driverSelfServiceBinding=true"
+            : "driverSelfServiceBinding=false"}
+        </Pill>
+        {row.relaySummary.map((fact) => (
+          <Pill
+            key={`${row.record.platformCode}-${fact}`}
+            theme={THEME}
+            tone="neutral"
+          >
+            {fact}
+          </Pill>
+        ))}
+      </View>
+
+      <DL
+        theme={THEME}
+        cols={2}
+        items={[
+          {
+            label: "授權狀態",
+            value: row.record.reauthRequired ? "需重新驗證" : "正常",
+          },
+          {
+            label: "最後同步",
+            value: formatCompactDateTime(
+              row.adapterStatus?.lastSyncAt ??
+                row.record.lastOnlineAt ??
+                row.record.updatedAt,
+            ),
+            mono: true,
+          },
+          {
+            label: "平台資格",
+            value:
+              row.record.eligibility === "eligible"
+                ? "可接單"
+                : row.record.eligibility === "pending"
+                  ? "審核中"
+                  : "資格受限",
+          },
+          {
+            label: "同步健康",
+            value: row.adapterStatus?.status ?? "unknown",
+            mono: true,
+          },
+        ]}
+      />
+
+      <View style={styles.bindingActionRow}>
+        {row.availableActions.map((descriptor) => {
+          const action = descriptor.action as BindingActionId;
+          const palette = getActionTone(action);
+          const disabled = busy || !descriptor.enabled;
+
+          return (
+            <Btn
+              key={`${row.record.platformCode}-${descriptor.action}`}
+              theme={THEME}
+              variant={palette.variant}
+              size="xs"
+              danger={palette.danger}
+              disabled={disabled}
+              onPress={() => onAction(action, row)}
+            >
+              {getActionLabel(action)}
+            </Btn>
+          );
+        })}
+      </View>
+
+      {row.availableActions.some(
+        (item) => !item.enabled && item.disabledReasonCode,
+      ) ? (
+        <Text style={[styles.bindingHint, { color: THEME.textDim }]}>
+          {row.availableActions
+            .filter((item) => !item.enabled && item.disabledReasonCode)
+            .map((item) => item.disabledReasonCode)
+            .join(" · ")}
+        </Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -184,15 +820,23 @@ export default function SettingsScreen() {
   const driverId = isProvisioned ? getDriverId() : "";
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [busyPlatform, setBusyPlatform] = useState<PlatformCode | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<"success" | "error" | null>(
     null,
   );
-
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [platformSummary, setPlatformSummary] =
+    useState<PlatformPresenceSummary | null>(null);
+  const [refreshMeta, setRefreshMeta] = useState<UiRefreshMetadata>(
+    createRefreshMetadata("unknown"),
+  );
+  const [bindingFilter, setBindingFilter] = useState<BindingFilter>("all");
+
   const [settingsValues, setSettingsValues] = useState<SettingsFormValues>(
     DEFAULT_SETTINGS_VALUES,
   );
@@ -206,72 +850,10 @@ export default function SettingsScreen() {
     DEFAULT_PROFILE_VALUES,
   );
 
-  useEffect(() => {
-    if (!isProvisioned) {
-      setLoading(false);
-      return;
-    }
-
-    let isActive = true;
-    const client = getDriverClient();
-
-    const loadAll = async () => {
-      const [settingsResult, profileResult] = await Promise.allSettled([
-        client.getDriverSettings(driverId),
-        client.getDriverProfile(),
-      ]);
-
-      if (!isActive) {
-        return;
-      }
-
-      const failures: string[] = [];
-
-      if (settingsResult.status === "fulfilled") {
-        const next = settingsValuesFromRecord(
-          settingsResult.value as DriverSettings,
-        );
-        setSettingsValues(next);
-        setInitialSettings(next);
-        setSettingsLoaded(true);
-      } else {
-        failures.push(`偏好設定（${toErrorMessage(settingsResult.reason)}）`);
-      }
-
-      if (profileResult.status === "fulfilled") {
-        const next = profileValuesFromRecord(
-          profileResult.value as DriverProfileRecord,
-        );
-        setProfileValues(next);
-        setInitialProfile(next);
-        setProfileLoaded(true);
-      } else {
-        failures.push(`個人資料（${toErrorMessage(profileResult.reason)}）`);
-      }
-
-      if (failures.length > 0) {
-        setLoadError(
-          `已使用可用資料。無法載入 ${formatSectionList(failures)}。`,
-        );
-      } else {
-        setLoadError(null);
-      }
-
-      setLoading(false);
-    };
-
-    void loadAll();
-
-    return () => {
-      isActive = false;
-    };
-  }, [driverId, isProvisioned]);
-
   const settingsErrors = validateSettingsValues(settingsValues);
   const profileErrors = profileLoaded
     ? validateProfileValues(profileValues)
     : {};
-
   const settingsDirty =
     settingsLoaded && !settingsValuesEqual(initialSettings, settingsValues);
   const profileDirty =
@@ -280,31 +862,78 @@ export default function SettingsScreen() {
   const hasValidation =
     (settingsLoaded && hasErrors(settingsErrors)) ||
     (profileLoaded && hasErrors(profileErrors));
-  const validationMessage = hasValidation
-    ? "請先修正標示欄位後再儲存設定。"
-    : null;
-
   const saveState = deriveSaveState({
     saving,
     dirty,
     hasValidation,
     lastResult,
   });
-  const saveStatus = describeSaveStatus(saveState);
-  const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
-  const identitySummary = [
-    driverId ? `ID ${driverId}` : null,
-    profileValues.profilePhone.trim() || null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const emergencySummary = [
-    profileValues.emergencyName.trim() || "尚未設定",
-    profileValues.emergencyRelationship.trim() || null,
-    profileValues.emergencyPhone.trim() || null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+
+  const loadAll = async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!isProvisioned) {
+      setLoading(false);
+      return;
+    }
+
+    const client = getDriverClient();
+    const [settingsResult, profileResult, platformResult] =
+      await Promise.allSettled([
+        client.getDriverSettings(driverId) as Promise<DriverSettings>,
+        client.getDriverProfile() as Promise<DriverProfileRecord>,
+        client.getPlatformPresence(),
+      ]);
+
+    const failures: string[] = [];
+    let freshness: UiRefreshMetadata["dataFreshness"] = "fresh";
+
+    if (settingsResult.status === "fulfilled") {
+      const next = settingsValuesFromRecord(settingsResult.value);
+      setSettingsValues(next);
+      setInitialSettings(next);
+      setSettingsLoaded(true);
+    } else {
+      failures.push(`偏好設定（${toErrorMessage(settingsResult.reason)}）`);
+      freshness = "degraded";
+    }
+
+    if (profileResult.status === "fulfilled") {
+      const next = profileValuesFromRecord(profileResult.value);
+      setProfileValues(next);
+      setInitialProfile(next);
+      setProfileLoaded(true);
+    } else {
+      failures.push(`個人資料（${toErrorMessage(profileResult.reason)}）`);
+      freshness = "degraded";
+    }
+
+    if (platformResult.status === "fulfilled") {
+      setPlatformSummary(platformResult.value);
+    } else {
+      failures.push(`平台綁定（${toErrorMessage(platformResult.reason)}）`);
+      freshness = "degraded";
+      if (!silent) {
+        setPlatformSummary(null);
+      }
+    }
+
+    setRefreshMeta(createRefreshMetadata(freshness));
+    setLoadError(
+      failures.length > 0
+        ? `已載入可用資料。無法同步 ${formatSectionList(failures)}。`
+        : null,
+    );
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void loadAll({ silent: true });
+  }, [driverId, isProvisioned]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadAll();
+    setRefreshing(false);
+  };
 
   const updateSettings = (patch: Partial<SettingsFormValues>) => {
     setSettingsValues((prev) => ({ ...prev, ...patch }));
@@ -334,8 +963,8 @@ export default function SettingsScreen() {
     setSaving(true);
     setSaveError(null);
     const client = getDriverClient();
-
     const tasks: Array<Promise<{ section: string }>> = [];
+
     if (settingsDirty) {
       tasks.push(
         client
@@ -357,8 +986,8 @@ export default function SettingsScreen() {
       const failed: string[] = [];
 
       results.forEach((entry, index) => {
-        const isSettingsTask = settingsDirty && index === 0;
-        const sectionLabel = isSettingsTask ? "偏好設定" : "個人資料";
+        const sectionLabel =
+          settingsDirty && index === 0 ? "偏好設定" : "個人資料";
         if (entry.status === "fulfilled") {
           saved.push(entry.value.section);
         } else {
@@ -375,27 +1004,95 @@ export default function SettingsScreen() {
 
       if (failed.length === 0) {
         setLastResult("success");
-        Alert.alert("儲存成功", "設定已成功儲存。");
-        return;
-      }
-
-      if (saved.length === 0) {
-        setLastResult("error");
-        setSaveError(`無法儲存 ${formatSectionList(failed)}。`);
-        Alert.alert("儲存失敗", `無法儲存 ${formatSectionList(failed)}。`);
         return;
       }
 
       setLastResult("error");
       setSaveError(
-        `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`,
-      );
-      Alert.alert(
-        "部分儲存成功",
-        `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`,
+        saved.length === 0
+          ? `無法儲存 ${formatSectionList(failed)}。`
+          : `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`,
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleBindingAction = async (
+    action: BindingActionId,
+    row: SettingsBindingRow,
+  ) => {
+    if (action === "view_status") {
+      router.push("/platform-presence");
+      return;
+    }
+
+    if (action === "unbind") {
+      Alert.prompt?.(
+        "解除平台綁定",
+        `請輸入解除「${row.displayName}」的原因。`,
+        [
+          { text: "取消", style: "cancel" },
+          {
+            text: "確認解除",
+            style: "destructive",
+            onPress: (reason?: string) => {
+              if (!reason?.trim()) {
+                Alert.alert("需要原因", "解除綁定前需要填寫原因。");
+                return;
+              }
+              void submitBindingAction(action, row, reason.trim());
+            },
+          },
+        ],
+        "plain-text",
+      );
+
+      if (!Alert.prompt) {
+        Alert.alert(
+          "解除平台綁定",
+          "此裝置需要原因才能解除綁定。請改到派車台或支援可輸入原因的裝置執行。",
+        );
+      }
+      return;
+    }
+
+    void submitBindingAction(action, row);
+  };
+
+  const submitBindingAction = async (
+    action: Exclude<BindingActionId, "view_status">,
+    row: SettingsBindingRow,
+    reason?: string,
+  ) => {
+    const client = getDriverClient();
+    const authMeta = getAuthMechanismMeta(row.authMechanism);
+    setBusyPlatform(row.record.platformCode);
+
+    try {
+      if (action === "bind" || action === "reauth") {
+        await client.setPlatformOnline({
+          platformCode: row.record.platformCode,
+          tokenExpiresAt: null,
+        });
+        Alert.alert(
+          action === "bind" ? "已送出平台綁定" : "已送出重新驗證",
+          `請依 ${authMeta.label} 流程完成「${row.displayName}」驗證。`,
+        );
+      } else {
+        await client.setPlatformOffline({
+          platformCode: row.record.platformCode,
+        });
+        Alert.alert(
+          "已解除平台綁定",
+          `「${row.displayName}」已下線並解除綁定。原因：${reason ?? "未提供"}`,
+        );
+      }
+      await onRefresh();
+    } catch (error) {
+      Alert.alert("平台操作失敗", toErrorMessage(error));
+    } finally {
+      setBusyPlatform(null);
     }
   };
 
@@ -415,387 +1112,789 @@ export default function SettingsScreen() {
 
   if (!isProvisioned) {
     return (
-      <AppScreen scrollable={false}>
-        <PageHeader title={driverStrings.settings.title} />
-        <EmptyState
-          title="尚未完成裝置配置"
-          description="此裝置尚未分配司機身份，無法載入設定。"
-          icon="lock-closed-outline"
-          actionTitle="前往配置裝置"
-          onAction={() => router.push("/onboarding")}
-          style={styles.fillState}
+      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
+        <PageHeader
+          theme={THEME}
+          title="設定"
+          subtitle="個人資料、偏好與平台綁定"
         />
-      </AppScreen>
+        <BindingEmptyState
+          reason="not_provisioned"
+          action={
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              onPress={() => router.push("/onboarding")}
+            >
+              前往裝置配置
+            </Btn>
+          }
+        />
+      </Shell>
     );
   }
 
   if (loading) {
     return (
-      <AppScreen scrollable={false}>
-        <PageHeader title={driverStrings.settings.title} />
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={Tokens.colors.primary} />
-          <Text style={styles.loadingLabel}>載入設定中…</Text>
+      <Shell theme={THEME} contentContainerStyle={styles.loadingContent}>
+        <PageHeader
+          theme={THEME}
+          title="設定"
+          subtitle="個人資料、偏好與平台綁定"
+        />
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color={THEME.accent} />
+          <Text style={[styles.loadingLabel, { color: THEME.textMuted }]}>
+            載入設定中…
+          </Text>
         </View>
-      </AppScreen>
+      </Shell>
     );
   }
 
+  if (loadError && !settingsLoaded && !profileLoaded && !platformSummary) {
+    const reason = toPageEmptyReason(loadError);
+    return (
+      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
+        <PageHeader
+          theme={THEME}
+          title="設定"
+          subtitle="個人資料、偏好與平台綁定"
+          actions={
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
+              onPress={() => void onRefresh()}
+              disabled={refreshing}
+            >
+              重新整理
+            </Btn>
+          }
+        />
+        <BindingEmptyState reason={reason} />
+      </Shell>
+    );
+  }
+
+  const bindingRows = deriveBindingRows(platformSummary, driverId);
+  const boundCount = bindingRows.filter((item) =>
+    Boolean(item.record.accountId),
+  ).length;
+  const attentionCount = bindingRows.filter((item) => item.attention).length;
+  const autoAcceptRows = bindingRows.filter((item) => item.autoAcceptAllowed);
+  const currentAutoAcceptLabel =
+    autoAcceptRows.length > 0
+      ? `支援 ${autoAcceptRows.length} 個平台`
+      : "目前無平台支援";
+  const filteredRows = bindingRows.filter((item) => {
+    if (bindingFilter === "attention") {
+      return item.attention;
+    }
+    if (bindingFilter === "bound") {
+      return Boolean(item.record.accountId);
+    }
+    return true;
+  });
+  const bindingEmptyReason: EmptyReason | null =
+    filteredRows.length > 0
+      ? null
+      : bindingFilter !== "all"
+        ? "filtered_empty"
+        : bindingRows.length === 0
+          ? "no_data"
+          : bindingRows.every(
+                (item) =>
+                  item.adapterStatus?.status === "down" ||
+                  item.adapterStatus?.status === "degraded",
+              )
+            ? "external_unavailable"
+            : boundCount > 0 &&
+                bindingRows
+                  .filter((item) => item.record.accountId)
+                  .every((item) => item.record.eligibility === "ineligible")
+              ? "driver_not_eligible"
+              : null;
+  const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
   const saveDisabled = !dirty || hasValidation || saving;
+  const staleLabel =
+    refreshMeta.dataFreshness === "degraded"
+      ? "部分資料降級"
+      : `最後同步 ${formatCompactDateTime(refreshMeta.generatedAt)}`;
 
   return (
-    <View style={styles.root}>
-      <AppScreen>
-        <View style={styles.heroHeader}>
-          <Text style={styles.screenTitle}>設定</Text>
-          <Text style={styles.screenSubtitle}>
-            個人資料、偏好設定與平台帳號綁定
-          </Text>
+    <Shell
+      theme={THEME}
+      contentContainerStyle={styles.shellContent}
+      footer={
+        <View style={styles.footerBar}>
+          <View>
+            <SaveStatePill state={saveState} />
+            <Text style={[styles.footerMeta, { color: THEME.textDim }]}>
+              {hasValidation ? "請先修正欄位錯誤" : staleLabel}
+            </Text>
+          </View>
+          <Btn
+            theme={THEME}
+            variant="primary"
+            size="md"
+            disabled={saveDisabled}
+            onPress={() => void handleSave()}
+          >
+            {saving ? "儲存中…" : "儲存設定"}
+          </Btn>
         </View>
-
-        <View style={styles.content}>
-          {loadError ? <ErrorBanner message={loadError} /> : null}
-          {validationMessage ? (
-            <ErrorBanner message={validationMessage} />
-          ) : null}
-          {saveError ? <ErrorBanner message={saveError} /> : null}
-
-          <FormSection
-            title="司機身份"
-            description="維持最新的聯絡方式以便派遣與行政聯繫。"
+      }
+    >
+      <PageHeader
+        theme={THEME}
+        title="設定"
+        subtitle="4 段設定 · 手動同步 · 平台綁定與健康中心對齊"
+        actions={
+          <Btn
+            theme={THEME}
+            variant="ghost"
+            size="xs"
+            icon={<Ionicons name="refresh" size={13} color={THEME.textMuted} />}
+            onPress={() => void onRefresh()}
+            disabled={refreshing}
           >
-            <View style={styles.profileHeroCard}>
-              <View style={styles.profileAvatar}>
-                <Text style={styles.profileAvatarText}>{profileInitial}</Text>
-              </View>
-              <View style={styles.profileIdentityBlock}>
-                <Text style={styles.profileName}>
-                  {profileValues.profileName.trim() || "尚未填寫司機姓名"}
-                </Text>
-                <Text style={styles.profileMeta}>
-                  {identitySummary || "尚未填寫聯絡資訊"}
-                </Text>
-              </View>
-              <StatusChip
-                label={saveStatus.label}
-                variant={saveStatus.variant}
-                style={styles.profileStatusChip}
-              />
-            </View>
+            {refreshing ? "同步中" : "重新整理"}
+          </Btn>
+        }
+      />
 
-            <FormField
-              label="姓名"
+      <View style={styles.kpiRow}>
+        <KPI theme={THEME} label="已綁定平台" value={String(boundCount)} />
+        <KPI theme={THEME} label="需處理" value={String(attentionCount)} />
+        <KPI
+          theme={THEME}
+          label="Refresh tier"
+          value="Manual"
+          sub={staleLabel}
+        />
+      </View>
+
+      {loadError ? (
+        <Banner
+          theme={THEME}
+          tone="warn"
+          title="部分資料同步失敗"
+          body={loadError}
+          icon={
+            <Ionicons name="warning-outline" size={16} color={THEME.warn} />
+          }
+        />
+      ) : null}
+      {saveError ? (
+        <Banner
+          theme={THEME}
+          tone="danger"
+          title="儲存失敗"
+          body={saveError}
+          icon={
+            <Ionicons
+              name="alert-circle-outline"
+              size={16}
+              color={THEME.danger}
+            />
+          }
+        />
+      ) : null}
+      {hasValidation ? (
+        <Banner
+          theme={THEME}
+          tone="warn"
+          title="還有欄位需要修正"
+          body="請先修正標示欄位，再執行儲存。"
+          icon={
+            <Ionicons name="warning-outline" size={16} color={THEME.warn} />
+          }
+        />
+      ) : null}
+
+      <Card theme={THEME} padding={16}>
+        <View style={styles.profileHero}>
+          <View
+            style={[styles.profileAvatar, { backgroundColor: THEME.accentBg }]}
+          >
+            <Text
+              style={[styles.profileAvatarLabel, { color: THEME.accentHi }]}
+            >
+              {profileInitial}
+            </Text>
+          </View>
+          <View style={styles.profileHeroCopy}>
+            <Text style={[styles.profileHeroName, { color: THEME.text }]}>
+              {profileValues.profileName.trim() || "尚未填寫司機姓名"}
+            </Text>
+            <Text style={[styles.profileHeroMeta, { color: THEME.textMuted }]}>
+              {driverId ? `driverId · ${driverId}` : "未配置 driverId"}
+            </Text>
+          </View>
+          <SaveStatePill state={saveState} />
+        </View>
+      </Card>
+
+      <SectionTitle
+        title="司機身份"
+        subtitle="維持最新聯絡方式，派遣與行政才能正確找到您。"
+      />
+      <Card theme={THEME} padding={16}>
+        <View style={styles.fieldStack}>
+          <Field theme={THEME} label="姓名" required>
+            <Input
+              theme={THEME}
               value={profileValues.profileName}
+              ph="司機姓名"
+              editable={!saving}
               onChangeText={(value) => updateProfile({ profileName: value })}
-              placeholder="司機姓名"
-              error={profileErrors.profileName}
-              editable={profileLoaded && !saving}
             />
-            <FormField
-              label="電話"
-              value={profileValues.profilePhone}
-              onChangeText={(value) => updateProfile({ profilePhone: value })}
-              placeholder="+886-900-000-000"
-              keyboardType="phone-pad"
-              error={profileErrors.profilePhone}
-              editable={profileLoaded && !saving}
-            />
-            <FormField
-              label="電子郵件"
-              value={profileValues.profileEmail}
-              onChangeText={(value) => updateProfile({ profileEmail: value })}
-              placeholder="driver@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              error={profileErrors.profileEmail}
-              editable={profileLoaded && !saving}
-            />
-          </FormSection>
+          </Field>
+          {profileErrors.profileName ? (
+            <Text style={[styles.fieldError, { color: THEME.danger }]}>
+              {profileErrors.profileName}
+            </Text>
+          ) : null}
 
-          <FormSection
-            title="緊急聯絡人"
-            description="緊急情況時平台會優先聯絡此人；任一欄位填寫後姓名與電話為必填。"
-          >
-            <FormField
-              label="聯絡人姓名"
+          <Field theme={THEME} label="電話">
+            <Input
+              theme={THEME}
+              value={profileValues.profilePhone}
+              ph="+886-900-000-000"
+              editable={!saving}
+              onChangeText={(value) => updateProfile({ profilePhone: value })}
+            />
+          </Field>
+
+          <Field theme={THEME} label="電子郵件">
+            <Input
+              theme={THEME}
+              value={profileValues.profileEmail}
+              ph="driver@example.com"
+              editable={!saving}
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={(value) => updateProfile({ profileEmail: value })}
+            />
+          </Field>
+          {profileErrors.profileEmail ? (
+            <Text style={[styles.fieldError, { color: THEME.danger }]}>
+              {profileErrors.profileEmail}
+            </Text>
+          ) : null}
+        </View>
+      </Card>
+
+      <SectionTitle
+        title="緊急聯絡人"
+        subtitle="任一欄位有內容時，姓名與電話必填。"
+      />
+      <Card theme={THEME} padding={16}>
+        <View style={styles.fieldStack}>
+          <Field theme={THEME} label="聯絡人姓名">
+            <Input
+              theme={THEME}
               value={profileValues.emergencyName}
+              ph="緊急聯絡人姓名"
+              editable={!saving}
               onChangeText={(value) => updateProfile({ emergencyName: value })}
-              placeholder="緊急聯絡人姓名"
-              error={profileErrors.emergencyName}
-              editable={profileLoaded && !saving}
             />
-            <FormField
-              label="聯絡人電話"
+          </Field>
+          {profileErrors.emergencyName ? (
+            <Text style={[styles.fieldError, { color: THEME.danger }]}>
+              {profileErrors.emergencyName}
+            </Text>
+          ) : null}
+
+          <Field theme={THEME} label="聯絡人電話">
+            <Input
+              theme={THEME}
               value={profileValues.emergencyPhone}
+              ph="+886-900-000-000"
+              editable={!saving}
               onChangeText={(value) => updateProfile({ emergencyPhone: value })}
-              placeholder="+886-900-000-001"
-              keyboardType="phone-pad"
-              error={profileErrors.emergencyPhone}
-              editable={profileLoaded && !saving}
             />
-            <FormField
-              label="關係"
+          </Field>
+          {profileErrors.emergencyPhone ? (
+            <Text style={[styles.fieldError, { color: THEME.danger }]}>
+              {profileErrors.emergencyPhone}
+            </Text>
+          ) : null}
+
+          <Field theme={THEME} label="關係">
+            <Input
+              theme={THEME}
               value={profileValues.emergencyRelationship}
+              ph="例如：配偶、家人、主管"
+              editable={!saving}
               onChangeText={(value) =>
                 updateProfile({ emergencyRelationship: value })
               }
-              placeholder="配偶、兄弟姐妹、父母…"
-              editable={profileLoaded && !saving}
             />
-          </FormSection>
+          </Field>
+        </View>
+      </Card>
 
-          <FormSection
-            title="偏好設定"
-            description="調整系統介面語言、接單範圍與通知行為。"
+      <SectionTitle
+        title="偏好"
+        subtitle="語言、通知、接單距離與 auto-accept 都在這裡。"
+      />
+      <Card theme={THEME} padding={16}>
+        <View style={styles.preferenceStack}>
+          <Field theme={THEME} label="語言" required>
+            <View style={styles.segmentRow}>
+              {[
+                { label: "繁中", value: "zh-TW" },
+                { label: "English", value: "en" },
+              ].map((option) => (
+                <Pressable
+                  key={option.value}
+                  onPress={() => updateSettings({ language: option.value })}
+                  style={[
+                    styles.segmentButton,
+                    {
+                      backgroundColor:
+                        settingsValues.language === option.value
+                          ? THEME.accentBg
+                          : THEME.surfaceLo,
+                      borderColor:
+                        settingsValues.language === option.value
+                          ? THEME.accent
+                          : THEME.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.segmentLabel,
+                      {
+                        color:
+                          settingsValues.language === option.value
+                            ? THEME.accentHi
+                            : THEME.textMuted,
+                      },
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </Field>
+
+          <Field
+            theme={THEME}
+            label="最大接單距離"
+            hint="Q-DRV14：公里單位。外部平台若自有規則，可能僅作參考。"
           >
-            <FormField
-              label="介面語言"
-              value={settingsValues.language}
-              onChangeText={(value) => updateSettings({ language: value })}
-              placeholder="zh-TW"
-              autoCapitalize="none"
-              error={settingsErrors.language}
-              editable={settingsLoaded && !saving}
-            />
-            <FormField
-              label="最大接單範圍（公里）"
+            <Input
+              theme={THEME}
               value={settingsValues.maxAcceptRadius}
+              ph="例如 8"
+              editable={!saving}
+              suffix="km"
               onChangeText={(value) =>
                 updateSettings({ maxAcceptRadius: value })
               }
-              placeholder="例如：10"
-              keyboardType="numeric"
-              error={settingsErrors.maxAcceptRadius}
-              helpText="留白代表不限制；最大可設定到 200 公里。"
-              editable={settingsLoaded && !saving}
             />
-            <View style={styles.switchCard}>
-              <SwitchRow
-                label="通知"
-                description="關閉後將不會收到任務指派與行政通知。"
-                value={settingsValues.notificationsEnabled}
-                onValueChange={(value) =>
-                  updateSettings({ notificationsEnabled: value })
-                }
-                disabled={!settingsLoaded || saving}
-              />
-              <View style={styles.switchDivider} />
-              <SwitchRow
-                label="自動接單（全平台）"
-                description="開啟後會對所有已綁定平台的合格派遣自動接單；目前尚未提供逐平台覆寫，外部平台仍以該平台的接單規則為準。"
-                value={settingsValues.autoAcceptEnabled}
-                onValueChange={(value) =>
-                  updateSettings({ autoAcceptEnabled: value })
-                }
-                disabled={!settingsLoaded || saving}
-              />
-            </View>
-          </FormSection>
+          </Field>
+          {settingsErrors.maxAcceptRadius ? (
+            <Text style={[styles.fieldError, { color: THEME.danger }]}>
+              {settingsErrors.maxAcceptRadius}
+            </Text>
+          ) : null}
 
-          <FormSection
-            title="平台帳號綁定"
-            description="管理外部平台帳號綁定、重新驗證、平台憑證與接單資格；狀態與「平台健康中心」即時同步。"
-          >
-            <PlatformBinding showSectionTitle={false} />
-          </FormSection>
-
-          <FormSection
-            title="其他"
-            description="快速查看緊急聯絡、裝置資訊與帳號動作。"
-          >
-            <View style={styles.utilityCard}>
-              <UtilityRow label="緊急聯絡人" detail={emergencySummary} />
-              <View style={styles.utilityDivider} />
-              <UtilityRow
-                label="關於本機"
-                detail={identitySummary || driverId}
-              />
-              <View style={styles.utilityDivider} />
-              <UtilityRow
-                label="查看收益"
-                detail="前往收益與月結摘要"
-                onPress={() => router.push("/earnings")}
-              />
-              <View style={styles.utilityDivider} />
-              <UtilityRow
-                label="登出"
-                detail="清除此裝置上的司機登入狀態"
-                tone="danger"
-                onPress={handleLogout}
-              />
+          <View style={styles.switchRow}>
+            <View style={styles.switchCopy}>
+              <Text style={[styles.switchTitle, { color: THEME.text }]}>
+                通知
+              </Text>
+              <Text style={[styles.switchHint, { color: THEME.textMuted }]}>
+                推播與 in-app 事件通知。若系統停用通知，仍會保留關鍵車務提醒。
+              </Text>
             </View>
-          </FormSection>
+            <Switch
+              value={settingsValues.notificationsEnabled}
+              onValueChange={(value) =>
+                updateSettings({ notificationsEnabled: value })
+              }
+              disabled={saving}
+            />
+          </View>
+
+          <View style={styles.switchRow}>
+            <View style={styles.switchCopy}>
+              <Text style={[styles.switchTitle, { color: THEME.text }]}>
+                自動接單 · 自營
+              </Text>
+              <Text style={[styles.switchHint, { color: THEME.textMuted }]}>
+                Q-DRV13：Phase 1 不允許全域
+                auto-accept。此開關僅作自營/允許平台設定。
+              </Text>
+            </View>
+            <Switch
+              value={settingsValues.autoAcceptEnabled}
+              onValueChange={(value) =>
+                updateSettings({ autoAcceptEnabled: value })
+              }
+              disabled={saving || autoAcceptRows.length === 0}
+            />
+          </View>
+
+          <Banner
+            theme={THEME}
+            tone="info"
+            title="平台 auto-accept 範圍"
+            body={currentAutoAcceptLabel}
+            icon={
+              <Ionicons name="flash-outline" size={16} color={THEME.info} />
+            }
+          />
         </View>
-      </AppScreen>
+      </Card>
 
-      <BottomActionBar>
-        <ActionButton
-          title={
-            saving
-              ? "正在儲存…"
-              : hasValidation
-                ? "請先修正欄位"
-                : dirty
-                  ? "儲存設定"
-                  : "目前無變更"
-          }
-          icon={saving ? undefined : "save-outline"}
-          onPress={handleSave}
-          loading={saving}
-          disabled={saveDisabled}
-          style={{ flex: 1 }}
-        />
-      </BottomActionBar>
-    </View>
+      <SectionTitle
+        title="平台帳號綁定"
+        subtitle="`availableActions` 驅動 CTA，並與平台健康中心的狀態語言一致。"
+        action={
+          <Btn
+            theme={THEME}
+            variant="secondary"
+            size="xs"
+            onPress={() => router.push("/platform-presence")}
+          >
+            前往平台中心
+          </Btn>
+        }
+      />
+
+      <View style={styles.filterRow}>
+        {(["all", "attention", "bound"] as BindingFilter[]).map((filter) => (
+          <Pressable
+            key={filter}
+            onPress={() => setBindingFilter(filter)}
+            style={[
+              styles.filterChip,
+              {
+                backgroundColor:
+                  bindingFilter === filter ? THEME.accentBg : THEME.surfaceLo,
+                borderColor:
+                  bindingFilter === filter ? THEME.accent : THEME.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.filterChipLabel,
+                {
+                  color:
+                    bindingFilter === filter ? THEME.accentHi : THEME.textMuted,
+                },
+              ]}
+            >
+              {toBindingFilterLabel(filter)}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <Card theme={THEME} padding={0}>
+        {bindingEmptyReason ? (
+          <View style={styles.bindingEmptyWrap}>
+            <BindingEmptyState reason={bindingEmptyReason} />
+          </View>
+        ) : (
+          filteredRows.map((row, index) => (
+            <View key={row.record.platformCode}>
+              <PlatformBindingRow
+                row={row}
+                busy={busyPlatform === row.record.platformCode}
+                onAction={handleBindingAction}
+              />
+              {index === filteredRows.length - 1 ? null : null}
+            </View>
+          ))
+        )}
+      </Card>
+
+      <SectionTitle title="其他" subtitle="收益入口、裝置資訊與登出。" />
+      <Card theme={THEME} padding={0}>
+        <Pressable
+          onPress={() => router.push("/earnings")}
+          style={[styles.utilityRow, { borderBottomColor: THEME.border }]}
+        >
+          <View style={styles.utilityCopy}>
+            <Text style={[styles.utilityTitle, { color: THEME.text }]}>
+              查看收益
+            </Text>
+            <Text style={[styles.utilityHint, { color: THEME.textMuted }]}>
+              前往收益頁查看今日、本週與本月的結算摘要。
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={THEME.textDim} />
+        </Pressable>
+
+        <View style={[styles.utilityRow, { borderBottomColor: THEME.border }]}>
+          <View style={styles.utilityCopy}>
+            <Text style={[styles.utilityTitle, { color: THEME.text }]}>
+              關於本機
+            </Text>
+            <Text style={[styles.utilityHint, { color: THEME.textMuted }]}>
+              {driverId || "driver-unassigned"} · refresh tier manual
+            </Text>
+          </View>
+        </View>
+
+        <Pressable onPress={handleLogout} style={styles.utilityRow}>
+          <View style={styles.utilityCopy}>
+            <Text style={[styles.utilityTitle, { color: THEME.danger }]}>
+              登出
+            </Text>
+            <Text style={[styles.utilityHint, { color: THEME.textMuted }]}>
+              清除此裝置上的司機配置並返回 onboarding。
+            </Text>
+          </View>
+          <Ionicons name="log-out-outline" size={16} color={THEME.danger} />
+        </Pressable>
+      </Card>
+    </Shell>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  center: {
-    flex: 1,
+  shellContent: {
+    paddingBottom: 24,
+    gap: 14,
+  },
+  loadingContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    gap: 14,
+  },
+  loadingState: {
+    minHeight: 220,
     justifyContent: "center",
     alignItems: "center",
-    padding: Tokens.spacing.xxl,
+    gap: 12,
   },
-  fillState: { flex: 1 },
   loadingLabel: {
-    marginTop: Tokens.spacing.sm,
-    color: Tokens.colors.textMuted,
+    fontSize: 14,
   },
-  content: { paddingVertical: Tokens.spacing.lg, gap: Tokens.spacing.lg },
-  heroHeader: {
-    paddingTop: Tokens.spacing.sm,
-    gap: Tokens.spacing.xs,
-  },
-  screenTitle: {
-    ...Tokens.type.screenTitle,
-    color: Tokens.colors.textStrong,
-  },
-  screenSubtitle: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textMuted,
-  },
-  section: {
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.lg,
-    gap: Tokens.spacing.sm,
-    ...Tokens.shadows.sm,
-  },
-  sectionHeader: { marginBottom: Tokens.spacing.md },
-  sectionTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
-  },
-  sectionDescription: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-    marginTop: 4,
-  },
-  sectionBody: { gap: Tokens.spacing.xs },
-  profileHeroCard: {
+  kpiRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: Tokens.spacing.md,
-    padding: Tokens.spacing.md,
-    borderRadius: Tokens.radius.lg,
-    backgroundColor: Tokens.colors.brandBg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.ownedBorder,
-    marginBottom: Tokens.spacing.md,
+    gap: 8,
   },
-  profileAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Tokens.colors.brand,
-    alignItems: "center",
-    justifyContent: "center",
+  sectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
   },
-  profileAvatarText: {
-    color: Tokens.colors.textInverse,
-    fontSize: 18,
+  sectionTitleCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  sectionTitle: {
+    fontSize: 16,
     fontWeight: "700",
   },
-  profileIdentityBlock: {
+  sectionSubtitle: {
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  profileHero: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  profileAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileAvatarLabel: {
+    fontSize: 22,
+    fontWeight: "700",
+  },
+  profileHeroCopy: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
-  profileName: {
-    ...Tokens.type.title,
-    color: Tokens.colors.textStrong,
+  profileHeroName: {
+    fontSize: 17,
+    fontWeight: "700",
   },
-  profileMeta: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+  profileHeroMeta: {
+    fontSize: 11.5,
   },
-  profileStatusChip: {
-    alignSelf: "flex-start",
+  fieldStack: {
+    gap: 10,
+  },
+  fieldError: {
+    fontSize: 12,
+    marginTop: -4,
+  },
+  preferenceStack: {
+    gap: 14,
+  },
+  segmentRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  segmentButton: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  segmentLabel: {
+    fontSize: 13,
+    fontWeight: "600",
   },
   switchRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: Tokens.spacing.sm,
+    gap: 16,
   },
-  switchTextBlock: { flex: 1, marginRight: Tokens.spacing.md },
-  switchLabel: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
+  switchCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  switchTitle: {
+    fontSize: 14,
     fontWeight: "600",
   },
-  switchDescription: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-    marginTop: 2,
+  switchHint: {
+    fontSize: 12,
+    lineHeight: 18,
   },
-  switchCard: {
-    borderRadius: Tokens.radius.md,
-    backgroundColor: Tokens.colors.surfaceLo,
-    paddingHorizontal: Tokens.spacing.md,
+  filterRow: {
+    flexDirection: "row",
+    gap: 8,
   },
-  switchDivider: {
-    height: 1,
-    backgroundColor: Tokens.colors.border,
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
   },
-  utilityCard: {
-    borderRadius: Tokens.radius.md,
-    backgroundColor: Tokens.colors.surfaceLo,
-    overflow: "hidden",
+  filterChipLabel: {
+    fontSize: 12,
+    fontWeight: "600",
   },
-  utilityPressable: {
-    flex: 1,
+  bindingEmptyWrap: {
+    padding: 14,
   },
-  utilityRow: {
-    minHeight: 56,
-    paddingHorizontal: Tokens.spacing.md,
-    paddingVertical: Tokens.spacing.md,
+  bindingRow: {
+    padding: 14,
+    borderBottomWidth: 1,
+    gap: 10,
+  },
+  bindingRowTop: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Tokens.spacing.md,
+    gap: 12,
   },
-  utilityTextBlock: {
+  bindingMark: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bindingMarkText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  bindingMain: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
-  utilityLabel: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
+  bindingNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  bindingName: {
+    fontSize: 14.5,
+    fontWeight: "700",
+  },
+  bindingMeta: {
+    fontSize: 11.5,
+  },
+  bindingStatus: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  bindingMechanismBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  bindingMechanismLabel: {
+    fontSize: 11.5,
+  },
+  bindingMechanismCode: {
+    fontSize: 10,
+  },
+  bindingFacts: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  bindingActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  bindingHint: {
+    fontSize: 11.5,
+    lineHeight: 17,
+  },
+  utilityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  utilityCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  utilityTitle: {
+    fontSize: 14,
     fontWeight: "600",
   },
-  utilityLabelDanger: {
-    color: Tokens.colors.danger,
+  utilityHint: {
+    fontSize: 12,
+    lineHeight: 18,
   },
-  utilityDetail: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+  footerBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+    borderTopColor: THEME.border,
+    backgroundColor: THEME.bgRaised,
   },
-  utilityDivider: {
-    height: 1,
-    backgroundColor: Tokens.colors.border,
-    marginHorizontal: Tokens.spacing.md,
+  footerMeta: {
+    marginTop: 6,
+    fontSize: 11.5,
   },
 });
