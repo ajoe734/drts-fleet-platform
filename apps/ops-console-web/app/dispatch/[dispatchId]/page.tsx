@@ -160,6 +160,28 @@ const detailHeaderCardStyle = {
   gap: 16,
 };
 
+const summaryRailStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const statTileStyle = {
+  display: "grid",
+  gap: 8,
+  padding: "14px 16px",
+  borderRadius: 16,
+  border: `1px solid ${theme.border}`,
+  background:
+    "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(247,243,238,0.96) 100%)",
+  boxShadow: "0 10px 30px rgba(53, 31, 23, 0.06)",
+};
+
+const sectionStackStyle = {
+  display: "grid",
+  gap: 12,
+};
+
 const APP_ORIGIN_BY_TARGET: Record<CrossAppResourceLink["targetApp"], string> =
   {
     "ops-console":
@@ -1400,6 +1422,50 @@ function renderWorkspaceTitle(
   );
 }
 
+function renderStatTile(
+  locale: Locale,
+  label: string,
+  value: ReactNode,
+  detail?: string,
+  tone: Exclude<CanvasTone, "neutral"> = "info",
+) {
+  return (
+    <div style={statTileStyle}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <span
+          style={{
+            color: theme.textDim,
+            fontSize: 10.5,
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+          }}
+        >
+          {label}
+        </span>
+        <Pill theme={theme} tone={tone}>
+          {locale === "zh" ? "live" : "live"}
+        </Pill>
+      </div>
+      <div style={{ color: theme.text, fontSize: 16, fontWeight: 700 }}>
+        {value}
+      </div>
+      {detail ? (
+        <div style={{ color: theme.textMuted, fontSize: 12, lineHeight: 1.45 }}>
+          {detail}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function normalizeRoutePath(route: string) {
   if (/^https?:\/\//.test(route)) {
     return route;
@@ -1982,6 +2048,75 @@ export default async function DispatchDetailPage({
         />
 
         <div style={pageBodyStyle}>
+          <div style={summaryRailStyle}>
+            {renderStatTile(
+              locale,
+              locale === "zh" ? "workspace state" : "workspace state",
+              <Pill theme={theme} tone={toSurfaceTone(getStateTone(stateCode))}>
+                {formatCode(locale, stateCode)}
+              </Pill>,
+              locale === "zh"
+                ? "依 dispatch status、hold 與 driver task 決定下一步。"
+                : "Use dispatch status, hold state, and current driver task to determine the next step.",
+              toSurfaceTone(getStateTone(stateCode)),
+            )}
+            {renderStatTile(
+              locale,
+              locale === "zh" ? "window / eta" : "window / eta",
+              formatWindow(
+                locale,
+                ownedRecord.reservationWindowStart,
+                ownedRecord.reservationWindowEnd,
+              ),
+              locale === "zh"
+                ? `ETA ${formatEtaLabel(
+                    dispatchJob?.latestEtaMinutes ??
+                      ownedRecord.etaSnapshot?.etaMinutes,
+                  )}`
+                : `ETA ${formatEtaLabel(
+                    dispatchJob?.latestEtaMinutes ??
+                      ownedRecord.etaSnapshot?.etaMinutes,
+                  )}`,
+              "info",
+            )}
+            {renderStatTile(
+              locale,
+              locale === "zh" ? "candidate ladder" : "candidate ladder",
+              `${candidateEnvelope.items.length}`,
+              locale === "zh"
+                ? "候選數、gate 與 score 應在同屏完成判讀。"
+                : "Candidate count, gate status, and score should be triaged on this screen.",
+              candidateEnvelope.items.length > 0
+                ? "success"
+                : emptyContent.tone,
+            )}
+            {renderStatTile(
+              locale,
+              locale === "zh" ? "current driver task" : "current driver task",
+              currentTask ? (
+                <Pill
+                  theme={theme}
+                  tone={toSurfaceTone(getStateTone(currentTask.status))}
+                >
+                  {formatCode(locale, currentTask.status)}
+                </Pill>
+              ) : locale === "zh" ? (
+                "未建立"
+              ) : (
+                "Not established"
+              ),
+              currentTask
+                ? locale === "zh"
+                  ? `${driverById.get(currentTask.driverId)?.name ?? currentTask.driverId} · ${currentTask.taskId}`
+                  : `${driverById.get(currentTask.driverId)?.name ?? currentTask.driverId} · ${currentTask.taskId}`
+                : locale === "zh"
+                  ? "目前沒有 active driver task。"
+                  : "There is no active driver task right now.",
+              currentTask
+                ? toSurfaceTone(getStateTone(currentTask.status))
+                : "warn",
+            )}
+          </div>
           <div id="refresh-tier">
             {renderRefreshBanner(
               locale,
@@ -2030,7 +2165,7 @@ export default async function DispatchDetailPage({
           >
             <div style={detailHeaderCardStyle}>
               <DL theme={theme} cols={3} items={summaryItems} />
-              <div style={{ display: "grid", gap: 8 }}>
+              <div style={sectionStackStyle}>
                 <Field
                   theme={theme}
                   label={locale === "zh" ? "工作區決策重點" : "Decision focus"}
@@ -2054,6 +2189,24 @@ export default async function DispatchDetailPage({
                       {locale === "zh"
                         ? "判斷候選排名、gating 與目前 driver task，盡量在同屏完成指派或改派。"
                         : "Decide using candidate rank, gating, and the current driver task so assignment or redispatch can stay on this screen."}
+                    </span>
+                  </div>
+                </Field>
+                <Field
+                  theme={theme}
+                  label={locale === "zh" ? "Pickup → Drop" : "Pickup → Drop"}
+                >
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: 4,
+                      color: theme.text,
+                      fontSize: "12.5px",
+                    }}
+                  >
+                    <span>{getAddressLabel(ownedRecord.pickup)}</span>
+                    <span style={{ color: theme.textMuted }}>
+                      ↓ {getAddressLabel(ownedRecord.dropoff)}
                     </span>
                   </div>
                 </Field>
@@ -2707,6 +2860,69 @@ export default async function DispatchDetailPage({
       />
 
       <div style={pageBodyStyle}>
+        <div style={summaryRailStyle}>
+          {renderStatTile(
+            locale,
+            locale === "zh" ? "mirror state" : "mirror state",
+            <Pill
+              theme={theme}
+              tone={toSurfaceTone(getForwardedStateTone(forwardedOrder.status))}
+            >
+              {formatCode(locale, forwardedOrder.status)}
+            </Pill>,
+            locale === "zh"
+              ? "此工作區只處理 sync、fallback 與 reconciliation。"
+              : "This workspace only handles sync, fallback, and reconciliation.",
+            toSurfaceTone(getForwardedStateTone(forwardedOrder.status)),
+          )}
+          {renderStatTile(
+            locale,
+            locale === "zh" ? "platform / adapter" : "platform / adapter",
+            formatCode(locale, forwardedOrder.platformCode),
+            adapterHealth
+              ? locale === "zh"
+                ? `${adapterHealth.status} · ${formatLongDateTime(
+                    locale,
+                    adapterHealth.lastCheckedAt,
+                  )}`
+                : `${adapterHealth.status} · ${formatLongDateTime(
+                    locale,
+                    adapterHealth.lastCheckedAt,
+                  )}`
+              : locale === "zh"
+                ? "等待 adapter health"
+                : "Waiting for adapter health",
+            adapterHealth ? getAdapterTone(adapterHealth.status) : "info",
+          )}
+          {renderStatTile(
+            locale,
+            locale === "zh" ? "route / eta" : "route / eta",
+            routeLocked
+              ? locale === "zh"
+                ? "route locked"
+                : "route locked"
+              : locale === "zh"
+                ? "route open"
+                : "route open",
+            locale === "zh"
+              ? `ETA ${formatEtaLabel(forwardedEtaMinutes)} · ${waypointList.length} waypoints`
+              : `ETA ${formatEtaLabel(forwardedEtaMinutes)} · ${waypointList.length} waypoints`,
+            routeLocked ? "warn" : "success",
+          )}
+          {renderStatTile(
+            locale,
+            locale === "zh" ? "eligible drivers" : "eligible drivers",
+            `${forwardedOrder.candidateDriverIds.length}`,
+            locale === "zh"
+              ? mirroredTask
+                ? `mirror task · ${mirroredTask.localStatus}`
+                : "無 owned task mirror"
+              : mirroredTask
+                ? `mirror task · ${mirroredTask.localStatus}`
+                : "No owned task mirror",
+            forwardedOrder.candidateDriverIds.length > 0 ? "success" : "warn",
+          )}
+        </div>
         <div id="refresh-tier">
           {renderRefreshBanner(
             locale,
@@ -2768,38 +2984,73 @@ export default async function DispatchDetailPage({
         >
           <div style={detailHeaderCardStyle}>
             <DL theme={theme} cols={3} items={forwardedSummaryItems} />
-            <Field
-              theme={theme}
-              label={
-                locale === "zh"
-                  ? "Owner-surface constraint"
-                  : "Owner-surface constraint"
-              }
-            >
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  flexWrap: "wrap",
-                  color: theme.textMuted,
-                  fontSize: "12px",
-                }}
+            <div style={sectionStackStyle}>
+              <Field
+                theme={theme}
+                label={
+                  locale === "zh"
+                    ? "Owner-surface constraint"
+                    : "Owner-surface constraint"
+                }
               >
-                <Pill
-                  theme={theme}
-                  tone={toSurfaceTone(
-                    getForwardedStateTone(forwardedOrder.status),
-                  )}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    color: theme.textMuted,
+                    fontSize: "12px",
+                  }}
                 >
-                  {formatCode(locale, forwardedOrder.status)}
-                </Pill>
-                <span>
-                  {locale === "zh"
-                    ? "這裡只處理 sync、fallback、reconciliation 與 eligible-driver 判讀；需要 owner mutation 時預設新分頁開啟。"
-                    : "This workspace only handles sync, fallback, reconciliation, and eligible-driver triage; owner mutations open in a new tab by default."}
-                </span>
-              </div>
-            </Field>
+                  <Pill
+                    theme={theme}
+                    tone={toSurfaceTone(
+                      getForwardedStateTone(forwardedOrder.status),
+                    )}
+                  >
+                    {formatCode(locale, forwardedOrder.status)}
+                  </Pill>
+                  <span>
+                    {locale === "zh"
+                      ? "這裡只處理 sync、fallback、reconciliation 與 eligible-driver 判讀；需要 owner mutation 時預設新分頁開啟。"
+                      : "This workspace only handles sync, fallback, reconciliation, and eligible-driver triage; owner mutations open in a new tab by default."}
+                  </span>
+                </div>
+              </Field>
+              <Field
+                theme={theme}
+                label={locale === "zh" ? "Pickup → Drop" : "Pickup → Drop"}
+              >
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 4,
+                    color: theme.text,
+                    fontSize: "12.5px",
+                  }}
+                >
+                  <span>
+                    {readForwardedValue(forwardedOrder, [
+                      "pickupSummary",
+                      "pickupAddress",
+                      "pickup.addressName",
+                      "pickup.address",
+                      "pickup",
+                    ]) ?? "—"}
+                  </span>
+                  <span style={{ color: theme.textMuted }}>
+                    ↓{" "}
+                    {readForwardedValue(forwardedOrder, [
+                      "dropoffSummary",
+                      "dropoffAddress",
+                      "dropoff.addressName",
+                      "dropoff.address",
+                      "dropoff",
+                    ]) ?? "—"}
+                  </span>
+                </div>
+              </Field>
+            </div>
           </div>
         </Card>
 
