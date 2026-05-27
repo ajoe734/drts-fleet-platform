@@ -257,6 +257,13 @@ type EmptyStateConfig = {
   ctaLabel: string;
 };
 
+type EmptyStateCta = {
+  href: string | null;
+  label: string;
+  enabled: boolean;
+  disabledReasonCode?: string;
+};
+
 type ActionConfig = {
   mode: AddressMode;
   title: string;
@@ -703,10 +710,52 @@ function getEmptyStateHref(
   });
 }
 
+function getEmptyStateCta(
+  reason: AddressEmptyReason,
+  query: string,
+  selectedTab: AddressTabKey,
+  owner: string,
+  tag: string,
+  nextAction?: ResourceActionDescriptor,
+): EmptyStateCta {
+  const href = getEmptyStateHref(reason, query, selectedTab, owner, tag);
+  if (!nextAction) {
+    return {
+      href,
+      label: EMPTY_STATE_CONFIG[reason].ctaLabel,
+      enabled: true,
+    };
+  }
+
+  const actionHref =
+    buildPageActionHref(nextAction, query, selectedTab, owner, tag) ?? href;
+  const enabled = nextAction.enabled && Boolean(actionHref);
+  const label = getActionLabel(nextAction);
+
+  if (nextAction.disabledReasonCode) {
+    return {
+      href: actionHref,
+      label,
+      enabled,
+      disabledReasonCode: nextAction.disabledReasonCode,
+    };
+  }
+
+  return {
+    href: actionHref,
+    label,
+    enabled,
+  };
+}
+
 function buildExternalHref(link: CrossAppResourceLink) {
   const baseUrl =
     link.targetApp === "platform-admin" ? PLATFORM_ADMIN_URL : OPS_CONSOLE_URL;
   return `${baseUrl}${link.route}`;
+}
+
+function getLinkTarget(link: CrossAppResourceLink) {
+  return link.openMode === "same_tab" ? undefined : "_blank";
 }
 
 function getSelectedAddress(rows: AddressRow[], addressId: string | undefined) {
@@ -1241,13 +1290,26 @@ export default async function AddressesPage({
 
   const columns = selectedTab === "export" ? exportColumns : listColumns;
   const emptyStateConfig = emptyReason ? EMPTY_STATE_CONFIG[emptyReason] : null;
+  const emptyStateCta =
+    emptyReason && emptyStateConfig
+      ? getEmptyStateCta(
+          emptyReason,
+          query,
+          selectedTab,
+          selectedOwner,
+          selectedTag,
+          directory?.emptyState?.reason === emptyReason
+            ? directory.emptyState.nextAction
+            : undefined,
+        )
+      : null;
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
         title="地址簿"
-        subtitle="Address book · T5 tenant slow · backend availableActions / refreshMetadata / crossAppLinks"
+        subtitle="常用地點 · tag · 啟用狀態 · 軟停用 only (Q-TEN06)"
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={
@@ -1433,11 +1495,14 @@ export default async function AddressesPage({
                   href={buildExternalHref(link)}
                   rel="noreferrer"
                   style={externalLinkStyle}
-                  target="_blank"
+                  target={getLinkTarget(link)}
                 >
                   <span style={primaryTextStyle}>{link.label}</span>
                   <span style={secondaryTextStyle}>
-                    {link.targetApp} · {link.resourceType} · opens in new tab
+                    {link.targetApp} · {link.resourceType} ·{" "}
+                    {link.openMode === "same_tab"
+                      ? "opens in current tab"
+                      : "opens in new tab"}
                   </span>
                 </a>
               ))}
@@ -1478,18 +1543,21 @@ export default async function AddressesPage({
                 </CanvasPill>
                 <h2 style={emptyTitleStyle}>{emptyStateConfig.title}</h2>
                 <p style={emptyCopyStyle}>{emptyStateConfig.body}</p>
-                <Link
-                  href={getEmptyStateHref(
-                    emptyReason,
-                    query,
-                    selectedTab,
-                    selectedOwner,
-                    selectedTag,
-                  )}
-                  style={primaryActionLinkStyle}
-                >
-                  {emptyStateConfig.ctaLabel}
-                </Link>
+                {emptyStateCta?.enabled && emptyStateCta.href ? (
+                  <Link
+                    href={emptyStateCta.href}
+                    style={primaryActionLinkStyle}
+                  >
+                    {emptyStateCta.label}
+                  </Link>
+                ) : (
+                  <span
+                    style={disabledActionStyle}
+                    title={emptyStateCta?.disabledReasonCode}
+                  >
+                    {emptyStateCta?.label ?? emptyStateConfig.ctaLabel}
+                  </span>
+                )}
               </div>
             ) : (
               <CanvasTable<AddressRow>
