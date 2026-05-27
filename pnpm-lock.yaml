@@ -231,6 +231,9 @@ importers:
       "@drts/shared-types":
         specifier: workspace:*
         version: link:../../packages/shared-types
+      "@drts/ui-tokens":
+        specifier: workspace:*
+        version: link:../../packages/ui-tokens
       "@drts/ui-web":
         specifier: workspace:*
         version: link:../../packages/ui-web

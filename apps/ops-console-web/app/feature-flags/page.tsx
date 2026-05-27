@@ -2,8 +2,11 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type {
   CrossAppResourceLink,
+  EmptyStateEnvelope,
   EmptyReason,
   FeatureFlag,
+  OpsFeatureFlagRecord,
+  OpsFeatureFlagSummary,
   RefreshTier,
   ResourceActionDescriptor,
   UiRefreshMetadata,
@@ -35,28 +38,23 @@ type ScopeFilter = "all" | "global" | "tenant";
 type FlagScope = Exclude<ScopeFilter, "all">;
 type FlagState = "enabled" | "disabled" | "partial";
 
-type LegacyFeatureFlagRecord = FeatureFlag & {
-  scope?: FlagScope;
-  currentValue?: string;
-  updatedBy?: string;
-  changedBy?: string;
-  lastChangedBy?: string;
-  availableActions?: ResourceActionDescriptor[];
-  historyLink?: CrossAppResourceLink | null;
-};
+type FeatureFlagRecordLike = Partial<OpsFeatureFlagRecord> &
+  FeatureFlag & {
+    scope?: FlagScope;
+    currentValue?: string;
+    updatedBy?: string;
+    changedBy?: string;
+    lastChangedBy?: string;
+    availableActions?: ResourceActionDescriptor[] | null;
+    historyLink?: CrossAppResourceLink | null;
+  };
 
-type EmptyStateEnvelopeLike = {
-  reason: EmptyReason;
-  messageCode?: string;
-  nextAction?: ResourceActionDescriptor;
-};
-
-type FeatureFlagPayloadLike = {
-  flags?: LegacyFeatureFlagRecord[];
+type OpsFeatureFlagSummaryLike = Partial<OpsFeatureFlagSummary> & {
+  flags?: FeatureFlagRecordLike[];
   notes?: string[];
   refresh?: UiRefreshMetadata;
   refreshTier?: RefreshTier;
-  emptyState?: EmptyStateEnvelopeLike;
+  emptyState?: EmptyStateEnvelope;
 };
 
 type NormalizedFlag = {
@@ -77,7 +75,7 @@ type NormalizedFlagsPayload = {
   notes: string[];
   refresh: UiRefreshMetadata;
   refreshTier: RefreshTier;
-  emptyState?: EmptyStateEnvelopeLike;
+  emptyState?: EmptyStateEnvelope;
 };
 
 type FlagTableRow = Record<string, unknown> & {
@@ -92,12 +90,7 @@ type FlagTableRow = Record<string, unknown> & {
   _selected?: boolean;
 };
 
-type EmptyStateIconName =
-  | "flags"
-  | "audit"
-  | "reports"
-  | "search"
-  | "warn";
+type EmptyStateIconName = "flags" | "audit" | "reports" | "search" | "warn";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -113,6 +106,7 @@ const EMPTY_REASON_VALUES = [
   "fetch_failed",
   "permission_denied",
   "external_unavailable",
+  "driver_not_eligible",
   "filtered_empty",
 ] as const satisfies readonly EmptyReason[];
 
@@ -151,8 +145,10 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 }
 
 function isEmptyReason(value: string | undefined): value is EmptyReason {
-  return value !== undefined &&
-    EMPTY_REASON_VALUES.includes(value as (typeof EMPTY_REASON_VALUES)[number]);
+  return (
+    value !== undefined &&
+    EMPTY_REASON_VALUES.includes(value as (typeof EMPTY_REASON_VALUES)[number])
+  );
 }
 
 function resolveScope(value: string | undefined): ScopeFilter {
@@ -194,21 +190,20 @@ function fallbackRefreshMetadata(): UiRefreshMetadata {
   };
 }
 
-function fallbackHistoryActions(
-  availableActions: ResourceActionDescriptor[] | undefined,
+function normalizeAvailableActions(
+  availableActions: ResourceActionDescriptor[] | null | undefined,
 ): ResourceActionDescriptor[] {
-  if (Array.isArray(availableActions) && availableActions.length > 0) {
-    return availableActions;
-  }
+  return Array.isArray(availableActions) ? availableActions : [];
+}
 
-  return [
-    {
-      action: "view_change_history",
-      enabled: false,
-      disabledReasonCode: "history_unavailable",
-      riskLevel: "low",
-    },
-  ];
+function findHistoryAction(
+  availableActions: ResourceActionDescriptor[],
+): ResourceActionDescriptor | null {
+  return (
+    availableActions.find(
+      (action) => action.action === "view_change_history",
+    ) ?? null
+  );
 }
 
 function normalizeFeatureFlags(
@@ -217,10 +212,10 @@ function normalizeFeatureFlags(
 ): NormalizedFlagsPayload {
   const maybePayload =
     payload && typeof payload === "object"
-      ? (payload as FeatureFlagPayloadLike)
-      : ({} as FeatureFlagPayloadLike);
+      ? (payload as OpsFeatureFlagSummaryLike)
+      : ({} as OpsFeatureFlagSummaryLike);
   const flags = Array.isArray(maybePayload.flags) ? maybePayload.flags : [];
-  const grouped = new Map<string, LegacyFeatureFlagRecord[]>();
+  const grouped = new Map<string, FeatureFlagRecordLike[]>();
 
   for (const flag of flags) {
     const key = typeof flag.key === "string" ? flag.key : "";
@@ -233,81 +228,75 @@ function normalizeFeatureFlags(
     }
   }
 
-  const normalizedFlags = Array.from(grouped.entries())
-    .map(([key, records]) => {
-      const globalRecord =
-        records.find((record) => !record.tenantId && record.scope !== "tenant") ??
-        records[0];
-      const tenantRecords = records.filter(
-        (record) => record.tenantId || record.scope === "tenant",
-      );
-      const latestRecord = [...records]
-        .filter((record) => record.updatedAt)
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-      const enabledValues = new Set(
-        records
-          .map((record) =>
-            typeof record.enabled === "boolean" ? String(record.enabled) : null,
-          )
-          .filter((value): value is string => value !== null),
-      );
-      const hasPartial =
-        (typeof globalRecord.currentValue === "string" &&
-          globalRecord.currentValue.toLowerCase().includes("partial")) ||
-        enabledValues.size > 1;
-      const state: FlagState = hasPartial
-        ? "partial"
-        : globalRecord.enabled
-          ? "enabled"
-          : "disabled";
-      const currentValue =
-        typeof globalRecord.currentValue === "string" &&
-          globalRecord.currentValue.trim().length > 0
-          ? globalRecord.currentValue
-          : state;
-      const scope: FlagScope =
-        globalRecord.scope ??
-        (tenantRecords.length > 0 ? "tenant" : "global");
+  const normalizedFlags: NormalizedFlag[] = [];
 
-      return {
-        key,
-        description:
-          featureFlagDescription(locale, globalRecord) || t("common.dash", locale),
-        scope,
-        state,
-        currentValue,
-        lastChangedAt: latestRecord?.updatedAt ?? null,
-        lastChangedBy:
-          latestRecord?.lastChangedBy ??
-          latestRecord?.updatedBy ??
-          latestRecord?.changedBy ??
-          null,
-        availableActions: fallbackHistoryActions(globalRecord.availableActions),
-        historyLink:
-          globalRecord.historyLink ??
-          {
-            targetApp: "platform-admin",
-            route: `/feature-flags?flag=${encodeURIComponent(key)}`,
-            resourceType: "feature_flag",
-            resourceId: key,
-            openMode: "new_tab",
-            label: t("flags.platformAdminLink", locale),
-          },
-        tenantIds: tenantRecords
-          .map((record) => record.tenantId)
-          .filter((value): value is string => Boolean(value)),
-      } satisfies NormalizedFlag;
-    })
-    .sort((left, right) => left.key.localeCompare(right.key));
+  for (const [key, records] of grouped.entries()) {
+    const globalRecord =
+      records.find((record) => !record.tenantId && record.scope !== "tenant") ??
+      records[0];
+    if (!globalRecord) continue;
+    const tenantRecords = records.filter(
+      (record) => record.tenantId || record.scope === "tenant",
+    );
+    const latestRecord = [...records]
+      .filter((record) => record.updatedAt)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    const enabledValues = new Set(
+      records
+        .map((record) =>
+          typeof record.enabled === "boolean" ? String(record.enabled) : null,
+        )
+        .filter((value): value is string => value !== null),
+    );
+    const hasPartial =
+      (typeof globalRecord.currentValue === "string" &&
+        globalRecord.currentValue.toLowerCase().includes("partial")) ||
+      enabledValues.size > 1;
+    const state: FlagState = hasPartial
+      ? "partial"
+      : globalRecord.enabled
+        ? "enabled"
+        : "disabled";
+    const currentValue =
+      typeof globalRecord.currentValue === "string" &&
+      globalRecord.currentValue.trim().length > 0
+        ? globalRecord.currentValue
+        : state;
+    const scope: FlagScope =
+      globalRecord.scope ?? (tenantRecords.length > 0 ? "tenant" : "global");
+
+    normalizedFlags.push({
+      key,
+      description:
+        featureFlagDescription(locale, globalRecord) ||
+        t("common.dash", locale),
+      scope,
+      state,
+      currentValue,
+      lastChangedAt: latestRecord?.updatedAt ?? null,
+      lastChangedBy:
+        latestRecord?.lastChangedBy ??
+        latestRecord?.updatedBy ??
+        latestRecord?.changedBy ??
+        null,
+      availableActions: normalizeAvailableActions(
+        globalRecord.availableActions,
+      ),
+      historyLink: globalRecord.historyLink ?? null,
+      tenantIds: tenantRecords
+        .map((record) => record.tenantId)
+        .filter((value): value is string => Boolean(value)),
+    } satisfies NormalizedFlag);
+  }
+
+  normalizedFlags.sort((left, right) => left.key.localeCompare(right.key));
 
   return {
     flags: normalizedFlags,
     notes: Array.isArray(maybePayload.notes) ? maybePayload.notes : [],
     refresh: maybePayload.refresh ?? fallbackRefreshMetadata(),
     refreshTier: maybePayload.refreshTier ?? REFRESH_TIER,
-    ...(maybePayload.emptyState
-      ? { emptyState: maybePayload.emptyState }
-      : {}),
+    ...(maybePayload.emptyState ? { emptyState: maybePayload.emptyState } : {}),
   };
 }
 
@@ -339,25 +328,27 @@ function resolveCrossAppHref(link: CrossAppResourceLink | null): string | null {
   if (!link) return null;
   if (/^https?:\/\//.test(link.route)) return link.route;
   const origin = getCrossAppOrigin(link.targetApp);
-  if (!origin) return link.route;
+  if (!origin) return null;
   return new URL(link.route, `${origin.replace(/\/$/, "")}/`).toString();
 }
 
-function resolvePlatformAdminFlagsHref(flagKey?: string): string {
+function resolvePlatformAdminFlagsHref(flagKey?: string): string | null {
   const route = flagKey
     ? `/feature-flags?flag=${encodeURIComponent(flagKey)}`
     : "/feature-flags";
-  return resolveCrossAppHref({
-    targetApp: "platform-admin",
-    route,
-    resourceType: "feature_flag",
-    resourceId: flagKey ?? "feature_flags",
-    openMode: "new_tab",
-    label: "Platform Admin",
-  }) ?? route;
+  return (
+    resolveCrossAppHref({
+      targetApp: "platform-admin",
+      route,
+      resourceType: "feature_flag",
+      resourceId: flagKey ?? "feature_flags",
+      openMode: "new_tab",
+      label: "Platform Admin",
+    }) ?? route
+  );
 }
 
-function featureFlagDescription(locale: Locale, flag: LegacyFeatureFlagRecord) {
+function featureFlagDescription(locale: Locale, flag: FeatureFlagRecordLike) {
   if (locale !== "zh") return flag.description ?? "—";
 
   const descriptions: Record<string, string> = {
@@ -463,7 +454,9 @@ function renderStack(
     >
       <div>{primary}</div>
       {secondary ? (
-        <div style={{ color: theme.textMuted, fontSize: 11.5 }}>{secondary}</div>
+        <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+          {secondary}
+        </div>
       ) : null}
       {tertiary ? (
         <div style={{ color: theme.textDim, fontSize: 11 }}>{tertiary}</div>
@@ -563,7 +556,7 @@ function buildEmptyState(
   title: string;
   body: string;
   actionLabel: string;
-  actionHref: string;
+  actionHref: string | null;
   actionTarget?: "_blank";
 } {
   switch (reason) {
@@ -596,6 +589,16 @@ function buildEmptyState(
         title: t("flags.emptyState.externalUnavailable.title", locale),
         body: t("flags.emptyState.externalUnavailable.body", locale),
         actionLabel: t("common.tryAgain", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+    case "driver_not_eligible":
+      return {
+        icon: "warn",
+        tone: "warn",
+        label: "DRIVER NOT ELIGIBLE",
+        title: t("flags.emptyState.driverNotEligible.title", locale),
+        body: t("flags.emptyState.driverNotEligible.body", locale),
+        actionLabel: t("common.refresh", locale),
         actionHref: buildRefreshHref(query, scope),
       };
     case "filtered_empty":
@@ -728,15 +731,28 @@ function EmptyStateCard({
             </span>
           </div>
           <div>
-            <ActionLink
-              href={emptyState.actionHref}
-              tone={emptyState.tone === "neutral" ? "accent" : emptyState.tone}
-              {...(emptyState.actionTarget
-                ? { target: emptyState.actionTarget }
-                : {})}
-            >
-              {emptyState.actionLabel}
-            </ActionLink>
+            {emptyState.actionHref ? (
+              <ActionLink
+                href={emptyState.actionHref}
+                tone={
+                  emptyState.tone === "neutral" ? "accent" : emptyState.tone
+                }
+                {...(emptyState.actionTarget
+                  ? { target: emptyState.actionTarget }
+                  : {})}
+              >
+                {emptyState.actionLabel}
+              </ActionLink>
+            ) : (
+              <div style={{ display: "grid", gap: 6 }}>
+                <Pill theme={theme} tone="warn">
+                  {emptyState.actionLabel}
+                </Pill>
+                <span style={{ color: theme.textDim, fontSize: 11 }}>
+                  {t("flags.platformAdminLinkUnavailable", locale)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -749,9 +765,17 @@ function buildFlagTableRows(
   locale: Locale,
 ): FlagTableRow[] {
   return flags.map((flag) => {
-    const historyHref =
-      resolveCrossAppHref(flag.historyLink) ?? resolvePlatformAdminFlagsHref(flag.key);
-    const hasEnabledAction = flag.availableActions.some((action) => action.enabled);
+    const historyAction = findHistoryAction(flag.availableActions);
+    const historyHref = historyAction
+      ? (resolveCrossAppHref(flag.historyLink) ??
+        resolvePlatformAdminFlagsHref(flag.key))
+      : null;
+    const hasEnabledAction = flag.availableActions.some((action) => {
+      if (action.action !== "view_change_history") {
+        return action.enabled;
+      }
+      return action.enabled && Boolean(historyHref);
+    });
 
     return {
       key: flag.key,
@@ -777,11 +801,15 @@ function buildFlagTableRows(
           {t(`flags.state.${flag.state}`, locale)}
         </Pill>,
         flag.currentValue !== flag.state ? flag.currentValue : undefined,
-        flag.state === "partial" ? t("flags.partialStateHelp", locale) : undefined,
+        flag.state === "partial"
+          ? t("flags.partialStateHelp", locale)
+          : undefined,
       ),
       updatedByCell: renderStack(
         flag.lastChangedBy ?? t("common.dash", locale),
-        flag.historyLink ? t("flags.crossAppHint", locale) : undefined,
+        historyAction && historyHref
+          ? t("flags.crossAppHint", locale)
+          : undefined,
       ),
       updatedAt: formatDateTime(flag.lastChangedAt, locale),
       description: flag.description,
@@ -793,13 +821,13 @@ function buildFlagTableRows(
             gap: 8,
           }}
         >
-          {!hasEnabledAction ? (
+          {flag.availableActions.length === 0 ? (
             <Pill theme={theme} tone="neutral">
               {t("flags.readOnly", locale)}
             </Pill>
           ) : null}
           {flag.availableActions.map((action) =>
-            action.enabled ? (
+            action.enabled && historyHref ? (
               <ActionLink
                 key={`${flag.key}-${action.action}`}
                 href={historyHref}
@@ -818,14 +846,21 @@ function buildFlagTableRows(
                 <Pill theme={theme} tone={actionTone(action.riskLevel)}>
                   {formatActionLabel(locale, action.action)}
                 </Pill>
-                {action.disabledReasonCode ? (
+                {action.disabledReasonCode || !historyHref ? (
                   <span style={{ color: theme.textDim, fontSize: 11 }}>
-                    {formatDisabledReason(locale, action.disabledReasonCode)}
+                    {action.disabledReasonCode
+                      ? formatDisabledReason(locale, action.disabledReasonCode)
+                      : t("flags.disabledReason.history_link_missing", locale)}
                   </span>
                 ) : null}
               </div>
             ),
           )}
+          {flag.availableActions.length > 0 && !hasEnabledAction ? (
+            <Pill theme={theme} tone="neutral">
+              {t("flags.readOnly", locale)}
+            </Pill>
+          ) : null}
         </div>
       ),
       _selected: flag.state === "partial",
@@ -894,14 +929,15 @@ export default async function FeatureFlagsPage({
 
   const visibleFlags =
     effectiveEmptyReason === null ? filteredFlags : ([] as NormalizedFlag[]);
-  const enabledCount = payload.flags.filter((flag) => flag.state === "enabled")
-    .length;
-  const partialCount = payload.flags.filter((flag) => flag.state === "partial")
-    .length;
+  const enabledCount = payload.flags.filter(
+    (flag) => flag.state === "enabled",
+  ).length;
+  const partialCount = payload.flags.filter(
+    (flag) => flag.state === "partial",
+  ).length;
   const tenantScopedCount = payload.flags.filter(
     (flag) => flag.scope === "tenant",
   ).length;
-  const pageHref = buildPageHref(query, scope, emptyReasonOverride);
   const refreshHref = buildRefreshHref(query, scope, emptyReasonOverride);
   const platformAdminFlagsHref = resolvePlatformAdminFlagsHref();
   const rows = buildFlagTableRows(visibleFlags, locale);
@@ -910,18 +946,28 @@ export default async function FeatureFlagsPage({
     <>
       <PageHeader
         theme={theme}
-        title={locale === "zh" ? "功能旗標 · read only" : "Feature Flags · read only"}
+        title={
+          locale === "zh" ? "功能旗標 · read only" : "Feature Flags · read only"
+        }
         subtitle={t("flags.subtitleReadOnly", locale)}
         actions={
           <>
-            <ActionLink href={refreshHref}>{t("common.refresh", locale)}</ActionLink>
-            <ActionLink
-              href={platformAdminFlagsHref}
-              target="_blank"
-              tone="accent"
-            >
-              {t("flags.platformAdminLink", locale)}
+            <ActionLink href={refreshHref}>
+              {t("common.refresh", locale)}
             </ActionLink>
+            {platformAdminFlagsHref ? (
+              <ActionLink
+                href={platformAdminFlagsHref}
+                target="_blank"
+                tone="accent"
+              >
+                {t("flags.platformAdminLink", locale)}
+              </ActionLink>
+            ) : (
+              <Pill theme={theme} tone="warn">
+                {t("flags.platformAdminLinkUnavailable", locale)}
+              </Pill>
+            )}
           </>
         }
       />
@@ -1056,7 +1102,9 @@ export default async function FeatureFlagsPage({
                 >
                   {t("common.search", locale)}
                 </button>
-                <ActionLink href={pageHref}>{t("flags.keepFilters", locale)}</ActionLink>
+                <ActionLink href="/feature-flags">
+                  {t("flags.clearFilters", locale)}
+                </ActionLink>
               </form>
 
               <div
@@ -1069,8 +1117,15 @@ export default async function FeatureFlagsPage({
                 <Pill theme={theme} tone="accent">
                   {t(`flags.refreshTier.${payload.refreshTier}`, locale)}
                 </Pill>
-                <Pill theme={theme} tone={refreshTone(payload.refresh.dataFreshness)} dot>
-                  {t(`flags.freshness.${payload.refresh.dataFreshness}`, locale)}
+                <Pill
+                  theme={theme}
+                  tone={refreshTone(payload.refresh.dataFreshness)}
+                  dot
+                >
+                  {t(
+                    `flags.freshness.${payload.refresh.dataFreshness}`,
+                    locale,
+                  )}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
                   {payload.refresh.source}
@@ -1113,6 +1168,18 @@ export default async function FeatureFlagsPage({
               >
                 {t("flags.registryFooterV2", locale)}
               </div>
+              <div
+                style={{
+                  display: "grid",
+                  gap: 6,
+                  color: theme.textDim,
+                  fontSize: 11.5,
+                  lineHeight: 1.45,
+                }}
+              >
+                <div>{t("flags.boundary.readOnly", locale)}</div>
+                <div>{t("flags.boundary.deepLink", locale)}</div>
+              </div>
               {payload.notes.length > 0 ? (
                 <div style={{ display: "grid", gap: 6 }}>
                   {payload.notes.map((note) => (
@@ -1147,7 +1214,11 @@ export default async function FeatureFlagsPage({
         ) : (
           <Card
             theme={theme}
-            title={locale === "zh" ? "Operational flag registry" : "Operational flag registry"}
+            title={
+              locale === "zh"
+                ? "Operational flag registry"
+                : "Operational flag registry"
+            }
             subtitle={t("flags.registrySummaryV2", locale, {
               total: payload.flags.length,
               enabled: enabledCount,

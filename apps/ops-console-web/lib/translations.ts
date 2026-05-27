@@ -346,12 +346,18 @@ const en = {
   "flags.keepFilters": "Keep current filters",
   "flags.clearFilters": "Clear filters",
   "flags.platformAdminLink": "Open Platform Admin /feature-flags",
+  "flags.platformAdminLinkUnavailable":
+    "Platform Admin origin is not configured in this environment.",
   "flags.opsReadOnly": "Ops read-only",
   "flags.readOnly": "Read only",
   "flags.midRollout": "Mid-rollout",
   "flags.partialStateHelp": "Different tenant values are active right now.",
   "flags.tenantOverrideCount": "{count} tenant override(s)",
   "flags.crossAppHint": "History opens in Platform Admin",
+  "flags.boundary.readOnly":
+    "This screen stays terminal and read-only. Mutation belongs to Platform Admin.",
+  "flags.boundary.deepLink":
+    "Cross-app links open the owner surface in a new tab when history is available.",
   "flags.scope.all": "All scopes",
   "flags.scope.global": "Global",
   "flags.scope.tenant": "Tenant",
@@ -359,7 +365,10 @@ const en = {
   "flags.state.disabled": "disabled",
   "flags.state.partial": "partial",
   "flags.action.view_change_history": "View change history",
-  "flags.disabledReason.history_unavailable": "History is not available for this flag yet.",
+  "flags.disabledReason.history_unavailable":
+    "History is not available for this flag yet.",
+  "flags.disabledReason.history_link_missing":
+    "History is enabled by contract but no cross-app link was provided.",
   "flags.meta.refreshTier": "Refresh tier",
   "flags.meta.freshness": "Freshness",
   "flags.meta.generatedAt": "Generated at",
@@ -375,18 +384,25 @@ const en = {
   "flags.emptyState.noData.title": "No flags are available yet",
   "flags.emptyState.noData.body":
     "The registry returned no flag rows for this ops scope. Refresh to confirm this is not a transient empty snapshot.",
-  "flags.emptyState.notProvisioned.title": "Feature flag registry is not provisioned",
+  "flags.emptyState.notProvisioned.title":
+    "Feature flag registry is not provisioned",
   "flags.emptyState.notProvisioned.body":
     "This realm does not expose the operational flag registry yet. Open Platform Admin to confirm setup and ownership.",
   "flags.emptyState.fetchFailed.title": "Could not load feature flags",
   "flags.emptyState.fetchFailed.body":
     "The snapshot request failed before the registry data could be rendered. Try a manual refresh.",
-  "flags.emptyState.permissionDenied.title": "You do not have access to this registry",
+  "flags.emptyState.permissionDenied.title":
+    "You do not have access to this registry",
   "flags.emptyState.permissionDenied.body":
     "The current actor can reach the screen but the upstream registry rejected the request. Refresh after confirming the actor context.",
-  "flags.emptyState.externalUnavailable.title": "Flag history source is unavailable",
+  "flags.emptyState.externalUnavailable.title":
+    "Flag history source is unavailable",
   "flags.emptyState.externalUnavailable.body":
     "The backing service for operational flag visibility is degraded or unavailable. Retry after the upstream dependency recovers.",
+  "flags.emptyState.driverNotEligible.title":
+    "This empty-state reason does not belong on the ops surface",
+  "flags.emptyState.driverNotEligible.body":
+    "The upstream response returned a driver-app-only empty reason. Refresh and verify the adapter mapping if this persists.",
   "flags.emptyState.filteredEmpty.title": "No flags match the current filters",
   "flags.emptyState.filteredEmpty.body":
     "Adjust the search term or scope filter to see other flags in the current snapshot.",
@@ -1867,12 +1883,18 @@ const zh: Record<keyof typeof en, string> = {
   "flags.keepFilters": "保留目前篩選",
   "flags.clearFilters": "清除篩選",
   "flags.platformAdminLink": "前往 Platform Admin /feature-flags",
+  "flags.platformAdminLinkUnavailable":
+    "這個環境尚未設定 Platform Admin origin，無法開啟跨 app 連結。",
   "flags.opsReadOnly": "營運唯讀",
   "flags.readOnly": "唯讀",
   "flags.midRollout": "進行中 rollout",
   "flags.partialStateHelp": "目前不同租戶仍套用不同值。",
   "flags.tenantOverrideCount": "{count} 個租戶覆寫",
   "flags.crossAppHint": "歷史會在 Platform Admin 開啟",
+  "flags.boundary.readOnly":
+    "這個畫面維持終端唯讀；任何治理變更都屬於 Platform Admin。",
+  "flags.boundary.deepLink":
+    "跨 app 連結在有歷史可看時會以新分頁開啟 owner surface。",
   "flags.scope.all": "全部範圍",
   "flags.scope.global": "全域",
   "flags.scope.tenant": "租戶",
@@ -1881,6 +1903,8 @@ const zh: Record<keyof typeof en, string> = {
   "flags.state.partial": "partial",
   "flags.action.view_change_history": "查看變更歷史",
   "flags.disabledReason.history_unavailable": "此旗標尚未提供歷史紀錄。",
+  "flags.disabledReason.history_link_missing":
+    "contract 允許查看歷史，但沒有提供 cross-app 連結。",
   "flags.meta.refreshTier": "刷新層級",
   "flags.meta.freshness": "新鮮度",
   "flags.meta.generatedAt": "產生時間",
@@ -1908,6 +1932,10 @@ const zh: Record<keyof typeof en, string> = {
   "flags.emptyState.externalUnavailable.title": "旗標來源服務目前不可用",
   "flags.emptyState.externalUnavailable.body":
     "提供 operational flag visibility 的上游服務降級或不可用。待依賴恢復後再試。",
+  "flags.emptyState.driverNotEligible.title":
+    "這個 empty-state reason 不應出現在 ops 畫面",
+  "flags.emptyState.driverNotEligible.body":
+    "上游回傳了 driver app 專用的 empty reason。若持續出現，請刷新並檢查 adapter mapping。",
   "flags.emptyState.filteredEmpty.title": "目前篩選條件沒有符合的旗標",
   "flags.emptyState.filteredEmpty.body":
     "請調整搜尋字詞或 scope 篩選，查看此快照中的其他旗標。",
