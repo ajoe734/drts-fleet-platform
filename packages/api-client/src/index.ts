@@ -2107,12 +2107,22 @@ export class ApiClient {
     return this.getList<SettlementMatrixRecord>("/api/settlement/matrix");
   }
 
-  async suspendTenant(tenantId: string): Promise<unknown> {
-    return this.post(`/api/platform-admin/tenants/${tenantId}/suspend`);
+  async suspendTenant(
+    tenantId: string,
+    command?: { reason?: string },
+  ): Promise<unknown> {
+    return this.post(`/api/platform-admin/tenants/${tenantId}/suspend`, {
+      body: command,
+    });
   }
 
-  async activateTenant(tenantId: string): Promise<unknown> {
-    return this.post(`/api/platform-admin/tenants/${tenantId}/activate`);
+  async activateTenant(
+    tenantId: string,
+    command?: { reason?: string },
+  ): Promise<unknown> {
+    return this.post(`/api/platform-admin/tenants/${tenantId}/activate`, {
+      body: command,
+    });
   }
 
   async inviteTenantRole(
@@ -2137,9 +2147,11 @@ export class ApiClient {
 
   async rollbackHoldTenant(
     tenantId: string,
+    command?: { reason?: string },
   ): Promise<PlatformAdminTenantRecord> {
     return this.post<PlatformAdminTenantRecord>(
       `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/rollback-hold`,
+      { body: command },
     );
   }
 
