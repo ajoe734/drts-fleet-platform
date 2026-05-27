@@ -110,6 +110,8 @@ type ActionDestination = {
   label: string;
 };
 
+type SurfaceTone = Exclude<CanvasTone, "neutral">;
+
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: false,
@@ -131,7 +133,7 @@ const DRIVER_TASK_PRIORITY: Record<string, number> = {
 const pageBodyStyle = {
   padding: 24,
   display: "grid",
-  gap: 16,
+  gap: 20,
 };
 
 const actionRowStyle = {
@@ -144,6 +146,18 @@ const surfaceStackStyle = {
   display: "grid",
   gap: 16,
   alignContent: "start" as const,
+};
+
+const detailGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
+  gap: 16,
+  alignItems: "start" as const,
+};
+
+const detailHeaderCardStyle = {
+  display: "grid",
+  gap: 16,
 };
 
 const APP_ORIGIN_BY_TARGET: Record<CrossAppResourceLink["targetApp"], string> =
@@ -720,6 +734,10 @@ function getForwardedStateTone(
     default:
       return "neutral";
   }
+}
+
+function toSurfaceTone(tone: CanvasTone): SurfaceTone {
+  return tone === "neutral" ? "info" : tone;
 }
 
 function getAdapterTone(
@@ -1709,7 +1727,7 @@ export default async function DispatchDetailPage({
       {
         k: locale === "zh" ? "狀態" : "State",
         v: (
-          <Pill theme={theme} tone={getStateTone(stateCode)}>
+          <Pill theme={theme} tone={toSurfaceTone(getStateTone(stateCode))}>
             {formatCode(locale, stateCode)}
           </Pill>
         ),
@@ -1985,59 +2003,66 @@ export default async function DispatchDetailPage({
               (ownedRecord.orderNo || ownedRecord.orderId),
           )}
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.65fr)",
-              gap: 16,
-            }}
+          {(stateCode === "no_supply" ||
+            stateCode === "exception_hold" ||
+            stateCode === "override_pending" ||
+            stateCode === "dispatch_timeout") && (
+            <Banner
+              theme={theme}
+              tone={toSurfaceTone(getStateTone(stateCode))}
+              icon="warn"
+              title={
+                locale === "zh"
+                  ? `例外狀態 · ${formatCode(locale, stateCode)}`
+                  : `Exception state · ${formatCode(locale, stateCode)}`
+              }
+              body={
+                locale === "zh"
+                  ? "此工作項目不在標準派遣階梯內；先看 compliance / hold、no-supply escalation 與 availableActions，再決定下一步。"
+                  : "This work item is outside the standard dispatch progression; inspect compliance / hold, no-supply escalation, and availableActions before deciding the next step."
+              }
+            />
+          )}
+
+          <Card
+            theme={theme}
+            title={locale === "zh" ? "工作項目摘要" : "Work item summary"}
           >
+            <div style={detailHeaderCardStyle}>
+              <DL theme={theme} cols={3} items={summaryItems} />
+              <div style={{ display: "grid", gap: 8 }}>
+                <Field
+                  theme={theme}
+                  label={locale === "zh" ? "工作區決策重點" : "Decision focus"}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      color: theme.textMuted,
+                      fontSize: "12px",
+                    }}
+                  >
+                    <Pill
+                      theme={theme}
+                      tone={toSurfaceTone(getStateTone(stateCode))}
+                    >
+                      {formatCode(locale, stateCode)}
+                    </Pill>
+                    <span>
+                      {locale === "zh"
+                        ? "判斷候選排名、gating 與目前 driver task，盡量在同屏完成指派或改派。"
+                        : "Decide using candidate rank, gating, and the current driver task so assignment or redispatch can stay on this screen."}
+                    </span>
+                  </div>
+                </Field>
+              </div>
+            </div>
+          </Card>
+
+          <div style={detailGridStyle}>
             <div style={surfaceStackStyle}>
-              <Card
-                theme={theme}
-                title={
-                  locale === "zh" ? "Work item summary" : "Work item summary"
-                }
-                actions={
-                  <Pill theme={theme} tone="accent">
-                    owned
-                  </Pill>
-                }
-              >
-                <DL theme={theme} cols={3} items={summaryItems} />
-              </Card>
-
-              <Card
-                theme={theme}
-                title={locale === "zh" ? "State machine" : "State machine"}
-              >
-                {renderStateMachine(
-                  locale,
-                  [
-                    "ready_for_dispatch",
-                    "queued",
-                    "broadcasting",
-                    "assigned",
-                    "on_trip",
-                    "completed",
-                  ],
-                  stateCode,
-                  {
-                    exceptionalTone:
-                      getStateTone(stateCode) === "neutral"
-                        ? "info"
-                        : (getStateTone(stateCode) as Exclude<
-                            CanvasTone,
-                            "neutral"
-                          >),
-                    exceptionalBody:
-                      locale === "zh"
-                        ? "owned dispatch 目前處於例外或終態；請改看 Compliance / hold、No supply、Timeout 與 availableActions，而不是把它當成流程起點。"
-                        : "This owned dispatch is in an exceptional or terminal state; use Compliance / hold, No supply, Timeout, and availableActions instead of treating it as the start of the flow.",
-                  },
-                )}
-              </Card>
-
               <div id="candidates">
                 <Card
                   theme={theme}
@@ -2078,7 +2103,7 @@ export default async function DispatchDetailPage({
                       tone={emptyContent.tone}
                       icon={emptyContent.icon}
                       title={emptyContent.title}
-                      body={emptyContent.body}
+                      body={`${emptyContent.body} · ${emptyState?.messageCode ?? "dispatch.candidates.none"}`}
                       actions={
                         emptyState?.nextAction ? (
                           <div style={actionRowStyle}>
@@ -2105,6 +2130,126 @@ export default async function DispatchDetailPage({
                       }
                     />
                   )}
+                </Card>
+              </div>
+
+              <Card
+                theme={theme}
+                title={
+                  locale === "zh"
+                    ? "Compliance gates / authority chain"
+                    : "Compliance gates / authority chain"
+                }
+              >
+                <DL theme={theme} cols={1} items={gateItems} />
+                <div style={{ height: 14 }} />
+                <DL theme={theme} cols={1} items={exceptionItems} />
+              </Card>
+
+              <Card
+                theme={theme}
+                title={
+                  locale === "zh"
+                    ? "Linked recordings / callbacks"
+                    : "Linked recordings / callbacks"
+                }
+              >
+                <DL theme={theme} cols={1} items={commsItems} />
+              </Card>
+            </div>
+
+            <div style={surfaceStackStyle}>
+              <Card
+                theme={theme}
+                title={locale === "zh" ? "State machine" : "State machine"}
+              >
+                {renderStateMachine(
+                  locale,
+                  [
+                    "ready_for_dispatch",
+                    "queued",
+                    "broadcasting",
+                    "assigned",
+                    "on_trip",
+                    "completed",
+                  ],
+                  stateCode,
+                  {
+                    exceptionalTone:
+                      getStateTone(stateCode) === "neutral"
+                        ? "info"
+                        : (getStateTone(stateCode) as Exclude<
+                            CanvasTone,
+                            "neutral"
+                          >),
+                    exceptionalBody:
+                      locale === "zh"
+                        ? "owned dispatch 目前處於例外或終態；請改看 compliance / hold、no-supply escalation、timeout 與 availableActions，而不是把它當成流程起點。"
+                        : "This owned dispatch is in an exceptional or terminal state; use compliance / hold, no-supply escalation, timeout, and availableActions instead of treating it as the start of the flow.",
+                  },
+                )}
+              </Card>
+
+              <div id="available-actions">
+                <Card
+                  theme={theme}
+                  title={
+                    locale === "zh"
+                      ? "availableActions / next step"
+                      : "availableActions / next step"
+                  }
+                >
+                  {renderActionSection(
+                    locale,
+                    orderActions,
+                    locale === "zh"
+                      ? "此 work item 目前沒有 backend 暴露的 action descriptor。"
+                      : "This work item currently has no backend-exposed action descriptors.",
+                    {
+                      baseHref: href,
+                      scope: "dispatch",
+                      resourceId: ownedRecord.orderId,
+                      resourceLabel: ownedRecord.orderNo || ownedRecord.orderId,
+                      candidatesHref: withFragment(href, "candidates"),
+                      currentTaskHref: withFragment(
+                        href,
+                        "current-driver-task",
+                      ),
+                      incidentHref,
+                      approvalHref,
+                      refreshHref: withFragment(href, "refresh-tier"),
+                    },
+                  )}
+                  <div style={{ height: 12 }} />
+                  <Field
+                    theme={theme}
+                    label={locale === "zh" ? "Risk pattern" : "Risk pattern"}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: 4,
+                        color: theme.textMuted,
+                        fontSize: "12px",
+                      }}
+                    >
+                      <span>
+                        {locale === "zh"
+                          ? "low: direct + toast receipt"
+                          : "low: direct + toast receipt"}
+                      </span>
+                      <span>
+                        {locale === "zh"
+                          ? "medium: confirm modal + audit receipt"
+                          : "medium: confirm modal + audit receipt"}
+                      </span>
+                      <span>
+                        {locale === "zh"
+                          ? "high: confirm + required reason + audit receipt"
+                          : "high: confirm + required reason + audit receipt"}
+                      </span>
+                    </div>
+                  </Field>
                 </Card>
               </div>
 
@@ -2181,93 +2326,6 @@ export default async function DispatchDetailPage({
                   ))}
                 </div>
               </Card>
-            </div>
-
-            <div style={surfaceStackStyle}>
-              <div id="available-actions">
-                <Card
-                  theme={theme}
-                  title={
-                    locale === "zh" ? "availableActions" : "availableActions"
-                  }
-                >
-                  {renderActionSection(
-                    locale,
-                    orderActions,
-                    locale === "zh"
-                      ? "此 work item 目前沒有 backend 暴露的 action descriptor。"
-                      : "This work item currently has no backend-exposed action descriptors.",
-                    {
-                      baseHref: href,
-                      scope: "dispatch",
-                      resourceId: ownedRecord.orderId,
-                      resourceLabel: ownedRecord.orderNo || ownedRecord.orderId,
-                      candidatesHref: withFragment(href, "candidates"),
-                      currentTaskHref: withFragment(
-                        href,
-                        "current-driver-task",
-                      ),
-                      incidentHref,
-                      approvalHref,
-                      refreshHref: withFragment(href, "refresh-tier"),
-                    },
-                  )}
-                  <div style={{ height: 12 }} />
-                  <Field
-                    theme={theme}
-                    label={locale === "zh" ? "Risk pattern" : "Risk pattern"}
-                  >
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: 4,
-                        color: theme.textMuted,
-                        fontSize: "12px",
-                      }}
-                    >
-                      <span>
-                        {locale === "zh"
-                          ? "low: direct + toast"
-                          : "low: direct + toast"}
-                      </span>
-                      <span>
-                        {locale === "zh"
-                          ? "medium: confirm modal"
-                          : "medium: confirm modal"}
-                      </span>
-                      <span>
-                        {locale === "zh"
-                          ? "high: confirm + required reason"
-                          : "high: confirm + required reason"}
-                      </span>
-                    </div>
-                  </Field>
-                </Card>
-              </div>
-
-              <div id="compliance-hold">
-                <Card
-                  theme={theme}
-                  title={
-                    locale === "zh" ? "Compliance / hold" : "Compliance / hold"
-                  }
-                >
-                  <DL theme={theme} cols={1} items={gateItems} />
-                  <div style={{ height: 14 }} />
-                  <DL theme={theme} cols={1} items={exceptionItems} />
-                </Card>
-              </div>
-
-              <Card
-                theme={theme}
-                title={
-                  locale === "zh"
-                    ? "Linked recordings / callbacks"
-                    : "Linked recordings / callbacks"
-                }
-              >
-                <DL theme={theme} cols={1} items={commsItems} />
-              </Card>
 
               <div id="current-driver-task">
                 <Card
@@ -2307,7 +2365,9 @@ export default async function DispatchDetailPage({
                         v: currentTask ? (
                           <Pill
                             theme={theme}
-                            tone={getStateTone(currentTask.status)}
+                            tone={toSurfaceTone(
+                              getStateTone(currentTask.status),
+                            )}
                           >
                             {formatCode(locale, currentTask.status)}
                           </Pill>
@@ -2352,6 +2412,36 @@ export default async function DispatchDetailPage({
                       },
                     ]}
                   />
+                </Card>
+              </div>
+
+              <div id="compliance-hold">
+                <Card
+                  theme={theme}
+                  title={
+                    locale === "zh"
+                      ? "Escalation / related surfaces"
+                      : "Escalation / related surfaces"
+                  }
+                >
+                  <div style={actionRowStyle}>
+                    <Link href={incidentHref} style={actionLinkStyle()}>
+                      <CanvasIcon name="warn" size={12} />
+                      <span>
+                        {locale === "zh"
+                          ? "建立 incident 草稿"
+                          : "Create incident draft"}
+                      </span>
+                    </Link>
+                    <Link href={approvalHref} style={actionLinkStyle()}>
+                      <CanvasIcon name="ext" size={12} />
+                      <span>
+                        {locale === "zh"
+                          ? "前往 approval queue"
+                          : "Open approval queue"}
+                      </span>
+                    </Link>
+                  </div>
                 </Card>
               </div>
             </div>
@@ -2456,7 +2546,10 @@ export default async function DispatchDetailPage({
     {
       k: locale === "zh" ? "狀態" : "State",
       v: (
-        <Pill theme={theme} tone={getForwardedStateTone(forwardedOrder.status)}>
+        <Pill
+          theme={theme}
+          tone={toSurfaceTone(getForwardedStateTone(forwardedOrder.status))}
+        >
           {formatCode(locale, forwardedOrder.status)}
         </Pill>
       ),
@@ -2667,59 +2760,51 @@ export default async function DispatchDetailPage({
           }
         />
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.65fr)",
-            gap: 16,
-          }}
+        <Card
+          theme={theme}
+          title={
+            locale === "zh" ? "鏡像工作項目摘要" : "Mirror work item summary"
+          }
         >
-          <div style={surfaceStackStyle}>
-            <Card
+          <div style={detailHeaderCardStyle}>
+            <DL theme={theme} cols={3} items={forwardedSummaryItems} />
+            <Field
               theme={theme}
-              title={
+              label={
                 locale === "zh"
-                  ? "Mirror-order summary"
-                  : "Mirror-order summary"
+                  ? "Owner-surface constraint"
+                  : "Owner-surface constraint"
               }
-              actions={
-                <Pill theme={theme} tone="accent">
-                  forwarded
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  color: theme.textMuted,
+                  fontSize: "12px",
+                }}
+              >
+                <Pill
+                  theme={theme}
+                  tone={toSurfaceTone(
+                    getForwardedStateTone(forwardedOrder.status),
+                  )}
+                >
+                  {formatCode(locale, forwardedOrder.status)}
                 </Pill>
-              }
-            >
-              <DL theme={theme} cols={3} items={forwardedSummaryItems} />
-            </Card>
+                <span>
+                  {locale === "zh"
+                    ? "這裡只處理 sync、fallback、reconciliation 與 eligible-driver 判讀；需要 owner mutation 時預設新分頁開啟。"
+                    : "This workspace only handles sync, fallback, reconciliation, and eligible-driver triage; owner mutations open in a new tab by default."}
+                </span>
+              </div>
+            </Field>
+          </div>
+        </Card>
 
-            <Card
-              theme={theme}
-              title={locale === "zh" ? "State machine" : "State machine"}
-            >
-              {renderStateMachine(
-                locale,
-                [
-                  "received",
-                  "broadcasted",
-                  "accept_pending",
-                  "confirmed_by_platform",
-                  "completed_synced",
-                ],
-                forwardedOrder.status,
-                {
-                  exceptionalTone:
-                    getForwardedStateTone(forwardedOrder.status) === "neutral"
-                      ? "info"
-                      : (getForwardedStateTone(
-                          forwardedOrder.status,
-                        ) as Exclude<CanvasTone, "neutral">),
-                  exceptionalBody:
-                    locale === "zh"
-                      ? "forwarded mirror 目前不在標準同步進度上；請依 adapter health、reconciliation、manual fallback 與 availableActions 決策。"
-                      : "This forwarded mirror is outside the standard sync progression; use adapter health, reconciliation, manual fallback, and availableActions to decide the next action.",
-                },
-              )}
-            </Card>
-
+        <div style={detailGridStyle}>
+          <div style={surfaceStackStyle}>
             <div id="eligible-drivers">
               <Card
                 theme={theme}
@@ -2796,8 +2881,8 @@ export default async function DispatchDetailPage({
               theme={theme}
               title={
                 locale === "zh"
-                  ? "Route / callback / sync"
-                  : "Route / callback / sync"
+                  ? "Adapter / route / sync"
+                  : "Adapter / route / sync"
               }
             >
               <DL
@@ -2879,38 +2964,6 @@ export default async function DispatchDetailPage({
                 ]}
               />
             </Card>
-          </div>
-
-          <div style={surfaceStackStyle}>
-            <div id="available-actions">
-              <Card
-                theme={theme}
-                title={
-                  locale === "zh" ? "availableActions" : "availableActions"
-                }
-              >
-                {renderActionSection(
-                  locale,
-                  forwardedActions,
-                  locale === "zh"
-                    ? "此 forwarded work item 目前沒有 backend action descriptor。"
-                    : "This forwarded work item currently has no backend action descriptors.",
-                  {
-                    baseHref: href,
-                    scope: "forwarded",
-                    resourceId: forwardedOrder.mirrorOrderId,
-                    resourceLabel:
-                      forwardedOrder.externalOrderId ||
-                      forwardedOrder.mirrorOrderId,
-                    adapterHref: resolveCrossAppHref(externalSyncLink),
-                    reconciliationHref: resolveCrossAppHref(reconciliationLink),
-                    incidentHref: forwardedIncidentHref,
-                    refreshHref: withFragment(href, "refresh-tier"),
-                    eligibleDriversHref: withFragment(href, "eligible-drivers"),
-                  },
-                )}
-              </Card>
-            </div>
 
             <div id="adapter-cross-app">
               <Card
@@ -2967,6 +3020,98 @@ export default async function DispatchDetailPage({
                 />
               </Card>
             </div>
+          </div>
+
+          <div style={surfaceStackStyle}>
+            <Card
+              theme={theme}
+              title={locale === "zh" ? "State machine" : "State machine"}
+            >
+              {renderStateMachine(
+                locale,
+                [
+                  "received",
+                  "broadcasted",
+                  "accept_pending",
+                  "confirmed_by_platform",
+                  "completed_synced",
+                ],
+                forwardedOrder.status,
+                {
+                  exceptionalTone:
+                    getForwardedStateTone(forwardedOrder.status) === "neutral"
+                      ? "info"
+                      : (getForwardedStateTone(
+                          forwardedOrder.status,
+                        ) as Exclude<CanvasTone, "neutral">),
+                  exceptionalBody:
+                    locale === "zh"
+                      ? "forwarded mirror 目前不在標準同步進度上；請依 adapter health、reconciliation、manual fallback 與 availableActions 決策。"
+                      : "This forwarded mirror is outside the standard sync progression; use adapter health, reconciliation, manual fallback, and availableActions to decide the next action.",
+                },
+              )}
+            </Card>
+
+            <div id="available-actions">
+              <Card
+                theme={theme}
+                title={
+                  locale === "zh"
+                    ? "availableActions / owner handoff"
+                    : "availableActions / owner handoff"
+                }
+              >
+                {renderActionSection(
+                  locale,
+                  forwardedActions,
+                  locale === "zh"
+                    ? "此 forwarded work item 目前沒有 backend action descriptor。"
+                    : "This forwarded work item currently has no backend action descriptors.",
+                  {
+                    baseHref: href,
+                    scope: "forwarded",
+                    resourceId: forwardedOrder.mirrorOrderId,
+                    resourceLabel:
+                      forwardedOrder.externalOrderId ||
+                      forwardedOrder.mirrorOrderId,
+                    adapterHref: resolveCrossAppHref(externalSyncLink),
+                    reconciliationHref: resolveCrossAppHref(reconciliationLink),
+                    incidentHref: forwardedIncidentHref,
+                    refreshHref: withFragment(href, "refresh-tier"),
+                    eligibleDriversHref: withFragment(href, "eligible-drivers"),
+                  },
+                )}
+                <div style={{ height: 12 }} />
+                <Field
+                  theme={theme}
+                  label={
+                    locale === "zh"
+                      ? "Cross-app behavior"
+                      : "Cross-app behavior"
+                  }
+                >
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: 4,
+                      color: theme.textMuted,
+                      fontSize: "12px",
+                    }}
+                  >
+                    <span>
+                      {locale === "zh"
+                        ? "owner-surface deep links 依 spec 預設新分頁開啟。"
+                        : "Owner-surface deep links open in a new tab by default."}
+                    </span>
+                    <span>
+                      {locale === "zh"
+                        ? "manual fallback / reconciliation 類動作需預先顯示跨 app 提示。"
+                        : "Manual-fallback and reconciliation actions must expose the cross-app hint before navigation."}
+                    </span>
+                  </div>
+                </Field>
+              </Card>
+            </div>
 
             <Card
               theme={theme}
@@ -2996,7 +3141,9 @@ export default async function DispatchDetailPage({
                     v: mirroredTask ? (
                       <Pill
                         theme={theme}
-                        tone={getForwardedStateTone(forwardedOrder.status)}
+                        tone={toSurfaceTone(
+                          getForwardedStateTone(forwardedOrder.status),
+                        )}
                       >
                         {formatCode(locale, mirroredTask.localStatus)}
                       </Pill>
