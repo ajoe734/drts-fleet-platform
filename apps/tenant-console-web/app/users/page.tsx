@@ -245,17 +245,29 @@ type RuntimeTenantUserRecord = TenantUserRoleRecord & {
 };
 
 const ROLE_CANVAS_LABEL: Record<string, string> = {
+  tc_admin: "tenant_admin",
+  tc_operator: "operator",
+  tc_finance: "finance",
+  tc_integration_mgr: "integration_mgr",
+  tc_viewer: "viewer",
   tenant_admin: "tenant_admin",
   tenant_ops_admin: "operator",
   tenant_finance_admin: "finance",
+  tenant_integration_mgr: "integration_mgr",
   tenant_viewer: "viewer",
 };
 
 const ROLE_SORT_ORDER: Record<string, number> = {
+  tc_admin: 0,
+  tc_operator: 1,
+  tc_finance: 2,
+  tc_integration_mgr: 3,
+  tc_viewer: 4,
   tenant_admin: 0,
   tenant_ops_admin: 1,
   tenant_finance_admin: 2,
-  tenant_viewer: 3,
+  tenant_integration_mgr: 3,
+  tenant_viewer: 4,
 };
 
 const STATUS_SORT_ORDER: Record<TenantUserRoleRecord["status"], number> = {
@@ -461,9 +473,9 @@ function buildFallbackUserActions(
 ): ResourceActionDescriptor[] {
   const updateRole = buildActionDescriptor(
     "role",
-    user.status !== "suspended",
+    user.status === "active",
     "medium",
-    user.status === "suspended" ? "already_suspended" : undefined,
+    user.status === "active" ? undefined : "not_active",
   );
   const suspend = buildActionDescriptor(
     "suspend",
