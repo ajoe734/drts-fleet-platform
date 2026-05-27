@@ -735,7 +735,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const locale = await getServerLocale();
 
   const [
-    revenueRuntime,
+    runtimeOutcome,
     ordersOutcome,
     tasksOutcome,
     statementsOutcome,
@@ -747,7 +747,11 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   ] = await Promise.all([
     client
       .getOpsRevenueReviewRuntime()
-      .catch<OpsRevenueReviewRuntime | null>(() => null),
+      .then((data) => ({ ok: true as const, data }))
+      .catch(() => ({
+        ok: false as const,
+        data: null as OpsRevenueReviewRuntime | null,
+      })),
     fetchListWithOutcome<OwnedOrderRecord>(() => client.listOrders()),
     fetchListWithOutcome<DriverTaskRecord>(() => client.listDriverTasks()),
     fetchListWithOutcome<DriverStatementRecord>(() =>
@@ -768,8 +772,17 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     ),
   ]);
 
+  const revenueRuntime = runtimeOutcome.data;
+  const pageStateReason: EmptyReason | null = !runtimeOutcome.ok
+    ? "fetch_failed"
+    : !revenueRuntime?.authorized
+      ? "permission_denied"
+      : !revenueRuntime?.provisioned
+        ? "not_provisioned"
+        : null;
+
   const anyFailed =
-    revenueRuntime === null ||
+    !runtimeOutcome.ok ||
     !ordersOutcome.ok ||
     !tasksOutcome.ok ||
     !matrixOutcome.ok ||
@@ -947,39 +960,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const runtimeAuthorized = revenueRuntime?.authorized ?? true;
   const runtimeProvisioned = revenueRuntime?.provisioned ?? true;
   const pageActions: ResourceActionDescriptor[] =
-    revenueRuntime?.availableActions ?? [
-      {
-        action: "filterPeriod",
-        enabled: true,
-        riskLevel: "low",
-      },
-      {
-        action: "filterServiceBucket",
-        enabled: true,
-        riskLevel: "low",
-      },
-      {
-        action: "filterVehicle",
-        enabled: vehicleOptions.length > 0,
-        riskLevel: "low",
-      },
-      {
-        action: "openMismatchDrawer",
-        enabled: true,
-        riskLevel: "low",
-      },
-      {
-        action: "refresh",
-        enabled: true,
-        riskLevel: "low",
-      },
-      {
-        action: "export",
-        enabled: false,
-        disabledReasonCode: "phase1_no_export",
-        riskLevel: "low",
-      },
-    ];
+    revenueRuntime?.availableActions ?? [];
   const actionById = new Map(
     pageActions.map((descriptor) => [descriptor.action, descriptor] as const),
   );
@@ -1056,58 +1037,75 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           }
         />
 
-        <div style={kpiGridStyle}>
-          <KPI
+        {pageStateReason ? (
+          <Card
             theme={theme}
-            label={t("revenue.kpi.billed", locale)}
-            value={formatMinorCurrency(recognisedRevenueMinor)}
-            sub={t("revenue.kpi.billedSub", locale)}
-          />
-          <KPI
-            theme={theme}
-            label={t("revenue.kpi.ownedShare", locale)}
-            value={pctLabel(ownedTrips, Math.max(totalTrips, 1))}
-            sub={t("revenue.kpi.ownedShareSub", locale)}
-            hint={`${formatCompactNumber(ownedTrips)} / ${formatCompactNumber(totalTrips)}`}
-          />
-          <KPI
-            theme={theme}
-            label={t("revenue.kpi.forwardedSyncFailed", locale)}
-            value={forwardedSyncFailedPct}
-            delta={
-              forwardedSyncFailedCount > 0
-                ? `${formatCompactNumber(forwardedSyncFailedCount)} sync_failed`
-                : undefined
-            }
-            deltaTone={forwardedSyncFailedCount > 0 ? "down" : "neutral"}
-            sub={t("revenue.kpi.forwardedSyncFailedSub", locale)}
-          />
-          <KPI
-            theme={theme}
-            label={t("revenue.kpi.openRecon", locale)}
-            value={formatCompactNumber(openReconCount)}
-            deltaTone={openReconCount > 0 ? "down" : "neutral"}
-            sub={t("revenue.kpi.openReconSub", locale)}
-          />
-        </div>
+            title={t("revenue.canvas.title", locale)}
+            subtitle={t("revenue.canvas.subtitle", locale)}
+          >
+            <EmptyStatePanel
+              envelope={buildEmptyEnvelope(pageStateReason, "revenue")}
+              locale={locale}
+              filters={filters}
+              themeRef={theme}
+            />
+          </Card>
+        ) : (
+          <>
+            <div style={kpiGridStyle}>
+              <KPI
+                theme={theme}
+                label={t("revenue.kpi.billed", locale)}
+                value={formatMinorCurrency(recognisedRevenueMinor)}
+                sub={t("revenue.kpi.billedSub", locale)}
+              />
+              <KPI
+                theme={theme}
+                label={t("revenue.kpi.ownedShare", locale)}
+                value={pctLabel(ownedTrips, Math.max(totalTrips, 1))}
+                sub={t("revenue.kpi.ownedShareSub", locale)}
+                hint={`${formatCompactNumber(ownedTrips)} / ${formatCompactNumber(totalTrips)}`}
+              />
+              <KPI
+                theme={theme}
+                label={t("revenue.kpi.forwardedSyncFailed", locale)}
+                value={forwardedSyncFailedPct}
+                delta={
+                  forwardedSyncFailedCount > 0
+                    ? `${formatCompactNumber(forwardedSyncFailedCount)} sync_failed`
+                    : undefined
+                }
+                deltaTone={forwardedSyncFailedCount > 0 ? "down" : "neutral"}
+                sub={t("revenue.kpi.forwardedSyncFailedSub", locale)}
+              />
+              <KPI
+                theme={theme}
+                label={t("revenue.kpi.openRecon", locale)}
+                value={formatCompactNumber(openReconCount)}
+                deltaTone={openReconCount > 0 ? "down" : "neutral"}
+                sub={t("revenue.kpi.openReconSub", locale)}
+              />
+            </div>
 
-        {renderFilterChips()}
+            {renderFilterChips()}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)",
-            gap: 16,
-            alignItems: "start",
-          }}
-        >
-          <div style={{ minWidth: 0 }}>{renderInsight()}</div>
-          <div style={{ minWidth: 0 }}>{renderChannelMix()}</div>
-        </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)",
+                gap: 16,
+                alignItems: "start",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>{renderInsight()}</div>
+              <div style={{ minWidth: 0 }}>{renderChannelMix()}</div>
+            </div>
 
-        {renderMatrix()}
+            {renderMatrix()}
 
-        {mismatchSlot}
+            {mismatchSlot}
+          </>
+        )}
       </div>
     </>
   );
