@@ -1,37 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import React, {
+import {
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useState,
   type CSSProperties,
+  type FormEvent,
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import {
   EMPTY_ENTRY_FORM,
+  EntryForm,
   buildPartnerReadinessItems,
   toPartnerCreateCommand,
   type EntryFormState,
 } from "@/components/partner-governance-shared";
-import {
-  BUSINESS_DISPATCH_SUBTYPES,
-  PARTNER_ENTRY_AUTH_MODES,
-  PARTNER_ENTRY_STATUSES,
-  PARTNER_ELIGIBILITY_MODES,
-  type PartnerChannelEntryRecord,
+import type {
+  ActionableResourceRuntimeFields,
+  EmptyReason,
+  EmptyStateEnvelope,
+  PartnerChannelEntryRecord,
+  RefreshTier,
+  ResourceActionDescriptor,
 } from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
-  CanvasField,
-  CanvasIcon,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -41,7 +41,26 @@ import {
 } from "@drts/ui-web";
 
 type PartnerFilter = "all" | "active" | "inactive" | "revoked" | "attention";
-type PartnerTableRow = PartnerChannelEntryRecord & Record<string, unknown>;
+type PartnerEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+type PartnerRow = PartnerChannelEntryRecord & ActionableResourceRuntimeFields;
+type PartnerTableRow = PartnerRow & Record<string, unknown>;
+type PartnerMutationKind = "create" | "activate" | "deactivate" | "revoke";
+
+interface PendingPartnerAction {
+  kind: PartnerMutationKind;
+  descriptor: ResourceActionDescriptor;
+  entrySlug?: string;
+  displayName?: string;
+  command?: ReturnType<typeof toPartnerCreateCommand>;
+}
+
+interface PartnerActionReceiptState {
+  tone: "success" | "warn";
+  title: string;
+  body: string;
+  href?: string;
+  hrefLabel?: string;
+}
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -56,35 +75,135 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const pillsRowStyle = {
+const kpiGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+} satisfies CSSProperties;
+
+const kpiCardStyle = (tone: "platform" | "warn" | "danger"): CSSProperties => ({
+  borderRadius: 20,
+  border: `1px solid ${
+    tone === "danger"
+      ? theme.dangerBorder
+      : tone === "warn"
+        ? theme.warnBorder
+        : theme.border
+  }`,
+  background:
+    tone === "danger"
+      ? theme.dangerBg
+      : tone === "warn"
+        ? theme.warnBg
+        : theme.bgRaised,
+  padding: 18,
+  display: "grid",
+  gap: 8,
+});
+
+const headerActionsStyle = {
   display: "flex",
   gap: 8,
-  alignItems: "center",
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
-const kpiGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
+const infoBarStyle = {
+  border: `1px solid ${theme.neutralBorder}`,
+  borderRadius: 18,
+  background: theme.bgRaised,
+  padding: "12px 14px",
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  alignItems: "center",
 } satisfies CSSProperties;
 
-const formGridStyle = {
+const filtersGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "0 14px",
+  gap: 12,
+  gridTemplateColumns:
+    "minmax(220px, 1.6fr) repeat(auto-fit, minmax(140px, 1fr))",
+} satisfies CSSProperties;
+
+const filtersCardStyle = {
+  border: `1px solid ${theme.border}`,
+  borderRadius: 18,
+  background: theme.surfaceLo,
+  padding: 16,
+  display: "grid",
+  gap: 14,
+} satisfies CSSProperties;
+
+const filterCardHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const inputStyle = (mono = false): CSSProperties => ({
+  width: "100%",
+  boxSizing: "border-box",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  fontFamily: mono ? theme.monoFamily : theme.fontFamily,
+  fontSize: 12.5,
+  padding: "10px 11px",
+});
+
+const toolbarClusterStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  alignItems: "center",
+} satisfies CSSProperties;
+
+const watchlistGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+} satisfies CSSProperties;
+
+const watchlistCardStyle = {
+  border: `1px solid ${theme.border}`,
+  borderRadius: 18,
+  background: theme.bgRaised,
+  padding: 16,
+  display: "grid",
+  gap: 10,
+} satisfies CSSProperties;
+
+const rosterHeaderStyle = {
+  display: "grid",
+  gap: 14,
+} satisfies CSSProperties;
+
+const rosterHeaderTopStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+  alignItems: "center",
+} satisfies CSSProperties;
+
+const filterSummaryStyle = {
+  color: theme.textMuted,
+  fontSize: 12.5,
 } satisfies CSSProperties;
 
 const entryCellStyle = {
   display: "flex",
   alignItems: "center",
-  gap: 9,
+  gap: 10,
 } satisfies CSSProperties;
 
-const entryAccentStyle = (accent: string): CSSProperties => ({
-  width: 28,
-  height: 28,
-  borderRadius: 6,
+const entryAvatarStyle = (accent: string): CSSProperties => ({
+  width: 30,
+  height: 30,
+  borderRadius: 8,
   background: accent,
   color: "#fff",
   display: "flex",
@@ -95,66 +214,121 @@ const entryAccentStyle = (accent: string): CSSProperties => ({
   flexShrink: 0,
 });
 
-const monoSubtleStyle = {
-  fontSize: 11,
+const monoTextStyle = {
   color: theme.textDim,
+  fontSize: 11.5,
   fontFamily: theme.monoFamily,
 } satisfies CSSProperties;
 
-const entryLinkStyle = {
+const primaryLinkStyle = {
   color: theme.text,
+  textDecoration: "none",
   fontWeight: 600,
+} satisfies CSSProperties;
+
+const secondaryLinkStyle = {
+  color: theme.textMuted,
+  fontSize: 11.5,
   textDecoration: "none",
 } satisfies CSSProperties;
 
-const iconLinkStyle = {
-  width: 22,
-  height: 22,
-  borderRadius: 6,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: theme.textDim,
-  textDecoration: "none",
-} satisfies CSSProperties;
-
-const pillButtonStyle = {
-  border: "none",
-  background: "transparent",
+const textButtonStyle = {
   padding: 0,
+  border: 0,
+  background: "transparent",
+  color: theme.textMuted,
+  fontSize: 11.5,
+  fontWeight: 600,
   cursor: "pointer",
 } satisfies CSSProperties;
 
-const inputBaseStyle = (mono = false): CSSProperties => ({
-  width: "100%",
-  boxSizing: "border-box",
-  borderRadius: 7,
-  border: `1px solid ${theme.border}`,
-  background: theme.bgRaised,
-  color: theme.text,
-  fontFamily: mono ? theme.monoFamily : theme.fontFamily,
-  fontSize: 12.5,
-  padding: "8px 10px",
-  outline: "none",
-});
+const linkRailStyle = {
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+  alignItems: "center",
+} satisfies CSSProperties;
 
-const submitButtonStyle = (disabled: boolean): CSSProperties => ({
+const chipButtonStyle = (disabled: boolean): CSSProperties => ({
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  gap: 6,
-  padding: "8px 14px",
-  minHeight: 34,
-  fontSize: 13,
+  minHeight: 28,
+  padding: "0 10px",
+  borderRadius: 999,
+  border: `1px solid ${disabled ? theme.neutralBorder : theme.border}`,
+  background: disabled ? theme.surfaceLo : theme.bgRaised,
+  color: disabled ? theme.textDim : theme.text,
+  fontSize: 11.5,
   fontWeight: 600,
-  background: theme.accent,
-  color: "#fff",
-  border: `1px solid ${theme.accent}`,
-  borderRadius: 7,
+  textDecoration: "none",
   cursor: disabled ? "not-allowed" : "pointer",
-  opacity: disabled ? 0.55 : 1,
-  fontFamily: theme.fontFamily,
+  opacity: disabled ? 0.72 : 1,
 });
+
+const modalScrimStyle = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.62)",
+  display: "grid",
+  placeItems: "center",
+  padding: 24,
+  zIndex: 40,
+} satisfies CSSProperties;
+
+const modalCardStyle = {
+  width: "min(680px, 100%)",
+  borderRadius: 24,
+  border: `1px solid ${theme.border}`,
+  background: theme.bg,
+  boxShadow: "0 28px 90px rgba(15, 23, 42, 0.34)",
+  padding: 22,
+  display: "grid",
+  gap: 16,
+} satisfies CSSProperties;
+
+const textareaStyle = {
+  ...inputStyle(),
+  minHeight: 108,
+  resize: "vertical",
+} satisfies CSSProperties;
+
+const createModalBodyStyle = {
+  display: "grid",
+  gap: 14,
+} satisfies CSSProperties;
+
+function emptyStateStyle(reason: EmptyReason): CSSProperties {
+  const palette =
+    reason === "fetch_failed"
+      ? {
+          border: `1px solid ${theme.dangerBorder}`,
+          background: theme.dangerBg,
+        }
+      : reason === "not_provisioned" || reason === "external_unavailable"
+        ? {
+            border: `1px solid ${theme.warnBorder}`,
+            background: theme.warnBg,
+          }
+        : reason === "permission_denied"
+          ? {
+              border: `1px solid ${theme.neutralBorder}`,
+              background: theme.bgRaised,
+            }
+          : {
+              border: `1px dashed ${theme.border}`,
+              background: theme.surfaceLo,
+            };
+
+  return {
+    ...palette,
+    borderRadius: 18,
+    padding: 20,
+    display: "grid",
+    gap: 10,
+    justifyItems: "start",
+  };
+}
 
 function buildPlatformNav(locale: string): CanvasShellNavItem[] {
   const labels =
@@ -271,6 +445,21 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
   ];
 }
 
+function actionMatches(
+  descriptor: ResourceActionDescriptor,
+  needles: string[],
+) {
+  const action = descriptor.action.toLowerCase();
+  return needles.some((needle) => action.includes(needle));
+}
+
+function findAction(
+  actions: readonly ResourceActionDescriptor[] | undefined,
+  needles: string[],
+) {
+  return actions?.find((descriptor) => actionMatches(descriptor, needles));
+}
+
 function statusTone(
   status: PartnerChannelEntryRecord["status"],
 ): "success" | "warn" | "danger" | "neutral" {
@@ -286,125 +475,385 @@ function statusTone(
   }
 }
 
+function toPartnerEmptyReason(reason: EmptyReason): PartnerEmptyReason {
+  if (reason === "driver_not_eligible") {
+    return "fetch_failed";
+  }
+  return reason;
+}
+
+function emptyTone(reason: PartnerEmptyReason): "danger" | "warn" | "neutral" {
+  switch (reason) {
+    case "fetch_failed":
+      return "danger";
+    case "not_provisioned":
+    case "external_unavailable":
+      return "warn";
+    default:
+      return "neutral";
+  }
+}
+
+function emptyReasonEyebrow(reason: PartnerEmptyReason) {
+  switch (reason) {
+    case "no_data":
+      return "Roster empty";
+    case "not_provisioned":
+      return "Provisioning gap";
+    case "fetch_failed":
+      return "Refresh failed";
+    case "permission_denied":
+      return "Access boundary";
+    case "external_unavailable":
+      return "Upstream dependency";
+    case "filtered_empty":
+      return "Filter result";
+    default:
+      return "Empty state";
+  }
+}
+
 function partnerNeedsAttention(entry: PartnerChannelEntryRecord) {
-  return buildPartnerReadinessItems(entry, (key: string) => key).some(
-    (item) => !item.ready,
+  return (
+    entry.status !== "active" ||
+    buildPartnerReadinessItems(entry, (key: string) => key).some(
+      (item) => !item.ready,
+    )
   );
 }
 
-function readinessState(
+function readinessSummary(
   entry: PartnerChannelEntryRecord,
   t: (key: string) => string,
-): {
-  missingCount: number;
-  label: string;
-  tone: "success" | "warn";
-} {
+) {
   const items = buildPartnerReadinessItems(entry, t);
-  const missingCount = items.filter((item) => !item.ready).length;
-
+  const gaps = items.filter((item) => !item.ready);
   return {
-    missingCount,
-    label:
-      missingCount === 0
-        ? "ok"
-        : `${missingCount} ${missingCount === 1 ? "gap" : "gaps"}`,
-    tone: missingCount === 0 ? "success" : "warn",
+    gaps,
+    tone: gaps.length === 0 ? ("success" as const) : ("warn" as const),
+    label: gaps.length === 0 ? "ready" : `${gaps.length} gaps`,
   };
+}
+
+function refreshIntervalMs(refreshTier: RefreshTier | null) {
+  switch (refreshTier) {
+    case "medium_slow":
+    case "slow":
+      return 30_000;
+    case "manual":
+      return null;
+    default:
+      return null;
+  }
+}
+
+function formatRefreshTierLabel(refreshTier: RefreshTier) {
+  switch (refreshTier) {
+    case "medium_slow":
+      return "T4 / medium_slow";
+    case "manual":
+      return "T6 / manual";
+    default:
+      return refreshTier;
+  }
+}
+
+function detectMutationKind(
+  descriptor: ResourceActionDescriptor,
+): PartnerMutationKind | null {
+  const action = descriptor.action.toLowerCase();
+  if (action.includes("deactivate")) {
+    return "deactivate";
+  }
+  if (action.includes("activate")) {
+    return "activate";
+  }
+  if (action.includes("revoke")) {
+    return "revoke";
+  }
+  if (action.includes("create") || action.includes("new")) {
+    return "create";
+  }
+  return null;
+}
+
+function humanizeActionLabel(action: string) {
+  return action
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (segment) => segment.toUpperCase());
+}
+
+function buildAuditHref(requestId?: string | null) {
+  const query = new URLSearchParams();
+  if (requestId?.trim()) {
+    query.set("requestId", requestId.trim());
+  }
+  const suffix = query.toString();
+  return suffix ? `/audit?${suffix}` : "/audit";
+}
+
+function crossAppLinkLabel(
+  route: string,
+  targetApp: string,
+  fallbackLabel: string,
+  copy: {
+    openAudit: string;
+    openOps: string;
+    openTenant: string;
+    openExternal: string;
+  },
+) {
+  if (route.startsWith("/audit")) {
+    return copy.openAudit;
+  }
+  if (targetApp === "ops-console") {
+    return copy.openOps;
+  }
+  if (targetApp === "tenant-console") {
+    return copy.openTenant;
+  }
+  return fallbackLabel || copy.openExternal;
 }
 
 export default function PartnersPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const [entries, setEntries] = useState<PartnerChannelEntryRecord[]>([]);
+  const [entries, setEntries] = useState<PartnerRow[]>([]);
+  const [listActions, setListActions] = useState<ResourceActionDescriptor[]>(
+    [],
+  );
+  const [emptyState, setEmptyState] = useState<EmptyStateEnvelope | null>(null);
+  const [refreshTier, setRefreshTier] = useState<RefreshTier>("medium_slow");
+  const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showFilters, setShowFilters] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [pendingRowAction, setPendingRowAction] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] =
+    useState<PendingPartnerAction | null>(null);
+  const [actionReason, setActionReason] = useState("");
+  const [actionReceipt, setActionReceipt] =
+    useState<PartnerActionReceiptState | null>(null);
+  const [showFilters, setShowFilters] = useState(true);
   const [filter, setFilter] = useState<PartnerFilter>("all");
+  const [search, setSearch] = useState("");
+  const [tenantFilter, setTenantFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [createForm, setCreateForm] =
     useState<EntryFormState>(EMPTY_ENTRY_FORM);
+  const deferredSearch = useDeferredValue(search);
 
   const copy =
     locale === "en"
       ? {
           title: "Partner entry",
           subtitle:
-            "Bank, hotel, and enterprise-facing partner entry programs, auth posture, eligibility, and branding metadata.",
-          breadcrumbRoot: "Tenant Governance",
-          searchPlaceholder: "Search entries, tenants, credentials...",
-          filterAction: "Filter",
-          filterTitle: "Entry filters",
-          filterSubtitle:
-            "Narrow the roster, refresh the dataset, and keep readiness gaps visible before promotion.",
+            "Bank, hotel, and enterprise partner entry points with auth mode, eligibility, routing, and readiness.",
+          breadcrumbRoot: "Partner Governance",
+          refreshTierLabel: "Refresh tier",
+          refreshedAtLabel: "Last refreshed",
+          searchLabel: "Search",
+          tenantLabel: "Tenant",
+          typeLabel: "Type",
+          statusLabel: "Status",
+          endpointLabel: "Endpoint",
+          filtersTitle: "Filters",
+          filtersSubtitle:
+            "Filter by tenant, type, status, or search term before drilling into a partner entry.",
+          jumpToFilters: "Filters",
+          searchPlaceholder: "Search entry slug, tenant, program, bank code…",
+          refresh: "Refresh",
+          create: "Create entry",
           createTitle: "Create partner entry",
           createSubtitle:
-            "Provision routing, auth mode, eligibility mode, and brand metadata before traffic goes live.",
-          refresh: "Refresh",
-          last30Days: "last 30 days",
-          errorTitle: "Unable to load partner entries",
-          attentionTitle: "Promotion readiness has gaps",
-          attentionBody: (count: number) =>
-            `${count} partner entr${count === 1 ? "y" : "ies"} still have readiness gaps and should not be promoted blindly.`,
-          filters: {
-            all: "all",
-            active: "active",
-            inactive: "inactive",
-            attention: "attention",
-            revoked: "revoked",
+            "Provision routing, auth mode, eligibility mode, and brand metadata before activation.",
+          rosterTitle: "Entry roster",
+          rosterSubtitle:
+            "Tenant mapping, dispatch subtype, auth posture, readiness, and cross-app inspection in one governance table.",
+          rosterSummary:
+            "List CTAs are driven by availableActions. Inactive entries and readiness gaps stay visibly flagged.",
+          kpiActiveLabel: "Active entries",
+          kpiAttentionLabel: "Needs attention",
+          kpiRevokedLabel: "Revoked entries",
+          watchlistTitle: "Readiness watchlist",
+          watchlistSubtitle:
+            "Keep inactive, revoked, and readiness-gap entries in a single governance lane before opening detail.",
+          watchlistEmpty:
+            "No watchlist entries right now. The roster is active and readiness-complete.",
+          watchlistOpen: "Open detail",
+          crossAppLabel: "Cross-app",
+          openAudit: "Audit",
+          openOps: "Ops",
+          openTenant: "Tenant",
+          openExternal: "Open link",
+          openDetail: "Open detail",
+          clearFilters: "Clear filters",
+          readOnly: "Read-only",
+          noActionReason: "No state-changing actions returned for this row",
+          confirmTitle: "Confirm partner action",
+          confirmReasonLabel: "Audit reason",
+          confirmReasonPlaceholder:
+            "Explain the governance reason for this state change.",
+          confirmImpact: "Impact",
+          confirmActionsLabel: "Action contract",
+          confirmCancel: "Cancel",
+          confirmProceed: "Confirm and continue",
+          viewAudit: "View audit",
+          inactiveRisk: "Inactive risk",
+          auditPending:
+            "Audit trail recorded on the backend. Open audit for the full event.",
+          totalCountLabel: "Total entries",
+          riskCountLabel: "Needs attention",
+          activeFiltersLabel: "Active filters",
+          receiptTitle: "Partner action recorded",
+          receiptFallback:
+            "The partner entry changed and the roster has been refreshed.",
+          riskCopy: {
+            low: "Direct action with immediate receipt.",
+            medium: "Confirmation required before the write is sent.",
+            high: "High-risk action. Confirmation is required and a non-empty reason must be captured.",
           },
-          kpis: {
-            active: "Active entries",
-            attention: "Needs attention",
-            revoked: "Revoked entries",
+          filterLabels: {
+            all: "All",
+            active: "Active",
+            inactive: "Inactive",
+            attention: "Attention",
+            revoked: "Revoked",
           },
-          detail: {
-            selection: "Selected filter",
-            visible: "Visible rows",
-            latest: "Latest update",
-            readiness: "Attention rows",
-          },
-          openDetail: "Open entry detail",
+          emptyStates: {
+            no_data: {
+              title: "No partner entries yet",
+              body: "Create the first entry when partner governance is ready to onboard a tenant-program route.",
+            },
+            not_provisioned: {
+              title: "Partner governance is not provisioned",
+              body: "The backend says this surface exists, but partner governance has not been provisioned for this environment yet.",
+            },
+            fetch_failed: {
+              title: "Unable to load partner entries",
+              body: "The page could not refresh the partner roster. Retry or inspect the upstream dependency.",
+            },
+            permission_denied: {
+              title: "You can’t view this roster",
+              body: "The response explicitly denied access. CTA visibility must remain driven by backend permissions.",
+            },
+            external_unavailable: {
+              title: "Partner registry is temporarily unavailable",
+              body: "An external dependency is down or degraded. Cross-app inspection may still be available from existing links.",
+            },
+            filtered_empty: {
+              title: "No rows match the current filters",
+              body: "Clear search and filters to recover the wider roster.",
+            },
+          } satisfies Record<
+            PartnerEmptyReason,
+            { title: string; body: string }
+          >,
         }
       : {
           title: "合作夥伴 entry",
           subtitle:
-            "銀行、飯店與企業 partner 入口、auth 模式、eligibility 與品牌治理資料。",
-          breadcrumbRoot: "租戶治理",
-          searchPlaceholder: "搜尋 entry、租戶、憑證...",
-          filterAction: "篩選",
-          filterTitle: "Entry 篩選",
-          filterSubtitle:
-            "收斂治理清單、重新整理資料，並在 promotion 前保留 readiness 缺口視角。",
+            "集中管理銀行、旅宿與企業 partner 的 auth mode、eligibility、routing 與 readiness。",
+          breadcrumbRoot: "合作夥伴治理",
+          refreshTierLabel: "刷新層級",
+          refreshedAtLabel: "最近刷新",
+          searchLabel: "搜尋",
+          tenantLabel: "租戶",
+          typeLabel: "類型",
+          statusLabel: "狀態",
+          endpointLabel: "端點",
+          filtersTitle: "篩選",
+          filtersSubtitle:
+            "先以 tenant、type、status 與搜尋條件縮小範圍，再往 partner entry drill down。",
+          jumpToFilters: "篩選",
+          searchPlaceholder: "搜尋 entry slug、tenant、program、bank code…",
+          refresh: "重新整理",
+          create: "建立 entry",
           createTitle: "建立 partner entry",
           createSubtitle:
-            "在正式導流前先補齊 routing、auth mode、eligibility mode 與品牌 metadata。",
-          refresh: "重新整理",
-          last30Days: "近 30 天",
-          errorTitle: "無法載入 partner entries",
-          attentionTitle: "Promotion readiness 尚未完整",
-          attentionBody: (count: number) =>
-            `${count} 筆 partner entry 仍有 readiness 缺口，不應直接推進。`,
-          filters: {
+            "在 activation 前先補齊 routing、auth mode、eligibility mode 與品牌 metadata。",
+          rosterTitle: "Entry roster",
+          rosterSubtitle:
+            "tenant 對應、dispatch subtype、auth posture、readiness 與跨 app 檢視集中在同一張治理表。",
+          rosterSummary:
+            "清單級 CTA 由 availableActions 決定；inactive 與 readiness 缺口會持續顯示風險標記。",
+          kpiActiveLabel: "啟用中的 entries",
+          kpiAttentionLabel: "待處理",
+          kpiRevokedLabel: "已撤銷",
+          watchlistTitle: "Readiness watchlist",
+          watchlistSubtitle:
+            "先把 inactive、revoked 與 readiness 缺口條目集中在同一條治理清單，再進入 detail。",
+          watchlistEmpty:
+            "目前沒有 watchlist 項目，代表 roster 已啟用且 readiness 完整。",
+          watchlistOpen: "查看詳情",
+          crossAppLabel: "跨 app",
+          openAudit: "Audit",
+          openOps: "Ops",
+          openTenant: "Tenant",
+          openExternal: "開啟連結",
+          openDetail: "查看詳情",
+          clearFilters: "清除篩選",
+          readOnly: "唯讀",
+          noActionReason: "此 row 沒有任何可變更狀態的後端動作",
+          confirmTitle: "確認 partner 動作",
+          confirmReasonLabel: "稽核原因",
+          confirmReasonPlaceholder: "說明這次治理變更的原因。",
+          confirmImpact: "影響",
+          confirmActionsLabel: "動作契約",
+          confirmCancel: "取消",
+          confirmProceed: "確認並執行",
+          viewAudit: "查看 audit",
+          inactiveRisk: "停用風險",
+          auditPending: "後端已記錄稽核事件；可前往 audit 查看完整紀錄。",
+          totalCountLabel: "總筆數",
+          riskCountLabel: "待處理",
+          activeFiltersLabel: "已啟用篩選",
+          receiptTitle: "Partner 動作已記錄",
+          receiptFallback: "partner entry 已變更，且 roster 已重新整理。",
+          riskCopy: {
+            low: "直接執行，完成後立即提供 receipt。",
+            medium: "送出前必須先確認。",
+            high: "高風險動作，必須確認且需填寫非空原因。",
+          },
+          filterLabels: {
             all: "全部",
-            active: "active",
-            inactive: "inactive",
+            active: "啟用",
+            inactive: "停用",
             attention: "待處理",
-            revoked: "revoked",
+            revoked: "撤銷",
           },
-          kpis: {
-            active: "啟用 entry",
-            attention: "待補 readiness",
-            revoked: "已撤銷 entry",
-          },
-          detail: {
-            selection: "目前篩選",
-            visible: "可見列數",
-            latest: "最近更新",
-            readiness: "待處理列數",
-          },
-          openDetail: "查看 entry 詳情",
+          emptyStates: {
+            no_data: {
+              title: "目前沒有 partner entries",
+              body: "當治理流程準備好 onboarding tenant-program route 後，可從這裡建立第一筆 entry。",
+            },
+            not_provisioned: {
+              title: "Partner governance 尚未佈建",
+              body: "後端表示此畫面存在，但此環境的 partner governance 還沒完成佈建。",
+            },
+            fetch_failed: {
+              title: "無法載入 partner entries",
+              body: "頁面刷新 roster 失敗，請重試或檢查上游依賴狀態。",
+            },
+            permission_denied: {
+              title: "你沒有檢視此 roster 的權限",
+              body: "回應明確拒絕存取；CTA 能見度仍必須完全以後端權限回傳為準。",
+            },
+            external_unavailable: {
+              title: "Partner registry 暫時不可用",
+              body: "外部依賴目前降級或中斷，但既有 cross-app 連結仍可能可供調查。",
+            },
+            filtered_empty: {
+              title: "目前篩選條件沒有任何結果",
+              body: "清除搜尋與篩選即可回到完整 roster。",
+            },
+          } satisfies Record<
+            PartnerEmptyReason,
+            { title: string; body: string }
+          >,
         };
 
   const navItems = useMemo(() => buildPlatformNav(locale), [locale]);
@@ -414,9 +863,19 @@ export default function PartnersPage() {
     setError(null);
     try {
       const result = await client.listPlatformPartnerEntries();
-      setEntries(result ?? []);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setEntries(result.items ?? []);
+      setListActions(result.availableActions ?? []);
+      setEmptyState(result.emptyState ?? null);
+      setRefreshTier(result.refreshTier ?? "medium_slow");
+      setRefreshedAt(result.refreshedAt ?? new Date().toISOString());
+    } catch (cause: unknown) {
+      setEntries([]);
+      setListActions([]);
+      setEmptyState({
+        reason: "fetch_failed",
+        messageCode: "partners.list.fetch_failed",
+      });
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
     }
@@ -425,6 +884,17 @@ export default function PartnersPage() {
   useEffect(() => {
     void loadEntries();
   }, [loadEntries]);
+
+  useEffect(() => {
+    const intervalMs = refreshIntervalMs(refreshTier);
+    if (intervalMs === null) {
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      void loadEntries();
+    }, intervalMs);
+    return () => window.clearInterval(intervalId);
+  }, [loadEntries, refreshTier]);
 
   const counts = useMemo(
     () => ({
@@ -437,103 +907,235 @@ export default function PartnersPage() {
     [entries],
   );
 
-  const visibleEntries = useMemo(() => {
-    switch (filter) {
-      case "attention":
-        return entries.filter(partnerNeedsAttention);
-      case "active":
-      case "inactive":
-      case "revoked":
-        return entries.filter((entry) => entry.status === filter);
-      case "all":
-      default:
-        return entries;
-    }
-  }, [entries, filter]);
+  const watchlistEntries = useMemo(
+    () =>
+      entries
+        .filter((entry) => partnerNeedsAttention(entry))
+        .sort((left, right) => {
+          const leftScore =
+            (left.status === "revoked"
+              ? 3
+              : left.status === "inactive"
+                ? 2
+                : 0) + readinessSummary(left, t).gaps.length;
+          const rightScore =
+            (right.status === "revoked"
+              ? 3
+              : right.status === "inactive"
+                ? 2
+                : 0) + readinessSummary(right, t).gaps.length;
+          return rightScore - leftScore;
+        })
+        .slice(0, 6),
+    [entries, t],
+  );
 
-  const latestUpdatedAt = useMemo(() => {
-    if (visibleEntries.length === 0) {
+  const tenantOptions = useMemo(
+    () => ["all", ...new Set(entries.map((entry) => entry.tenantId))],
+    [entries],
+  );
+
+  const typeOptions = useMemo(
+    () => [
+      "all",
+      ...new Set(entries.map((entry) => entry.partnerType || "unknown")),
+    ],
+    [entries],
+  );
+
+  const visibleEntries = useMemo(() => {
+    const searchText = deferredSearch.trim().toLowerCase();
+    return entries.filter((entry) => {
+      if (filter === "attention" && !partnerNeedsAttention(entry)) {
+        return false;
+      }
+      if (
+        filter !== "all" &&
+        filter !== "attention" &&
+        entry.status !== filter
+      ) {
+        return false;
+      }
+      if (tenantFilter !== "all" && entry.tenantId !== tenantFilter) {
+        return false;
+      }
+      if (
+        typeFilter !== "all" &&
+        (entry.partnerType || "unknown") !== typeFilter
+      ) {
+        return false;
+      }
+      if (!searchText) {
+        return true;
+      }
+      return [
+        entry.entrySlug,
+        entry.displayName,
+        entry.tenantId,
+        entry.partnerCode,
+        entry.partnerType,
+        entry.programId,
+        entry.programCode,
+        entry.bankCode,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(searchText));
+    });
+  }, [deferredSearch, entries, filter, tenantFilter, typeFilter]);
+
+  const effectiveEmptyState = useMemo(() => {
+    if (loading) {
       return null;
     }
-
-    return visibleEntries.reduce<string | null>((latest, entry) => {
-      if (!latest) {
-        return entry.updatedAt;
-      }
-      return new Date(entry.updatedAt).getTime() > new Date(latest).getTime()
-        ? entry.updatedAt
-        : latest;
-    }, null);
-  }, [visibleEntries]);
-
-  const tableRows = useMemo(
-    () => visibleEntries as PartnerTableRow[],
-    [visibleEntries],
-  );
-
-  const filterPills = useMemo(
-    () =>
-      [
-        {
-          value: "all" as const,
-          label: `${copy.filters.all} ${counts.all}`,
-          tone: "neutral" as const,
-        },
-        {
-          value: "active" as const,
-          label: `${copy.filters.active} ${counts.active}`,
-          tone: "success" as const,
-        },
-        {
-          value: "inactive" as const,
-          label: `${copy.filters.inactive} ${counts.inactive}`,
-          tone: "warn" as const,
-        },
-        {
-          value: "attention" as const,
-          label: `${copy.filters.attention} ${counts.attention}`,
-          tone: "warn" as const,
-        },
-        {
-          value: "revoked" as const,
-          label: `${copy.filters.revoked} ${counts.revoked}`,
-          tone: "danger" as const,
-        },
-      ] satisfies Array<{
-        value: PartnerFilter;
-        label: string;
-        tone: "neutral" | "success" | "warn" | "danger";
-      }>,
-    [copy.filters, counts],
-  );
-
-  const selectedFilterLabel =
-    filterPills.find((item) => item.value === filter)?.label ?? filter;
-
-  const handleCreate = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setCreating(true);
-    setError(null);
-    try {
-      await client.createPlatformPartnerEntry(
-        toPartnerCreateCommand(createForm),
-      );
-      setCreateForm(EMPTY_ENTRY_FORM);
-      setShowCreate(false);
-      await loadEntries();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreating(false);
+    if (visibleEntries.length > 0) {
+      return null;
     }
-  };
+    if (entries.length > 0) {
+      return {
+        reason: "filtered_empty" as const,
+        messageCode: "partners.list.filtered_empty",
+      };
+    }
+    return (
+      emptyState ?? {
+        reason: "no_data" as const,
+        messageCode: "partners.list.no_data",
+      }
+    );
+  }, [emptyState, entries.length, loading, visibleEntries.length]);
+  const displayEmptyReason = effectiveEmptyState
+    ? toPartnerEmptyReason(effectiveEmptyState.reason)
+    : null;
+
+  const refreshAction = findAction(listActions, ["refresh", "reload"]);
+  const createAction = findAction(listActions, ["create", "new"]);
 
   const createDisabled =
     creating ||
+    createAction?.enabled === false ||
     !createForm.partnerCode.trim() ||
     !createForm.programId.trim() ||
     !createForm.entrySlug.trim() ||
     !createForm.displayName.trim();
+
+  const executeAction = useCallback(
+    async (action: PendingPartnerAction, reason: string) => {
+      const pendingKey = action.entrySlug
+        ? `${action.entrySlug}:${action.descriptor.action}`
+        : null;
+      if (pendingKey) {
+        setPendingRowAction(pendingKey);
+      }
+      setCreating(action.kind === "create");
+      setError(null);
+      setActionReceipt(null);
+
+      try {
+        let result: PartnerChannelEntryRecord | null = null;
+
+        if (action.kind === "create" && action.command) {
+          result = await client.createPlatformPartnerEntry(action.command);
+          setCreateForm(EMPTY_ENTRY_FORM);
+          setShowCreateModal(false);
+        } else if (action.kind === "activate" && action.entrySlug) {
+          result = await client.activatePlatformPartnerEntry(action.entrySlug);
+        } else if (action.kind === "deactivate" && action.entrySlug) {
+          result = await client.deactivatePlatformPartnerEntry(
+            action.entrySlug,
+          );
+        } else if (action.kind === "revoke" && action.entrySlug) {
+          result = await client.revokePlatformPartnerEntry(action.entrySlug);
+        }
+
+        await loadEntries();
+
+        const requestId = result?.auditMetadata.requestId?.trim() || null;
+        const subject =
+          action.displayName || result?.displayName || action.entrySlug;
+        const reasonSuffix = reason.trim()
+          ? locale === "en"
+            ? ` Reason: ${reason.trim()}`
+            : ` 原因：${reason.trim()}`
+          : "";
+
+        setActionReceipt({
+          tone: action.descriptor.riskLevel === "high" ? "warn" : "success",
+          title: copy.receiptTitle,
+          body:
+            requestId !== null
+              ? `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"} • request ${requestId}.${reasonSuffix}`
+              : `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"}. ${copy.receiptFallback}${reasonSuffix}`,
+          href: buildAuditHref(requestId),
+          hrefLabel: copy.viewAudit,
+        });
+      } catch (cause: unknown) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setPendingRowAction(null);
+        setCreating(false);
+        setPendingAction(null);
+        setActionReason("");
+      }
+    },
+    [
+      client,
+      copy.receiptFallback,
+      copy.receiptTitle,
+      copy.viewAudit,
+      loadEntries,
+      locale,
+    ],
+  );
+
+  const stageRowAction = useCallback(
+    (entry: PartnerRow, descriptor: ResourceActionDescriptor) => {
+      if (!descriptor.enabled) {
+        return;
+      }
+
+      const kind = detectMutationKind(descriptor);
+      if (!kind) {
+        return;
+      }
+
+      setPendingAction({
+        kind,
+        descriptor,
+        entrySlug: entry.entrySlug,
+        displayName: entry.displayName,
+      });
+      setActionReason("");
+    },
+    [],
+  );
+
+  const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (createDisabled || !createAction) {
+      return;
+    }
+
+    setPendingAction({
+      kind: "create",
+      descriptor: createAction,
+      displayName: createForm.displayName.trim(),
+      command: toPartnerCreateCommand(createForm),
+    });
+    setActionReason("");
+  };
+
+  const clearFilters = () => {
+    setFilter("all");
+    setSearch("");
+    setTenantFilter("all");
+    setTypeFilter("all");
+  };
+
+  const activeFilterCount =
+    (search.trim() ? 1 : 0) +
+    (tenantFilter !== "all" ? 1 : 0) +
+    (typeFilter !== "all" ? 1 : 0) +
+    (filter !== "all" ? 1 : 0);
 
   return (
     <CanvasShell
@@ -552,23 +1154,30 @@ export default function PartnersPage() {
         subtitle={copy.subtitle}
         sticky={false}
         actions={
-          <>
-            <CanvasBtn
-              theme={theme}
-              icon="filter"
-              onClick={() => setShowFilters((current) => !current)}
-            >
-              {copy.filterAction}
-            </CanvasBtn>
-            <CanvasBtn
-              theme={theme}
-              variant={showCreate ? "secondary" : "primary"}
-              icon={showCreate ? "x" : "plus"}
-              onClick={() => setShowCreate((current) => !current)}
-            >
-              {showCreate ? t("common.cancel") : t("partners.newEntry")}
-            </CanvasBtn>
-          </>
+          <div style={headerActionsStyle}>
+            {refreshAction ? (
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                icon="refresh"
+                disabled={!refreshAction.enabled}
+                onClick={() => void loadEntries()}
+              >
+                {copy.refresh}
+              </CanvasBtn>
+            ) : null}
+            {createAction ? (
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                icon="plus"
+                disabled={!createAction.enabled}
+                onClick={() => setShowCreateModal(true)}
+              >
+                {copy.create}
+              </CanvasBtn>
+            ) : null}
+          </div>
         }
       />
 
@@ -577,565 +1186,901 @@ export default function PartnersPage() {
           <CanvasBanner
             theme={theme}
             tone="danger"
-            title={copy.errorTitle}
+            title={copy.emptyStates.fetch_failed.title}
             body={error}
           />
         ) : null}
 
-        {!error && counts.attention > 0 ? (
+        {actionReceipt ? (
           <CanvasBanner
             theme={theme}
-            tone="warn"
-            title={copy.attentionTitle}
-            body={copy.attentionBody(counts.attention)}
+            tone={actionReceipt.tone}
+            title={actionReceipt.title}
+            body={actionReceipt.body}
+            actions={
+              actionReceipt.href ? (
+                <Link href={actionReceipt.href} style={secondaryLinkStyle}>
+                  {actionReceipt.hrefLabel}
+                </Link>
+              ) : undefined
+            }
           />
         ) : null}
 
-        {showFilters ? (
-          <CanvasCard
+        <div style={kpiGridStyle}>
+          <div style={kpiCardStyle("platform")}>
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              {copy.kpiActiveLabel}
+            </span>
+            <strong style={{ fontSize: 32, lineHeight: 1 }}>
+              {counts.active}
+            </strong>
+            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+              {locale === "en"
+                ? `${counts.all} total entries with ${counts.inactive} inactive still visible for governance.`
+                : `${counts.all} 筆 entries 中，${counts.inactive} 筆停用仍保留在治理清單。`}
+            </span>
+          </div>
+          <div style={kpiCardStyle("warn")}>
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              {copy.kpiAttentionLabel}
+            </span>
+            <strong style={{ fontSize: 32, lineHeight: 1 }}>
+              {counts.attention}
+            </strong>
+            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+              {locale === "en"
+                ? "Readiness gaps, inactive posture, or missing partner runtime signals."
+                : "包含 readiness 缺口、停用狀態或 partner runtime 訊號不完整。"}
+            </span>
+          </div>
+          <div style={kpiCardStyle("danger")}>
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              {copy.kpiRevokedLabel}
+            </span>
+            <strong style={{ fontSize: 32, lineHeight: 1 }}>
+              {counts.revoked}
+            </strong>
+            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+              {locale === "en"
+                ? "Revoked entries remain visible for audit lineage and deep-link investigation."
+                : "已撤銷 entries 仍需保留，以支援 audit lineage 與 deep link 調查。"}
+            </span>
+          </div>
+        </div>
+
+        {counts.attention > 0 ? (
+          <CanvasBanner
             theme={theme}
-            title={copy.filterTitle}
-            subtitle={copy.filterSubtitle}
-            actions={
-              <CanvasBtn theme={theme} onClick={() => void loadEntries()}>
-                {copy.refresh}
-              </CanvasBtn>
+            tone="warn"
+            title={copy.watchlistTitle}
+            body={
+              locale === "en"
+                ? `${counts.attention} entries still need readiness or lifecycle follow-up before activation decisions.`
+                : `${counts.attention} 筆 entries 在 activation 決策前仍需補 readiness 或 lifecycle 後續處理。`
             }
-          >
-            <div style={{ display: "grid", gap: 14 }}>
-              <div style={pillsRowStyle}>
-                {filterPills.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    style={pillButtonStyle}
-                    onClick={() => setFilter(item.value)}
-                  >
-                    <CanvasPill
-                      theme={theme}
-                      tone={filter === item.value ? "accent" : item.tone}
-                      dot={item.value !== "all"}
+          />
+        ) : null}
+
+        <CanvasCard
+          theme={theme}
+          title={copy.watchlistTitle}
+          subtitle={copy.watchlistSubtitle}
+        >
+          {watchlistEntries.length > 0 ? (
+            <div style={watchlistGridStyle}>
+              {watchlistEntries.map((entry) => {
+                const readiness = readinessSummary(entry, t);
+                const crossLinks = (entry.resourceLinks ?? []).filter(
+                  (link) => link.targetApp !== "platform-admin",
+                );
+                return (
+                  <div key={entry.entrySlug} style={watchlistCardStyle}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        alignItems: "flex-start",
+                      }}
                     >
-                      {item.label}
-                    </CanvasPill>
-                  </button>
-                ))}
-                <span style={{ flex: 1 }} />
-                <CanvasPill theme={theme} tone="neutral">
-                  {copy.last30Days}
-                </CanvasPill>
-              </div>
-
-              <div style={kpiGridStyle}>
-                <CanvasKPI
-                  theme={theme}
-                  label={copy.kpis.active}
-                  value={counts.active}
-                  sub={`${counts.all} total`}
-                />
-                <CanvasKPI
-                  theme={theme}
-                  label={copy.kpis.attention}
-                  value={counts.attention}
-                  delta={
-                    counts.attention > 0 ? `${counts.attention}` : undefined
-                  }
-                  deltaTone={counts.attention > 0 ? "down" : "neutral"}
-                  sub={
-                    locale === "en"
-                      ? "Branding, routing, support, or credential gaps"
-                      : "品牌、routing、support 或 credential 缺口"
-                  }
-                />
-                <CanvasKPI
-                  theme={theme}
-                  label={copy.kpis.revoked}
-                  value={counts.revoked}
-                  sub={
-                    locale === "en"
-                      ? "Still visible for audit lineage"
-                      : "仍保留供 audit lineage 追溯"
-                  }
-                />
-              </div>
-
-              <CanvasDL
-                theme={theme}
-                cols={2}
-                items={[
-                  {
-                    label: copy.detail.selection,
-                    value: selectedFilterLabel,
-                  },
-                  {
-                    label: copy.detail.visible,
-                    value: `${visibleEntries.length}`,
-                    mono: true,
-                  },
-                  {
-                    label: copy.detail.latest,
-                    value: latestUpdatedAt
-                      ? formatDateTime(latestUpdatedAt)
-                      : "—",
-                    mono: true,
-                  },
-                  {
-                    label: copy.detail.readiness,
-                    value: `${counts.attention}`,
-                    mono: true,
-                  },
-                ]}
-              />
-            </div>
-          </CanvasCard>
-        ) : null}
-
-        {showCreate ? (
-          <CanvasCard
-            theme={theme}
-            title={copy.createTitle}
-            subtitle={copy.createSubtitle}
-          >
-            <form onSubmit={handleCreate}>
-              <div style={formGridStyle}>
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.tenantId")}
-                  required
-                >
-                  <input
-                    value={createForm.tenantId}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        tenantId: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.partnerCode")}
-                  required
-                >
-                  <input
-                    value={createForm.partnerCode}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        partnerCode: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.partnerType")}
-                >
-                  <input
-                    value={createForm.partnerType}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        partnerType: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.programId")}
-                  required
-                >
-                  <input
-                    value={createForm.programId}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        programId: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.programCode")}
-                >
-                  <input
-                    value={createForm.programCode}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        programCode: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField theme={theme} label={t("partners.form.bankCode")}>
-                  <input
-                    value={createForm.bankCode}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        bankCode: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.entrySlug")}
-                  required
-                >
-                  <input
-                    value={createForm.entrySlug}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        entrySlug: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.displayName")}
-                  required
-                >
-                  <input
-                    value={createForm.displayName}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        displayName: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle()}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.dispatchSubtype")}
-                >
-                  <select
-                    value={createForm.businessDispatchSubtype}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        businessDispatchSubtype: event.target
-                          .value as EntryFormState["businessDispatchSubtype"],
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  >
-                    {BUSINESS_DISPATCH_SUBTYPES.map((value) => (
-                      <option key={value} value={value}>
-                        {formatPlatformCodeLabel(locale, value)}
-                      </option>
-                    ))}
-                  </select>
-                </CanvasField>
-
-                <CanvasField theme={theme} label={t("partners.form.authMode")}>
-                  <select
-                    value={createForm.authMode}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        authMode: event.target
-                          .value as EntryFormState["authMode"],
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  >
-                    {PARTNER_ENTRY_AUTH_MODES.map((value) => (
-                      <option key={value} value={value}>
-                        {formatPlatformCodeLabel(locale, value)}
-                      </option>
-                    ))}
-                  </select>
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.eligibilityMode")}
-                >
-                  <select
-                    value={createForm.eligibilityMode}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        eligibilityMode: event.target
-                          .value as EntryFormState["eligibilityMode"],
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  >
-                    {PARTNER_ELIGIBILITY_MODES.map((value) => (
-                      <option key={value} value={value}>
-                        {formatPlatformCodeLabel(locale, value)}
-                      </option>
-                    ))}
-                  </select>
-                </CanvasField>
-
-                <CanvasField theme={theme} label={t("partners.form.entryHost")}>
-                  <input
-                    value={createForm.entryHost}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        entryHost: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField theme={theme} label={t("partners.form.entryPath")}>
-                  <input
-                    value={createForm.entryPath}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        entryPath: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.themeAccent")}
-                >
-                  <input
-                    value={createForm.themeAccent}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        themeAccent: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.supportEmail")}
-                >
-                  <input
-                    type="email"
-                    value={createForm.supportEmail}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        supportEmail: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle()}
-                  />
-                </CanvasField>
-
-                <CanvasField
-                  theme={theme}
-                  label={t("partners.form.supportPhone")}
-                >
-                  <input
-                    type="tel"
-                    value={createForm.supportPhone}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        supportPhone: event.target.value,
-                      }))
-                    }
-                    style={inputBaseStyle()}
-                  />
-                </CanvasField>
-
-                <CanvasField theme={theme} label={t("partners.form.status")}>
-                  <select
-                    value={createForm.status}
-                    onChange={(event) =>
-                      setCreateForm((current) => ({
-                        ...current,
-                        status: event.target.value as EntryFormState["status"],
-                      }))
-                    }
-                    style={inputBaseStyle(true)}
-                  >
-                    {PARTNER_ENTRY_STATUSES.map((value) => (
-                      <option key={value} value={value}>
-                        {formatPlatformCodeLabel(locale, value)}
-                      </option>
-                    ))}
-                  </select>
-                </CanvasField>
-              </div>
-
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button
-                  type="submit"
-                  disabled={createDisabled}
-                  style={submitButtonStyle(createDisabled)}
-                >
-                  {creating ? t("common.creating") : t("partners.createEntry")}
-                </button>
-              </div>
-            </form>
-          </CanvasCard>
-        ) : null}
-
-        <CanvasCard theme={theme} padding={0}>
-          {loading ? (
-            <div
-              style={{
-                padding: "24px 16px",
-                color: theme.textMuted,
-                fontSize: 13,
-              }}
-            >
-              {t("partners.loading")}
-            </div>
-          ) : visibleEntries.length === 0 ? (
-            <div
-              style={{
-                padding: "24px 16px",
-                color: theme.textMuted,
-                fontSize: 13,
-              }}
-            >
-              {t("partners.empty")}
-            </div>
-          ) : (
-            <CanvasTable<PartnerTableRow>
-              theme={theme}
-              rows={tableRows}
-              columns={[
-                {
-                  h: "ENTRY",
-                  w: 220,
-                  r: (entry) => (
-                    <div style={entryCellStyle}>
-                      <span
-                        style={entryAccentStyle(
-                          entry.themeAccent?.trim() || theme.accent,
-                        )}
-                      >
-                        {entry.partnerCode.slice(0, 2).toUpperCase() || "PE"}
-                      </span>
-                      <div style={{ display: "flex", flexDirection: "column" }}>
-                        <Link
-                          href={`/partners/${entry.entrySlug}`}
-                          style={entryLinkStyle}
+                      <div style={entryCellStyle}>
+                        <span
+                          style={entryAvatarStyle(
+                            entry.themeAccent?.trim() || theme.accent,
+                          )}
                         >
-                          {entry.displayName}
-                        </Link>
-                        <span style={monoSubtleStyle}>/{entry.entrySlug}</span>
+                          {entry.partnerCode.slice(0, 2).toUpperCase() || "PE"}
+                        </span>
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <strong style={{ fontSize: 13.5 }}>
+                            {entry.displayName}
+                          </strong>
+                          <span style={monoTextStyle}>/{entry.entrySlug}</span>
+                          <span
+                            style={{ color: theme.textMuted, fontSize: 12 }}
+                          >
+                            {entry.tenantId} · {entry.programId}
+                          </span>
+                        </div>
                       </div>
+                      <CanvasPill
+                        theme={theme}
+                        tone={statusTone(entry.status)}
+                        dot
+                      >
+                        {entry.status}
+                      </CanvasPill>
                     </div>
-                  ),
-                },
-                {
-                  h: "PROGRAM",
-                  w: 140,
-                  r: (entry) => (
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      <span>{entry.programId}</span>
-                      {entry.programCode ? (
-                        <span style={monoSubtleStyle}>{entry.programCode}</span>
-                      ) : null}
-                    </div>
-                  ),
-                },
-                {
-                  h: "SUBTYPE",
-                  w: 140,
-                  mono: true,
-                  r: (entry) => (
-                    <span style={{ fontSize: 11.5 }}>
-                      {entry.businessDispatchSubtype}
-                    </span>
-                  ),
-                },
-                {
-                  h: "AUTH",
-                  w: 110,
-                  mono: true,
-                  k: "authMode",
-                },
-                {
-                  h: "ELIGIBILITY",
-                  w: 120,
-                  mono: true,
-                  k: "eligibilityMode",
-                },
-                {
-                  h: "STATUS",
-                  w: 100,
-                  r: (entry) => (
-                    <CanvasPill
-                      theme={theme}
-                      tone={statusTone(entry.status)}
-                      dot
-                    >
-                      {entry.status}
-                    </CanvasPill>
-                  ),
-                },
-                {
-                  h: "READINESS",
-                  w: 160,
-                  r: (entry) => {
-                    const readiness = readinessState(entry, t);
-                    return (
+                    <div style={toolbarClusterStyle}>
                       <CanvasPill
                         theme={theme}
                         tone={readiness.tone}
-                        dot={readiness.missingCount > 0}
+                        dot={readiness.gaps.length > 0}
                       >
                         {readiness.label}
                       </CanvasPill>
-                    );
-                  },
-                },
-                {
-                  h: "",
-                  w: 28,
-                  align: "right",
-                  r: (entry) => (
-                    <Link
-                      href={`/partners/${entry.entrySlug}`}
-                      aria-label={copy.openDetail}
-                      title={copy.openDetail}
-                      style={iconLinkStyle}
-                    >
-                      <CanvasIcon name="more" size={14} />
-                    </Link>
-                  ),
-                },
-              ]}
-            />
+                      <CanvasPill theme={theme} tone="neutral">
+                        {formatPlatformCodeLabel(locale, entry.authMode)}
+                      </CanvasPill>
+                      <CanvasPill theme={theme} tone="neutral">
+                        {formatPlatformCodeLabel(locale, entry.eligibilityMode)}
+                      </CanvasPill>
+                    </div>
+                    <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                      {readiness.gaps.length > 0
+                        ? readiness.gaps
+                            .slice(0, 2)
+                            .map((gap) => gap.label)
+                            .join(" · ")
+                        : locale === "en"
+                          ? "No readiness gaps detected."
+                          : "目前沒有 readiness 缺口。"}
+                    </span>
+                    <div style={linkRailStyle}>
+                      <Link
+                        href={`/partners/${entry.entrySlug}`}
+                        style={secondaryLinkStyle}
+                      >
+                        {copy.watchlistOpen}
+                      </Link>
+                      {crossLinks.map((link) => (
+                        <a
+                          key={`${entry.entrySlug}:${link.targetApp}:${link.route}`}
+                          href={link.route}
+                          target={
+                            link.openMode === "new_tab" ? "_blank" : undefined
+                          }
+                          rel={
+                            link.openMode === "new_tab"
+                              ? "noreferrer noopener"
+                              : undefined
+                          }
+                          style={secondaryLinkStyle}
+                        >
+                          {crossAppLinkLabel(
+                            link.route,
+                            link.targetApp,
+                            link.label,
+                            copy,
+                          )}{" "}
+                          {link.openMode === "new_tab" ? "↗" : ""}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={infoBarStyle}>{copy.watchlistEmpty}</div>
           )}
         </CanvasCard>
+
+        <CanvasCard
+          theme={theme}
+          title={copy.rosterTitle}
+          subtitle={copy.rosterSubtitle}
+          actions={
+            effectiveEmptyState?.reason === "filtered_empty" ? (
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={clearFilters}
+              >
+                {copy.clearFilters}
+              </CanvasBtn>
+            ) : undefined
+          }
+        >
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={rosterHeaderStyle}>
+              <div style={rosterHeaderTopStyle}>
+                <div style={toolbarClusterStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {counts.all} total
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="success" dot>
+                    {copy.filterLabels.active} {counts.active}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="warn" dot>
+                    {copy.filterLabels.inactive} {counts.inactive}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="warn" dot>
+                    {copy.filterLabels.attention} {counts.attention}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="danger" dot>
+                    {copy.filterLabels.revoked} {counts.revoked}
+                  </CanvasPill>
+                </div>
+                <div style={toolbarClusterStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.refreshTierLabel}:{" "}
+                    {formatRefreshTierLabel(refreshTier)}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.refreshedAtLabel}:{" "}
+                    {refreshedAt ? formatDateTime(refreshedAt) : "—"}
+                  </CanvasPill>
+                </div>
+              </div>
+              <div style={infoBarStyle}>
+                <span style={filterSummaryStyle}>{copy.rosterSummary}</span>
+                <span style={filterSummaryStyle}>
+                  {locale === "en"
+                    ? `Active filters: ${activeFilterCount}. T4 pages poll every 30s; T6 stays manual.`
+                    : `目前啟用 ${activeFilterCount} 個篩選。T4 頁面每 30 秒輪詢；T6 維持手動刷新。`}
+                </span>
+              </div>
+            </div>
+
+            <div style={filtersCardStyle}>
+              <div style={filterCardHeaderStyle}>
+                <div style={{ display: "grid", gap: 4 }}>
+                  <strong style={{ fontSize: 13 }}>{copy.filtersTitle}</strong>
+                  <span style={filterSummaryStyle}>{copy.filtersSubtitle}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFilters((current) => !current)}
+                  style={textButtonStyle}
+                >
+                  {showFilters
+                    ? locale === "en"
+                      ? "Hide filters"
+                      : "收合篩選"
+                    : copy.jumpToFilters}
+                </button>
+              </div>
+              {showFilters ? (
+                <div style={filtersGridStyle}>
+                  <label>
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        fontSize: 11,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {copy.searchLabel}
+                    </div>
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder={copy.searchPlaceholder}
+                      style={inputStyle()}
+                    />
+                  </label>
+                  <label>
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        fontSize: 11,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {copy.tenantLabel}
+                    </div>
+                    <select
+                      value={tenantFilter}
+                      onChange={(event) => setTenantFilter(event.target.value)}
+                      style={inputStyle(true)}
+                    >
+                      {tenantOptions.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        fontSize: 11,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {copy.typeLabel}
+                    </div>
+                    <select
+                      value={typeFilter}
+                      onChange={(event) => setTypeFilter(event.target.value)}
+                      style={inputStyle(true)}
+                    >
+                      {typeOptions.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        fontSize: 11,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {copy.statusLabel}
+                    </div>
+                    <select
+                      value={filter}
+                      onChange={(event) =>
+                        setFilter(event.target.value as PartnerFilter)
+                      }
+                      style={inputStyle(true)}
+                    >
+                      <option value="all">{copy.filterLabels.all}</option>
+                      <option value="active">{copy.filterLabels.active}</option>
+                      <option value="inactive">
+                        {copy.filterLabels.inactive}
+                      </option>
+                      <option value="attention">
+                        {copy.filterLabels.attention}
+                      </option>
+                      <option value="revoked">
+                        {copy.filterLabels.revoked}
+                      </option>
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+            </div>
+
+            <div style={toolbarClusterStyle}>
+              {(
+                [
+                  ["all", copy.filterLabels.all, counts.all, "neutral"],
+                  [
+                    "active",
+                    copy.filterLabels.active,
+                    counts.active,
+                    "success",
+                  ],
+                  [
+                    "inactive",
+                    copy.filterLabels.inactive,
+                    counts.inactive,
+                    "warn",
+                  ],
+                  [
+                    "attention",
+                    copy.filterLabels.attention,
+                    counts.attention,
+                    "warn",
+                  ],
+                  [
+                    "revoked",
+                    copy.filterLabels.revoked,
+                    counts.revoked,
+                    "danger",
+                  ],
+                ] as const
+              ).map(([value, label, count, tone]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setFilter(value)}
+                  style={{ background: "transparent", border: 0, padding: 0 }}
+                >
+                  <CanvasPill
+                    theme={theme}
+                    tone={filter === value ? "accent" : tone}
+                    dot={value !== "all"}
+                  >
+                    {label} {count}
+                  </CanvasPill>
+                </button>
+              ))}
+              {createAction ? (
+                <CanvasBtn
+                  theme={theme}
+                  variant="primary"
+                  icon="plus"
+                  disabled={!createAction.enabled}
+                  onClick={() => setShowCreateModal(true)}
+                >
+                  {copy.create}
+                </CanvasBtn>
+              ) : null}
+            </div>
+
+            {loading ? (
+              <div style={infoBarStyle}>{t("partners.loading")}</div>
+            ) : effectiveEmptyState ? (
+              <div style={emptyStateStyle(effectiveEmptyState.reason)}>
+                {displayEmptyReason ? (
+                  <span
+                    style={{
+                      color: theme.textMuted,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {emptyReasonEyebrow(displayEmptyReason)}
+                  </span>
+                ) : null}
+                <CanvasPill
+                  theme={theme}
+                  tone={emptyTone(displayEmptyReason ?? "fetch_failed")}
+                >
+                  {displayEmptyReason ?? effectiveEmptyState.reason}
+                </CanvasPill>
+                <strong>
+                  {copy.emptyStates[displayEmptyReason ?? "fetch_failed"].title}
+                </strong>
+                <span style={{ color: theme.textMuted, maxWidth: 720 }}>
+                  {copy.emptyStates[displayEmptyReason ?? "fetch_failed"].body}
+                </span>
+                <span style={{ color: theme.textDim, fontSize: 12 }}>
+                  {error || effectiveEmptyState.messageCode}
+                </span>
+                <div style={toolbarClusterStyle}>
+                  {effectiveEmptyState.reason === "filtered_empty" ? (
+                    <CanvasBtn
+                      theme={theme}
+                      variant="secondary"
+                      onClick={clearFilters}
+                    >
+                      {copy.clearFilters}
+                    </CanvasBtn>
+                  ) : null}
+                  {refreshAction?.enabled ? (
+                    <CanvasBtn
+                      theme={theme}
+                      variant="secondary"
+                      onClick={() => void loadEntries()}
+                    >
+                      {copy.refresh}
+                    </CanvasBtn>
+                  ) : null}
+                  {effectiveEmptyState.nextAction ? (
+                    <button
+                      type="button"
+                      disabled={!effectiveEmptyState.nextAction.enabled}
+                      title={effectiveEmptyState.nextAction.disabledReasonCode}
+                      style={chipButtonStyle(
+                        !effectiveEmptyState.nextAction.enabled,
+                      )}
+                      onClick={() => {
+                        if (
+                          effectiveEmptyState.nextAction?.enabled &&
+                          actionMatches(effectiveEmptyState.nextAction, [
+                            "create",
+                            "new",
+                          ])
+                        ) {
+                          setShowCreateModal(true);
+                        }
+                      }}
+                    >
+                      {humanizeActionLabel(
+                        effectiveEmptyState.nextAction.action,
+                      )}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <CanvasTable<PartnerTableRow>
+                theme={theme}
+                rows={visibleEntries as PartnerTableRow[]}
+                columns={[
+                  {
+                    h: "ENTRY",
+                    w: 250,
+                    r: (entry) => (
+                      <div style={entryCellStyle}>
+                        <span
+                          style={entryAvatarStyle(
+                            entry.themeAccent?.trim() || theme.accent,
+                          )}
+                        >
+                          {entry.partnerCode.slice(0, 2).toUpperCase() || "PE"}
+                        </span>
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <Link
+                            href={`/partners/${entry.entrySlug}`}
+                            style={primaryLinkStyle}
+                          >
+                            {entry.displayName}
+                          </Link>
+                          <span style={monoTextStyle}>/{entry.entrySlug}</span>
+                          <span
+                            style={{ color: theme.textMuted, fontSize: 12 }}
+                          >
+                            {entry.tenantId} · {entry.partnerCode} ·{" "}
+                            {entry.partnerType}
+                          </span>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  {
+                    h: "TENANT / PROGRAM",
+                    w: 190,
+                    r: (entry) => (
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <span style={{ fontWeight: 600 }}>
+                          {entry.tenantId}
+                        </span>
+                        <span style={monoTextStyle}>{entry.programId}</span>
+                        <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                          {[entry.programCode, entry.bankCode]
+                            .filter(Boolean)
+                            .join(" · ") || "—"}
+                        </span>
+                      </div>
+                    ),
+                  },
+                  {
+                    h: "TYPE / SUBTYPE",
+                    w: 180,
+                    r: (entry) => (
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <span style={{ fontWeight: 600 }}>
+                          {entry.partnerType || "—"}
+                        </span>
+                        <span style={monoTextStyle}>
+                          {formatPlatformCodeLabel(
+                            locale,
+                            entry.businessDispatchSubtype,
+                          )}
+                        </span>
+                      </div>
+                    ),
+                  },
+                  {
+                    h: "AUTH / ELIGIBILITY",
+                    w: 160,
+                    r: (entry) => (
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <span style={monoTextStyle}>
+                          {formatPlatformCodeLabel(locale, entry.authMode)}
+                        </span>
+                        <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                          {formatPlatformCodeLabel(
+                            locale,
+                            entry.eligibilityMode,
+                          )}
+                        </span>
+                      </div>
+                    ),
+                  },
+                  {
+                    h: "STATUS",
+                    w: 110,
+                    r: (entry) => (
+                      <CanvasPill
+                        theme={theme}
+                        tone={statusTone(entry.status)}
+                        dot
+                      >
+                        {entry.status}
+                      </CanvasPill>
+                    ),
+                  },
+                  {
+                    h: "READINESS",
+                    w: 200,
+                    r: (entry) => {
+                      const readiness = readinessSummary(entry, t);
+                      return (
+                        <div style={{ display: "grid", gap: 6 }}>
+                          <div style={toolbarClusterStyle}>
+                            <CanvasPill
+                              theme={theme}
+                              tone={readiness.tone}
+                              dot={readiness.gaps.length > 0}
+                            >
+                              {readiness.label}
+                            </CanvasPill>
+                            {entry.status !== "active" ? (
+                              <CanvasPill theme={theme} tone="warn">
+                                {copy.inactiveRisk}
+                              </CanvasPill>
+                            ) : null}
+                          </div>
+                          <span
+                            style={{ color: theme.textMuted, fontSize: 11.5 }}
+                          >
+                            {entry.entryHost || "—"}
+                            {entry.entryPath || ""}
+                          </span>
+                          {readiness.gaps.length > 0 ? (
+                            <span
+                              style={{ color: theme.textDim, fontSize: 11.5 }}
+                            >
+                              {readiness.gaps
+                                .slice(0, 2)
+                                .map((gap) => gap.label)
+                                .join(" · ")}
+                            </span>
+                          ) : null}
+                        </div>
+                      );
+                    },
+                  },
+                  {
+                    h: "ACTIONS / LINKS",
+                    w: 300,
+                    r: (entry) => {
+                      const rowActions = entry.availableActions ?? [];
+                      const links = entry.resourceLinks ?? [];
+                      return (
+                        <div style={{ display: "grid", gap: 8 }}>
+                          <div style={toolbarClusterStyle}>
+                            {rowActions.length > 0 ? (
+                              rowActions.map(
+                                (action: ResourceActionDescriptor) => (
+                                  <button
+                                    key={action.action}
+                                    type="button"
+                                    disabled={
+                                      !action.enabled ||
+                                      pendingRowAction ===
+                                        `${entry.entrySlug}:${action.action}`
+                                    }
+                                    title={
+                                      action.disabledReasonCode ||
+                                      `${action.riskLevel}${action.requiresReason ? " · reason" : ""}`
+                                    }
+                                    style={chipButtonStyle(
+                                      !action.enabled ||
+                                        pendingRowAction ===
+                                          `${entry.entrySlug}:${action.action}`,
+                                    )}
+                                    onClick={() =>
+                                      stageRowAction(entry, action)
+                                    }
+                                  >
+                                    {pendingRowAction ===
+                                    `${entry.entrySlug}:${action.action}`
+                                      ? t("common.saving")
+                                      : humanizeActionLabel(action.action)}
+                                  </button>
+                                ),
+                              )
+                            ) : (
+                              <span
+                                style={chipButtonStyle(true)}
+                                title={copy.noActionReason}
+                              >
+                                {copy.readOnly}
+                              </span>
+                            )}
+                          </div>
+                          <div style={toolbarClusterStyle}>
+                            <Link
+                              href={`/partners/${entry.entrySlug}`}
+                              style={secondaryLinkStyle}
+                            >
+                              {copy.openDetail}
+                            </Link>
+                            {links.map((link) => (
+                              <a
+                                key={`${link.targetApp}:${link.resourceType}:${link.resourceId}`}
+                                href={link.route}
+                                target={
+                                  link.openMode === "new_tab"
+                                    ? "_blank"
+                                    : undefined
+                                }
+                                rel={
+                                  link.openMode === "new_tab"
+                                    ? "noreferrer noopener"
+                                    : undefined
+                                }
+                                style={secondaryLinkStyle}
+                              >
+                                {crossAppLinkLabel(
+                                  link.route,
+                                  link.targetApp,
+                                  link.label,
+                                  copy,
+                                )}{" "}
+                                {link.openMode === "new_tab" ? "↗" : ""}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    },
+                  },
+                  {
+                    h: "UPDATED",
+                    w: 140,
+                    r: (entry) => (
+                      <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                        {formatDateTime(entry.updatedAt)}
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+            )}
+          </div>
+        </CanvasCard>
       </div>
+
+      {showCreateModal ? (
+        <div style={modalScrimStyle}>
+          <div style={modalCardStyle}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <CanvasPill theme={theme} tone="accent">
+                {createAction?.riskLevel || "medium"}
+              </CanvasPill>
+              <strong style={{ fontSize: 20 }}>{copy.createTitle}</strong>
+              <span style={{ color: theme.textMuted, fontSize: 13 }}>
+                {copy.createSubtitle}
+              </span>
+            </div>
+            <form onSubmit={handleCreate} style={createModalBodyStyle}>
+              <EntryForm form={createForm} setForm={setCreateForm} t={t} />
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <CanvasBtn
+                  theme={theme}
+                  variant="secondary"
+                  onClick={() => setShowCreateModal(false)}
+                  disabled={creating}
+                >
+                  {copy.confirmCancel}
+                </CanvasBtn>
+                <button
+                  type="submit"
+                  disabled={createDisabled}
+                  title={createAction?.disabledReasonCode}
+                  style={chipButtonStyle(createDisabled)}
+                >
+                  {creating ? t("common.creating") : copy.create}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingAction ? (
+        <div style={modalScrimStyle}>
+          <div style={modalCardStyle}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <CanvasPill
+                theme={theme}
+                tone={
+                  pendingAction.descriptor.riskLevel === "high"
+                    ? "danger"
+                    : pendingAction.descriptor.riskLevel === "medium"
+                      ? "warn"
+                      : "accent"
+                }
+              >
+                {pendingAction.descriptor.riskLevel}
+              </CanvasPill>
+              <strong style={{ fontSize: 20 }}>{copy.confirmTitle}</strong>
+              <span style={{ color: theme.textMuted, fontSize: 13 }}>
+                {humanizeActionLabel(pendingAction.descriptor.action)} ·{" "}
+                {pendingAction.displayName ||
+                  pendingAction.entrySlug ||
+                  copy.title}
+              </span>
+            </div>
+
+            <CanvasBanner
+              theme={theme}
+              tone={
+                pendingAction.descriptor.riskLevel === "high"
+                  ? "danger"
+                  : "warn"
+              }
+              title={copy.confirmImpact}
+              body={copy.riskCopy[pendingAction.descriptor.riskLevel]}
+            />
+
+            <div style={{ display: "grid", gap: 8 }}>
+              <strong style={{ fontSize: 13 }}>
+                {copy.confirmActionsLabel}
+              </strong>
+              <div style={toolbarClusterStyle}>
+                <CanvasPill theme={theme} tone="neutral">
+                  {pendingAction.descriptor.action}
+                </CanvasPill>
+                <CanvasPill theme={theme} tone="neutral">
+                  {pendingAction.descriptor.riskLevel}
+                </CanvasPill>
+                <CanvasPill
+                  theme={theme}
+                  tone={
+                    pendingAction.descriptor.requiresReason ? "warn" : "neutral"
+                  }
+                >
+                  {pendingAction.descriptor.requiresReason
+                    ? "reason required"
+                    : "reason optional"}
+                </CanvasPill>
+              </div>
+              <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                {copy.auditPending}
+              </span>
+            </div>
+
+            {pendingAction.descriptor.requiresReason ||
+            pendingAction.descriptor.riskLevel === "high" ? (
+              <label style={{ display: "grid", gap: 8 }}>
+                <span style={{ fontSize: 12, color: theme.textMuted }}>
+                  {copy.confirmReasonLabel}
+                </span>
+                <textarea
+                  value={actionReason}
+                  onChange={(event) => setActionReason(event.target.value)}
+                  placeholder={copy.confirmReasonPlaceholder}
+                  style={textareaStyle}
+                />
+              </label>
+            ) : null}
+
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}
+            >
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={() => {
+                  setPendingAction(null);
+                  setActionReason("");
+                }}
+                disabled={creating || pendingRowAction !== null}
+              >
+                {copy.confirmCancel}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                disabled={
+                  creating ||
+                  pendingRowAction !== null ||
+                  ((pendingAction.descriptor.requiresReason ||
+                    pendingAction.descriptor.riskLevel === "high") &&
+                    !actionReason.trim())
+                }
+                onClick={() => void executeAction(pendingAction, actionReason)}
+              >
+                {copy.confirmProceed}
+              </CanvasBtn>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </CanvasShell>
   );
 }
