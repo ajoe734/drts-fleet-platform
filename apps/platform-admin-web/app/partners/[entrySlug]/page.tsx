@@ -78,6 +78,7 @@ type DetailSectionId =
   | "branding"
   | "auth"
   | "eligibility"
+  | "readiness"
   | "credentials"
   | "audit";
 
@@ -1702,6 +1703,13 @@ export default function PartnerDetailPage() {
         label: locale === "en" ? "Eligibility" : "Eligibility",
       },
       {
+        id: "readiness",
+        label: locale === "en" ? "Readiness" : "Readiness",
+        ...(readinessMissingCount > 0
+          ? { badge: String(readinessMissingCount) }
+          : {}),
+      },
+      {
         id: "credentials",
         label: locale === "en" ? "Credentials" : "Credentials",
         ...(credentials.length > 0
@@ -1710,7 +1718,7 @@ export default function PartnerDetailPage() {
       },
       { id: "audit", label: locale === "en" ? "Audit" : "Audit" },
     ],
-    [credentials.length, locale],
+    [credentials.length, locale, readinessMissingCount],
   );
 
   const refreshTier =
