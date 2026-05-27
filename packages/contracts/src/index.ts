@@ -1,5 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  PlatformPresenceAdapterStatusRecord,
+  PlatformPresenceEligibility,
+  PlatformPresenceRecord,
+} from "./platform-presence";
+import type { UiHealthEnvelope, UiRefreshMetadata } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -2570,6 +2576,65 @@ export interface UnifiedDriverTaskView {
   dropoffSummary: string | null;
   deadlineAt: string | null;
   updatedAt: string;
+}
+
+export interface DriverWorkspaceTaskStateCounts {
+  actionRequired: number;
+  awaitingPlatform: number;
+  inProgress: number;
+  blocked: number;
+  completed: number;
+  readOnly: number;
+  total: number;
+}
+
+export interface DriverWorkspaceActiveTripRef {
+  taskId: string;
+  orderId: string;
+  orderDomain: OrderDomain;
+  sourcePlatform: DriverTaskViewSource;
+  platformDisplayName: string;
+  localStatus: DriverTaskStatus | ForwardedOrderStatus;
+  updatedAt: string;
+}
+
+export interface DriverWorkspaceSummary {
+  driverId: string;
+  counts: DriverWorkspaceTaskStateCounts;
+  activeTrip: DriverWorkspaceActiveTripRef | null;
+  outstandingInstructionCount: number;
+  refresh: UiRefreshMetadata;
+}
+
+export const DRIVER_PLATFORM_BINDING_STATES = [
+  "not_bound",
+  "bound_offline",
+  "bound_online",
+  "reauth_required",
+  "suspended",
+  "incident_hold",
+  "degraded",
+] as const;
+export type DriverPlatformBindingState =
+  (typeof DRIVER_PLATFORM_BINDING_STATES)[number];
+
+export interface DriverPlatformBindingSummary {
+  platformCode: PlatformCode;
+  platformDisplayName: string;
+  bindingState: DriverPlatformBindingState;
+  presence: PlatformPresenceRecord;
+  adapterStatus: PlatformPresenceAdapterStatusRecord;
+  outstandingInstructionCount: number;
+  eligibility: PlatformPresenceEligibility;
+  updatedAt: string;
+}
+
+export interface DriverPlatformPresenceSummary {
+  driverId: string;
+  bindings: DriverPlatformBindingSummary[];
+  notes: string[];
+  health: UiHealthEnvelope;
+  refresh: UiRefreshMetadata;
 }
 
 export type OpsDispatchStreamEventType =

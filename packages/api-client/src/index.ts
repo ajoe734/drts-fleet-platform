@@ -70,12 +70,14 @@ import type {
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
   DriverLocationHeartbeatCommand,
+  DriverPlatformPresenceSummary,
   DriverProfileRecord,
   DriverRegistryRecord,
   DriverRejectTaskCommand,
   DriverStartTaskCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  DriverWorkspaceSummary,
   UnifiedDriverTaskView,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
@@ -787,6 +789,30 @@ export class ApiClient {
       ? `/api/driver/task-views/${taskId}?${query}`
       : `/api/driver/task-views/${taskId}`;
     return this.get<UnifiedDriverTaskView>(url);
+  }
+
+  async getDriverWorkspaceSummary(filters?: {
+    driverId?: string;
+  }): Promise<DriverWorkspaceSummary> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/workspace/summary?${query}`
+      : "/api/driver/workspace/summary";
+    return this.get<DriverWorkspaceSummary>(url);
+  }
+
+  async getDriverPlatformPresenceSummary(filters?: {
+    driverId?: string;
+  }): Promise<DriverPlatformPresenceSummary> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/platform-presence/summary?${query}`
+      : "/api/driver/platform-presence/summary";
+    return this.get<DriverPlatformPresenceSummary>(url);
   }
 
   async acceptForwardedOrder(

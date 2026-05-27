@@ -15,6 +15,11 @@ function isoNow() {
   return new Date().toISOString();
 }
 
+const PLATFORM_PRESENCE_SUMMARY_NOTES = [
+  "平台狀態會優先使用資料庫同步；若目前環境未啟用資料庫，會改用目前執行個體的暫存資料。",
+  "可使用 POST /api/platform-presence/online 或 /api/platform-presence/offline 更新單一平台的綁定、上下線與重新驗證狀態。",
+];
+
 @Injectable()
 export class PlatformPresenceService {
   private readonly logger = new Logger(PlatformPresenceService.name);
@@ -173,19 +178,28 @@ export class PlatformPresenceService {
     };
   }
 
+  listAdapterStatuses(
+    platformCodes: readonly PlatformCode[],
+  ): PlatformPresenceAdapterStatusRecord[] {
+    const adapterHealth = this.listAdapterHealthSafely();
+    return platformCodes.map((platformCode) =>
+      this.mapAdapterStatus(platformCode, adapterHealth),
+    );
+  }
+
+  getSummaryNotes(): string[] {
+    return [...PLATFORM_PRESENCE_SUMMARY_NOTES];
+  }
+
   async summary(driverId: string): Promise<PlatformPresenceSummary> {
     const presences = await this.listForDriver(driverId);
-    const adapterHealth = this.listAdapterHealthSafely();
     return {
       driverId,
       presences,
-      adapterStatuses: presences.map((presence) =>
-        this.mapAdapterStatus(presence.platformCode, adapterHealth),
+      adapterStatuses: this.listAdapterStatuses(
+        presences.map((presence) => presence.platformCode),
       ),
-      notes: [
-        "平台狀態會優先使用資料庫同步；若目前環境未啟用資料庫，會改用目前執行個體的暫存資料。",
-        "可使用 POST /api/platform-presence/online 或 /api/platform-presence/offline 更新單一平台的綁定、上下線與重新驗證狀態。",
-      ],
+      notes: this.getSummaryNotes(),
     };
   }
 }

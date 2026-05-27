@@ -3,6 +3,7 @@ import type { PlatformCode } from "./platform-codes";
 export type PlatformPresenceStatus = "online" | "offline";
 
 export type PlatformEligibility = "eligible" | "ineligible" | "pending";
+export type PlatformPresenceEligibility = PlatformEligibility;
 
 export interface PlatformPresenceRecord {
   driverId: string;
