@@ -18,10 +18,12 @@ import {
   type TenantApprovalRuleConditionOperator,
   type TenantApprovalRuleRecord,
   type TenantBookingApprovalRequestRecord,
+  type EmptyReason,
   type TenantPrincipalRef,
   type TenantQuotaEnforcementMode,
   type TenantQuotaLedgerEntry,
   type TenantQuotaSummary,
+  type ResourceActionDescriptor,
 } from "@drts/contracts";
 import {
   CalloutBanner,
@@ -55,6 +57,13 @@ type RulesManagerProps = {
   approvalRequests: TenantBookingApprovalRequestRecord[];
   ledgerEntries: TenantQuotaLedgerEntry[];
   errors: string[];
+  availableActions: ResourceActionDescriptor[];
+  emptyReason: EmptyReason | null;
+  filters: {
+    search: string;
+    action: TenantApprovalRuleAction | "all";
+  };
+  refreshedAt: string;
 };
 
 type EditableCondition = {
@@ -212,6 +221,19 @@ const chipWrapStyle = {
 
 const compactTableWrapStyle = {
   overflowX: "auto" as const,
+};
+
+const utilityRowStyle = {
+  display: "flex",
+  flexWrap: "wrap" as const,
+  gap: "10px",
+  alignItems: "center",
+};
+
+const inlineLinkStyle = {
+  color: "#0f766e",
+  fontWeight: 700,
+  textDecoration: "none",
 };
 
 function createId() {
@@ -497,12 +519,132 @@ function maybeCountWarnings(evaluation: TenantApprovalEvaluationResult | null) {
   return evaluation.outcome.warnings.length;
 }
 
+function getActionDescriptor(
+  actions: ResourceActionDescriptor[],
+  actionName: string,
+) {
+  return actions.find((action) => action.action === actionName) ?? null;
+}
+
+function buildEmptyState(reason: EmptyReason) {
+  switch (reason) {
+    case "not_provisioned":
+      return {
+        title: "Tenant governance is not provisioned yet",
+        description:
+          "No rules, quota policy snapshot, pending approvals, or ledger evidence were published for this tenant yet.",
+        tone: "warning" as const,
+      };
+    case "fetch_failed":
+      return {
+        title: "Approval rules could not be loaded",
+        description:
+          "The governance list request failed before any rule records could be rendered.",
+        tone: "warning" as const,
+      };
+    case "permission_denied":
+      return {
+        title: "You cannot read this governance surface",
+        description:
+          "The backend denied the approval-rules read, so edit affordances stay disabled until access is granted.",
+        tone: "danger" as const,
+      };
+    case "external_unavailable":
+      return {
+        title: "A dependency is currently unavailable",
+        description:
+          "The approval-rules surface is reachable, but an upstream or timeout condition blocked the empty-state read.",
+        tone: "warning" as const,
+      };
+    case "filtered_empty":
+      return {
+        title: "No rules match the current filter",
+        description:
+          "Adjust the search or action filter to widen the rule register again.",
+        tone: "neutral" as const,
+      };
+    case "driver_not_eligible":
+      return {
+        title: "This empty state is not used on tenant governance",
+        description:
+          "The driver-only eligibility empty reason is shown here only to keep all Q-X15 states mapped explicitly.",
+        tone: "neutral" as const,
+      };
+    case "no_data":
+    default:
+      return {
+        title: "No approval rules published yet",
+        description:
+          "Create the first tenant governance rule below instead of inventing unpublished client defaults.",
+        tone: "tenant" as const,
+      };
+  }
+}
+
+function normalizeConditions(rule: TenantApprovalRuleRecord) {
+  return rule.conditions
+    .map((condition) => formatConditionSummary(condition))
+    .sort()
+    .join(" && ");
+}
+
+function detectConflictingRules(rules: TenantApprovalRuleRecord[]) {
+  const activeRules = rules.filter((rule) => rule.activeFlag);
+  const conflicts: Array<{ left: string; right: string; reason: string }> = [];
+
+  for (let index = 0; index < activeRules.length; index += 1) {
+    const left = activeRules[index];
+    if (!left) {
+      continue;
+    }
+
+    for (
+      let compareIndex = index + 1;
+      compareIndex < activeRules.length;
+      compareIndex += 1
+    ) {
+      const right = activeRules[compareIndex];
+      if (!right) {
+        continue;
+      }
+
+      if (left.priority === right.priority) {
+        conflicts.push({
+          left: left.ruleName ?? left.ruleId,
+          right: right.ruleName ?? right.ruleId,
+          reason: "duplicate priority",
+        });
+        continue;
+      }
+
+      if (
+        normalizeConditions(left) === normalizeConditions(right) &&
+        (left.action !== right.action ||
+          left.approvalMode !== right.approvalMode ||
+          formatRuleApprovers(left) !== formatRuleApprovers(right))
+      ) {
+        conflicts.push({
+          left: left.ruleName ?? left.ruleId,
+          right: right.ruleName ?? right.ruleId,
+          reason: "same condition set with different outcome",
+        });
+      }
+    }
+  }
+
+  return conflicts;
+}
+
 export function RulesManager({
   rules,
   quotaSummary,
   approvalRequests,
   ledgerEntries,
   errors,
+  availableActions,
+  emptyReason,
+  filters,
+  refreshedAt,
 }: RulesManagerProps) {
   const router = useRouter();
   const [flash, setFlash] = useState<RulesFlashPayload | null>(null);
@@ -556,6 +698,13 @@ export function RulesManager({
     (request) => request.status === "pending",
   );
   const remainingQuotaPercent = quotaSummary?.usage.remainingPercent ?? null;
+  const createAction = getActionDescriptor(availableActions, "create_rule");
+  const updateAction = getActionDescriptor(availableActions, "update_rule");
+  const disableAction = getActionDescriptor(availableActions, "disable_rule");
+  const reorderAction = getActionDescriptor(availableActions, "reorder_rule");
+  const dryRunAction = getActionDescriptor(availableActions, "dry_run_rule");
+  const conflicts = detectConflictingRules(sortedRules);
+  const emptyState = emptyReason ? buildEmptyState(emptyReason) : null;
 
   function selectRule(rule: TenantApprovalRuleRecord) {
     setSelectedRuleId(rule.ruleId);
@@ -636,7 +785,7 @@ export function RulesManager({
       <PageHeader
         eyebrow="Governance"
         title="Rules"
-        subtitle="Approval rules, quota posture, pending approvals, and dry-run evaluation now live on one tenant-governance surface backed by the published tenant contract."
+        subtitle="Approval rules, quota posture, pending approvals, and dry-run evaluation stay on one tenant-governance surface aligned to Q-TEN12 and the canvas artboard."
         meta={[
           {
             label: "Rules",
@@ -653,13 +802,36 @@ export function RulesManager({
             value: formatCount(pendingApprovals.length),
             tone: "warning",
           },
+          {
+            label: "Refresh",
+            value: "T5 / 30s",
+            tone: "info",
+          },
         ]}
         actions={
           <>
-            <a href="#rule-editor" style={pillButtonStyle()}>
+            <a
+              href="#rule-editor"
+              style={{
+                ...pillButtonStyle(),
+                opacity: updateAction?.enabled === false ? 0.55 : 1,
+                pointerEvents:
+                  updateAction?.enabled === false ? "none" : "auto",
+              }}
+              title={updateAction?.disabledReasonCode}
+            >
               Edit rule
             </a>
-            <a href="#rule-dry-run" style={pillButtonStyle(true)}>
+            <a
+              href="#rule-dry-run"
+              style={{
+                ...pillButtonStyle(true),
+                opacity: dryRunAction?.enabled === false ? 0.55 : 1,
+                pointerEvents:
+                  dryRunAction?.enabled === false ? "none" : "auto",
+              }}
+              title={dryRunAction?.disabledReasonCode}
+            >
               Dry-run
             </a>
           </>
@@ -723,14 +895,99 @@ export function RulesManager({
 
       <CalloutBanner
         title="All governance mutations stay contract-backed"
-        description="This page uses the tenant approval-rule, quota-policy, approval-request, and quota-ledger APIs directly. It does not invent client-side approval state or fake quota math."
+        description="This page uses the tenant approval-rule, quota-policy, approval-request, and quota-ledger APIs directly. Page-level CTAs follow ResourceActionDescriptor semantics even though the current approval-rule list contract does not yet publish per-row availableActions."
         tone="tenant"
         density="compact"
       />
 
+      {conflicts.length > 0 ? (
+        <CalloutBanner
+          title="Conflicting active rules detected"
+          description={`${conflicts[0]?.left} vs ${conflicts[0]?.right} (${conflicts[0]?.reason}). Reorder or disable one rule so precedence stays explicit.`}
+          tone="warning"
+          density="compact"
+        />
+      ) : null}
+
       <WorkflowSplitLayout
         main={
           <>
+            <DataViewCard
+              title="Routing and refresh"
+              subtitle="This route is a T5 governance surface and remains reachable from cost-center approval linkage work."
+              tone="tenant"
+              density="compact"
+            >
+              <div style={{ display: "grid", gap: "12px" }}>
+                <div style={utilityRowStyle}>
+                  <button
+                    onClick={() => router.refresh()}
+                    style={secondaryButtonStyle}
+                    type="button"
+                  >
+                    Refresh now
+                  </button>
+                  <span style={hintStyle}>
+                    Last loaded {formatDateTime(refreshedAt)} · target tier T5
+                    (30s).
+                  </span>
+                </div>
+                <div style={utilityRowStyle}>
+                  <a href="/cost-centers" style={inlineLinkStyle}>
+                    Open cost centers
+                  </a>
+                  <span style={hintStyle}>
+                    Use the approval-linkage path when a cost center needs to
+                    explain why a booking enters approval.
+                  </span>
+                </div>
+              </div>
+            </DataViewCard>
+
+            <DataViewCard
+              title="Filters"
+              subtitle="Use URL-backed filters to narrow the register without mutating the tenant rule set."
+              tone="tenant"
+              density="compact"
+            >
+              <form action="/rules" method="get" style={formGridStyle}>
+                <div style={columnGridStyle}>
+                  <label style={fieldGridStyle}>
+                    <span style={fieldLabelStyle}>Search</span>
+                    <input
+                      defaultValue={filters.search}
+                      name="search"
+                      placeholder="finance approval"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={fieldGridStyle}>
+                    <span style={fieldLabelStyle}>Action</span>
+                    <select
+                      defaultValue={filters.action}
+                      name="action"
+                      style={inputStyle}
+                    >
+                      <option value="all">all</option>
+                      {TENANT_APPROVAL_RULE_ACTIONS.map((action) => (
+                        <option key={action} value={action}>
+                          {action}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div style={utilityRowStyle}>
+                  <button style={secondaryButtonStyle} type="submit">
+                    Apply filters
+                  </button>
+                  <a href="/rules" style={inlineLinkStyle}>
+                    Clear
+                  </a>
+                </div>
+              </form>
+            </DataViewCard>
+
             <DataViewCard
               title="Rule register"
               subtitle="The primary table keeps priority, condition summary, action, approver path, and state visible in the same scan, matching the TN_Rules parity target."
@@ -828,9 +1085,12 @@ export function RulesManager({
                 </div>
               ) : (
                 <WorkflowEmptyState
-                  title="No approval rules published yet"
-                  description="Create the first tenant governance rule below instead of inventing unpublished client defaults."
-                  tone="tenant"
+                  title={emptyState?.title ?? "No approval rules published yet"}
+                  description={
+                    emptyState?.description ??
+                    "Create the first tenant governance rule below instead of inventing unpublished client defaults."
+                  }
+                  tone={emptyState?.tone ?? "tenant"}
                   density="compact"
                 />
               )}
@@ -1398,8 +1658,9 @@ export function RulesManager({
                     }}
                   >
                     <button
-                      disabled={pending}
+                      disabled={pending || createAction?.enabled === false}
                       style={pillButtonStyle(true)}
+                      title={createAction?.disabledReasonCode}
                       type="submit"
                     >
                       {ruleDraft.ruleId ? "Save rule" : "Create rule"}
@@ -1413,7 +1674,10 @@ export function RulesManager({
                     </button>
                     <button
                       disabled={
-                        selectedRuleIndex <= 0 || pending || !selectedRule
+                        selectedRuleIndex <= 0 ||
+                        pending ||
+                        !selectedRule ||
+                        reorderAction?.enabled === false
                       }
                       onClick={() => {
                         if (!selectedRule) {
@@ -1433,6 +1697,7 @@ export function RulesManager({
                         runAction(reorderApprovalRulesAction, formData);
                       }}
                       style={secondaryButtonStyle}
+                      title={reorderAction?.disabledReasonCode}
                       type="button"
                     >
                       Move earlier
@@ -1442,7 +1707,8 @@ export function RulesManager({
                         selectedRuleIndex < 0 ||
                         selectedRuleIndex >= sortedRules.length - 1 ||
                         pending ||
-                        !selectedRule
+                        !selectedRule ||
+                        reorderAction?.enabled === false
                       }
                       onClick={() => {
                         if (!selectedRule) {
@@ -1462,12 +1728,17 @@ export function RulesManager({
                         runAction(reorderApprovalRulesAction, formData);
                       }}
                       style={secondaryButtonStyle}
+                      title={reorderAction?.disabledReasonCode}
                       type="button"
                     >
                       Move later
                     </button>
                     <button
-                      disabled={!selectedRule || pending}
+                      disabled={
+                        !selectedRule ||
+                        pending ||
+                        disableAction?.enabled === false
+                      }
                       onClick={() => {
                         if (!selectedRule) {
                           return;
@@ -1483,6 +1754,7 @@ export function RulesManager({
                         });
                       }}
                       style={dangerButtonStyle}
+                      title={disableAction?.disabledReasonCode}
                       type="button"
                     >
                       Disable selected
