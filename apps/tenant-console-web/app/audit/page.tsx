@@ -312,8 +312,9 @@ type EmptyStateSpec = {
 };
 
 type ExportState = {
-  href: string | null;
+  download: ControlledDownloadRecord | null;
   error: string | null;
+  rowCount: number;
 };
 
 function getSingleParam(searchParams: SearchParamsInput, key: string): string {
@@ -386,6 +387,14 @@ function formatDay(value: string | null | undefined) {
   if (!value) return "—";
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? "—" : dayFormatter.format(parsed);
+}
+
+function formatArtifactAt(value: string | null | undefined) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "—"
+    : auditDateFormatter.format(parsed);
 }
 
 function normalizeActorScope(
@@ -890,11 +899,29 @@ async function loadAuditExport(filters: FilterState): Promise<ExportState> {
     const download = (await client.exportTenantAudit(
       buildExportCommand(filters),
     )) as ControlledDownloadRecord;
-    return { href: download.downloadUrl, error: null };
+    return { download, error: null, rowCount: 0 };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { href: null, error: message };
+    return { download: null, error: message, rowCount: 0 };
   }
+}
+
+function buildExportState(
+  rowCount: number,
+  download: ControlledDownloadRecord | null,
+  error: string | null,
+): ExportState {
+  return {
+    download,
+    error,
+    rowCount,
+  };
+}
+
+function shortenManifestHash(value: string | null | undefined) {
+  if (!value) return "—";
+  if (value.length <= 24) return value;
+  return `${value.slice(0, 16)}…${value.slice(-8)}`;
 }
 
 export default async function AuditPage({
@@ -968,16 +995,19 @@ export default async function AuditPage({
         : "no_data"
       : null);
   const emptyState = emptyReason ? buildEmptyState(emptyReason) : null;
-  const exportState =
-    exportAction.enabled && !emptyState
-      ? await loadAuditExport(filters)
-      : { href: null, error: null };
+  const exportLoadState =
+    exportAction.enabled && !emptyState ? await loadAuditExport(filters) : null;
+  const exportState = buildExportState(
+    exportCount,
+    exportLoadState?.download ?? null,
+    exportLoadState?.error ?? null,
+  );
   const exportDisabledReason =
     "disabledReasonCode" in exportAction
       ? exportAction.disabledReasonCode
       : undefined;
   const exportActionResolved =
-    exportAction.enabled && exportState.href
+    exportAction.enabled && exportState.download?.downloadUrl
       ? exportAction
       : {
           ...exportAction,
@@ -987,6 +1017,7 @@ export default async function AuditPage({
             exportState.error ??
             "Signed export unavailable",
         };
+  const exportReady = Boolean(exportState.download?.downloadUrl);
 
   return (
     <div>
@@ -1004,8 +1035,8 @@ export default async function AuditPage({
             )}
             {renderActionLink(
               exportActionResolved,
-              exportState.href ?? "#",
-              "匯出篩選結果",
+              exportState.download?.downloadUrl ?? "#",
+              exportReady ? "下載簽章匯出" : "匯出篩選結果",
             )}
           </>
         }
@@ -1445,10 +1476,25 @@ export default async function AuditPage({
                   </span>
                 </div>
                 <div style={summaryCellStyle}>
-                  <span style={summaryLabelStyle}>Export set</span>
-                  <span style={summaryValueStyle}>{exportCount}</span>
+                  <span style={summaryLabelStyle}>Signed export</span>
+                  <span style={summaryValueStyle}>{exportState.rowCount}</span>
                   <span style={summarySubStyle}>
-                    Rows included in the signed export subset.
+                    {exportReady
+                      ? `Artifact ready · ${formatArtifactAt(exportState.download?.expiresAt)} 到期`
+                      : exportState.error
+                        ? "Artifact unavailable while export endpoint is failing."
+                        : "Visible rows eligible for the next signed export."}
+                  </span>
+                </div>
+                <div style={summaryCellStyle}>
+                  <span style={summaryLabelStyle}>Artifact hash</span>
+                  <span style={summaryValueStyle}>
+                    {shortenManifestHash(exportState.download?.manifestHash)}
+                  </span>
+                  <span style={summarySubStyle}>
+                    {exportReady
+                      ? `Subject ${exportState.download?.subjectId} · immutable signed subset`
+                      : "Manifest hash appears after a signed export is issued."}
                   </span>
                 </div>
                 <div style={summaryCellStyle}>
