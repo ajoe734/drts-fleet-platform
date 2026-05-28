@@ -100,10 +100,12 @@ export function TenantBookingCreateForm({
   passengers,
   addresses,
   costCenters,
+  initialSelectedPassengerId = "",
 }: {
   passengers: TenantPassengerRecord[];
   addresses: TenantAddressRecord[];
   costCenters: TenantCostCenterRecord[];
+  initialSelectedPassengerId?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -113,7 +115,9 @@ export function TenantBookingCreateForm({
 
   const [businessDispatchSubtype, setBusinessDispatchSubtype] =
     useState<BusinessDispatchSubtype>("credit_card_airport_transfer");
-  const [selectedPassengerId, setSelectedPassengerId] = useState("");
+  const [selectedPassengerId, setSelectedPassengerId] = useState(
+    initialSelectedPassengerId,
+  );
   const [pickupAddressId, setPickupAddressId] = useState(
     initialPickupAddress?.addressId ?? "",
   );

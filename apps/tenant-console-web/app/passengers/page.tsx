@@ -1,10 +1,22 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
-import type { TenantPassengerRecord } from "@drts/contracts";
+import type {
+  ApiListData,
+  ApiSuccessEnvelope,
+  CrossAppResourceLink,
+  EmptyReason,
+  ResourceActionDescriptor,
+  TenantPassengerQualityIssue,
+  TenantPassengerRecord,
+  UiRefreshMetadata,
+} from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
+  CanvasDL,
+  CanvasField,
+  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -12,7 +24,7 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { getTenantClient } from "@/lib/api-client";
+import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
 
 export const dynamic = "force-dynamic";
 
@@ -22,16 +34,41 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
+const T5_REFRESH_MS = 30_000;
+
 const pageBodyStyle: CSSProperties = {
   padding: 24,
-  display: "flex",
-  flexDirection: "column",
+  display: "grid",
   gap: 16,
+};
+
+const metricsStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gap: 12,
+};
+
+const contentGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.9fr) minmax(280px, 0.95fr)",
+  gap: 16,
+};
+
+const sideStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+  alignContent: "start",
 };
 
 const primaryCellStyle: CSSProperties = {
   color: th.text,
   fontWeight: 600,
+};
+
+const subtleMonoStyle: CSSProperties = {
+  color: th.textMuted,
+  fontFamily: th.monoFamily,
+  fontSize: 11.5,
 };
 
 const tabLinkStyle: CSSProperties = {
@@ -43,23 +80,184 @@ const cardStyle: CSSProperties = {
   overflow: "hidden",
 };
 
+const filterCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 14,
+};
+
+const filterRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.25fr) minmax(180px, 220px) auto",
+  gap: 10,
+  alignItems: "end",
+};
+
+const fieldStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+};
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  background: th.bgRaised,
+  color: th.text,
+  border: `1px solid ${th.border}`,
+  borderRadius: 8,
+  padding: "9px 11px",
+  fontSize: 12.5,
+  outline: "none",
+};
+
+const selectStyle: CSSProperties = {
+  ...inputStyle,
+  appearance: "none",
+};
+
+const submitButtonStyle: CSSProperties = {
+  height: 28,
+  borderRadius: 7,
+  border: `1px solid ${th.accent}`,
+  background: th.accent,
+  color: "#fff",
+  padding: "0 12px",
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
+const helperRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+  justifyContent: "space-between",
+};
+
+const chipRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const actionWrapStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+  justifyContent: "flex-end",
+};
+
+const warningListStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const warningItemStyle: CSSProperties = {
+  border: `1px solid ${th.warnBorder}`,
+  background: th.warnBg,
+  borderRadius: 10,
+  padding: 12,
+  display: "grid",
+  gap: 6,
+};
+
 const emptyStateStyle: CSSProperties = {
   padding: 24,
+  display: "grid",
+  gap: 10,
+  textAlign: "center",
+};
+
+const emptyTitleStyle: CSSProperties = {
+  color: th.text,
+  fontWeight: 700,
+  fontSize: 15,
+};
+
+const emptyBodyStyle: CSSProperties = {
   color: th.textMuted,
   fontSize: 12.5,
-  textAlign: "center",
+  lineHeight: 1.6,
+};
+
+const emptyActionsStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  justifyContent: "center",
+  flexWrap: "wrap",
+};
+
+const linkListStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const linkItemStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "center",
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  color: th.text,
+  textDecoration: "none",
+  fontSize: 12.5,
 };
 
 type PassengerTabKey = "all" | "employee" | "visitor" | "disabled";
 
-type PassengerRow = TenantPassengerRecord &
+type PassengerActionLink = {
+  key: string;
+  label: string;
+  href: string | undefined;
+  disabled: boolean | undefined;
+  variant: "primary" | "secondary" | "ghost" | undefined;
+  danger: boolean | undefined;
+};
+
+type PassengerRowRecord = TenantPassengerRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  supportLinks?: CrossAppResourceLink[];
+  duplicateWarning?: string | null;
+};
+
+type PassengerRow = PassengerRowRecord &
   Record<string, unknown> & {
     stateLabel: string;
     stateTone: CanvasTone;
+    categoryLabel: string;
+    qualitySummary: string;
+    actionsSummary: string;
   };
 
+type PassengerDirectoryResponse = ApiListData<PassengerRowRecord> & {
+  availableActions?: ResourceActionDescriptor[];
+  emptyState?: {
+    reason: EmptyReason;
+    messageCode: string;
+    nextAction?: ResourceActionDescriptor;
+  };
+  refresh?: UiRefreshMetadata;
+  supportLinks?: CrossAppResourceLink[];
+  duplicateWarnings?: Array<{
+    key: string;
+    label: string;
+    passengerIds: string[];
+  }>;
+};
+
 type PassengerPageData = {
-  passengers: TenantPassengerRecord[];
+  passengers: PassengerRowRecord[];
+  pageActions: ResourceActionDescriptor[];
+  emptyState?: PassengerDirectoryResponse["emptyState"];
+  refresh: UiRefreshMetadata;
+  supportLinks: CrossAppResourceLink[];
+  duplicateWarnings: Array<{
+    key: string;
+    label: string;
+    passengerIds: string[];
+  }>;
   errors: string[];
 };
 
@@ -131,30 +329,174 @@ function matchesTab(passenger: TenantPassengerRecord, tab: PassengerTabKey) {
   return !isEmployeePassenger(passenger);
 }
 
-async function loadPassengersData(): Promise<PassengerPageData> {
-  const client = getTenantClient();
-  const errors: string[] = [];
-  const [passengersResult] = await Promise.allSettled([
-    client.listPassengers() as Promise<TenantPassengerRecord[]>,
-  ]);
-
-  const passengers =
-    passengersResult.status === "fulfilled"
-      ? [...passengersResult.value].sort(comparePassengers)
-      : [];
-
-  if (passengersResult.status === "rejected") {
-    errors.push(`乘客目錄: ${toErrorMessage(passengersResult.reason)}`);
-  }
-
-  return { passengers, errors };
+function normalizeActions(
+  actions: ResourceActionDescriptor[] | undefined,
+  fallback: ResourceActionDescriptor[],
+) {
+  return actions && actions.length > 0 ? actions : fallback;
 }
 
-function toPassengerRow(passenger: TenantPassengerRecord): PassengerRow {
+function normalizeEmptyReason(reason?: string | null): EmptyReason {
+  switch (reason) {
+    case "no_data":
+    case "not_provisioned":
+    case "fetch_failed":
+    case "permission_denied":
+    case "external_unavailable":
+    case "filtered_empty":
+      return reason;
+    default:
+      return "fetch_failed";
+  }
+}
+
+function getFallbackPageActions(): ResourceActionDescriptor[] {
+  return [
+    {
+      action: "create_passenger",
+      enabled: true,
+      riskLevel: "medium",
+    },
+    {
+      action: "import_passenger_csv",
+      enabled: false,
+      disabledReasonCode: "passenger_csv_import_not_published",
+      riskLevel: "low",
+    },
+  ];
+}
+
+function getFallbackRowActions(
+  passenger: TenantPassengerRecord,
+): ResourceActionDescriptor[] {
+  return [
+    {
+      action: "edit_passenger",
+      enabled: true,
+      riskLevel: "medium",
+    },
+    {
+      action: passenger.activeFlag
+        ? "soft_deactivate_passenger"
+        : "reactivate_passenger",
+      enabled: true,
+      requiresReason: passenger.activeFlag,
+      riskLevel: passenger.activeFlag ? "high" : "medium",
+    },
+  ];
+}
+
+async function fetchPassengersEnvelope(): Promise<PassengerPageData> {
+  const errors: string[] = [];
+
+  try {
+    const response = await fetch(`${API_URL}/api/tenant/passengers`, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        "X-Tenant-Id": DEMO_TENANT_ID,
+        "X-Actor-Id": DEMO_ACTOR_ID,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const envelope = (await response.json()) as ApiSuccessEnvelope<
+      PassengerDirectoryResponse | ApiListData<PassengerRowRecord>
+    >;
+    const payload = envelope.data;
+    const passengers = [...(payload.items ?? [])].sort(comparePassengers);
+    const refresh =
+      "refresh" in payload && payload.refresh
+        ? payload.refresh
+        : {
+            generatedAt: envelope.meta.timestamp,
+            staleAfterMs: T5_REFRESH_MS,
+            dataFreshness: "unknown",
+            source: "live",
+          };
+
+    const duplicateWarnings =
+      "duplicateWarnings" in payload && Array.isArray(payload.duplicateWarnings)
+        ? payload.duplicateWarnings
+        : buildDuplicateWarnings(passengers);
+    const supportLinks =
+      "supportLinks" in payload && Array.isArray(payload.supportLinks)
+        ? payload.supportLinks
+        : [];
+    const pageActions =
+      "availableActions" in payload && Array.isArray(payload.availableActions)
+        ? payload.availableActions
+        : getFallbackPageActions();
+    const emptyState = "emptyState" in payload ? payload.emptyState : undefined;
+
+    return {
+      passengers,
+      pageActions,
+      emptyState,
+      refresh,
+      supportLinks,
+      duplicateWarnings,
+      errors,
+    };
+  } catch (error) {
+    errors.push(`乘客目錄: ${toErrorMessage(error)}`);
+    return {
+      passengers: [],
+      pageActions: getFallbackPageActions(),
+      emptyState: {
+        reason: "fetch_failed",
+        messageCode: "tenant_passenger_fetch_failed",
+      },
+      refresh: {
+        generatedAt: new Date().toISOString(),
+        staleAfterMs: T5_REFRESH_MS,
+        dataFreshness: "degraded",
+        source: "live",
+      },
+      supportLinks: [],
+      duplicateWarnings: [],
+      errors,
+    };
+  }
+}
+
+function buildDuplicateWarnings(passengers: TenantPassengerRecord[]) {
+  const grouped = new Map<string, PassengerRowRecord[]>();
+
+  passengers.forEach((passenger) => {
+    const key = passenger.fullName.trim().toLocaleLowerCase("zh-Hant");
+    if (!key) return;
+    const bucket = grouped.get(key) ?? [];
+    bucket.push(passenger);
+    grouped.set(key, bucket);
+  });
+
+  return Array.from(grouped.entries())
+    .filter(([, bucket]) => bucket.length > 1)
+    .map(([key, bucket]) => ({
+      key,
+      label: `${bucket[0]?.fullName ?? key} 重複 ${bucket.length} 筆`,
+      passengerIds: bucket.map((item) => item.passengerId),
+    }));
+}
+
+function toPassengerRow(passenger: PassengerRowRecord): PassengerRow {
+  const qualitySummary = formatQualityIssues(passenger.qualityIssues);
   return {
     ...passenger,
     stateLabel: getStateLabel(passenger.activeFlag),
     stateTone: getStateTone(passenger.activeFlag),
+    categoryLabel: isEmployeePassenger(passenger) ? "員工" : "訪客",
+    qualitySummary,
+    actionsSummary: normalizeActions(
+      passenger.availableActions,
+      getFallbackRowActions(passenger),
+    )
+      .map((action) => describeActionLabel(action.action))
+      .join(" / "),
   };
 }
 
@@ -184,25 +526,410 @@ function getSelectedTab(rawTab: string | undefined): PassengerTabKey {
   return matched?.key ?? "all";
 }
 
+function getSearchParam(
+  value: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function formatRefreshTime(value: string) {
+  const date = parseDate(value);
+  if (!date) return "—";
+  return new Intl.DateTimeFormat("sv-SE", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .format(date)
+    .replace(",", "");
+}
+
+function formatRelativeStale(refresh: UiRefreshMetadata) {
+  const generated = parseDate(refresh.generatedAt)?.getTime();
+  if (!generated) return "unknown";
+
+  const delta = Date.now() - generated;
+  if (delta <= refresh.staleAfterMs) {
+    return "fresh";
+  }
+
+  const overdue = Math.round((delta - refresh.staleAfterMs) / 1000);
+  return overdue <= 0 ? "fresh" : `${overdue}s overdue`;
+}
+
+function describeActionLabel(action: string) {
+  switch (action) {
+    case "create_passenger":
+      return "新增";
+    case "import_passenger_csv":
+      return "CSV 匯入";
+    case "edit_passenger":
+    case "update_passenger":
+      return "編輯";
+    case "soft_deactivate_passenger":
+    case "deactivate_passenger":
+      return "停用";
+    case "reactivate_passenger":
+      return "重新啟用";
+    case "create_booking":
+      return "建立訂單";
+    case "view_audit":
+      return "檢視稽核";
+    default:
+      return action.replaceAll("_", " ");
+  }
+}
+
+function formatDisabledReason(code?: string) {
+  switch (code) {
+    case "passenger_csv_import_not_published":
+      return "CSV 匯入 command 尚未對 tenant console 發布";
+    case "passenger_deactivation_requires_reason":
+      return "停用必須填寫原因";
+    default:
+      return code ? code.replaceAll("_", " ") : null;
+  }
+}
+
+function formatQualityIssues(issues?: TenantPassengerQualityIssue[]) {
+  if (!issues || issues.length === 0) {
+    return "clean";
+  }
+  return issues
+    .map((issue) => {
+      switch (issue) {
+        case "missing_contact":
+          return "missing contact";
+        case "missing_employee_no":
+          return "missing emp id";
+        case "duplicate_employee_no":
+          return "duplicate emp id";
+        default:
+          return issue;
+      }
+    })
+    .join(" / ");
+}
+
+function buildPageActionLinks(
+  actions: ResourceActionDescriptor[],
+): PassengerActionLink[] {
+  return actions.map((action) => ({
+    key: action.action,
+    label: describeActionLabel(action.action),
+    href:
+      action.action === "create_passenger"
+        ? "/passengers?action=create"
+        : undefined,
+    disabled: !action.enabled,
+    variant: action.action === "create_passenger" ? "primary" : "secondary",
+    danger: undefined,
+  }));
+}
+
+function buildRowActionLinks(row: PassengerRowRecord): PassengerActionLink[] {
+  const actions = normalizeActions(
+    row.availableActions,
+    getFallbackRowActions(row),
+  );
+  const links: PassengerActionLink[] = actions.map((action) => {
+    const isDeactivate =
+      action.action === "soft_deactivate_passenger" ||
+      action.action === "deactivate_passenger";
+    return {
+      key: action.action,
+      label: describeActionLabel(action.action),
+      href:
+        action.action === "create_booking"
+          ? `/bookings/new?passengerId=${encodeURIComponent(row.passengerId)}`
+          : action.action === "view_audit"
+            ? `/audit?resourceId=${encodeURIComponent(row.passengerId)}`
+            : action.action === "edit_passenger" ||
+                action.action === "update_passenger"
+              ? `/passengers?action=edit&passengerId=${encodeURIComponent(row.passengerId)}`
+              : undefined,
+      disabled: !action.enabled,
+      danger: isDeactivate,
+      variant:
+        action.action === "create_booking"
+          ? "primary"
+          : isDeactivate
+            ? "ghost"
+            : "secondary",
+    };
+  });
+
+  links.push({
+    key: `new-booking-${row.passengerId}`,
+    label: "建立訂單",
+    href: `/bookings/new?passengerId=${encodeURIComponent(row.passengerId)}`,
+    variant: "primary",
+    disabled: undefined,
+    danger: undefined,
+  });
+
+  return dedupeActionLinks(links);
+}
+
+function dedupeActionLinks(links: PassengerActionLink[]) {
+  const seen = new Set<string>();
+  return links.filter((link) => {
+    if (seen.has(link.label)) return false;
+    seen.add(link.label);
+    return true;
+  });
+}
+
+function buildFilteredHref(
+  params: URLSearchParams,
+  key: string,
+  value?: string | null,
+) {
+  const next = new URLSearchParams(params.toString());
+  if (value && value.length > 0) {
+    next.set(key, value);
+  } else {
+    next.delete(key);
+  }
+  const query = next.toString();
+  return query ? `/passengers?${query}` : "/passengers";
+}
+
+function resolveEmptyState(params: {
+  hasErrors: boolean;
+  rowsLength: number;
+  passengerCount: number;
+  activeFilters: boolean;
+  previewReason: string | undefined;
+  backendEmptyState: PassengerDirectoryResponse["emptyState"] | undefined;
+}): PassengerDirectoryResponse["emptyState"] | undefined {
+  if (params.previewReason) {
+    return {
+      reason: normalizeEmptyReason(params.previewReason),
+      messageCode: `preview_${params.previewReason}`,
+    };
+  }
+
+  if (params.rowsLength > 0) return undefined;
+  if (params.backendEmptyState) return params.backendEmptyState;
+  if (params.hasErrors) {
+    return {
+      reason: "fetch_failed",
+      messageCode: "tenant_passenger_fetch_failed",
+    };
+  }
+  if (params.activeFilters) {
+    return {
+      reason: "filtered_empty",
+      messageCode: "tenant_passenger_filtered_empty",
+    };
+  }
+  if (params.passengerCount === 0) {
+    return {
+      reason: "no_data",
+      messageCode: "tenant_passenger_no_data",
+    };
+  }
+  return undefined;
+}
+
+function renderActionButton(link: PassengerActionLink) {
+  const variant = link.variant ?? "secondary";
+  const danger = link.danger ?? false;
+  const disabled = link.disabled ?? false;
+  const icon =
+    link.label === "CSV 匯入"
+      ? "ext"
+      : variant === "primary"
+        ? "plus"
+        : undefined;
+  const button = (
+    <CanvasBtn
+      theme={th}
+      size="sm"
+      variant={variant}
+      danger={danger}
+      disabled={disabled}
+      icon={icon}
+    >
+      {link.label}
+    </CanvasBtn>
+  );
+
+  if (!link.href || disabled) {
+    return <span key={link.key}>{button}</span>;
+  }
+
+  return (
+    <Link key={link.key} href={link.href} style={{ textDecoration: "none" }}>
+      {button}
+    </Link>
+  );
+}
+
+function renderEmptyState(
+  emptyState: NonNullable<PassengerDirectoryResponse["emptyState"]>,
+  activeFiltersHref: string,
+) {
+  const reason = normalizeEmptyReason(emptyState.reason);
+  const nextAction =
+    emptyState.nextAction ??
+    (reason === "no_data"
+      ? {
+          action: "create_passenger",
+          enabled: true,
+          riskLevel: "medium" as const,
+        }
+      : undefined);
+
+  const content = {
+    no_data: {
+      title: "尚未建立任何乘客資料",
+      body: "Passenger directory 目前為空。建立第一筆常用乘客後，/bookings/new 才能直接預填並重用名單。",
+      tone: "info" as const,
+    },
+    not_provisioned: {
+      title: "租戶乘客名錄尚未啟用",
+      body: "這個 tenant 尚未完成 passenger directory provisioning。請先完成租戶設定，避免用假資料填充列表。",
+      tone: "warn" as const,
+    },
+    fetch_failed: {
+      title: "乘客資料暫時無法載入",
+      body: "後端未提供可用 snapshot。此時要顯示錯誤狀態，而不是假裝沒有資料。",
+      tone: "danger" as const,
+    },
+    permission_denied: {
+      title: "目前角色沒有乘客目錄權限",
+      body: "availableActions 與列表都被後端拒絕時，UI 必須明確顯示 permission_denied。",
+      tone: "warn" as const,
+    },
+    external_unavailable: {
+      title: "外部依賴暫時不可用",
+      body: "名錄資料受外部系統影響時，要顯示 external_unavailable，而不是 generic fetch error。",
+      tone: "warn" as const,
+    },
+    filtered_empty: {
+      title: "目前篩選條件沒有符合的乘客",
+      body: "放寬 active/inactive、department 或搜尋字詞後再試一次。",
+      tone: "info" as const,
+    },
+  } satisfies Record<
+    EmptyReason,
+    {
+      title: string;
+      body: string;
+      tone: CanvasTone;
+    }
+  >;
+  const emptyContent = content[reason];
+
+  return (
+    <div style={emptyStateStyle}>
+      <CanvasPill theme={th} tone={emptyContent.tone}>
+        {reason}
+      </CanvasPill>
+      <div style={emptyTitleStyle}>{emptyContent.title}</div>
+      <div style={emptyBodyStyle}>{emptyContent.body}</div>
+      <div style={emptyActionsStyle}>
+        {nextAction
+          ? renderActionButton(buildPageActionLinks([nextAction])[0]!)
+          : null}
+        {reason === "filtered_empty" ? (
+          <Link href={activeFiltersHref} style={{ textDecoration: "none" }}>
+            <CanvasBtn theme={th} size="sm" variant="secondary">
+              清除篩選
+            </CanvasBtn>
+          </Link>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default async function PassengersPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ tab?: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = (await searchParams) ?? {};
-  const selectedTab = getSelectedTab(resolvedSearchParams.tab);
-  const { passengers, errors } = await loadPassengersData();
+  const selectedTab = getSelectedTab(getSearchParam(resolvedSearchParams.tab));
+  const searchQuery = getSearchParam(resolvedSearchParams.q)?.trim() ?? "";
+  const selectedDepartment =
+    getSearchParam(resolvedSearchParams.department)?.trim() ?? "";
+  const previewEmptyReason = getSearchParam(resolvedSearchParams.emptyReason);
+
+  const {
+    passengers,
+    pageActions,
+    emptyState: backendEmptyState,
+    refresh,
+    supportLinks,
+    duplicateWarnings,
+    errors,
+  } = await fetchPassengersEnvelope();
+  const { tabs, activeTab } = buildTabNodes(selectedTab);
+
+  const departmentOptions = Array.from(
+    new Set(
+      passengers
+        .map((passenger) => passenger.departmentName?.trim())
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ).sort((left, right) => left.localeCompare(right, "zh-Hant"));
+
   const rows = passengers
     .filter((passenger) => matchesTab(passenger, selectedTab))
+    .filter((passenger) =>
+      selectedDepartment
+        ? passenger.departmentName?.trim() === selectedDepartment
+        : true,
+    )
+    .filter((passenger) => {
+      if (!searchQuery) return true;
+      const haystack = [
+        passenger.fullName,
+        passenger.employeeNo,
+        passenger.mobile,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("zh-Hant");
+      return haystack.includes(searchQuery.toLocaleLowerCase("zh-Hant"));
+    })
     .map(toPassengerRow);
-  const { tabs, activeTab } = buildTabNodes(selectedTab);
+
+  const filteredEmptyState = resolveEmptyState({
+    hasErrors: errors.length > 0,
+    rowsLength: rows.length,
+    passengerCount: passengers.length,
+    activeFilters: Boolean(
+      searchQuery || selectedDepartment || selectedTab !== "all",
+    ),
+    previewReason: previewEmptyReason,
+    backendEmptyState,
+  });
+
+  const clearFiltersHref = buildFilteredHref(
+    buildSearchParams(selectedTab),
+    "q",
+    null,
+  );
+  const pageActionLinks = buildPageActionLinks(pageActions);
 
   const columns: CanvasTableColumn<PassengerRow>[] = [
     {
       h: "NAME",
       k: "fullName",
       w: 160,
-      r: (row) => <span style={primaryCellStyle}>{row.fullName}</span>,
+      r: (row) => (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={primaryCellStyle}>{row.fullName}</span>
+          <span style={subtleMonoStyle}>{row.categoryLabel}</span>
+        </div>
+      ),
     },
     {
       h: "EMP ID",
@@ -228,14 +955,32 @@ export default async function PassengersPage({
     },
     {
       h: "STATE",
-      w: 100,
+      w: 120,
       r: (row) => (
-        <CanvasPill theme={th} tone={row.stateTone} dot>
-          {row.stateLabel}
-        </CanvasPill>
+        <div style={{ display: "grid", gap: 4 }}>
+          <CanvasPill theme={th} tone={row.stateTone} dot>
+            {row.stateLabel}
+          </CanvasPill>
+          <span style={subtleMonoStyle}>{row.qualitySummary}</span>
+        </div>
+      ),
+    },
+    {
+      h: "ACTIONS",
+      w: 280,
+      r: (row) => (
+        <div style={actionWrapStyle}>
+          {buildRowActionLinks(row).map((link) => renderActionButton(link))}
+        </div>
       ),
     },
   ];
+
+  const activeCount = passengers.filter(
+    (passenger) => passenger.activeFlag,
+  ).length;
+  const employeeCount = passengers.filter(isEmployeePassenger).length;
+  const inactiveCount = passengers.length - activeCount;
 
   return (
     <div>
@@ -245,16 +990,7 @@ export default async function PassengersPage({
         subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本"
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
-        actions={
-          <>
-            <CanvasBtn theme={th} icon="ext" size="sm">
-              CSV 匯入
-            </CanvasBtn>
-            <CanvasBtn theme={th} variant="primary" icon="plus" size="sm">
-              新增
-            </CanvasBtn>
-          </>
-        }
+        actions={<>{pageActionLinks.map((link) => renderActionButton(link))}</>}
       />
 
       <div style={pageBodyStyle}>
@@ -268,18 +1004,258 @@ export default async function PassengersPage({
           />
         ) : null}
 
-        <CanvasCard theme={th} padding={0} style={cardStyle}>
-          {rows.length > 0 ? (
-            <CanvasTable<PassengerRow>
-              theme={th}
-              columns={columns}
-              rows={rows}
-            />
-          ) : (
-            <div style={emptyStateStyle}>目前沒有符合篩選條件的乘客資料。</div>
-          )}
+        <div style={metricsStyle}>
+          <CanvasKPI
+            theme={th}
+            label="Passengers"
+            value={String(passengers.length)}
+            sub="directory rows"
+          />
+          <CanvasKPI
+            theme={th}
+            label="Active"
+            value={String(activeCount)}
+            sub="picker visible"
+          />
+          <CanvasKPI
+            theme={th}
+            label="Employees"
+            value={String(employeeCount)}
+            sub="employee profile"
+          />
+          <CanvasKPI
+            theme={th}
+            label="Inactive"
+            value={String(inactiveCount)}
+            sub="historical only"
+          />
+        </div>
+
+        <CanvasCard
+          theme={th}
+          title="查詢與 freshness"
+          subtitle="T5 refresh tier = 30s cadence"
+          style={filterCardStyle}
+        >
+          <form method="get" style={filterRowStyle}>
+            <label style={fieldStackStyle}>
+              <span style={subtleMonoStyle}>SEARCH</span>
+              <input
+                type="search"
+                name="q"
+                defaultValue={searchQuery}
+                placeholder="姓名 / 員編 / 手機"
+                style={inputStyle}
+              />
+            </label>
+
+            <label style={fieldStackStyle}>
+              <span style={subtleMonoStyle}>DEPARTMENT</span>
+              <select
+                name="department"
+                defaultValue={selectedDepartment}
+                style={selectStyle}
+              >
+                <option value="">全部部門</option>
+                {departmentOptions.map((department) => (
+                  <option key={department} value={department}>
+                    {department}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              {selectedTab !== "all" ? (
+                <input type="hidden" name="tab" value={selectedTab} />
+              ) : null}
+              <button type="submit" style={submitButtonStyle}>
+                套用
+              </button>
+              <Link href="/passengers" style={{ textDecoration: "none" }}>
+                <CanvasBtn theme={th} variant="secondary" size="sm">
+                  重設
+                </CanvasBtn>
+              </Link>
+            </div>
+          </form>
+
+          <div style={helperRowStyle}>
+            <div style={chipRowStyle}>
+              <CanvasPill theme={th} tone="info">
+                refresh {refresh.dataFreshness}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                generated {formatRefreshTime(refresh.generatedAt)}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                {formatRelativeStale(refresh)}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                source {refresh.source}
+              </CanvasPill>
+            </div>
+            <span style={subtleMonoStyle}>
+              active / inactive、department、name / employee no / mobile
+            </span>
+          </div>
         </CanvasCard>
+
+        <div style={contentGridStyle}>
+          <CanvasCard theme={th} padding={0} style={cardStyle}>
+            {filteredEmptyState ? (
+              renderEmptyState(filteredEmptyState, clearFiltersHref)
+            ) : (
+              <CanvasTable<PassengerRow>
+                theme={th}
+                columns={columns}
+                rows={rows}
+              />
+            )}
+          </CanvasCard>
+
+          <div style={sideStackStyle}>
+            <CanvasCard
+              theme={th}
+              title="Directory notes"
+              subtitle="spec-driven behavior"
+            >
+              <CanvasDL
+                theme={th}
+                cols={2}
+                items={[
+                  { k: "Refresh tier", v: "T5 / 30s", mono: true },
+                  { k: "Soft deactivate", v: "reason required", mono: false },
+                  { k: "Hard delete", v: "not in normal UI", mono: false },
+                  { k: "Booking exit", v: "/bookings/new prefill", mono: true },
+                ]}
+              />
+
+              <div style={{ height: 16 }} />
+
+              <CanvasField
+                theme={th}
+                label="availableActions"
+                hint="畫面上的 CTA 從 backend action descriptors 讀取；缺資料時才用 contract-safe fallback。"
+              >
+                <div style={chipRowStyle}>
+                  {pageActions.map((action) => (
+                    <CanvasPill
+                      key={action.action}
+                      theme={th}
+                      tone={
+                        !action.enabled
+                          ? "neutral"
+                          : action.riskLevel === "high"
+                            ? "warn"
+                            : action.riskLevel === "medium"
+                              ? "accent"
+                              : "info"
+                      }
+                    >
+                      {describeActionLabel(action.action)}
+                    </CanvasPill>
+                  ))}
+                </div>
+              </CanvasField>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
+              title="Duplicate-name warning"
+              subtitle="backend-detected or local fallback grouping"
+            >
+              {duplicateWarnings.length > 0 ? (
+                <div style={warningListStyle}>
+                  {duplicateWarnings.map((warning) => (
+                    <div key={warning.key} style={warningItemStyle}>
+                      <div style={{ color: th.text, fontWeight: 600 }}>
+                        {warning.label}
+                      </div>
+                      <div style={subtleMonoStyle}>
+                        {warning.passengerIds.join(" · ")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={emptyBodyStyle}>
+                  目前未發現 duplicate-name warning。
+                </div>
+              )}
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
+              title="Deep links"
+              subtitle="cross-app links open in new tab"
+            >
+              {supportLinks.length > 0 ? (
+                <div style={linkListStyle}>
+                  {supportLinks.map((link) => (
+                    <Link
+                      key={`${link.targetApp}-${link.resourceId}-${link.route}`}
+                      href={link.route}
+                      target={
+                        link.openMode === "new_tab" ? "_blank" : undefined
+                      }
+                      rel={
+                        link.openMode === "new_tab"
+                          ? "noreferrer noopener"
+                          : undefined
+                      }
+                      style={linkItemStyle}
+                    >
+                      <span>{link.label}</span>
+                      <span style={subtleMonoStyle}>{link.targetApp}</span>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div style={emptyBodyStyle}>
+                  目前 passenger directory 沒有 backend 發出的 cross-app deep
+                  links。
+                </div>
+              )}
+            </CanvasCard>
+
+            {pageActionLinks.some((link) => link.disabled) ? (
+              <CanvasCard
+                theme={th}
+                title="Disabled actions"
+                subtitle="descriptor reasons"
+              >
+                <div style={warningListStyle}>
+                  {pageActionLinks
+                    .filter((link) => link.disabled)
+                    .map((link) => (
+                      <div key={link.key} style={warningItemStyle}>
+                        <div style={{ color: th.text, fontWeight: 600 }}>
+                          {link.label}
+                        </div>
+                        <div style={emptyBodyStyle}>
+                          {formatDisabledReason(
+                            pageActions.find(
+                              (action) => action.action === link.key,
+                            )?.disabledReasonCode,
+                          ) ?? "action currently disabled"}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </CanvasCard>
+            ) : null}
+          </div>
+        </div>
       </div>
     </div>
   );
+}
+
+function buildSearchParams(selectedTab: PassengerTabKey) {
+  const params = new URLSearchParams();
+  if (selectedTab !== "all") {
+    params.set("tab", selectedTab);
+  }
+  return params;
 }

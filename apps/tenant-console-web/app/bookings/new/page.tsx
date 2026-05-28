@@ -13,7 +13,11 @@ import { TenantBookingCreateForm } from "./tenant-booking-create-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewBookingPage() {
+export default async function NewBookingPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const client = getTenantClient();
   const [passengers, addresses, costCenters] = await Promise.all([
     client.listPassengers() as Promise<TenantPassengerRecord[]>,
@@ -26,6 +30,15 @@ export default async function NewBookingPage() {
   const activePassengers = passengers.filter((row) => row.activeFlag);
   const activeAddresses = addresses.filter((row) => row.activeFlag);
   const activeCostCenters = costCenters.filter((row) => row.activeFlag);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const rawPassengerId = Array.isArray(resolvedSearchParams.passengerId)
+    ? resolvedSearchParams.passengerId[0]
+    : resolvedSearchParams.passengerId;
+  const initialSelectedPassengerId =
+    rawPassengerId &&
+    activePassengers.some((row) => row.passengerId === rawPassengerId)
+      ? rawPassengerId
+      : "";
 
   return (
     <div className="page-shell">
@@ -58,6 +71,7 @@ export default async function NewBookingPage() {
       <TenantBookingCreateForm
         addresses={activeAddresses}
         costCenters={activeCostCenters}
+        initialSelectedPassengerId={initialSelectedPassengerId}
         passengers={activePassengers}
       />
 
