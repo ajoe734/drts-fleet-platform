@@ -158,8 +158,12 @@ type CostCenterRow = Record<string, unknown> & {
   actions: ResourceActionDescriptor[];
 };
 
+type CostCenterActionRecord = TenantCostCenterRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
 type CostCentersPageData = {
-  costCenters: TenantCostCenterRecord[];
+  costCenters: CostCenterActionRecord[];
   quotaSummariesByCode: Partial<Record<string, TenantCostCenterQuotaSummary>>;
   approvalRules: TenantApprovalRuleRecord[];
   coverageReport: TenantCostCenterCoverageReport | null;
@@ -304,7 +308,9 @@ async function loadCostCentersData(
 
   const costCenters =
     costCentersResult.status === "fulfilled"
-      ? [...costCentersResult.value].sort(compareCostCenters)
+      ? [...(costCentersResult.value as CostCenterActionRecord[])].sort(
+          compareCostCenters,
+        )
       : [];
   const approvalRules =
     approvalRulesResult.status === "fulfilled"
@@ -506,9 +512,13 @@ function buildPageActions(
 }
 
 function buildRowActions(
-  costCenter: TenantCostCenterRecord,
+  costCenter: CostCenterActionRecord,
   usersById: Map<string, TenantUserRoleRecord>,
 ): ResourceActionDescriptor[] {
+  if (Array.isArray(costCenter.availableActions)) {
+    return costCenter.availableActions;
+  }
+
   const ownerLinked = costCenter.ownerUserId
     ? usersById.has(costCenter.ownerUserId)
     : false;
@@ -555,7 +565,7 @@ function buildRowActions(
 }
 
 function buildCostCenterRows(
-  costCenters: TenantCostCenterRecord[],
+  costCenters: CostCenterActionRecord[],
   quotaSummariesByCode: Partial<Record<string, TenantCostCenterQuotaSummary>>,
   approvalRules: TenantApprovalRuleRecord[],
   coverageReport: TenantCostCenterCoverageReport | null,
@@ -974,11 +984,23 @@ export default async function CostCentersPage({
     },
     {
       h: "審批",
-      w: 190,
+      w: 170,
       r: (row) => (
         <div style={tableCellStackStyle}>
           <span style={tablePrimaryTextStyle}>{row.approvalLabel}</span>
           <span style={tableMutedTextStyle}>連到 `/rules` 檢查 precedence</span>
+        </div>
+      ),
+    },
+    {
+      h: "報表歸因",
+      w: 220,
+      r: (row) => (
+        <div style={tableCellStackStyle}>
+          <span style={tablePrimaryTextStyle}>{row.reportLabel}</span>
+          <span style={tableMutedTextStyle}>
+            連到 `/reports` 檢查歸因與 legacy mapping
+          </span>
         </div>
       ),
     },
