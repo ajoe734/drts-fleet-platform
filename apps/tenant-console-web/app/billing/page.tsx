@@ -325,11 +325,36 @@ const CROSS_APP_LINKS: CrossAppResourceLink[] = [
   },
 ];
 
-const CROSS_APP_ORIGINS: Record<CrossAppResourceLink["targetApp"], string> = {
+const DEFAULT_CROSS_APP_ORIGINS: Record<
+  CrossAppResourceLink["targetApp"],
+  string
+> = {
   "tenant-console": "",
-  "platform-admin": "https://admin.drts.io",
-  "ops-console": "https://ops.drts.io",
+  "platform-admin": "http://localhost:3002",
+  "ops-console": "http://localhost:3003",
 };
+
+function trimTrailingSlash(value: string) {
+  return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+function getCrossAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
+  switch (targetApp) {
+    case "platform-admin":
+      return trimTrailingSlash(
+        process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ??
+          DEFAULT_CROSS_APP_ORIGINS["platform-admin"],
+      );
+    case "ops-console":
+      return trimTrailingSlash(
+        process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ??
+          DEFAULT_CROSS_APP_ORIGINS["ops-console"],
+      );
+    case "tenant-console":
+    default:
+      return DEFAULT_CROSS_APP_ORIGINS["tenant-console"];
+  }
+}
 
 async function loadBillingPageData(): Promise<BillingPageData> {
   const client = getTenantClient();
@@ -676,7 +701,7 @@ function getUsageRemainingValue(summary: TenantQuotaSummary | null) {
 }
 
 function resolveCrossAppHref(link: CrossAppResourceLink) {
-  const origin = CROSS_APP_ORIGINS[link.targetApp] ?? "";
+  const origin = getCrossAppOrigin(link.targetApp);
   return `${origin}${link.route}`;
 }
 
