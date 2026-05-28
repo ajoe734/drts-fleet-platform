@@ -71,6 +71,28 @@ describe("maintenance service", () => {
     expect(updated.completedAt).toBeDefined();
   });
 
+  it("returns the captured audit log when a caller requests receipt metadata", () => {
+    const { service } = createService();
+
+    const created = service.createMaintenanceLog(
+      {
+        vehicleId: "VEH-005",
+        type: "inspection",
+        description: "Receipt pilot",
+      },
+      "req-maint-capture-001",
+      { captureAudit: true },
+    );
+
+    expect(created.data.maintenanceId).toMatch(/^MNT-\d{6}$/);
+    expect(created.auditLog.auditId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(created.auditLog.requestId).toBe("req-maint-capture-001");
+    expect(created.auditLog.resourceType).toBe("maintenance_log");
+    expect(created.auditLog.resourceId).toBe(created.data.maintenanceId);
+  });
+
   it("creates scheduled log with scheduled status", () => {
     const { service } = createService();
 
