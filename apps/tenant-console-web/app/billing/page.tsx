@@ -138,7 +138,7 @@ const stateChipActiveStyle: CSSProperties = {
   ...stateChipStyle,
   background: th.surfaceLo,
   borderColor: th.accent,
-  boxShadow: `0 0 0 1px ${th.accentInset}`,
+  boxShadow: `0 0 0 1px ${th.accent}`,
 };
 
 const inlineRowStyle: CSSProperties = {
@@ -599,6 +599,10 @@ function getInvoiceDueDate(invoice: TenantInvoiceRecord) {
   return formatDateInput(basis.toISOString()) ?? "—";
 }
 
+function toInvoiceSummaryHref(invoice: TenantInvoiceRecord) {
+  return `/invoices?period=${invoice.periodStart.slice(0, 7)}`;
+}
+
 function getAverageTripAmount(invoices: TenantInvoiceRecord[]) {
   const totalTrips = invoices.reduce(
     (count, invoice) => count + invoice.lines.length,
@@ -743,7 +747,11 @@ export default async function BillingPage({
       h: "INVOICE",
       w: 200,
       mono: true,
-      r: (row) => <span style={tablePrimaryStyle}>{row.invoiceId}</span>,
+      r: (row) => (
+        <Link href={toInvoiceSummaryHref(row)} style={tableLinkStyle}>
+          <span style={tablePrimaryStyle}>{row.invoiceId}</span>
+        </Link>
+      ),
     },
     {
       h: "PERIOD",
