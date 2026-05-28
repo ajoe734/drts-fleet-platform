@@ -5,160 +5,129 @@
 - Task: `UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR`
 - Parent: `UI-FE-DRV-IDX`
 - Owner: `Codex`
-- Reviewer: `Claude`
-- Audit timestamp: `2026-05-27`
+- Reviewer: `Codex2`
+- Audit timestamp: `2026-05-28`
 
-## Diagnosis
+## Current Machine Truth
 
-The parent is blocked by mixed branch/state history, not by a missing cockpit
-implementation commit.
+The parent is no longer blocked.
 
-1. `UI-FE-DRV-IDX` first moved through a `codex2` implementation/review cycle.
-   `Codex2` handed off commit `64b7a51d` on 2026-05-25T19:54Z, and `Codex`
-   explicitly recorded at 2026-05-25T20:12Z that this handoff commit was being
-   pulled into `codex/ui-fe-drv-idx` before fixing the inbox truncation review
-   bug.
-2. That produced one pushed owner-lane branch
-   `origin/codex/ui-fe-drv-idx @ b334ef9663d026e9ca37da636a158219dc75eff2`
-   with the reviewed follow-up fix commit `8ecdea98` in its ancestry.
-3. The same task later completed again on a separate pushed branch
-   `origin/codex2/ui-fe-drv-idx @ 1c83f9af648a0a787fa0da41e4c1688e6a74ae1b`,
-   whose ancestry is different: it contains the original `codex2` cockpit rebuild
-   chain (`1f34ba15`, `97b3c0c5`, `1c83f9af`) and is based on a later trunk tip
-   `070f9aea`, not on the `5e76ec58` base used by the `codex` branch.
-4. Because both task branches are pushed and both carry closeout commits for the
-   same task id, the control plane can see two plausible parent histories even
-   though only one matches the parent's current machine-truth owner/reviewer
-   pair.
-5. Parent machine truth now points at the `codex2` branch. In canonical
-   `ai-status.json`, `UI-FE-DRV-IDX` is owned by `Codex2`, reviewed by
-   `Claude2`, and its blocker text says closeout commit `1c83f9af` is already on
-   `origin/codex2/ui-fe-drv-idx` but the task regressed from `review_approved`
-   back to `in_progress` after approval due to a later owner progress update.
+- Canonical `ai-status.json` now records `UI-FE-DRV-IDX` as `done`.
+- The accepted parent closeout is
+  `origin/codex/ui-fe-drv-idx @ b334ef9663d026e9ca37da636a158219dc75eff2`
+  with commit subject `UI-FE-DRV-IDX: finalize approved workspace cockpit closeout`.
+- The parent state changed to `done` at `2026-05-28T03:21:30Z`.
 
-## Evidence
-
-### Branch and commit state
-
-- `origin/codex/ui-fe-drv-idx @ b334ef9663d026e9ca37da636a158219dc75eff2`
-- `origin/codex2/ui-fe-drv-idx @ 1c83f9af648a0a787fa0da41e4c1688e6a74ae1b`
-- merge-base of `codex/ui-fe-drv-idx` and `codex2/ui-fe-drv-idx` is
-  `5e76ec587b25307a5e63068e4ef80a895d4179a6`
-- `git rev-list --left-right --count codex/ui-fe-drv-idx...codex2/ui-fe-drv-idx`
-  returns `2 10`
-- `git log --oneline 5e76ec58..b334ef96` shows the `codex` branch carries:
-  - `8ecdea98` `UI-FE-DRV-IDX: cover full cockpit notification inbox`
-  - `b334ef96` `UI-FE-DRV-IDX: finalize approved workspace cockpit closeout`
-- `git log --oneline 070f9aea..1c83f9af` shows the `codex2` branch carries:
-  - `1f34ba15` `UI-FE-DRV-IDX: rebuild driver workspace cockpit`
-  - `97b3c0c5` `UI-FE-DRV-IDX: complete cockpit workspace spec`
-  - `1c83f9af` `UI-FE-DRV-IDX: finalize cockpit reskin closeout`
-- `git diff --name-only codex/ui-fe-drv-idx...codex2/ui-fe-drv-idx` shows the
-  two branch histories do not differ only in `apps/driver-app/app/index.tsx`;
-  the later-base `codex2` branch also drags unrelated docs/ops history into the
-  comparison because it starts from a newer trunk commit.
-
-### Machine-truth anchors
-
-- Parent task `UI-FE-DRV-IDX` is `blocked` in canonical
-  `/home/edna/workspace/drts-fleet-platform/ai-status.json`
-- Parent `next` says:
-  `Closeout commit 1c83f9af pushed to origin/codex2/ui-fe-drv-idx ... reviewer must restore review_approved before owner can run done with commit/push metadata.`
-- Canonical activity log records the branch crossover:
-  - `2026-05-25T19:54:06Z` `Codex2` handoff cites pushed commit `64b7a51d`
-  - `2026-05-25T20:12:42Z` `Codex` progress says it is pulling handoff commit
-    `64b7a51d` into `codex/ui-fe-drv-idx`
-  - `2026-05-25T20:29:07Z` `Codex` hands off the resulting `codex` branch after
-    validating commit `8ecdea98`
-  - `2026-05-26T13:43:59Z` chairman creates this history-repair child and cites
-    the later `codex2` closeout commit `1c83f9af` as the already-pushed parent
-    tip that lost its `review_approved` state
-- `git ls-remote --heads origin` confirms both parent branches exist remotely:
-  - `refs/heads/codex/ui-fe-drv-idx @ b334ef96`
-  - `refs/heads/codex2/ui-fe-drv-idx @ 1c83f9af`
-- `gh pr list --state all --search 'UI-FE-DRV-IDX'` finds no task-specific PR;
-  the only match is the umbrella task-registration PR `#286`
+This helper task stayed open because its previously pushed evidence branch and
+artifact were stale relative to current trunk and current machine truth.
 
 ## Exact Contamination
 
-The contamination is a two-part mismatch:
+There were two separate contamination problems.
 
-1. The same task id has two different pushed parent branches with different
-   commit ancestry:
-   `origin/codex/ui-fe-drv-idx @ b334ef96` and
-   `origin/codex2/ui-fe-drv-idx @ 1c83f9af`.
-2. The parent's machine truth no longer points to the earlier `codex` replay.
-   It now points to the later `codex2` closeout, but the reviewer-approved state
-   for that closeout was accidentally regressed by a later owner progress event.
+### 1. Parent history contamination
 
-This means the parent is not blocked by missing UI work. It is blocked because
-history currently presents two durable branch rails for the same task while the
-control plane still needs the `codex2` rail restored to `review_approved`/`done`.
+`UI-FE-DRV-IDX` accumulated two pushed task rails with different ancestry:
 
-## Non-Destructive Repair Path
+- `origin/codex/ui-fe-drv-idx @ b334ef9663d026e9ca37da636a158219dc75eff2`
+- `origin/codex2/ui-fe-drv-idx @ 1c83f9af648a0a787fa0da41e4c1688e6a74ae1b`
 
-Do not force-push, rebase, rename, or delete either parent branch. Repair by
-declaring the already-pushed `codex2` branch the canonical parent replay rail
-and replaying only the state transition.
+That ambiguity is now resolved in machine truth: the canonical parent rail is
+the `codex` branch at `b334ef96`, and the parent is already `done`.
 
-1. Treat `origin/codex2/ui-fe-drv-idx @ 1c83f9af648a0a787fa0da41e4c1688e6a74ae1b`
-   as the canonical parent branch, because:
-   - the current parent owner/reviewer pair is `Codex2` / `Claude2`
-   - canonical `ai-status.json` already names `1c83f9af` as the closeout commit
-   - the blocker is loss of `review_approved`, not absence of a pushed commit
-2. Leave `origin/codex/ui-fe-drv-idx @ b334ef96` untouched. It remains valid
-   audit evidence of the earlier replay/fix path, but it is not the canonical
-   branch for final parent closeout anymore.
-3. Parent reviewer `Claude2` restores `review_approved` on the existing pushed
-   `codex2` branch:
+### 2. Helper branch contamination
 
-```bash
-AI_NAME=Claude2 scripts/ai-status.sh approve UI-FE-DRV-IDX \
-  "Replay approval on canonical parent branch origin/codex2/ui-fe-drv-idx @ 1c83f9af648a0a787fa0da41e4c1688e6a74ae1b. History repair confirms the older origin/codex/ui-fe-drv-idx @ b334ef96 is superseded audit history, not the closeout rail. No force-push or code replay required."
-```
+The previously handed-off helper branch was not a clean task-only replay rail.
 
-4. Parent owner `Codex2` then performs the formal closeout on the same already
-   pushed branch with commit/push metadata:
+- Previous helper tip:
+  `origin/codex/ui-fe-drv-idx-unblock-history-repair @ 47f5ce962e8c48a2e8a09ea7af1aed3191fa2a24`
+- Previous merge-base versus `origin/dev`:
+  `070f9aea91e066ffce138b321e16dd8cda10828d`
+- Previous divergence:
+  `git rev-list --left-right --count origin/dev...origin/codex/ui-fe-drv-idx-unblock-history-repair`
+  returned `15 1`
 
-```bash
-AI_NAME=Codex2 COMMIT_HASH=1c83f9af648a0a787fa0da41e4c1688e6a74ae1b \
-COMMIT_SUBJECT="UI-FE-DRV-IDX: finalize cockpit reskin closeout" \
-PUSH_REMOTE=origin PUSH_BRANCH=codex2/ui-fe-drv-idx \
-scripts/ai-status.sh done UI-FE-DRV-IDX \
-  "Parent closeout finalized on canonical branch origin/codex2/ui-fe-drv-idx @ 1c83f9af648a0a787fa0da41e4c1688e6a74ae1b after restoring reviewer approval. Earlier origin/codex/ui-fe-drv-idx history remains preserved as audit evidence; no force-push required."
-```
+That means `47f5ce96` was a valid documentation commit, but it was sitting on an
+outdated helper branch base and therefore could not be reviewed as a clean
+task-only repair branch.
 
-5. If reviewer `Claude2` finds a real UI regression on commit `1c83f9af`, that
-   should be recorded as a normal parent reopen/blocker against
-   `origin/codex2/ui-fe-drv-idx`. Do not reopen history repair unless the
-   canonical replay branch itself becomes ambiguous again.
+## Repair Applied
+
+The helper branch itself has now been repaired without rewriting shared history.
+
+1. Kept the existing documentation commit `47f5ce96` intact.
+2. Merged `origin/dev` into the helper branch instead of force-pushing or
+   rebasing.
+3. Produced new helper tip `94551202`:
+   `Merge origin/dev into codex/ui-fe-drv-idx-unblock-history-repair to repair stale helper base`
+4. After the merge, the helper branch is clean relative to current trunk:
+   - merge-base of `origin/dev` and `HEAD` is now
+     `75674c4c678c195dff5e709bd2622a0e713ae216`
+   - `git rev-list --left-right --count origin/dev...HEAD` now returns `0 2`
+
+This preserves the old evidence commit, avoids force-push, and makes the helper
+reviewable on top of current `dev`.
+
+## Updated Interpretation
+
+The prior artifact recommendation is now obsolete.
+
+It previously recommended restoring the parent on
+`origin/codex2/ui-fe-drv-idx @ 1c83f9af`. That was accurate for the machine
+truth visible on 2026-05-27, but it is no longer correct after the parent was
+closed on `origin/codex/ui-fe-drv-idx @ b334ef96` at `2026-05-28T03:21:30Z`.
+
+The concrete unblocked next step is therefore:
+
+- do **not** reopen or replay `UI-FE-DRV-IDX`
+- keep `UI-FE-DRV-IDX` on its existing `done` rail
+- close this helper as obsolete after reviewer verifies the refreshed artifact
+  and the repaired helper branch base
 
 ## Why This Is Safe
 
-- No remote branch is rewritten.
-- No commit moves between branch names.
-- The already-pushed closeout commit `1c83f9af` remains the canonical parent tip.
-- The earlier `codex` branch remains available for audit and diff inspection.
-- The repair resolves ambiguity by replaying state, not by rewriting history.
+- No shared branch was force-pushed.
+- No existing task commit was dropped.
+- The accepted parent closeout `b334ef96` stays untouched.
+- The stale helper evidence `47f5ce96` remains reachable in history.
+- The branch-base repair is additive only: merge `origin/dev`, then document the
+  superseding machine truth.
 
-## Verification Performed For This Repair
+## Evidence
 
-- Read `AI_COLLABORATION_GUIDE.md`, `docs/ops/branch-strategy.md`, and
-  `.orchestrator/skills/worker-anchor-commit.md`
-- Inspected canonical `/home/edna/workspace/drts-fleet-platform/ai-status.json`
-- Inspected canonical `/home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl`
-- Compared related branch and worktree state:
-  - `git worktree list --porcelain`
-  - `git branch -vv | grep 'ui-fe-drv-idx'`
-  - `git ls-remote --heads origin 'refs/heads/codex/ui-fe-drv-idx' 'refs/heads/codex2/ui-fe-drv-idx'`
-- Compared ancestry and divergence:
-  - `git merge-base codex/ui-fe-drv-idx codex2/ui-fe-drv-idx`
-  - `git rev-list --left-right --count codex/ui-fe-drv-idx...codex2/ui-fe-drv-idx`
-  - `git log --oneline 5e76ec58..b334ef96`
-  - `git log --oneline 070f9aea..1c83f9af`
-  - `git diff --name-only codex/ui-fe-drv-idx...codex2/ui-fe-drv-idx`
-- Confirmed machine-truth blocker and crossover history:
-  - `sed -n '23045,23105p' /home/edna/workspace/drts-fleet-platform/ai-status.json`
-  - `grep -n '64b7a51d\\|UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR' /home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl`
-- Confirmed no task-specific PR exists yet:
-  - `gh pr list --state all --search 'UI-FE-DRV-IDX' --json number,title,headRefName,baseRefName,state,url`
+### Parent machine truth
+
+- `UI-FE-DRV-IDX` in canonical `ai-status.json`:
+  - status `done`
+  - `commit_hash = b334ef9663d026e9ca37da636a158219dc75eff2`
+  - `push_branch = codex/ui-fe-drv-idx`
+  - `last_update = 2026-05-28T03:21:30Z`
+- Review failure recorded at `2026-05-28T03:25:14Z` in
+  `ai-activity-log.jsonl` explicitly cited helper-branch contamination
+  (`15 left / 1 right`) and instructed the owner to refresh against current
+  machine truth or close the helper as obsolete.
+
+### Helper branch state
+
+- old helper tip: `47f5ce96`
+- repaired helper merge tip: `94551202` (local before push)
+- old merge-base versus `origin/dev`: `070f9aea`
+- new merge-base versus `origin/dev`: `75674c4c`
+- old divergence versus `origin/dev`: `15 left / 1 right`
+- new divergence versus `origin/dev`: `0 left / 2 right`
+
+## Verification Performed
+
+- Read `AI_COLLABORATION_GUIDE.md`
+- Read `.orchestrator/skills/worker-anchor-commit.md`
+- Inspected canonical machine truth:
+  - `sed -n '23090,23145p' /home/edna/workspace/drts-fleet-platform/ai-status.json`
+  - `sed -n '23970,24030p' /home/edna/workspace/drts-fleet-platform/ai-status.json`
+  - `grep -R -n 'UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR' /home/edna/workspace/drts-fleet-platform/ai-status.json /home/edna/workspace/drts-fleet-platform/current-work.md /home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl`
+- Verified helper contamination and repair:
+  - `git merge-base origin/dev origin/codex/ui-fe-drv-idx-unblock-history-repair`
+  - `git rev-list --left-right --count origin/dev...origin/codex/ui-fe-drv-idx-unblock-history-repair`
+  - `git merge --no-ff origin/dev`
+  - `git merge-base origin/dev HEAD`
+  - `git rev-list --left-right --count origin/dev...HEAD`
+  - `git log --oneline --decorate --graph --max-count=6 HEAD`
