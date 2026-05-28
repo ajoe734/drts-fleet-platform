@@ -109,3 +109,15 @@ Those are not blockers for `UI-FE-TEN-USR`.
 - Existing gap inventory and command matrix:
   `support/sidecars/XS-UI-002/backend-gap-inventory.md`,
   `support/sidecars/XS-UI-003/command-action-matrix.md`
+
+## Review And Closeout Evidence
+
+- Reviewer `Claude2` approved this decision on `2026-05-28T09:33:42Z`,
+  confirming alignment with spec §9.6.5, the four `tenant_*` role contracts,
+  and the existing `TU-1` / `TU-3` gap inventory.
+- Owner closeout keeps the parent next step explicit: `UI-FE-TEN-USR` should
+  resume against `listTenantUsers()`, `listTenantRoles()`, `createTenantUser()`,
+  and `updateTenantRole()`.
+- The remaining workspace package-resolution issue mentioned on the parent is
+  independent of this planning decision and does not reopen the `/users`
+  product/contract scope resolved here.
