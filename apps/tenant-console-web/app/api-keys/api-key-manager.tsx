@@ -97,11 +97,10 @@ type EmptyStateConfig = {
 
 const th = buildCanvasTheme({
   surface: "tenant",
-  dark: true,
+  dark: false,
   density: "compact",
 });
 
-const AUTO_REFRESH_MS = 30_000;
 const REFRESH_LABELS: Record<RefreshTier, string> = {
   urgent: "T1 urgent · push",
   fast: "T2 fast · 3s",
@@ -110,6 +109,13 @@ const REFRESH_LABELS: Record<RefreshTier, string> = {
   medium_slow: "T4.5 medium-slow · 30s",
   slow: "T5 tenant slow · 30s",
   manual: "T6 manual",
+};
+const REFRESH_INTERVALS_MS: Partial<Record<RefreshTier, number>> = {
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
 };
 
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
@@ -641,7 +647,9 @@ function renderActionButton(
   );
 }
 
-function getEmptyStateCatalog(issueAction: ResourceActionDescriptor) {
+function getEmptyStateCatalog(
+  issueAction: ResourceActionDescriptor,
+): Record<SupportedEmptyReason, EmptyStateConfig> {
   return {
     no_data: {
       tone: "info" as CanvasTone,
@@ -684,6 +692,34 @@ function getEmptyStateCatalog(issueAction: ResourceActionDescriptor) {
       ctaLabel: "清除篩選",
     },
   } satisfies Record<SupportedEmptyReason, EmptyStateConfig>;
+}
+
+function inferEmptyReasonFromErrors(
+  errors: string[],
+): "permission_denied" | "external_unavailable" | null {
+  const normalized = errors.join(" ").toLowerCase();
+  if (
+    normalized.includes("permission_denied") ||
+    normalized.includes("permission denied") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("403")
+  ) {
+    return "permission_denied";
+  }
+
+  if (
+    normalized.includes("external_unavailable") ||
+    normalized.includes("service unavailable") ||
+    normalized.includes("dependency") ||
+    normalized.includes("timeout") ||
+    normalized.includes("upstream") ||
+    normalized.includes("trust service")
+  ) {
+    return "external_unavailable";
+  }
+
+  return null;
 }
 
 function getFlashKeyName(
@@ -733,13 +769,14 @@ export function ApiKeyManager({
   }, [snapshotAt]);
 
   useEffect(() => {
-    if (refreshTier === "manual") return;
+    const intervalMs = REFRESH_INTERVALS_MS[refreshTier];
+    if (!intervalMs) return;
     const timer = window.setInterval(() => {
       startTransition(() => {
         router.refresh();
         setLastRefreshedAt(new Date().toISOString());
       });
-    }, AUTO_REFRESH_MS);
+    }, intervalMs);
     return () => window.clearInterval(timer);
   }, [refreshTier, router]);
 
@@ -793,7 +830,9 @@ export function ApiKeyManager({
     if (emptyReasonOverride) {
       return emptyReasonOverride as SupportedEmptyReason;
     }
-    if (errors.length > 0 && sortedKeys.length === 0) return "fetch_failed";
+    if (errors.length > 0 && sortedKeys.length === 0) {
+      return inferEmptyReasonFromErrors(errors) ?? "fetch_failed";
+    }
     if (!governanceResource && sortedKeys.length === 0)
       return "not_provisioned";
     if (sortedKeys.length === 0) return "no_data";
