@@ -3,14 +3,18 @@ import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   AuditLogRecord,
+  CrossAppResourceLink,
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
+  PlatformAdminUserMutationResult,
   PlatformAdminUserRecord,
+  PlatformAdminUsersView,
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
   PlatformPricingRuleRecord,
@@ -18,8 +22,10 @@ import type {
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
+  ResourceActionDescriptor,
   SetPlatformMaintenanceModeCommand,
   TenantInvoiceRecord,
+  UiHealthEnvelope,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
@@ -78,23 +84,67 @@ const PLACARD_SEED: PlacardVersionRecord[] = [
 const PLATFORM_ADMIN_USERS_SEED: PlatformAdminUserRecord[] = [
   {
     userId: "pa-admin-001",
-    email: "admin@platform.drts",
-    displayName: "Platform Superadmin",
-    roleCode: "superadmin",
+    email: "yc.lin@drts.io",
+    displayName: "林宜君",
+    roleCode: "pa_super_admin",
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-05-25T08:30:00.000Z",
+    availableActions: [],
   },
   {
-    userId: "pa-operator-001",
-    email: "ops@platform.drts",
-    displayName: "Ops Operator",
-    roleCode: "operator",
+    userId: "pa-ops-risk-001",
+    email: "fang.wang@drts.io",
+    displayName: "王芳",
+    roleCode: "pa_ops_risk_gov",
     status: "active",
     createdAt: "2026-02-01T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-05-25T08:10:00.000Z",
+    availableActions: [],
+  },
+  {
+    userId: "pa-finance-001",
+    email: "wei.chang@drts.io",
+    displayName: "張薇",
+    roleCode: "pa_finance_gov",
+    status: "active",
+    createdAt: "2026-02-10T00:00:00.000Z",
+    updatedAt: "2026-05-24T17:45:00.000Z",
+    availableActions: [],
+  },
+  {
+    userId: "pa-tenant-001",
+    email: "jun.li@drts.io",
+    displayName: "李俊",
+    roleCode: "pa_tenant_mgr",
+    status: "invited",
+    createdAt: "2026-03-03T00:00:00.000Z",
+    updatedAt: "2026-05-24T09:20:00.000Z",
+    availableActions: [],
+  },
+  {
+    userId: "pa-fleet-001",
+    email: "wei.chen@drts.io",
+    displayName: "陳維",
+    roleCode: "pa_fleet_gov",
+    status: "active",
+    createdAt: "2026-03-18T00:00:00.000Z",
+    updatedAt: "2026-05-21T11:00:00.000Z",
+    availableActions: [],
+  },
+  {
+    userId: "pa-partner-001",
+    email: "ken.liao@drts.io",
+    displayName: "Ken Liao",
+    roleCode: "pa_partner_mgr",
+    status: "suspended",
+    createdAt: "2026-02-22T00:00:00.000Z",
+    updatedAt: "2026-05-19T06:40:00.000Z",
+    availableActions: [],
   },
 ];
+
+const PLATFORM_ADMIN_USERS_REFRESH_MS = 30_000;
 
 const PLATFORM_NOTICES_SEED: PlatformNoticeRecord[] = [
   {

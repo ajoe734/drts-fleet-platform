@@ -116,7 +116,9 @@ import type {
   PartnerIngressCredentialRecord,
   PlacardVersionRecord,
   PlatformAdminTenantRecord,
+  PlatformAdminUserMutationResult,
   PlatformAdminUserRecord,
+  PlatformAdminUsersView,
   PlatformEarningsByPlatformResponse,
   PlatformEarningsSummary,
   PlatformMaintenanceModeRecord,
@@ -2015,23 +2017,30 @@ export class ApiClient {
     );
   }
 
+  async getPlatformAdminUsersView(): Promise<PlatformAdminUsersView> {
+    return this.get<PlatformAdminUsersView>("/api/platform-admin/users");
+  }
+
   async listPlatformAdminUsers(): Promise<PlatformAdminUserRecord[]> {
     return this.getList<PlatformAdminUserRecord>("/api/platform-admin/users");
   }
 
   async createPlatformAdminUser(
     command: CreatePlatformAdminUserCommand,
-  ): Promise<PlatformAdminUserRecord> {
-    return this.post<PlatformAdminUserRecord>("/api/platform-admin/users", {
-      body: command,
-    });
+  ): Promise<PlatformAdminUserMutationResult> {
+    return this.post<PlatformAdminUserMutationResult>(
+      "/api/platform-admin/users",
+      {
+        body: command,
+      },
+    );
   }
 
   async updatePlatformAdminUserRole(
     userId: string,
     command: UpdatePlatformAdminUserRoleCommand,
-  ): Promise<PlatformAdminUserRecord> {
-    return this.post<PlatformAdminUserRecord>(
+  ): Promise<PlatformAdminUserMutationResult> {
+    return this.post<PlatformAdminUserMutationResult>(
       `/api/platform-admin/users/${userId}/role`,
       { body: command },
     );

@@ -1,5 +1,13 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  ActionReceipt,
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiHealthEnvelope,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4654,11 +4662,16 @@ export interface UpdatePlatformTenantSettingsCommand {
   quotas?: Partial<PlatformTenantQuotaSummary>;
 }
 
+export const PLATFORM_ADMIN_USER_ROLES = [
+  "pa_super_admin",
+  "pa_tenant_mgr",
+  "pa_partner_mgr",
+  "pa_fleet_gov",
+  "pa_finance_gov",
+  "pa_ops_risk_gov",
+] as const;
 export type PlatformAdminUserRole =
-  | "superadmin"
-  | "admin"
-  | "operator"
-  | "viewer";
+  (typeof PLATFORM_ADMIN_USER_ROLES)[number];
 export type PlatformAdminUserStatus = "active" | "suspended" | "invited";
 
 export interface PlatformAdminUserRecord {
@@ -4669,6 +4682,21 @@ export interface PlatformAdminUserRecord {
   status: PlatformAdminUserStatus;
   createdAt: string;
   updatedAt: string;
+  availableActions: ResourceActionDescriptor[];
+  resourceLinks?: CrossAppResourceLink[];
+}
+
+export interface PlatformAdminUsersView {
+  items: PlatformAdminUserRecord[];
+  availableActions: ResourceActionDescriptor[];
+  refresh: UiRefreshMetadata;
+  health: UiHealthEnvelope;
+  emptyState?: EmptyStateEnvelope;
+}
+
+export interface PlatformAdminUserMutationResult {
+  user: PlatformAdminUserRecord;
+  receipt: ActionReceipt;
 }
 
 export interface CreatePlatformAdminUserCommand {
@@ -4680,6 +4708,7 @@ export interface CreatePlatformAdminUserCommand {
 export interface UpdatePlatformAdminUserRoleCommand {
   roleCode: PlatformAdminUserRole;
   status?: PlatformAdminUserStatus;
+  reason?: string;
 }
 
 export type PlatformNoticeSeverity = "info" | "warning" | "critical";
