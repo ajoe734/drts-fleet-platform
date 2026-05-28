@@ -584,15 +584,17 @@ function statusTone(status: PlatformAdminTenantRecord["status"]): CanvasTone {
 function fallbackRowActions(
   tenant: PlatformAdminTenantRecord,
 ): ResourceActionDescriptor[] {
-  const actions: ResourceActionDescriptor[] = [
-    {
-      action: tenant.status === "active" ? "suspend_tenant" : "activate_tenant",
-      enabled: tenant.status !== "rollback_hold",
-      disabledReasonCode:
-        tenant.status === "rollback_hold" ? "rollback_hold_active" : undefined,
-      riskLevel: "medium",
-    },
-  ];
+  const primaryAction: ResourceActionDescriptor = {
+    action: tenant.status === "active" ? "suspend_tenant" : "activate_tenant",
+    enabled: tenant.status !== "rollback_hold",
+    riskLevel: "medium",
+  };
+
+  if (tenant.status === "rollback_hold") {
+    primaryAction.disabledReasonCode = "rollback_hold_active";
+  }
+
+  const actions: ResourceActionDescriptor[] = [primaryAction];
 
   if (tenant.status !== "rollback_hold") {
     actions.push({
@@ -1224,6 +1226,7 @@ export default function TenantsPage() {
   const canCreateTenant = pageActions.some(
     (action) => isCreateTenantAction(action) && action.enabled,
   );
+  const emptyNextAction = loadState?.empty?.nextAction ?? null;
 
   const handlePageAction = useCallback(
     async (action: ResourceActionDescriptor) => {
@@ -2342,21 +2345,14 @@ export default function TenantsPage() {
                 {emptyDescriptor.title}
               </div>
               <div style={{ maxWidth: 460 }}>{emptyDescriptor.body}</div>
-              {loadState?.empty?.nextAction ? (
+              {emptyNextAction ? (
                 <CanvasBtn
                   theme={th}
-                  variant={
-                    loadState.empty.nextAction.enabled ? "primary" : "secondary"
-                  }
-                  onClick={() =>
-                    void handlePageAction(loadState.empty.nextAction!)
-                  }
-                  disabled={!loadState.empty.nextAction.enabled}
+                  variant={emptyNextAction.enabled ? "primary" : "secondary"}
+                  onClick={() => void handlePageAction(emptyNextAction)}
+                  disabled={!emptyNextAction.enabled}
                 >
-                  {resolveActionLabel(
-                    copy.actionLabels,
-                    loadState.empty.nextAction,
-                  )}
+                  {resolveActionLabel(copy.actionLabels, emptyNextAction)}
                 </CanvasBtn>
               ) : null}
               {canCreateTenant && emptyDescriptor.reason === "no_data" ? (
