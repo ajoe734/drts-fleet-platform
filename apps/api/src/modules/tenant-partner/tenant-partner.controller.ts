@@ -977,12 +977,14 @@ export class TenantPartnerController {
   @Get("tenant/integration-governance")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   getTenantIntegrationGovernancePackage(
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const item: TenantIntegrationGovernancePackage =
       this.tenantPartnerService.getIntegrationGovernancePackage(
         this.requireTenantId(tenantId),
+        identity,
       );
     return toApiSuccessEnvelope(item, requestId);
   }
@@ -1017,11 +1019,13 @@ export class TenantPartnerController {
 
   @Get("tenant/webhooks")
   listWebhookEndpoints(
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const items = this.tenantPartnerService.listWebhookEndpoints(
       this.requireTenantId(tenantId),
+      identity,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }

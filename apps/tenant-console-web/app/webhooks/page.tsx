@@ -6,6 +6,7 @@ import type {
   CreateTenantWebhookEndpointCommand,
   IdentityContext,
   NotificationRecord,
+  ResourceActionDescriptor,
   TenantIntegrationGovernancePackage,
   TenantWebhookEndpoint,
   TenantWebhookEndpointStatus,
@@ -284,6 +285,7 @@ type ActionDescriptor = {
   label: string;
   riskLevel: "low" | "medium" | "high";
   enabled: boolean;
+  requiresReason?: boolean;
   disabledReasonCode?: string;
   tone?: CanvasTone;
   href?: string;
@@ -316,7 +318,7 @@ type DeliveryRow = Record<string, unknown> & {
 type EmptyStateCopy = {
   title: string;
   body: string;
-  tone: CanvasTone;
+  tone: "info" | "success" | "danger" | "accent" | "warn";
   cta?: {
     href: string;
     label: string;
@@ -454,9 +456,10 @@ function getEndpointHealth(endpoint: TenantWebhookEndpoint) {
 
   if (endpoint.status === "disabled") {
     return {
-      label: runtime?.disableReason === "delivery_failed"
-        ? "disabled after failure cluster"
-        : "manually paused",
+      label:
+        runtime?.disableReason === "delivery_failed"
+          ? "disabled after failure cluster"
+          : "manually paused",
       tone: "warn" as CanvasTone,
     };
   }
@@ -516,7 +519,8 @@ function toDeliveryRow(delivery: WebhookDeliveryRecord): DeliveryRow {
     eventType: delivery.eventType,
     statusLabel: delivery.status,
     statusTone: getDeliveryStatusTone(delivery.status),
-    codeLabel: delivery.httpStatus === null ? "timeout" : String(delivery.httpStatus),
+    codeLabel:
+      delivery.httpStatus === null ? "timeout" : String(delivery.httpStatus),
     codeTone: getDeliveryCodeTone(delivery.httpStatus),
     tries: delivery.attempt,
     at: formatDateTime(delivery.createdAt),
@@ -578,13 +582,15 @@ function detectEmptyReason(
   return filtered ? "filtered_empty" : "no_data";
 }
 
-function getEmptyStateCopy(reason: EmptyReason, hrefBase: string): EmptyStateCopy {
+function getEmptyStateCopy(
+  reason: EmptyReason,
+  hrefBase: string,
+): EmptyStateCopy {
   switch (reason) {
     case "not_provisioned":
       return {
         title: "Webhook engine 尚未開通",
-        body:
-          "此租戶目前沒有啟用 delivery engine。依 Q-TEN08，畫面不會回填任何假 delivery log；請先完成平台側開通，再建立 endpoint。",
+        body: "此租戶目前沒有啟用 delivery engine。依 Q-TEN08，畫面不會回填任何假 delivery log；請先完成平台側開通，再建立 endpoint。",
         tone: "warn",
         cta: {
           href: `${hrefBase}?mode=create`,
@@ -594,29 +600,25 @@ function getEmptyStateCopy(reason: EmptyReason, hrefBase: string): EmptyStateCop
     case "permission_denied":
       return {
         title: "目前身分沒有 webhook 權限",
-        body:
-          "後端拒絕回傳此區塊資料。請改用具 `tc_admin` 或 `tc_integration_mgr` 權限的身分，或請平台/租戶管理員協助。",
+        body: "後端拒絕回傳此區塊資料。請改用具 `tc_admin` 或 `tc_integration_mgr` 權限的身分，或請平台/租戶管理員協助。",
         tone: "danger",
       };
     case "external_unavailable":
       return {
         title: "Delivery engine 暫時不可用",
-        body:
-          "後端或外部目的端暫時不可用，因此無法取得 webhook 可視資料。保留目前查詢條件，稍後手動 refresh 再試。",
+        body: "後端或外部目的端暫時不可用，因此無法取得 webhook 可視資料。保留目前查詢條件，稍後手動 refresh 再試。",
         tone: "warn",
       };
     case "fetch_failed":
       return {
         title: "資料抓取失敗",
-        body:
-          "請檢查 API 可用性與目前環境 headers。這不是無資料狀態，而是 read model 讀取失敗。",
+        body: "請檢查 API 可用性與目前環境 headers。這不是無資料狀態，而是 read model 讀取失敗。",
         tone: "danger",
       };
     case "filtered_empty":
       return {
         title: "目前篩選條件下沒有結果",
-        body:
-          "資料源仍可用，但現有 `status` 或 endpoint 篩選沒有命中任何項目。清除篩選即可回到完整檢視。",
+        body: "資料源仍可用，但現有 `status` 或 endpoint 篩選沒有命中任何項目。清除篩選即可回到完整檢視。",
         tone: "info",
         cta: {
           href: hrefBase,
@@ -627,8 +629,7 @@ function getEmptyStateCopy(reason: EmptyReason, hrefBase: string): EmptyStateCop
     default:
       return {
         title: "尚未建立任何 endpoint",
-        body:
-          "目前沒有 webhook endpoint，因此也不會有 delivery log。先建立第一個 endpoint，系統才會開始產生真實 delivery visibility。",
+        body: "目前沒有 webhook endpoint，因此也不會有 delivery log。先建立第一個 endpoint，系統才會開始產生真實 delivery visibility。",
         tone: "info",
         cta: {
           href: `${hrefBase}?mode=create`,
@@ -646,52 +647,155 @@ function deriveActorCanManage(identity: IdentityContext | null) {
   );
 }
 
+function getActionLabel(action: string) {
+  switch (action) {
+    case "payload_schema":
+      return "payload schema";
+    case "createWebhookEndpoint":
+      return "新增端點";
+    case "updateWebhookEndpoint":
+      return "更新";
+    case "disableWebhookEndpoint":
+      return "停用";
+    case "deleteWebhookEndpoint":
+      return "刪除";
+    case "rotateWebhookSecret":
+      return "rotate secret";
+    case "viewDeliveryLog":
+      return "delivery log";
+    case "retryFailedDelivery":
+      return "retry failed";
+    default:
+      return action;
+  }
+}
+
+function getActionTone(action: string): CanvasTone | undefined {
+  switch (action) {
+    case "createWebhookEndpoint":
+      return "accent";
+    case "disableWebhookEndpoint":
+      return "warn";
+    case "deleteWebhookEndpoint":
+      return "danger";
+    default:
+      return undefined;
+  }
+}
+
+function getActionHref(
+  action: string,
+  options?: {
+    webhookId?: string;
+    status?: string;
+  },
+) {
+  const webhookId = options?.webhookId;
+  const status =
+    options?.status && options.status !== "all"
+      ? `&status=${encodeURIComponent(options.status)}`
+      : "";
+
+  switch (action) {
+    case "payload_schema":
+      return "/settings";
+    case "createWebhookEndpoint":
+      return "/webhooks?mode=create";
+    case "updateWebhookEndpoint":
+    case "disableWebhookEndpoint":
+      return webhookId
+        ? `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}${status}`
+        : undefined;
+    case "deleteWebhookEndpoint":
+      return webhookId
+        ? `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}${status}#high-risk`
+        : undefined;
+    case "rotateWebhookSecret":
+      return webhookId
+        ? `/webhooks?mode=rotate&webhookId=${encodeURIComponent(webhookId)}${status}`
+        : undefined;
+    case "viewDeliveryLog":
+      return webhookId
+        ? `/webhooks?webhookId=${encodeURIComponent(webhookId)}${status}`
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function decorateActions(
+  descriptors: ResourceActionDescriptor[],
+  options?: {
+    webhookId?: string;
+    status?: string;
+  },
+): ActionDescriptor[] {
+  return descriptors.map((descriptor) => {
+    const tone = getActionTone(descriptor.action);
+    const href = getActionHref(descriptor.action, options);
+
+    return {
+      action: descriptor.action,
+      label: getActionLabel(descriptor.action),
+      riskLevel: descriptor.riskLevel,
+      enabled: descriptor.enabled,
+      ...(descriptor.requiresReason !== undefined
+        ? { requiresReason: descriptor.requiresReason }
+        : {}),
+      ...(descriptor.disabledReasonCode
+        ? { disabledReasonCode: descriptor.disabledReasonCode }
+        : {}),
+      ...(tone ? { tone } : {}),
+      ...(href ? { href } : {}),
+    };
+  });
+}
+
 function derivePageActions(
+  governanceActions: ResourceActionDescriptor[] | undefined,
   canManage: boolean,
   endpointReason: EmptyReason | null,
 ): ActionDescriptor[] {
-  return [
+  const fallbackActions: ResourceActionDescriptor[] = [
     {
       action: "payload_schema",
-      label: "payload schema",
-      riskLevel: "low",
       enabled: true,
-      href: "/settings",
+      riskLevel: "low",
     },
     {
       action: "createWebhookEndpoint",
-      label: "新增端點",
+      enabled: canManage,
+      disabledReasonCode: canManage ? undefined : "tenant_role_missing",
       riskLevel: "medium",
-      enabled: canManage && endpointReason !== "not_provisioned",
-      disabledReasonCode:
-        endpointReason === "not_provisioned"
-          ? "engine_not_provisioned"
-          : canManage
-            ? undefined
-            : "tenant_role_missing",
-      tone: "accent",
-      href: "/webhooks?mode=create",
     },
   ];
+
+  return decorateActions(governanceActions ?? fallbackActions).map((action) =>
+    action.action === "createWebhookEndpoint" &&
+    endpointReason === "not_provisioned"
+      ? {
+          ...action,
+          enabled: false,
+          disabledReasonCode: "engine_not_provisioned",
+        }
+      : action,
+  );
 }
 
 function getEndpointActions(
   endpoint: TenantWebhookEndpoint,
   canManage: boolean,
+  statusFilter = "all",
 ): ActionDescriptor[] {
-  return [
+  const fallbackActions: ResourceActionDescriptor[] = [
     {
       action: "updateWebhookEndpoint",
-      label: "更新",
-      riskLevel: "medium",
       enabled: canManage,
       disabledReasonCode: canManage ? undefined : "tenant_role_missing",
-      href: `/webhooks?mode=edit&webhookId=${encodeURIComponent(endpoint.webhookId)}`,
+      riskLevel: "medium",
     },
     {
       action: "disableWebhookEndpoint",
-      label: endpoint.status === "disabled" ? "已停用" : "停用",
-      riskLevel: "high",
       enabled: canManage && endpoint.status !== "disabled",
       disabledReasonCode:
         endpoint.status === "disabled"
@@ -699,41 +803,44 @@ function getEndpointActions(
           : canManage
             ? undefined
             : "tenant_role_missing",
-      tone: "warn",
-      href: `/webhooks?mode=edit&webhookId=${encodeURIComponent(endpoint.webhookId)}`,
+      requiresReason: true,
+      riskLevel: "high",
     },
     {
       action: "deleteWebhookEndpoint",
-      label: "刪除",
-      riskLevel: "high",
       enabled: canManage,
       disabledReasonCode: canManage ? undefined : "tenant_role_missing",
-      tone: "danger",
-      href: `/webhooks?mode=edit&webhookId=${encodeURIComponent(endpoint.webhookId)}`,
+      requiresReason: true,
+      riskLevel: "high",
     },
     {
       action: "rotateWebhookSecret",
-      label: "rotate secret",
-      riskLevel: "high",
       enabled: canManage,
       disabledReasonCode: canManage ? undefined : "tenant_role_missing",
-      href: `/webhooks?mode=rotate&webhookId=${encodeURIComponent(endpoint.webhookId)}`,
+      requiresReason: true,
+      riskLevel: "high",
     },
     {
       action: "viewDeliveryLog",
-      label: "delivery log",
-      riskLevel: "low",
       enabled: true,
-      href: `/webhooks?webhookId=${encodeURIComponent(endpoint.webhookId)}`,
+      riskLevel: "low",
     },
     {
       action: "retryFailedDelivery",
-      label: "retry failed",
-      riskLevel: "medium",
       enabled: false,
       disabledReasonCode: "backend_retry_endpoint_pending",
+      riskLevel: "medium",
     },
   ];
+
+  return decorateActions(endpoint.availableActions ?? fallbackActions, {
+    webhookId: endpoint.webhookId,
+    status: statusFilter,
+  }).map((action) =>
+    action.action === "disableWebhookEndpoint" && endpoint.status === "disabled"
+      ? { ...action, label: "已停用" }
+      : action,
+  );
 }
 
 function renderAction(
@@ -801,18 +908,23 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
     client.getIdentityContext() as Promise<IdentityContext>,
     client.getTenantIntegrationGovernancePackage() as Promise<TenantIntegrationGovernancePackage>,
     client.listWebhooks() as Promise<TenantWebhookEndpoint[]>,
-    client.get<{ items: WebhookDeliveryRecord[] }>("/api/tenant/webhooks/deliveries") as Promise<{
+    client.get<{ items: WebhookDeliveryRecord[] }>(
+      "/api/tenant/webhooks/deliveries",
+    ) as Promise<{
       items: WebhookDeliveryRecord[];
     }>,
     client.listTenantNotificationFeed() as Promise<NotificationRecord[]>,
   ]);
 
   return {
-    identity: identityResult.status === "fulfilled" ? identityResult.value : null,
+    identity:
+      identityResult.status === "fulfilled" ? identityResult.value : null,
     governance:
       governanceResult.status === "fulfilled" ? governanceResult.value : null,
     notifications:
-      notificationsResult.status === "fulfilled" ? notificationsResult.value : [],
+      notificationsResult.status === "fulfilled"
+        ? notificationsResult.value
+        : [],
     endpoints:
       endpointsResult.status === "fulfilled"
         ? [...endpointsResult.value].sort(compareEndpoints)
@@ -971,6 +1083,7 @@ async function updateWebhookAction(formData: FormData) {
 
   const client = getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
+  const disableReason = String(formData.get("disableReason") ?? "").trim();
   const events = parseEvents(formData);
   try {
     if (!webhookId) {
@@ -980,11 +1093,16 @@ async function updateWebhookAction(formData: FormData) {
     const command: UpdateTenantWebhookEndpointCommand = {
       url: String(formData.get("url") ?? "").trim(),
       events,
-      status: String(formData.get("status") ?? "") as TenantWebhookEndpointStatus,
+      status: String(
+        formData.get("status") ?? "",
+      ) as TenantWebhookEndpointStatus,
     };
 
     if (!command.url || !command.status || events.length === 0) {
       throw new Error("URL、status 與至少一個 event 為必填。");
+    }
+    if (command.status === "disabled" && !disableReason) {
+      throw new Error("停用 endpoint 時必須填寫 reason。");
     }
 
     await client.updateWebhookEndpoint(webhookId, command);
@@ -1008,17 +1126,17 @@ async function deleteWebhookAction(formData: FormData) {
 
   const client = getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
+  const deleteReason = String(formData.get("deleteReason") ?? "").trim();
   try {
     if (!webhookId) {
       throw new Error("缺少 webhookId。");
     }
+    if (!deleteReason) {
+      throw new Error("刪除 endpoint 時必須填寫 reason。");
+    }
     await client.deleteWebhookEndpoint(webhookId);
     revalidatePath("/webhooks");
-    redirect(
-      `/webhooks?success=${encodeURIComponent(
-        "Endpoint 已刪除。",
-      )}`,
-    );
+    redirect(`/webhooks?success=${encodeURIComponent("Endpoint 已刪除。")}`);
   } catch (error) {
     redirect(
       `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
@@ -1077,10 +1195,13 @@ function EndpointForm({
       subtitle={
         isCreate
           ? "Create / update 屬於 medium action；新 endpoint 一律進入 test_pending。"
-          : "Disable / delete 是 high-risk 操作。現有 backend contract 尚未攜帶 reason，因此 UI 保留風險提示並直接呼叫既有 endpoint。"
+          : "Disable / delete 是 high-risk 操作。UI 會強制填寫 reason 後才送出既有 backend contract。"
       }
     >
-      <form action={isCreate ? createWebhookAction : updateWebhookAction} style={formGridStyle}>
+      <form
+        action={isCreate ? createWebhookAction : updateWebhookAction}
+        style={formGridStyle}
+      >
         {!isCreate && webhook ? (
           <input type="hidden" name="webhookId" value={webhook.webhookId} />
         ) : null}
@@ -1139,6 +1260,19 @@ function EndpointForm({
             />
           </CanvasField>
         ) : null}
+        {!isCreate ? (
+          <CanvasField
+            theme={th}
+            label="DISABLE REASON"
+            hint="當 status 改為 disabled 時必填；符合 packet 的 high-risk reason gate。"
+          >
+            <textarea
+              name="disableReason"
+              style={textareaStyle}
+              placeholder="Receiver maintenance window, repeated failure cluster, security hold, etc."
+            />
+          </CanvasField>
+        ) : null}
         <div style={buttonWrapStyle}>
           <button
             type="submit"
@@ -1156,15 +1290,29 @@ function EndpointForm({
       </form>
       {!isCreate && webhook ? (
         <div style={{ ...stackStyle, marginTop: 12 }}>
-          <div style={panelStyle}>
-            <div style={{ color: th.text, fontWeight: 600 }}>High-risk actions</div>
+          <div id="high-risk" style={panelStyle}>
+            <div style={{ color: th.text, fontWeight: 600 }}>
+              High-risk actions
+            </div>
             <p style={mutedStyle}>
-              Delete 與 disable 依 packet 屬 high action；既有 API 尚未接受 reason
-              payload，因此這裡保留風險說明並觸發現有 backend endpoint。
+              Delete 與 disable 依 packet 屬 high action；delete 送出前必須填
+              reason， disable 則透過上方欄位 gate 住提交。
             </p>
             <div style={buttonWrapStyle}>
-              <form action={deleteWebhookAction}>
-                <input type="hidden" name="webhookId" value={webhook.webhookId} />
+              <form
+                action={deleteWebhookAction}
+                style={{ display: "grid", gap: 8 }}
+              >
+                <input
+                  type="hidden"
+                  name="webhookId"
+                  value={webhook.webhookId}
+                />
+                <textarea
+                  name="deleteReason"
+                  style={{ ...textareaStyle, minHeight: 72 }}
+                  placeholder="Decommissioned integration, duplicate endpoint, security incident, etc."
+                />
                 <button
                   type="submit"
                   style={{
@@ -1211,7 +1359,11 @@ function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
           </CanvasField>
         </div>
         <CanvasField theme={th} label="NEW SECRET">
-          <input name="secret" placeholder="whsec_new..." style={controlStyle} />
+          <input
+            name="secret"
+            placeholder="whsec_new..."
+            style={controlStyle}
+          />
         </CanvasField>
         <CanvasField
           theme={th}
@@ -1278,10 +1430,16 @@ export default async function WebhooksPage({
   );
   const selectedWebhook =
     (selectedWebhookId
-      ? data.endpoints.find((endpoint) => endpoint.webhookId === selectedWebhookId)
+      ? data.endpoints.find(
+          (endpoint) => endpoint.webhookId === selectedWebhookId,
+        )
       : undefined) ?? null;
   const summary = summarizeDeliveries(scopedDeliveries);
-  const pageActions = derivePageActions(canManage, endpointReason);
+  const pageActions = derivePageActions(
+    data.governance?.availableActions,
+    canManage,
+    endpointReason,
+  );
   const notifications = data.notifications
     .filter((notification) => {
       const haystack =
@@ -1359,6 +1517,32 @@ export default async function WebhooksPage({
       w: 180,
       mono: true,
     },
+    {
+      h: "ACTIONS",
+      w: 320,
+      r: (row) => {
+        const endpoint = filteredEndpoints.find(
+          (item) => item.webhookId === row.webhookId,
+        );
+        if (!endpoint) {
+          return null;
+        }
+        return (
+          <div style={buttonWrapStyle}>
+            {getEndpointActions(endpoint, canManage, statusFilter)
+              .filter(
+                (action) =>
+                  action.action === "viewDeliveryLog" ||
+                  action.action === "updateWebhookEndpoint" ||
+                  action.action === "rotateWebhookSecret",
+              )
+              .map((action, index) =>
+                renderAction(action, `${row.webhookId}-${index}`),
+              )}
+          </div>
+        );
+      },
+    },
   ];
 
   const deliveryColumns: CanvasTableColumn<DeliveryRow>[] = [
@@ -1409,7 +1593,13 @@ export default async function WebhooksPage({
         subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — real engine per Q-TEN08"
         tabs={["Endpoints", "Deliveries", "Replay"]}
         activeTab={selectedWebhookId ? "Deliveries" : "Endpoints"}
-        actions={<>{pageActions.map((action, index) => renderAction(action, `page-${index}`, false))}</>}
+        actions={
+          <>
+            {pageActions.map((action, index) =>
+              renderAction(action, `page-${index}`, false),
+            )}
+          </>
+        }
       />
 
       <div style={pageBodyStyle}>
@@ -1434,7 +1624,9 @@ export default async function WebhooksPage({
               <span style={{ ...metricValueStyle, fontSize: 18 }}>
                 {formatDateTime(data.governance?.generatedAt ?? data.loadedAt)}
               </span>
-              <p style={mutedStyle}>governance.generatedAt / page load timestamp</p>
+              <p style={mutedStyle}>
+                governance.generatedAt / page load timestamp
+              </p>
             </div>
             <div style={metricCardStyle}>
               <span style={metricLabelStyle}>Scope</span>
@@ -1486,25 +1678,39 @@ export default async function WebhooksPage({
               <div style={metricCardStyle}>
                 <span style={metricLabelStyle}>active</span>
                 <span style={metricValueStyle}>
-                  {data.endpoints.filter((endpoint) => endpoint.status === "active").length}
+                  {
+                    data.endpoints.filter(
+                      (endpoint) => endpoint.status === "active",
+                    ).length
+                  }
                 </span>
               </div>
               <div style={metricCardStyle}>
                 <span style={metricLabelStyle}>test_pending</span>
                 <span style={metricValueStyle}>
-                  {data.endpoints.filter((endpoint) => endpoint.status === "test_pending").length}
+                  {
+                    data.endpoints.filter(
+                      (endpoint) => endpoint.status === "test_pending",
+                    ).length
+                  }
                 </span>
               </div>
               <div style={metricCardStyle}>
                 <span style={metricLabelStyle}>failure cluster</span>
-                <span style={metricValueStyle}>{countFailureClusters(data.endpoints)}</span>
+                <span style={metricValueStyle}>
+                  {countFailureClusters(data.endpoints)}
+                </span>
               </div>
             </div>
           </CanvasCard>
           <CanvasCard
             theme={th}
             title="Delivery health"
-            subtitle={selectedWebhook ? "Current endpoint view" : "Tenant-wide delivery snapshot"}
+            subtitle={
+              selectedWebhook
+                ? "Current endpoint view"
+                : "Tenant-wide delivery snapshot"
+            }
           >
             <div style={metricGridStyle}>
               <div style={metricCardStyle}>
@@ -1529,7 +1735,9 @@ export default async function WebhooksPage({
             <div style={stackStyle}>
               <div style={detailLineStyle}>
                 <span>test event</span>
-                <span style={monoStyle}>{data.governance?.webhookPolicy.testEventType ?? "—"}</span>
+                <span style={monoStyle}>
+                  {data.governance?.webhookPolicy.testEventType ?? "—"}
+                </span>
               </div>
               <div style={detailLineStyle}>
                 <span>retry policy</span>
@@ -1542,14 +1750,16 @@ export default async function WebhooksPage({
               <div style={detailLineStyle}>
                 <span>failure notice</span>
                 <span style={monoStyle}>
-                  {data.governance?.webhookPolicy.deliveryFailureNotificationChannel ?? "—"}
+                  {data.governance?.webhookPolicy
+                    .deliveryFailureNotificationChannel ?? "—"}
                 </span>
               </div>
             </div>
           </CanvasCard>
         </div>
 
-        {(mode === "create" || mode === "edit") && (mode !== "edit" || selectedWebhook) ? (
+        {(mode === "create" || mode === "edit") &&
+        (mode !== "edit" || selectedWebhook) ? (
           <EndpointForm
             mode={mode}
             webhook={selectedWebhook}
@@ -1600,7 +1810,10 @@ export default async function WebhooksPage({
                 />
                 {endpointEmptyCopy.cta ? (
                   <div style={{ marginTop: 12 }}>
-                    <Link href={endpointEmptyCopy.cta.href} style={getLinkButtonStyle()}>
+                    <Link
+                      href={endpointEmptyCopy.cta.href}
+                      style={getLinkButtonStyle()}
+                    >
                       {endpointEmptyCopy.cta.label}
                     </Link>
                   </div>
@@ -1627,7 +1840,9 @@ export default async function WebhooksPage({
             {selectedWebhook ? (
               <div style={stackStyle}>
                 <div style={panelStyle}>
-                  <div style={{ color: th.text, fontWeight: 600 }}>{selectedWebhook.url}</div>
+                  <div style={{ color: th.text, fontWeight: 600 }}>
+                    {selectedWebhook.url}
+                  </div>
                   <div style={codeLabelStyle}>{selectedWebhook.webhookId}</div>
                   <div style={chipWrapStyle}>
                     {selectedWebhook.events.map((eventType) => (
@@ -1638,12 +1853,17 @@ export default async function WebhooksPage({
                   </div>
                 </div>
                 <div style={buttonWrapStyle}>
-                  {getEndpointActions(selectedWebhook, canManage).map((action, index) =>
+                  {getEndpointActions(
+                    selectedWebhook,
+                    canManage,
+                    statusFilter,
+                  ).map((action, index) =>
                     renderAction(action, `endpoint-${index}`),
                   )}
                 </div>
                 <p style={mutedStyle}>
-                  `retry failed` 仍保留為 disabled CTA，原因是目前 repo 內沒有對應 retry endpoint；UI 不會假裝此能力已上線。
+                  `retry failed` 仍保留為 disabled CTA，原因是目前 repo
+                  內沒有對應 retry endpoint；UI 不會假裝此能力已上線。
                 </p>
               </div>
             ) : (
@@ -1657,8 +1877,14 @@ export default async function WebhooksPage({
                 />
                 <ul style={listStyle}>
                   <li>Create / update 由真實 backend route 支援。</li>
-                  <li>Rotate secret 直接呼叫 `/api/tenant/webhooks/:id/rotate-secret`。</li>
-                  <li>Retry failed delivery 目前僅顯示 disabled reason，避免 UI 造成功能錯覺。</li>
+                  <li>
+                    Rotate secret 直接呼叫
+                    `/api/tenant/webhooks/:id/rotate-secret`。
+                  </li>
+                  <li>
+                    Retry failed delivery 目前僅顯示 disabled reason，避免 UI
+                    造成功能錯覺。
+                  </li>
                 </ul>
               </div>
             )}
@@ -1694,7 +1920,10 @@ export default async function WebhooksPage({
                 />
                 {deliveryEmptyCopy.cta ? (
                   <div style={{ marginTop: 12 }}>
-                    <Link href={deliveryEmptyCopy.cta.href} style={getLinkButtonStyle()}>
+                    <Link
+                      href={deliveryEmptyCopy.cta.href}
+                      style={getLinkButtonStyle()}
+                    >
                       {deliveryEmptyCopy.cta.label}
                     </Link>
                   </div>
@@ -1717,12 +1946,19 @@ export default async function WebhooksPage({
           >
             <div style={stackStyle}>
               <div style={panelStyle}>
-                <div style={{ color: th.text, fontWeight: 600 }}>Notification feed</div>
+                <div style={{ color: th.text, fontWeight: 600 }}>
+                  Notification feed
+                </div>
                 {notifications.length > 0 ? (
                   notifications.map((notification) => (
-                    <div key={notification.notificationId} style={detailLineStyle}>
+                    <div
+                      key={notification.notificationId}
+                      style={detailLineStyle}
+                    >
                       <span>{notification.title}</span>
-                      <span style={monoStyle}>{formatDateTime(notification.createdAt)}</span>
+                      <span style={monoStyle}>
+                        {formatDateTime(notification.createdAt)}
+                      </span>
                     </div>
                   ))
                 ) : (
@@ -1735,7 +1971,9 @@ export default async function WebhooksPage({
                 </Link>
               </div>
               <div style={panelStyle}>
-                <div style={{ color: th.text, fontWeight: 600 }}>Cross-app deep links</div>
+                <div style={{ color: th.text, fontWeight: 600 }}>
+                  Cross-app deep links
+                </div>
                 {externalLinks.map((link) => (
                   <div key={link.label} style={{ display: "grid", gap: 4 }}>
                     {link.href ? (
@@ -1753,8 +1991,10 @@ export default async function WebhooksPage({
                     <span style={subtleTextStyle}>{link.description}</span>
                     {!link.href ? (
                       <span style={subtleTextStyle}>
-                        Missing base URL env; configure `NEXT_PUBLIC_OPS_CONSOLE_URL` /
-                        `NEXT_PUBLIC_PLATFORM_ADMIN_URL` to activate new-tab navigation.
+                        Missing base URL env; configure
+                        `NEXT_PUBLIC_OPS_CONSOLE_URL` /
+                        `NEXT_PUBLIC_PLATFORM_ADMIN_URL` to activate new-tab
+                        navigation.
                       </span>
                     ) : null}
                   </div>

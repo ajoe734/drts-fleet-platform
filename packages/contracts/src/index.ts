@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ResourceActionDescriptor } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -886,6 +887,7 @@ export interface TenantWebhookEndpoint {
   secretPreview: string;
   createdAt: string;
   updatedAt: string;
+  availableActions?: ResourceActionDescriptor[];
   retryPolicy?: WebhookRetryPolicyRecord;
   runtimeMetadata?: TenantWebhookRuntimeMetadata;
   secretHistory?: TenantWebhookSecretRotationRecord[];
@@ -911,6 +913,7 @@ export interface WebhookDeliveryRecord {
   httpStatus: number | null;
   signature: string;
   createdAt: string;
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface UpdateTenantSlaProfileCommand {
@@ -1646,6 +1649,7 @@ export interface TenantWebhookGovernancePolicy {
 export interface TenantIntegrationGovernancePackage {
   tenantId: string;
   generatedAt: string;
+  availableActions?: ResourceActionDescriptor[];
   apiKeyPolicy: TenantApiKeyGovernancePolicy;
   webhookPolicy: TenantWebhookGovernancePolicy;
   baselineWebhookEvents: string[];

@@ -67,6 +67,7 @@ import type {
   TenantApiKeyIssued,
   OwnedOrderRecord,
   ReorderTenantApprovalRulesCommand,
+  ResourceActionDescriptor,
   TenantBookingQuotaImpactPreview,
   TenantBookingQuotaImpactQuery,
   TenantBookingQuotaImpactResult,
@@ -1049,10 +1050,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   getIntegrationGovernancePackage(
     tenantId: string,
+    identity?: IdentityContext | null,
   ): TenantIntegrationGovernancePackage {
     return {
       tenantId,
       generatedAt: new Date().toISOString(),
+      availableActions: this.buildWebhookManagementActions(identity),
       apiKeyPolicy: this.buildTenantApiKeyGovernancePolicy(),
       webhookPolicy: this.buildTenantWebhookGovernancePolicy(),
       baselineWebhookEvents: [...DEFAULT_TENANT_WEBHOOK_EVENTS],
@@ -4309,10 +4312,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  listWebhookEndpoints(tenantId: string) {
+  listWebhookEndpoints(tenantId: string, identity?: IdentityContext | null) {
     return this.webhookEndpoints
       .filter((endpoint) => endpoint.tenantId === tenantId)
-      .map((endpoint) => this.toWebhookResponse(endpoint));
+      .map((endpoint) => this.toWebhookResponse(endpoint, identity));
   }
 
   summarizeWebhookDeliveryHealth(referenceDate = new Date()) {
@@ -5034,7 +5037,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     });
     const items = this.webhookDeliveries
       .filter((delivery) => delivery.tenantId === tenantId)
-      .map((delivery) => this.toDeliveryResponse(delivery));
+      .map((delivery) => this.toDeliveryResponse(delivery, identity));
     this.recordTenantAudit(
       {
         actorId: identity?.actorId ?? null,
@@ -5071,7 +5074,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         (delivery) =>
           delivery.tenantId === tenantId && delivery.webhookId === webhookId,
       )
-      .map((delivery) => this.toDeliveryResponse(delivery));
+      .map((delivery) => this.toDeliveryResponse(delivery, identity));
     this.recordTenantAudit(
       {
         actorId: identity?.actorId ?? null,
@@ -5429,7 +5432,118 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return new Date(parsed).toISOString();
   }
 
-  private toWebhookResponse(endpoint: StoredWebhookEndpoint) {
+  private canManageWebhook(identity?: IdentityContext | null) {
+    if (!identity) {
+      return true;
+    }
+    if (identity.actorType === "tenant_admin") {
+      return true;
+    }
+    return identity.roles.some(
+      (role) => role === "tc_admin" || role === "tc_integration_mgr",
+    );
+  }
+
+  private buildWebhookManagementActions(
+    identity?: IdentityContext | null,
+  ): ResourceActionDescriptor[] {
+    const canManage = this.canManageWebhook(identity);
+    return [
+      {
+        action: "payload_schema",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "createWebhookEndpoint",
+        enabled: canManage,
+        disabledReasonCode: canManage ? undefined : "tenant_role_missing",
+        riskLevel: "medium",
+      },
+    ];
+  }
+
+  private buildWebhookEndpointActions(
+    endpoint: StoredWebhookEndpoint,
+    identity?: IdentityContext | null,
+  ): ResourceActionDescriptor[] {
+    const canManage = this.canManageWebhook(identity);
+    return [
+      {
+        action: "updateWebhookEndpoint",
+        enabled: canManage,
+        disabledReasonCode: canManage ? undefined : "tenant_role_missing",
+        riskLevel: "medium",
+      },
+      {
+        action: "disableWebhookEndpoint",
+        enabled: canManage && endpoint.status !== "disabled",
+        disabledReasonCode:
+          endpoint.status === "disabled"
+            ? "already_disabled"
+            : canManage
+              ? undefined
+              : "tenant_role_missing",
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "deleteWebhookEndpoint",
+        enabled: canManage,
+        disabledReasonCode: canManage ? undefined : "tenant_role_missing",
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "rotateWebhookSecret",
+        enabled: canManage,
+        disabledReasonCode: canManage ? undefined : "tenant_role_missing",
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "viewDeliveryLog",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "retryFailedDelivery",
+        enabled: false,
+        disabledReasonCode: "backend_retry_endpoint_pending",
+        riskLevel: "medium",
+      },
+    ];
+  }
+
+  private buildWebhookDeliveryActions(
+    delivery: StoredWebhookDelivery,
+    identity?: IdentityContext | null,
+  ): ResourceActionDescriptor[] {
+    const canManage = this.canManageWebhook(identity);
+    return [
+      {
+        action: "viewDeliveryLog",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "retryFailedDelivery",
+        enabled: false,
+        disabledReasonCode:
+          delivery.status === "delivery_failed"
+            ? canManage
+              ? "backend_retry_endpoint_pending"
+              : "tenant_role_missing"
+            : "delivery_not_failed",
+        riskLevel: "medium",
+      },
+    ];
+  }
+
+  private toWebhookResponse(
+    endpoint: StoredWebhookEndpoint,
+    identity?: IdentityContext | null,
+  ) {
     return {
       webhookId: endpoint.webhookId,
       tenantId: endpoint.tenantId,
@@ -5440,6 +5554,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       secretPreview: endpoint.secretPreview,
       createdAt: endpoint.createdAt,
       updatedAt: endpoint.updatedAt,
+      availableActions: this.buildWebhookEndpointActions(endpoint, identity),
       retryPolicy: { ...endpoint.retryPolicy },
       runtimeMetadata: {
         ...endpoint.runtimeMetadata,
@@ -5458,7 +5573,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private toDeliveryResponse(delivery: StoredWebhookDelivery) {
+  private toDeliveryResponse(
+    delivery: StoredWebhookDelivery,
+    identity?: IdentityContext | null,
+  ) {
     return {
       deliveryId: delivery.deliveryId,
       webhookId: delivery.webhookId,
@@ -5469,6 +5587,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       httpStatus: delivery.httpStatus,
       signature: previewOpaqueValue(delivery.signature, 20) ?? "",
       createdAt: delivery.createdAt,
+      availableActions: this.buildWebhookDeliveryActions(delivery, identity),
       attemptedAt: delivery.attemptedAt,
       nextAttemptAt: delivery.nextAttemptAt,
       signatureVersion: delivery.signatureVersion,
