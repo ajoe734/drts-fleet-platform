@@ -332,7 +332,7 @@ function getActionLabel(action: string) {
     case "update_sla_profile":
       return "Configure SLA";
     case "create_report_job":
-      return "Open reports";
+      return "Create report job";
     default:
       return action.replaceAll("_", " ");
   }
@@ -355,6 +355,18 @@ function actionButtonStyle(enabled: boolean): CSSProperties {
     pointerEvents: enabled ? "auto" : "none",
     opacity: enabled ? 1 : 0.78,
   };
+}
+
+function getActionAssistiveCopy(action: ResourceActionDescriptor) {
+  if (!action.enabled && action.disabledReasonCode) {
+    return `Unavailable: ${action.disabledReasonCode}`;
+  }
+
+  if (!action.enabled) {
+    return "Unavailable";
+  }
+
+  return undefined;
 }
 
 function linkStyle(emphasis = false): CSSProperties {
@@ -405,7 +417,11 @@ function dedupeActions(items: TenantIntegrationReadinessItem[]) {
   > = [];
 
   for (const item of items) {
-    if (!item.nextAction || seen.has(item.nextAction.action)) {
+    if (
+      !item.nextAction ||
+      !item.nextAction.enabled ||
+      seen.has(item.nextAction.action)
+    ) {
       continue;
     }
 
@@ -515,11 +531,25 @@ function renderActionLink(
   href: string,
   children: ReactNode,
 ) {
+  const assistiveCopy = getActionAssistiveCopy(action);
+
+  if (!action.enabled) {
+    return (
+      <span
+        aria-disabled="true"
+        title={assistiveCopy}
+        style={actionButtonStyle(false)}
+      >
+        {children}
+      </span>
+    );
+  }
+
   return (
     <Link
       href={href}
-      aria-disabled={!action.enabled}
-      style={actionButtonStyle(action.enabled)}
+      aria-label={assistiveCopy}
+      style={actionButtonStyle(true)}
     >
       {children}
     </Link>
@@ -891,9 +921,9 @@ export default async function IntegrationGovernancePage({
                               : null}
                           </div>
 
-                          {!action?.enabled && action?.disabledReasonCode ? (
+                          {!action?.enabled ? (
                             <div style={{ fontSize: 10.5, color: th.textDim }}>
-                              disabled · {action.disabledReasonCode}
+                              {getActionAssistiveCopy(action)}
                             </div>
                           ) : null}
                         </div>
