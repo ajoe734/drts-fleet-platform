@@ -119,8 +119,8 @@ function matchesTextQuery(booking: BookingRecord, query: string) {
   return haystack.includes(query.toLowerCase());
 }
 
-export function applyBookingListQuery(
-  bookings: BookingRecord[],
+export function applyBookingListQuery<TBooking extends BookingRecord>(
+  bookings: TBooking[],
   query: BookingListQuery,
 ) {
   const filtered = bookings

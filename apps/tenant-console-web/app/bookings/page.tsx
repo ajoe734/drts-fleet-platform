@@ -383,14 +383,16 @@ function buildBookingCrossAppLinks(
 function buildBookingActions(
   booking: BookingRecord,
 ): ResourceActionDescriptor[] {
+  const modifiableUntil = parseDate(booking.modifiableUntil);
+  const cancelableUntil = parseDate(booking.cancelableUntil);
   const canEdit =
     isActionableStatus(booking.orderStatus) &&
-    Boolean(booking.modifiableUntil) &&
-    new Date(booking.modifiableUntil).getTime() > Date.now();
+    modifiableUntil !== null &&
+    modifiableUntil.getTime() > Date.now();
   const canCancel =
     isActionableStatus(booking.orderStatus) &&
-    Boolean(booking.cancelableUntil) &&
-    new Date(booking.cancelableUntil).getTime() > Date.now();
+    cancelableUntil !== null &&
+    cancelableUntil.getTime() > Date.now();
 
   const actions: ResourceActionDescriptor[] = [
     {
@@ -401,21 +403,25 @@ function buildBookingActions(
     {
       action: "update_booking",
       enabled: canEdit,
-      disabledReasonCode: canEdit
-        ? undefined
-        : booking.modifiableUntil
-          ? "editable_window_passed"
-          : "workflow_locked",
+      ...(canEdit
+        ? {}
+        : {
+            disabledReasonCode: booking.modifiableUntil
+              ? "editable_window_passed"
+              : "workflow_locked",
+          }),
       riskLevel: "medium",
     },
     {
       action: "cancel_booking",
       enabled: canCancel,
-      disabledReasonCode: canCancel
-        ? undefined
-        : booking.cancelableUntil
-          ? "cancel_window_passed"
-          : "workflow_locked",
+      ...(canCancel
+        ? {}
+        : {
+            disabledReasonCode: booking.cancelableUntil
+              ? "cancel_window_passed"
+              : "workflow_locked",
+          }),
       requiresReason: true,
       riskLevel: "high",
     },
@@ -525,7 +531,7 @@ function getSubtypeLabel(subtype: BookingRecord["businessDispatchSubtype"]) {
   }
 }
 
-function getServiceBucketLabel(bucket: BookingRecord["serviceBucket"]) {
+function getServiceBucketLabel(bucket: string) {
   switch (bucket) {
     case "business_dispatch":
       return "Business dispatch";
