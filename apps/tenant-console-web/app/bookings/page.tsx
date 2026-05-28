@@ -17,6 +17,8 @@ import {
   BUSINESS_DISPATCH_SUBTYPES,
   OWNED_ORDER_STATUSES,
   PHASE1_SERVICE_BUCKETS,
+} from "@drts/contracts";
+import {
   CanvasBanner,
   CanvasCard,
   CanvasKPI,
