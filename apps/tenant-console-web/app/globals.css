@@ -689,6 +689,23 @@ textarea {
   align-items: center;
 }
 
+.bookings-refresh-control {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.bookings-refresh-countdown {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+.bookings-refresh-button {
+  padding: 0.5rem 0.85rem;
+}
+
 .bookings-board {
   border-radius: 32px;
   border: 1px solid rgba(16, 35, 58, 0.08);

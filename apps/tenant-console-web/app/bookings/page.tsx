@@ -1,5 +1,7 @@
 import Link from "next/link";
 import type {
+  ApiListData,
+  ApiSuccessEnvelope,
   BookingRecord,
   CrossAppResourceLink,
   EmptyReason,
@@ -19,12 +21,13 @@ import {
   parseBookingListQuery,
   toggleStatus,
 } from "@/lib/booking-list";
-import { getTenantClient } from "@/lib/api-client";
+import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
 import { formatDateTime, formatMoney } from "@/lib/formatters";
 import {
   getBookingSourceVisibility,
   getSourceToneClassName,
 } from "@/lib/source-domain";
+import { BookingsRefreshControl } from "./bookings-refresh-control";
 
 export const dynamic = "force-dynamic";
 
@@ -70,8 +73,9 @@ const ACTION_COPY: Record<string, string> = {
   create_booking: "建立叫車",
   view_detail: "查看詳情",
 };
-const ACTION_ORDER = ["view_detail", "update", "cancel"];
+const ACTION_PRIORITY = ["view_detail", "update", "cancel"];
 const REFRESH_TIER: RefreshTier = "slow";
+const REFRESH_POLL_INTERVAL_MS = 30_000;
 
 type SearchParamValue = string | string[] | undefined;
 
@@ -93,8 +97,7 @@ type TenantBookingListRecord = TenantBookingRuntimeRecord & {
 
 type TenantEmptyReason = (typeof TENANT_EMPTY_REASONS)[number];
 
-type BookingListEnvelope = {
-  items: TenantBookingRuntimeRecord[];
+type BookingListEnvelope = ApiListData<TenantBookingRuntimeRecord> & {
   emptyState?: {
     reason: TenantEmptyReason;
   } | null;
@@ -262,45 +265,6 @@ function deriveReadOnlyReasonCode(booking: TenantBookingRuntimeRecord) {
   return null;
 }
 
-function deriveAvailableActions(
-  booking: TenantBookingRuntimeRecord,
-): ResourceActionDescriptor[] {
-  if (Array.isArray(booking.availableActions)) {
-    return booking.availableActions;
-  }
-
-  const readOnlyReasonCode = deriveReadOnlyReasonCode(booking);
-  const cancelWindowOpen =
-    booking.cancelableUntil == null ||
-    new Date(booking.cancelableUntil).getTime() > Date.now();
-
-  return [
-    {
-      action: "view_detail",
-      enabled: true,
-      riskLevel: "low",
-    },
-    {
-      action: "update",
-      enabled: readOnlyReasonCode == null,
-      riskLevel: "medium",
-      ...(readOnlyReasonCode ? { disabledReasonCode: readOnlyReasonCode } : {}),
-    },
-    {
-      action: "cancel",
-      enabled:
-        !TERMINAL_ORDER_STATUSES.has(booking.orderStatus) && cancelWindowOpen,
-      requiresReason: true,
-      riskLevel: "high",
-      ...(!cancelWindowOpen
-        ? { disabledReasonCode: "past_cancelable_until" }
-        : TERMINAL_ORDER_STATUSES.has(booking.orderStatus)
-          ? { disabledReasonCode: "terminal_order_state" }
-          : {}),
-    },
-  ];
-}
-
 function deriveSlaStatus(booking: TenantBookingRuntimeRecord) {
   if (booking.slaStatus !== undefined) {
     return booking.slaStatus;
@@ -353,29 +317,33 @@ function deriveCrossAppLinks(
 function normalizeBooking(
   booking: TenantBookingRuntimeRecord,
 ): TenantBookingListRecord {
-  const availableActions = deriveAvailableActions(booking);
-
   return {
     ...booking,
     editableUntil: booking.editableUntil ?? booking.modifiableUntil,
     readOnlyReasonCode: deriveReadOnlyReasonCode(booking),
-    availableActions,
+    availableActions: Array.isArray(booking.availableActions)
+      ? booking.availableActions
+      : [],
     slaStatus: deriveSlaStatus(booking),
     crossAppLinks: deriveCrossAppLinks(booking),
   };
 }
 
 function getActionDescriptorsForRow(booking: TenantBookingListRecord) {
-  const byAction = new Map(
-    booking.availableActions.map((descriptor) => [
-      descriptor.action,
-      descriptor,
-    ]),
-  );
+  return [...booking.availableActions].sort((left, right) => {
+    const leftIndex = ACTION_PRIORITY.indexOf(left.action);
+    const rightIndex = ACTION_PRIORITY.indexOf(right.action);
+    const normalizedLeftIndex =
+      leftIndex === -1 ? ACTION_PRIORITY.length : leftIndex;
+    const normalizedRightIndex =
+      rightIndex === -1 ? ACTION_PRIORITY.length : rightIndex;
 
-  return ACTION_ORDER.map((action) => byAction.get(action)).filter(
-    (descriptor): descriptor is ResourceActionDescriptor => Boolean(descriptor),
-  );
+    if (normalizedLeftIndex !== normalizedRightIndex) {
+      return normalizedLeftIndex - normalizedRightIndex;
+    }
+
+    return left.action.localeCompare(right.action);
+  });
 }
 
 function getActionLabel(action: string) {
@@ -386,14 +354,14 @@ function getActionHref(
   booking: TenantBookingListRecord,
   descriptor: ResourceActionDescriptor,
 ) {
-  if (descriptor.action === "view_detail") {
-    return `/bookings/${booking.bookingId}`;
-  }
-  if (descriptor.action === "update" || descriptor.action === "cancel") {
-    return `/bookings/${booking.bookingId}`;
+  if (
+    descriptor.action === "create" ||
+    descriptor.action === "create_booking"
+  ) {
+    return "/bookings/new";
   }
 
-  return "/bookings";
+  return `/bookings/${booking.bookingId}`;
 }
 
 function getActionDisabledReason(descriptor: ResourceActionDescriptor) {
@@ -490,7 +458,7 @@ function getFallbackRefresh(
 
   return {
     generatedAt: new Date(latestUpdatedAt).toISOString(),
-    staleAfterMs: 30_000,
+    staleAfterMs: REFRESH_POLL_INTERVAL_MS,
     dataFreshness: bookings.length > 0 ? "fresh" : "unknown",
     source: "sandbox",
   };
@@ -518,121 +486,118 @@ function getRefreshCopy(refresh: UiRefreshMetadata) {
 
 function getApprovalCopy(booking: TenantBookingListRecord) {
   if (booking.approvalState === "pending") {
-    return `待審批 · ${booking.approvalRequestIds.length} request`;
+    return `${booking.approvalRequestIds.length} approvals pending`;
   }
-  if (
-    booking.approvalState === "rejected" ||
-    booking.approvalState === "blocked"
-  ) {
-    return `審批 ${booking.approvalState}`;
+  if (booking.approvalState === "blocked") {
+    return "approval blocked";
+  }
+  if (booking.approvalState === "rejected") {
+    return "approval rejected";
   }
 
   return null;
 }
 
 function getServiceLabel(booking: TenantBookingListRecord) {
-  return `${booking.serviceBucket} / ${booking.businessDispatchSubtype.replaceAll("_", " ")}`;
+  return `${booking.serviceBucket} / ${booking.businessDispatchSubtype}`;
+}
+
+function getSubtypeCounts(bookings: TenantBookingListRecord[]) {
+  const counts = new Map<string, number>();
+  bookings.forEach((booking) => {
+    const current = counts.get(booking.businessDispatchSubtype) ?? 0;
+    counts.set(booking.businessDispatchSubtype, current + 1);
+  });
+
+  return [...counts.entries()]
+    .map(([subtype, count]) => ({
+      subtype: subtype as BookingListQuery["subtype"],
+      count,
+    }))
+    .sort((left, right) => left.subtype.localeCompare(right.subtype));
 }
 
 function buildBookingsHref(
   query: BookingListQuery,
-  overrides: Partial<BookingListQuery> = {},
-  extras: {
+  nextQuery: Partial<BookingListQuery>,
+  options?: {
     focusedBookingId?: string;
     notificationRef?: string;
     emptyReasonOverride?: TenantEmptyReason | null;
-  } = {},
+  },
 ) {
-  const params = new URLSearchParams(
-    buildBookingListQueryString(query, overrides),
-  );
-
-  if (extras.focusedBookingId) {
-    params.set("bookingId", extras.focusedBookingId);
+  const mergedQuery = {
+    ...query,
+    ...nextQuery,
+  };
+  const params = new URLSearchParams(buildBookingListQueryString(mergedQuery));
+  if (options?.focusedBookingId) {
+    params.set("bookingId", options.focusedBookingId);
   }
-  if (extras.notificationRef) {
-    params.set("notification", extras.notificationRef);
+  if (options?.notificationRef) {
+    params.set("notification", options.notificationRef);
   }
-  if (extras.emptyReasonOverride) {
-    params.set("emptyReason", extras.emptyReasonOverride);
+  if (options?.emptyReasonOverride) {
+    params.set("emptyReason", options.emptyReasonOverride);
   }
-
   const queryString = params.toString();
+
   return queryString ? `/bookings?${queryString}` : "/bookings";
-}
-
-function areStatusesEqual(
-  left: OwnedOrderStatus[],
-  right: OwnedOrderStatus[] | undefined,
-) {
-  if (!right) {
-    return left.length === 0;
-  }
-
-  return (
-    left.length === right.length &&
-    left.every((status) => right.includes(status))
-  );
-}
-
-function getTabCount(
-  bookings: TenantBookingListRecord[],
-  preset: TabFilterPreset,
-) {
-  return bookings.filter((booking) => {
-    const matchesStatuses = preset.statuses
-      ? preset.statuses.includes(booking.orderStatus)
-      : true;
-    const matchesApproval = preset.approval
-      ? booking.approvalState === preset.approval
-      : true;
-
-    return matchesStatuses && matchesApproval;
-  }).length;
 }
 
 function getPageStatusTabs(
   bookings: TenantBookingListRecord[],
   query: BookingListQuery,
-  extras: {
+  options?: {
     focusedBookingId?: string;
     notificationRef?: string;
     emptyReasonOverride?: TenantEmptyReason | null;
   },
 ): PageTabDescriptor[] {
   return PAGE_TAB_PRESETS.map((preset) => {
-    const statuses = preset.statuses ?? [];
-    const approval = preset.approval ?? "all";
+    const tabQuery = {
+      ...query,
+      page: 1,
+      approval: preset.approval ?? "all",
+      statuses: preset.statuses ?? [],
+    };
+    const value = applyBookingListQuery(bookings, tabQuery).total;
+    const isActive =
+      (preset.statuses
+        ? preset.statuses.join(",") === query.statuses.join(",")
+        : query.statuses.length === 0) &&
+      (preset.approval ?? "all") === query.approval;
 
     return {
       label: preset.label,
-      value: getTabCount(bookings, preset),
-      href: buildBookingsHref(
-        query,
-        {
-          statuses,
-          approval,
-          page: 1,
-        },
-        extras,
-      ),
-      isActive:
-        areStatusesEqual(query.statuses, preset.statuses) &&
-        query.approval === approval,
+      value,
+      href: buildBookingsHref(query, tabQuery, options),
+      isActive,
     };
   });
 }
 
-function getSubtypeCounts(bookings: TenantBookingListRecord[]) {
-  return BUSINESS_DISPATCH_SUBTYPES.map((subtype) => ({
-    subtype,
-    count: bookings.filter(
-      (booking) => booking.businessDispatchSubtype === subtype,
-    ).length,
-  }));
+async function fetchBookingListEnvelope(): Promise<BookingListEnvelope> {
+  const response = await fetch(`${API_URL}/api/tenant/bookings`, {
+    cache: "no-store",
+    headers: {
+      "x-actor-id": DEMO_ACTOR_ID,
+      "x-actor-type": "tenant_admin",
+      "x-realm": "tenant",
+      "x-tenant-id": DEMO_TENANT_ID,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`tenant bookings fetch failed: ${response.status}`);
+  }
+
+  const payload =
+    (await response.json()) as ApiSuccessEnvelope<BookingListEnvelope>;
+  return payload.data;
 }
 
-export default async function BookingsPage({
+export default async function TenantBookingsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, SearchParamValue>>;
@@ -642,25 +607,11 @@ export default async function BookingsPage({
   const focusedBookingId = first(resolvedSearchParams.bookingId);
   const notificationRef = first(resolvedSearchParams.notification);
   const emptyReasonOverride = parseEmptyReasonOverride(resolvedSearchParams);
-  const client = getTenantClient();
-  const bookingsResult = await Promise.allSettled([
-    client.listTenantBookings() as Promise<
-      TenantBookingRuntimeRecord[] | BookingListEnvelope
-    >,
-  ]);
+  const bookingsResult = await Promise.allSettled([fetchBookingListEnvelope()]);
   const bookingsSettled = bookingsResult[0];
   const listEnvelope =
-    bookingsSettled.status === "fulfilled" &&
-    !Array.isArray(bookingsSettled.value) &&
-    Array.isArray(bookingsSettled.value.items)
-      ? bookingsSettled.value
-      : null;
-  const rawBookings =
-    bookingsSettled.status === "fulfilled"
-      ? Array.isArray(bookingsSettled.value)
-        ? bookingsSettled.value
-        : bookingsSettled.value.items
-      : [];
+    bookingsSettled.status === "fulfilled" ? bookingsSettled.value : null;
+  const rawBookings = listEnvelope?.items ?? [];
   const bookings = rawBookings.map(normalizeBooking);
   const result = applyBookingListQuery(bookings, query);
   const refreshMetadata = listEnvelope?.refresh ?? getFallbackRefresh(bookings);
@@ -745,6 +696,12 @@ export default async function BookingsPage({
           >
             {getRefreshCopy(refreshMetadata)}
           </span>
+          <BookingsRefreshControl
+            generatedAt={refreshMetadata.generatedAt}
+            pollIntervalMs={
+              refreshMetadata.staleAfterMs ?? REFRESH_POLL_INTERVAL_MS
+            }
+          />
           <span className="status-chip">
             {result.total} visible / {bookings.length} total
           </span>
@@ -1117,24 +1074,30 @@ export default async function BookingsPage({
                             {booking.status} · {formatMoney(booking.quotedFare)}
                           </span>
                           <div className="row-actions">
-                            {rowActions.map((descriptor) =>
-                              descriptor.enabled ? (
-                                <Link
-                                  className="bookings-action-pill"
-                                  href={getActionHref(booking, descriptor)}
-                                  key={descriptor.action}
-                                >
-                                  {getActionLabel(descriptor.action)}
-                                </Link>
-                              ) : (
-                                <span
-                                  className="bookings-action-pill is-disabled"
-                                  key={descriptor.action}
-                                  title={getActionDisabledReason(descriptor)}
-                                >
-                                  {getActionLabel(descriptor.action)}
-                                </span>
-                              ),
+                            {rowActions.length > 0 ? (
+                              rowActions.map((descriptor) =>
+                                descriptor.enabled ? (
+                                  <Link
+                                    className="bookings-action-pill"
+                                    href={getActionHref(booking, descriptor)}
+                                    key={descriptor.action}
+                                  >
+                                    {getActionLabel(descriptor.action)}
+                                  </Link>
+                                ) : (
+                                  <span
+                                    className="bookings-action-pill is-disabled"
+                                    key={descriptor.action}
+                                    title={getActionDisabledReason(descriptor)}
+                                  >
+                                    {getActionLabel(descriptor.action)}
+                                  </span>
+                                ),
+                              )
+                            ) : (
+                              <span className="bookings-inline-meta">
+                                backend returned no row actions
+                              </span>
                             )}
                           </div>
                         </div>
