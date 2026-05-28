@@ -108,6 +108,12 @@ export const tenantNavEntries: TenantNavEntry[] = [
     label: "Webhook",
   },
   {
+    key: "integrationgovernance",
+    href: "/integration-governance",
+    icon: "flags",
+    label: "整合就緒度",
+  },
+  {
     key: "audit",
     href: "/audit",
     icon: "audit",

@@ -416,100 +416,104 @@ export default async function SettingsPage() {
         </div>
 
         <div style={settingsLaneStyle}>
-          <CanvasCard
-            theme={th}
-            title="通知訂閱"
-            subtitle="事件代碼 · 路由 · 狀態"
-            actions={
-              <CanvasBtn theme={th} icon="export" size="sm">
-                匯出路由
-              </CanvasBtn>
-            }
-            padding={0}
-          >
-            {notificationRows.length > 0 ? (
-              <SettingsNotificationTable rows={notificationRows} />
-            ) : (
-              <div style={emptyStateStyle}>尚未訂閱任何事件通知</div>
-            )}
-            <div style={{ ...mutedFootnoteStyle, padding: "10px 14px 14px" }}>
-              {notificationFootnote}
-            </div>
-          </CanvasCard>
-
-          <CanvasCard
-            theme={th}
-            title="SLA 與配額姿態"
-            subtitle="等候 / 抵達 / 完成門檻 · 月配額姿態"
-          >
-            <div style={kpiGridStyle}>
-              <CanvasKPI
-                theme={th}
-                label="等候"
-                value={data.sla ? `${data.sla.waitThresholdMin}m` : "—"}
-                sub="等候門檻"
-              />
-              <CanvasKPI
-                theme={th}
-                label="抵達"
-                value={data.sla ? `${data.sla.arrivalThresholdMin}m` : "—"}
-                sub="抵達門檻"
-              />
-              <CanvasKPI
-                theme={th}
-                label="完成"
-                value={data.sla ? `${data.sla.completionThresholdMin}m` : "—"}
-                sub="完成門檻"
-              />
-              <CanvasKPI
-                theme={th}
-                label="剩餘配額"
-                value={formatRemainingPercent(quotaSummary)}
-                sub={formatQuotaRemaining(quotaSummary)}
-              />
-            </div>
-
-            <CanvasDL
+          <div id="notifications">
+            <CanvasCard
               theme={th}
-              cols={2}
-              items={[
-                {
-                  k: "API key 壽命",
-                  v: apiKeyLifetime,
-                  mono: true,
-                },
-                {
-                  k: "webhook 重送",
-                  v: webhookRetry,
-                  mono: true,
-                },
-                {
-                  k: "Webhook 基線",
-                  v: `${baselineEvents.length} 項`,
-                  mono: true,
-                },
-                {
-                  k: "強制模式",
-                  v: quotaSummary?.limit.enforcementMode ?? "—",
-                  mono: true,
-                },
-                {
-                  k: "已確認趟次",
-                  v: quotaSummary
-                    ? formatCount(quotaSummary.usage.confirmedBookingCount)
-                    : "—",
-                  mono: true,
-                },
-                {
-                  k: "更新時間",
-                  v: formatUpdated(
-                    quotaSummary?.refreshedAt ?? data.sla?.updatedAt,
-                  ),
-                  mono: true,
-                },
-              ]}
-            />
-          </CanvasCard>
+              title="通知訂閱"
+              subtitle="事件代碼 · 路由 · 狀態"
+              actions={
+                <CanvasBtn theme={th} icon="export" size="sm">
+                  匯出路由
+                </CanvasBtn>
+              }
+              padding={0}
+            >
+              {notificationRows.length > 0 ? (
+                <SettingsNotificationTable rows={notificationRows} />
+              ) : (
+                <div style={emptyStateStyle}>尚未訂閱任何事件通知</div>
+              )}
+              <div style={{ ...mutedFootnoteStyle, padding: "10px 14px 14px" }}>
+                {notificationFootnote}
+              </div>
+            </CanvasCard>
+          </div>
+
+          <div id="sla">
+            <CanvasCard
+              theme={th}
+              title="SLA 與配額姿態"
+              subtitle="等候 / 抵達 / 完成門檻 · 月配額姿態"
+            >
+              <div style={kpiGridStyle}>
+                <CanvasKPI
+                  theme={th}
+                  label="等候"
+                  value={data.sla ? `${data.sla.waitThresholdMin}m` : "—"}
+                  sub="等候門檻"
+                />
+                <CanvasKPI
+                  theme={th}
+                  label="抵達"
+                  value={data.sla ? `${data.sla.arrivalThresholdMin}m` : "—"}
+                  sub="抵達門檻"
+                />
+                <CanvasKPI
+                  theme={th}
+                  label="完成"
+                  value={data.sla ? `${data.sla.completionThresholdMin}m` : "—"}
+                  sub="完成門檻"
+                />
+                <CanvasKPI
+                  theme={th}
+                  label="剩餘配額"
+                  value={formatRemainingPercent(quotaSummary)}
+                  sub={formatQuotaRemaining(quotaSummary)}
+                />
+              </div>
+
+              <CanvasDL
+                theme={th}
+                cols={2}
+                items={[
+                  {
+                    k: "API key 壽命",
+                    v: apiKeyLifetime,
+                    mono: true,
+                  },
+                  {
+                    k: "webhook 重送",
+                    v: webhookRetry,
+                    mono: true,
+                  },
+                  {
+                    k: "Webhook 基線",
+                    v: `${baselineEvents.length} 項`,
+                    mono: true,
+                  },
+                  {
+                    k: "強制模式",
+                    v: quotaSummary?.limit.enforcementMode ?? "—",
+                    mono: true,
+                  },
+                  {
+                    k: "已確認趟次",
+                    v: quotaSummary
+                      ? formatCount(quotaSummary.usage.confirmedBookingCount)
+                      : "—",
+                    mono: true,
+                  },
+                  {
+                    k: "更新時間",
+                    v: formatUpdated(
+                      quotaSummary?.refreshedAt ?? data.sla?.updatedAt,
+                    ),
+                    mono: true,
+                  },
+                ]}
+              />
+            </CanvasCard>
+          </div>
 
           <CanvasCard
             theme={th}
