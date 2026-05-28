@@ -34,7 +34,17 @@ const th = buildCanvasTheme({
 });
 
 const TENANT_REFRESH_TIER: RefreshTier = "slow";
-const TENANT_REFRESH_CADENCE_MS = 30_000;
+const REFRESH_TIER_CADENCE_MS: Record<RefreshTier, number | null> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: null,
+};
+const TENANT_REFRESH_CADENCE_MS =
+  REFRESH_TIER_CADENCE_MS[TENANT_REFRESH_TIER] ?? 30_000;
 const OPS_CONSOLE_URL =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003";
 const PLATFORM_ADMIN_URL =
@@ -125,11 +135,17 @@ const rowActionMetaStyle: CSSProperties = {
   gap: 6,
 };
 
-const accessMetaStyle: CSSProperties = {
-  display: "grid",
-  gap: 2,
-  fontSize: 11.5,
+const metricValueStyle: CSSProperties = {
+  color: th.text,
+  fontWeight: 700,
+  fontSize: 18,
+  lineHeight: 1.1,
+};
+
+const metricLabelStyle: CSSProperties = {
   color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.4,
 };
 
 const authorityMetaStyle: CSSProperties = {
@@ -879,20 +895,16 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "ACCESS",
-      w: 180,
-      r: (row) => (
-        <div style={accessMetaStyle}>
-          <span>invited {formatUpdated(row.invitedAt)}</span>
-          <span>last login {formatUpdated(row.lastLoginAt)}</span>
-        </div>
-      ),
+      h: "INVITED",
+      w: 140,
+      mono: true,
+      r: (row) => formatUpdated(row.invitedAt),
     },
     {
-      h: "UPDATED",
+      h: "LAST LOGIN",
       w: 150,
       mono: true,
-      r: (row) => formatUpdated(row.updatedAt),
+      r: (row) => formatUpdated(row.lastLoginAt),
     },
     {
       h: "ACTIONS",
@@ -968,7 +980,7 @@ export default async function UsersPage({
           theme={th}
           tone={refreshMetadata.dataFreshness === "degraded" ? "warn" : "info"}
           icon="refresh"
-          title={`Refresh tier T5 · 30s cadence · ${TENANT_REFRESH_TIER}`}
+          title={`Refresh tier T5 · ${TENANT_REFRESH_CADENCE_MS / 1000}s cadence · ${TENANT_REFRESH_TIER}`}
           body={`目前顯示的是 ${formatRefreshAt(refreshMetadata.generatedAt)} 產生的 snapshot · dataFreshness=${refreshMetadata.dataFreshness} · source=${refreshMetadata.source}`}
         />
 
@@ -1073,7 +1085,7 @@ export default async function UsersPage({
           <CanvasCard
             theme={th}
             title="Roster 摘要"
-            subtitle="must-show data / authority / refresh"
+            subtitle="tc_admin scope · must-show counters"
           >
             <div style={controlStackStyle}>
               <div style={pillRowStyle}>
@@ -1091,6 +1103,26 @@ export default async function UsersPage({
                 </CanvasPill>
               </div>
 
+              <div style={supportingGridStyle}>
+                <div>
+                  <div style={metricValueStyle}>
+                    {formatCount(users.length)}
+                  </div>
+                  <div style={metricLabelStyle}>
+                    roster entries currently returned by `/api/tenant/users`
+                  </div>
+                </div>
+                <div>
+                  <div style={metricValueStyle}>
+                    {formatCount(assignableRoles.length)} /{" "}
+                    {formatCount(roles.length)}
+                  </div>
+                  <div style={metricLabelStyle}>
+                    assignable roles from role catalog
+                  </div>
+                </div>
+              </div>
+
               <CanvasDL
                 theme={th}
                 cols={1}
@@ -1101,8 +1133,8 @@ export default async function UsersPage({
                     mono: true,
                   },
                   {
-                    k: "Assignable roles",
-                    v: `${formatCount(assignableRoles.length)} / ${formatCount(roles.length)}`,
+                    k: "Page owner",
+                    v: "tc_admin only",
                     mono: true,
                   },
                   {
@@ -1116,7 +1148,12 @@ export default async function UsersPage({
           </CanvasCard>
         </div>
 
-        <CanvasCard theme={th} padding={0}>
+        <CanvasCard
+          theme={th}
+          title="Tenant roster"
+          subtitle="user id · display name · email · role · status · invited at · last login"
+          padding={0}
+        >
           {emptyReason && emptyConfig ? (
             <EmptyStateBlock reason={emptyReason} config={emptyConfig} />
           ) : (
