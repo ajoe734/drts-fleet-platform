@@ -1,0 +1,16 @@
+[Unit]
+Description=DRTS orchestrator health probe — every 5 min
+Documentation=file:%h/workspace/drts-fleet-platform/ops/systemd/README-velocity-health.md
+
+[Timer]
+# Run health probe 30s after boot then every 5 min. Persistent=true so a
+# missed run after host wake catches up.
+OnBootSec=30s
+OnUnitActiveSec=5min
+Persistent=true
+AccuracySec=15s
+
+Unit=drts-health.service
+
+[Install]
+WantedBy=timers.target

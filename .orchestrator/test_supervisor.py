@@ -5,6 +5,8 @@ import json
 import signal
 import subprocess
 import tempfile
+import pathlib
+from datetime import datetime, timezone
 import unittest
 import os
 from pathlib import Path
@@ -4411,6 +4413,75 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(reason, "provider_health_triage")
 
+    def test_repeated_failure_records_ignore_tasks_covered_by_workspace_baseline_task(self) -> None:
+        state = {
+            "failure_streaks": {
+                "UI-FE-ADM-FLT:owner": {
+                    "task_id": "UI-FE-ADM-FLT",
+                    "role": "owner",
+                    "agent": "Codex",
+                    "awaiting_chair": True,
+                },
+                "UI-FE-TEN-PSG:owner": {
+                    "task_id": "UI-FE-TEN-PSG",
+                    "role": "owner",
+                    "agent": "Codex",
+                    "awaiting_chair": True,
+                },
+            }
+        }
+        status = {
+            "tasks": [
+                {
+                    "id": supervisor.WORKSPACE_BASELINE_TASK_ID,
+                    "status": "in_progress",
+                    "helper_kind": supervisor.WORKSPACE_BASELINE_HELPER_KIND,
+                    "covers_task_ids": ["UI-FE-ADM-FLT"],
+                }
+            ]
+        }
+
+        records = supervisor.repeated_failure_records(state, status)
+
+        self.assertEqual([item["task_id"] for item in records], ["UI-FE-TEN-PSG"])
+
+    def test_chair_review_reason_skips_reassignment_when_workspace_baseline_task_covers_loops(self) -> None:
+        reason = supervisor.chair_review_reason(
+            {
+                "failure_streaks": {
+                    "UI-FE-ADM-FLT:owner": {
+                        "task_id": "UI-FE-ADM-FLT",
+                        "role": "owner",
+                        "agent": "Codex",
+                        "awaiting_chair": True,
+                    }
+                },
+                "provider_pauses": {},
+                "dispatch_pauses": [
+                    {
+                        "task_id": "UI-FE-ADM-FLT",
+                        "provider": "codex",
+                        "failure_kind": "terminal",
+                        "paused_at": "2026-05-28T00:00:00Z",
+                    }
+                ],
+            },
+            {"pending": []},
+            status={
+                "tasks": [
+                    {
+                        "id": supervisor.WORKSPACE_BASELINE_TASK_ID,
+                        "status": "in_progress",
+                        "helper_kind": supervisor.WORKSPACE_BASELINE_HELPER_KIND,
+                        "covers_task_ids": ["UI-FE-ADM-FLT"],
+                    }
+                ]
+            },
+            config={"paths": {}},
+        )
+
+        self.assertEqual(reason, "operational_review")
+
     def test_chair_review_reason_prioritizes_dependency_ready_blocked_tasks(self) -> None:
         status = {
             "tasks": [
@@ -5717,6 +5788,150 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertIsNone(state["chair_review"]["active_review"])
             self.assertEqual(state["chair_review"]["last_reason"], "blocked_task_triage")
 
+    def test_refresh_chair_review_state_materializes_workspace_baseline_task_from_reassignment_focus(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260528T000000Z-claude.md"
+            json_path = review_dir / "20260528T000000Z-claude.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "operational_review",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "No reassignment improves machine truth.",
+                        "blocked_by": [
+                            "Shared workspace-baseline blocker keeps the UI-FE wave from typecheck/build completion."
+                        ],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [],
+                        "provider_actions": [],
+                        "recommended_focus": [
+                            "Create a workspace-baseline repair task before re-dispatching the UI-FE wave."
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text('{"tasks": []}\n', encoding="utf-8")
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "failure_streaks": {
+                    "UI-FE-ADM-FLT:owner": {
+                        "task_id": "UI-FE-ADM-FLT",
+                        "role": "owner",
+                        "agent": "Codex",
+                        "awaiting_chair": True,
+                    }
+                },
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude",
+                        "agent": "Claude",
+                        "reason": "reassignment_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "create_chair_workspace_baseline_task", return_value=True) as create_task,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            create_task.assert_called_once()
+            self.assertEqual(create_task.call_args.kwargs["preferred_owner"], "Claude")
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reason"], "reassignment_triage")
+
+    def test_materialize_workspace_baseline_task_from_last_decision_uses_last_reviewer(self) -> None:
+        config = {"paths": {"status_file": "ai-status.json"}}
+        state = {
+            "chair_review": {
+                "last_reason": "reassignment_triage",
+                "last_reviewer": "Claude",
+                "last_decision": {
+                    "reason": "Shared workspace-baseline blocker",
+                    "blocked_by": ["@drts/ui-tokens and @drts/contracts module resolution"],
+                    "recommended_focus": ["Dispatch a workspace-baseline repair task"],
+                },
+            }
+        }
+
+        with mock.patch.object(supervisor, "create_chair_workspace_baseline_task", return_value=True) as create_task:
+            changed = supervisor.materialize_workspace_baseline_task_from_last_decision(
+                config,
+                state,
+                provider_report={},
+            )
+
+        self.assertTrue(changed)
+        create_task.assert_called_once_with(
+            config,
+            state,
+            state["chair_review"]["last_decision"],
+            {},
+            preferred_owner="Claude",
+        )
+
+    def test_ensure_workspace_baseline_task_dispatch_queues_owner_event(self) -> None:
+        task = {
+            "id": "UI-BASELINE-001",
+            "status": "backlog",
+            "owner": "Claude",
+            "reviewer": "Codex",
+        }
+        state = {}
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task]}),
+            mock.patch.object(supervisor, "chair_dispatch_action_reason", return_value=("Claude", "owned_ready_dispatch")),
+            mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False),
+            mock.patch.object(supervisor, "ready_dispatch_settings", return_value={"active_worker_statuses": ["running"]}),
+            mock.patch.object(supervisor, "outstanding_delivery_agent_counts", return_value={}),
+            mock.patch.object(supervisor, "outstanding_delivery_indexes", return_value=(set(), {}, set())),
+            mock.patch.object(supervisor, "build_dispatch_event", return_value={"key": "evt-baseline", "task_id": "UI-BASELINE-001"}),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_event,
+            mock.patch.object(supervisor, "write_activity_log") as write_log,
+        ):
+            changed = supervisor.ensure_workspace_baseline_task_dispatch(
+                {"paths": {"status_file": "ai-status.json"}},
+                state,
+                provider_report={},
+            )
+
+        self.assertTrue(changed)
+        queue_event.assert_called_once()
+        write_log.assert_called_once()
+        self.assertIn("evt-baseline", state["seen_event_keys"])
+
     def test_refresh_chair_review_state_applies_resume_parent_task_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -6374,6 +6589,178 @@ class PruneDoneHandoffsTests(unittest.TestCase):
         s = {"handoffs": "not-a-list"}
         supervisor.prune_done_handoffs(s, keep=500)
         self.assertEqual(s["handoffs"], "not-a-list")  # unchanged
+
+
+
+
+class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
+    """OPS-RECONCILE-ASYNC-001: reconcile_status_from_git must spawn the
+    git-reconcile subprocess in the background (non-blocking) and finalize
+    its result on the NEXT tick, so a slow reconcile cannot freeze the
+    supervisor's main dispatch loop.
+
+    Previously the supervisor used `subprocess.run` and synchronously waited
+    for the reconcile-from-git subprocess. On a bloated ai-status.json the
+    subprocess took ~4 minutes, during which dispatch was completely starved
+    and every lane drained to zero (OPS-RECONCILE-INTERVAL-600 throttled
+    re-entry but did not address the per-call freeze).
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        root = pathlib.Path(self._tmp.name)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "ai_status.py").write_text("# stub\n")
+        (root / ".orchestrator").mkdir()
+        (root / "ai-status.json").write_text("{}")
+        self.config = {
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+            },
+            "supervisor": {"git_reconcile_interval_seconds": 60},
+        }
+        # ensure the registry is empty across tests
+        supervisor._RECONCILE_PROCS.clear()
+
+    def tearDown(self) -> None:
+        supervisor._RECONCILE_PROCS.clear()
+        self._tmp.cleanup()
+
+    def _fake_popen(self, *, alive: bool, returncode: int = 0,
+                     stdout: str = "", stderr: str = "") -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.poll.return_value = None if alive else returncode
+        proc.returncode = None if alive else returncode
+        proc._fake_stdout = stdout
+        proc._fake_stderr = stderr
+        return proc
+
+    def test_first_call_spawns_popen_and_returns_false(self) -> None:
+        # Fresh state — first call spawns Popen and returns False (no
+        # result to apply yet).
+        state: dict = {}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            popen.return_value = self._fake_popen(alive=True)
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        self.assertEqual(popen.call_count, 1)
+        # Throttle timestamp recorded so a re-entry skips spawn.
+        self.assertIn("last_git_reconcile_at", state.get("supervisor", {}))
+        # In-flight entry registered.
+        self.assertEqual(len(supervisor._RECONCILE_PROCS), 1)
+
+    def test_subsequent_call_while_in_flight_does_not_respawn(self) -> None:
+        # Simulate: previous tick spawned reconcile; this tick should observe
+        # it still running and NOT spawn a second one.
+        state: dict = {}
+        popen_proc = self._fake_popen(alive=True)
+        with mock.patch.object(supervisor.subprocess, "Popen", return_value=popen_proc) as popen:
+            supervisor.reconcile_status_from_git(self.config, state)
+            # Second call while alive=True
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        self.assertEqual(popen.call_count, 1, "must NOT re-spawn while in flight")
+
+    def test_completion_applies_stdout_and_returns_true(self) -> None:
+        # Spawn -> mark completed -> ensure next call reads stdout, emits
+        # activity-log entries, clears the registry and returns True.
+        state: dict = {}
+        # Spawn
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            proc = self._fake_popen(alive=True)
+            popen.return_value = proc
+            supervisor.reconcile_status_from_git(self.config, state)
+        # Find the tempfile paths from the registry and prefill them
+        entry = next(iter(supervisor._RECONCILE_PROCS.values()))
+        entry["stdout_path"].write_text("reconciled UI-X to done\n")
+        entry["stderr_path"].write_text("")
+        # Mark process completed (rc=0)
+        entry["proc"].poll.return_value = 0
+        entry["proc"].returncode = 0
+        with mock.patch.object(supervisor, "write_activity_log") as log:
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertTrue(changed)
+        self.assertEqual(len(supervisor._RECONCILE_PROCS), 0,
+                         "registry must clear after applying completion")
+        # Activity log invoked with the reconcile message
+        calls = [c.args[1] for c in log.call_args_list]
+        self.assertTrue(any(
+            c.get("type") == "reconcile_status_from_git" and "UI-X" in c.get("message", "")
+            for c in calls
+        ))
+
+    def test_throttle_blocks_spawn_within_interval(self) -> None:
+        # last_git_reconcile_at < interval ago and registry empty -> no spawn.
+        state = {"supervisor": {
+            "last_git_reconcile_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        popen.assert_not_called()
+
+    def test_completion_with_nonzero_rc_logs_failure_and_returns_false(self) -> None:
+        state: dict = {}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            popen.return_value = self._fake_popen(alive=True)
+            supervisor.reconcile_status_from_git(self.config, state)
+        entry = next(iter(supervisor._RECONCILE_PROCS.values()))
+        entry["stdout_path"].write_text("")
+        entry["stderr_path"].write_text("boom: missing remote\n")
+        entry["proc"].poll.return_value = 2
+        entry["proc"].returncode = 2
+        with mock.patch.object(supervisor, "write_activity_log") as log:
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        types = [c.args[1].get("type") for c in log.call_args_list]
+        self.assertIn("reconcile_status_from_git_failed", types)
+
+
+
+
+class SdNotifyTests(unittest.TestCase):
+    """OPS-SUPERVISOR-SD-NOTIFY-001: _sd_notify must (a) no-op when
+    NOTIFY_SOCKET is unset (covers interactive / --once usage), (b) deliver
+    a WATCHDOG=1 datagram to the AF_UNIX socket systemd hands us when set,
+    (c) swallow all OS errors (heartbeat must never take the supervisor
+    down)."""
+
+    def test_noop_when_notify_socket_unset(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("NOTIFY_SOCKET", None)
+            with mock.patch.object(supervisor.socket, "socket") as sk:
+                supervisor._sd_notify("WATCHDOG=1")
+            sk.assert_not_called()
+
+    def test_sends_datagram_when_notify_socket_set(self) -> None:
+        fake_sock = mock.MagicMock()
+        with mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "/run/systemd/notify"}):
+            with mock.patch.object(supervisor.socket, "socket", return_value=fake_sock):
+                supervisor._sd_notify("WATCHDOG=1")
+        fake_sock.connect.assert_called_once_with("/run/systemd/notify")
+        fake_sock.sendall.assert_called_once_with(b"WATCHDOG=1")
+        fake_sock.close.assert_called_once()
+
+    def test_abstract_namespace_socket_path_translated(self) -> None:
+        # systemd uses @-prefix for abstract namespace; kernel wants \0-prefix.
+        fake_sock = mock.MagicMock()
+        with mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "@some-abstract"}):
+            with mock.patch.object(supervisor.socket, "socket", return_value=fake_sock):
+                supervisor._sd_notify("READY=1")
+        fake_sock.connect.assert_called_once_with("\0some-abstract")
+        fake_sock.sendall.assert_called_once_with(b"READY=1")
+
+    def test_oserror_during_send_is_swallowed(self) -> None:
+        # If the systemd socket disappears mid-supervisor (or perms drop),
+        # _sd_notify must NOT raise — heartbeat is best-effort.
+        fake_sock = mock.MagicMock()
+        fake_sock.sendall.side_effect = OSError("broken pipe")
+        with mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "/run/systemd/notify"}):
+            with mock.patch.object(supervisor.socket, "socket", return_value=fake_sock):
+                # MUST NOT raise.
+                supervisor._sd_notify("WATCHDOG=1")
+        fake_sock.close.assert_called_once()
 
 
 if __name__ == "__main__":
