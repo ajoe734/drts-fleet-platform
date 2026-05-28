@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import type {
   CrossAppResourceLink,
+  EmptyStateEnvelope,
   EmptyReason,
   MoneyAmount,
   ResourceActionDescriptor,
@@ -102,7 +103,7 @@ const actionListStyle: CSSProperties = {
 
 const actionLinkStyle: CSSProperties = {
   display: "grid",
-  gap: 4,
+  gap: 6,
   padding: "12px 14px",
   borderRadius: 14,
   border: `1px solid ${th.border}`,
@@ -133,6 +134,13 @@ const stateChipStyle: CSSProperties = {
   color: th.text,
 };
 
+const stateChipActiveStyle: CSSProperties = {
+  ...stateChipStyle,
+  background: th.surfaceLo,
+  borderColor: th.accent,
+  boxShadow: `0 0 0 1px ${th.accentInset}`,
+};
+
 const inlineRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
@@ -159,6 +167,44 @@ const emptyPanelStyle: CSSProperties = {
   textAlign: "center",
 };
 
+const emptyStateLayoutStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.25fr) minmax(260px, 0.75fr)",
+  gap: 16,
+};
+
+const emptyStateBodyStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
+const routeListStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const routeItemStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  padding: "12px 14px",
+  borderRadius: 14,
+  border: `1px solid ${th.border}`,
+  background: th.surface,
+};
+
+const routeCodeStyle: CSSProperties = {
+  color: th.textMuted,
+  fontFamily: th.monoFamily,
+  fontSize: 11,
+};
+
+const actionMetaRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+  alignItems: "center",
+};
+
 type BillingPageData = {
   billingProfile: TenantBillingProfile | null;
   invoices: TenantInvoiceRecord[];
@@ -173,11 +219,11 @@ type BillingSnapshot = {
   status: "active" | "past_due" | "suspended" | "not_provisioned";
 };
 
-type BillingEmptyState = {
+type BillingEmptyState = EmptyStateEnvelope & {
   title: string;
   body: string;
   tone: "info" | "warn" | "danger";
-  nextAction?: ResourceActionDescriptor;
+  laneLabel: string;
 };
 
 type InvoiceSummaryRow = TenantInvoiceRecord & Record<string, unknown>;
@@ -193,9 +239,12 @@ const EMPTY_REASON_SEQUENCE: EmptyReason[] = [
 
 const EMPTY_REASON_META: Record<EmptyReason, BillingEmptyState> = {
   not_provisioned: {
+    reason: "not_provisioned",
+    messageCode: "BILLING_PROFILE_NOT_READY",
     title: "租戶尚未完成帳務配置",
     body: "尚未建立 billing profile，因此 overview 應保留導引與 next action，而不是假裝已經有結帳資料。",
     tone: "info",
+    laneLabel: "profile setup required",
     nextAction: {
       action: "billing.profile.create",
       enabled: true,
@@ -203,19 +252,28 @@ const EMPTY_REASON_META: Record<EmptyReason, BillingEmptyState> = {
     },
   },
   no_data: {
+    reason: "no_data",
+    messageCode: "BILLING_SNAPSHOT_EMPTY",
     title: "目前沒有可顯示的帳務資料",
     body: "當期尚未累積任何帳款，也沒有 recent invoice summary 可供比對。",
     tone: "info",
+    laneLabel: "usage not started",
   },
   filtered_empty: {
+    reason: "filtered_empty",
+    messageCode: "BILLING_FILTER_EMPTY",
     title: "目前篩選條件下沒有結果",
     body: "Overview 本身仍可讀，但當前條件沒有命中 invoice summary 或 usage 切片。",
     tone: "info",
+    laneLabel: "filter produced zero matches",
   },
   fetch_failed: {
+    reason: "fetch_failed",
+    messageCode: "BILLING_FETCH_FAILED",
     title: "帳務資料抓取失敗",
     body: "API 已回錯，畫面保留 refresh tier 與 next action，而不是把錯誤偽裝成空清單。",
     tone: "warn",
+    laneLabel: "authority fetch interrupted",
     nextAction: {
       action: "billing.retry",
       enabled: true,
@@ -223,19 +281,28 @@ const EMPTY_REASON_META: Record<EmptyReason, BillingEmptyState> = {
     },
   },
   external_unavailable: {
+    reason: "external_unavailable",
+    messageCode: "BILLING_UPSTREAM_UNAVAILABLE",
     title: "外部計費來源暫時不可用",
     body: "部分發票或投影金額仍可能顯示，但 current-period snapshot 不應被視為完整權威。",
     tone: "warn",
+    laneLabel: "upstream degraded",
   },
   permission_denied: {
+    reason: "permission_denied",
+    messageCode: "BILLING_SCOPE_REQUIRED",
     title: "目前角色沒有查看帳務內容的權限",
     body: "依 packet 與 role matrix，頁面保留入口，但資料區必須明確說明 read scope 不足。",
     tone: "danger",
+    laneLabel: "read scope missing",
   },
   driver_not_eligible: {
+    reason: "driver_not_eligible",
+    messageCode: "TENANT_BILLING_REASON_NOT_APPLICABLE",
     title: "此空狀態不適用於 tenant billing",
     body: "保留型別相容性；tenant console 不應以 driver_not_eligible 作為 billing empty reason。",
     tone: "info",
+    laneLabel: "tenant route guard",
   },
 };
 
@@ -362,37 +429,47 @@ function getBillingSnapshot(
 
 function buildAvailableActions(
   snapshot: BillingSnapshot,
-  emptyReason: EmptyReason | null,
+  emptyState: BillingEmptyState | null,
 ): ResourceActionDescriptor[] {
-  if (emptyReason === "permission_denied") {
-    return [
-      {
-        action: "billing.open.invoices",
-        enabled: false,
-        disabledReasonCode: "RBAC_SCOPE_REQUIRED",
-        riskLevel: "low",
-      },
-    ];
+  const actions: ResourceActionDescriptor[] =
+    emptyState?.reason === "permission_denied"
+      ? [
+          {
+            action: "billing.open.invoices",
+            enabled: false,
+            disabledReasonCode: "RBAC_SCOPE_REQUIRED",
+            riskLevel: "low",
+          },
+        ]
+      : [
+          {
+            action:
+              snapshot.status === "not_provisioned"
+                ? "billing.profile.create"
+                : "billing.profile.edit",
+            enabled: true,
+            requiresReason: false,
+            riskLevel: "medium",
+          },
+          {
+            action: "billing.open.invoices",
+            enabled: emptyState?.reason !== "not_provisioned",
+            disabledReasonCode:
+              emptyState?.reason === "not_provisioned"
+                ? "PROFILE_NOT_READY"
+                : undefined,
+            riskLevel: "low",
+          },
+        ];
+
+  if (
+    emptyState?.nextAction &&
+    !actions.some((action) => action.action === emptyState.nextAction?.action)
+  ) {
+    actions.unshift(emptyState.nextAction);
   }
 
-  return [
-    {
-      action:
-        snapshot.status === "not_provisioned"
-          ? "billing.profile.create"
-          : "billing.profile.edit",
-      enabled: true,
-      requiresReason: false,
-      riskLevel: "medium",
-    },
-    {
-      action: "billing.open.invoices",
-      enabled: emptyReason !== "not_provisioned",
-      disabledReasonCode:
-        emptyReason === "not_provisioned" ? "PROFILE_NOT_READY" : undefined,
-      riskLevel: "low",
-    },
-  ];
+  return actions;
 }
 
 function mapActionLink(action: ResourceActionDescriptor) {
@@ -480,6 +557,18 @@ function getEmptyReason(searchValue: string | null, hasErrors: boolean) {
     return searchValue as EmptyReason;
   }
   return hasErrors ? "fetch_failed" : null;
+}
+
+function getActionTone(riskLevel: ResourceActionDescriptor["riskLevel"]) {
+  switch (riskLevel) {
+    case "high":
+      return "danger" as const;
+    case "medium":
+      return "warn" as const;
+    case "low":
+    default:
+      return "info" as const;
+  }
 }
 
 function getInvoiceStatusMeta(invoice: TenantInvoiceRecord) {
@@ -611,7 +700,7 @@ export default async function BillingPage({
     stateParam ?? null,
   );
   const emptyState = emptyReason ? EMPTY_REASON_META[emptyReason] : null;
-  const availableActions = buildAvailableActions(snapshot, emptyReason);
+  const availableActions = buildAvailableActions(snapshot, emptyState);
   const sortedInvoices =
     emptyReason === "no_data" || emptyReason === "filtered_empty"
       ? []
@@ -639,12 +728,15 @@ export default async function BillingPage({
     .slice(0, 6)
     .map((invoice) => ({ ...invoice }));
   const refreshSummary = "T5 tenant slow · 30s cadence · generated via ISR";
-  const paymentMethodLabel = data.billingProfile ? "invoice (NET 30)" : "—";
+  const paymentMethodLabel = data.billingProfile ? "月結發票 · NET 30" : "—";
   const billingCurrency =
     latestInvoice?.amount.currency ?? quotaSummary?.limit.currency ?? "TWD";
   const nextCloseLabel = latestInvoice?.periodEnd
     ? `${latestInvoice.periodEnd} 23:59`
     : "—";
+  const emptyStateAction = emptyState?.nextAction
+    ? mapActionLink(emptyState.nextAction)
+    : null;
 
   const invoiceColumns: CanvasTableColumn<InvoiceSummaryRow>[] = [
     {
@@ -715,6 +807,76 @@ export default async function BillingPage({
           />
         ) : null}
 
+        {emptyState ? (
+          <div style={emptyStateLayoutStyle}>
+            <CanvasCard
+              theme={th}
+              title={emptyState.title}
+              subtitle={`${emptyState.reason} · ${emptyState.messageCode}`}
+              actions={
+                <CanvasPill theme={th} tone={getActionTone("medium")} dot>
+                  {emptyState.laneLabel}
+                </CanvasPill>
+              }
+            >
+              <div style={emptyStateBodyStyle}>
+                <div style={detailItemStyle}>
+                  <span style={detailLabelStyle}>Authority note</span>
+                  <span style={detailValueStyle}>{emptyState.body}</span>
+                </div>
+                <div style={detailGridStyle}>
+                  <div style={detailItemStyle}>
+                    <span style={detailLabelStyle}>Refresh tier</span>
+                    <span style={detailValueStyle}>{refreshSummary}</span>
+                  </div>
+                  <div style={detailItemStyle}>
+                    <span style={detailLabelStyle}>Exit route</span>
+                    <span style={detailValueStyle}>/invoices</span>
+                  </div>
+                </div>
+                {emptyStateAction ? (
+                  <Link href={emptyStateAction.href} style={actionLinkStyle}>
+                    <strong>{emptyStateAction.label}</strong>
+                    <span style={noteStyle}>
+                      {emptyStateAction.description}
+                    </span>
+                  </Link>
+                ) : null}
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
+              title="Route flow"
+              subtitle="spec entry / exit and sibling surfaces"
+            >
+              <div style={routeListStyle}>
+                <div style={routeItemStyle}>
+                  <span style={detailLabelStyle}>Entry</span>
+                  <span style={detailValueStyle}>Sidebar navigation</span>
+                  <span style={routeCodeStyle}>tenant-console /billing</span>
+                </div>
+                <div style={routeItemStyle}>
+                  <span style={detailLabelStyle}>Detail exit</span>
+                  <Link href="/invoices" style={tableLinkStyle}>
+                    Open invoice detail
+                  </Link>
+                  <span style={routeCodeStyle}>/invoices</span>
+                </div>
+                <div style={routeItemStyle}>
+                  <span style={detailLabelStyle}>Related routes</span>
+                  <span style={detailValueStyle}>
+                    /settings · /cost-centers
+                  </span>
+                  <span style={routeCodeStyle}>
+                    billing profile + finance controls
+                  </span>
+                </div>
+              </div>
+            </CanvasCard>
+          </div>
+        ) : null}
+
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
@@ -759,6 +921,12 @@ export default async function BillingPage({
             }
           >
             <div style={detailStackStyle}>
+              <div style={detailItemStyle}>
+                <span style={detailLabelStyle}>發票抬頭</span>
+                <span style={detailValueStyle}>
+                  {data.billingProfile?.invoiceTitle ?? "未設定抬頭"}
+                </span>
+              </div>
               <div style={detailItemStyle}>
                 <span style={detailLabelStyle}>統一編號</span>
                 <span style={detailValueStyle}>
@@ -880,6 +1048,14 @@ export default async function BillingPage({
                   return (
                     <div key={action.action} style={mutedActionStyle}>
                       <strong>{target.label}</strong>
+                      <div style={actionMetaRowStyle}>
+                        <CanvasPill
+                          theme={th}
+                          tone={getActionTone(action.riskLevel)}
+                        >
+                          {action.riskLevel}
+                        </CanvasPill>
+                      </div>
                       <span style={noteStyle}>
                         {action.disabledReasonCode ?? "disabled"}
                       </span>
@@ -894,24 +1070,23 @@ export default async function BillingPage({
                     style={actionLinkStyle}
                   >
                     <strong>{target.label}</strong>
+                    <div style={actionMetaRowStyle}>
+                      <CanvasPill
+                        theme={th}
+                        tone={getActionTone(action.riskLevel)}
+                      >
+                        {action.riskLevel}
+                      </CanvasPill>
+                      {action.requiresReason ? (
+                        <CanvasPill theme={th} tone="danger">
+                          reason required
+                        </CanvasPill>
+                      ) : null}
+                    </div>
                     <span style={noteStyle}>{target.description}</span>
                   </Link>
                 );
               })}
-              {emptyState?.nextAction &&
-              !availableActions.some(
-                (action) => action.action === emptyState.nextAction?.action,
-              )
-                ? (() => {
-                    const target = mapActionLink(emptyState.nextAction);
-                    return (
-                      <Link href={target.href} style={actionLinkStyle}>
-                        <strong>{target.label}</strong>
-                        <span style={noteStyle}>{target.description}</span>
-                      </Link>
-                    );
-                  })()
-                : null}
             </div>
           </CanvasCard>
 
@@ -953,7 +1128,9 @@ export default async function BillingPage({
                     key={reason}
                     href={`/billing?empty=${reason}`}
                     style={
-                      emptyReason === reason ? stateChipStyle : mutedActionStyle
+                      emptyReason === reason
+                        ? stateChipActiveStyle
+                        : mutedActionStyle
                     }
                   >
                     <strong>{reason}</strong>
