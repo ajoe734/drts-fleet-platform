@@ -84,6 +84,12 @@ type ActionModalState =
     }
   | null;
 
+type ActionFeedback = {
+  tone: "success" | "info";
+  title: string;
+  body: string;
+};
+
 const pageStyle = {
   display: "grid",
   gap: 16,
@@ -372,6 +378,24 @@ function toneForEmpty(reason: EmptyReason) {
   }
 }
 
+function deriveEmptyReasonFromError(error: string | null): EmptyReason | null {
+  const errorText = error?.toLowerCase() ?? "";
+  if (errorText.includes("403") || errorText.includes("forbidden")) {
+    return "permission_denied";
+  }
+  if (
+    errorText.includes("503") ||
+    errorText.includes("unavailable") ||
+    errorText.includes("timeout")
+  ) {
+    return "external_unavailable";
+  }
+  if (error) {
+    return "fetch_failed";
+  }
+  return null;
+}
+
 function inferTimeRange(iso: string, timeRange: string) {
   if (!timeRange) return true;
   const createdAt = new Date(iso).getTime();
@@ -499,6 +523,16 @@ function fallbackAuditActions(
     deletionException: EvidenceDeletionExceptionRecord | null;
   },
 ): ResourceActionDescriptor[] {
+  if (!selectedRecord) {
+    return [
+      {
+        action: "refresh",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
+  }
+
   return [
     {
       action: "refresh",
@@ -619,6 +653,7 @@ export default function AuditPage() {
   });
   const [releaseReason, setReleaseReason] = useState("");
   const [resolutionNote, setResolutionNote] = useState("");
+  const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -751,30 +786,46 @@ export default function AuditPage() {
 
   const availableActions = useMemo<ResourceActionDescriptor[]>(() => {
     const resourceActions = selectedRecord?.availableActions;
-    if (resourceActions && resourceActions.length > 0) {
+    if (resourceActions) {
       return resourceActions;
     }
     return fallbackAuditActions(selectedRecord, selectedGovernance);
   }, [selectedGovernance, selectedRecord]);
 
+  const sharedErrorReason = useMemo(
+    () => deriveEmptyReasonFromError(error),
+    [error],
+  );
+
   const emptyReason = useMemo<EmptyReason>(() => {
-    const errorText = error?.toLowerCase() ?? "";
-    if (errorText.includes("403") || errorText.includes("forbidden")) {
-      return "permission_denied";
-    }
-    if (
-      errorText.includes("503") ||
-      errorText.includes("unavailable") ||
-      errorText.includes("timeout")
-    ) {
-      return "external_unavailable";
-    }
-    if (error) return "fetch_failed";
+    if (sharedErrorReason) return sharedErrorReason;
     if (records.length === 0 && policies.length === 0) return "not_provisioned";
     if (records.length === 0) return "no_data";
     if (filteredRecords.length === 0) return "filtered_empty";
     return "no_data";
-  }, [error, filteredRecords.length, policies.length, records.length]);
+  }, [
+    filteredRecords.length,
+    policies.length,
+    records.length,
+    sharedErrorReason,
+  ]);
+
+  const policyEmptyReason = useMemo<EmptyReason>(() => {
+    if (sharedErrorReason) return sharedErrorReason;
+    if (policies.length === 0 && records.length === 0) return "not_provisioned";
+    if (policies.length === 0) return "no_data";
+    return "no_data";
+  }, [policies.length, records.length, sharedErrorReason]);
+
+  const holdsEmptyReason = useMemo<EmptyReason>(() => {
+    if (sharedErrorReason) return sharedErrorReason;
+    return activeLegalHolds.length === 0 ? "no_data" : "no_data";
+  }, [activeLegalHolds.length, sharedErrorReason]);
+
+  const exceptionsEmptyReason = useMemo<EmptyReason>(() => {
+    if (sharedErrorReason) return sharedErrorReason;
+    return activeDeletionExceptions.length === 0 ? "no_data" : "no_data";
+  }, [activeDeletionExceptions.length, sharedErrorReason]);
 
   const emptyAction = useMemo<ResourceActionDescriptor | undefined>(() => {
     switch (emptyReason) {
@@ -847,6 +898,7 @@ export default function AuditPage() {
     setSaving(true);
     setError(null);
     try {
+      let nextFeedback: ActionFeedback | null = null;
       if (modal.action === "grant_legal_hold") {
         const command: CreateEvidenceLegalHoldCommand = {
           family: mapRecordFamily(modal.record),
@@ -856,11 +908,29 @@ export default function AuditPage() {
           reasonNote: holdForm.reasonNote.trim() || null,
           tenantId: modal.record.tenantId,
         };
-        await client.placeEvidenceLegalHold(command);
+        const hold = await client.placeEvidenceLegalHold(command);
+        nextFeedback = {
+          tone: "success",
+          title: text(locale, "Legal hold granted", "已建立 legal hold"),
+          body: text(
+            locale,
+            `Subject ${hold.subjectId} is now frozen under case ${hold.caseNumber}.`,
+            `主體 ${hold.subjectId} 已依案件 ${hold.caseNumber} 進入保存凍結。`,
+          ),
+        };
       } else if (modal.action === "lift_legal_hold") {
-        await client.releaseEvidenceLegalHold(modal.hold.holdId, {
+        const hold = await client.releaseEvidenceLegalHold(modal.hold.holdId, {
           releaseReason: releaseReason.trim(),
         });
+        nextFeedback = {
+          tone: "info",
+          title: text(locale, "Legal hold lifted", "已解除 legal hold"),
+          body: text(
+            locale,
+            `Hold ${hold.holdId} was released and the audit stream will reflect the release.`,
+            `Hold ${hold.holdId} 已解除，audit 串流會反映這次釋放。`,
+          ),
+        };
       } else if (modal.action === "grant_deletion_exception") {
         const command: CreateEvidenceDeletionExceptionCommand = {
           family: mapRecordFamily(modal.record),
@@ -874,18 +944,38 @@ export default function AuditPage() {
           reasonNote: exceptionForm.reasonNote.trim() || null,
           tenantId: modal.record.tenantId,
         };
-        await client.registerEvidenceDeletionException(command);
+        const exception =
+          await client.registerEvidenceDeletionException(command);
+        nextFeedback = {
+          tone: "success",
+          title: text(locale, "Deletion exception granted", "已建立刪除例外"),
+          body: text(
+            locale,
+            `Exception ${exception.exceptionId} is active until ${formatDateTime(exception.expiresAt)}.`,
+            `例外 ${exception.exceptionId} 已建立，效期至 ${formatDateTime(exception.expiresAt)}。`,
+          ),
+        };
       } else if (modal.action === "revoke_deletion_exception") {
-        await client.resolveEvidenceDeletionException(
+        const exception = await client.resolveEvidenceDeletionException(
           modal.exception.exceptionId,
           {
             resolutionNote: resolutionNote.trim(),
           },
         );
+        nextFeedback = {
+          tone: "info",
+          title: text(locale, "Deletion exception revoked", "已撤銷刪除例外"),
+          body: text(
+            locale,
+            `Exception ${exception.exceptionId} is no longer active.`,
+            `例外 ${exception.exceptionId} 已不再有效。`,
+          ),
+        };
       }
       setModal(null);
       setReleaseReason("");
       setResolutionNote("");
+      setFeedback(nextFeedback);
       await loadData();
     } catch (nextError: any) {
       setError(nextError?.message || String(nextError));
@@ -902,6 +992,7 @@ export default function AuditPage() {
     holdForm.reasonCode,
     holdForm.reasonNote,
     loadData,
+    locale,
     modal,
     releaseReason,
     resolutionNote,
@@ -1041,6 +1132,14 @@ export default function AuditPage() {
               "Audit 畫面抓取失敗",
             )}
             body={error}
+          />
+        ) : null}
+        {feedback ? (
+          <CanvasBanner
+            theme={theme}
+            tone={feedback.tone}
+            title={feedback.title}
+            body={feedback.body}
           />
         ) : null}
 
@@ -1343,21 +1442,31 @@ export default function AuditPage() {
                     </div>
                   </div>
                   <div style={actionRowStyle}>
-                    {availableActions.map((action) => (
-                      <ActionButton
-                        key={action.action}
-                        locale={locale}
-                        descriptor={action}
-                        onClick={() =>
-                          handleAction(action, {
-                            record: selectedRecord,
-                            hold: selectedGovernance.hold,
-                            deletionException:
-                              selectedGovernance.deletionException,
-                          })
-                        }
-                      />
-                    ))}
+                    {availableActions.length === 0 ? (
+                      <CanvasPill theme={theme} tone="neutral">
+                        {text(
+                          locale,
+                          "Read-only in current scope",
+                          "目前範圍唯讀",
+                        )}
+                      </CanvasPill>
+                    ) : (
+                      availableActions.map((action) => (
+                        <ActionButton
+                          key={action.action}
+                          locale={locale}
+                          descriptor={action}
+                          onClick={() =>
+                            handleAction(action, {
+                              record: selectedRecord,
+                              hold: selectedGovernance.hold,
+                              deletionException:
+                                selectedGovernance.deletionException,
+                            })
+                          }
+                        />
+                      ))
+                    )}
                   </div>
                 </div>
 
@@ -1564,6 +1673,12 @@ export default function AuditPage() {
                                     ) : null}
                                     {deletionException ? (
                                       <div style={subTextStyle}>
+                                        {text(locale, "Owner", "Owner")}:{" "}
+                                        {deletionException.reviewerActorId}
+                                      </div>
+                                    ) : null}
+                                    {deletionException ? (
+                                      <div style={subTextStyle}>
                                         {text(locale, "Reason", "原因")}:{" "}
                                         {formatPlatformCodeLabel(
                                           locale,
@@ -1651,24 +1766,40 @@ export default function AuditPage() {
                       {text(
                         locale,
                         "Cross-app drill-in and high-risk actions are driven from the selected record's availableActions.",
-                        "跨 app 深連結與高風險動作由所選記錄的 availableActions 驅動。",
+                        "跨 app 深連結與高風險動作完全由所選記錄的 availableActions 驅動。",
                       )}
                     </div>
                   </div>
                   {!selectedRecord ? (
                     <EmptyStateCard
                       locale={locale}
-                      reason="filtered_empty"
-                      nextAction={{
-                        action: "refresh",
-                        enabled: true,
-                        riskLevel: "low",
-                      }}
+                      reason={sharedErrorReason ?? emptyReason}
+                      nextAction={emptyAction}
                       onAction={() => void loadData()}
                     />
                   ) : (
                     <>
                       <div style={{ display: "grid", gap: 10 }}>
+                        <div style={pillRowStyle}>
+                          <CanvasPill
+                            theme={theme}
+                            tone={
+                              availableActions.length === 0 ? "neutral" : "info"
+                            }
+                          >
+                            {availableActions.length === 0
+                              ? text(
+                                  locale,
+                                  "No write actions returned",
+                                  "後端未回傳可寫動作",
+                                )
+                              : text(
+                                  locale,
+                                  `${availableActions.length} actions returned`,
+                                  `後端回傳 ${availableActions.length} 個動作`,
+                                )}
+                          </CanvasPill>
+                        </div>
                         <MetadataRow
                           label={text(locale, "Audit ID", "Audit ID")}
                           value={selectedRecord.auditId}
@@ -1744,6 +1875,11 @@ export default function AuditPage() {
                                   `${text(locale, "Owner", "Owner")}: ${selectedGovernance.hold.placedByActorId}`,
                                   `${text(locale, "Case", "案件")}: ${selectedGovernance.hold.caseNumber}`,
                                   `${text(locale, "Placed at", "建立時間")}: ${formatDateTime(selectedGovernance.hold.placedAt)}`,
+                                  text(
+                                    locale,
+                                    "Expiry is policy-bound and not exposed by the current contract.",
+                                    "到期由政策決定，現行 contract 未提供欄位。",
+                                  ),
                                 ]
                               : [
                                   text(
@@ -1788,7 +1924,7 @@ export default function AuditPage() {
                 locale={locale}
                 title={text(locale, "Active legal holds", "有效 legal hold")}
                 tone="warn"
-                emptyReason={emptyReason}
+                emptyReason={holdsEmptyReason}
                 items={activeLegalHolds.slice(0, 4).map((hold) => ({
                   id: hold.holdId,
                   headline: hold.subjectId,
@@ -1805,7 +1941,7 @@ export default function AuditPage() {
                 locale={locale}
                 title={text(locale, "Deletion exceptions", "刪除例外")}
                 tone="danger"
-                emptyReason={emptyReason}
+                emptyReason={exceptionsEmptyReason}
                 items={activeDeletionExceptions
                   .slice(0, 4)
                   .map((exception) => ({
@@ -1827,14 +1963,14 @@ export default function AuditPage() {
           <PolicyTable
             policies={policies}
             locale={locale}
-            emptyReason={emptyReason}
+            emptyReason={policyEmptyReason}
           />
         ) : null}
         {activeTab === "holds" ? (
           <HoldTable
             holds={activeLegalHolds}
             locale={locale}
-            emptyReason={emptyReason}
+            emptyReason={holdsEmptyReason}
             onRelease={(hold) =>
               handleAction(
                 hold.availableActions?.find(
@@ -1850,7 +1986,7 @@ export default function AuditPage() {
           <ExceptionTable
             exceptions={activeDeletionExceptions}
             locale={locale}
-            emptyReason={emptyReason}
+            emptyReason={exceptionsEmptyReason}
             onResolve={(exception) =>
               handleAction(
                 exception.availableActions?.find(
@@ -1884,8 +2020,8 @@ export default function AuditPage() {
               <div style={subTextStyle}>
                 {text(
                   locale,
-                  "High-risk action. Reason capture is required and the result will appear in audit.",
-                  "高風險動作，必須輸入原因，結果會回寫到 audit。",
+                  "High-risk action. Reason capture is required; the resulting governance change will be visible in audit after refresh.",
+                  "高風險動作必須輸入原因；完成後的治理變更會在刷新後出現在 audit。",
                 )}
               </div>
             </div>
@@ -2130,10 +2266,25 @@ function ActionButton({
       "撤銷刪除例外",
     ),
   };
+  const label = labelMap[descriptor.action] ?? descriptor.action;
+  const disabledTitle = descriptor.enabled
+    ? undefined
+    : text(
+        locale,
+        `Unavailable: ${descriptor.disabledReasonCode ?? "not_allowed"}`,
+        `目前不可用：${descriptor.disabledReasonCode ?? "not_allowed"}`,
+      );
   return (
-    <CanvasBtn theme={theme} onClick={onClick} disabled={!descriptor.enabled}>
-      {labelMap[descriptor.action] ?? descriptor.action}
-    </CanvasBtn>
+    <span title={disabledTitle}>
+      <CanvasBtn
+        theme={theme}
+        onClick={onClick}
+        disabled={!descriptor.enabled}
+        aria-label={label}
+      >
+        {label}
+      </CanvasBtn>
+    </span>
   );
 }
 
@@ -2195,6 +2346,18 @@ function EmptyStateCard({
         "證據治理依賴的上游服務目前不可用。",
       ),
     },
+    driver_not_eligible: {
+      title: text(
+        locale,
+        "This empty state is not used on Platform Admin",
+        "此空狀態不適用於 Platform Admin",
+      ),
+      body: text(
+        locale,
+        "Driver eligibility is a driver-app-specific empty reason and should not appear on this surface.",
+        "Driver eligibility 屬於 driver app 專用空狀態，不應出現在此畫面。",
+      ),
+    },
     filtered_empty: {
       title: text(locale, "No results for current filters", "目前篩選沒有結果"),
       body: text(
@@ -2204,7 +2367,10 @@ function EmptyStateCard({
       ),
     },
   };
-  const content = copy[reason];
+  const content = (copy[reason] ?? copy.no_data) as {
+    title: string;
+    body: string;
+  };
   return (
     <div
       style={{
