@@ -26,7 +26,7 @@ import {
 } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 const th = buildCanvasTheme({
   surface: "tenant",
@@ -120,7 +120,18 @@ type BillingData = {
   billingProfile: BillingProfileResource | null;
   invoices: InvoiceResource[];
   quotaSummary: QuotaSummaryResource | null;
-  errors: string[];
+  errors: BillingLoadError[];
+};
+
+type BillingLoadErrorReason =
+  | "permission_denied"
+  | "external_unavailable"
+  | "fetch_failed";
+
+type BillingLoadError = {
+  label: string;
+  message: string;
+  reason: BillingLoadErrorReason;
 };
 
 type BillingAction = {
@@ -156,6 +167,25 @@ const crossAppBaseUrls: Record<CrossAppResourceLink["targetApp"], string> = {
     process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003",
 };
 
+function classifyBillingError(error: unknown): BillingLoadErrorReason {
+  if (error instanceof Error && /^API error (401|403):/.test(error.message)) {
+    return "permission_denied";
+  }
+
+  if (
+    (error instanceof Error &&
+      (/^API error (429|5\d{2}):/.test(error.message) ||
+        /timed out|timeout|fetch failed|network|aborted/i.test(
+          error.message,
+        ))) ||
+    (error instanceof DOMException && error.name === "AbortError")
+  ) {
+    return "external_unavailable";
+  }
+
+  return "fetch_failed";
+}
+
 async function loadBillingData(): Promise<BillingData> {
   const client = getTenantClient();
   const [billingProfile, invoices, quotaSummary] = await Promise.allSettled([
@@ -164,16 +194,22 @@ async function loadBillingData(): Promise<BillingData> {
     client.getTenantQuotaSummary() as Promise<QuotaSummaryResource>,
   ]);
 
-  const errors: string[] = [];
+  const errors: BillingLoadError[] = [];
 
   const collectError = (
     label: string,
     result: PromiseSettledResult<unknown>,
   ) => {
     if (result.status === "rejected") {
-      errors.push(
-        `${label}: ${result.reason instanceof Error ? result.reason.message : "Unknown error"}`,
-      );
+      const message =
+        result.reason instanceof Error
+          ? result.reason.message
+          : "Unknown error";
+      errors.push({
+        label,
+        message: `${label}: ${message}`,
+        reason: classifyBillingError(result.reason),
+      });
     }
   };
 
@@ -445,7 +481,7 @@ function buildRefreshMetadata(args: {
   billingProfile: BillingProfileResource | null;
   currentInvoice: TenantInvoiceRecord | null;
   quotaSummary: TenantQuotaSummary | null;
-  errors: readonly string[];
+  errors: readonly BillingLoadError[];
 }): UiRefreshMetadata {
   const generatedAtCandidates = [
     args.quotaSummary?.refreshedAt,
@@ -556,24 +592,77 @@ function resolveEmptyReason(
   data: BillingData,
   forcedReason: string | undefined,
   pageState: BillingPageState,
+  visibleInvoices: readonly InvoiceResource[],
+  hasInvoiceFilters: boolean,
 ) {
   if (forcedReason && emptyReasonPreviewOptions.has(forcedReason)) {
     return forcedReason as EmptyReason;
-  }
-
-  if (data.errors.length > 0) {
-    return "fetch_failed" as const;
   }
 
   if (pageState === "not_provisioned") {
     return "not_provisioned" as const;
   }
 
-  if (data.invoices.length === 0) {
+  if (
+    data.errors.length > 0 &&
+    data.errors.every((error) => error.reason === "permission_denied")
+  ) {
+    return "permission_denied" as const;
+  }
+
+  if (
+    data.errors.length > 0 &&
+    data.errors.every((error) => error.reason === "external_unavailable")
+  ) {
+    return "external_unavailable" as const;
+  }
+
+  if (data.errors.length > 0) {
+    return "fetch_failed" as const;
+  }
+
+  if (
+    hasInvoiceFilters &&
+    data.invoices.length > 0 &&
+    visibleInvoices.length === 0
+  ) {
+    return "filtered_empty" as const;
+  }
+
+  if (visibleInvoices.length === 0) {
     return "no_data" as const;
   }
 
   return null;
+}
+
+function getSearchParamValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function filterInvoices(
+  invoices: readonly InvoiceResource[],
+  filters: {
+    period?: string;
+    status?: string;
+  },
+) {
+  return invoices.filter((invoice) => {
+    if (
+      filters.period &&
+      getPeriodKey(invoice.periodStart) !== filters.period
+    ) {
+      return false;
+    }
+
+    if (filters.status && invoice.status !== filters.status) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 function buildPrimaryActions(args: {
@@ -840,20 +929,31 @@ export default async function BillingOverviewPage({
 }) {
   const data = await loadBillingData();
   const resolvedSearchParams = await searchParams;
-  const forcedEmptyReason = Array.isArray(resolvedSearchParams.emptyReason)
-    ? resolvedSearchParams.emptyReason[0]
-    : resolvedSearchParams.emptyReason;
-  const forcedState = Array.isArray(resolvedSearchParams.state)
-    ? resolvedSearchParams.state[0]
-    : resolvedSearchParams.state;
+  const forcedEmptyReason = getSearchParamValue(
+    resolvedSearchParams.emptyReason,
+  );
+  const forcedState = getSearchParamValue(resolvedSearchParams.state);
+  const invoiceStatusFilter = getSearchParamValue(
+    resolvedSearchParams.invoiceStatus,
+  );
+  const invoicePeriodFilter = getSearchParamValue(resolvedSearchParams.period);
   const showEmptyGallery =
-    (Array.isArray(resolvedSearchParams.preview)
-      ? resolvedSearchParams.preview[0]
-      : resolvedSearchParams.preview) === "empties";
+    getSearchParamValue(resolvedSearchParams.preview) === "empties";
 
   const sortedInvoices = [...data.invoices].sort((left, right) =>
     right.periodEnd.localeCompare(left.periodEnd),
   );
+  const invoiceFilters: {
+    period?: string;
+    status?: string;
+  } = {};
+  if (invoicePeriodFilter) {
+    invoiceFilters.period = invoicePeriodFilter;
+  }
+  if (invoiceStatusFilter) {
+    invoiceFilters.status = invoiceStatusFilter;
+  }
+  const visibleInvoices = filterInvoices(sortedInvoices, invoiceFilters);
   const currentPeriodKey = getCurrentPeriodLabel(data.quotaSummary);
   const currentInvoice =
     sortedInvoices.find(
@@ -861,13 +961,21 @@ export default async function BillingOverviewPage({
     ) ??
     sortedInvoices[0] ??
     null;
-  const recentInvoices = sortedInvoices.slice(0, 6);
+  const recentInvoices = visibleInvoices.slice(0, 6);
+  const actionInvoices =
+    recentInvoices.length > 0 ? recentInvoices : sortedInvoices;
   const projectedClose = buildProjectedClose(currentInvoice, data.quotaSummary);
   const pageState = resolvePageState(data, forcedState);
-  const emptyReason = resolveEmptyReason(data, forcedEmptyReason, pageState);
+  const emptyReason = resolveEmptyReason(
+    data,
+    forcedEmptyReason,
+    pageState,
+    visibleInvoices,
+    Boolean(invoiceStatusFilter || invoicePeriodFilter),
+  );
   const primaryActions = buildPrimaryActions({
     billingProfile: data.billingProfile,
-    invoices: recentInvoices,
+    invoices: actionInvoices,
     pageState,
     emptyReason,
   });
@@ -988,7 +1096,7 @@ export default async function BillingOverviewPage({
             tone="warn"
             icon="warn"
             title="帳務資料目前不是完整 fresh snapshot"
-            body={data.errors.join(" / ")}
+            body={data.errors.map((error) => error.message).join(" / ")}
           />
         ) : null}
 
@@ -999,6 +1107,16 @@ export default async function BillingOverviewPage({
             icon={refreshMetadata.dataFreshness === "stale" ? "warn" : "info"}
             title="Refresh tier 已接線，這份 snapshot 目前不是 fresh"
             body={`source=${refreshMetadata.source} · generatedAt=${formatDateTime(refreshMetadata.generatedAt)} · staleAfterMs=${refreshMetadata.staleAfterMs}`}
+          />
+        ) : null}
+
+        {emptyReason === "filtered_empty" ? (
+          <CanvasBanner
+            theme={th}
+            tone="info"
+            icon="info"
+            title="Invoice filter 目前沒有命中資料"
+            body={`period=${invoicePeriodFilter ?? "all"} · status=${invoiceStatusFilter ?? "all"}；overview snapshot 仍顯示租戶當期帳務。`}
           />
         ) : null}
 
