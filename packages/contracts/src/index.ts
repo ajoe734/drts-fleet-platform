@@ -1,6 +1,9 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-import type { ResourceActionDescriptor } from "./ui-runtime";
+import type {
+  DriverMatchingSuppression,
+  ResourceActionDescriptor,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4257,6 +4260,12 @@ export interface UpdateIncidentCommand {
   severity?: IncidentSeverity;
 }
 
+export interface ExtendDriverMatchingSuppressionCommand {
+  reason: string;
+  expiresAt?: string;
+  extendByHours?: number;
+}
+
 export interface CreateIncidentFromDispatchExceptionCommand {
   orderId: string;
   exceptionReasonCode: string;
@@ -4307,6 +4316,8 @@ export interface IncidentRecord {
   location: string | null;
   resolutionNote: string | null;
   serviceRecoveryActions: ServiceRecoveryActionRecord[];
+  availableActions?: ResourceActionDescriptor[];
+  matchingSuppression?: DriverMatchingSuppression | null;
   createdAt: string;
   updatedAt: string;
 }

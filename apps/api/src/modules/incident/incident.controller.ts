@@ -5,13 +5,14 @@ import {
   Headers,
   HttpStatus,
   Param,
-  Post,
   Patch,
+  Post,
 } from "@nestjs/common";
 
 import type {
   CreateIncidentCommand,
   CreateIncidentFromDispatchExceptionCommand,
+  ExtendDriverMatchingSuppressionCommand,
   LinkComplaintToIncidentCommand,
   RecordServiceRecoveryActionCommand,
   UpdateIncidentCommand,
@@ -21,8 +22,19 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import {
+  CurrentIdentity,
+  type BootstrapRequestIdentity,
+} from "../../common/auth";
+import {
+  buildEmptyStateEnvelope,
+  buildUiReadModelList,
+  buildUiReadModelResource,
+} from "../../common/ui-read-model";
 import { ComplaintService } from "../complaint/complaint.service";
 import { IncidentService } from "./incident.service";
+
+const INCIDENT_REFRESH_STALE_AFTER_MS = 15_000;
 
 @Controller("incidents")
 export class IncidentController {
@@ -35,17 +47,24 @@ export class IncidentController {
   createIncident(
     @Body() command: CreateIncidentCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.createIncident(command, requestId),
+      this.incidentService.createIncident(command, requestId, identity),
       requestId,
     );
   }
 
   @Get()
-  listIncidents(@Headers("x-request-id") requestId?: string) {
+  listIncidents(
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+  ) {
     return toApiSuccessEnvelope(
-      { items: this.incidentService.listIncidents() },
+      buildUiReadModelList(this.incidentService.listIncidents(identity), {
+        staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+        emptyState: buildEmptyStateEnvelope("no_data", "incidents.empty"),
+      }),
       requestId,
     );
   }
@@ -54,9 +73,15 @@ export class IncidentController {
   getIncident(
     @Param("incidentId") incidentId: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.getIncident(incidentId),
+      buildUiReadModelResource(
+        this.incidentService.getIncident(incidentId, identity),
+        {
+          staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+        },
+      ),
       requestId,
     );
   }
@@ -66,9 +91,15 @@ export class IncidentController {
     @Param("incidentId") incidentId: string,
     @Body() command: UpdateIncidentCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.updateIncident(incidentId, command, requestId),
+      this.incidentService.updateIncident(
+        incidentId,
+        command,
+        requestId,
+        identity,
+      ),
       requestId,
     );
   }
@@ -79,7 +110,10 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      { items: this.incidentService.getTimeline(incidentId) },
+      buildUiReadModelList(this.incidentService.getTimeline(incidentId), {
+        staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+        emptyState: buildEmptyStateEnvelope("no_data", "incidents.timeline.empty"),
+      }),
       requestId,
     );
   }
@@ -88,9 +122,14 @@ export class IncidentController {
   createFromDispatchException(
     @Body() command: CreateIncidentFromDispatchExceptionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.incidentService.createFromDispatchException(command, requestId),
+      this.incidentService.createFromDispatchException(
+        command,
+        requestId,
+        identity,
+      ),
       requestId,
     );
   }
@@ -111,15 +150,40 @@ export class IncidentController {
     );
   }
 
+  @Post(":incidentId/matching-suppression/extend")
+  extendMatchingSuppression(
+    @Param("incidentId") incidentId: string,
+    @Body() command: ExtendDriverMatchingSuppressionCommand,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+  ) {
+    return toApiSuccessEnvelope(
+      this.incidentService.extendMatchingSuppression(
+        incidentId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Get(":incidentId/service-recovery")
   getServiceRecoveryActions(
     @Param("incidentId") incidentId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      {
-        items: this.incidentService.getServiceRecoveryActions(incidentId),
-      },
+      buildUiReadModelList(
+        this.incidentService.getServiceRecoveryActions(incidentId),
+        {
+          staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+          emptyState: buildEmptyStateEnvelope(
+            "no_data",
+            "incidents.service_recovery.empty",
+          ),
+        },
+      ),
       requestId,
     );
   }
@@ -129,6 +193,7 @@ export class IncidentController {
     @Param("incidentId") incidentId: string,
     @Body() body: { complaintCaseNo: string },
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     const incidentRecord = this.incidentService.getIncident(incidentId);
     const complaintCase = this.complaintService.getComplaintCase(
@@ -168,6 +233,7 @@ export class IncidentController {
       incidentId,
       body.complaintCaseNo,
       requestId,
+      identity,
     );
     this.complaintService.linkIncident(
       body.complaintCaseNo,
