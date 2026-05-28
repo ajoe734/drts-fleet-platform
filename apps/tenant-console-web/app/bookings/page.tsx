@@ -127,22 +127,6 @@ type PageTabDescriptor = {
   isActive: boolean;
 };
 
-type ResolvedActionLink = {
-  href: string;
-  label: string;
-  openInNewTab: boolean;
-};
-
-const LIST_HEADER_ACTIONS = new Set(["create", "create_booking", "filter"]);
-const LIST_ROW_ACTIONS = new Set([
-  "view_detail",
-  "open_detail",
-  "detail",
-  "view_audit",
-  "audit",
-]);
-const DETAIL_ONLY_ACTIONS = new Set(["update", "cancel"]);
-
 const PAGE_TAB_PRESETS: TabFilterPreset[] = [
   { id: "all", label: "全部" },
   {
@@ -250,30 +234,20 @@ function normalizeBooking(
 }
 
 function getActionDescriptorsForRow(booking: TenantBookingListRecord) {
-  return booking.availableActions
-    .filter((descriptor) =>
-      LIST_ROW_ACTIONS.has(normalizeActionToken(descriptor.action)),
-    )
-    .sort((left, right) => {
-      const leftIndex = ACTION_PRIORITY.indexOf(left.action);
-      const rightIndex = ACTION_PRIORITY.indexOf(right.action);
-      const normalizedLeftIndex =
-        leftIndex === -1 ? ACTION_PRIORITY.length : leftIndex;
-      const normalizedRightIndex =
-        rightIndex === -1 ? ACTION_PRIORITY.length : rightIndex;
+  return [...booking.availableActions].sort((left, right) => {
+    const leftIndex = ACTION_PRIORITY.indexOf(left.action);
+    const rightIndex = ACTION_PRIORITY.indexOf(right.action);
+    const normalizedLeftIndex =
+      leftIndex === -1 ? ACTION_PRIORITY.length : leftIndex;
+    const normalizedRightIndex =
+      rightIndex === -1 ? ACTION_PRIORITY.length : rightIndex;
 
-      if (normalizedLeftIndex !== normalizedRightIndex) {
-        return normalizedLeftIndex - normalizedRightIndex;
-      }
+    if (normalizedLeftIndex !== normalizedRightIndex) {
+      return normalizedLeftIndex - normalizedRightIndex;
+    }
 
-      return left.action.localeCompare(right.action);
-    });
-}
-
-function hasDetailOnlyActions(booking: TenantBookingListRecord) {
-  return booking.availableActions.some((descriptor) =>
-    DETAIL_ONLY_ACTIONS.has(normalizeActionToken(descriptor.action)),
-  );
+    return left.action.localeCompare(right.action);
+  });
 }
 
 function getActionLabel(action: string) {
@@ -282,30 +256,6 @@ function getActionLabel(action: string) {
 
 function normalizeActionToken(action: string) {
   return action.trim().toLowerCase();
-}
-
-function getActionRoute(action: string, bookingId?: string) {
-  const normalizedAction = normalizeActionToken(action);
-  if (normalizedAction === "create" || normalizedAction === "create_booking") {
-    return "/bookings/new";
-  }
-
-  if (normalizedAction === "filter") {
-    return "#bookings-filters";
-  }
-
-  if (
-    bookingId &&
-    ["view_detail", "open_detail", "detail"].includes(normalizedAction)
-  ) {
-    return `/bookings/${bookingId}`;
-  }
-
-  if (normalizedAction === "view_audit" || normalizedAction === "audit") {
-    return "/audit";
-  }
-
-  return null;
 }
 
 function getActionDisabledReason(descriptor: ResourceActionDescriptor) {
@@ -349,39 +299,15 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
   return baseUrl ? `${baseUrl}${link.route}` : link.route;
 }
 
-function resolvePageActionLink(
-  descriptor: ResourceActionDescriptor,
-): ResolvedActionLink | null {
-  if (!LIST_HEADER_ACTIONS.has(normalizeActionToken(descriptor.action))) {
-    return null;
-  }
-
-  const href = getActionRoute(descriptor.action);
-  if (!href) {
-    return null;
-  }
-
-  return {
-    href,
-    label: getActionLabel(descriptor.action),
-    openInNewTab: false,
-  };
+function isCreateBookingAction(descriptor: ResourceActionDescriptor) {
+  const normalizedAction = normalizeActionToken(descriptor.action);
+  return normalizedAction === "create" || normalizedAction === "create_booking";
 }
 
-function resolveBookingActionLink(
-  booking: TenantBookingListRecord,
-  descriptor: ResourceActionDescriptor,
-): ResolvedActionLink | null {
-  const actionRoute = getActionRoute(descriptor.action, booking.bookingId);
-  if (!actionRoute) {
-    return null;
-  }
-
-  return {
-    href: actionRoute,
-    label: getActionLabel(descriptor.action),
-    openInNewTab: false,
-  };
+function isBookingDetailAction(descriptor: ResourceActionDescriptor) {
+  return ["view_detail", "open_detail", "detail"].includes(
+    normalizeActionToken(descriptor.action),
+  );
 }
 
 function getRelativeUrgency(iso: string | null) {
@@ -452,17 +378,6 @@ function getRefreshCopy(refresh: UiRefreshMetadata | null) {
     `snapshot ${formatDateTime(refresh.generatedAt)}`,
     refresh.source,
   ].join(" · ");
-}
-
-function getEmptyStateAction(
-  emptyState: EmptyStateEnvelope | null | undefined,
-): ResolvedActionLink | null {
-  const descriptor = emptyState?.nextAction;
-  if (!descriptor?.enabled) {
-    return null;
-  }
-
-  return resolvePageActionLink(descriptor);
 }
 
 function getApprovalCopy(booking: TenantBookingListRecord) {
@@ -602,17 +517,11 @@ export default async function TenantBookingsPage({
           : "no_data"
         : null);
   const emptyState = emptyReason ? EMPTY_STATE_COPY[emptyReason] : null;
-  const emptyStateAction = getEmptyStateAction(listEnvelope?.emptyState);
   const pageTabs = getPageStatusTabs(bookings, query, {
     focusedBookingId,
     notificationRef,
   });
-  const headerActions = (listEnvelope?.availableActions ?? [])
-    .filter((descriptor) => descriptor.enabled)
-    .map(resolvePageActionLink)
-    .filter(
-      (descriptor): descriptor is ResolvedActionLink => descriptor !== null,
-    );
+  const headerActions = listEnvelope?.availableActions ?? [];
   const subtypeCounts = getSubtypeCounts(bookings);
   const pendingApprovalBookings = bookings
     .filter((booking) => booking.approvalState === "pending")
@@ -639,21 +548,29 @@ export default async function TenantBookingsPage({
           <p>本月所有預約，含進行中、待審批、已完成與取消。</p>
         </div>
         <div className="bookings-header-actions">
-          {headerActions.map((action) => (
-            <Link
-              className={
-                action.href === "/bookings/new"
-                  ? "action-button action-button-primary"
-                  : "action-button action-button-secondary"
-              }
-              href={action.href}
-              key={`${action.label}-${action.href}`}
-              rel={action.openInNewTab ? "noreferrer" : undefined}
-              target={action.openInNewTab ? "_blank" : undefined}
-            >
-              {action.label}
-            </Link>
-          ))}
+          {headerActions.map((descriptor) =>
+            isCreateBookingAction(descriptor) && descriptor.enabled ? (
+              <Link
+                className="action-button action-button-primary"
+                href="/bookings/new"
+                key={descriptor.action}
+              >
+                {getActionLabel(descriptor.action)}
+              </Link>
+            ) : (
+              <span
+                className="action-button action-button-secondary is-disabled"
+                key={descriptor.action}
+                title={
+                  descriptor.enabled
+                    ? "list action is published by backend but not bound to this list surface"
+                    : getActionDisabledReason(descriptor)
+                }
+              >
+                {getActionLabel(descriptor.action)}
+              </span>
+            ),
+          )}
         </div>
       </section>
 
@@ -925,16 +842,25 @@ export default async function TenantBookingsPage({
             <span className="surface-kicker">{emptyState.eyebrow}</span>
             <h3>{emptyState.title}</h3>
             <p>{emptyState.description}</p>
+            {listEnvelope?.emptyState?.messageCode ? (
+              <p className="table-secondary">
+                {listEnvelope.emptyState.messageCode}
+              </p>
+            ) : null}
             <div className="link-row">
-              {emptyStateAction ? (
-                <Link
-                  className="text-link"
-                  href={emptyStateAction.href}
-                  rel={emptyStateAction.openInNewTab ? "noreferrer" : undefined}
-                  target={emptyStateAction.openInNewTab ? "_blank" : undefined}
+              {listEnvelope?.emptyState?.nextAction ? (
+                <span
+                  className="bookings-action-pill is-disabled"
+                  title={
+                    listEnvelope.emptyState.nextAction.enabled
+                      ? "backend published nextAction without a bound navigation target"
+                      : getActionDisabledReason(
+                          listEnvelope.emptyState.nextAction,
+                        )
+                  }
                 >
-                  {emptyStateAction.label}
-                </Link>
+                  {getActionLabel(listEnvelope.emptyState.nextAction.action)}
+                </span>
               ) : null}
             </div>
           </div>
@@ -960,11 +886,6 @@ export default async function TenantBookingsPage({
                   const urgency = getRelativeUrgency(booking.editableUntil);
                   const approvalCopy = getApprovalCopy(booking);
                   const rowActions = getActionDescriptorsForRow(booking);
-                  const detailOnlyActions = hasDetailOnlyActions(booking);
-                  const resolvedRowActions = rowActions.map((descriptor) => ({
-                    descriptor,
-                    link: resolveBookingActionLink(booking, descriptor),
-                  }));
                   const isFocused = focusedBookingId === booking.bookingId;
 
                   return (
@@ -1050,22 +971,15 @@ export default async function TenantBookingsPage({
                           </span>
                           <div className="row-actions">
                             {rowActions.length > 0 ? (
-                              resolvedRowActions.map(({ descriptor, link }) =>
-                                descriptor.enabled && link ? (
+                              rowActions.map((descriptor) =>
+                                descriptor.enabled &&
+                                isBookingDetailAction(descriptor) ? (
                                   <Link
                                     className="bookings-action-pill"
-                                    href={link.href}
+                                    href={`/bookings/${booking.bookingId}`}
                                     key={descriptor.action}
-                                    rel={
-                                      link.openInNewTab
-                                        ? "noreferrer"
-                                        : undefined
-                                    }
-                                    target={
-                                      link.openInNewTab ? "_blank" : undefined
-                                    }
                                   >
-                                    {link.label}
+                                    {getActionLabel(descriptor.action)}
                                   </Link>
                                 ) : (
                                   <span
@@ -1073,7 +987,7 @@ export default async function TenantBookingsPage({
                                     key={descriptor.action}
                                     title={
                                       descriptor.enabled
-                                        ? "backend published an action without a bound route"
+                                        ? "action is available on the booking resource but not bound on this list surface"
                                         : getActionDisabledReason(descriptor)
                                     }
                                   >
@@ -1083,9 +997,7 @@ export default async function TenantBookingsPage({
                               )
                             ) : (
                               <span className="bookings-inline-meta">
-                                {detailOnlyActions
-                                  ? "詳情頁提供 update / cancel 等動作"
-                                  : "backend returned no list-row actions"}
+                                backend returned no resource actions
                               </span>
                             )}
                           </div>
