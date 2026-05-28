@@ -11,6 +11,7 @@ Umbrella closeout is **not ready** to move to `review` or `done`.
 What is complete in this audit pass:
 
 - machine truth ownership was reassigned to `Codex` per dispatch and the umbrella task was moved to `in_progress`
+- machine truth was rechecked after the reassignment and now records `owner=Codex`, `reviewer=Claude2`, and `status=in_progress` for `UI-FE-ADM-UMBRELLA`
 - the platform-admin route surface was verified in `apps/platform-admin-web`
 - local dependency installation was repaired in this worktree with `python3 scripts/ensure-local-node-modules.py repair`
 - `pnpm --filter @drts/contracts build` passed
@@ -23,6 +24,7 @@ What is complete in this audit pass:
 What is still blocking formal closeout:
 
 - all 18 dependency tasks listed on `UI-FE-ADM-UMBRELLA` are still recorded as `backlog` in `ai-status.json`
+- `python3 scripts/ai_status.py reconcile-from-git origin/dev` reported no drift, and `git log origin/dev --grep="Task-ID: UI-FE-ADM-*"` found no closeout commits for these dependency task IDs
 - no clean smoke-test evidence was produced in this pass
 
 ## Dependency Audit
@@ -49,6 +51,8 @@ What is still blocking formal closeout:
 - `UI-FE-ADM-ADP`
 
 At audit time, every one of those dependencies remained `backlog` in machine truth. That alone prevents the umbrella acceptance item "All 18 sub-tasks done" from being satisfied, even though the corresponding route surface exists in the app tree.
+
+An additional reconciliation check against `origin/dev` found no merged closeout commits carrying these dependency `Task-ID` footers, so this is not just a local dashboard sync problem.
 
 ## Route Surface Present
 
@@ -78,6 +82,9 @@ This matches the currently implemented platform-admin rebuild surface in the rep
 Commands run in this audit pass:
 
 ```bash
+AI_NAME=Codex scripts/ai-status.sh assign UI-FE-ADM-UMBRELLA Codex Claude2
+AI_NAME=Codex scripts/ai-status.sh start UI-FE-ADM-UMBRELLA "audit umbrella status, reconcile machine-truth drift, and determine closeout blockers"
+AI_NAME=Codex scripts/ai-status.sh progress UI-FE-ADM-UMBRELLA "machine truth corrected to Codex/in_progress; umbrella remains blocked because all 18 dependencies are still backlog and reconcile-from-git found no origin/dev closeout commits for those task IDs; smoke evidence is still missing"
 python3 scripts/ensure-local-node-modules.py repair
 pnpm --filter @drts/contracts build
 pnpm --filter @drts/ui-tokens build
@@ -85,10 +92,13 @@ pnpm --filter @drts/platform-admin-web test
 pnpm --filter @drts/platform-admin-web typecheck
 pnpm --filter @drts/platform-admin-web build
 pnpm --filter @drts/ui-web build-storybook
+python3 scripts/ai_status.py reconcile-from-git origin/dev
+git log origin/dev --grep="Task-ID: UI-FE-ADM-..." --format='%h %s' -n 1
 ```
 
 Results:
 
+- `ai-status.sh assign/start/progress`: passed and restored machine-truth ownership/status for the umbrella task
 - `ensure-local-node-modules.py repair`: passed
 - `@drts/contracts build`: passed
 - `@drts/ui-tokens build`: passed
@@ -96,6 +106,8 @@ Results:
 - `@drts/platform-admin-web typecheck`: passed after workspace package builds
 - `@drts/platform-admin-web build`: passed and emitted the expected route manifest
 - `@drts/ui-web build-storybook`: passed and emitted `packages/ui-web/storybook-static`
+- `reconcile-from-git origin/dev`: passed with `no drift found against origin/dev`
+- `git log origin/dev --grep="Task-ID: UI-FE-ADM-*"`: found no merged closeout commits for the 18 dependency task IDs
 
 Not executed in this pass:
 
