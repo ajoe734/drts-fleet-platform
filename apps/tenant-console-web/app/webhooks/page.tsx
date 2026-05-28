@@ -771,6 +771,11 @@ async function updateWebhook(formData: FormData) {
     if (!url || !status) {
       throw new Error("Webhook URL 與狀態都是必填。");
     }
+    if (status === "disabled") {
+      throw new Error(
+        "停用 webhook 屬於 high-risk 動作，請改用 danger zone 並填寫 reason。",
+      );
+    }
 
     await client.updateWebhookEndpoint(webhookId, {
       url,
@@ -1560,7 +1565,6 @@ export default async function WebhooksPage({
                           >
                             <option value="active">active</option>
                             <option value="test_pending">test_pending</option>
-                            <option value="disabled">disabled</option>
                           </select>
                         </CanvasField>
                       </div>
@@ -1581,6 +1585,10 @@ export default async function WebhooksPage({
                         >
                           建立新端點
                         </Link>
+                      </div>
+                      <div style={helperTextStyle}>
+                        `disabled` 不在一般 update flow 內；停用需走下方 danger
+                        zone，並提供 reason 以符合 high-risk 動作要求。
                       </div>
                     </form>
 
