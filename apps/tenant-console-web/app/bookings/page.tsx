@@ -64,14 +64,25 @@ const LIVE_ORDER_STATUSES = new Set(
 );
 const ACTION_COPY: Record<string, string> = {
   update: "可更新",
+  update_booking: "更新訂單",
   cancel: "可取消",
+  cancel_booking: "取消訂單",
   create: "建立叫車",
   create_booking: "建立叫車",
+  create_tenant_booking: "建立訂單",
   view_detail: "查看詳情",
   filter: "篩選",
   refresh: "立即更新",
 };
-const ACTION_PRIORITY = ["view_detail", "update", "cancel"];
+const ACTION_PRIORITY = [
+  "view_detail",
+  "open_detail",
+  "detail",
+  "update_booking",
+  "update",
+  "cancel_booking",
+  "cancel",
+];
 const REFRESH_TIER: RefreshTier = "slow";
 const REFRESH_TIER_POLL_INTERVAL_MS: Record<RefreshTier, number> = {
   urgent: 5_000,
@@ -248,6 +259,59 @@ const EMPTY_STATE_ORBS: Record<TenantEmptyReason, string> = {
   filtered_empty: "filter",
 };
 
+const ORDER_STATUS_COPY: Record<OwnedOrderStatus, string> = {
+  created: "已建立",
+  recording_pending: "錄音待補",
+  ready_for_dispatch: "待派遣",
+  preassigned: "已預指派",
+  assigned: "已指派",
+  driver_accepted: "司機已接單",
+  enroute_pickup: "前往上車點",
+  arrived_pickup: "抵達上車點",
+  on_trip: "行程中",
+  proof_pending: "佐證待補",
+  completed: "已完成",
+  cancelled: "已取消",
+  redispatch_required: "需重新派遣",
+  dispatch_failed: "派遣失敗",
+  dispatch_timeout: "派遣逾時",
+  no_supply: "無可用車輛",
+  delayed_queue: "延後佇列",
+  exception_hold: "例外暫停",
+};
+
+const APPROVAL_STATE_COPY: Record<BookingRecord["approvalState"], string> = {
+  not_required: "無需審批",
+  pending: "待審批",
+  approved: "已核准",
+  rejected: "已拒絕",
+  blocked: "已阻擋",
+  cancelled_by_re_evaluation: "審批已取消",
+};
+
+const BOOKING_TYPE_COPY: Record<BookingRecord["bookingType"], string> = {
+  oneway: "單程",
+  roundtrip: "來回",
+  recurring: "固定排程",
+};
+
+const REFRESH_FRESHNESS_COPY: Record<
+  UiRefreshMetadata["dataFreshness"],
+  string
+> = {
+  fresh: "資料新鮮",
+  stale: "等待上游同步",
+  degraded: "資料降級",
+  unknown: "新鮮度未知",
+};
+
+const REFRESH_SOURCE_COPY: Record<UiRefreshMetadata["source"], string> = {
+  live: "即時來源",
+  cache: "快取快照",
+  sandbox: "沙盒資料",
+  static: "靜態資料",
+};
+
 function first(value: SearchParamValue) {
   if (Array.isArray(value)) {
     return value[0] ?? "";
@@ -317,6 +381,18 @@ function getActionDisabledReason(descriptor: ResourceActionDescriptor) {
   return descriptor.disabledReasonCode.replaceAll("_", " ");
 }
 
+function getOrderStatusLabel(status: OwnedOrderStatus) {
+  return ORDER_STATUS_COPY[status] ?? status;
+}
+
+function getApprovalStateLabel(state: BookingRecord["approvalState"]) {
+  return APPROVAL_STATE_COPY[state] ?? state;
+}
+
+function getBookingTypeLabel(type: BookingRecord["bookingType"]) {
+  return BOOKING_TYPE_COPY[type] ?? type;
+}
+
 function getEmptyReasonFromError(error: unknown): TenantEmptyReason {
   const message =
     error instanceof Error
@@ -352,10 +428,14 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
 
 function isCreateBookingAction(descriptor: ResourceActionDescriptor) {
   const normalizedAction = normalizeActionToken(descriptor.action);
-  return normalizedAction === "create" || normalizedAction === "create_booking";
+  return (
+    normalizedAction === "create" ||
+    normalizedAction === "create_booking" ||
+    normalizedAction === "create_tenant_booking"
+  );
 }
 
-function isBookingDetailAction(descriptor: ResourceActionDescriptor) {
+function opensBookingWorkSurface(descriptor: ResourceActionDescriptor) {
   return ["view_detail", "open_detail", "detail"].includes(
     normalizeActionToken(descriptor.action),
   );
@@ -369,11 +449,35 @@ function getActionHref(
     return "/bookings/new";
   }
 
-  if (context?.bookingId && isBookingDetailAction(descriptor)) {
+  if (
+    context?.bookingId &&
+    (opensBookingWorkSurface(descriptor) ||
+      ["update", "update_booking", "cancel", "cancel_booking"].includes(
+        normalizeActionToken(descriptor.action),
+      ))
+  ) {
     return `/bookings/${context.bookingId}`;
   }
 
   return null;
+}
+
+function getPrimaryBookingHref(booking: TenantBookingListRecord) {
+  const primaryAction = getActionDescriptorsForRow(booking).find(
+    (descriptor) =>
+      descriptor.enabled &&
+      Boolean(
+        getActionHref(descriptor, {
+          bookingId: booking.bookingId,
+        }),
+      ),
+  );
+
+  return primaryAction
+    ? getActionHref(primaryAction, {
+        bookingId: booking.bookingId,
+      })
+    : null;
 }
 
 function getRelativeUrgency(iso: string | null) {
@@ -432,36 +536,36 @@ function getRefreshTone(refresh: UiRefreshMetadata | null) {
 
 function getRefreshCopy(refresh: UiRefreshMetadata | null) {
   if (!refresh) {
-    return [
-      `T5 ${REFRESH_TIER.replaceAll("_", " ")}`,
-      "refresh metadata unavailable",
-    ].join(" · ");
+    return "T5 Tenant slow · 等待後端 refresh metadata";
   }
 
   return [
-    `T5 ${REFRESH_TIER.replaceAll("_", " ")}`,
-    refresh.dataFreshness,
-    `snapshot ${formatDateTime(refresh.generatedAt)}`,
-    refresh.source,
+    "T5 Tenant slow",
+    REFRESH_FRESHNESS_COPY[refresh.dataFreshness],
+    `快照 ${formatDateTime(refresh.generatedAt)}`,
+    REFRESH_SOURCE_COPY[refresh.source],
   ].join(" · ");
 }
 
 function getApprovalCopy(booking: TenantBookingListRecord) {
   if (booking.approvalState === "pending") {
-    return `${booking.approvalRequestIds.length} approvals pending`;
+    return `${booking.approvalRequestIds.length} 筆審批待處理`;
   }
   if (booking.approvalState === "blocked") {
-    return "approval blocked";
+    return "審批阻擋中";
   }
   if (booking.approvalState === "rejected") {
-    return "approval rejected";
+    return "審批已拒絕";
+  }
+  if (booking.approvalState === "cancelled_by_re_evaluation") {
+    return "審批已因重算取消";
   }
 
   return null;
 }
 
 function getServiceLabel(booking: TenantBookingListRecord) {
-  return `${booking.serviceBucket} / ${booking.businessDispatchSubtype}`;
+  return `企業派遣 / ${booking.businessDispatchSubtype}`;
 }
 
 function getSubtypeCounts(bookings: TenantBookingListRecord[]) {
@@ -634,14 +738,17 @@ export default async function TenantBookingsPage({
         <div className="bookings-console-headline">
           <span className="eyebrow">Bookings</span>
           <h1>訂單</h1>
-          <p>本月所有預約 · 含進行中、待審批、已完成與取消。</p>
+          <p>
+            查看租戶當前 booking snapshot，快速辨識待審批、即將截止與需要跨 app
+            追查的訂單。
+          </p>
         </div>
         <div className="bookings-header-actions">
           <a
             className="action-button action-button-secondary"
             href="#bookings-filters"
           >
-            篩選
+            篩選條件
           </a>
           {headerActions.map((descriptor) => {
             const href = getActionHref(descriptor);
@@ -660,7 +767,7 @@ export default async function TenantBookingsPage({
                 key={descriptor.action}
                 title={
                   descriptor.enabled
-                    ? "list action is published by backend but not bound to this list surface"
+                    ? "backend 已發布此 action，但此列表頁沒有直接綁定對應 route"
                     : getActionDisabledReason(descriptor)
                 }
               >
@@ -687,26 +794,32 @@ export default async function TenantBookingsPage({
       <section className="bookings-board">
         <div className="bookings-overview-grid">
           <article className="bookings-overview-card">
-            <span className="metric-label">Visible</span>
+            <span className="metric-label">目前可見</span>
             <strong>{result.total}</strong>
-            <p>{bookings.length} total bookings in tenant snapshot</p>
+            <p>
+              本次 tenant snapshot 共 {bookings.length}{" "}
+              筆，會依當前篩選與搜尋條件縮減。
+            </p>
           </article>
           <article className="bookings-overview-card">
-            <span className="metric-label">Live / Reserve</span>
+            <span className="metric-label">進行中 / 預約</span>
             <strong>
               {liveCount} / {reserveCount}
             </strong>
-            <p>進行中與預約 booking 需要持續看 T5 freshness</p>
+            <p>
+              進行中與預約 booking 受上游派遣變動影響，需配合 T5 freshness
+              一起判讀。
+            </p>
           </article>
           <article className="bookings-overview-card">
-            <span className="metric-label">Needs Attention</span>
+            <span className="metric-label">需要關注</span>
             <strong>{attentionCount}</strong>
-            <p>pending approval 或 SLA 已進入 at-risk / breach</p>
+            <p>含待審批與 SLA 進入風險中的 booking，優先從這些項目開始處理。</p>
           </article>
         </div>
 
         <div className="bookings-meta-strip">
-          <span className="metric-label">Refresh tier</span>
+          <span className="metric-label">刷新節奏</span>
           <span
             className={`status-chip ${getRefreshTone(refreshMetadata)}`.trim()}
           >
@@ -717,18 +830,18 @@ export default async function TenantBookingsPage({
             pollIntervalMs={refreshPollIntervalMs}
           />
           <span className="status-chip">
-            {result.total} visible / {bookings.length} total
+            可見 {result.total} / 全部 {bookings.length}
           </span>
           {(notificationRef || focusedBookingId) && (
             <span className="status-chip is-warning">
               {notificationRef
-                ? `notification ${notificationRef}`
-                : `focus ${focusedBookingId}`}
+                ? `通知追蹤 ${notificationRef}`
+                : `聚焦訂單 ${focusedBookingId}`}
             </span>
           )}
           {hasCrossAppLinks ? (
             <span className="status-chip is-warning">
-              cross-app deep links available
+              已提供 cross-app deep links
             </span>
           ) : null}
         </div>
@@ -743,27 +856,27 @@ export default async function TenantBookingsPage({
             <input
               defaultValue={query.q}
               name="q"
-              placeholder="Booking ID, order ID, passenger, route"
+              placeholder="Booking ID、Order ID、乘客、上下車地點"
             />
           </label>
           <label className="field-stack">
             <span>日期欄位</span>
             <select defaultValue={query.dateField} name="dateField">
-              <option value="reservationStart">Reservation start</option>
-              <option value="createdAt">Created at</option>
+              <option value="reservationStart">預約時間</option>
+              <option value="createdAt">建立時間</option>
             </select>
           </label>
           <label className="field-stack">
-            <span>Service bucket</span>
+            <span>服務分類</span>
             <select defaultValue={query.serviceBucket} name="serviceBucket">
-              <option value="all">All</option>
-              <option value="business_dispatch">business_dispatch</option>
+              <option value="all">全部</option>
+              <option value="business_dispatch">企業派遣</option>
             </select>
           </label>
           <label className="field-stack">
-            <span>Service subtype</span>
+            <span>服務子類型</span>
             <select defaultValue={query.subtype} name="subtype">
-              <option value="all">All</option>
+              <option value="all">全部</option>
               {BUSINESS_DISPATCH_SUBTYPES.map((subtype) => (
                 <option key={subtype} value={subtype}>
                   {subtype}
@@ -774,23 +887,31 @@ export default async function TenantBookingsPage({
           <label className="field-stack">
             <span>審批</span>
             <select defaultValue={query.approval} name="approval">
-              <option value="all">All</option>
-              <option value="pending">pending</option>
-              <option value="approved">approved</option>
-              <option value="rejected">rejected</option>
-              <option value="blocked">blocked</option>
+              <option value="all">全部</option>
+              <option value="pending">
+                {getApprovalStateLabel("pending")}
+              </option>
+              <option value="approved">
+                {getApprovalStateLabel("approved")}
+              </option>
+              <option value="rejected">
+                {getApprovalStateLabel("rejected")}
+              </option>
+              <option value="blocked">
+                {getApprovalStateLabel("blocked")}
+              </option>
             </select>
           </label>
           <label className="field-stack">
-            <span>From</span>
+            <span>起始日</span>
             <input defaultValue={query.dateFrom} name="dateFrom" type="date" />
           </label>
           <label className="field-stack">
-            <span>To</span>
+            <span>結束日</span>
             <input defaultValue={query.dateTo} name="dateTo" type="date" />
           </label>
           <label className="field-stack">
-            <span>Page size</span>
+            <span>每頁筆數</span>
             <select defaultValue={String(query.pageSize)} name="pageSize">
               <option value="10">10</option>
               <option value="25">25</option>
@@ -827,7 +948,7 @@ export default async function TenantBookingsPage({
         </form>
 
         <div className="bookings-subtype-strip">
-          <span className="metric-label">Subtype</span>
+          <span className="metric-label">子類型</span>
           <Link
             className={`status-chip${query.subtype === "all" ? " is-active" : ""}`}
             href={buildBookingsHref(
@@ -842,7 +963,7 @@ export default async function TenantBookingsPage({
               },
             )}
           >
-            all
+            全部
             <span>{bookings.length}</span>
           </Link>
           {subtypeCounts.map((entry) => (
@@ -888,7 +1009,7 @@ export default async function TenantBookingsPage({
                 href={href}
                 key={status}
               >
-                {status}
+                {getOrderStatusLabel(status)}
                 <span>{result.statusCounts[status] ?? 0}</span>
               </Link>
             );
@@ -899,7 +1020,7 @@ export default async function TenantBookingsPage({
           <div className="bookings-approval-lane">
             <div className="bookings-approval-head">
               <div>
-                <span className="surface-kicker">Approval lane</span>
+                <span className="surface-kicker">審批焦點</span>
                 <h3>待審批 booking 需要明確浮出，不埋在表格深處。</h3>
               </div>
               <Link
@@ -920,36 +1041,48 @@ export default async function TenantBookingsPage({
               </Link>
             </div>
             <div className="bookings-approval-grid">
-              {pendingApprovalBookings.map((booking) => (
-                <article
-                  className="bookings-approval-card"
-                  key={booking.bookingId}
-                >
-                  <div className="bookings-approval-card-head">
-                    <div>
-                      <Link
-                        className="bookings-primary-link"
-                        href={`/bookings/${booking.bookingId}`}
-                      >
-                        {booking.bookingId}
-                      </Link>
-                      <p>{booking.passenger.name}</p>
+              {pendingApprovalBookings.map((booking) => {
+                const primaryHref = getPrimaryBookingHref(booking);
+
+                return (
+                  <article
+                    className="bookings-approval-card"
+                    key={booking.bookingId}
+                  >
+                    <div className="bookings-approval-card-head">
+                      <div>
+                        {primaryHref ? (
+                          <Link
+                            className="bookings-primary-link"
+                            href={primaryHref}
+                          >
+                            {booking.bookingId}
+                          </Link>
+                        ) : (
+                          <span className="bookings-primary-link">
+                            {booking.bookingId}
+                          </span>
+                        )}
+                        <p>{booking.passenger.name}</p>
+                      </div>
+                      <span className="bookings-warning-pill">
+                        {booking.approvalRequestIds.length} 筆待審批
+                      </span>
                     </div>
-                    <span className="bookings-warning-pill">
-                      {booking.approvalRequestIds.length} request
-                    </span>
-                  </div>
-                  <p>
-                    {booking.pickup.address} → {booking.dropoff.address}
-                  </p>
-                  <div className="bookings-approval-meta">
-                    <span className="status-chip">{booking.orderStatus}</span>
-                    <span className="status-chip">
-                      {formatDateTime(booking.reservationWindowStart)}
-                    </span>
-                  </div>
-                </article>
-              ))}
+                    <p>
+                      {booking.pickup.address} → {booking.dropoff.address}
+                    </p>
+                    <div className="bookings-approval-meta">
+                      <span className="status-chip">
+                        {getOrderStatusLabel(booking.orderStatus)}
+                      </span>
+                      <span className="status-chip">
+                        {formatDateTime(booking.reservationWindowStart)}
+                      </span>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -998,7 +1131,7 @@ export default async function TenantBookingsPage({
                         className="bookings-action-pill is-disabled"
                         title={
                           listEnvelope.emptyState.nextAction.enabled
-                            ? "backend published nextAction without a bound navigation target"
+                            ? "backend 已發布 nextAction，但此頁沒有對應 route 綁定"
                             : getActionDisabledReason(
                                 listEnvelope.emptyState.nextAction,
                               )
@@ -1058,6 +1191,7 @@ export default async function TenantBookingsPage({
                   const approvalCopy = getApprovalCopy(booking);
                   const rowActions = getActionDescriptorsForRow(booking);
                   const isFocused = focusedBookingId === booking.bookingId;
+                  const primaryHref = getPrimaryBookingHref(booking);
 
                   return (
                     <tr
@@ -1066,12 +1200,18 @@ export default async function TenantBookingsPage({
                     >
                       <td>
                         <div className="table-primary table-mono">
-                          <Link
-                            className="bookings-primary-link"
-                            href={`/bookings/${booking.bookingId}`}
-                          >
-                            {booking.bookingId}
-                          </Link>
+                          {primaryHref ? (
+                            <Link
+                              className="bookings-primary-link"
+                              href={primaryHref}
+                            >
+                              {booking.bookingId}
+                            </Link>
+                          ) : (
+                            <span className="bookings-primary-link">
+                              {booking.bookingId}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td>
@@ -1083,7 +1223,7 @@ export default async function TenantBookingsPage({
                         <div className="table-primary table-mono">
                           <span>{getServiceLabel(booking)}</span>
                           <span className="table-secondary">
-                            {booking.bookingType}
+                            {getBookingTypeLabel(booking.bookingType)}
                           </span>
                         </div>
                       </td>
@@ -1101,7 +1241,7 @@ export default async function TenantBookingsPage({
                             {formatDateTime(booking.reservationWindowStart)}
                           </span>
                           <span className="table-secondary">
-                            to {formatDateTime(booking.reservationWindowEnd)}
+                            至 {formatDateTime(booking.reservationWindowEnd)}
                           </span>
                         </div>
                       </td>
@@ -1117,7 +1257,7 @@ export default async function TenantBookingsPage({
                         <div className="table-primary">
                           <div className="bookings-chip-stack">
                             <span className="status-badge">
-                              {booking.orderStatus}
+                              {getOrderStatusLabel(booking.orderStatus)}
                             </span>
                             <span
                               className={getSourceToneClassName(source.tone)}
@@ -1133,12 +1273,18 @@ export default async function TenantBookingsPage({
                               <span
                                 className={`bookings-sla-pill is-${booking.slaStatus}`}
                               >
-                                SLA {booking.slaStatus}
+                                SLA{" "}
+                                {booking.slaStatus === "at_risk"
+                                  ? "風險中"
+                                  : booking.slaStatus === "breach"
+                                    ? "已違反"
+                                    : "健康"}
                               </span>
                             ) : null}
                           </div>
                           <span className="table-secondary">
-                            {booking.status} · {formatMoney(booking.quotedFare)}
+                            {getApprovalStateLabel(booking.approvalState)} ·{" "}
+                            {formatMoney(booking.quotedFare)}
                           </span>
                           <div className="row-actions">
                             {rowActions.length > 0 ? (
@@ -1161,7 +1307,7 @@ export default async function TenantBookingsPage({
                                     key={descriptor.action}
                                     title={
                                       descriptor.enabled
-                                        ? "action is available on the booking resource but not bound on this list surface"
+                                        ? "backend 已發布此 action，但此列表頁沒有直接綁定對應 route"
                                         : getActionDisabledReason(descriptor)
                                     }
                                   >
@@ -1171,7 +1317,7 @@ export default async function TenantBookingsPage({
                               })
                             ) : (
                               <span className="bookings-inline-meta">
-                                backend returned no resource actions
+                                backend 未回傳可執行動作
                               </span>
                             )}
                           </div>
@@ -1195,7 +1341,7 @@ export default async function TenantBookingsPage({
                         <div className="table-primary">
                           <span>{formatDateTime(booking.updatedAt)}</span>
                           <span className="table-secondary">
-                            {booking.bookedBy?.name ?? "Self-service tenant"}
+                            {booking.bookedBy?.name ?? "Tenant self-service"}
                           </span>
                           {Array.isArray(booking.crossAppLinks) &&
                           booking.crossAppLinks.length > 0 ? (
@@ -1217,6 +1363,7 @@ export default async function TenantBookingsPage({
                                   }
                                 >
                                   {link.label}
+                                  {link.openMode === "new_tab" ? " ↗" : ""}
                                 </a>
                               ))}
                             </div>
@@ -1233,7 +1380,7 @@ export default async function TenantBookingsPage({
 
         <div className="pagination-row">
           <span className="muted-copy">
-            Page {result.page} of {result.totalPages} · {result.total} rows
+            第 {result.page} / {result.totalPages} 頁 · 共 {result.total} 筆
           </span>
           <div className="link-row">
             {result.page > 1 ? (
@@ -1250,7 +1397,7 @@ export default async function TenantBookingsPage({
                   },
                 )}
               >
-                Previous
+                上一頁
               </Link>
             ) : null}
             {result.page < result.totalPages ? (
@@ -1267,7 +1414,7 @@ export default async function TenantBookingsPage({
                   },
                 )}
               >
-                Next
+                下一頁
               </Link>
             ) : null}
           </div>

@@ -61,17 +61,17 @@ export function BookingsRefreshControl({
     <div className="bookings-refresh-control">
       <span className="status-chip">
         {isPending
-          ? "Refreshing…"
+          ? "更新中"
           : pollIntervalMs > 0
-            ? `Auto ${pollIntervalMs / 1000}s`
-            : "Manual refresh"}
+            ? `自動輪詢 ${pollIntervalMs / 1000}s`
+            : "手動更新"}
       </span>
       <span className="bookings-refresh-countdown">
         {isPending
-          ? "syncing backend snapshot"
+          ? "正在同步最新 snapshot"
           : remainingSeconds === null
-            ? "waiting for backend freshness metadata"
-            : `next poll ${remainingSeconds}s`}
+            ? "等待後端 freshness metadata"
+            : `${remainingSeconds}s 後自動更新`}
       </span>
       <button
         className="action-button action-button-secondary bookings-refresh-button"
@@ -82,7 +82,7 @@ export function BookingsRefreshControl({
         }}
         type="button"
       >
-        立即更新
+        重新整理
       </button>
     </div>
   );
