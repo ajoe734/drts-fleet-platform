@@ -17,7 +17,6 @@ import {
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasField as Field,
-  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasShell as Shell,
@@ -49,7 +48,7 @@ const pageStackStyle: CSSProperties = {
   padding: 24,
   display: "flex",
   flexDirection: "column",
-  gap: 14,
+  gap: 16,
 };
 
 const formGridStyle: CSSProperties = {
@@ -75,10 +74,77 @@ const actionRowStyle: CSSProperties = {
   gap: 6,
 };
 
-const kpiGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+const controlsBarStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  justifyContent: "space-between",
   gap: 12,
+  padding: "14px 16px",
+  borderBottom: `1px solid ${theme.border}`,
+};
+
+const tabRailStyle: CSSProperties = {
+  display: "flex",
+  gap: 0,
+  flexWrap: "wrap",
+  alignItems: "center",
+};
+
+const tabButtonStyle = (
+  active: boolean,
+  tone: CanvasTone = "neutral",
+): CSSProperties => ({
+  border: "none",
+  borderBottom: `2px solid ${
+    active
+      ? tone === "danger"
+        ? theme.danger
+        : tone === "warn"
+          ? theme.warn
+          : tone === "success"
+            ? theme.success
+            : tone === "info"
+              ? theme.info
+              : theme.accent
+      : "transparent"
+  }`,
+  background: "transparent",
+  color: active
+    ? tone === "danger"
+      ? theme.danger
+      : tone === "warn"
+        ? theme.warn
+        : tone === "success"
+          ? theme.success
+          : tone === "info"
+            ? theme.info
+            : theme.accent
+    : theme.textMuted,
+  padding: "10px 12px",
+  fontSize: 12.5,
+  fontWeight: active ? 700 : 500,
+  cursor: "pointer",
+  transition: "color 160ms ease, border-color 160ms ease",
+});
+
+const controlsMetaStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
+const controlsMetaTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  fontWeight: 700,
+  color: theme.text,
+};
+
+const controlsMetaSubtitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  color: theme.textMuted,
 };
 
 function copy(locale: "en" | "zh", en: string, zh: string) {
@@ -291,7 +357,9 @@ export default function MaintenancePage() {
     return haystack.includes(deferredQuery);
   });
 
-  const effectiveStatusCounts = records.reduce<Record<MaintenanceStatus, number>>(
+  const effectiveStatusCounts = records.reduce<
+    Record<MaintenanceStatus, number>
+  >(
     (counts, record) => {
       const effectiveStatus = getEffectiveStatus(record);
       counts[effectiveStatus] = (counts[effectiveStatus] ?? 0) + 1;
@@ -319,13 +387,34 @@ export default function MaintenancePage() {
     statusTabs.find((tab) => tab.value === statusFilter)?.label ??
     statusTabs[0]!.label;
   const editingRecord = editingId
-    ? records.find((record) => record.maintenanceId === editingId) ?? null
+    ? (records.find((record) => record.maintenanceId === editingId) ?? null)
     : null;
+  const tabMeta: Array<{
+    value: StatusFilter;
+    count: number;
+    tone?: CanvasTone;
+  }> = statusTabs.map((tab) => ({
+    value: tab.value,
+    count:
+      tab.value === "all"
+        ? records.length
+        : effectiveStatusCounts[tab.value as MaintenanceStatus],
+    tone:
+      tab.value === "overdue"
+        ? "danger"
+        : tab.value === "completed"
+          ? "success"
+          : tab.value === "scheduled"
+            ? "warn"
+            : tab.value === "in_progress"
+              ? "info"
+              : "neutral",
+  }));
 
   const columns: CanvasTableColumn<MaintenanceTableRow>[] = [
     {
-      h: "WO",
-      w: 260,
+      h: t("maintenance.col.workOrder"),
+      w: 250,
       mono: true,
       r: (record: MaintenanceTableRow) => (
         <div style={tableCellStackStyle}>
@@ -391,10 +480,11 @@ export default function MaintenancePage() {
     {
       h: copy(locale, "Category", "類別"),
       w: 190,
-      r: (record: MaintenanceTableRow) => formatOpsCodeLabel(locale, record.type),
+      r: (record: MaintenanceTableRow) =>
+        formatOpsCodeLabel(locale, record.type),
     },
     {
-      h: "STATUS",
+      h: t("maintenance.col.status"),
       w: 132,
       r: (record: MaintenanceTableRow) => {
         const effectiveStatus = getEffectiveStatus(record);
@@ -406,7 +496,7 @@ export default function MaintenancePage() {
       },
     },
     {
-      h: copy(locale, "Scheduled", "排定"),
+      h: t("maintenance.col.schedule"),
       mono: true,
       w: 170,
       r: (record: MaintenanceTableRow) => (
@@ -471,7 +561,11 @@ export default function MaintenancePage() {
       <PageHeader
         theme={theme}
         title={t("maintenance.title")}
-        subtitle={t("maintenance.subtitle")}
+        subtitle={copy(
+          locale,
+          "Work orders, schedule, technicians, and dispatch impact",
+          "工單、排程、技師與派遣影響",
+        )}
         tabs={statusTabs.map((tab) => tab.label)}
         activeTab={activeTab}
         actions={
@@ -499,67 +593,6 @@ export default function MaintenancePage() {
         }
       />
       <div style={pageStackStyle}>
-        <div style={kpiGridStyle}>
-          <KPI
-            theme={theme}
-            label={copy(locale, "Open work orders", "未結工單")}
-            value={inFlightCount}
-            sub={copy(locale, "scheduled + in progress", "排程中 + 進行中")}
-          />
-          <KPI
-            theme={theme}
-            label={copy(locale, "Overdue", "逾期")}
-            value={effectiveStatusCounts.overdue}
-            delta={
-              effectiveStatusCounts.overdue > 0
-                ? copy(locale, "dispatch risk", "影響派遣")
-                : copy(locale, "within plan", "依計畫")
-            }
-            deltaTone={effectiveStatusCounts.overdue > 0 ? "down" : "neutral"}
-          />
-          <KPI
-            theme={theme}
-            label={copy(locale, "Completed", "已完成")}
-            value={effectiveStatusCounts.completed}
-            sub={copy(locale, "closed work orders", "已結案工單")}
-          />
-          <KPI
-            theme={theme}
-            label={copy(locale, "Visible results", "目前顯示")}
-            value={filteredRecords.length}
-            sub={copy(locale, "after filters", "篩選後結果")}
-          />
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {statusTabs.map((tab) => {
-            const count =
-              tab.value === "all"
-                ? records.length
-                : effectiveStatusCounts[tab.value as MaintenanceStatus];
-            const active = statusFilter === tab.value;
-            return (
-              <button
-                key={tab.value}
-                type="button"
-                onClick={() => setStatusFilter(tab.value)}
-                style={{
-                  borderRadius: 999,
-                  border: `1px solid ${active ? theme.accent : theme.border}`,
-                  background: active ? theme.accentBg : theme.surface,
-                  color: active ? theme.accent : theme.textMuted,
-                  padding: "6px 12px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                {tab.label} {count}
-              </button>
-            );
-          })}
-        </div>
-
         {error ? (
           <Banner
             theme={theme}
@@ -592,7 +625,7 @@ export default function MaintenancePage() {
           />
         ) : null}
 
-        {(showCreate || editingRecord) && (
+        {showCreate || editingRecord ? (
           <MaintenanceEditor
             key={editingRecord?.maintenanceId ?? "create"}
             editingRecord={editingRecord}
@@ -621,28 +654,57 @@ export default function MaintenancePage() {
               }
             }}
           />
-        )}
+        ) : null}
 
-        <Card
-          theme={theme}
-          title={t("maintenance.backlog")}
-          subtitle={t("maintenance.visibleOrders", {
-            count: filteredRecords.length,
-          })}
-          actions={
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("maintenance.search")}
-              style={{
-                ...controlStyle(theme),
-                width: 320,
-              }}
-            />
-          }
-          padding={0}
-        >
+        <Card theme={theme} padding={0}>
+          <div style={controlsBarStyle}>
+            <div style={controlsMetaStyle}>
+              <p style={controlsMetaTitleStyle}>
+                {copy(locale, "Maintenance work orders", "保養工單")}
+              </p>
+              <p style={controlsMetaSubtitleStyle}>
+                {copy(
+                  locale,
+                  `${inFlightCount} open work order(s) in flight`,
+                  `共有 ${inFlightCount} 筆未結工單`,
+                )}
+              </p>
+            </div>
+            <div style={{ minWidth: 260, flex: "1 1 320px", maxWidth: 420 }}>
+              <Field theme={theme} label={t("maintenance.search")} srOnlyLabel>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t("maintenance.search")}
+                  style={controlStyle(theme)}
+                />
+              </Field>
+            </div>
+          </div>
+          <div
+            style={{
+              ...tabRailStyle,
+              padding: "0 16px",
+              borderBottom: `1px solid ${theme.border}`,
+            }}
+          >
+            {tabMeta.map((tab) => {
+              const statusTab = statusTabs.find(
+                (candidate) => candidate.value === tab.value,
+              );
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => setStatusFilter(tab.value)}
+                  style={tabButtonStyle(statusFilter === tab.value, tab.tone)}
+                >
+                  {statusTab?.label ?? tab.value} {tab.count}
+                </button>
+              );
+            })}
+          </div>
           {loading ? (
             <div style={{ padding: 16, color: theme.textMuted }}>
               {t("common.loading")}
@@ -654,8 +716,23 @@ export default function MaintenancePage() {
               rows={filteredRecords as MaintenanceTableRow[]}
             />
           ) : (
-            <div style={{ padding: 16, color: theme.textMuted }}>
-              {t("maintenance.empty")}
+            <div
+              style={{
+                padding: 24,
+                color: theme.textMuted,
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              <strong style={{ color: theme.text }}>
+                {copy(
+                  locale,
+                  "No work orders in this view",
+                  "目前篩選下沒有工單",
+                )}
+              </strong>
+              <span>{t("maintenance.empty")}</span>
             </div>
           )}
         </Card>
@@ -780,7 +857,11 @@ function MaintenanceEditor({
             cols={4}
             items={[
               { k: "WO", v: editingRecord.maintenanceId, mono: true },
-              { k: t("maintenance.col.vehicle"), v: editingRecord.vehicleId, mono: true },
+              {
+                k: t("maintenance.col.vehicle"),
+                v: editingRecord.vehicleId,
+                mono: true,
+              },
               {
                 k: copy(locale, "Created", "建立"),
                 v: formatDateTime(locale, editingRecord.createdAt),
@@ -801,7 +882,11 @@ function MaintenanceEditor({
           {!isEditing ? (
             <>
               <div>
-                <Field theme={theme} label={t("maintenance.form.vehicleId")} required>
+                <Field
+                  theme={theme}
+                  label={t("maintenance.form.vehicleId")}
+                  required
+                >
                   <input
                     value={vehicleId}
                     onChange={(event) => setVehicleId(event.target.value)}
@@ -811,7 +896,11 @@ function MaintenanceEditor({
                 </Field>
               </div>
               <div>
-                <Field theme={theme} label={t("maintenance.form.type")} required>
+                <Field
+                  theme={theme}
+                  label={t("maintenance.form.type")}
+                  required
+                >
                   <select
                     value={type}
                     onChange={(event) =>
