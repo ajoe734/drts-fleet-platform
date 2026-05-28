@@ -241,263 +241,65 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
-### 4.5 E2E-005 — Tenant Governance Negative-Path Pack
-
-**Script:** `tests/e2e/E2E-005-tenant-governance.sh`  
-**Companion integration suite:** `tests/integ/tenant-governance-negative.test.ts`
-
-This scenario packs the Phase 1 tenant-governance negative cases into one
-live/API harness, while the integration companion provides deterministic
-time-control and in-memory rollback assertions that cannot be forced safely on
-shared staging.
-
-#### Surface Chain
-
-```
-Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (dispatch denial + governance summary) ─► Audit
-```
-
-#### Negative Scenario Matrix
-
-| Case | Negative path                             | Primary route(s)                                                                                     | Live assertion                                                                 | Audit evidence                                        |
-| ---- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| A    | unknown cost center                       | `POST /api/tenant/bookings`                                                                          | `400 BOOKING_COST_CENTER_UNKNOWN`                                              | `booking.cost_center.validation_rejected`             |
-| B    | disabled cost center                      | `POST /api/tenant/cost-centers/disable`, `POST /api/tenant/bookings`                                 | `400 BOOKING_COST_CENTER_DISABLED`                                             | `booking.cost_center.validation_rejected`             |
-| C    | cross-tenant cost center                  | `POST /api/platform-admin/tenants`, `POST /api/tenant/cost-centers`, `POST /api/tenant/bookings`     | caller tenant sees `400 BOOKING_COST_CENTER_UNKNOWN` for another tenant's code | `booking.cost_center.validation_rejected`             |
-| D    | quota_insufficient                        | `POST /api/tenant/quotas/policies`, `POST /api/tenant/bookings`                                      | `409 QUOTA_INSUFFICIENT_AT_COMMIT`, no booking success response                | `tenant.quota_reservation.blocked`                    |
-| E    | rule block                                | `POST /api/tenant/approval-rules`, `POST /api/tenant/bookings`, `POST /api/orders/:orderId/dispatch` | booking read-back shows `approvalState=blocked`; dispatch denied               | `booking.approval_state.changed`                      |
-| F    | no approver rollback                      | `POST /api/tenant/approval-rules`, `POST /api/tenant/bookings`, `GET /api/tenant/quotas/ledger`      | `409 APPROVAL_NO_RESOLVABLE_APPROVERS`; ledger count unchanged                 | `booking.approval_rules.evaluated`                    |
-| G    | governance-sensitive update re-evaluation | `PUT /api/tenant/bookings/:bookingId`                                                                | approval request ID rotates after cost-center update                           | `booking.approval_request.cancelled_by_re_evaluation` |
-| H    | notes-only no re-evaluation               | `PUT /api/tenant/bookings/:bookingId`                                                                | approval request ID unchanged after notes-only update                          | request continuity captured in evidence log           |
-| I    | rejected booking does not dispatch        | `POST /api/tenant/approval-requests/:id/reject`, `POST /api/orders/:orderId/dispatch`                | `409 BOOKING_APPROVAL_PENDING` after rejection                                 | `booking.approval_request.rejected`                   |
-| J    | SLA escalation visible                    | `POST /api/tenant/approval-requests/:id/escalate`, `GET /api/admin/tenant-governance/summary`        | escalated request remains visible in governance summary pending counts         | `booking.approval_request.timeout_escalated`          |
-
-#### Pass Criteria
-
-1. Cases A through J either pass live or explicitly record a bounded environmental skip reason in the evidence log.
-2. Every failing API path preserves a machine-readable audit trail; the script records the matched `auditId` in `E2E_EVIDENCE_FILE`.
-3. The no-approver case must not increase quota-ledger count for its isolated cost center.
-4. Governance-sensitive field changes rotate approval requests; notes-only changes do not.
-5. A rejected booking or a rule-blocked booking cannot be dispatched.
-6. Manual escalation remains visible on the governance surface even without a time-travelled 48h SLA breach.
-
-#### Notes
-
-- The companion integration suite is authoritative for the deterministic
-  48-hour SLA-age alert (`pending_approval_over_48h`) because live E2E cannot
-  safely time-travel shared environments.
-- `E2E-005` writes temporary JSON payloads at runtime instead of adding new
-  fixture files to `tests/e2e/fixtures/`.
-
-#### Verification Snapshot
-
-- `pnpm --filter @drts/api test:tenant-governance-negative`
-- `bash -n tests/e2e/E2E-005-tenant-governance.sh`
-- `bash tests/e2e/run-e2e.sh --suite 005 --dry-run`
-
----
-
-### 4.6 E2E-006 — Driver Multi-Platform Workbench
-
-**Script:** `tests/e2e/E2E-006-driver-multi-platform.sh`
-**Workflow family:** `WF-DRV-MP-001`
-**Closure driver:** `PH1GC-DRV-MP-001` (E2E hardening) + `PH1GC-DRV-MP-002` (device evidence sidecar)
-
-#### Surface Chain
-
-```
-Forwarder sandbox inbound (mixed owned + forwarded seed)
-  ─► Driver app inbox (owned task visible alongside forwarded task with sourcePlatform metadata)
-  ─► Trip surface (route-locked forwarded task; no owned dispatch assignment created)
-  ─► Earnings surface (by-platform earnings split)
-```
-
-#### Pass Criteria
-
-1. Default environment (no mixed owned+forwarded seed) **hard-fails** with descriptive exit code — no silent passes.
-2. `E2E_ALLOW_MISSING_FORWARDER_SEED=true` is the only way to warning-skip; without it, missing seed is a release blocker.
-3. Seeded execution asserts:
-   - one owned task and one forwarded task present in the same driver inbox
-   - forwarded task carries `sourcePlatform` metadata and `routeLocked = true`
-   - **no owned dispatch assignment is created for the forwarded task**
-   - per-platform earnings split is visible
-4. The directive-§C device packet at `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/` (Android + iOS install / signing / push / permission / weak network / forwarded display / earnings) is required to uplift the gate read from sandbox to sandbox + device evidence.
-
-#### ⚠ Risk — warning-skip is not hard proof
-
-Prior to `PH1GC-DRV-MP-001`, `E2E-006` allowed a warning-skip exit-0 on missing seed by default. That behavior is now an opt-in through `E2E_ALLOW_MISSING_FORWARDER_SEED=true`. **Any release closeout that cites `E2E-006` must confirm the deterministic seed mode ran**; a warning-skipped run does not count as `WF-DRV-MP-001` proof.
-
-#### Verification Snapshot
-
-- `bash -n tests/e2e/E2E-006-driver-multi-platform.sh`
-- `bash tests/e2e/run-e2e.sh --suite 006 --dry-run`
-- (with seed) `bash tests/e2e/E2E-006-driver-multi-platform.sh` exits 0
-- (without seed, default) `bash tests/e2e/E2E-006-driver-multi-platform.sh` exits non-zero
-
----
-
-### 4.7 E2E-007 — Partner Airport Transfer
-
-**Script:** `tests/e2e/E2E-007-partner-airport-transfer.sh`
-**Workflow family:** `WF-PARTNER-001` (formerly `WF-PRT-001`; renamed per release-truth runbook §1.2 — no alias)
-**Spec:** `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md` (driven by `PH1GC-PARTNER-001`)
-**Sandbox evidence:** `support/sidecars/PARTNER-ELIG-LIVE-001/` (driven by `PH1GC-PARTNER-002`)
-
-#### Surface Chain
-
-```
-Partner entry page ([tenantSlug]/[entrySlug])
-  ─► Eligibility verification (eligible | ineligible | manual_review)
-  ─► Authenticated booking (carries eligibilityVerificationId + referenceHash; cardLast4 only)
-  ─► Driver dispatch → trip → completion
-  ─► Receipt / partner record + governance-aware billing row (cross-references WF-FIN-GOV-001)
-```
-
-#### Pass Criteria
-
-1. Eligibility verification produces a terminal state (`eligible` / `ineligible` / `manual_review`) within the 2-retry timeout budget per spec §4.3.
-2. Refused bookings (ineligible or rejected manual_review) do not enter the billing pipeline.
-3. `referenceToken` appears only in masked form (`maskOpaqueToken(value, 8, 4)`) in every persistence boundary.
-4. Subsidy line item is applied at billing time per published partner-program pricing (`WF-ADM-001` pricing version).
-5. Sandbox uplift requires the 7 directive-§E proof items in `PARTNER-ELIG-LIVE-001/`.
-
----
-
-### 4.8 E2E-008 — Partner Booking Pilot Cutover Authority
-
-**Script:** `tests/e2e/E2E-008-partner-booking-cutover.sh`
-**Workflow family:** `WF-PBK-001`
-**Plan:** `docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md` (driven by `PH1GC-PBK-001`)
-**Pilot sidecar:** `support/sidecars/PBK-PILOT-001/` (driven by `PH1GC-PBK-001`)
-
-#### Surface Chain
-
-```
-Partner entry resolution ([tenantSlug]/[entrySlug])
-  ─► Eligibility-bound booking
-  ─► Trip + tracking
-  ─► Receipt + partner record
-  ─► Negative paths + rollback retention proof (≥ 14 calendar days)
-```
-
-#### Pass Criteria
-
-1. Partner entry routes resolve with brand + eligibility-mode visible.
-2. Cutover proof includes: target slug, cutover owner, rollback owner, rollback route / host, support hotline, branding metadata, eligibility mode, pilot time window, ≥ 14-day rollback retention demonstrated.
-3. Repo-local UI coverage alone is NOT pilot evidence; gate-read uplift to `PASS (pilot evidence)` requires a real partner entry cutover.
-
----
-
-### 4.9 E2E-009 — Production Rail Dry-Run
+### 4.5 E2E-009 — Production Deploy Rail Dry-Run
 
 **Script:** `tests/e2e/E2E-009-prod-rail-dry-run.sh`
 **Workflow family:** `WF-PROD-001`
-**Closeout driver:** `PH1GC-PROD-001` (live-execution readiness packet)
+**Depends on:** `PROD-RAIL-001`
+**Reviewer:** `Codex2`
+**Cross-ref:**
+`docs/03-runbooks/prod-deploy-rollback-runbook-20260519.md`,
+`docs/ops/branch-strategy.md §7`,
+`.github/workflows/deploy-prod.yml`.
+
+#### Why This Scenario Is Different
+
+The production rail is operator-triggered and side-effecting: it builds and
+pushes images to Artifact Registry, runs a Cloud Run migration job against
+Cloud SQL, and rolls Cloud Run services with IAP-protected ingress. We
+deliberately do **not** drive a real deploy from this E2E. Instead, the
+scenario is a static + dry-run contract check that runs in CI and locally,
+asserting the rail will behave as the runbook promises before anyone
+dispatches it.
+
+#### Phase Breakdown
+
+| Phase | Stage             | Assertions                                                                                                                                                       |
+| ----- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | `validate-config` | `workflow_dispatch` + `tag` + `skip_migration` inputs; tag regex `prod/v<YYYY.MM.DD>.<N>` (positive and negative); required PROD\_\* vars/secrets; `concurrency.group=deploy-prod`, `cancel-in-progress=false`; `environment.name=production`; `id-token: write`; runtime ≠ deployer identity guard (FULL mode). |
+| 2     | `build-push`      | `build-push` job present, `needs: prepare`; all four Dockerfiles built (`apps/api/Dockerfile`, `Dockerfile.migrate`, `apps/platform-admin-web/Dockerfile`, `apps/ops-console-web/Dockerfile`); `:latest` tag aliases published. (FULL mode only.)                                                                |
+| 3     | `deploy dry-run`  | `deploy` job depends on `build-push`; gates on `migrate.result == success || skipped` so rollback can bypass migrate; four Cloud Run targets reference defaults `drts-api` / `drts-platform-admin-web` / `drts-ops-console-web` / `drts-migrate`; `--ingress internal-and-cloud-load-balancing` on all three web/api services; Cloud SQL bound on api + migrate; `health-check` mints id_token and probes `CONTROL_PLANE_API_ORIGIN`, `PLATFORM_ADMIN_ORIGIN`, `OPS_CONSOLE_ORIGIN`. (FULL mode only.) |
+| 4     | `rollback by tag` | No separate `rollback-prod.yml` file — rollback reuses the same rail; tag regex still accepts an older `prod/v<date>.<N>`; `skip_migration=true` actually gates the migrate job; runbook documents `Rollback Procedure`, `skip_migration=true`, prod/v tag, plus stop conditions referencing schema; `branch-strategy.md §7` exists. |
+
+#### Mode Detection
+
+| Mode       | When                                                                                                            | Behaviour                                                                                            |
+| ---------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `SKELETON` | `deploy-prod.yml` only contains the `validate-config` skeleton (pre-merge state on `dev` while PROD-RAIL-001 is still on `codex/prod-rail-001`). | Minimum-contract assertions run; build-push / deploy assertions are reported as `EXTERNAL-GATED-skeleton`. Test passes. |
+| `FULL`     | `deploy-prod.yml` contains the full `prepare → build-push → migrate → deploy → health-check` job graph (post PROD-RAIL-001 merge). | Every phase runs; SKELETON-only WARN downgrades become hard FAILs.                                                       |
 
 #### Pass Criteria
 
-1. `.github/workflows/deploy-prod.yml` validates the full graph: validate-config → build-push → migrate → deploy → health-check.
-2. Dry-run rehearsal confirms the rail's structure without making external Cloud Run / Cloud SQL calls.
-3. Live-execution uplift requires `vars.PROD_GCP_*` + `secrets.PROD_WIF_*` configured in repo Settings, GCP project provisioned (WIF / Cloud SQL / Artifact Registry / Secret Manager), GitHub Environment `production` reviewer rule, and the `PH1GC-PROD-001` rollback drill packet at `support/sidecars/WF-PROD-001-LIVE-EXEC/`.
-4. **Non-claim:** dry-run rehearsal is NOT production-launched proof. Do not state otherwise without an actual deploy + rollback drill + monitoring + human approval gate.
+1. Workflow file exists and parses as valid YAML.
+2. Tag regex accepts a canonical good tag and rejects a malformed one.
+3. Concurrency is serialised on `deploy-prod` and never auto-cancels in-flight runs.
+4. Rollback path is documented and uses the same workflow with `skip_migration=true`.
+5. In FULL mode, all four service Dockerfiles are built and the three web/api services deploy with internal-and-cloud-load-balancing ingress.
 
----
+#### Evidence
 
-### 4.10 E2E-010 — Governance-Aware Billing / Reporting
+Each phase appends rows to the shared E2E evidence log
+(`/tmp/drts-e2e-evidence-<RUN_ID>.log`) using the tab-separated format
+`SCENARIO\tPHASE\tKEY\tVALUE`. Required evidence keys per phase:
 
-**Script:** `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (driven by `PH1GC-E2E-010`)
-**Workflow family:** `WF-FIN-GOV-001`
-**Spec:** `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` (driven by `PH1GC-FIN-GOV-001`)
-**UAT:** `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md`
-
-#### Surface Chain
-
-```
-Tenant Console (cost-center + quota + require_approval rule)
-  ─► Tenant Console (governed booking with costCenterCode → pending approval)
-  ─► Tenant Console (quota summary + ledger, filtered by bookingId)
-  ─► Tenant Console (approval snapshot for the booking)
-  ─► Tenant Console (approve approval request as tenant_admin)
-  ─► Ops Console (dispatch → candidates → assign vehicle/driver)
-  ─► Driver App (accept → depart → arrived_pickup → start → complete)
-  ─► Tenant Console (invoice generation for today's UTC window)
-  ─► Tenant Console (invoice line MUST carry the governed orderId)
-  ─► Tenant / Platform reporting (report job + governance column probe)
-  ─► Platform Admin (settlement matrix + platform-earnings by-platform)
-  ─► Platform Admin (audit MUST contain generate_tenant_invoice for invoiceId)
-  ─► Tenant Console (cost-center coverage / legacy_unmapped probe)
-  ─► Verification body asserted field-by-field:
-     costCenterCode, costCenterName, ownerUserId, legacy_unmapped,
-     approvalRequestId, approvalState, quotaPeriodKey, quotaUsageDelta,
-     partnerProgramCode, eligibilityVerificationId, platformEarningsRef,
-     auditId, reportArtifactId
-  ─► Tenant Admin (cross-tenant fetch of invoiceId MUST return 4xx)
-```
-
-#### Sub-Case Matrix
-
-| Case    | Probe                                                                 | Primary route(s)                                                                                                                                                                                                                                              | Probe outcome                                                                                                                                                                                                                                                                                                              |
-| ------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FG-01` | Booking → invoice carries cost-center attribution and binds to the governed `orderId` | `POST /api/tenant/bookings`, `GET /api/tenant/bookings/:id`, `POST /api/tenant/approval-requests/:id/approve`, `POST /api/orders/:orderId/dispatch`, driver accept/depart/arrived_pickup/start/complete, `POST /api/tenant/invoices/generate`, `GET /api/tenant/invoices/:id` | Hard-fails if `costCenter` is dropped from the booking read-back, if the driver lifecycle cannot reach `complete` after dispatch+assign accepted, or if the generated invoice does **not** contain a line whose `orderId` matches the governed booking; records per-line `costCenterCode/Name/ownerUserId/approvalState/activeFlag/legacy_unmapped` presence as soft enrichment evidence |
-| `FG-02` | Quota reservation + ledger continuity (filtered by `bookingId`)       | `GET /api/tenant/cost-centers/:code/quota`, `GET /api/tenant/quotas/ledger?costCenterCode=…&bookingId=…`                                                                                                                                                    | Records usage/limit and ledger entry count; missing endpoints recorded as `NOT_POPULATED`                                                                                                                                                                                                                                  |
-| `FG-03` | Approval evaluation snapshot + governed approval                      | `GET /api/tenant/approval-requests?bookingId=…`, `POST /api/tenant/approval-requests/:id/approve`                                                                                                                                                           | Records `approvalRequestId`, `state`, `evaluatedAt`, `decision` from the booking's approval request; sets `APPROVED=true` so the dispatch leg can proceed                                                                                                                                                                 |
-| `FG-04` | Governance-aware report export                                        | `POST /api/tenant/reports/jobs` (fallback `POST /api/reports/jobs`), `GET /api/(tenant/)reports/:jobId`                                                                                                                                                     | Records presence of `costCenterCode/Name/ownerUserId/approvalState/quotaImpacts/partnerProgramId/legacy_unmapped` in the job row                                                                                                                                                                                          |
-| `FG-05` | Partner-program reconciliation references                             | `GET /api/settlement/matrix`                                                                                                                                                                                                                                  | Records partner-row count and any observed `programId`; pairs with invoice-level `partnerId/partnerProgramId` recording                                                                                                                                                                                                    |
-| `FG-06` | Platform earnings separation by `platformCode`                        | `GET /api/platform-earnings/by-platform`                                                                                                                                                                                                                      | Records platform item count and joined `platformCode` list                                                                                                                                                                                                                                                                  |
-| `FG-07` | Legacy unmapped cost-center labelling                                 | `GET /api/tenant/cost-centers/coverage`                                                                                                                                                                                                                       | Records `totalBookings`, `resolvedCount`, `unresolvedCount`, `disabledHits`, first `unresolvedSamples[]` entry                                                                                                                                                                                                             |
-| `FG-08` | Sensitive invoice/report download audit (bound to invoiceId)          | `GET /api/audit`                                                                                                                                                                                                                                              | **Hard-fails** if no audit entry has `actionName == generate_tenant_invoice` and `resourceId == <invoiceId>` — that is the FG-08 audit chain regression named in `FIN-GOV-SPEC-001` §5                                                                                                                                   |
-| `FG-09` | Cross-tenant scope on the governed invoice                            | `GET /api/tenant/invoices/:invoiceId` with a probe tenant id distinct from the seed tenant                                                                                                                                                                   | **Hard-fails** if the cross-tenant fetch returns 2xx; expects 4xx (typically 404 NOT_FOUND, per `billing-settlement.service.ts:550-565`)                                                                                                                                                                                  |
-
-#### Pass Criteria
-
-1. Booking creation with `costCenterCode` must round-trip through booking read-back — a dropped cost-center is a hard fail.
-2. The approval request for the booking must be approvable as `tenant_admin`; if approval is granted the script drives the driver lifecycle to `complete`. If the environment cannot accept dispatch or assign in the first place, the lifecycle leg is skipped cleanly. If dispatch+assign are accepted but `/driver/tasks/:id/complete` then refuses, that is treated as a WF-DRV-001 coupling regression and hard-fails.
-3. The invoice generated for today's UTC window must contain a `lines[*]` entry whose `orderId` matches the just-completed governed booking. A missing line is a hard fail — the prior implementation could pass on unrelated historical invoice data, which the review specifically called out.
-4. The audit chain must contain an entry with `actionName == generate_tenant_invoice` and `resourceId == <ourInvoiceId>` (FG-08). A missing audit entry is a hard fail per `FIN-GOV-SPEC-001` §5.
-5. A cross-tenant fetch of the governed invoice must return 4xx. A 2xx response is a hard fail (FG-09 tenant-scope widening).
-6. Enrichment fields the spec still marks as runtime gaps (`costCenterName`, `ownerUserId`, explicit `approvalState` on invoice/report lines, `legacy_unmapped`, partner/program/platform aggregations) are recorded in `E2E_EVIDENCE_FILE` as either `<value>` or `NOT_POPULATED`, so the field-presence delta is the reviewable evidence as runtime enrichment lands.
-
-#### Notes
-
-- This script is a **shell**: per `FIN-GOV-UAT-001` the live promotion for `WF-FIN-GOV-001` is currently `BLOCKED FOR LIVE`. Default-mode runs record each unpopulated verification-body field as `NOT_POPULATED`, and `STRICT_VERIFICATION_BODY=1` is the uplift gate-keeper once a governed staging rerun is available.
-- Hard failures are reserved for contract regressions named in `FIN-GOV-SPEC-001`: cost-center dropped from booking, driver lifecycle cannot reach completion after dispatch accepted, invoice does not include the governed `orderId`, audit chain broken (FG-08), and cross-tenant scope widened (FG-09). All other shape probes are recorded as field-presence evidence so the test does not "pass on unrelated historical invoice data" — a regression flagged in the prior review round and now closed by the orderId-binding rule above.
-- Negative-path governance assertions (unknown / disabled / cross-tenant cost centers, rule block, rejected booking, escalation visibility) remain owned by `E2E-005-tenant-governance.sh` and `tests/integ/tenant-governance-negative.test.ts`. The deterministic invoice-line ↔ governed-orderId binding asserted here mirrors `apps/api/tests/integration/tenant-governance-e2e.test.ts:573-579`.
-
-#### Verification Snapshot
-
-- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
-- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run`
-
----
-
-### 4.11 E2E-011 — Platform Admin Control Plane
-
-**Script:** `tests/e2e/E2E-011-platform-admin-control-plane.sh` (driven by `PH1GC-E2E-011`)
-**Workflow family:** `WF-ADM-001`
-**UAT:** `docs/04-uat/platform-admin-control-plane-uat-20260519.md` (driven by `PH1GC-ADM-001`)
-
-#### Surface Chain
-
-```
-Platform admin login
-  ─► Tenant create → module enablement → tenant quotas
-  ─► Partner entry → partner credential issue/revoke
-  ─► Adapter / switchboard health
-  ─► Pricing publish (with version)
-  ─► Feature flag toggle
-  ─► Rollout stage promotion
-  ─► Rollback hold set → blocks production promote
-  ─► Audit verification (every mutation produces an audit row)
-```
-
-#### Pass Criteria (per `PH1GC-E2E-011` acceptance)
-
-1. All 11 happy-path scenarios from `docs/04-uat/platform-admin-control-plane-uat-20260519.md` §2 pass.
-2. ≥ 2 RBAC negative paths verified (e.g., `UAT-ADM-N01` non-admin tenant create blocked, `UAT-ADM-N02` non-admin pricing publish blocked).
-3. Pricing publish carries a non-null `version` field.
-4. Rollback hold blocks production promote with `production_rollback_hold_active` reason code.
-5. Audit log contains an entry for every mutation **and** for every rejected attempt.
-6. Hard-fail on missing seed; no silent pass.
+| Phase           | Required keys                                                                                |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| preflight       | `workflowFile`, `mode`                                                                       |
+| validate-config | `tagInput`, `skipMigrationInput`, `tagRegexAccepts`, `tagRegexRejects`, `concurrencySerialised`, `productionEnvironment` |
+| build-push      | (`status` in SKELETON) or per-Dockerfile `dockerfile` keys in FULL                           |
+| deploy          | (`status` in SKELETON) or `migrateGate`, `internalIngressCount` in FULL                      |
+| rollback        | `rail`, `historicalTagAccepted` (always); `skipMigrationGate`, `runbook` in FULL             |
+| result          | `verdict`, `mode`                                                                            |
 
 ---
 
@@ -593,13 +395,12 @@ and the evidence log must be committed alongside the FBP-014B evidence pack.
 
 Minimum evidence items required for each scenario:
 
-| Scenario | Required Evidence Items                                                                                                                                              |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`                                                                                               |
-| E2E-002  | `primaryMirrorOrderId`, `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `primaryDriverCompletedStatus`, `secondaryDriverCancelledStatus`, `settlementLedgerMode` |
-| E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`                                                                                             |
-| E2E-008  | `inactiveBootstrapCode`, `eligibilityVerificationId`, `bookingId`, `receiptOwner`, `invoiceId`                                                                       |
-| E2E-010  | `bookingId`, `orderId`, `invoiceId`, `reportJobId`, `crossTenantStatus`, plus the 13 verification-body fields recorded explicitly as literal values or `NOT_POPULATED`: `costCenterCode`, `costCenterName`, `ownerUserId`, `legacy_unmapped`, `approvalRequestId`, `approvalState`, `quotaPeriodKey`, `quotaUsageDelta`, `partnerProgramCode`, `eligibilityVerificationId`, `platformEarningsRef`, `auditId`, `reportArtifactId` |
+| Scenario | Required Evidence Items                                                     |
+| -------- | --------------------------------------------------------------------------- |
+| E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`      |
+| E2E-002  | `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `taskStatusAfterAccept` |
+| E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`    |
+| E2E-009  | `workflowFile`, `mode`, `tagRegexAccepts`, `tagRegexRejects`, `concurrencySerialised`, `rail=same-as-deploy-prod`, `historicalTagAccepted`, `verdict` |
 
 ---
 
