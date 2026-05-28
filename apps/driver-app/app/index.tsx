@@ -10,6 +10,8 @@ import {
 } from "react-native";
 import {
   type CrossAppResourceLink,
+  type DriverTaskAction,
+  type EmptyStateEnvelope,
   type MarkNotificationsReadCommand,
   type NotificationRecord,
   PLATFORM_CODE_REGISTRY,
@@ -21,6 +23,7 @@ import {
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
   type ShiftRecord,
+  type UiRefreshMetadata,
   type UnifiedDriverTaskView,
 } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
@@ -100,11 +103,11 @@ type HeroActionModel = {
 };
 
 type EmptyStateModel = {
-  reason: EmptyReason;
   tone: Exclude<CanvasTone, "neutral">;
   title: string;
   body: string;
   action: WorkspaceActionModel;
+  envelope: EmptyStateEnvelope;
 };
 
 type UrgentItem = {
@@ -112,8 +115,7 @@ type UrgentItem = {
   tone: Exclude<CanvasTone, "neutral">;
   title: string;
   body: string;
-  actionLabel: string;
-  route: WorkspaceRoute;
+  action: WorkspaceActionModel;
   iconName: keyof typeof Ionicons.glyphMap;
 };
 
@@ -123,8 +125,8 @@ type ActiveTripCardModel = {
   meta: string;
   fareLabel: string;
   platformLabel: string;
-  primaryLabel: string;
-  secondaryLabel: string;
+  primaryAction: WorkspaceActionModel;
+  secondaryAction: WorkspaceActionModel;
 };
 
 type NotificationCardModel = {
@@ -554,26 +556,75 @@ function formatTaskActionSummary(task: UnifiedDriverTaskView) {
   return "目前無可直接操作的任務動作";
 }
 
-function getRefreshSnapshot(
+function buildRefreshMetadata(
   loadedAt: string | null,
   nowSeed: number,
   tier: RefreshTier,
-): { freshness: "fresh" | "stale" | "unknown"; label: string } {
+): UiRefreshMetadata {
   if (!loadedAt) {
-    return { freshness: "unknown", label: "尚未同步" };
+    return {
+      generatedAt: new Date(nowSeed).toISOString(),
+      staleAfterMs: 0,
+      dataFreshness: "unknown",
+      source: "static",
+    };
   }
 
   const age = nowSeed - Date.parse(loadedAt);
   if (!Number.isFinite(age) || age < 0) {
-    return { freshness: "unknown", label: "等待校時" };
+    return {
+      generatedAt: loadedAt,
+      staleAfterMs: 0,
+      dataFreshness: "unknown",
+      source: "cache",
+    };
   }
 
-  const staleAfterMs = getRefreshTierIntervalMs(tier);
-  if (staleAfterMs !== null && age <= staleAfterMs) {
-    return { freshness: "fresh", label: "Fresh" };
-  }
+  const staleAfterMs = getRefreshTierIntervalMs(tier) ?? 0;
 
-  return { freshness: "stale", label: "Stale" };
+  return {
+    generatedAt: loadedAt,
+    staleAfterMs,
+    dataFreshness: age <= staleAfterMs ? "fresh" : "stale",
+    source: "live",
+  };
+}
+
+function getRefreshFreshnessLabel(metadata: UiRefreshMetadata) {
+  switch (metadata.dataFreshness) {
+    case "fresh":
+      return "Fresh";
+    case "stale":
+      return "Stale";
+    case "degraded":
+      return "Degraded";
+    default:
+      return "尚未同步";
+  }
+}
+
+function getRefreshSourceLabel(metadata: UiRefreshMetadata) {
+  switch (metadata.source) {
+    case "live":
+      return "live";
+    case "cache":
+      return "cache";
+    case "sandbox":
+      return "sandbox";
+    default:
+      return "static";
+  }
+}
+
+function createEmptyStateEnvelope(
+  reason: EmptyReason,
+  action?: WorkspaceActionModel,
+): EmptyStateEnvelope {
+  return {
+    reason,
+    messageCode: `driver.workspace.${reason}`,
+    nextAction: action?.descriptor,
+  };
 }
 
 function getTaskActionRoute(task: UnifiedDriverTaskView): WorkspaceRoute {
@@ -584,23 +635,62 @@ function getTaskActionRoute(task: UnifiedDriverTaskView): WorkspaceRoute {
   return "/jobs";
 }
 
+function getTaskOpenAction(task: UnifiedDriverTaskView): WorkspaceActionModel {
+  return createWorkspaceAction(
+    getTaskActionRoute(task),
+    task.driverActionState === "in_progress" ? "return_to_trip" : "open_jobs",
+  );
+}
+
+function getTaskActionRiskLevel(
+  action: DriverTaskAction,
+): ResourceActionDescriptor["riskLevel"] {
+  switch (action) {
+    case "accept":
+    case "reject":
+    case "complete":
+      return "medium";
+    default:
+      return "low";
+  }
+}
+
+function getTaskAvailableActions(task: UnifiedDriverTaskView) {
+  const taskActions = task.allowedActions.map((action) =>
+    createWorkspaceAction(
+      getTaskActionRoute(task),
+      action,
+      true,
+      undefined,
+      getTaskActionRiskLevel(action),
+    ),
+  );
+
+  return dedupeActions([
+    ...taskActions,
+    getTaskOpenAction(task),
+    createWorkspaceAction("/platform-presence", "open_platform_presence"),
+  ]);
+}
+
 function getPrimaryTaskAction(
   task: UnifiedDriverTaskView,
 ): WorkspaceActionModel {
-  const preferredAction: string =
-    task.allowedActions[0] ??
-    (task.driverActionState === "in_progress" ? "return_to_trip" : "open_jobs");
+  return getTaskAvailableActions(task)[0] ?? getTaskOpenAction(task);
+}
 
-  return createWorkspaceAction(
-    getTaskActionRoute(task),
-    preferredAction,
-    task.allowedActions.length > 0 || preferredAction === "return_to_trip",
-    task.allowedActions.length > 0
-      ? undefined
-      : task.blockingReason
-        ? "external_unavailable"
-        : "no_active_trip",
-    task.allowedActions.length > 0 ? "medium" : "low",
+function getSecondaryTaskAction(
+  task: UnifiedDriverTaskView,
+  primaryAction: WorkspaceActionModel,
+): WorkspaceActionModel {
+  return (
+    getTaskAvailableActions(task).find(
+      (candidate) =>
+        !(
+          candidate.route === primaryAction.route &&
+          candidate.descriptor.action === primaryAction.descriptor.action
+        ),
+    ) ?? createWorkspaceAction("/platform-presence", "open_platform_presence")
   );
 }
 
@@ -780,8 +870,8 @@ function RefreshTierPill({
   nowSeed: number;
   tier: RefreshTier;
 }) {
-  const snapshot = getRefreshSnapshot(loadedAt, nowSeed, tier);
-  const tone = snapshot.freshness === "fresh" ? "success" : "warn";
+  const metadata = buildRefreshMetadata(loadedAt, nowSeed, tier);
+  const tone = metadata.dataFreshness === "fresh" ? "success" : "warn";
 
   return (
     <View style={styles.refreshRow}>
@@ -789,7 +879,8 @@ function RefreshTierPill({
         {getRefreshTierLabel(tier)}
       </Pill>
       <Text style={styles.refreshLabel}>
-        {snapshot.label} · {formatCompactDateTime(loadedAt)}
+        {getRefreshFreshnessLabel(metadata)} · {getRefreshSourceLabel(metadata)}{" "}
+        · {formatCompactDateTime(metadata.generatedAt)}
       </Text>
     </View>
   );
@@ -935,31 +1026,31 @@ function FocusEmptyStateCard({
               border: THEME.accentBorder,
             };
   const iconName =
-    state.reason === "permission_denied"
+    state.envelope.reason === "permission_denied"
       ? "shield-outline"
-      : state.reason === "fetch_failed"
+      : state.envelope.reason === "fetch_failed"
         ? "cloud-offline-outline"
-        : state.reason === "external_unavailable"
+        : state.envelope.reason === "external_unavailable"
           ? "warning-outline"
-          : state.reason === "driver_not_eligible"
+          : state.envelope.reason === "driver_not_eligible"
             ? "ban-outline"
-            : state.reason === "not_provisioned"
+            : state.envelope.reason === "not_provisioned"
               ? "link-outline"
-              : state.reason === "filtered_empty"
+              : state.envelope.reason === "filtered_empty"
                 ? "sparkles-outline"
                 : "moon-outline";
   const eyebrow =
-    state.reason === "driver_not_eligible"
+    state.envelope.reason === "driver_not_eligible"
       ? "Eligibility blocked"
-      : state.reason === "external_unavailable"
+      : state.envelope.reason === "external_unavailable"
         ? "Adapter degraded"
-        : state.reason === "permission_denied"
+        : state.envelope.reason === "permission_denied"
           ? "Access check required"
-          : state.reason === "fetch_failed"
+          : state.envelope.reason === "fetch_failed"
             ? "Needs refresh"
-            : state.reason === "not_provisioned"
+            : state.envelope.reason === "not_provisioned"
               ? "Setup required"
-              : state.reason === "filtered_empty"
+              : state.envelope.reason === "filtered_empty"
                 ? "Urgent lane cleared"
                 : "Quiet lane";
 
@@ -995,7 +1086,7 @@ function FocusEmptyStateCard({
           tone={getActionRiskTone(state.action.descriptor.riskLevel)}
           dot
         >
-          {`${state.reason} · ${state.action.descriptor.action}`}
+          {`${state.envelope.reason} · ${state.action.descriptor.action}`}
         </Pill>
         <Btn
           theme={THEME}
@@ -1067,7 +1158,7 @@ function UrgentSignalCard({
           <Text style={styles.urgentBody}>{item.body}</Text>
         </View>
         <Btn theme={THEME} variant="secondary" size="sm" onPress={onPress}>
-          {item.actionLabel}
+          {getActionLabel(item.action.descriptor.action)}
         </Btn>
       </View>
     </Card>
@@ -1256,7 +1347,7 @@ function ActiveTripSummaryCard({
       </View>
       <View style={styles.activeTripActionRow}>
         <Btn theme={THEME} variant="primary" size="sm" onPress={onPrimaryPress}>
-          {model.primaryLabel}
+          {getActionLabel(model.primaryAction.descriptor.action)}
         </Btn>
         <Btn
           theme={THEME}
@@ -1264,7 +1355,7 @@ function ActiveTripSummaryCard({
           size="sm"
           onPress={onSecondaryPress}
         >
-          {model.secondaryLabel}
+          {getActionLabel(model.secondaryAction.descriptor.action)}
         </Btn>
       </View>
     </Card>
@@ -1673,7 +1764,6 @@ export default function WorkspaceIndex() {
     if (workspace.taskLoadError && workspace.taskViews.length === 0) {
       const reason = classifyErrorReason(workspace.taskLoadError);
       return {
-        reason,
         tone: reason === "permission_denied" ? "warn" : "danger",
         title: reason === "permission_denied" ? "權限不足" : "資料讀取失敗",
         body:
@@ -1687,6 +1777,16 @@ export default function WorkspaceIndex() {
           undefined,
           "medium",
         ),
+        envelope: createEmptyStateEnvelope(
+          reason,
+          createWorkspaceAction(
+            "/settings",
+            "open_settings",
+            true,
+            undefined,
+            "medium",
+          ),
+        ),
       };
     }
 
@@ -1696,7 +1796,6 @@ export default function WorkspaceIndex() {
       !workspace.taskLoadError
     ) {
       return {
-        reason: "external_unavailable",
         tone: "warn",
         title: "外部平台暫時不可用",
         body: workspace.platformLoadError,
@@ -1707,12 +1806,52 @@ export default function WorkspaceIndex() {
           undefined,
           "medium",
         ),
+        envelope: createEmptyStateEnvelope(
+          "external_unavailable",
+          createWorkspaceAction(
+            "/platform-presence",
+            "open_platform_presence",
+            true,
+            undefined,
+            "medium",
+          ),
+        ),
+      };
+    }
+
+    if (
+      externalPresences.length > 0 &&
+      onlinePlatformCount === 0 &&
+      degradedPlatformCount === externalPresences.length &&
+      !taskSummary.activeTripTask &&
+      !taskSummary.actionRequiredTask
+    ) {
+      return {
+        tone: "warn",
+        title: "平台通道目前全部降級",
+        body: "所有外部平台目前都處於 degraded / down，工作台改為顯示整備與通知，請先前往平台中心檢查原因。",
+        action: createWorkspaceAction(
+          "/platform-presence",
+          "open_platform_presence",
+          true,
+          undefined,
+          "medium",
+        ),
+        envelope: createEmptyStateEnvelope(
+          "external_unavailable",
+          createWorkspaceAction(
+            "/platform-presence",
+            "open_platform_presence",
+            true,
+            undefined,
+            "medium",
+          ),
+        ),
       };
     }
 
     if (externalPresences.length === 0) {
       return {
-        reason: "not_provisioned",
         tone: "info",
         title: "尚未綁定平台帳號",
         body: "目前只有自營派單資訊，若要接收外部平台任務，請先完成平台綁定與授權。",
@@ -1723,6 +1862,16 @@ export default function WorkspaceIndex() {
           undefined,
           "medium",
         ),
+        envelope: createEmptyStateEnvelope(
+          "not_provisioned",
+          createWorkspaceAction(
+            "/platform-presence",
+            "manage_platform_binding",
+            true,
+            undefined,
+            "medium",
+          ),
+        ),
       };
     }
 
@@ -1731,7 +1880,6 @@ export default function WorkspaceIndex() {
       externalPresences.every((record) => record.eligibility === "ineligible")
     ) {
       return {
-        reason: "driver_not_eligible",
         tone: "danger",
         title: "目前不具備接單資格",
         body: "所有外部平台都回報司機資格不符。請先前往平台頁檢查授權、資格或由派車台協助排除。",
@@ -1742,6 +1890,16 @@ export default function WorkspaceIndex() {
           undefined,
           "medium",
         ),
+        envelope: createEmptyStateEnvelope(
+          "driver_not_eligible",
+          createWorkspaceAction(
+            "/platform-presence",
+            "review_eligibility",
+            true,
+            undefined,
+            "medium",
+          ),
+        ),
       };
     }
 
@@ -1751,11 +1909,14 @@ export default function WorkspaceIndex() {
       onlinePlatformCount > 0
     ) {
       return {
-        reason: "no_data",
         tone: "info",
         title: "目前沒有新任務",
         body: "工作台已待命。保持平台在線與班次正常，新的派單或平台任務會優先出現在這裡。",
         action: createWorkspaceAction("/jobs", "open_jobs"),
+        envelope: createEmptyStateEnvelope(
+          "no_data",
+          createWorkspaceAction("/jobs", "open_jobs"),
+        ),
       };
     }
 
@@ -1766,11 +1927,14 @@ export default function WorkspaceIndex() {
       !taskSummary.actionRequiredTask
     ) {
       return {
-        reason: "filtered_empty",
         tone: "info",
         title: "目前沒有需立即處理的項目",
         body: "工作台的 urgent lane 已清空，您可以查看今日收入、班次或維持平台在線待命。",
         action: createWorkspaceAction("/earnings", "open_earnings"),
+        envelope: createEmptyStateEnvelope(
+          "filtered_empty",
+          createWorkspaceAction("/earnings", "open_earnings"),
+        ),
       };
     }
 
@@ -1778,6 +1942,7 @@ export default function WorkspaceIndex() {
   }, [
     externalPresences,
     onlinePlatformCount,
+    degradedPlatformCount,
     taskSummary.activeTripTask,
     taskSummary.actionRequiredTask,
     taskSummary.orderedTasks.length,
@@ -1801,8 +1966,13 @@ export default function WorkspaceIndex() {
         tone: "warn",
         title: `${name} 需重新授權`,
         body: `Token 已失效 · 最後同步 ${formatCompactDateTime(platform.updatedAt)}`,
-        actionLabel: "處理",
-        route: "/platform-presence",
+        action: createWorkspaceAction(
+          "/platform-presence",
+          "resolve_reauth",
+          true,
+          undefined,
+          "medium",
+        ),
         iconName: "lock-closed-outline",
       });
     }
@@ -1813,8 +1983,7 @@ export default function WorkspaceIndex() {
         tone: "info",
         title: `任務待回應 · ${formatTaskHeadline(taskSummary.actionRequiredTask)}`,
         body: formatTaskActionSummary(taskSummary.actionRequiredTask),
-        actionLabel: "查看任務",
-        route: "/jobs",
+        action: getPrimaryTaskAction(taskSummary.actionRequiredTask),
         iconName: "timer-outline",
       });
     }
@@ -1830,8 +1999,7 @@ export default function WorkspaceIndex() {
         body:
           taskSummary.syncIssueTask.syncIssueSummary?.trim() ||
           "外部平台回傳狀態異常，需要派車台協助確認。",
-        actionLabel: "查看任務",
-        route: "/jobs",
+        action: getTaskOpenAction(taskSummary.syncIssueTask),
         iconName: "warning-outline",
       });
     }
@@ -1847,8 +2015,7 @@ export default function WorkspaceIndex() {
         tone: "info",
         title: "尚未上班",
         body: "仍有待處理任務，但自營派單尚未切成可接單狀態。",
-        actionLabel: "班次",
-        route: "/shift",
+        action: createWorkspaceAction("/shift", "open_shift"),
         iconName: "time-outline",
       });
     }
@@ -1945,6 +2112,7 @@ export default function WorkspaceIndex() {
     if (taskSummary.actionRequiredTask) {
       const task = taskSummary.actionRequiredTask;
       const primaryAction = getPrimaryTaskAction(task);
+      const secondaryAction = getSecondaryTaskAction(task, primaryAction);
       return {
         state: "urgent_task",
         tone: "info",
@@ -1953,10 +2121,7 @@ export default function WorkspaceIndex() {
         detail: formatTaskRouteSummary(task),
         meta: `${task.platformDisplayName} · ${formatTaskActionSummary(task)}`,
         primaryAction,
-        secondaryAction: createWorkspaceAction(
-          "/platform-presence",
-          "open_platform_presence",
-        ),
+        secondaryAction,
       };
     }
 
@@ -1966,16 +2131,20 @@ export default function WorkspaceIndex() {
         ? formatMoney(workspace.orderMap[task.orderId]?.quotedFare)
         : "車資待確認";
       const primaryAction = getPrimaryTaskAction(task);
+      const secondaryAction = getSecondaryTaskAction(task, primaryAction);
 
       return {
         state: "trip",
         tone: "accent",
         eyebrow: "Next Best Action · Active trip",
-        title: `返回進行中的行程`,
+        title:
+          task.allowedActions.length > 0
+            ? `下一步：${getActionLabel(primaryAction.descriptor.action)}`
+            : "返回進行中的行程",
         detail: formatTaskRouteSummary(task),
         meta: `${task.taskId} · ${fareLabel} · ${formatCompactDateTime(task.updatedAt)}`,
         primaryAction,
-        secondaryAction: createWorkspaceAction("/jobs", "open_jobs"),
+        secondaryAction,
       };
     }
 
@@ -2064,14 +2233,16 @@ export default function WorkspaceIndex() {
 
     const task = taskSummary.activeTripTask;
     const quotedFare = workspace.orderMap[task.orderId]?.quotedFare ?? null;
+    const primaryAction = getPrimaryTaskAction(task);
+    const secondaryAction = getSecondaryTaskAction(task, primaryAction);
     return {
       title: formatTaskHeadline(task),
       routeSummary: formatTaskRouteSummary(task),
       meta: `${task.taskId} · 最後同步 ${formatCompactDateTime(task.updatedAt)}`,
       fareLabel: quotedFare ? formatMoney(quotedFare) : "車資待確認",
       platformLabel: task.platformDisplayName || task.sourcePlatform,
-      primaryLabel: "返回行程",
-      secondaryLabel: "任務詳情",
+      primaryAction,
+      secondaryAction,
     };
   }, [taskSummary.activeTripTask, workspace.orderMap]);
 
@@ -2246,7 +2417,7 @@ export default function WorkspaceIndex() {
   const notificationCount =
     notificationItems.filter((item) => item.readAt === null).length +
     urgentItems.length +
-    (focusEmptyState?.reason === "driver_not_eligible" ? 1 : 0) +
+    (focusEmptyState?.envelope.reason === "driver_not_eligible" ? 1 : 0) +
     (identityIssue ? 1 : 0);
 
   const markNotificationsRead = async (notificationIds: string[]) => {
@@ -2458,8 +2629,8 @@ export default function WorkspaceIndex() {
       {activeTripCard ? (
         <ActiveTripSummaryCard
           model={activeTripCard}
-          onPrimaryPress={navigate("/trip")}
-          onSecondaryPress={navigate("/jobs")}
+          onPrimaryPress={navigate(activeTripCard.primaryAction.route)}
+          onSecondaryPress={navigate(activeTripCard.secondaryAction.route)}
         />
       ) : null}
 
@@ -2503,7 +2674,7 @@ export default function WorkspaceIndex() {
         <UrgentSignalCard
           key={item.key}
           item={item}
-          onPress={navigate(item.route)}
+          onPress={navigate(item.action.route)}
         />
       ))}
 
@@ -2539,10 +2710,8 @@ export default function WorkspaceIndex() {
       <View style={styles.sectionBlock}>
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionEyebrow}>Available actions</Text>
-            <Text style={styles.sectionTitle}>
-              本頁 CTA 由 action descriptor 驅動
-            </Text>
+            <Text style={styles.sectionEyebrow}>立即可做</Text>
+            <Text style={styles.sectionTitle}>工作台當前可執行動作</Text>
           </View>
         </View>
         <Card theme={THEME} padding={14}>
@@ -2557,7 +2726,11 @@ export default function WorkspaceIndex() {
                     {getActionLabel(action.descriptor.action)}
                   </Text>
                   <Text style={styles.availableActionMeta}>
-                    {`${action.descriptor.action} · ${action.route} · risk=${action.descriptor.riskLevel}`}
+                    {action.descriptor.enabled
+                      ? "可直接前往對應工作區處理"
+                      : getActionDisabledReason(
+                          action.descriptor.disabledReasonCode,
+                        )}
                   </Text>
                 </View>
                 <Pill
@@ -2570,8 +2743,12 @@ export default function WorkspaceIndex() {
                   dot
                 >
                   {action.descriptor.enabled
-                    ? "enabled"
-                    : (action.descriptor.disabledReasonCode ?? "disabled")}
+                    ? action.descriptor.riskLevel === "high"
+                      ? "需確認"
+                      : action.descriptor.riskLevel === "medium"
+                        ? "可處理"
+                        : "可前往"
+                    : "暫不可用"}
                 </Pill>
               </View>
             ))}
@@ -2587,23 +2764,47 @@ export default function WorkspaceIndex() {
           </View>
         </View>
         <Text style={styles.sectionBody}>
-          依 packet §5.1，workspace cockpit 必須提供 sitemap 級入口：
+          依 packet §5.3，workspace cockpit 必須提供 sitemap 級入口：
           任務、行程、平台中心、收入、班次與設定，且 next-best-action 置於其上。
         </Text>
         <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
-          <Text style={styles.crossAppPolicyTitle}>
-            {`CrossAppResourceLink = ${WORKSPACE_CROSS_APP_LINKS.length}`}
-          </Text>
+          <Text style={styles.crossAppPolicyTitle}>跨系統連結策略</Text>
           <Text style={styles.crossAppPolicyBody}>
-            Phase 1 driver app 沒有直接開啟 web console 的 deep link；跨 app
-            訊息會落在本頁通知／notice 卡片，由司機留在 app 內處理。
+            Phase 1 driver app 不直接跳轉 web console。跨系統訊息改由通知與
+            notice 卡片送進工作台，司機可留在 app 內完成後續處理。
+          </Text>
+          <Text style={styles.crossAppPolicyMeta}>
+            {WORKSPACE_CROSS_APP_LINKS.length === 0
+              ? "CrossAppResourceLink · none"
+              : `CrossAppResourceLink · ${WORKSPACE_CROSS_APP_LINKS.length}`}
           </Text>
         </Card>
+        {WORKSPACE_CROSS_APP_LINKS.length > 0 ? (
+          <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
+            <Text style={styles.crossAppPolicyTitle}>跨系統 deep links</Text>
+            <View style={styles.crossAppNoticeList}>
+              {WORKSPACE_CROSS_APP_LINKS.map((link) => (
+                <View
+                  key={`${link.targetApp}-${link.resourceType}-${link.resourceId}`}
+                  style={styles.crossAppNoticeRow}
+                >
+                  <View style={styles.crossAppNoticeCopy}>
+                    <Text style={styles.availableActionLabel}>
+                      {link.label}
+                    </Text>
+                    <Text style={styles.sectionBody}>
+                      {`${link.targetApp} · ${link.route} · ${link.openMode}`}
+                    </Text>
+                  </View>
+                  <Text style={styles.platformRowMeta}>{link.resourceId}</Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
         {crossAppNotices.length > 0 ? (
           <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
-            <Text style={styles.crossAppPolicyTitle}>
-              Cross-app notices routed into cockpit
-            </Text>
+            <Text style={styles.crossAppPolicyTitle}>跨系統 notice</Text>
             <View style={styles.crossAppNoticeList}>
               {crossAppNotices.map((notice) => (
                 <View
@@ -2638,7 +2839,7 @@ export default function WorkspaceIndex() {
       <View style={styles.sectionBlock}>
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionEyebrow}>Eligibility / readiness</Text>
+            <Text style={styles.sectionEyebrow}>資格與整備</Text>
             <Text style={styles.sectionTitle}>平台資格與工作台摘要</Text>
           </View>
         </View>
@@ -2669,8 +2870,8 @@ export default function WorkspaceIndex() {
           <Text style={styles.readinessBody}>
             必備資料已就位：裝置身份、班次狀態、多平台健康、urgent task
             count、active trip summary、next-best-action、6 種 EmptyReason 與
-            app 內 deep-link sitemap。CTAs 優先由 task `allowedActions` 與
-            `ResourceActionDescriptor` 驅動；舊版 task API 僅作 fallback。
+            app 內 deep-link sitemap。CTA 會優先跟隨 task allowedActions 與
+            ResourceActionDescriptor；舊版 task API 僅作 fallback。
           </Text>
         </Card>
       </View>
@@ -3207,6 +3408,12 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 12,
     lineHeight: 17,
+  },
+  crossAppPolicyMeta: {
+    color: THEME.textDim,
+    fontFamily: THEME.monoFamily,
+    fontSize: 10.5,
+    marginTop: 8,
   },
   crossAppNoticeList: {
     gap: 10,
