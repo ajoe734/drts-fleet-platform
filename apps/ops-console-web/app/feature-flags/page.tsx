@@ -863,7 +863,7 @@ function rowForRecord(
           </Pill>
           {record.rolloutState === "partial" ? (
             <Pill theme={theme} tone="warn">
-              {formatOpsCodeLabel(locale, "partial")}
+              {copy(locale, "Mid-rollout", "進行中 rollout")}
             </Pill>
           ) : null}
         </div>
