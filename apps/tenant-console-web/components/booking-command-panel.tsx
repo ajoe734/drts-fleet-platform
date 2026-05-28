@@ -6,9 +6,46 @@ import type {
   BookingRecord,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
+import {
+  createBookingCommandGuard,
+  type ActionAvailabilityDescriptor,
+} from "./booking-command-guard";
 import { formatDateTime, isFutureIso } from "@/lib/formatters";
 
 type Mode = "update" | "cancel" | null;
+
+type BookingCommandTriggerButtonProps = {
+  descriptor?: ActionAvailabilityDescriptor;
+  disabled: boolean;
+  className: string;
+  onAction: () => void;
+  children: React.ReactNode;
+};
+
+export function BookingCommandTriggerButton({
+  descriptor,
+  disabled: disabledByState,
+  className,
+  onAction,
+  children,
+}: BookingCommandTriggerButtonProps) {
+  const guard = createBookingCommandGuard({
+    descriptor,
+    disabled: disabledByState,
+    onAction,
+  });
+
+  return (
+    <button
+      className={className}
+      disabled={guard.disabled}
+      type="button"
+      onClick={guard.onClick}
+    >
+      {children}
+    </button>
+  );
+}
 
 export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
   const router = useRouter();
@@ -133,28 +170,26 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
           </p>
         </div>
         <div className="action-row">
-          <button
+          <BookingCommandTriggerButton
             className="action-button action-button-secondary"
             disabled={!commandState.canUpdate}
-            type="button"
-            onClick={() => {
+            onAction={() => {
               setError(null);
               setMode("update");
             }}
           >
             Update booking
-          </button>
-          <button
+          </BookingCommandTriggerButton>
+          <BookingCommandTriggerButton
             className="action-button action-button-danger"
             disabled={!commandState.canCancel}
-            type="button"
-            onClick={() => {
+            onAction={() => {
               setError(null);
               setMode("cancel");
             }}
           >
             Cancel booking
-          </button>
+          </BookingCommandTriggerButton>
         </div>
         {commandState.updateReason ? (
           <p className="action-note">{commandState.updateReason}</p>

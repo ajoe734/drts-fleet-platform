@@ -18,7 +18,14 @@ export default defineConfig({
     jsx: "automatic",
   },
   test: {
-    environment: "node",
-    include: ["tests/unit/**/*.test.ts", "tests/unit/**/*.test.tsx"],
+    environment: "jsdom",
+    include: [
+      "app/**/*.test.ts",
+      "app/**/*.test.tsx",
+      "components/**/*.test.ts",
+      "components/**/*.test.tsx",
+      "tests/unit/**/*.test.ts",
+      "tests/unit/**/*.test.tsx",
+    ],
   },
 });

@@ -7,6 +7,10 @@ import type {
   PlatformCode,
   PlatformPresenceStatus,
 } from "@drts/contracts";
+import {
+  createDriverActionGuard,
+  type ActionAvailabilityDescriptor,
+} from "./driver-action-guard";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 
@@ -15,6 +19,13 @@ type DriverPlatformActionsProps = {
   workState: DriverRegistryRecord["workState"];
   platformCode?: PlatformCode | undefined;
   platformStatus?: PlatformPresenceStatus | undefined;
+};
+
+type DriverActionButtonProps = {
+  descriptor?: ActionAvailabilityDescriptor;
+  busy: boolean;
+  onAction: () => void;
+  children: React.ReactNode;
 };
 
 const buttonStyle: React.CSSProperties = {
@@ -27,6 +38,30 @@ const buttonStyle: React.CSSProperties = {
   fontWeight: 600,
   cursor: "pointer",
 };
+
+export function DriverActionButton({
+  descriptor,
+  busy,
+  onAction,
+  children,
+}: DriverActionButtonProps) {
+  const guard = createDriverActionGuard({
+    descriptor,
+    busy,
+    onAction,
+  });
+
+  return (
+    <button
+      type="button"
+      style={buttonStyle}
+      disabled={guard.disabled}
+      onClick={guard.onClick}
+    >
+      {children}
+    </button>
+  );
+}
 
 export function DriverPlatformActions({
   driverId,
@@ -64,11 +99,9 @@ export function DriverPlatformActions({
       <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
         {platformCode && platformStatus === "online" ? (
           <>
-            <button
-              type="button"
-              style={buttonStyle}
-              disabled={pendingAction !== null}
-              onClick={() =>
+            <DriverActionButton
+              busy={pendingAction !== null}
+              onAction={() =>
                 void runAction("take-offline", () =>
                   client.setPlatformOffline({ platformCode }, { driverId }),
                 )
@@ -77,12 +110,10 @@ export function DriverPlatformActions({
               {pendingAction === "take-offline"
                 ? t("drivers.detail.refreshing")
                 : t("drivers.detail.takeOffline")}
-            </button>
-            <button
-              type="button"
-              style={buttonStyle}
-              disabled={pendingAction !== null}
-              onClick={() =>
+            </DriverActionButton>
+            <DriverActionButton
+              busy={pendingAction !== null}
+              onAction={() =>
                 void runAction("mark-reauth", () =>
                   client.setPlatformOnline(
                     {
@@ -97,15 +128,13 @@ export function DriverPlatformActions({
               {pendingAction === "mark-reauth"
                 ? t("drivers.detail.refreshing")
                 : t("drivers.detail.markReauth")}
-            </button>
+            </DriverActionButton>
           </>
         ) : null}
 
-        <button
-          type="button"
-          style={buttonStyle}
-          disabled={pendingAction !== null}
-          onClick={() =>
+        <DriverActionButton
+          busy={pendingAction !== null}
+          onAction={() =>
             void runAction("toggle-hold", () =>
               client.updateDriverWorkState(driverId, {
                 workState:
@@ -119,7 +148,7 @@ export function DriverPlatformActions({
             : workState === "incident_hold"
               ? t("drivers.detail.releaseHold")
               : t("drivers.detail.suppressMatching")}
-        </button>
+        </DriverActionButton>
       </div>
 
       {error ? (
@@ -173,11 +202,9 @@ export function DriverPlatformRowActions({
 
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-      <button
-        type="button"
-        style={buttonStyle}
-        disabled={pendingAction !== null}
-        onClick={() =>
+      <DriverActionButton
+        busy={pendingAction !== null}
+        onAction={() =>
           void runAction("offline", () =>
             client.setPlatformOffline({ platformCode }, { driverId }),
           )
@@ -186,12 +213,10 @@ export function DriverPlatformRowActions({
         {pendingAction === "offline"
           ? t("drivers.detail.refreshing")
           : t("drivers.detail.takeOffline")}
-      </button>
-      <button
-        type="button"
-        style={buttonStyle}
-        disabled={pendingAction !== null}
-        onClick={() =>
+      </DriverActionButton>
+      <DriverActionButton
+        busy={pendingAction !== null}
+        onAction={() =>
           void runAction("reauth", () =>
             client.setPlatformOnline(
               { platformCode, tokenExpiresAt: new Date().toISOString() },
@@ -203,7 +228,7 @@ export function DriverPlatformRowActions({
         {pendingAction === "reauth"
           ? t("drivers.detail.refreshing")
           : t("drivers.detail.markReauth")}
-      </button>
+      </DriverActionButton>
       {error ? (
         <span style={{ color: "#b91c1c", fontSize: "0.78rem" }}>
           {t("drivers.detail.actionError")}: {error}

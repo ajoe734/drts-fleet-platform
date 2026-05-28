@@ -13,6 +13,10 @@ import {
   StatusChip,
   Tokens,
 } from "@/components/ui";
+import {
+  createPlatformStatusActionGuard,
+  type ActionAvailabilityDescriptor,
+} from "@/components/platform-status-action-guard";
 
 type TokenExpiryInfo = {
   label: string;
@@ -27,6 +31,11 @@ export interface PlatformStatusAction {
   tone?: "primary" | "warning" | "danger" | "neutral";
   disabled?: boolean;
 }
+
+type PlatformStatusActionButtonProps = {
+  action: PlatformStatusAction;
+  descriptor?: ActionAvailabilityDescriptor;
+};
 
 export interface PlatformHealthAssessment {
   canReceiveOrders: boolean;
@@ -235,6 +244,40 @@ function getActionToneStyles(tone: PlatformStatusAction["tone"] = "neutral") {
   }
 }
 
+export function PlatformStatusActionButton({
+  action,
+  descriptor,
+}: PlatformStatusActionButtonProps) {
+  const toneStyles = getActionToneStyles(action.tone);
+  const guard = createPlatformStatusActionGuard({
+    descriptor,
+    disabled: action.disabled,
+    onPress: action.onPress,
+  });
+
+  return (
+    <TouchableOpacity
+      style={[
+        styles.actionButton,
+        {
+          backgroundColor: toneStyles.backgroundColor,
+          borderColor: toneStyles.borderColor,
+        },
+        guard.disabled && styles.actionButtonDisabled,
+      ]}
+      onPress={guard.onPress}
+      disabled={guard.disabled}
+      accessibilityRole="button"
+      accessibilityLabel={action.label}
+    >
+      <Ionicons name={action.icon} size={16} color={toneStyles.iconColor} />
+      <Text style={[styles.actionLabel, { color: toneStyles.textColor }]}>
+        {action.label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 export function getPlatformHealthSeverity(
   assessment: PlatformHealthAssessment,
 ): number {
@@ -410,40 +453,9 @@ export function PlatformStatusCard({
 
           {actions.length > 0 ? (
             <View style={styles.actions}>
-              {actions.map((action) => {
-                const toneStyles = getActionToneStyles(action.tone);
-                return (
-                  <TouchableOpacity
-                    key={action.key}
-                    style={[
-                      styles.actionButton,
-                      {
-                        backgroundColor: toneStyles.backgroundColor,
-                        borderColor: toneStyles.borderColor,
-                      },
-                      action.disabled && styles.actionButtonDisabled,
-                    ]}
-                    onPress={action.onPress}
-                    disabled={action.disabled}
-                    accessibilityRole="button"
-                    accessibilityLabel={action.label}
-                  >
-                    <Ionicons
-                      name={action.icon}
-                      size={16}
-                      color={toneStyles.iconColor}
-                    />
-                    <Text
-                      style={[
-                        styles.actionLabel,
-                        { color: toneStyles.textColor },
-                      ]}
-                    >
-                      {action.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+              {actions.map((action) => (
+                <PlatformStatusActionButton key={action.key} action={action} />
+              ))}
             </View>
           ) : null}
         </>

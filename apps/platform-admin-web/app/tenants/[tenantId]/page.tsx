@@ -60,6 +60,10 @@ import {
   type StepState,
   type StepperItem,
 } from "@drts/ui-web";
+import {
+  createLifecycleActionGuard,
+  type ActionAvailabilityDescriptor,
+} from "./lifecycle-action-guard";
 
 const STAGE_INDEX: Record<PlatformTenantRolloutStage, number> = {
   sandbox: 0,
@@ -72,6 +76,39 @@ const anchorSectionStyle = {
   gap: 12,
   scrollMarginTop: 96,
 } satisfies React.CSSProperties;
+
+type TenantLifecycleActionButtonProps = {
+  descriptor?: ActionAvailabilityDescriptor;
+  busy: boolean;
+  className: string;
+  onAction: () => void;
+  children: React.ReactNode;
+};
+
+export function TenantLifecycleActionButton({
+  descriptor,
+  busy,
+  className,
+  onAction,
+  children,
+}: TenantLifecycleActionButtonProps) {
+  const guard = createLifecycleActionGuard({
+    descriptor,
+    busy,
+    onAction,
+  });
+
+  return (
+    <button
+      type="button"
+      className={className}
+      disabled={guard.disabled}
+      onClick={guard.onClick}
+    >
+      {children}
+    </button>
+  );
+}
 
 function rolloutStepState(
   tenant: PlatformAdminTenantRecord,
@@ -1789,32 +1826,29 @@ export default function TenantDetailPage() {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {tenant.status === "active" ? (
-                  <button
-                    type="button"
+                  <TenantLifecycleActionButton
                     className="admin-btn admin-btn--secondary"
-                    disabled={lifecycleAction === "suspend"}
-                    onClick={() => void runLifecycle("suspend")}
+                    busy={lifecycleAction === "suspend"}
+                    onAction={() => void runLifecycle("suspend")}
                   >
                     {copy.suspend}
-                  </button>
+                  </TenantLifecycleActionButton>
                 ) : (
-                  <button
-                    type="button"
+                  <TenantLifecycleActionButton
                     className="admin-btn admin-btn--secondary"
-                    disabled={lifecycleAction === "activate"}
-                    onClick={() => void runLifecycle("activate")}
+                    busy={lifecycleAction === "activate"}
+                    onAction={() => void runLifecycle("activate")}
                   >
                     {copy.activate}
-                  </button>
+                  </TenantLifecycleActionButton>
                 )}
-                <button
-                  type="button"
+                <TenantLifecycleActionButton
                   className="admin-btn admin-btn--secondary"
-                  disabled={lifecycleAction === "rollback_hold"}
-                  onClick={() => void runLifecycle("rollback_hold")}
+                  busy={lifecycleAction === "rollback_hold"}
+                  onAction={() => void runLifecycle("rollback_hold")}
                 >
                   {copy.rollback}
-                </button>
+                </TenantLifecycleActionButton>
               </div>
             </WorkflowPanel>
           </>
