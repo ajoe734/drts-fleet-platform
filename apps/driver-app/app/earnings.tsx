@@ -40,14 +40,13 @@ import {
   getCurrencyLabel,
 } from "@/lib/money";
 import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
-import { driverStrings } from "@/lib/strings";
+import { driverEarningsPeriodOptions, driverStrings } from "@/lib/strings";
 
 const THEME = driverCanvasTheme;
-const PERIOD_OPTIONS: Array<{ key: DriverEarningsPeriod; label: string }> = [
-  { key: "today", label: "本日 · today" },
-  { key: "week", label: "本週 · week" },
-  { key: "month", label: "本月 · month" },
-];
+const PERIOD_OPTIONS = driverEarningsPeriodOptions.map((option) => ({
+  key: option.value,
+  label: option.label,
+})) satisfies Array<{ key: DriverEarningsPeriod; label: string }>;
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -119,6 +118,15 @@ function getRefreshSourceLabel(refresh: UiRefreshMetadata) {
   }
 }
 
+function getRefreshTierLabel(
+  refreshTier: DriverEarningsDashboard["refreshTier"],
+) {
+  if (refreshTier === "manual") {
+    return "manual refresh";
+  }
+  return refreshTier;
+}
+
 function getActionLabel(action: ResourceActionDescriptor | null | undefined) {
   switch (action?.action) {
     case "refresh_earnings":
@@ -129,6 +137,58 @@ function getActionLabel(action: ResourceActionDescriptor | null | undefined) {
       return "前往派車台覆核";
     default:
       return "繼續";
+  }
+}
+
+function getAuthorityTone(
+  item: DriverEarningsDashboard["platformBreakdown"][number],
+) {
+  if (item.authorityTone === "owned") {
+    return "accent" as const;
+  }
+  if (item.authorityTone === "reference_only") {
+    return "info" as const;
+  }
+  return "warn" as const;
+}
+
+function getAuthorityDetail(
+  item: DriverEarningsDashboard["platformBreakdown"][number],
+) {
+  if (item.authorityTone === "owned") {
+    return {
+      settlementLabel: "結算：DRTS",
+      payoutLabel: "撥款：DRTS",
+      note: "列入 DRTS 對帳與待撥款計算。",
+    };
+  }
+
+  if (item.authorityTone === "reference_only") {
+    return {
+      settlementLabel: "結算：鏡像參考",
+      payoutLabel: "撥款：不由 DRTS",
+      note: "shadow-only 鏡像資料，只供對帳檢視。",
+    };
+  }
+
+  return {
+    settlementLabel: "結算：外部平台",
+    payoutLabel: "撥款：外部平台",
+    note: "由外部平台結算與撥款，不列入 DRTS 待撥款。",
+  };
+}
+
+function getAuthorityLegendCopy(
+  tone: DriverEarningsDashboard["platformBreakdown"][number]["authorityTone"],
+) {
+  switch (tone) {
+    case "owned":
+      return "DRTS 可直接對帳與撥款";
+    case "reference_only":
+      return "forwarded shadow ledger，僅供參考";
+    case "external":
+    default:
+      return "外部平台持有 finance authority";
   }
 }
 
@@ -522,6 +582,45 @@ export default function EarningsScreen() {
     );
   };
 
+  const invokeAction = async (
+    action: ResourceActionDescriptor | null,
+    options?: {
+      statement?: DriverEarningsStatementListItem;
+      link?: CrossAppResourceLink;
+      fallbackRoute?: "/settings";
+    },
+  ) => {
+    if (!action) {
+      return;
+    }
+    if (!action.enabled) {
+      explainDisabledAction(action);
+      return;
+    }
+
+    if (action.action === "refresh_earnings") {
+      await onRefresh();
+      return;
+    }
+
+    if (action.action === "view_statement_detail" && options?.statement) {
+      await openStatementDetail(options.statement);
+      return;
+    }
+
+    if (action.action === "open_manager_review" && options?.link) {
+      await openManagerReview(options.link);
+      return;
+    }
+
+    if (options?.fallbackRoute) {
+      router.push(options.fallbackRoute);
+      return;
+    }
+
+    Alert.alert("尚未支援", "這個操作尚未綁定對應流程。");
+  };
+
   const refreshAction = findAction(
     dashboard?.availableActions,
     "refresh_earnings",
@@ -597,11 +696,7 @@ export default function EarningsScreen() {
                 variant="secondary"
                 size="sm"
                 icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
-                onPress={() =>
-                  refreshEnabled
-                    ? void onRefresh()
-                    : explainDisabledAction(refreshAction)
-                }
+                onPress={() => void invokeAction(refreshAction)}
               >
                 {driverStrings.common.retry}
               </Btn>
@@ -636,7 +731,7 @@ export default function EarningsScreen() {
               {getRefreshSourceLabel(dashboard.refresh)}
             </Pill>
             <Pill theme={THEME} tone="warn">
-              refresh tier · {dashboard.refreshTier}
+              {getRefreshTierLabel(dashboard.refreshTier)}
             </Pill>
           </View>
         ) : null}
@@ -646,19 +741,12 @@ export default function EarningsScreen() {
             variant="primary"
             size="sm"
             disabled={!emptyAction.enabled}
-            onPress={() => {
-              if (!emptyAction.enabled) {
-                explainDisabledAction(emptyAction);
-                return;
-              }
-              if (emptyAction.action === "refresh_earnings") {
-                void onRefresh();
-                return;
-              }
-              if (emptyReason === "not_provisioned") {
-                router.push("/settings");
-              }
-            }}
+            onPress={() =>
+              void invokeAction(emptyAction, {
+                fallbackRoute:
+                  emptyReason === "not_provisioned" ? "/settings" : undefined,
+              })
+            }
           >
             {emptyContent.actionLabel}
           </Btn>
@@ -714,7 +802,7 @@ export default function EarningsScreen() {
               size="sm"
               disabled={!refreshEnabled || refreshing}
               icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
-              onPress={() => void onRefresh()}
+              onPress={() => void invokeAction(refreshAction)}
             >
               重新整理
             </Btn>
@@ -814,7 +902,7 @@ export default function EarningsScreen() {
               {refreshStatus}
             </Pill>
             <Pill theme={THEME} tone="warn">
-              refresh tier · {dashboard.refreshTier}
+              {getRefreshTierLabel(dashboard.refreshTier)}
             </Pill>
           </View>
           <View
@@ -876,6 +964,48 @@ export default function EarningsScreen() {
           </Card>
         ) : null}
 
+        <Card theme={THEME} style={styles.legendCard}>
+          <Text
+            style={[
+              styles.legendTitle,
+              { color: THEME.text, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            finance authority
+          </Text>
+          <View style={styles.legendList}>
+            {(["owned", "external", "reference_only"] as const).map((tone) => (
+              <View key={tone} style={styles.legendRow}>
+                <Pill
+                  theme={THEME}
+                  tone={
+                    tone === "owned"
+                      ? "accent"
+                      : tone === "external"
+                        ? "warn"
+                        : "info"
+                  }
+                  dot
+                >
+                  {tone === "owned"
+                    ? "DRTS"
+                    : tone === "external"
+                      ? "外部平台"
+                      : "shadow-only"}
+                </Pill>
+                <Text
+                  style={[
+                    styles.legendText,
+                    { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+                  ]}
+                >
+                  {getAuthorityLegendCopy(tone)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </Card>
+
         <Card
           theme={THEME}
           title={driverStrings.earnings.sections.platformBreakdown}
@@ -915,17 +1045,7 @@ export default function EarningsScreen() {
                     ]}
                   >
                     <View style={styles.breakdownTopRow}>
-                      <Pill
-                        theme={THEME}
-                        tone={
-                          item.authorityTone === "owned"
-                            ? "accent"
-                            : item.authorityTone === "reference_only"
-                              ? "info"
-                              : "warn"
-                        }
-                        dot
-                      >
+                      <Pill theme={THEME} tone={getAuthorityTone(item)} dot>
                         {item.platformName} · {item.platformCode}
                       </Pill>
                       <Text
@@ -937,6 +1057,40 @@ export default function EarningsScreen() {
                         {item.netAmount.amountMinor === 0
                           ? "—"
                           : formatAmountNumber(item.netAmount)}
+                      </Text>
+                    </View>
+                    <View style={styles.breakdownAuthorityRow}>
+                      <Text
+                        style={[
+                          styles.breakdownAuthorityLabel,
+                          {
+                            color:
+                              getAuthorityTone(item) === "accent"
+                                ? THEME.accentHi
+                                : getAuthorityTone(item) === "info"
+                                  ? THEME.info
+                                  : THEME.warn,
+                            fontFamily: THEME.fontFamily,
+                          },
+                        ]}
+                      >
+                        {getAuthorityDetail(item).settlementLabel}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.breakdownAuthorityLabel,
+                          {
+                            color:
+                              getAuthorityTone(item) === "accent"
+                                ? THEME.accentHi
+                                : getAuthorityTone(item) === "info"
+                                  ? THEME.info
+                                  : THEME.warn,
+                            fontFamily: THEME.fontFamily,
+                          },
+                        ]}
+                      >
+                        {getAuthorityDetail(item).payoutLabel}
                       </Text>
                     </View>
                     <View
@@ -1014,9 +1168,9 @@ export default function EarningsScreen() {
                           styles.breakdownAuthority,
                           {
                             color:
-                              item.authorityTone === "owned"
+                              getAuthorityTone(item) === "accent"
                                 ? THEME.accentHi
-                                : item.authorityTone === "reference_only"
+                                : getAuthorityTone(item) === "info"
                                   ? THEME.info
                                   : THEME.warn,
                             fontFamily: THEME.fontFamily,
@@ -1035,7 +1189,7 @@ export default function EarningsScreen() {
                             variant="ghost"
                             size="xs"
                             disabled={!action.enabled}
-                            onPress={() => explainDisabledAction(action)}
+                            onPress={() => void invokeAction(action)}
                           >
                             {getActionLabel(action)}
                           </Btn>
@@ -1052,7 +1206,20 @@ export default function EarningsScreen() {
                           },
                         ]}
                       >
-                        reference-only · 不列入 DRTS 待撥款
+                        {getAuthorityDetail(item).note}
+                      </Text>
+                    ) : null}
+                    {!item.referenceOnly ? (
+                      <Text
+                        style={[
+                          styles.referenceNote,
+                          {
+                            color: THEME.textMuted,
+                            fontFamily: THEME.fontFamily,
+                          },
+                        ]}
+                      >
+                        {getAuthorityDetail(item).note}
                       </Text>
                     ) : null}
                   </View>
@@ -1095,7 +1262,7 @@ export default function EarningsScreen() {
                   ]}
                 >
                   deep link ·{" "}
-                  {dashboard.reconciliationIssue.managerReviewLink.targetApp}
+                  {dashboard.reconciliationIssue.managerReviewLink.label}
                 </Text>
               </View>
             </View>
@@ -1106,9 +1273,9 @@ export default function EarningsScreen() {
               disabled={!reconciliationAction?.enabled}
               onPress={() =>
                 reconciliationAction?.enabled
-                  ? void openManagerReview(
-                      dashboard.reconciliationIssue!.managerReviewLink,
-                    )
+                  ? void invokeAction(reconciliationAction, {
+                      link: dashboard.reconciliationIssue!.managerReviewLink,
+                    })
                   : explainDisabledAction(reconciliationAction)
               }
             >
@@ -1154,7 +1321,15 @@ export default function EarningsScreen() {
                     <Pressable
                       key={statement.statementId}
                       disabled={!canView}
-                      onPress={() => void openStatementDetail(statement)}
+                      onPress={() =>
+                        void invokeAction(
+                          findAction(
+                            statement.availableActions,
+                            "view_statement_detail",
+                          ),
+                          { statement },
+                        )
+                      }
                       style={({ pressed }) => [
                         styles.statementRow,
                         index < dashboard.statements.length - 1
@@ -1409,6 +1584,29 @@ const styles = StyleSheet.create({
   notesCard: {
     gap: 10,
   },
+  legendCard: {
+    gap: 10,
+  },
+  legendTitle: {
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  legendList: {
+    gap: 8,
+  },
+  legendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  legendText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+  },
   notesTitle: {
     fontSize: 12.5,
     fontWeight: "600",
@@ -1446,6 +1644,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  breakdownAuthorityRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  breakdownAuthorityLabel: {
+    fontSize: 11,
+    lineHeight: 16,
+    letterSpacing: 0.2,
   },
   breakdownNetValue: {
     marginLeft: "auto",
