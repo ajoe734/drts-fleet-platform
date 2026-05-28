@@ -70,10 +70,6 @@ const ACTION_COPY: Record<string, string> = {
   refresh: "立即更新",
 };
 const ACTION_PRIORITY = ["view_detail", "update", "cancel"];
-const DEFAULT_PAGE_ACTIONS: ResourceActionDescriptor[] = [
-  { action: "filter", enabled: true, riskLevel: "low" },
-  { action: "create_booking", enabled: true, riskLevel: "medium" },
-];
 const REFRESH_TIER: RefreshTier = "slow";
 const REFRESH_TIER_POLL_INTERVAL_MS: Record<RefreshTier, number> = {
   urgent: 5_000,
@@ -137,6 +133,16 @@ type ResolvedActionLink = {
   label: string;
   openInNewTab: boolean;
 };
+
+const LIST_HEADER_ACTIONS = new Set(["create", "create_booking", "filter"]);
+const LIST_ROW_ACTIONS = new Set([
+  "view_detail",
+  "open_detail",
+  "detail",
+  "view_audit",
+  "audit",
+]);
+const DETAIL_ONLY_ACTIONS = new Set(["update", "cancel"]);
 
 const PAGE_TAB_PRESETS: TabFilterPreset[] = [
   { id: "all", label: "全部" },
@@ -230,17 +236,6 @@ function first(value: SearchParamValue) {
   return value ?? "";
 }
 
-function parseEmptyReasonOverride(
-  searchParams: Record<string, SearchParamValue>,
-): TenantEmptyReason | null {
-  const value = first(searchParams.emptyReason);
-  if (EMPTY_REASON_SET.has(value as EmptyReason)) {
-    return value as TenantEmptyReason;
-  }
-
-  return null;
-}
-
 function hasActiveFilters(searchParams: Record<string, SearchParamValue>) {
   return Boolean(
     first(searchParams.q) ||
@@ -270,20 +265,30 @@ function normalizeBooking(
 }
 
 function getActionDescriptorsForRow(booking: TenantBookingListRecord) {
-  return [...booking.availableActions].sort((left, right) => {
-    const leftIndex = ACTION_PRIORITY.indexOf(left.action);
-    const rightIndex = ACTION_PRIORITY.indexOf(right.action);
-    const normalizedLeftIndex =
-      leftIndex === -1 ? ACTION_PRIORITY.length : leftIndex;
-    const normalizedRightIndex =
-      rightIndex === -1 ? ACTION_PRIORITY.length : rightIndex;
+  return booking.availableActions
+    .filter((descriptor) =>
+      LIST_ROW_ACTIONS.has(normalizeActionToken(descriptor.action)),
+    )
+    .sort((left, right) => {
+      const leftIndex = ACTION_PRIORITY.indexOf(left.action);
+      const rightIndex = ACTION_PRIORITY.indexOf(right.action);
+      const normalizedLeftIndex =
+        leftIndex === -1 ? ACTION_PRIORITY.length : leftIndex;
+      const normalizedRightIndex =
+        rightIndex === -1 ? ACTION_PRIORITY.length : rightIndex;
 
-    if (normalizedLeftIndex !== normalizedRightIndex) {
-      return normalizedLeftIndex - normalizedRightIndex;
-    }
+      if (normalizedLeftIndex !== normalizedRightIndex) {
+        return normalizedLeftIndex - normalizedRightIndex;
+      }
 
-    return left.action.localeCompare(right.action);
-  });
+      return left.action.localeCompare(right.action);
+    });
+}
+
+function hasDetailOnlyActions(booking: TenantBookingListRecord) {
+  return booking.availableActions.some((descriptor) =>
+    DETAIL_ONLY_ACTIONS.has(normalizeActionToken(descriptor.action)),
+  );
 }
 
 function getActionLabel(action: string) {
@@ -306,9 +311,7 @@ function getActionRoute(action: string, bookingId?: string) {
 
   if (
     bookingId &&
-    ["view_detail", "open_detail", "detail", "update", "cancel"].includes(
-      normalizedAction,
-    )
+    ["view_detail", "open_detail", "detail"].includes(normalizedAction)
   ) {
     return `/bookings/${bookingId}`;
   }
@@ -366,43 +369,13 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
   return baseUrl ? `${baseUrl}${link.route}` : link.route;
 }
 
-function matchCrossAppLinkForAction(
-  links: CrossAppResourceLink[] | undefined,
-  action: string,
-) {
-  if (!Array.isArray(links) || links.length === 0) {
-    return null;
-  }
-
-  const normalizedAction = normalizeActionToken(action);
-  return (
-    links.find((link) => {
-      const normalizedLabel = normalizeActionToken(link.label);
-      return (
-        normalizedLabel.includes(normalizedAction) ||
-        normalizedAction.includes(normalizedLabel) ||
-        (normalizedAction.includes("complaint") &&
-          (link.resourceType === "complaint" ||
-            link.route.includes("/complaints/"))) ||
-        ((normalizedAction.includes("audit") ||
-          normalizedAction.includes("receipt")) &&
-          (link.resourceType === "audit" || link.route.startsWith("/audit"))) ||
-        (normalizedAction.includes("invoice") &&
-          (link.resourceType === "invoice" ||
-            link.route.includes("/invoices/"))) ||
-        (normalizedAction.includes("webhook") &&
-          (link.resourceType === "webhook" ||
-            link.route.includes("/webhooks"))) ||
-        (normalizedAction.includes("integration") &&
-          link.route.includes("/integration-governance"))
-      );
-    }) ?? null
-  );
-}
-
 function resolvePageActionLink(
   descriptor: ResourceActionDescriptor,
 ): ResolvedActionLink | null {
+  if (!LIST_HEADER_ACTIONS.has(normalizeActionToken(descriptor.action))) {
+    return null;
+  }
+
   const href = getActionRoute(descriptor.action);
   if (!href) {
     return null;
@@ -420,26 +393,14 @@ function resolveBookingActionLink(
   descriptor: ResourceActionDescriptor,
 ): ResolvedActionLink | null {
   const actionRoute = getActionRoute(descriptor.action, booking.bookingId);
-  if (actionRoute) {
-    return {
-      href: actionRoute,
-      label: getActionLabel(descriptor.action),
-      openInNewTab: false,
-    };
-  }
-
-  const matchedCrossAppLink = matchCrossAppLinkForAction(
-    booking.crossAppLinks,
-    descriptor.action,
-  );
-  if (!matchedCrossAppLink) {
+  if (!actionRoute) {
     return null;
   }
 
   return {
-    href: buildCrossAppHref(matchedCrossAppLink),
-    label: matchedCrossAppLink.label,
-    openInNewTab: matchedCrossAppLink.openMode === "new_tab",
+    href: actionRoute,
+    label: getActionLabel(descriptor.action),
+    openInNewTab: false,
   };
 }
 
@@ -563,7 +524,6 @@ function buildBookingsHref(
   options?: {
     focusedBookingId?: string;
     notificationRef?: string;
-    emptyReasonOverride?: TenantEmptyReason | null;
   },
 ) {
   const mergedQuery = {
@@ -577,9 +537,6 @@ function buildBookingsHref(
   if (options?.notificationRef) {
     params.set("notification", options.notificationRef);
   }
-  if (options?.emptyReasonOverride) {
-    params.set("emptyReason", options.emptyReasonOverride);
-  }
   const queryString = params.toString();
 
   return queryString ? `/bookings?${queryString}` : "/bookings";
@@ -591,7 +548,6 @@ function getPageStatusTabs(
   options?: {
     focusedBookingId?: string;
     notificationRef?: string;
-    emptyReasonOverride?: TenantEmptyReason | null;
   },
 ): PageTabDescriptor[] {
   return PAGE_TAB_PRESETS.map((preset) => {
@@ -646,7 +602,6 @@ export default async function TenantBookingsPage({
   const query = parseBookingListQuery(resolvedSearchParams);
   const focusedBookingId = first(resolvedSearchParams.bookingId);
   const notificationRef = first(resolvedSearchParams.notification);
-  const emptyReasonOverride = parseEmptyReasonOverride(resolvedSearchParams);
   const bookingsResult = await Promise.allSettled([fetchBookingListEnvelope()]);
   const bookingsSettled = bookingsResult[0];
   const listEnvelope =
@@ -656,8 +611,9 @@ export default async function TenantBookingsPage({
   const result = applyBookingListQuery(bookings, query);
   const refreshMetadata = listEnvelope?.refresh ?? null;
   const emptyReason: TenantEmptyReason | null =
-    emptyReasonOverride ??
-    (listEnvelope?.emptyState?.reason as TenantEmptyReason | undefined) ??
+    (EMPTY_REASON_SET.has(listEnvelope?.emptyState?.reason as EmptyReason)
+      ? (listEnvelope?.emptyState?.reason as TenantEmptyReason)
+      : undefined) ??
     (bookingsSettled.status === "rejected"
       ? getEmptyReasonFromError(bookingsSettled.reason)
       : result.total === 0
@@ -670,13 +626,8 @@ export default async function TenantBookingsPage({
   const pageTabs = getPageStatusTabs(bookings, query, {
     focusedBookingId,
     notificationRef,
-    emptyReasonOverride,
   });
-  const headerActions = (
-    listEnvelope?.availableActions?.length
-      ? listEnvelope.availableActions
-      : DEFAULT_PAGE_ACTIONS
-  )
+  const headerActions = (listEnvelope?.availableActions ?? [])
     .filter((descriptor) => descriptor.enabled)
     .map(resolvePageActionLink)
     .filter(
@@ -845,13 +796,6 @@ export default async function TenantBookingsPage({
               value={query.statuses.join(",")}
             />
           ) : null}
-          {emptyReasonOverride ? (
-            <input
-              name="emptyReason"
-              type="hidden"
-              value={emptyReasonOverride}
-            />
-          ) : null}
           <div className="form-actions">
             <button
               className="action-button action-button-primary"
@@ -881,7 +825,6 @@ export default async function TenantBookingsPage({
               {
                 focusedBookingId,
                 notificationRef,
-                emptyReasonOverride,
               },
             )}
           >
@@ -900,7 +843,6 @@ export default async function TenantBookingsPage({
                 {
                   focusedBookingId,
                   notificationRef,
-                  emptyReasonOverride,
                 },
               )}
               key={entry.subtype}
@@ -923,7 +865,6 @@ export default async function TenantBookingsPage({
               {
                 focusedBookingId,
                 notificationRef,
-                emptyReasonOverride,
               },
             );
 
@@ -958,7 +899,6 @@ export default async function TenantBookingsPage({
                   {
                     focusedBookingId,
                     notificationRef,
-                    emptyReasonOverride,
                   },
                 )}
               >
@@ -1050,6 +990,7 @@ export default async function TenantBookingsPage({
                   const urgency = getRelativeUrgency(booking.editableUntil);
                   const approvalCopy = getApprovalCopy(booking);
                   const rowActions = getActionDescriptorsForRow(booking);
+                  const detailOnlyActions = hasDetailOnlyActions(booking);
                   const resolvedRowActions = rowActions.map((descriptor) => ({
                     descriptor,
                     link: resolveBookingActionLink(booking, descriptor),
@@ -1172,7 +1113,9 @@ export default async function TenantBookingsPage({
                               )
                             ) : (
                               <span className="bookings-inline-meta">
-                                backend returned no row actions
+                                {detailOnlyActions
+                                  ? "詳情頁提供 update / cancel 等動作"
+                                  : "backend returned no list-row actions"}
                               </span>
                             )}
                           </div>
@@ -1248,7 +1191,6 @@ export default async function TenantBookingsPage({
                   {
                     focusedBookingId,
                     notificationRef,
-                    emptyReasonOverride,
                   },
                 )}
               >
@@ -1266,7 +1208,6 @@ export default async function TenantBookingsPage({
                   {
                     focusedBookingId,
                     notificationRef,
-                    emptyReasonOverride,
                   },
                 )}
               >
