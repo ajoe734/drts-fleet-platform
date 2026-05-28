@@ -140,6 +140,28 @@ function copyText(locale: "en" | "zh", en: string, zh: string) {
   return locale === "zh" ? zh : en;
 }
 
+type EmptyReason =
+  | "no_data"
+  | "not_provisioned"
+  | "fetch_failed"
+  | "permission_denied"
+  | "external_unavailable"
+  | "filtered_empty";
+
+type EmptyState = {
+  reason: EmptyReason;
+  messageCode: string;
+  nextAction?: string;
+};
+
+type ResourceActionDescriptor = {
+  action: string;
+  enabled: boolean;
+  disabledReasonCode?: string;
+  requiresReason?: boolean;
+  riskLevel: "low" | "medium" | "high";
+};
+
 export default function ReportsPage() {
   const { t, locale } = useTranslation();
   const [jobs, setJobs] = useState<ReportJobRecord[]>([]);
@@ -149,6 +171,9 @@ export default function ReportsPage() {
   );
   const [packageDetail, setPackageDetail] =
     useState<FilingPackageDetailRecord | null>(null);
+  const [emptyJobState, setEmptyJobState] = useState<EmptyState | null>(null);
+  const [emptyPackageState, setEmptyPackageState] =
+    useState<EmptyState | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(
     null,
@@ -166,6 +191,46 @@ export default function ReportsPage() {
   const [packageMonth, setPackageMonth] = useState(defaultClosedMonth());
   const [packageScope, setPackageScope] = useState("ops-console");
 
+  const getEmptyStateDetails = (reason: EmptyReason) => {
+    switch (reason) {
+      case "no_data":
+        return {
+          message: t("reports.empty.noData"),
+          action: t("reports.empty.noDataAction"),
+        };
+      case "not_provisioned":
+        return {
+          message: t("reports.empty.notProvisioned"),
+          action: t("reports.empty.notProvisionedAction"),
+        };
+      case "fetch_failed":
+        return {
+          message: t("reports.empty.fetchFailed"),
+          action: t("reports.empty.fetchFailedAction"),
+        };
+      case "permission_denied":
+        return {
+          message: t("reports.empty.permissionDenied"),
+          action: t("reports.empty.permissionDeniedAction"),
+        };
+      case "external_unavailable":
+        return {
+          message: t("reports.empty.externalUnavailable"),
+          action: t("reports.empty.externalUnavailableAction"),
+        };
+      case "filtered_empty":
+        return {
+          message: t("reports.empty.filteredEmpty"),
+          action: t("reports.empty.filteredEmptyAction"),
+        };
+      default:
+        return {
+          message: t("reports.empty.unknown"),
+          action: "",
+        };
+    }
+  };
+
   useEffect(() => {
     void loadData();
   }, []);
@@ -180,6 +245,18 @@ export default function ReportsPage() {
       ]);
       setJobs(reportJobs);
       setPackages(filingPackages);
+      if (reportJobs.length === 0) {
+        setEmptyJobState({ reason: "no_data", messageCode: "reports.empty.noData" });
+      } else {
+        setEmptyJobState(null);
+      }
+
+      if (filingPackages.length === 0) {
+        setEmptyPackageState({ reason: "no_data", messageCode: "reports.empty.noData" });
+      } else {
+        setEmptyPackageState(null);
+      }
+
       setError(null);
 
       if (
@@ -196,7 +273,14 @@ export default function ReportsPage() {
         setSelectedPackageId(null);
         setPackageDetail(null);
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e.response && e.response.status === 403) {
+        setEmptyJobState({ reason: "permission_denied", messageCode: "reports.empty.permissionDenied" });
+        setEmptyPackageState({ reason: "permission_denied", messageCode: "reports.empty.permissionDenied" });
+      } else {
+        setEmptyJobState({ reason: "fetch_failed", messageCode: "reports.empty.fetchFailed" });
+        setEmptyPackageState({ reason: "fetch_failed", messageCode: "reports.empty.fetchFailed" });
+      }
       setError(e instanceof Error ? e.message : t("common.unknown"));
     } finally {
       setLoading(false);
@@ -1129,7 +1213,20 @@ export default function ReportsPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7}>{t("reports.noJobs")}</td>
+                    <td colSpan={7} className="text-center">
+                      {emptyJobState ? (
+                        <>
+                          <p>{t(emptyJobState.messageCode)}</p>
+                          {getEmptyStateDetails(emptyJobState.reason).action && (
+                            <button className="btn" onClick={() => void loadData()}>
+                              {getEmptyStateDetails(emptyJobState.reason).action}
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <p>{t("reports.noJobs")}</p>
+                      )}
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -1266,7 +1363,24 @@ export default function ReportsPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={8}>{t("reports.noPackages")}</td>
+                    <td colSpan={8} className="text-center">
+                      {emptyPackageState ? (
+                        <>
+                          <p>{t(emptyPackageState.messageCode)}</p>
+                          {getEmptyStateDetails(emptyPackageState.reason)
+                            .action && (
+                            <button
+                              className="btn"
+                              onClick={() => void loadData()}
+                            >
+                              {getEmptyStateDetails(emptyPackageState.reason).action}
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <p>{t("reports.noPackages")}</p>
+                      )}
+                    </td>
                   </tr>
                 )}
               </tbody>
