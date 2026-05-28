@@ -431,6 +431,7 @@ function buildAvailableActions(
   snapshot: BillingSnapshot,
   emptyState: BillingEmptyState | null,
 ): ResourceActionDescriptor[] {
+  const invoiceActionDisabled = emptyState?.reason === "not_provisioned";
   const actions: ResourceActionDescriptor[] =
     emptyState?.reason === "permission_denied"
       ? [
@@ -453,11 +454,10 @@ function buildAvailableActions(
           },
           {
             action: "billing.open.invoices",
-            enabled: emptyState?.reason !== "not_provisioned",
-            disabledReasonCode:
-              emptyState?.reason === "not_provisioned"
-                ? "PROFILE_NOT_READY"
-                : undefined,
+            enabled: !invoiceActionDisabled,
+            ...(invoiceActionDisabled
+              ? { disabledReasonCode: "PROFILE_NOT_READY" }
+              : {}),
             riskLevel: "low",
           },
         ];
@@ -701,10 +701,7 @@ export default async function BillingPage({
   const canReadBillingContent = emptyReason !== "permission_denied";
   const billingProfile = canReadBillingContent ? data.billingProfile : null;
   const invoices = canReadBillingContent ? data.invoices : [];
-  const quotaSummary =
-    canReadBillingContent && emptyReason !== "permission_denied"
-      ? data.quotaSummary
-      : null;
+  const quotaSummary = canReadBillingContent ? data.quotaSummary : null;
   const snapshot = getBillingSnapshot(
     emptyReason === "not_provisioned" ? null : billingProfile,
     emptyReason === "no_data" ? [] : invoices,
