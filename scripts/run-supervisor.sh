@@ -3,7 +3,17 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
-export PATH="$ROOT_DIR/.orchestrator/bin/node_modules/.bin:$ROOT_DIR/.orchestrator/bin:$PATH"
+# Ensure the user's local bin (where repair-cli-symlinks.sh maintains the
+# real codex/claude/gemini symlinks into the VS Code extension dirs) is on
+# PATH. Under systemd --user the inherited PATH is the minimal default
+# (/usr/local/bin:/usr/bin:...) with NO ~/.local/bin, so the .orchestrator/bin
+# codex/claude wrappers could not find the real binary in PATH and exited 127
+# ("cannot find real codex binary in PATH"). That made the auth-readiness
+# probe report auth_ready=false -> the whole codex lane was treated as
+# dispatch-paused even though `codex login status` was healthy. Prepending
+# ~/.local/bin (and the npm global prefix for gemini) fixes the probe and
+# keeps behaviour identical whether launched from a login shell or systemd.
+export PATH="$ROOT_DIR/.orchestrator/bin/node_modules/.bin:$ROOT_DIR/.orchestrator/bin:$HOME/.local/bin:$HOME/.local/npm-prefix/bin:$PATH"
 
 # Pre-flight: ensure the autoworker OAuth credentials remain a symlink to the
 # main lane's credentials. Claude CLI silently rewrites this as a regular file
@@ -42,4 +52,7 @@ if [[ -x "$ROOT_DIR/scripts/codex-wrapper.sh" ]]; then
   ln -sfn "$ROOT_DIR/scripts/codex-wrapper.sh" "$ROOT_DIR/.orchestrator/bin/codex"
 fi
 
+if [[ -x "$ROOT_DIR/scripts/ensure-local-node-modules.py" ]]; then
+  python3 "$ROOT_DIR/scripts/ensure-local-node-modules.py" repair
+fi
 exec python3 "$ROOT_DIR/.orchestrator/supervisor.py" "$@"
