@@ -535,7 +535,13 @@ function resolvePageState(
   data: BillingData,
   requestedState: string | undefined,
 ) {
-  if (requestedState === "not_provisioned" || !data.billingProfile) {
+  const isNotProvisioned =
+    !data.billingProfile &&
+    !data.quotaSummary &&
+    data.invoices.length === 0 &&
+    data.errors.length === 0;
+
+  if (requestedState === "not_provisioned" || isNotProvisioned) {
     return "not_provisioned" as const;
   }
 
@@ -605,11 +611,8 @@ function buildPrimaryActions(args: {
         }
       : {
           action: "open_invoices",
-          enabled: args.pageState === "past_due" || args.invoices.length > 0,
+          enabled: true,
           riskLevel: "low",
-          ...(!(args.pageState === "past_due" || args.invoices.length > 0)
-            ? { disabledReasonCode: "no_invoice_snapshot" }
-            : {}),
         };
 
   const provisionFallback: ResourceActionDescriptor = {
@@ -686,17 +689,6 @@ function buildCrossAppLinks(
           : "跨 actor 帳務稽核 lane",
     },
   ];
-
-  if (latestInvoice) {
-    links.unshift({
-      targetApp: "tenant-console",
-      route: `/invoices?invoiceId=${encodeURIComponent(latestInvoice.invoiceId)}`,
-      resourceType: "invoice",
-      resourceId: latestInvoice.invoiceId,
-      openMode: "same_tab",
-      label: "本 app 對帳單 detail",
-    });
-  }
 
   return links;
 }
