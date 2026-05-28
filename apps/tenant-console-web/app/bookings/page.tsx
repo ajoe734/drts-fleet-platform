@@ -32,11 +32,13 @@ import { BookingsRefreshControl } from "./bookings-refresh-control";
 
 export const dynamic = "force-dynamic";
 
-const OPS_CONSOLE_URL =
-  process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003";
-const PLATFORM_ADMIN_URL =
-  process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002";
-const TENANT_CONSOLE_URL = process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "";
+const CROSS_APP_BASE_URLS = {
+  "ops-console":
+    process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003",
+  "platform-admin":
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002",
+  "tenant-console": process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "",
+} as const satisfies Record<CrossAppResourceLink["targetApp"], string>;
 const TENANT_EMPTY_REASONS = [
   "no_data",
   "not_provisioned",
@@ -109,9 +111,6 @@ type EmptyStateDescriptor = {
   eyebrow: string;
   title: string;
   description: string;
-  actionLabel?: string;
-  actionHref?: string;
-  actionOpenInNewTab?: boolean;
 };
 
 type TabFilterPreset = {
@@ -181,50 +180,36 @@ const EMPTY_STATE_COPY: Record<TenantEmptyReason, EmptyStateDescriptor> = {
     title: "還沒有任何 tenant booking",
     description:
       "這個租戶尚未建立任何預約。從這裡直接開始 booking intake，之後列表會依 reservation window 與 order state 持續刷新。",
-    actionLabel: "建立第一筆叫車",
-    actionHref: "/bookings/new",
   },
   not_provisioned: {
     eyebrow: "Not Provisioned",
     title: "租戶尚未完成 booking capability 開通",
     description:
       "目前不是單純的空列表，而是 tenant booking surface 尚未 ready。先完成 integration governance / module enablement，再回到這個 route。",
-    actionLabel: "查看 tenant 設定與就緒度",
-    actionHref: `${PLATFORM_ADMIN_URL}/tenants/${DEMO_TENANT_ID}`,
-    actionOpenInNewTab: true,
   },
   fetch_failed: {
     eyebrow: "Fetch Failed",
     title: "目前無法讀取 booking 列表",
     description:
       "系統沒有拿到可靠的 tenant booking snapshot。先檢查 API 連線與後端健康，再決定是否重新整理或改從 audit 追查。",
-    actionLabel: "查看稽核",
-    actionHref: "/audit",
   },
   permission_denied: {
     eyebrow: "Permission Denied",
     title: "目前身分無法查看這份 booking 列表",
     description:
       "這是權限不足，不是資料為空。必須改由有 tenant booking read 權限的 actor 進入，或回到使用者角色設定確認授權。",
-    actionLabel: "檢查使用者與角色",
-    actionHref: "/users",
   },
   external_unavailable: {
     eyebrow: "External Unavailable",
     title: "外部依賴暫時無法提供 booking 狀態",
     description:
       "forwarded / partner 相關依賴目前不穩定。tenant list 不能假裝資料完整，請改從 integration governance 或 ops console 深入查明。",
-    actionLabel: "查看 tenant 設定與就緒度",
-    actionHref: `${PLATFORM_ADMIN_URL}/tenants/${DEMO_TENANT_ID}`,
-    actionOpenInNewTab: true,
   },
   filtered_empty: {
     eyebrow: "Filtered Empty",
     title: "目前的篩選條件沒有命中任何 booking",
     description:
       "清單本身存在資料，但狀態、service bucket、日期區間或搜尋詞把結果縮成 0 筆。可重設 filter 或切回全部狀態。",
-    actionLabel: "清除篩選",
-    actionHref: "/bookings",
   },
 };
 
@@ -360,12 +345,7 @@ function getEmptyReasonFromError(error: unknown): TenantEmptyReason {
 }
 
 function buildCrossAppHref(link: CrossAppResourceLink) {
-  const baseUrl =
-    link.targetApp === "ops-console"
-      ? OPS_CONSOLE_URL
-      : link.targetApp === "platform-admin"
-        ? PLATFORM_ADMIN_URL
-        : TENANT_CONSOLE_URL;
+  const baseUrl = CROSS_APP_BASE_URLS[link.targetApp];
   return baseUrl ? `${baseUrl}${link.route}` : link.route;
 }
 
@@ -946,16 +926,6 @@ export default async function TenantBookingsPage({
             <h3>{emptyState.title}</h3>
             <p>{emptyState.description}</p>
             <div className="link-row">
-              {emptyState.actionHref && emptyState.actionLabel ? (
-                <Link
-                  className="text-link"
-                  href={emptyState.actionHref}
-                  rel={emptyState.actionOpenInNewTab ? "noreferrer" : undefined}
-                  target={emptyState.actionOpenInNewTab ? "_blank" : undefined}
-                >
-                  {emptyState.actionLabel}
-                </Link>
-              ) : null}
               {emptyStateAction ? (
                 <Link
                   className="text-link"
