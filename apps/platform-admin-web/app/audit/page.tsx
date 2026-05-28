@@ -2203,20 +2203,8 @@ function EmptyStateCard({
         "系統有資料，但沒有任何記錄符合目前篩選或 deep-link 上下文。",
       ),
     },
-    driver_not_eligible: {
-      title: text(
-        locale,
-        "Actor not eligible for this slice",
-        "目前身份不適用此切面",
-      ),
-      body: text(
-        locale,
-        "This empty state is reserved for actor-specific eligibility gating and is rendered distinctly from permission denial.",
-        "這個 empty state 保留給身份適用性限制，必須和 permission denied 明確區分。",
-      ),
-    },
   };
-  const content = copy[reason] ?? copy.no_data;
+  const content = copy[reason];
   return (
     <div
       style={{
