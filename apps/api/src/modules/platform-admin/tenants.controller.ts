@@ -4,6 +4,7 @@ import type {
   AcknowledgeTenantRoleCommand,
   CreatePlatformTenantCommand,
   InviteTenantRoleCommand,
+  PlatformTenantLifecycleActionCommand,
   SetPlatformTenantRolloutStageCommand,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
@@ -93,27 +94,30 @@ export class TenantsController {
   @Post("tenants/:tenantId/rollback-hold")
   rollbackHold(
     @Param("tenantId") tenantId: string,
+    @Body() body: PlatformTenantLifecycleActionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setRollbackHold(tenantId, requestId);
+    const updated = this.tenants.setRollbackHold(tenantId, body, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/suspend")
   suspend(
     @Param("tenantId") tenantId: string,
+    @Body() body: PlatformTenantLifecycleActionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setStatus(tenantId, "paused", requestId);
+    const updated = this.tenants.setStatus(tenantId, "paused", body, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/activate")
   activate(
     @Param("tenantId") tenantId: string,
+    @Body() body: PlatformTenantLifecycleActionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setStatus(tenantId, "active", requestId);
+    const updated = this.tenants.setStatus(tenantId, "active", body, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 }

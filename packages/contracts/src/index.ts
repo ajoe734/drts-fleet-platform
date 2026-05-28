@@ -4652,6 +4652,10 @@ export interface SetPlatformTenantRolloutStageCommand {
   notes?: string | null;
 }
 
+export interface PlatformTenantLifecycleActionCommand {
+  reason?: string | null;
+}
+
 export interface InviteTenantRoleCommand {
   roleCode: string;
   inviteeEmail?: string;

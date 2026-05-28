@@ -30,6 +30,7 @@ import type {
   EmptyStateEnvelope,
   PlatformAdminTenantRecord,
   RefreshTier,
+  PlatformTenantLifecycleActionCommand,
   PlatformTenantIntegrationMode,
   PlatformTenantModule,
   PlatformAdminUserRecord,
@@ -666,6 +667,13 @@ function isRefreshAction(action: ResourceActionDescriptor) {
   return actionMatches(action.action, "refresh", "reload", "refetch");
 }
 
+function toLifecycleActionCommand(
+  reason: string | null,
+): PlatformTenantLifecycleActionCommand | undefined {
+  const normalized = reason?.trim();
+  return normalized ? { reason: normalized } : undefined;
+}
+
 function resolveActionLabel(
   labels: Record<string, string>,
   action: ResourceActionDescriptor,
@@ -1241,7 +1249,10 @@ export default function TenantsPage() {
 
       if (isRefreshAction(action)) {
         await loadTenants({ silent: true });
+        return;
       }
+
+      setError(`Unsupported page action: ${action.action}`);
     },
     [loadTenants],
   );
@@ -1319,12 +1330,13 @@ export default function TenantsPage() {
 
       try {
         setRefreshing(true);
+        const lifecycleCommand = toLifecycleActionCommand(reason);
         if (actionMatches(action.action, "activate_tenant", "activateTenant")) {
-          await client.activateTenant(tenant.id);
+          await client.activateTenant(tenant.id, lifecycleCommand);
         } else if (
           actionMatches(action.action, "suspend_tenant", "suspendTenant")
         ) {
-          await client.suspendTenant(tenant.id);
+          await client.suspendTenant(tenant.id, lifecycleCommand);
         } else if (
           actionMatches(
             action.action,
@@ -1333,12 +1345,10 @@ export default function TenantsPage() {
             "rollbackHoldTenant",
           )
         ) {
-          await client.rollbackHoldTenant(tenant.id);
+          await client.rollbackHoldTenant(tenant.id, lifecycleCommand);
         } else {
           return;
         }
-
-        void reason;
         await loadTenants({ silent: true });
       } catch (caughtError: unknown) {
         setError(
