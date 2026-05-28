@@ -86,6 +86,8 @@ export async function issueTenantApiKeyAction(
 
     payload = {
       tone: "default",
+      action: "issue",
+      keyName: issued.apiKey.keyName,
       title: "API key issued",
       description: `${issued.apiKey.keyName} is now active. Save the plaintext value now because subsequent fetches only show the masked suffix.`,
       plaintextKey: issued.plaintextKey,
@@ -127,6 +129,8 @@ export async function rotateTenantApiKeyAction(
 
     payload = {
       tone: "default",
+      action: "rotate",
+      keyName: issued.apiKey.keyName,
       title: "API key rotated",
       description: `${issued.apiKey.keyName} has a new plaintext value. The previously active credential is invalidated immediately.`,
       plaintextKey: issued.plaintextKey,
@@ -153,9 +157,14 @@ export async function revokeTenantApiKeyAction(
   try {
     const apiKeyId = readTrimmedString(formData, "apiKeyId");
     const keyName = readTrimmedString(formData, "keyName");
+    const reason = readTrimmedString(formData, "reason");
 
     if (!apiKeyId) {
       throw new Error("API key selection is required for revocation.");
+    }
+
+    if (!reason) {
+      throw new Error("Revocation reason is required.");
     }
 
     const client = getTenantClient();
@@ -163,6 +172,8 @@ export async function revokeTenantApiKeyAction(
 
     payload = {
       tone: "default",
+      action: "revoke",
+      keyName: keyName ?? apiKeyId,
       title: "API key revoked",
       description: `${keyName ?? apiKeyId} is now revoked and cannot authenticate again.`,
     };
