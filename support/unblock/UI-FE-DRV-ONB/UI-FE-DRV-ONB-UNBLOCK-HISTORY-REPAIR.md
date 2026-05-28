@@ -5,8 +5,8 @@
 - Task: `UI-FE-DRV-ONB-UNBLOCK-HISTORY-REPAIR`
 - Parent: `UI-FE-DRV-ONB`
 - Owner: `Codex`
-- Reviewer: `Claude`
-- Audit timestamp: `2026-05-27`
+- Reviewer: `Claude2`
+- Audit timestamp: `2026-05-28`
 
 ## Diagnosis
 
@@ -140,10 +140,24 @@ AI_NAME=Claude2 scripts/ai-status.sh approve UI-FE-DRV-ONB \
 - Review resumes on the real task branch instead of moving commits across branch
   names.
 
+## Owner Closeout Alignment
+
+- Machine truth review approval for this helper task is owned by `Claude2` at
+  `2026-05-28T09:23:12Z`, so this artifact now matches the approved reviewer
+  and closeout rail.
+- The helper branch of record remains
+  `origin/codex/ui-fe-drv-onb-unblock-history-repair`; this closeout refreshes
+  only the audit artifact and does not rewrite any shared branch name.
+- The concrete unblocked next step for parent task `UI-FE-DRV-ONB` is still to
+  replay review on `origin/codex2/ui-fe-drv-onb`, open the missing PR from that
+  branch to `dev`, and ignore helper branch `c373e932` except as contamination
+  evidence.
+
 ## Verification Performed For This Repair
 
-- Read `AI_COLLABORATION_GUIDE.md`, `docs/ops/branch-strategy.md`, and
-  `.orchestrator/skills/worker-anchor-commit.md`
+- Read `AI_COLLABORATION_GUIDE.md`, `docs/ops/branch-strategy.md`,
+  `.orchestrator/skills/worker-anchor-commit.md`, and
+  `.orchestrator/skills/task-closeout-finalization.md`
 - Inspected canonical `/home/edna/workspace/drts-fleet-platform/ai-status.json`
 - Compared related refs and worktrees:
   - `git show-ref --verify refs/heads/codex/ui-fe-drv-onb`
