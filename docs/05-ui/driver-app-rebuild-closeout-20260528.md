@@ -1,7 +1,7 @@
 # Driver App Rebuild Closeout (2026-05-28)
 
-Owner: Codex2  
-Reviewer: Claude2  
+Owner: Codex2
+Reviewer: Claude2
 Task: `UI-FE-DRV-UMBRELLA`
 
 ## Outcome
