@@ -345,13 +345,78 @@ def render_template(path: Path, variables: dict[str, Any]) -> str:
     return text
 
 
+# Activity-log size ceiling: when ai-activity-log.jsonl crosses this byte
+# threshold, write_activity_log rotates it down to ACTIVITY_LOG_KEEP_LINES
+# tail entries before appending the new payload. Without this bound the file
+# grew to ~500 MB / 338k lines by the 2026-05-26 incident, slowing the
+# dashboard's mirror fetch to the point of appearing dead. Per-call os.stat()
+# is microseconds — cheaper than discovering the bloat after-the-fact.
+ACTIVITY_LOG_MAX_BYTES = int(os.environ.get("ACTIVITY_LOG_MAX_BYTES", str(50 * 1024 * 1024)))
+ACTIVITY_LOG_KEEP_LINES = int(os.environ.get("ACTIVITY_LOG_KEEP_LINES", "10000"))
+
+
+def _rotate_activity_log_if_oversize(path: Path) -> None:
+    """If `path` exceeds ACTIVITY_LOG_MAX_BYTES, rewrite it to keep only the
+    last ACTIVITY_LOG_KEEP_LINES lines.
+
+    Atomic via tempfile + os.replace so concurrent writers from other
+    processes see either the pre-rotation file or the post-rotation file,
+    never a half-truncated one. Concurrent rotations are safe — both write
+    the same tail to their own tempfile; whichever rename wins, the other
+    loses a few in-flight lines at worst. Returning silently when the file
+    is missing or unreadable preserves write_activity_log's no-throw
+    contract.
+    """
+    try:
+        if not path.exists():
+            return
+        size = path.stat().st_size
+        if size <= ACTIVITY_LOG_MAX_BYTES:
+            return
+    except OSError:
+        return
+    try:
+        with path.open("rb") as handle:
+            # tail by reading from the end. ACTIVITY_LOG_KEEP_LINES lines is
+            # roughly a few MB given current per-line size; reading a 50+ MB
+            # tail block once per rotation is acceptable.
+            handle.seek(0, 2)
+            file_size = handle.tell()
+            # Read at most the last 20 MB (matches typical 10k * 1.5 KB lines
+            # plus headroom for unusually wide records).
+            read_back = min(file_size, 20 * 1024 * 1024)
+            handle.seek(file_size - read_back)
+            tail_bytes = handle.read()
+        tail_lines = tail_bytes.decode("utf-8", errors="replace").splitlines()
+        kept = tail_lines[-ACTIVITY_LOG_KEEP_LINES:]
+        tmp = path.with_suffix(path.suffix + ".rotate.tmp")
+        with tmp.open("w", encoding="utf-8") as handle:
+            for line in kept:
+                handle.write(line + "\n")
+        os.replace(tmp, path)
+    except (OSError, UnicodeDecodeError):
+        # Don't surface rotation errors to the caller; activity logging
+        # must be non-fatal. Worst case the file keeps growing until the
+        # operator investigates.
+        return
+
+
 def write_activity_log(config: dict[str, Any], entry: dict[str, Any]) -> None:
     payload = {
         "ts": utc_now(),
         "agent": "Orchestrator",
         **entry,
     }
-    append_jsonl(config_path(config, "activity_log"), payload)
+    log_path = config_path(config, "activity_log")
+    # Wrap rotation in try/except as a belt-and-suspenders defence:
+    # _rotate_activity_log_if_oversize already swallows its own errors, but
+    # activity logging is part of the hot path and must not surface ANY
+    # exception to callers regardless of what the helper does in future.
+    try:
+        _rotate_activity_log_if_oversize(log_path)
+    except Exception:
+        pass
+    append_jsonl(log_path, payload)
 
 
 def runtime_log_path(prefix: str, target: str) -> Path:

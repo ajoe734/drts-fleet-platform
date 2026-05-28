@@ -1,0 +1,25 @@
+[Unit]
+Description=DRTS canonical workspace root branch drift watchdog (one-shot)
+Documentation=file:%h/workspace/drts-fleet-platform/ops/canonical-root-lock/README.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/workspace/drts-fleet-platform
+# Observe mode by default — emits stderr WARN + JSONL record + non-zero
+# exit on drift, but does NOT auto-switch the branch. Switch to
+# --enforce in a follow-up after operator is comfortable that the
+# `ORCH_CANONICAL_BRANCH` allow list is correctly maintained.
+ExecStart=%h/workspace/drts-fleet-platform/scripts/canonical-root-watchdog.py
+
+# When the wave-dispatch / sprint branches are intentionally checked out
+# on canonical root, add them via an env override file at
+# ~/.config/drts/canonical-root.env containing e.g.:
+#   ORCH_CANONICAL_BRANCH=claude/ui-impl-wave-dispatch-202605-rebased-root,dev,main
+# EnvironmentFile=-: leading dash makes the file optional.
+EnvironmentFile=-%h/.config/drts/canonical-root.env
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drts-canonical-root-watch
+
+NoNewPrivileges=true

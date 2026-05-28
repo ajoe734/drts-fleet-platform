@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 import type {
   DispatchCandidate,
   DispatchJobRecord,
@@ -34,8 +35,13 @@ type DispatchDetailPageProps = {
 type CandidateRow = Record<string, unknown> & {
   candidate: DispatchCandidate;
   driver: DriverRegistryRecord | null;
+  rankCell: ReactNode;
+  driverCell: ReactNode;
+  vehicle: string;
+  etaCell: ReactNode;
   gateLabel: string;
   gateTone: "success" | "warn" | "danger";
+  gateCell: ReactNode;
   score: string;
   _selected?: boolean;
 };
@@ -1000,8 +1006,54 @@ export default async function DispatchDetailPage({
       return {
         candidate,
         driver,
+        rankCell: (
+          <span
+            style={{
+              color: theme.accent,
+              fontWeight: 700,
+              fontFamily: theme.monoFamily,
+            }}
+          >
+            #{index + 1}
+          </span>
+        ),
+        driverCell: (
+          <Link
+            href={`/drivers/${encodeURIComponent(candidate.driverId)}`}
+            style={{
+              display: "grid",
+              gap: "2px",
+              color: theme.text,
+              textDecoration: "none",
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>
+              {driver?.name ?? candidate.driverId}
+            </span>
+            <span
+              style={{
+                fontSize: "11px",
+                color: theme.textDim,
+                fontFamily: theme.monoFamily,
+              }}
+            >
+              {candidate.driverId}
+            </span>
+          </Link>
+        ),
+        vehicle: candidate.vehicleId,
+        etaCell: (
+          <Pill theme={theme} tone={index === 0 ? "success" : "info"}>
+            {candidate.etaMinutes}m
+          </Pill>
+        ),
         gateLabel: gate.label,
         gateTone: gate.tone,
+        gateCell: (
+          <Pill theme={theme} tone={gate.tone} dot>
+            {gate.label}
+          </Pill>
+        ),
         score: getCandidateScore(candidate, order, driver),
         _selected: index === 0,
       };
@@ -1029,76 +1081,35 @@ export default async function DispatchDetailPage({
   const candidateColumns: CanvasTableColumn<CandidateRow>[] = [
     {
       h: "RANK",
+      k: "rankCell",
       w: 52,
-      r: (_, index) => (
-        <span
-          style={{
-            color: theme.accent,
-            fontWeight: 700,
-            fontFamily: theme.monoFamily,
-          }}
-        >
-          #{index + 1}
-        </span>
-      ),
     },
     {
       h: "DRIVER",
+      k: "driverCell",
       w: 180,
-      r: (row) => (
-        <Link
-          href={`/drivers/${encodeURIComponent(row.candidate.driverId)}`}
-          style={{
-            display: "grid",
-            gap: "2px",
-            color: theme.text,
-            textDecoration: "none",
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>
-            {row.driver?.name ?? row.candidate.driverId}
-          </span>
-          <span
-            style={{
-              fontSize: "11px",
-              color: theme.textDim,
-              fontFamily: theme.monoFamily,
-            }}
-          >
-            {row.candidate.driverId}
-          </span>
-        </Link>
-      ),
     },
     {
       h: "VEHICLE",
+      k: "vehicle",
       w: 132,
       mono: true,
-      r: (row) => row.candidate.vehicleId,
     },
     {
       h: "ETA",
+      k: "etaCell",
       w: 84,
-      r: (row) => (
-        <Pill theme={theme} tone={row._selected ? "success" : "info"}>
-          {row.candidate.etaMinutes}m
-        </Pill>
-      ),
     },
     {
       h: "GATE",
+      k: "gateCell",
       w: 164,
-      r: (row) => (
-        <Pill theme={theme} tone={row.gateTone} dot>
-          {row.gateLabel}
-        </Pill>
-      ),
     },
     {
       h: "SCORE",
+      k: "score",
       w: 68,
       mono: true,
-      r: (row) => row.score,
     },
   ];
 

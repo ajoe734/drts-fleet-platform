@@ -1,5 +1,7 @@
 {
   "sections": {
-    "driver-core": { "labels": { "inbox-B": "3B · 任務 · Dense" } }
+    "driver-core": { "labels": { "inbox-B": "3B · 任務 · Dense" } },
+    "overview": { "title": "01 · Workspace" },
+    "tenants": { "title": "02 · 租戶治理" }
   }
 }
