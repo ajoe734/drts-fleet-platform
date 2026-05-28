@@ -25,17 +25,18 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import {
-  CalloutBanner,
-  DataViewCard,
+  CanvasBanner,
+  CanvasCard,
+  CanvasPageHeader,
+  CanvasPill,
   DetailList,
   KpiCard,
   KpiRow,
-  PageHeader,
   StatusChip,
+  buildCanvasTheme,
 } from "@drts/ui-web";
 import {
   buildTenantBookingCreateCommand,
-  getBlockingTenantBookingDraftErrors,
   getDefaultDateTimeLocalValue,
   getTenantBookingFieldErrors,
   isMissingRequiredBookingFields,
@@ -109,14 +110,23 @@ const BUSINESS_SUBTYPE_OPTIONS: Array<{
 ];
 
 const CURRENCY = "TWD";
+const th = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
+
 const pageStyle: CSSProperties = {
   padding: 24,
   display: "grid",
-  gap: 16,
+  gap: 18,
+  background:
+    "radial-gradient(circle at top left, rgba(20,184,166,0.18), transparent 32%), #07141a",
+  color: th.text,
 };
 const twoColumnLayoutStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(320px, 0.95fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -137,27 +147,27 @@ const fieldStackStyle: CSSProperties = {
 const labelStyle: CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
-  color: "#475569",
+  color: th.textMuted,
   textTransform: "uppercase",
   letterSpacing: "0.08em",
 };
 const hintStyle: CSSProperties = {
   fontSize: 12,
-  color: "#64748b",
+  color: th.textMuted,
   lineHeight: 1.5,
 };
 const errorStyle: CSSProperties = {
   fontSize: 12,
-  color: "#b91c1c",
+  color: "#fda4af",
   lineHeight: 1.5,
 };
 const inputBaseStyle: CSSProperties = {
   width: "100%",
-  minHeight: 42,
-  borderRadius: 14,
-  border: "1px solid #cbd5e1",
-  background: "#ffffff",
-  color: "#0f172a",
+  minHeight: 44,
+  borderRadius: 16,
+  border: `1px solid ${th.borderStrong}`,
+  background: "rgba(8, 18, 24, 0.78)",
+  color: th.text,
   padding: "0 12px",
   fontSize: 13,
   outline: "none",
@@ -194,33 +204,54 @@ const checkboxChipStyle: CSSProperties = {
   gap: 8,
   padding: "8px 12px",
   borderRadius: 999,
-  border: "1px solid #cbd5e1",
-  background: "#f8fafc",
+  border: `1px solid ${th.borderStrong}`,
+  background: "rgba(15, 23, 42, 0.56)",
   fontSize: 12.5,
-  color: "#0f172a",
+  color: th.text,
 };
 const emptyStatePanelStyle: CSSProperties = {
   padding: "28px 20px",
-  borderRadius: 18,
-  border: "1px dashed #cbd5e1",
-  background: "#ffffff",
+  borderRadius: 24,
+  border: `1px solid ${th.borderStrong}`,
+  background: "rgba(8, 18, 24, 0.92)",
   display: "grid",
   gap: 14,
-  justifyItems: "center",
-  textAlign: "center",
+  boxShadow: th.shadow,
 };
 const receiptStyle: CSSProperties = {
   display: "grid",
   gap: 10,
   padding: "14px 16px",
-  borderRadius: 16,
-  border: "1px solid #bfdbfe",
-  background: "#eff6ff",
+  borderRadius: 18,
+  border: "1px solid rgba(45, 212, 191, 0.35)",
+  background: "rgba(13, 148, 136, 0.12)",
 };
 const inlineLinkStyle: CSSProperties = {
-  color: "#0f766e",
+  color: th.accent,
   fontWeight: 700,
   textDecoration: "none",
+};
+const pageMetaCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+  padding: 18,
+  borderRadius: 22,
+  border: `1px solid ${th.borderStrong}`,
+  background: "rgba(9, 20, 28, 0.82)",
+  boxShadow: th.shadow,
+};
+const pageMetaGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 10,
+};
+const metaItemStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  padding: "12px 14px",
+  borderRadius: 16,
+  border: `1px solid ${th.borderStrong}`,
+  background: "rgba(15, 23, 42, 0.48)",
 };
 
 function formatCurrency(amountMinor: number | null | undefined) {
@@ -334,6 +365,42 @@ function toneForDecision(result: TenantApprovalEvaluationResult | null) {
   }
 }
 
+function toneForRefreshTier(
+  tier: RefreshTier,
+): "neutral" | "info" | "success" | "warn" {
+  switch (tier) {
+    case "manual":
+      return "info";
+    case "urgent":
+    case "fast":
+    case "dispatch":
+      return "success";
+    default:
+      return "neutral";
+  }
+}
+
+function labelForRefreshTier(tier: RefreshTier) {
+  switch (tier) {
+    case "manual":
+      return "Manual";
+    case "urgent":
+      return "Urgent";
+    case "fast":
+      return "Fast";
+    case "dispatch":
+      return "Dispatch";
+    case "medium":
+      return "Medium";
+    case "medium_slow":
+      return "Medium slow";
+    case "slow":
+      return "Slow";
+    default:
+      return tier;
+  }
+}
+
 function actionSurfaceStyle(
   descriptor: ResourceActionDescriptor,
   options: { primary?: boolean | undefined } = {},
@@ -343,13 +410,13 @@ function actionSurfaceStyle(
   const background = isDanger
     ? "#b91c1c"
     : isPrimary
-      ? "#0f766e"
-      : "#ffffff";
+      ? th.accent
+      : "rgba(15, 23, 42, 0.5)";
   const borderColor = isDanger
     ? "#b91c1c"
     : isPrimary
-      ? "#0f766e"
-      : "#cbd5e1";
+      ? th.accent
+      : th.borderStrong;
 
   return {
     display: "inline-flex",
@@ -360,12 +427,13 @@ function actionSurfaceStyle(
     borderRadius: 999,
     border: `1px solid ${borderColor}`,
     background,
-    color: isPrimary || isDanger ? "#ffffff" : "#0f172a",
+    color: isPrimary || isDanger ? "#031317" : th.text,
     fontSize: 13,
     fontWeight: 700,
     textDecoration: "none",
     cursor: descriptor.enabled ? "pointer" : "not-allowed",
     opacity: descriptor.enabled ? 1 : 0.45,
+    boxShadow: isPrimary || isDanger ? th.shadow : "none",
   };
 }
 
@@ -397,10 +465,18 @@ function FieldShell({
   children: ReactNode;
 }) {
   return (
-    <label style={fullSpan ? { ...fieldStackStyle, ...fullSpanStyle } : fieldStackStyle}>
+    <label
+      style={
+        fullSpan ? { ...fieldStackStyle, ...fullSpanStyle } : fieldStackStyle
+      }
+    >
       <span style={labelStyle}>{label}</span>
       {children}
-      {error ? <span style={errorStyle}>{error}</span> : hint ? <span style={hintStyle}>{hint}</span> : null}
+      {error ? (
+        <span style={errorStyle}>{error}</span>
+      ) : hint ? (
+        <span style={hintStyle}>{hint}</span>
+      ) : null}
     </label>
   );
 }
@@ -488,65 +564,66 @@ function EmptyStatePanel({
     { title: string; description: string; tone: CSSProperties }
   > = {
     no_data: {
-      title: "Directory is empty",
+      title: "目前沒有可用的建立捷徑",
       description:
-        "No passenger or address shortcuts are published yet. You can still review the module links, then return once tenant master data is ready.",
+        "乘客與地址目錄都還沒有可用資料。先補齊 tenant directory，再回來建立訂單。",
       tone: {
-        borderColor: "#cbd5e1",
-        background: "#ffffff",
+        borderColor: "rgba(148, 163, 184, 0.28)",
+        background: "rgba(15, 23, 42, 0.72)",
       },
     },
     not_provisioned: {
-      title: "Cost-center setup is not provisioned",
+      title: "Cost center 尚未佈建",
       description:
-        "This route requires the canonical tenant cost-center directory before operators can submit a booking command.",
+        "這個路由需要 canonical cost-center 目錄，否則 booking command 不能送出。",
       tone: {
-        borderColor: "#67e8f9",
-        background: "#ecfeff",
+        borderColor: "rgba(34, 211, 238, 0.38)",
+        background: "rgba(8, 47, 73, 0.5)",
       },
     },
     fetch_failed: {
-      title: "Required booking data failed to load",
+      title: "建立訂單所需資料載入失敗",
       description:
-        "The route could not fetch at least one required directory source. Refresh and retry before creating a booking.",
+        "至少一個必要目錄來源讀取失敗。請先 refresh，確認資料恢復後再送出。",
       tone: {
-        borderColor: "#fecaca",
-        background: "#fef2f2",
+        borderColor: "rgba(253, 164, 175, 0.45)",
+        background: "rgba(69, 10, 10, 0.48)",
       },
     },
     permission_denied: {
-      title: "You do not have permission to create bookings",
+      title: "目前身分沒有建立訂單權限",
       description:
-        "The backend denied booking-create authority for the current tenant actor. Review access with a tenant admin.",
+        "後端拒絕目前 actor 的 booking-create authority。請與 tenant admin 確認權限。",
       tone: {
-        borderColor: "#fde68a",
-        background: "#fffbeb",
+        borderColor: "rgba(253, 224, 71, 0.45)",
+        background: "rgba(113, 63, 18, 0.48)",
       },
     },
     external_unavailable: {
-      title: "An external dependency is unavailable",
+      title: "外部依賴暫時不可用",
       description:
-        "The tenant booking command is waiting on an upstream dependency. Refresh and retry when the dependency recovers.",
+        "booking command 依賴的上游服務暫時異常。等依賴恢復後 refresh 再重試。",
       tone: {
-        borderColor: "#fdba74",
-        background: "#fff7ed",
+        borderColor: "rgba(251, 146, 60, 0.45)",
+        background: "rgba(67, 20, 7, 0.48)",
       },
     },
     filtered_empty: {
-      title: "The selected shortcut no longer exists",
+      title: "預填捷徑已失效",
       description:
-        "The passenger or address prefill link is stale. Clear the shortcut context and start from a clean booking form.",
+        "乘客或地址的預填連結已經過期。清除 shortcut context 後，從乾淨表單重新開始。",
       tone: {
-        borderColor: "#cbd5e1",
-        background: "#f8fafc",
+        borderColor: "rgba(45, 212, 191, 0.34)",
+        background: "rgba(17, 94, 89, 0.34)",
       },
     },
     driver_not_eligible: {
-      title: "Driver eligibility does not apply here",
-      description: "This tenant route does not use driver eligibility states.",
+      title: "Driver eligibility 不適用這個頁面",
+      description:
+        "Tenant booking create route 不使用 driver eligibility 狀態。",
       tone: {
-        borderColor: "#cbd5e1",
-        background: "#ffffff",
+        borderColor: "rgba(148, 163, 184, 0.28)",
+        background: "rgba(15, 23, 42, 0.72)",
       },
     },
   };
@@ -554,13 +631,29 @@ function EmptyStatePanel({
 
   return (
     <div style={{ ...emptyStatePanelStyle, ...content.tone }}>
-      <StatusChip label={emptyState.reason} tone="info" />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <CanvasPill theme={th} tone="info" dot>
+          EmptyReason
+        </CanvasPill>
+        <CanvasPill theme={th} tone="neutral">
+          {emptyState.reason}
+        </CanvasPill>
+      </div>
       <div style={{ display: "grid", gap: 6 }}>
-        <strong style={{ fontSize: 20, color: "#0f172a" }}>{content.title}</strong>
-        <p style={{ margin: 0, maxWidth: 560, color: "#475569", lineHeight: 1.6 }}>
+        <strong style={{ fontSize: 22, color: th.text }}>
+          {content.title}
+        </strong>
+        <p
+          style={{
+            margin: 0,
+            maxWidth: 560,
+            color: th.textMuted,
+            lineHeight: 1.6,
+          }}
+        >
           {content.description}
         </p>
-        <span style={{ fontSize: 12, color: "#64748b" }}>
+        <span style={{ fontSize: 12, color: th.textMuted }}>
           messageCode: {emptyState.messageCode}
         </span>
       </div>
@@ -578,13 +671,15 @@ function EmptyStatePanel({
             href={links.clearShortcuts}
             label="Clear shortcut context"
           />
-        ) : emptyState.nextAction?.action === actions.manageCostCenters.action ? (
+        ) : emptyState.nextAction?.action ===
+          actions.manageCostCenters.action ? (
           <ActionLink
             descriptor={actions.manageCostCenters}
             href={links.costCenters}
             label="Open cost centers"
           />
-        ) : emptyState.nextAction?.action === actions.managePassengers.action ? (
+        ) : emptyState.nextAction?.action ===
+          actions.managePassengers.action ? (
           <ActionLink
             descriptor={actions.managePassengers}
             href={links.passengers}
@@ -665,7 +760,9 @@ export function TenantBookingCreateForm({
     useState<TenantBookingQuotaImpactPreview | null>(null);
   const [approvalEvaluation, setApprovalEvaluation] =
     useState<TenantApprovalEvaluationResult | null>(null);
-  const [submitReceipt, setSubmitReceipt] = useState<ActionReceipt | null>(null);
+  const [submitReceipt, setSubmitReceipt] = useState<ActionReceipt | null>(
+    null,
+  );
   const [submitAuditHref, setSubmitAuditHref] = useState<string | null>(null);
   const [submitCrossAppLinks, setSubmitCrossAppLinks] = useState<
     CrossAppResourceLink[]
@@ -727,7 +824,6 @@ export function TenantBookingCreateForm({
     includeRequired: submitAttempted,
     requireCostCenter: costCenters.length > 0,
   });
-  const draftValidationErrors = getBlockingTenantBookingDraftErrors(draft);
   const missingRequiredFields = isMissingRequiredBookingFields(
     draft,
     costCenters.length > 0,
@@ -760,8 +856,12 @@ export function TenantBookingCreateForm({
     const defaultStart = timingMode === "immediate" ? 0 : 30;
     const defaultEnd = timingMode === "immediate" ? 30 : 60;
 
-    setReservationWindowStart((value) => value || getDefaultDateTimeLocalValue(defaultStart));
-    setReservationWindowEnd((value) => value || getDefaultDateTimeLocalValue(defaultEnd));
+    setReservationWindowStart(
+      (value) => value || getDefaultDateTimeLocalValue(defaultStart),
+    );
+    setReservationWindowEnd(
+      (value) => value || getDefaultDateTimeLocalValue(defaultEnd),
+    );
   }, [timingMode]);
 
   useEffect(() => {
@@ -994,85 +1094,145 @@ export function TenantBookingCreateForm({
 
   return (
     <div style={pageStyle}>
-      <PageHeader
-        eyebrow="New booking"
-        title="Create a booking"
-        subtitle="Booking-on-behalf, canonical cost center, approval posture, and quota impact are handled in one route without inventing a local draft system."
-        meta={[
-          { label: "Passengers", value: String(passengers.length) },
-          { label: "Saved addresses", value: String(addresses.length) },
-          {
-            label: "Cost centers",
-            value: String(costCenters.length),
-            tone: costCenters.length > 0 ? "success" : "warning",
-          },
-          {
-            label: "Refresh tier",
-            value: pageModel.refreshTier,
-            tone: "info",
-          },
-        ]}
+      <CanvasPageHeader
+        theme={th}
+        title="建立叫車"
+        subtitle="代訂或本人 · 預約 / 即時 · 同步 command 模式 (Q-TEN04)"
         actions={
           <>
             <ActionLink
               descriptor={pageModel.actions.viewBookings}
               href={pageModel.links.bookings}
-              label="Back to bookings"
+              label="返回訂單列表"
             />
             <ActionButton
               descriptor={pageModel.actions.refresh}
-              label={navigationPending ? "Refreshing..." : "Refresh"}
+              label={navigationPending ? "重新載入中..." : "Refresh"}
               onClick={refreshPage}
             />
           </>
         }
       />
 
+      <div style={pageMetaCardStyle}>
+        <div style={pageMetaGridStyle}>
+          <div style={metaItemStyle}>
+            <span style={labelStyle}>Command</span>
+            <strong>POST /api/tenant/bookings/commands/create</strong>
+          </div>
+          <div style={metaItemStyle}>
+            <span style={labelStyle}>Refresh Tier</span>
+            <div style={chipRowStyle}>
+              <CanvasPill
+                theme={th}
+                tone={toneForRefreshTier(pageModel.refreshTier)}
+              >
+                {labelForRefreshTier(pageModel.refreshTier)}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                {formatAge(pageModel.refresh.generatedAt, nowMs)}
+              </CanvasPill>
+            </div>
+          </div>
+          <div style={metaItemStyle}>
+            <span style={labelStyle}>Directory Coverage</span>
+            <div style={chipRowStyle}>
+              <CanvasPill
+                theme={th}
+                tone={passengers.length > 0 ? "success" : "warn"}
+              >
+                passenger {passengers.length}
+              </CanvasPill>
+              <CanvasPill
+                theme={th}
+                tone={addresses.length > 0 ? "success" : "warn"}
+              >
+                address {addresses.length}
+              </CanvasPill>
+              <CanvasPill
+                theme={th}
+                tone={costCenters.length > 0 ? "success" : "warn"}
+              >
+                cost center {costCenters.length}
+              </CanvasPill>
+            </div>
+          </div>
+          <div style={metaItemStyle}>
+            <span style={labelStyle}>Must-Support Actions</span>
+            <div style={chipRowStyle}>
+              <CanvasPill
+                theme={th}
+                tone={pageModel.actions.submit.enabled ? "info" : "neutral"}
+              >
+                submit_command
+              </CanvasPill>
+              <CanvasPill
+                theme={th}
+                tone={pageModel.actions.cancel.enabled ? "neutral" : "warn"}
+              >
+                cancel
+              </CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                draft unsupported
+              </CanvasPill>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {pageModel.prefill.sourceLabel ? (
-        <CalloutBanner
-          title="Directory shortcut prefill applied"
-          description={pageModel.prefill.sourceLabel}
-          tone="info"
-          density="compact"
-        >
+        <div style={cardStackStyle}>
+          <CanvasBanner
+            theme={th}
+            tone="info"
+            icon="link"
+            title="已套用 directory shortcut 預填"
+            body={pageModel.prefill.sourceLabel}
+          />
           <div style={chipRowStyle}>
             {pageModel.prefill.badges.map((badge) => (
-              <StatusChip key={badge} label={badge} tone="info" />
+              <CanvasPill key={badge} theme={th} tone="info">
+                {badge}
+              </CanvasPill>
             ))}
           </div>
-        </CalloutBanner>
+        </div>
       ) : null}
 
       {pageModel.health.status !== "healthy" ? (
-        <CalloutBanner
-          title="Some booking-create dependencies are degraded"
-          description={pageModel.health.degradedServices
+        <CanvasBanner
+          theme={th}
+          tone="warn"
+          icon="warn"
+          title="部分建立訂單依賴目前 degraded"
+          body={pageModel.health.degradedServices
             .map((item) => item.impact)
             .join(" · ")}
-          tone="warning"
-          density="compact"
         />
       ) : null}
 
       {pageFreshness !== "fresh" ? (
-        <CalloutBanner
-          title={
-            pageFreshness === "degraded"
-              ? "Directory snapshot is degraded"
-              : "Directory snapshot is stale"
-          }
-          description={`Generated ${formatAge(pageModel.refresh.generatedAt, nowMs)} · ${formatDateTime(pageModel.refresh.generatedAt)} · tier ${pageModel.refreshTier}`}
-          tone={pageFreshness === "degraded" ? "warning" : "info"}
-          density="compact"
-          actions={
+        <div style={cardStackStyle}>
+          <CanvasBanner
+            theme={th}
+            icon={pageFreshness === "degraded" ? "warn" : "clock"}
+            body={`Generated ${formatAge(pageModel.refresh.generatedAt, nowMs)} · ${formatDateTime(pageModel.refresh.generatedAt)} · refresh tier ${labelForRefreshTier(pageModel.refreshTier)}`}
+            title={
+              pageFreshness === "degraded"
+                ? "Directory snapshot is degraded"
+                : "Directory snapshot is stale"
+            }
+            tone={pageFreshness === "degraded" ? "warn" : "info"}
+          />
+          <div style={actionRowStyle}>
             <ActionButton
               descriptor={pageModel.actions.refresh}
-              label="Refresh now"
+              label="立即 refresh"
               onClick={refreshPage}
               primary
             />
-          }
-        />
+          </div>
+        </div>
       ) : null}
 
       {pageModel.emptyState ? (
@@ -1084,19 +1244,20 @@ export function TenantBookingCreateForm({
         />
       ) : (
         <form onSubmit={handleSubmit}>
-          <CalloutBanner
-            title="Estimated spend is preview-only"
-            description="The booking command can preview quota and approval impact from a tenant-entered estimate, but canonical quoted fare remains backend-owned."
-            tone="warning"
-            density="compact"
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="spark"
+            title="estimate 只用於 preview"
+            body="費用、quota impact 與 approval posture 可先 preview，但 canonical quoted fare 仍由後端擁有。"
           />
 
           <div style={twoColumnLayoutStyle}>
             <div style={cardStackStyle}>
-              <DataViewCard
-                title="Trip"
-                subtitle="Service bucket, booking-on-behalf selection, timing, and address-book-assisted routing stay editable in one place."
-                tone="tenant"
+              <CanvasCard
+                theme={th}
+                title="行程"
+                subtitle="服務類型、乘客、預約時間與地址簿捷徑都在同一張表單完成。"
               >
                 <div style={fieldGridStyle}>
                   <FieldShell label="Service subtype">
@@ -1227,7 +1388,9 @@ export function TenantBookingCreateForm({
                   >
                     <input
                       disabled={passengerPhoneLocked}
-                      onChange={(event) => setPassengerPhone(event.target.value)}
+                      onChange={(event) =>
+                        setPassengerPhone(event.target.value)
+                      }
                       style={{
                         ...inputBaseStyle,
                         ...(visibleFieldErrors.passengerPhone
@@ -1239,23 +1402,28 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
                 </div>
-              </DataViewCard>
+              </CanvasCard>
 
-              <DataViewCard
-                title="Pickup and drop"
-                subtitle="Directory-backed addresses can be selected first, then fine-tuned inline without a separate geocoding flow."
-                tone="tenant"
+              <CanvasCard
+                theme={th}
+                title="Pickup / Drop-off"
+                subtitle="先選地址簿，再視需要直接微調，不另外開 geocoding flow。"
               >
                 <div style={fieldGridStyle}>
                   <FieldShell label="Saved pickup">
                     <select
-                      onChange={(event) => setPickupAddressId(event.target.value)}
+                      onChange={(event) =>
+                        setPickupAddressId(event.target.value)
+                      }
                       style={inputBaseStyle}
                       value={pickupAddressId}
                     >
                       <option value="">Manual pickup</option>
                       {addresses.map((address) => (
-                        <option key={address.addressId} value={address.addressId}>
+                        <option
+                          key={address.addressId}
+                          value={address.addressId}
+                        >
                           {address.addressName}
                         </option>
                       ))}
@@ -1272,7 +1440,10 @@ export function TenantBookingCreateForm({
                     >
                       <option value="">Manual drop-off</option>
                       {addresses.map((address) => (
-                        <option key={address.addressId} value={address.addressId}>
+                        <option
+                          key={address.addressId}
+                          value={address.addressId}
+                        >
                           {address.addressName}
                         </option>
                       ))}
@@ -1321,7 +1492,10 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
 
-                  <FieldShell error={visibleFieldErrors.pickupLat} label="Pickup lat">
+                  <FieldShell
+                    error={visibleFieldErrors.pickupLat}
+                    label="Pickup lat"
+                  >
                     <input
                       inputMode="decimal"
                       onChange={(event) => {
@@ -1339,7 +1513,10 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
 
-                  <FieldShell error={visibleFieldErrors.pickupLng} label="Pickup lng">
+                  <FieldShell
+                    error={visibleFieldErrors.pickupLng}
+                    label="Pickup lng"
+                  >
                     <input
                       inputMode="decimal"
                       onChange={(event) => {
@@ -1357,7 +1534,10 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
 
-                  <FieldShell error={visibleFieldErrors.dropoffLat} label="Drop-off lat">
+                  <FieldShell
+                    error={visibleFieldErrors.dropoffLat}
+                    label="Drop-off lat"
+                  >
                     <input
                       inputMode="decimal"
                       onChange={(event) => {
@@ -1375,7 +1555,10 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
 
-                  <FieldShell error={visibleFieldErrors.dropoffLng} label="Drop-off lng">
+                  <FieldShell
+                    error={visibleFieldErrors.dropoffLng}
+                    label="Drop-off lng"
+                  >
                     <input
                       inputMode="decimal"
                       onChange={(event) => {
@@ -1393,12 +1576,12 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
                 </div>
-              </DataViewCard>
+              </CanvasCard>
 
-              <DataViewCard
-                title="Governance"
-                subtitle="Cost center, finance references, and delegate-booking metadata stay inside the published tenant booking command."
-                tone="tenant"
+              <CanvasCard
+                theme={th}
+                title="關聯與審批"
+                subtitle="cost center、財務欄位與代訂 metadata 都隨 command 一起送出。"
               >
                 <div style={fieldGridStyle}>
                   <FieldShell
@@ -1430,7 +1613,9 @@ export function TenantBookingCreateForm({
                   >
                     <input
                       inputMode="decimal"
-                      onChange={(event) => setEstimatedAmount(event.target.value)}
+                      onChange={(event) =>
+                        setEstimatedAmount(event.target.value)
+                      }
                       placeholder="1580"
                       style={{
                         ...inputBaseStyle,
@@ -1481,7 +1666,10 @@ export function TenantBookingCreateForm({
                     </select>
                   </FieldShell>
 
-                  <FieldShell error={visibleFieldErrors.flightNo} label="Flight no.">
+                  <FieldShell
+                    error={visibleFieldErrors.flightNo}
+                    label="Flight no."
+                  >
                     <input
                       onChange={(event) => setFlightNo(event.target.value)}
                       style={{
@@ -1626,14 +1814,14 @@ export function TenantBookingCreateForm({
                     Expense proof required
                   </label>
                 </div>
-              </DataViewCard>
+              </CanvasCard>
             </div>
 
             <div style={cardStackStyle}>
-              <DataViewCard
+              <CanvasCard
+                theme={th}
                 title="Directory context"
-                subtitle="These shortcuts are the required in-app entry and exit points for booking create."
-                tone="info"
+                subtitle="這些是 handoff packet 指定的 in-app entry / exit points。"
               >
                 <KpiRow minWidth="150px">
                   <KpiCard
@@ -1678,27 +1866,29 @@ export function TenantBookingCreateForm({
                   />
                 </div>
                 {passengers.length === 0 ? (
-                  <CalloutBanner
-                    title="Passenger directory is empty"
-                    description="Manual passenger entry still works, but `/passengers` is the shortcut path the packet expects."
-                    tone="warning"
-                    density="compact"
+                  <CanvasBanner
+                    theme={th}
+                    tone="warn"
+                    icon="warn"
+                    title="Passenger directory 為空"
+                    body="仍可手動輸入乘客，但 `/passengers` 才是 packet 指定的捷徑入口。"
                   />
                 ) : null}
                 {addresses.length === 0 ? (
-                  <CalloutBanner
-                    title="Address book is empty"
-                    description="Manual addresses still work, but `/addresses` is the canonical shortcut source for this route."
-                    tone="warning"
-                    density="compact"
+                  <CanvasBanner
+                    theme={th}
+                    tone="warn"
+                    icon="warn"
+                    title="Address book 為空"
+                    body="仍可手動輸入地址，但 `/addresses` 才是這個 route 的 canonical shortcut source。"
                   />
                 ) : null}
-              </DataViewCard>
+              </CanvasCard>
 
-              <DataViewCard
+              <CanvasCard
+                theme={th}
                 title="Policy evaluation"
-                subtitle="Approval posture and quota impact come from the backend preview directly."
-                tone="tenant"
+                subtitle="approval posture 與 quota impact 都直接來自後端 preview。"
               >
                 <div style={chipRowStyle}>
                   <StatusChip
@@ -1735,11 +1925,12 @@ export function TenantBookingCreateForm({
                   ]}
                 />
                 {policyError ? (
-                  <CalloutBanner
+                  <CanvasBanner
+                    theme={th}
+                    tone="warn"
+                    icon="warn"
                     title="Policy preview failed"
-                    description={policyError}
-                    tone="warning"
-                    density="compact"
+                    body={policyError}
                   />
                 ) : null}
                 {approvalEvaluation?.approvalPlan ? (
@@ -1787,12 +1978,12 @@ export function TenantBookingCreateForm({
                     )}
                   />
                 ) : null}
-              </DataViewCard>
+              </CanvasCard>
 
-              <DataViewCard
+              <CanvasCard
+                theme={th}
                 title="Quota impact"
-                subtitle="The route keeps the backend preview vocabulary visible instead of replacing it with a local forecast."
-                tone="tenant"
+                subtitle="沿用後端 preview vocabulary，不用本地預估字典取代。"
               >
                 {quotaPreview?.impacts?.length ? (
                   <>
@@ -1835,19 +2026,20 @@ export function TenantBookingCreateForm({
                     />
                   </>
                 ) : (
-                  <CalloutBanner
-                    title="Preview waits for complete booking context"
-                    description="Select a cost center and fill the core booking fields to compute quota impact."
+                  <CanvasBanner
+                    theme={th}
                     tone="info"
-                    density="compact"
+                    icon="spark"
+                    title="Preview 等待完整 booking context"
+                    body="先選 cost center 並補齊核心欄位，才能計算 quota impact。"
                   />
                 )}
-              </DataViewCard>
+              </CanvasCard>
 
-              <DataViewCard
-                title="Create the booking"
-                subtitle="Blocked outcomes stay client-blocked. Approval-required outcomes still submit, but the approval workflow remains backend-owned."
-                tone="tenant"
+              <CanvasCard
+                theme={th}
+                title="送出 command"
+                subtitle="blocked outcome 在 client 端直接阻擋；approval-required 仍可送出，但 workflow 由後端擁有。"
               >
                 {submitReceipt ? (
                   <div style={receiptStyle}>
@@ -1895,18 +2087,20 @@ export function TenantBookingCreateForm({
                 ) : null}
 
                 {submitError ? (
-                  <CalloutBanner
+                  <CanvasBanner
+                    theme={th}
+                    tone="warn"
+                    icon="warn"
                     title="Booking create failed"
-                    description={submitError}
-                    tone="warning"
-                    density="compact"
+                    body={submitError}
                   />
                 ) : submitAttempted && firstError(visibleFieldErrors) ? (
-                  <CalloutBanner
-                    title="Resolve the highlighted fields"
-                    description={firstError(visibleFieldErrors) ?? ""}
-                    tone="warning"
-                    density="compact"
+                  <CanvasBanner
+                    theme={th}
+                    tone="warn"
+                    icon="warn"
+                    title="請先處理高亮欄位"
+                    body={firstError(visibleFieldErrors) ?? ""}
                   />
                 ) : null}
 
@@ -1945,7 +2139,7 @@ export function TenantBookingCreateForm({
                     type="submit"
                   />
                 </div>
-              </DataViewCard>
+              </CanvasCard>
             </div>
           </div>
         </form>
