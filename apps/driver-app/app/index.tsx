@@ -9,9 +9,12 @@ import {
   View,
 } from "react-native";
 import {
+  type CrossAppResourceLink,
   type MarkNotificationsReadCommand,
   type NotificationRecord,
   PLATFORM_CODE_REGISTRY,
+  type RefreshTier,
+  type ResourceActionDescriptor,
   type EmptyReason,
   type OwnedOrderRecord,
   type PlatformPresenceAdapterStatusRecord,
@@ -92,10 +95,8 @@ type HeroActionModel = {
   title: string;
   detail: string;
   meta: string;
-  primaryLabel: string;
-  primaryRoute: WorkspaceRoute;
-  secondaryLabel: string;
-  secondaryRoute: WorkspaceRoute;
+  primaryAction: WorkspaceActionModel;
+  secondaryAction: WorkspaceActionModel;
 };
 
 type EmptyStateModel = {
@@ -103,8 +104,7 @@ type EmptyStateModel = {
   tone: Exclude<CanvasTone, "neutral">;
   title: string;
   body: string;
-  actionLabel: string;
-  route: WorkspaceRoute;
+  action: WorkspaceActionModel;
 };
 
 type UrgentItem = {
@@ -152,12 +152,19 @@ type DeepLinkTileModel = {
   iconName: keyof typeof Ionicons.glyphMap;
   label: string;
   helper: string;
-  route: WorkspaceRoute;
+  action: WorkspaceActionModel;
   tone?: Exclude<CanvasTone, "neutral"> | "accent";
+};
+
+type WorkspaceActionModel = {
+  route: WorkspaceRoute;
+  descriptor: ResourceActionDescriptor;
 };
 
 const THEME = driverCanvasTheme;
 const REFRESH_INTERVAL_MS = 15_000;
+const WORKSPACE_REFRESH_TIER: RefreshTier = "medium";
+const WORKSPACE_CROSS_APP_LINKS: CrossAppResourceLink[] = [];
 
 const INITIAL_WORKSPACE: WorkspaceLoadResult = {
   taskViews: [],
@@ -180,6 +187,105 @@ function toErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function createWorkspaceAction(
+  route: WorkspaceRoute,
+  action: string,
+  enabled = true,
+  disabledReasonCode?: string,
+  riskLevel: ResourceActionDescriptor["riskLevel"] = "low",
+): WorkspaceActionModel {
+  return {
+    route,
+    descriptor: {
+      action,
+      enabled,
+      disabledReasonCode,
+      riskLevel,
+    },
+  };
+}
+
+function getActionLabel(action: string) {
+  switch (action) {
+    case "start_shift":
+      return "前往打卡";
+    case "go_online":
+      return "前往平台連線";
+    case "resolve_reauth":
+      return "處理重新授權";
+    case "return_to_trip":
+      return "回到行程";
+    case "review_urgent_task":
+      return "審視任務";
+    case "open_jobs":
+      return "查看任務";
+    case "open_trip":
+      return "行程工作區";
+    case "open_platform_presence":
+      return "平台中心";
+    case "open_earnings":
+      return "查看收入";
+    case "open_shift":
+      return "查看班次";
+    case "open_settings":
+      return "前往設定";
+    case "review_eligibility":
+      return "檢查資格";
+    case "manage_platform_binding":
+      return "管理平台";
+    case "review_sos":
+      return "查看 SOS";
+    default:
+      return action;
+  }
+}
+
+function getActionDisabledReason(
+  reasonCode: string | undefined,
+  fallback = "目前無法執行此動作。",
+) {
+  switch (reasonCode) {
+    case "feature_disabled":
+      return "此功能目前未啟用。";
+    case "no_platform_binding":
+      return "尚未綁定任何平台帳號。";
+    case "shift_data_unavailable":
+      return "班次資料尚未同步完成。";
+    case "permission_denied":
+      return "目前帳號權限不足，請聯繫管理員。";
+    case "external_unavailable":
+      return "外部平台暫時不可用，請稍後再試。";
+    case "not_provisioned":
+      return "裝置或平台尚未完成設定。";
+    case "no_active_trip":
+      return "目前沒有進行中的行程。";
+    default:
+      return fallback;
+  }
+}
+
+function getActionRiskTone(
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+): CanvasTone {
+  switch (riskLevel) {
+    case "high":
+      return "danger";
+    case "medium":
+      return "warn";
+    default:
+      return "info";
+  }
+}
+
+function getRefreshTierLabel(tier: RefreshTier) {
+  switch (tier) {
+    case "medium":
+      return "T3 · 15s";
+    default:
+      return tier;
+  }
 }
 
 function classifyErrorReason(message: string | null): EmptyReason {
@@ -598,7 +704,7 @@ function RefreshTierPill({
   return (
     <View style={styles.refreshRow}>
       <Pill theme={THEME} tone={tone} dot>
-        T3 · 15s
+        {getRefreshTierLabel(WORKSPACE_REFRESH_TIER)}
       </Pill>
       <Text style={styles.refreshLabel}>
         {snapshot.label} · {formatCompactDateTime(loadedAt)}
@@ -669,27 +775,45 @@ function HeroActionCard({
         </Text>
         <Text style={styles.heroDetail}>{model.detail}</Text>
         <Text style={styles.heroMeta}>{model.meta}</Text>
+        <View style={styles.heroAvailableActionsRow}>
+          <Pill
+            theme={THEME}
+            tone={getActionRiskTone(model.primaryAction.descriptor.riskLevel)}
+            dot
+          >
+            {`availableAction · ${model.primaryAction.descriptor.action}`}
+          </Pill>
+          {model.primaryAction.descriptor.enabled ? null : (
+            <Text style={styles.heroDisabledHint}>
+              {getActionDisabledReason(
+                model.primaryAction.descriptor.disabledReasonCode,
+              )}
+            </Text>
+          )}
+        </View>
         <View style={styles.heroActionRow}>
           <Btn
             theme={THEME}
             variant="primary"
             size="md"
             onPress={onPrimaryPress}
+            disabled={!model.primaryAction.descriptor.enabled}
             style={[
               styles.heroPrimaryButton,
               { backgroundColor: accentPalette.button },
             ]}
           >
-            {model.primaryLabel}
+            {getActionLabel(model.primaryAction.descriptor.action)}
           </Btn>
           <Btn
             theme={THEME}
             variant="secondary"
             size="md"
             onPress={onSecondaryPress}
+            disabled={!model.secondaryAction.descriptor.enabled}
             style={styles.heroSecondaryButton}
           >
-            {model.secondaryLabel}
+            {getActionLabel(model.secondaryAction.descriptor.action)}
           </Btn>
         </View>
       </View>
@@ -784,13 +908,28 @@ function FocusEmptyStateCard({
         </View>
       </View>
       <View style={styles.emptyStateFooter}>
-        <Pill theme={THEME} tone={state.tone} dot>
-          {state.reason}
+        <Pill
+          theme={THEME}
+          tone={getActionRiskTone(state.action.descriptor.riskLevel)}
+          dot
+        >
+          {`${state.reason} · ${state.action.descriptor.action}`}
         </Pill>
-        <Btn theme={THEME} variant="secondary" size="sm" onPress={onPress}>
-          {state.actionLabel}
+        <Btn
+          theme={THEME}
+          variant="secondary"
+          size="sm"
+          disabled={!state.action.descriptor.enabled}
+          onPress={onPress}
+        >
+          {getActionLabel(state.action.descriptor.action)}
         </Btn>
       </View>
+      {state.action.descriptor.enabled ? null : (
+        <Text style={styles.emptyStateDisabledHint}>
+          {getActionDisabledReason(state.action.descriptor.disabledReasonCode)}
+        </Text>
+      )}
     </Card>
   );
 }
@@ -973,9 +1112,11 @@ function DeepLinkTile({
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={onPress}
+      disabled={!model.action.descriptor.enabled}
+      onPress={model.action.descriptor.enabled ? onPress : undefined}
       style={({ pressed }) => [
         styles.deepLinkTileWrap,
+        !model.action.descriptor.enabled ? styles.tileDisabled : null,
         pressed ? styles.tilePressed : null,
       ]}
     >
@@ -989,6 +1130,14 @@ function DeepLinkTile({
           <View style={styles.deepLinkCopy}>
             <Text style={styles.deepLinkLabel}>{model.label}</Text>
             <Text style={styles.deepLinkHelper}>{model.helper}</Text>
+            <Text style={styles.deepLinkActionMeta}>
+              {model.action.descriptor.action}
+              {model.action.descriptor.enabled
+                ? ""
+                : ` · ${getActionDisabledReason(
+                    model.action.descriptor.disabledReasonCode,
+                  )}`}
+            </Text>
           </View>
         </View>
       </Card>
@@ -1444,8 +1593,13 @@ export default function WorkspaceIndex() {
           reason === "permission_denied"
             ? "目前無法讀取工作台任務資料，請確認司機帳號權限或聯繫管理員。"
             : workspace.taskLoadError,
-        actionLabel: "前往設定",
-        route: "/settings",
+        action: createWorkspaceAction(
+          "/settings",
+          "open_settings",
+          true,
+          undefined,
+          "medium",
+        ),
       };
     }
 
@@ -1459,8 +1613,13 @@ export default function WorkspaceIndex() {
         tone: "warn",
         title: "外部平台暫時不可用",
         body: workspace.platformLoadError,
-        actionLabel: "查看平台",
-        route: "/platform-presence",
+        action: createWorkspaceAction(
+          "/platform-presence",
+          "open_platform_presence",
+          true,
+          undefined,
+          "medium",
+        ),
       };
     }
 
@@ -1470,8 +1629,13 @@ export default function WorkspaceIndex() {
         tone: "info",
         title: "尚未綁定平台帳號",
         body: "目前只有自營派單資訊，若要接收外部平台任務，請先完成平台綁定與授權。",
-        actionLabel: "管理平台",
-        route: "/platform-presence",
+        action: createWorkspaceAction(
+          "/platform-presence",
+          "manage_platform_binding",
+          true,
+          undefined,
+          "medium",
+        ),
       };
     }
 
@@ -1484,8 +1648,13 @@ export default function WorkspaceIndex() {
         tone: "danger",
         title: "目前不具備接單資格",
         body: "所有外部平台都回報司機資格不符。請先前往平台頁檢查授權、資格或由派車台協助排除。",
-        actionLabel: "檢查資格",
-        route: "/platform-presence",
+        action: createWorkspaceAction(
+          "/platform-presence",
+          "review_eligibility",
+          true,
+          undefined,
+          "medium",
+        ),
       };
     }
 
@@ -1499,8 +1668,7 @@ export default function WorkspaceIndex() {
         tone: "info",
         title: "目前沒有新任務",
         body: "工作台已待命。保持平台在線與班次正常，新的派單或平台任務會優先出現在這裡。",
-        actionLabel: "查看任務",
-        route: "/jobs",
+        action: createWorkspaceAction("/jobs", "open_jobs"),
       };
     }
 
@@ -1515,8 +1683,7 @@ export default function WorkspaceIndex() {
         tone: "info",
         title: "目前沒有需立即處理的項目",
         body: "工作台的 urgent lane 已清空，您可以查看今日收入、班次或維持平台在線待命。",
-        actionLabel: "查看收入",
-        route: "/earnings",
+        action: createWorkspaceAction("/earnings", "open_earnings"),
       };
     }
 
@@ -1659,10 +1826,14 @@ export default function WorkspaceIndex() {
         title: `先恢復 ${name} 授權`,
         detail: "任何需重新授權的平台都應優先處理，否則該平台接單能力暫停。",
         meta: `最後同步 ${formatCompactDateTime(platform.updatedAt)} · cross-app deep link: none`,
-        primaryLabel: "處理重新授權",
-        primaryRoute: "/platform-presence",
-        secondaryLabel: "查看任務",
-        secondaryRoute: "/jobs",
+        primaryAction: createWorkspaceAction(
+          "/platform-presence",
+          "resolve_reauth",
+          true,
+          undefined,
+          "medium",
+        ),
+        secondaryAction: createWorkspaceAction("/jobs", "open_jobs"),
       };
     }
 
@@ -1675,10 +1846,17 @@ export default function WorkspaceIndex() {
         title: `優先回應 ${formatTaskHeadline(task)}`,
         detail: formatTaskRouteSummary(task),
         meta: `${task.platformDisplayName} · ${formatTaskActionSummary(task)}`,
-        primaryLabel: "打開任務",
-        primaryRoute: "/jobs",
-        secondaryLabel: "查看平台",
-        secondaryRoute: "/platform-presence",
+        primaryAction: createWorkspaceAction(
+          "/jobs",
+          "review_urgent_task",
+          true,
+          undefined,
+          task.allowedActions.length > 0 ? "medium" : "low",
+        ),
+        secondaryAction: createWorkspaceAction(
+          "/platform-presence",
+          "open_platform_presence",
+        ),
       };
     }
 
@@ -1695,10 +1873,8 @@ export default function WorkspaceIndex() {
         title: `返回進行中的行程`,
         detail: formatTaskRouteSummary(task),
         meta: `${task.taskId} · ${fareLabel} · ${formatCompactDateTime(task.updatedAt)}`,
-        primaryLabel: "前往行程",
-        primaryRoute: "/trip",
-        secondaryLabel: "任務詳情",
-        secondaryRoute: "/jobs",
+        primaryAction: createWorkspaceAction("/trip", "return_to_trip"),
+        secondaryAction: createWorkspaceAction("/jobs", "open_jobs"),
       };
     }
 
@@ -1714,10 +1890,11 @@ export default function WorkspaceIndex() {
         title: "先開始班次",
         detail: "依 spec，off-shift 時工作台主 CTA 必須回到班次啟動。",
         meta: "班次啟動後，自營派單會切換為可接單狀態。",
-        primaryLabel: "前往班次",
-        primaryRoute: "/shift",
-        secondaryLabel: "查看平台",
-        secondaryRoute: "/platform-presence",
+        primaryAction: createWorkspaceAction("/shift", "start_shift"),
+        secondaryAction: createWorkspaceAction(
+          "/platform-presence",
+          "open_platform_presence",
+        ),
       };
     }
 
@@ -1729,10 +1906,14 @@ export default function WorkspaceIndex() {
         title: "讓至少一個平台上線",
         detail: "目前沒有任何平台處於可接單狀態，新的派單不會送達。",
         meta: "平台健康與帳號授權狀態都可以在平台頁處理。",
-        primaryLabel: "前往平台中心",
-        primaryRoute: "/platform-presence",
-        secondaryLabel: "查看班次",
-        secondaryRoute: "/shift",
+        primaryAction: createWorkspaceAction(
+          "/platform-presence",
+          "go_online",
+          externalPresences.length > 0,
+          externalPresences.length > 0 ? undefined : "no_platform_binding",
+          "medium",
+        ),
+        secondaryAction: createWorkspaceAction("/shift", "open_shift"),
       };
     }
 
@@ -1744,10 +1925,11 @@ export default function WorkspaceIndex() {
         title: "等待平台確認",
         detail: formatTaskRouteSummary(taskSummary.awaitingPlatformTask),
         meta: "來源平台尚未回覆前，請不要提前前往接送點。",
-        primaryLabel: "查看任務",
-        primaryRoute: "/jobs",
-        secondaryLabel: "平台狀態",
-        secondaryRoute: "/platform-presence",
+        primaryAction: createWorkspaceAction("/jobs", "open_jobs"),
+        secondaryAction: createWorkspaceAction(
+          "/platform-presence",
+          "open_platform_presence",
+        ),
       };
     }
 
@@ -1759,10 +1941,8 @@ export default function WorkspaceIndex() {
       detail:
         "沒有需要立即處理的任務，保持平台在線並留意新的派單或重新授權提醒。",
       meta: "這是 cockpit，不是純入口頁；最重要的狀態已集中在上方。",
-      primaryLabel: "查看任務",
-      primaryRoute: "/jobs",
-      secondaryLabel: "查看收入",
-      secondaryRoute: "/earnings",
+      primaryAction: createWorkspaceAction("/jobs", "open_jobs"),
+      secondaryAction: createWorkspaceAction("/earnings", "open_earnings"),
     };
   }, [
     isDriverOnShift,
@@ -1803,7 +1983,7 @@ export default function WorkspaceIndex() {
           taskSummary.pendingCount > 0
             ? `${taskSummary.pendingCount} 件待處理`
             : "查看全部任務與可用動作",
-        route: "/jobs",
+        action: createWorkspaceAction("/jobs", "open_jobs"),
       },
       {
         iconName: "car-sport-outline",
@@ -1811,7 +1991,12 @@ export default function WorkspaceIndex() {
         helper: taskSummary.activeTripTask
           ? formatTaskHeadline(taskSummary.activeTripTask)
           : "沒有進行中的行程時會顯示空態",
-        route: "/trip",
+        action: createWorkspaceAction(
+          "/trip",
+          "open_trip",
+          taskSummary.activeTripTask !== null,
+          taskSummary.activeTripTask !== null ? undefined : "no_active_trip",
+        ),
       },
       {
         iconName: "layers-outline",
@@ -1820,7 +2005,10 @@ export default function WorkspaceIndex() {
           reauthPlatforms.length > 0
             ? `${reauthPlatforms.length} 個平台需重新授權`
             : `${onlinePlatformCount} 個平台在線`,
-        route: "/platform-presence",
+        action: createWorkspaceAction(
+          "/platform-presence",
+          "open_platform_presence",
+        ),
         tone: reauthPlatforms.length > 0 ? "warn" : "accent",
       },
       {
@@ -1830,19 +2018,24 @@ export default function WorkspaceIndex() {
           todayNetSummary.amount,
           { fractionDigits: 0 },
         )}`,
-        route: "/earnings",
+        action: createWorkspaceAction("/earnings", "open_earnings"),
       },
       {
         iconName: "time-outline",
         label: "班次",
         helper: formatShiftDuration(workspace.activeShift),
-        route: "/shift",
+        action: createWorkspaceAction(
+          "/shift",
+          "open_shift",
+          workspace.shiftFeatureEnabled,
+          workspace.shiftFeatureEnabled ? undefined : "feature_disabled",
+        ),
       },
       {
         iconName: "settings-outline",
         label: "設定",
         helper: "裝置身份、帳號與通知設定",
-        route: "/settings",
+        action: createWorkspaceAction("/settings", "open_settings"),
       },
     ],
     [
@@ -1852,6 +2045,21 @@ export default function WorkspaceIndex() {
       taskSummary.pendingCount,
       todayNetSummary.amount,
       workspace.activeShift,
+    ],
+  );
+
+  const availableActions = useMemo(
+    () => [
+      heroAction.primaryAction,
+      heroAction.secondaryAction,
+      ...(focusEmptyState ? [focusEmptyState.action] : []),
+      ...deepLinks.map((item) => item.action),
+    ],
+    [
+      deepLinks,
+      focusEmptyState,
+      heroAction.primaryAction,
+      heroAction.secondaryAction,
     ],
   );
 
@@ -2048,8 +2256,8 @@ export default function WorkspaceIndex() {
 
       <HeroActionCard
         model={heroAction}
-        onPrimaryPress={navigate(heroAction.primaryRoute)}
-        onSecondaryPress={navigate(heroAction.secondaryRoute)}
+        onPrimaryPress={navigate(heroAction.primaryAction.route)}
+        onSecondaryPress={navigate(heroAction.secondaryAction.route)}
       />
 
       {activeTripCard ? (
@@ -2092,7 +2300,7 @@ export default function WorkspaceIndex() {
       {focusEmptyState ? (
         <FocusEmptyStateCard
           state={focusEmptyState}
-          onPress={navigate(focusEmptyState.route)}
+          onPress={navigate(focusEmptyState.action.route)}
         />
       ) : null}
 
@@ -2136,20 +2344,75 @@ export default function WorkspaceIndex() {
       <View style={styles.sectionBlock}>
         <View style={styles.sectionHeader}>
           <View>
+            <Text style={styles.sectionEyebrow}>Available actions</Text>
+            <Text style={styles.sectionTitle}>
+              本頁 CTA 由 action descriptor 驅動
+            </Text>
+          </View>
+        </View>
+        <Card theme={THEME} padding={14}>
+          <View style={styles.availableActionsList}>
+            {availableActions.map((action, index) => (
+              <View
+                key={`${action.route}-${action.descriptor.action}-${index}`}
+                style={styles.availableActionRow}
+              >
+                <View style={styles.availableActionCopy}>
+                  <Text style={styles.availableActionLabel}>
+                    {getActionLabel(action.descriptor.action)}
+                  </Text>
+                  <Text style={styles.availableActionMeta}>
+                    {`${action.descriptor.action} · ${action.route} · risk=${action.descriptor.riskLevel}`}
+                  </Text>
+                </View>
+                <Pill
+                  theme={THEME}
+                  tone={
+                    action.descriptor.enabled
+                      ? getActionRiskTone(action.descriptor.riskLevel)
+                      : "neutral"
+                  }
+                  dot
+                >
+                  {action.descriptor.enabled
+                    ? "enabled"
+                    : (action.descriptor.disabledReasonCode ?? "disabled")}
+                </Pill>
+              </View>
+            ))}
+          </View>
+        </Card>
+      </View>
+
+      <View style={styles.sectionBlock}>
+        <View style={styles.sectionHeader}>
+          <View>
             <Text style={styles.sectionEyebrow}>Cross-app / deep links</Text>
-            <Text style={styles.sectionTitle}>Phase 1 僅支援 app 內深連結</Text>
+            <Text style={styles.sectionTitle}>
+              Phase 1 driver app 不跨連 web console
+            </Text>
           </View>
         </View>
         <Text style={styles.sectionBody}>
           依 spec，driver app 目前沒有對 web consoles 的 cross-app deep
           links。下列快捷動作全部導向本 app 內頁面。
         </Text>
+        <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
+          <Text style={styles.crossAppPolicyTitle}>
+            {`CrossAppResourceLink = ${WORKSPACE_CROSS_APP_LINKS.length}`}
+          </Text>
+          <Text style={styles.crossAppPolicyBody}>
+            平台管理端仍可發送給 driver audience 的 notice，但 cockpit 僅顯示
+            app 內通知與本 app 深連結，不導向 platform-admin / ops / tenant
+            web。
+          </Text>
+        </Card>
         <View style={styles.deepLinkGrid}>
           {deepLinks.map((item) => (
             <DeepLinkTile
-              key={`${item.route}-${item.label}`}
+              key={`${item.action.route}-${item.label}`}
               model={item}
-              onPress={navigate(item.route)}
+              onPress={navigate(item.action.route)}
             />
           ))}
         </View>
@@ -2364,6 +2627,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
+  heroAvailableActionsRow: {
+    gap: 8,
+    marginTop: 10,
+    marginBottom: 2,
+  },
+  heroDisabledHint: {
+    color: THEME.textMuted,
+    fontFamily: THEME.fontFamily,
+    fontSize: 11.5,
+    lineHeight: 16,
+  },
   heroActionRow: {
     flexDirection: "row",
     gap: 10,
@@ -2429,6 +2703,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
     marginTop: 14,
+  },
+  emptyStateDisabledHint: {
+    color: THEME.textMuted,
+    fontFamily: THEME.fontFamily,
+    fontSize: 11.5,
+    lineHeight: 16,
+    marginTop: 10,
   },
   urgentCard: {
     overflow: "hidden",
@@ -2608,6 +2889,9 @@ const styles = StyleSheet.create({
   deepLinkTileWrap: {
     width: "48%",
   },
+  tileDisabled: {
+    opacity: 0.58,
+  },
   deepLinkTileRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2635,6 +2919,55 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 11.5,
     lineHeight: 16,
+  },
+  deepLinkActionMeta: {
+    color: THEME.textDim,
+    fontFamily: THEME.monoFamily,
+    fontSize: 10.5,
+    lineHeight: 15,
+    marginTop: 4,
+  },
+  availableActionsList: {
+    gap: 10,
+  },
+  availableActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  availableActionCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  availableActionLabel: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  availableActionMeta: {
+    color: THEME.textDim,
+    fontFamily: THEME.monoFamily,
+    fontSize: 10.5,
+    lineHeight: 15,
+  },
+  crossAppPolicyCard: {
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  crossAppPolicyTitle: {
+    color: THEME.text,
+    fontFamily: THEME.monoFamily,
+    fontSize: 11.5,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  crossAppPolicyBody: {
+    color: THEME.textMuted,
+    fontFamily: THEME.fontFamily,
+    fontSize: 12,
+    lineHeight: 17,
   },
   readinessRow: {
     flexDirection: "row",
