@@ -16,32 +16,29 @@ describe("DriverAppSummaryService", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-27T12:00:00.000Z"));
 
-    const platformPresenceService = new PlatformPresenceService(
-      undefined,
-      {
-        listAdapterHealth: vi.fn(() => [
-          {
-            platformCode: "grab_taiwan",
-            status: "healthy",
-            reason: null,
-            credentialStatus: "authenticated",
-            authStatus: "authenticated",
-            webhookStatus: "healthy",
-            rateLimitStatus: "ok",
-            lastError: null,
-            lastCheckedAt: "2026-05-27T11:59:58.000Z",
-            capabilitySummary: {
-              mode: "hybrid",
-              productionStatus: "production_ready",
-              supportsInboundWebhook: true,
-              supportsOutboundActions: true,
-              supportedWebhookEvents: ["forwarder.order.received"],
-              notes: [],
-            },
+    const platformPresenceService = new PlatformPresenceService(undefined, {
+      listAdapterHealth: vi.fn(() => [
+        {
+          platformCode: "grab_taiwan",
+          status: "healthy",
+          reason: null,
+          credentialStatus: "authenticated",
+          authStatus: "authenticated",
+          webhookStatus: "healthy",
+          rateLimitStatus: "ok",
+          lastError: null,
+          lastCheckedAt: "2026-05-27T11:59:58.000Z",
+          capabilitySummary: {
+            mode: "hybrid",
+            productionStatus: "production_ready",
+            supportsInboundWebhook: true,
+            supportsOutboundActions: true,
+            supportedWebhookEvents: ["forwarder.order.received"],
+            notes: [],
           },
-        ]),
-      } as never,
-    );
+        },
+      ]),
+    } as never);
     await platformPresenceService.setOnline(
       "driver-fixture-001",
       "grab_taiwan",
@@ -106,6 +103,87 @@ describe("DriverAppSummaryService", () => {
     ).resolves.toEqual(driverWorkspaceSummaryFixture);
   });
 
+  it("marks workspace summaries stale when the latest task and platform reads are old", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T12:00:00.000Z"));
+
+    const platformPresenceService = {
+      listForDriver: vi.fn(async () => [
+        {
+          driverId: "driver-fixture-001",
+          platformCode: "grab_taiwan",
+          accountId: null,
+          status: "offline",
+          eligibility: "eligible",
+          tokenExpiresAt: null,
+          reauthRequired: false,
+          lastOnlineAt: "2026-05-27T11:59:10.000Z",
+          lastOfflineAt: "2026-05-27T11:59:20.000Z",
+          updatedAt: "2026-05-27T11:59:20.000Z",
+        },
+      ]),
+      listAdapterStatuses: vi.fn(() => [
+        {
+          platformCode: "grab_taiwan",
+          status: "healthy",
+          blockingReason: null,
+          lastSyncAt: "2026-05-27T11:59:10.000Z",
+        },
+      ]),
+    } as unknown as PlatformPresenceService;
+
+    const service = new DriverAppSummaryService(platformPresenceService, {
+      listDriverTaskViews: vi.fn(() => [
+        {
+          taskId: "task-readonly-001",
+          orderId: "order-readonly-001",
+          orderDomain: "owned",
+          sourcePlatform: "drts",
+          platformDisplayName: "DRTS",
+          externalOrderId: null,
+          nativeStatus: null,
+          localStatus: "assigned",
+          driverActionState: "read_only",
+          allowedActions: [],
+          routeLocked: false,
+          fareAuthority: "drts",
+          settlementAuthority: "drts",
+          driverPayoutAuthority: "drts",
+          requiresManualFallback: false,
+          requiresReauth: false,
+          syncIssueSummary: null,
+          blockingReason: null,
+          pickupSummary: null,
+          dropoffSummary: null,
+          deadlineAt: null,
+          updatedAt: "2026-05-27T11:59:30.000Z",
+        },
+      ]),
+    } as never);
+
+    await expect(
+      service.getWorkspaceSummary("driver-fixture-001"),
+    ).resolves.toMatchObject({
+      driverId: "driver-fixture-001",
+      counts: {
+        actionRequired: 0,
+        awaitingPlatform: 0,
+        inProgress: 0,
+        blocked: 0,
+        completed: 0,
+        readOnly: 1,
+        total: 1,
+      },
+      outstandingInstructionCount: 0,
+      refresh: {
+        generatedAt: "2026-05-27T11:59:30.000Z",
+        staleAfterMs: 15000,
+        dataFreshness: "stale",
+        source: "live",
+      },
+    });
+  });
+
   it("marks platform presence summary stale when the latest platform sync is old", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-27T12:00:00.000Z"));
@@ -143,7 +221,9 @@ describe("DriverAppSummaryService", () => {
     const summary =
       await service.getPlatformPresenceSummary("driver-fixture-001");
 
-    expect(summary.driverId).toBe(driverPlatformPresenceSummaryFixture.driverId);
+    expect(summary.driverId).toBe(
+      driverPlatformPresenceSummaryFixture.driverId,
+    );
     expect(summary.notes).toEqual(driverPlatformPresenceSummaryFixture.notes);
     expect(summary.health).toEqual(driverPlatformPresenceSummaryFixture.health);
     expect(summary.refresh).toEqual(
@@ -154,6 +234,58 @@ describe("DriverAppSummaryService", () => {
         expect.objectContaining(
           driverPlatformPresenceSummaryFixture.bindings[0],
         ),
+      ]),
+    );
+  });
+
+  it("marks platform presence summary fresh when recent platform sync data is available", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T12:00:00.000Z"));
+
+    const platformPresenceService = {
+      listForDriver: vi.fn(async () => [
+        {
+          driverId: "driver-fixture-001",
+          platformCode: "grab_taiwan",
+          accountId: null,
+          status: "online",
+          eligibility: "eligible",
+          tokenExpiresAt: "2026-06-01T00:00:00.000Z",
+          reauthRequired: false,
+          lastOnlineAt: "2026-05-27T11:59:50.000Z",
+          lastOfflineAt: null,
+          updatedAt: "2026-05-27T11:59:50.000Z",
+        },
+      ]),
+      listAdapterStatuses: vi.fn(() => [
+        {
+          platformCode: "grab_taiwan",
+          status: "healthy",
+          blockingReason: null,
+          lastSyncAt: "2026-05-27T11:59:50.000Z",
+        },
+      ]),
+      getSummaryNotes: vi.fn(() => []),
+    } as unknown as PlatformPresenceService;
+
+    const service = new DriverAppSummaryService(platformPresenceService);
+    const summary =
+      await service.getPlatformPresenceSummary("driver-fixture-001");
+
+    expect(summary.refresh).toEqual({
+      generatedAt: "2026-05-27T11:59:50.000Z",
+      staleAfterMs: 30000,
+      dataFreshness: "fresh",
+      source: "live",
+    });
+    expect(summary.health.status).toBe("healthy");
+    expect(summary.bindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platformCode: "grab_taiwan",
+          bindingState: "bound_online",
+          outstandingInstructionCount: 0,
+        }),
       ]),
     );
   });
