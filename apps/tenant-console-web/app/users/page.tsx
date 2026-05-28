@@ -4,11 +4,9 @@ import type {
   EmptyReason,
   RefreshTier,
   ResourceActionDescriptor,
-  UiRefreshMetadata,
-} from "@drts/contracts/ui-runtime";
-import type {
   TenantRoleCatalogRecord,
   TenantUserRoleRecord,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -234,12 +232,13 @@ type LoadFailure = {
   reason: EmptyReason;
 };
 
-type UserRow = TenantUserRoleRecord & {
-  availableActions: ResourceActionDescriptor[];
-  lastLoginAt: string | null;
-  roleDisplayName: string;
-  actionAuthority: "embedded" | "fallback";
-};
+type UserRow = Record<string, unknown> &
+  TenantUserRoleRecord & {
+    availableActions: ResourceActionDescriptor[];
+    lastLoginAt: string | null;
+    roleDisplayName: string;
+    actionAuthority: "embedded" | "fallback";
+  };
 
 type UsersPageData = {
   users: RuntimeTenantUserRecord[];
@@ -252,7 +251,7 @@ type EmptyStateConfig = {
   body: string;
   tone: CanvasTone;
   icon: ReactNode;
-  nextAction?: ResourceActionDescriptor;
+  nextAction?: ResourceActionDescriptor | undefined;
 };
 
 type RuntimeTenantUserRecord = TenantUserRoleRecord & {
