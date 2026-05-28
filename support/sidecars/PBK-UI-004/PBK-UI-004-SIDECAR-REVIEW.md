@@ -1,50 +1,71 @@
 # PBK-UI-004 Sidecar Review Packet
 
-This document refreshes the `PBK-UI-004` sidecar review packet against the
-current machine truth in this worktree. It does not change canonical truth.
-Its job is narrower: give the assigned reviewer (`Codex`) a clean evidence
-summary, explain the live handoff state, and remove stale claims that the
-parent task is already closed out on this branch.
+This document is the support-only review packet for `PBK-UI-004`
+("Authority-safe negative paths"). It does not change canonical truth or the
+parent implementation. Its purpose is narrower: give the assigned sidecar
+reviewer (`Codex`) a clean evidence summary for the current parent review state
+and remove stale packet text that no longer matches the live control plane.
 
-The key correction is simple:
+Current reality to preserve:
 
-- `ai-status.json` does **not** currently show `PBK-UI-004` as `done`.
-- `ai-status.json` currently shows `PBK-UI-004` as `todo`, owned by `Codex2`,
-  reviewed by `Codex`, and still gated on `PBK-UI-003`.
-- A historical commit `13104105d299eadd0b433596b2f173249dfbb5fc` exists in the
-  repo object database and matches the old packet's implementation story, but
-  it is **not** an ancestor of this task branch `HEAD` and it is **not** the
-  live control-plane claim for `PBK-UI-004` in the current `ai-status.json`.
+- The sidecar task `PBK-UI-004-SIDECAR-REVIEW` is in `review`, owned by
+  `Codex2`, reviewed by `Codex`.
+- The parent task `PBK-UI-004` is also in `review`, but its current structured
+  reviewer is `Codex2`, not `Codex`.
+- The parent implementation evidence lives on branch `claude2/pbk-ui-004`
+  (`origin/claude2/pbk-ui-004`), mainly in commits `f8da53e` and `63f6aef`.
+- Dependency `PBK-UI-003` is already `done` on commit
+  `89b5a96840987e6caac94d251e76dcbc40f83ce8`.
 
 Anchors used here:
 
-- `ai-status.json`
+- `/home/edna/workspace/drts-fleet-platform/ai-status.json`
 - `apps/partner-booking-web/README.md`
-- `docs/01-decisions/SD-DP-20260512-006-partner-booking-app-cutover-topology.md`
-- `git show --stat --summary 13104105d299eadd0b433596b2f173249dfbb5fc`
-- `git branch -a --contains 13104105d299eadd0b433596b2f173249dfbb5fc`
-- `git cat-file -e HEAD:<path>` path-presence checks
+- `git show --stat --summary f8da53e`
+- `git show --stat --summary 63f6aef`
+- `git branch -a --contains f8da53e`
+- `git branch -a --contains 63f6aef`
 
 ## §1 Scope & Boundary
 
 - **Task ID:** `PBK-UI-004-SIDECAR-REVIEW`
 - **Parent Task:** `PBK-UI-004`
 - **Helper Kind:** `review_packet`
-- **Dispatch owner / reviewer:** `Codex2` -> `Codex`
+- **Sidecar Owner / Reviewer:** `Codex2` -> `Codex`
 - **Mutates Canonical:** `false`
-- **Objective:** provide a reviewer-facing packet for `PBK-UI-004` without
-  editing runtime code, L1/L2 product truth, or the parent task's canonical
-  implementation surface.
+- **Objective:** refresh the packet so it matches current machine truth and the
+  active parent review evidence, without editing runtime code or L1/L2 truth.
 
 Guardrails for this packet:
 
-- Only the artifact under `support/sidecars/PBK-UI-004/` is touched.
-- Any machine-truth transition must go through `scripts/ai-status.sh`, not
-  manual edits to `ai-status.json`, `current-work.md`, or the log files.
-- This packet does not silently convert historical off-branch evidence into
-  current-branch acceptance.
+- Only `support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-REVIEW.md` is changed by
+  this sidecar branch.
+- Any machine-truth state transition belongs in `scripts/ai-status.sh`, not in
+  manual edits to `ai-status.json`, `current-work.md`, or activity logs.
+- Approval of this sidecar packet is not approval of the parent implementation;
+  it only confirms the packet faithfully summarizes the current review state.
 
 ## §2 Machine-Truth Anchors
+
+### Sidecar task: `PBK-UI-004-SIDECAR-REVIEW`
+
+| Field | Value |
+| --- | --- |
+| Title | `Prepare PBK-UI-004 review packet and evidence summary` |
+| Owner | `Codex2` |
+| Reviewer | `Codex` |
+| Status | `review` |
+| Depends on | `PBK-UI-003` |
+| `task_class` | `sidecar` |
+| `helper_kind` | `review_packet` |
+| `mutates_canonical` | `false` |
+| Artifact | `support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-REVIEW.md` |
+| `last_update` | `2026-05-18T07:36:14Z` |
+
+The sidecar task's current `next` text says the packet was refreshed for a
+then-current `Claude2` -> `Codex` parent handoff. That summary is now slightly
+stale because the parent reviewer has since been reassigned again. The sidecar
+reviewer, however, is still `Codex`.
 
 ### Parent task: `PBK-UI-004`
 
@@ -52,214 +73,175 @@ Guardrails for this packet:
 | --- | --- |
 | Title | `Authority-safe negative paths` |
 | Phase | `Wave 5` |
-| Owner | `Codex2` |
-| Reviewer | `Codex` |
-| Status | `todo` |
+| Owner | `Claude2` |
+| Reviewer | `Codex2` |
+| Status | `review` |
 | Depends on | `PBK-UI-003` |
 | Planning ref | `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md` |
 | Acceptance | `pnpm --filter @drts/partner-booking-web typecheck / build / lint`; `Storybook 對照對應 PB_* artboard (PBK-UI-003 起)` |
-| `last_update` | `2026-05-12T18:55:03Z` |
-| Current `next` | `Chairman reassigned reviewer from Claude to Codex: Claude lane is capacity-paused. Preemptively move the reviewer slot to healthy Codex so the task will not stall on reviewer assignment once its dependency clears.` |
-| Pending handoff | `Claude` -> `Codex` at `2026-05-12T18:55:03Z` |
+| `last_update` | `2026-05-18T07:46:24Z` |
 
-Implications:
+Important nuance:
 
-- The parent is **not** in `review`.
-- The parent is **not** in `review_approved`.
-- The parent is **not** in `done`.
-- This packet therefore supports future review and present-day reviewer
-  orientation; it is not proof that the parent already passed acceptance on
-  this branch.
+- The parent's structured fields currently route the live parent review to
+  `Codex2`.
+- The parent's free-text `next` field was overwritten by a later sidecar note
+  and still says "Current machine truth remains PBK-UI-004=todo with reviewer
+  Codex...". That sentence is stale and should **not** override the structured
+  `owner` / `reviewer` / `status` fields above.
+- The latest pending handoff row confirms the live parent reviewer movement:
+  `Codex` -> `Codex2` at `2026-05-18T07:43:14Z`.
 
-### Direct dependency: `PBK-UI-003`
+### Dependency: `PBK-UI-003`
 
 | Field | Value |
 | --- | --- |
 | Title | `CTBC reference funnel — 7 screens` |
-| Owner | `Codex2` |
-| Reviewer | `Codex` |
-| Status | `in_progress` |
-| Depends on | `PBK-UI-002` |
-| `last_update` | `2026-05-12T20:08:40Z` |
-| Current `next` | `Continuing CTBC 7-screen partner booking funnel implementation and verification in apps/partner-booking-web.` |
+| Owner | `Claude2` |
+| Reviewer | `Gemini2` |
+| Status | `done` |
+| Commit | `89b5a96840987e6caac94d251e76dcbc40f83ce8` |
+| Commit subject | `fix(PBK-UI-003): drop redundant @drts/ui-web path-map` |
+| Push | `origin/claude2/pbk-ui-003` |
+| `last_update` | `2026-05-18T07:03:36Z` |
 
-This dependency state matters: `PBK-UI-004` is not reviewable as a completed
-parent slice while its only prerequisite is still `in_progress`.
+This means the parent dependency gate is now satisfied. The sidecar packet no
+longer needs to speak about `PBK-UI-003` as `in_progress`.
 
-### This sidecar task: `PBK-UI-004-SIDECAR-REVIEW`
+## §3 Parent Review Handoff Trail
 
-The dispatch brief for this slice says:
+The most relevant recent handoffs are:
 
-| Field | Value | Source |
-| --- | --- | --- |
-| Owner | `Codex2` | dispatch brief |
-| Reviewer | `Codex` | dispatch brief |
-| Status | `review` | dispatch brief |
-| `task_class` | `sidecar` | expected sidecar shape |
-| `helper_kind` | `review_packet` | dispatch brief |
-| `mutates_canonical` | `false` | dispatch brief |
-| Artifact | `support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-REVIEW.md` | repo |
-
-Control-plane gap to note explicitly:
-
-- `PBK-UI-004-SIDECAR-REVIEW` is **not present** as a task row in the current
-  `ai-status.json`.
-- That means the packet can be refreshed now, but a formal sidecar
-  `approve`/`done` transition cannot be recorded until the task is materialized
-  in machine truth by the normal supervisor flow.
-
-## §3 Reviewer Handoff Trail For The Parent
-
-The parent reviewer slot moved several times while the task stayed pre-review.
-The live endpoint is `Codex`, not `Claude2` and not `Claude`.
-
-| Timestamp | Handoff | Status | Meaning |
+| Timestamp | Handoff | Status | Why it matters |
 | --- | --- | --- | --- |
-| `2026-05-10T12:21:05Z` | `Gemini` -> `Claude2` | done | owner moved off a paused lane |
-| `2026-05-10T12:47:43Z` | `Claude2` -> `Codex2` | done | owner aligned with the partner-booking chain |
-| `2026-05-11T02:52:55Z` | `Codex` -> `Claude2` | done | reviewer temporarily moved off the degraded Codex lane |
-| `2026-05-12T15:53:44Z` | `Claude2` -> `Claude` | done | reviewer moved off the capacity-paused Claude2 lane |
-| `2026-05-12T18:55:03Z` | `Claude` -> `Codex` | pending | current live reviewer handoff |
+| `2026-05-18T07:17:11Z` | `Codex2` -> `Claude2` | done | parent owner moved back to a healthy lane |
+| `2026-05-18T07:21:28Z` | `Claude2` -> `Codex` | done | parent entered review with concrete implementation evidence |
+| `2026-05-18T07:43:14Z` | `Codex` -> `Codex2` | pending | parent reviewer moved again after Codex terminal retries |
 
-This packet intentionally updates all reviewer-facing notes to point at
-`Codex` as the active reviewer destination.
+Reviewer routing consequence:
 
-## §4 Current Branch Baseline
+- `Codex` reviews this **sidecar packet**.
+- `Codex2` is the currently structured reviewer for the **parent task**.
 
-Current branch / `HEAD` context:
+The packet must keep those two roles distinct.
 
-- branch: `codex/pbk-ui-004-sidecar-review`
-- `HEAD`: `73038d6` (`OPS-DISPATCH-METRICS: skip active queue events in occupancy`)
+## §4 Parent Implementation Evidence
 
-What the current worktree actually contains for partner booking:
+The parent review evidence lives on branch `claude2/pbk-ui-004`
+(`origin/claude2/pbk-ui-004`), not on this sidecar branch.
 
-| Path | Present at `HEAD`? | Notes |
-| --- | --- | --- |
-| `apps/partner-booking-web/README.md` | yes | documents the future direct-route rule for `PBK-UI-004` |
-| `apps/partner-booking-web/AGENTS.md` | yes | repo-local guidance only |
-| `apps/partner-booking-web/app/[tenantSlug]/[routeState]/page.tsx` | no | missing at current `HEAD` |
-| `apps/partner-booking-web/app/[tenantSlug]/page.tsx` | no | missing at current `HEAD` |
-| `apps/partner-booking-web/lib/route-state.ts` | no | missing at current `HEAD` |
-| `packages/ui-web/src/partner-booking-funnel.tsx` | no | missing at current `HEAD` |
+### Commit `f8da53e` — PBK-UI-003 scaffolding import
 
-Additional baseline observations:
+`git show --stat --summary f8da53e` confirms:
 
-- `apps/partner-booking-web/README.md` already states that the canonical
-  authority-safe negative paths will be direct routes:
-  `/[tenantSlug]/eligible`, `/[tenantSlug]/ineligible`,
-  `/[tenantSlug]/manual_review`, `/[tenantSlug]/inactive`, and
-  `/[tenantSlug]/eligibility-required`.
-- That README text is a useful intent anchor, but it is not implementation
-  evidence by itself.
-- The planning-ref path
-  `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md` is referenced by
-  `ai-status.json` and by the accepted `PBK-UI-005` decision doc, but that file
-  is not present in this worktree. For this refresh, the packet therefore
-  relies on visible repo anchors plus the machine-truth task fields.
-
-## §5 Historical Off-Branch Evidence
-
-The repo still contains the historical commit
-`13104105d299eadd0b433596b2f173249dfbb5fc`
-(`feat(PBK-UI-004): preserve authority-safe partner negative paths`).
-
-What `git show --stat --summary 13104105...` confirms:
-
-- trailer: `LLM-Agent: Codex2`
-- trailer: `Task-ID: PBK-UI-004`
-- trailer: `Reviewer: Codex`
-- trailer verification string:
-  `pnpm --filter @drts/partner-booking-web typecheck; ... build; ... lint; pnpm --filter @drts/ui-web build-storybook`
-- six-file diff:
-  - `apps/partner-booking-web/README.md`
-  - `apps/partner-booking-web/app/[tenantSlug]/[routeState]/page.tsx`
-  - `apps/partner-booking-web/app/[tenantSlug]/page.tsx`
-  - `apps/partner-booking-web/lib/route-state.ts`
-  - `packages/ui-web/src/index.tsx`
+- subject:
+  `PBK-UI-004: import PBK-UI-003 base scaffolding (wip anchor)`
+- branch containment:
+  `claude2/pbk-ui-004`, `origin/claude2/pbk-ui-004`
+- 30-file import including:
+  - `apps/partner-booking-web/app/[tenantSlug]/(public|authenticated)/*`
+  - `apps/partner-booking-web/lib/brand.ts`
+  - `packages/ui-tokens/src/brands.ts`
   - `packages/ui-web/src/partner-booking-funnel.tsx`
+  - `packages/ui-web/src/partner-booking.stories.tsx`
 
-What the current branch checks confirm:
+This anchor matters because the negative-path work was not built on the sparse
+README-only partner-booking baseline in this sidecar worktree. It was built on
+top of the full PBK-UI-003 funnel surface imported into the owner branch.
 
-- `git merge-base --is-ancestor 13104105... HEAD` returns exit code `1`
-  on this task branch.
-- `git branch -a --contains 13104105...` lists
-  `feat/claude2-ui-redesign-foundation` and
-  `remotes/origin/feat/claude2-ui-redesign-foundation`, but not
-  `codex/pbk-ui-004-sidecar-review`.
-- The current `HEAD` contains only the README from that six-file surface, not
-  the route/page/funnel implementation files.
+### Commit `63f6aef` — authority-safe negative paths
 
-Reviewer consequence:
+`git show --stat --summary 63f6aef` confirms:
 
-- This historical commit explains where the stale packet's earlier
-  parent-`done` narrative came from.
-- It must **not** be presented as current-branch completion evidence unless the
-  control plane is updated to point back to that commit and the branch / push
-  evidence is re-established for the active task state.
+- subject: `PBK-UI-004: preserve authority-safe negative paths`
+- branch containment:
+  `claude2/pbk-ui-004`, `origin/claude2/pbk-ui-004`
+- 15-file diff including the key review surface:
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/eligible/page.tsx`
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/ineligible/page.tsx`
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/manual_review/page.tsx`
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/inactive/page.tsx`
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/eligibility-required/page.tsx`
+  - `apps/partner-booking-web/lib/render-state-gate.tsx`
+  - `packages/ui-web/src/partner-booking-funnel.tsx`
+  - `packages/ui-web/src/index.tsx`
+  - `docs/05-ui/drts-design-canvas/Partner Booking.html`
+  - `docs/05-ui/drts-design-canvas/partner-screens.jsx`
 
-## §6 Interaction With PBK-UI-005
+The commit message itself records the intended semantics:
 
-`docs/01-decisions/SD-DP-20260512-006-partner-booking-app-cutover-topology.md`
-still treats `PBK-UI-004` as a readiness gate:
+- the five negative states are explicit `/<tenantSlug>/<state>` routes
+- each route delegates to `renderPartnerStateGate`
+- the shared UI surface is `@drts/ui-web/PartnerBookingStateGate`
+- review assets for `PB_Eligible`, `PB_Ineligible`, `PB_ManualReview`,
+  `PB_Inactive`, and `PB_EligibilityRequired` were added under
+  `docs/05-ui/drts-design-canvas/`
 
-- repo-local live-routing work waits on `PBK-UI-003` parity
-- repo-local live-routing work also waits on `PBK-UI-004` negative-path parity
+## §5 Parent Review Evidence Summary
 
-That decision doc is useful context, but it is not substitute evidence that
-`PBK-UI-004` is complete on the current task branch. The decision is accepted;
-the implementation slice is not yet recorded as accepted in current machine
-truth.
+The active parent review handoff from `Claude2` recorded these concrete claims:
 
-## §7 Reviewer Checklist
+- the five authority-safe negative paths were ported into
+  `apps/partner-booking-web/app/[tenantSlug]/(public)/`
+- the implementation uses `renderPartnerStateGate` and
+  `PartnerBookingStateGate` from `@drts/ui-web`
+- acceptance reruns passed:
+  `pnpm --filter @drts/partner-booking-web typecheck / lint / build`
+- the Next build registered all five negative-path routes alongside the
+  `PBK-UI-003` funnel
+- design-canvas references for the five `PB_*` negative-path artboards were
+  added for reviewer spot checks
 
-These are the checks that matter for the refreshed packet itself.
+This packet does not re-run those commands. It consolidates the branch, commit,
+and handoff anchors that the current parent reviewer lane should use.
+
+## §6 Sidecar Scope Guardrails
+
+- This sidecar branch only changes the packet file under
+  `support/sidecars/PBK-UI-004/`.
+- The parent implementation evidence belongs to branch `claude2/pbk-ui-004`,
+  not to this sidecar branch.
+- The packet must not claim that `Codex` is still the active parent reviewer.
+  That was true earlier in the day but is no longer the current structured
+  state.
+- The packet must not treat the parent's stale free-text `next` string as
+  stronger truth than the structured task fields plus pending handoff row.
+
+## §7 Reviewer Checklist For This Sidecar
 
 ### A. Machine truth
 
-- [ ] `ai-status.json` still records `PBK-UI-004` as owner `Codex2`,
-      reviewer `Codex`, status `todo`, depends on `PBK-UI-003`, and carries the
-      pending reviewer handoff from `Claude` to `Codex`.
-- [ ] `ai-status.json` still records `PBK-UI-003` as `in_progress`. If it moves
-      to `done`, refresh this packet's dependency section before using it as
-      review support.
-- [ ] If `PBK-UI-004-SIDECAR-REVIEW` is later materialized into
-      `ai-status.json`, confirm its row matches the dispatch brief:
-      owner `Codex2`, reviewer `Codex`, `task_class=sidecar`,
-      `helper_kind=review_packet`, `mutates_canonical=false`, artifact path
-      under `support/sidecars/PBK-UI-004/`.
+- [ ] `PBK-UI-004-SIDECAR-REVIEW` still shows owner `Codex2`, reviewer `Codex`,
+      status `review`, helper kind `review_packet`, and artifact path under
+      `support/sidecars/PBK-UI-004/`.
+- [ ] `PBK-UI-004` still shows structured fields
+      `owner=Claude2`, `reviewer=Codex2`, `status=review`.
+- [ ] `PBK-UI-003` still shows `done` on commit
+      `89b5a96840987e6caac94d251e76dcbc40f83ce8`.
 
-### B. Repo state
+### B. Evidence branch
 
-- [ ] Do not approve `PBK-UI-004` based only on `apps/partner-booking-web/README.md`.
-- [ ] Do not treat the existence of commit `13104105...` elsewhere in the repo
-      as current-branch proof.
-- [ ] Require the active implementation branch or recorded closeout branch to
-      actually contain the route-state, page, and funnel files before accepting
-      parent completion.
-- [ ] If the eventual parent closeout again relies on `13104105...` or a
-      descendant, require `ai-status.json` to record that commit and its push
-      metadata explicitly instead of inferring it from historical packet text.
+- [ ] `git branch -a --contains f8da53e` lists `claude2/pbk-ui-004` and
+      `origin/claude2/pbk-ui-004`.
+- [ ] `git branch -a --contains 63f6aef` lists `claude2/pbk-ui-004` and
+      `origin/claude2/pbk-ui-004`.
+- [ ] The negative-path surface described in §4 is present on the owner branch
+      evidence commits, not merely in packet prose.
 
-### C. Sidecar scope
+### C. Sidecar-only hygiene
 
-- [ ] The only task-scoped content edit for this sidecar slice is this file.
-- [ ] No runtime code, no L1/L2 truth docs, and no parent implementation files
-      were edited by this refresh.
+- [ ] The only task-scoped content change for this sidecar is this packet file.
+- [ ] No parent runtime files, no canonical product docs, and no `ai-status`
+      content were hand-edited by the sidecar patch.
 
 ## §8 Reviewer Handoff Notes
 
-1. This refresh removes two stale narratives from the previous packet:
-   sidecar-reviewer `Codex2`, and parent-task `done`.
-2. The live parent reviewer endpoint is `Codex` because the latest unresolved
-   handoff is `Claude` -> `Codex` at `2026-05-12T18:55:03Z`.
-3. The parent task itself is still pre-review. The only dependency
-   `PBK-UI-003` is still `in_progress`, so this packet should be read as
-   reviewer orientation and evidence hygiene, not as parent acceptance.
-4. The repo does contain a historical implementation commit `13104105...`, but
-   it is off-branch relative to this task worktree. Keep that distinction
-   explicit whenever this packet is cited.
-5. The sidecar task row is currently missing from `ai-status.json` in this
-   worktree. Until supervisor or owner materializes that row, formal sidecar
-   `approve` / `done` recording cannot happen through `scripts/ai-status.sh`.
-6. Any later machine-truth movement should stay script-driven. Do not hand-edit
-   `ai-status.json`, `current-work.md`, or log files to "catch up" the packet.
+1. This refresh makes the reviewer split explicit: `Codex` reviews the sidecar
+   packet, while `Codex2` is now the structured reviewer for the parent task.
+2. The parent task's free-text `next` field is stale. Use the structured fields
+   plus the latest pending handoff row when deciding who currently owns parent
+   review.
+3. The sidecar packet now points at the correct implementation evidence branch:
+   `claude2/pbk-ui-004`, specifically commits `f8da53e` and `63f6aef`.
+4. Approval of this sidecar means the packet is accurate and reviewer-usable.
+   It does not approve or close out `PBK-UI-004` itself.
