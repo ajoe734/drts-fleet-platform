@@ -306,7 +306,6 @@ type SearchParamInput = Promise<{
   create?: string;
   edit?: string;
   emptyReason?: string;
-  engine?: string;
   success?: string;
   error?: string;
 }>;
@@ -548,6 +547,18 @@ function getPageActions(engineActive: boolean): ResourceActionDescriptor[] {
       riskLevel: "medium",
     },
   ];
+}
+
+function formatRetryPolicy(
+  retryPolicy:
+    | TenantWebhookEndpoint["retryPolicy"]
+    | TenantIntegrationGovernancePackage["webhookPolicy"]["retryPolicy"]
+    | null
+    | undefined,
+) {
+  if (!retryPolicy) return "—";
+
+  return `${retryPolicy.maxAttempts} attempts · base ${retryPolicy.initialBackoffSeconds}s × ${retryPolicy.backoffMultiplier} · max ${retryPolicy.maxBackoffSeconds}s`;
 }
 
 function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
@@ -998,17 +1009,21 @@ export default async function WebhooksPage({
         (delivery) => delivery.webhookId === selectedWebhookId,
       )
     : data.deliveries;
-  const engineActive =
-    resolvedSearchParams.engine === "inactive" ? false : true;
   const endpointRows = buildEndpointRows(data.endpoints, data.deliveries);
   const deliveryRows = buildDeliveryRows(selectedDeliveries, data.endpoints);
-  const allPageActions = getPageActions(engineActive);
   const failureClusterCount = data.deliveries.filter(
     (delivery) => delivery.status === "delivery_failed",
   ).length;
   const queuedCount = data.deliveries.filter(
     (delivery) => delivery.status === "queued",
   ).length;
+  const selectedEndpointFailures = selectedEndpoint
+    ? data.deliveries.filter(
+        (delivery) =>
+          delivery.webhookId === selectedEndpoint.webhookId &&
+          delivery.status === "delivery_failed",
+      ).length
+    : 0;
   const deliveryTargetLabel = selectedWebhookId
     ? `Endpoint ${selectedWebhookId} delivery log`
     : "近 24h 全部 webhook deliveries";
@@ -1030,8 +1045,6 @@ export default async function WebhooksPage({
     emptyReasonWhitelist.includes(requestedEmptyReason as EmptyReason)
   ) {
     emptyReason = requestedEmptyReason as EmptyReason;
-  } else if (!engineActive) {
-    emptyReason = "not_provisioned";
   } else if (data.errors.length > 0 && endpointRows.length === 0) {
     emptyReason = "fetch_failed";
   } else if (endpointRows.length === 0) {
@@ -1040,6 +1053,8 @@ export default async function WebhooksPage({
     emptyReason = "filtered_empty";
   }
 
+  const engineActive = emptyReason !== "not_provisioned";
+  const allPageActions = getPageActions(engineActive);
   const emptyModel = emptyReason ? getEmptyStateModel(emptyReason) : null;
   const refreshAge = Math.max(
     0,
@@ -1227,6 +1242,24 @@ export default async function WebhooksPage({
           />
         ) : null}
 
+        {failureClusterCount > 0 ? (
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title="Webhook failure cluster detected"
+            body={`目前有 ${failureClusterCount} 筆 delivery_failed。請先聚焦失敗 endpoint，再視需要到 Platform Admin health / queue 檢查。`}
+          />
+        ) : queuedCount > 0 ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="clock"
+            title="Webhook retries are pending"
+            body={`目前有 ${queuedCount} 筆 queued delivery 正等待 engine 自動重試；這不是資料遺失，而是 retry policy 正在生效。`}
+          />
+        ) : null}
+
         <div style={metaGridStyle}>
           <div style={metaCardStyle}>
             <span style={metaLabelStyle}>Refresh Tier</span>
@@ -1254,6 +1287,19 @@ export default async function WebhooksPage({
             </span>
             <span style={helperTextStyle}>
               generated {formatDateTime(data.governance?.generatedAt)}
+            </span>
+          </div>
+
+          <div style={metaCardStyle}>
+            <span style={metaLabelStyle}>Retry Policy</span>
+            <span style={metaValueStyle}>
+              {formatRetryPolicy(data.governance?.webhookPolicy.retryPolicy)}
+            </span>
+            <span style={helperTextStyle}>
+              auto-disable after{" "}
+              {data.governance?.webhookPolicy
+                .autoDisableAfterConsecutiveFailures ?? "—"}{" "}
+              consecutive failures
             </span>
           </div>
 
@@ -1336,9 +1382,40 @@ export default async function WebhooksPage({
                           )}
                         </div>
                       </div>
+                      <div>
+                        <div style={cardSectionLabelStyle}>Retry Policy</div>
+                        <div style={metaValueStyle}>
+                          {formatRetryPolicy(
+                            selectedEndpoint.retryPolicy ??
+                              data.governance?.webhookPolicy.retryPolicy,
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={cardSectionLabelStyle}>Validation</div>
+                        <div style={metaValueStyle}>
+                          last validated{" "}
+                          {formatDateTime(
+                            selectedEndpoint.runtimeMetadata?.lastValidatedAt,
+                          )}
+                          {selectedEndpoint.runtimeMetadata?.nextAttemptAt
+                            ? ` · next retry ${formatRelativeTime(selectedEndpoint.runtimeMetadata.nextAttemptAt)}`
+                            : ""}
+                        </div>
+                      </div>
                     </div>
 
                     <div style={dividerStyle} />
+
+                    {selectedEndpointFailures > 0 ? (
+                      <CanvasBanner
+                        theme={th}
+                        tone="danger"
+                        icon="warn"
+                        title="Selected endpoint has recent failed deliveries"
+                        body={`${selectedEndpoint.webhookId} 目前有 ${selectedEndpointFailures} 筆失敗投遞。若 receiver 已修復，可等待 engine 自動 retry，或到 Platform Admin 交叉檢查 queue / health。`}
+                      />
+                    ) : null}
 
                     <div style={actionRowStyle}>
                       {getEndpointActions(selectedEndpoint).map(
