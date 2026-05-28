@@ -236,7 +236,7 @@ type QuickActionTile = {
   href: string;
   description: string;
   label: string;
-  descriptor?: ResourceActionDescriptor;
+  descriptor?: ResourceActionDescriptor | undefined;
   external?: boolean;
 };
 
