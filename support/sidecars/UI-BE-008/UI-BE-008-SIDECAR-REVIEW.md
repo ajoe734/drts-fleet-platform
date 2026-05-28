@@ -1,171 +1,146 @@
 # UI-BE-008 Sidecar Review Packet
 
 - Sidecar Task: `UI-BE-008-SIDECAR-REVIEW`
-- Sidecar Owner / Reviewer: `Codex` / `Claude`
-- Parent Task: `UI-BE-008` - DriverOpsInstruction module (ops issues, driver receives)
-- Parent Owner / Reviewer: `Gemini` / `Codex2`
+- Sidecar Status: `review_approved` owner closeout support
+- Sidecar Owner / Reviewer: `Codex` / `Claude2`
+- Parent Task: `UI-BE-008`
 - Helper Kind: `review_packet`
 - Class: support-only; no canonical-truth mutation
-- Date: 2026-05-27
+- Last refreshed: `2026-05-28`
 
 ## Purpose
 
-Provide a reviewer-ready packet for `UI-BE-008` without changing canonical
-truth or parent runtime code. This sidecar exists to hand `Claude` one place
-to inspect:
-
-1. the parent task's current machine-truth position;
-2. the dependency and contract anchors that define the slice;
-3. the evidence that already exists before implementation starts; and
-4. the exact review focus the parent owner/reviewer should preserve once the
-   implementation lands.
-
-Because parent `UI-BE-008` is still `backlog` in machine truth, this packet is
-pre-implementation support material, not a completion claim.
+This packet is the closeout-time reviewer handoff for `UI-BE-008`. It does not
+change parent runtime code or any L1/L2 canonical truth. It only records the
+supporting evidence that the shipped `UI-BE-008` slice matches the approved
+review anchors from commits `b3681f5f` and `f6f8aa8c`.
 
 ## Scope Boundary
 
 Allowed:
 
-- create one support artifact under `support/sidecars/UI-BE-008/`
-- summarize machine-truth, planning, contract, and design anchors
-- prepare reviewer handoff notes for the eventual parent implementation review
+- refresh this sidecar artifact
+- summarize shipped-tree evidence for reviewer reuse
+- record commit, contract, migration, and test anchors
 
 Not allowed:
 
-- editing L1/L2 canonical truth
-- editing parent runtime code, contracts, or planning docs
-- changing the parent task lifecycle or claiming parent acceptance is complete
-- inventing implementation evidence that does not yet exist
+- edit parent implementation
+- edit canonical product truth or governance docs
+- restate support notes as new runtime truth
 
-## Machine-Truth Anchors
+## Shipped Commit Anchors
 
-### Sidecar task intent
+- `b3681f5f` — `UI-BE-008: enforce durable driver instruction persistence`
+- `f6f8aa8c` — `UI-BE-008: finalize closeout`
 
-- `id`: `UI-BE-008-SIDECAR-REVIEW`
-- `owner`: `Codex`
-- `reviewer`: `Claude`
-- `helper_parent`: `UI-BE-008`
-- `helper_kind`: `review_packet`
-- `mutates_canonical`: `false`
-- artifact path:
-  `support/sidecars/UI-BE-008/UI-BE-008-SIDECAR-REVIEW.md`
+Closeout trailer anchor from `f6f8aa8c`:
 
-### Parent task snapshot
-
-- `id`: `UI-BE-008`
-- `status`: `backlog`
-- `owner`: `Gemini`
-- `reviewer`: `Codex2`
-- `depends_on`: `UI-BE-003`
-- `artifacts`: `apps/api/src/modules/driver-instruction/`
-- `acceptance`: `Storage + ops-side create + driver-side read; expiresAt handling; vitest`
-- `planning_ref`:
-  `docs/03-runbooks/phase1-ui-implementation-wave-planning-20260525.md`
-
-Implication:
-
-- this sidecar may prepare reviewer context, but it cannot claim code landed or
-  tests passed because machine truth still places the parent before execution.
-
-### Dependency snapshot
-
-- `UI-BE-003` status: `backlog`
-- `UI-BE-003` owner / reviewer: `Codex2` / `Claude`
-- `UI-BE-003` acceptance:
-  `Endpoints implemented; per-realm filter works; vitest covers 5+ event types from Q-X06 taxonomy`
-
-Reviewer implication:
-
-- `UI-BE-008` depends on notification infrastructure but should still own its
-  own instruction storage, ops create flow, driver read flow, and ack flow.
-- parent review should verify that `UI-BE-008` consumes the notification slice
-  without redefining notification taxonomy locally.
-
-## Product And Contract Anchors
-
-These are the authoritative anchors this sidecar found for the future parent
-review:
-
-- [packages/contracts/src/ui-runtime.ts](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-ui-be-008-sidecar-review/packages/contracts/src/ui-runtime.ts:305)
-  defines `DriverOpsInstruction` with `instructionId`, `taskId`, `message`,
-  `issuedBy`, `issuedAt`, and optional `expiresAt`.
-- [docs/03-runbooks/phase1-ui-implementation-wave-planning-20260525.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-ui-be-008-sidecar-review/docs/03-runbooks/phase1-ui-implementation-wave-planning-20260525.md:82)
-  records the parent task scope and acceptance.
-- [docs/03-runbooks/phase1-ui-implementation-wave-planning-20260525.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-ui-be-008-sidecar-review/docs/03-runbooks/phase1-ui-implementation-wave-planning-20260525.md:117)
-  records the dependency chain `UI-BE-003 -> UI-BE-008 -> UI-CL-005`.
-- [docs/05-ui/driver-app-design-handoff-packet-20260525.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-ui-be-008-sidecar-review/docs/05-ui/driver-app-design-handoff-packet-20260525.md:449)
-  states the driver app receives `DriverOpsInstruction` with
-  `instructionId`, `taskId`, `message`, `issuedBy`, `issuedAt`, and
-  `expiresAt?`.
-- [docs/05-ui/driver-app-design-handoff-packet-20260525.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-ui-be-008-sidecar-review/docs/05-ui/driver-app-design-handoff-packet-20260525.md:701)
-  records the unresolved display behavior question for `/trip` manual fallback
-  banner auto-dismiss versus static handling after `expiresAt`.
-- [docs/02-architecture/driver-platform-binding-and-offline-contract-20260524.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-ui-be-008-sidecar-review/docs/02-architecture/driver-platform-binding-and-offline-contract-20260524.md:14)
-  ties `DriverOpsInstruction` to driver-platform binding and offline/manual
-  fallback behavior.
+- `LLM-Agent: Codex`
+- `Task-ID: UI-BE-008`
+- `Reviewer: Codex2`
+- `Verification: pnpm exec vitest run tests/unit/driver-instruction.repository.test.ts; pnpm --filter @drts/api exec vitest run tests/unit/driver-instruction.service.test.ts; pnpm --filter @drts/api typecheck`
 
 ## Evidence Summary
 
-This sidecar can only summarize evidence that already exists before the parent
-implementation:
+### Contract anchor
 
-| Review point | Status | Evidence anchor | Why it matters |
-| --- | --- | --- | --- |
-| Parent task is registered with explicit acceptance and artifact target | `met` | `ai-status.json` task record for `UI-BE-008`; planning packet §4 Layer 1 | Confirms the slice is formally dispatched work, not an ad hoc idea. |
-| Dependency on notifications is explicit | `met` | `ai-status.json` dependency record; planning dependency graph | Prevents the parent from silently re-implementing notification behavior. |
-| Contract shape for `DriverOpsInstruction` already exists | `met` | `packages/contracts/src/ui-runtime.ts` | Parent implementation should emit this exact shape instead of inventing a local DTO. |
-| Driver-app consumer expectation is already specified | `met` | driver-app handoff packet `/trip` instruction banner anchors | Parent API review must check backend fields against an already-defined consumer. |
-| `expiresAt` is part of both acceptance and product framing | `met-with-note` | planning acceptance; contract field; driver-app open question | Parent tests must cover expiry semantics, but the product packet still leaves presentation nuance open. |
-| Runtime implementation evidence exists today | `not-yet` | no `apps/api/src/modules/driver-instruction/` module found in this worktree | Important guardrail: this packet must not overclaim code or tests that do not exist yet. |
+- `packages/contracts/src/ui-runtime.ts:305` defines `DriverOpsInstruction`
+  for `Q-DRV04` with `instructionId`, `taskId`, `message`, `issuedBy`,
+  `issuedAt`, and optional `expiresAt`.
+- The contract comment ties the record to manual-fallback driver coordination,
+  which matches the parent task scope instead of inventing a local DTO.
 
-Result: 4 review points `met`, 1 review point `met-with-note`, 1 review point
-`not-yet`.
+### Persistence and migration anchor
 
-## Expected Parent Review Focus
+- `infra/migrations/V0025__driver_ops_instructions.sql:1` creates
+  `ops.phase1_driver_ops_instructions`.
+- The migration persists `instruction_id`, `driver_id`, `task_id`,
+  `issued_at`, `expires_at`, `acknowledged_at`, `updated_at`, and `record`,
+  with indexes on driver, task, updated time, and non-null expiry.
+- This matches the durable-storage requirement called out by the parent task
+  and the later persistence-hardening commit `b3681f5f`.
 
-When `UI-BE-008` moves to implementation and later to `review`, the reviewer
-should verify at least these points:
+### Runtime anchor
 
-1. `DriverOpsInstruction` responses match the contract fields exactly, with no
-   local shape drift.
-2. Ops-side creation flow is separated from driver-side read and acknowledge
-   flow, with auth boundaries appropriate to each realm.
-3. `expiresAt` behavior is covered in vitest and reflected consistently in list
-   and acknowledge behavior, even if UI presentation timing remains a frontend
-   decision.
-4. The module composes with `UI-BE-003` notification infrastructure instead of
-   duplicating notification persistence or delivery semantics.
-5. The implementation lands under the declared artifact root
-   `apps/api/src/modules/driver-instruction/`.
+- `apps/api/src/modules/driver-instruction/driver-instruction.module.ts`
+  wires `DatabaseModule`, `AuditNotificationModule`,
+  `DriverInstructionRepository`, and `DriverInstructionService`.
+- `apps/api/src/modules/driver-instruction/driver-instruction.controller.ts`
+  exposes:
+  - `POST /ops/driver-instructions`
+  - `GET /driver/ops-instructions`
+  - `POST /driver/ops-instructions/:instructionId/acknowledge`
+- `apps/api/src/modules/driver-instruction/driver-instruction.service.ts`
+  enforces:
+  - ops/platform identity to issue instructions
+  - driver identity to list and acknowledge
+  - future-only `expiresAt`
+  - durable persistence before create/ack side effects become externally
+    visible
+  - linked notification cleanup on create persistence failure
+  - idempotent acknowledge after a successful pre-expiry ack
 
-## Reviewer Spot-Checks For This Sidecar
+### Repository anchor
 
-`Claude` should be able to review this sidecar by confirming:
+- `apps/api/src/modules/driver-instruction/driver-instruction.repository.ts`
+  loads and upserts JSON records in
+  `ops.phase1_driver_ops_instructions`.
+- `tests/unit/driver-instruction.repository.test.ts` contains 2 vitest cases:
+  - load persisted instructions from `ops.phase1_driver_ops_instructions`
+  - upsert persisted instructions into `ops.phase1_driver_ops_instructions`
 
-1. the packet stays inside support-artifact scope only;
-2. it truthfully states that parent `UI-BE-008` and dependency `UI-BE-003` are
-   both still `backlog`;
-3. every evidence claim is anchored to machine truth, contract files, or design
-   packet docs that already exist; and
-4. it does not treat planning or design references as shipped implementation.
+### Service-test anchor
 
-## Sidecar Acceptance Checklist
+- `apps/api/tests/unit/driver-instruction.service.test.ts` contains 9 vitest
+  cases covering:
+  - active unacknowledged list filtering for the current driver
+  - expired instruction hiding plus linked notification read-on-ack
+  - invalid and past expiry rejection
+  - missing required field rejection
+  - durable create gating before list exposure
+  - create persistence failure cleanup with no in-memory residue
+  - expired acknowledge rejection
+  - durable acknowledge gating before read-state transition
+  - idempotent acknowledge after later expiry
 
-- [x] Create support artifacts only
-- [x] Do not edit canonical truth
-- [x] Prepare reviewer handoff packet for `Claude`
+### Reopen fix anchors
 
-## Local Verification For This Sidecar
+Dispatch brief references reopen `#1` through `#4`. The shipped tree matches
+those fixes through the durable-persistence and ack-hardening coverage above:
 
-This slice is docs-only. Local verification should stay minimal:
+1. create path does not expose an instruction before persistence succeeds
+2. create persistence failure removes the linked notification and leaves no
+   residue
+3. acknowledge path does not mark the instruction read before persistence
+   succeeds
+4. acknowledge remains idempotent after a prior successful ack, even if the
+   instruction later expires
+
+These are anchored by commit `b3681f5f` plus the 9 service tests and 2
+repository tests named above.
+
+## Reviewer Handoff
+
+`Claude2` should treat this packet as support-only. The review question is not
+whether to change `UI-BE-008`; it is whether this packet truthfully summarizes
+what already shipped in `b3681f5f` and `f6f8aa8c`.
+
+Spot-checks:
+
+1. `Q-DRV04` contract anchor still matches the shipped backend shape.
+2. `V0025` migration and repository code prove durable persistence rather than
+   in-memory-only storage.
+3. The test inventory is accurately counted as 9 service cases and 2
+   repository cases.
+4. The packet does not claim to be canonical truth or new implementation.
+5. Closeout trailers quoted above match the shipped `f6f8aa8c` commit.
+
+## Local Verification
 
 - `git diff --check -- support/sidecars/UI-BE-008/UI-BE-008-SIDECAR-REVIEW.md`
 
-No parent implementation tests were run because the sidecar does not add or
-modify runtime code.
-
-## Files Added By This Sidecar
+## File Owned By This Sidecar
 
 ```text
 support/sidecars/UI-BE-008/UI-BE-008-SIDECAR-REVIEW.md
