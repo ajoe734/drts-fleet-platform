@@ -16,12 +16,12 @@ import {
   type ShiftRecord,
   type UnifiedDriverTaskView,
 } from "@drts/contracts";
-import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
 import {
   Banner,
   Btn,
   Card,
+  type CanvasTone,
   KPI,
   PageHeader,
   Pill,
@@ -484,10 +484,7 @@ function PrimaryAlertCard({
     >
       <View style={styles.alertBodyRow}>
         <View
-          style={[
-            styles.alertIconWrap,
-            { backgroundColor: `${accent.fg}25` },
-          ]}
+          style={[styles.alertIconWrap, { backgroundColor: `${accent.fg}25` }]}
         >
           <Ionicons name={item.iconName} size={16} color={accent.fg} />
         </View>
@@ -525,7 +522,9 @@ function PlatformStatusSwitch({ enabled }: { enabled: boolean }) {
       <View
         style={[
           styles.platformSwitchThumb,
-          enabled ? styles.platformSwitchThumbOn : styles.platformSwitchThumbOff,
+          enabled
+            ? styles.platformSwitchThumbOn
+            : styles.platformSwitchThumbOff,
         ]}
       />
     </View>
@@ -549,10 +548,7 @@ function PlatformPresenceRow({
       style={({ pressed }) => [pressed ? styles.tilePressed : null]}
     >
       <View
-        style={[
-          styles.platformRow,
-          !isLast ? styles.platformRowBorder : null,
-        ]}
+        style={[styles.platformRow, !isLast ? styles.platformRowBorder : null]}
       >
         <View style={styles.platformRowCopy}>
           <Text style={styles.platformRowName}>{row.name}</Text>
@@ -801,11 +797,7 @@ export default function WorkspaceIndex() {
       });
 
     return [ownedRow, ...externalRows];
-  }, [
-    externalPresences,
-    isDriverOnShift,
-    workspace.activeShift,
-  ]);
+  }, [externalPresences, isDriverOnShift, workspace.activeShift]);
 
   const onlinePlatformCount = useMemo(
     () => platformRows.filter((row) => row.enabled).length,

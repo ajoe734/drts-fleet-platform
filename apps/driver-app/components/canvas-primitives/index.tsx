@@ -11,10 +11,12 @@ import {
   View,
 } from "react-native";
 import {
-  buildCanvasTheme,
   type CanvasTheme,
   type CanvasTone,
-} from "@drts/ui-web/canvas-tokens";
+  buildCanvasTheme,
+} from "./canvas-theme";
+
+export type { CanvasTheme, CanvasTone } from "./canvas-theme";
 
 export type DriverCanvasTheme = CanvasTheme;
 
@@ -32,7 +34,6 @@ const MONO_FONT =
 
 export const driverCanvasTheme: DriverCanvasTheme = {
   ...buildCanvasTheme({
-    surface: "platform",
     dark: true,
     density: "compact",
   }),

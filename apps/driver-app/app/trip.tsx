@@ -16,11 +16,11 @@ import type {
   ForwardedDriverActionResponse,
   OwnedOrderRecord,
 } from "@drts/contracts";
-import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
 import {
   Banner,
   Btn,
+  type CanvasTone,
   Card,
   DL,
   Field,

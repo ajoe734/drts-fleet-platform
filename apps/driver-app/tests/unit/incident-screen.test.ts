@@ -131,6 +131,8 @@ describe("IncidentScreen", () => {
       findActionButton(renderer, "交通事故").props.onPress();
     });
 
+    expect(findLongPressButton(renderer).props.delayLongPress).toBe(2000);
+
     await act(async () => {
       findLongPressButton(renderer).props.onPress();
     });

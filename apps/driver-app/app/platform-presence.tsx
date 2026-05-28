@@ -15,11 +15,11 @@ import {
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
 } from "@drts/contracts";
-import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
 import {
   Banner,
   Btn,
+  type CanvasTone,
   KPI,
   PageHeader,
   Pill,
@@ -262,7 +262,10 @@ function PlatformCard({
 
           <View style={styles.platformMetaRow}>
             <View
-              style={[styles.platformStatusDot, { backgroundColor: statusColor }]}
+              style={[
+                styles.platformStatusDot,
+                { backgroundColor: statusColor },
+              ]}
             />
             <Text style={[styles.platformMetaText, { color: THEME.textMuted }]}>
               {getStatusLabel(item)}
@@ -384,9 +387,7 @@ function PlatformRulesBanner({ notes = [] }: { notes?: string[] }) {
     <Banner
       theme={THEME}
       tone="info"
-      icon={
-        <Ionicons name="information-circle" size={16} color={THEME.info} />
-      }
+      icon={<Ionicons name="information-circle" size={16} color={THEME.info} />}
       body={
         <View style={styles.infoBannerBody}>
           <Text
@@ -559,7 +560,8 @@ export default function PlatformPresenceScreen() {
     isPlatformSwitchOn(item.record),
   ).length;
   const availableCount = enrichedPresences.filter(
-    (item) => isPlatformSwitchOn(item.record) && item.assessment.canReceiveOrders,
+    (item) =>
+      isPlatformSwitchOn(item.record) && item.assessment.canReceiveOrders,
   ).length;
   const attentionCount = enrichedPresences.filter(needsAttention).length;
   const todayCompletedTotal = enrichedPresences.reduce(
@@ -668,7 +670,11 @@ export default function PlatformPresenceScreen() {
           label={driverStrings.platformPresence.kpis.available}
           value={String(availableCount)}
         />
-        <KPI theme={THEME} label="今日完成" value={String(todayCompletedTotal)} />
+        <KPI
+          theme={THEME}
+          label="今日完成"
+          value={String(todayCompletedTotal)}
+        />
         <KPI
           theme={THEME}
           label={driverStrings.platformPresence.kpis.attention}
