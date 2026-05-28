@@ -4,16 +4,21 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  ActionReceipt,
   BookingRecord,
   ResourceActionDescriptor,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
-import { formatDateTime, isFutureIso } from "@/lib/formatters";
+import {
+  formatDateTime,
+  formatRelativeTime,
+  isFutureIso,
+} from "@/lib/formatters";
 
 type Mode = "update" | "cancel" | null;
 
 type BookingCommandPanelProps = {
-  booking: BookingRecord;
+  booking: BookingRecord & { editableUntil?: string | null };
   actions?: ResourceActionDescriptor[];
   readOnlyReasonCode?: string | null;
   auditHref?: string;
@@ -46,6 +51,24 @@ function describeReason(reasonCode: string | null | undefined) {
   }
 }
 
+function isActionReceipt(value: unknown): value is ActionReceipt {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<ActionReceipt>;
+  return (
+    typeof candidate.actionId === "string" &&
+    typeof candidate.auditId === "string" &&
+    typeof candidate.resourceId === "string" &&
+    typeof candidate.resourceType === "string" &&
+    typeof candidate.message === "string" &&
+    (candidate.status === "accepted" ||
+      candidate.status === "completed" ||
+      candidate.status === "failed")
+  );
+}
+
 export function BookingCommandPanel({
   booking,
   actions,
@@ -72,22 +95,26 @@ export function BookingCommandPanel({
       booking.orderStatus === "completed" ||
       booking.orderStatus === "cancelled";
     const isOnTrip = booking.orderStatus === "on_trip";
+    const approvalPending = booking.approvalState === "pending";
     const withinUpdateWindow =
-      booking.modifiableUntil == null || isFutureIso(booking.modifiableUntil);
+      booking.editableUntil == null || isFutureIso(booking.editableUntil);
     const withinCancelWindow =
       booking.cancelableUntil == null || isFutureIso(booking.cancelableUntil);
 
     return [
       {
         action: "update",
-        enabled: !isTerminal && !isOnTrip && withinUpdateWindow,
+        enabled:
+          !isTerminal && !isOnTrip && !approvalPending && withinUpdateWindow,
         disabledReasonCode: isTerminal
           ? "booking_terminal"
           : isOnTrip
             ? "on_trip_locked"
-            : withinUpdateWindow
-              ? undefined
-              : "past_editable_until",
+            : approvalPending
+              ? "approval_pending"
+              : withinUpdateWindow
+                ? undefined
+                : "past_editable_until",
         riskLevel: "medium",
       },
       {
@@ -124,11 +151,22 @@ export function BookingCommandPanel({
       Boolean(value) && list.indexOf(value) === index,
   );
 
+  function buildReceiptHref(receipt: ActionReceipt) {
+    const params = new URLSearchParams({
+      auditId: receipt.auditId,
+      commandId: receipt.actionId,
+      commandMessage: receipt.message,
+      commandStatus: receipt.status,
+    });
+
+    return `/bookings/${booking.bookingId}?${params.toString()}`;
+  }
+
   async function submitUpdate() {
     setLoading(true);
     setError(null);
     try {
-      const payload: UpdateTenantBookingCommand = {
+      const commandPayload: UpdateTenantBookingCommand = {
         pickup: { ...booking.pickup, address: pickupAddress },
         dropoff: { ...booking.dropoff, address: dropoffAddress },
         notes: notes.trim() ? notes.trim() : null,
@@ -141,19 +179,37 @@ export function BookingCommandPanel({
       const response = await fetch(
         `/api/bookings/${booking.bookingId}/update`,
         {
-          method: "PATCH",
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(commandPayload),
         },
       );
+      const payload = (await response.json()) as unknown;
       if (!response.ok) {
-        throw new Error(await response.text());
+        throw new Error(
+          typeof payload === "object" &&
+            payload &&
+            "error" in payload &&
+            typeof payload.error === "string"
+            ? payload.error
+            : "Unknown update failure.",
+        );
       }
 
       setMode(null);
-      setReceipt(
-        `Update accepted at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
-      );
+      if (isActionReceipt(payload)) {
+        setReceipt(
+          `${payload.status} · ${payload.actionId} · ${payload.message}`,
+        );
+        if (payload.status === "accepted") {
+          router.push(buildReceiptHref(payload));
+          return;
+        }
+      } else {
+        setReceipt(
+          `Update completed at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
+        );
+      }
       router.refresh();
     } catch (submissionError) {
       setError(
@@ -180,14 +236,32 @@ export function BookingCommandPanel({
           }),
         },
       );
+      const payload = (await response.json()) as unknown;
       if (!response.ok) {
-        throw new Error(await response.text());
+        throw new Error(
+          typeof payload === "object" &&
+            payload &&
+            "error" in payload &&
+            typeof payload.error === "string"
+            ? payload.error
+            : "Unknown cancel failure.",
+        );
       }
 
       setMode(null);
-      setReceipt(
-        `Cancellation accepted at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
-      );
+      if (isActionReceipt(payload)) {
+        setReceipt(
+          `${payload.status} · ${payload.actionId} · ${payload.message}`,
+        );
+        if (payload.status === "accepted") {
+          router.push(buildReceiptHref(payload));
+          return;
+        }
+      } else {
+        setReceipt(
+          `Cancellation completed at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
+        );
+      }
       router.refresh();
     } catch (submissionError) {
       setError(
@@ -272,7 +346,14 @@ export function BookingCommandPanel({
         ) : null}
         {updateAction?.disabledReasonCode === "past_editable_until" ? (
           <p className="action-note">
-            Editable until {formatDateTime(booking.modifiableUntil)}.
+            Editable until{" "}
+            {formatDateTime(booking.editableUntil ?? booking.modifiableUntil)}
+            {formatRelativeTime(
+              booking.editableUntil ?? booking.modifiableUntil,
+            )
+              ? ` (${formatRelativeTime(booking.editableUntil ?? booking.modifiableUntil)})`
+              : ""}
+            .
           </p>
         ) : null}
         {cancelAction?.disabledReasonCode === "past_cancelable_until" ? (

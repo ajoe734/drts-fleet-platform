@@ -532,6 +532,19 @@ textarea {
   gap: 1rem;
 }
 
+.booking-inline-note,
+.booking-reference-links {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.booking-hero-title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
+}
+
 .booking-pill-accent {
   background: rgba(184, 92, 56, 0.14);
   color: var(--accent);
@@ -545,6 +558,65 @@ textarea {
 .booking-pill-warning {
   background: rgba(139, 94, 20, 0.12);
   color: var(--warning);
+}
+
+.booking-stepper {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 0.7rem;
+}
+
+.booking-step {
+  display: grid;
+  justify-items: center;
+  gap: 0.45rem;
+  border-radius: 18px;
+  padding: 0.8rem 0.6rem;
+  border: 1px solid rgba(16, 35, 58, 0.08);
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.booking-step-dot {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 999px;
+  background: rgba(95, 111, 130, 0.24);
+}
+
+.booking-step.is-active {
+  border-color: rgba(184, 92, 56, 0.18);
+  background: rgba(255, 248, 242, 0.96);
+  color: var(--accent);
+}
+
+.booking-step.is-active .booking-step-dot,
+.booking-step.is-complete .booking-step-dot {
+  background: var(--accent);
+}
+
+.booking-step.is-complete {
+  border-color: rgba(29, 107, 87, 0.16);
+  background: rgba(241, 252, 248, 0.92);
+  color: var(--success);
+}
+
+.booking-step.is-complete .booking-step-dot {
+  background: var(--success);
+}
+
+.booking-step.is-cancelled {
+  border-color: rgba(185, 28, 28, 0.16);
+  background: rgba(254, 242, 242, 0.94);
+  color: #b91c1c;
+}
+
+.booking-step.is-cancelled .booking-step-dot {
+  background: #b91c1c;
 }
 
 .booking-event-list {

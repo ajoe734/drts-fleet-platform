@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type {
+  ActionReceipt,
+  AuditLogRecord,
   BookingRecord,
   EmptyReason,
   ResourceActionDescriptor,
@@ -13,7 +15,12 @@ import {
   SurfaceCard,
 } from "@/components/page-primitives";
 import { getTenantClient } from "@/lib/api-client";
-import { formatDateTime, formatMoney, isFutureIso } from "@/lib/formatters";
+import {
+  formatDateTime,
+  formatMoney,
+  formatRelativeTime,
+  isFutureIso,
+} from "@/lib/formatters";
 import {
   getBookingSourceVisibility,
   getSourceToneClassName,
@@ -41,6 +48,7 @@ type EmptyStateCopy = {
 type DerivedBookingView = {
   acceptedPending: boolean;
   actions: ResourceActionDescriptor[];
+  commandReceipt: ActionReceipt | null;
   deepLinks: Array<{
     href: string;
     label: string;
@@ -51,6 +59,14 @@ type DerivedBookingView = {
   events: BookingEvent[];
   generatedAt: string;
   readOnlyReasonCode: string | null;
+  timelineStep: number;
+};
+
+type BookingDetailRecord = BookingRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  editableUntil?: string | null;
+  readOnlyReasonCode?: string | null;
+  lastActionReceipt?: ActionReceipt | null;
 };
 
 const ACTIVE_ORDER_STATUSES = new Set([
@@ -61,11 +77,14 @@ const ACTIVE_ORDER_STATUSES = new Set([
   "on_trip",
 ]);
 
-const ACCEPTED_PENDING_STATUSES = new Set([
+const BOOKING_TIMELINE_STEPS = [
   "created",
-  "ready_for_dispatch",
-  "preassigned",
-]);
+  "queued",
+  "assigned",
+  "enroute",
+  "on_trip",
+  "completed",
+] as const;
 
 const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
   no_data: {
@@ -113,14 +132,14 @@ const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
 };
 
 function buildBookingActions(
-  booking: BookingRecord,
+  booking: BookingDetailRecord,
 ): ResourceActionDescriptor[] {
   const isTerminal =
     booking.orderStatus === "completed" || booking.orderStatus === "cancelled";
   const isOnTrip = booking.orderStatus === "on_trip";
   const approvalPending = booking.approvalState === "pending";
   const canUpdateWindow =
-    booking.modifiableUntil == null || isFutureIso(booking.modifiableUntil);
+    booking.editableUntil == null || isFutureIso(booking.editableUntil);
   const canCancelWindow =
     booking.cancelableUntil == null || isFutureIso(booking.cancelableUntil);
   const actions: ResourceActionDescriptor[] = [
@@ -235,6 +254,57 @@ function buildBookingEvents(booking: BookingRecord): BookingEvent[] {
   return events;
 }
 
+function mapAuditRealm(
+  actorType: AuditLogRecord["actorType"],
+): BookingEvent["realm"] {
+  switch (actorType) {
+    case "tenant_admin":
+      return "tenant";
+    case "ops_user":
+      return "ops";
+    case "platform_admin":
+      return "platform";
+    default:
+      return "system";
+  }
+}
+
+function buildAuditSubsetEvents(
+  logs: AuditLogRecord[],
+  booking: BookingDetailRecord,
+  commandReceipt: ActionReceipt | null,
+): BookingEvent[] {
+  const relatedIds = new Set(
+    [booking.bookingId, booking.orderId, commandReceipt?.auditId].filter(
+      (value): value is string => Boolean(value),
+    ),
+  );
+
+  return logs
+    .filter(
+      (log) =>
+        (log.resourceId ? relatedIds.has(log.resourceId) : false) ||
+        relatedIds.has(log.auditId),
+    )
+    .sort(
+      (left, right) =>
+        new Date(right.createdAt).getTime() -
+        new Date(left.createdAt).getTime(),
+    )
+    .slice(0, 6)
+    .map((log) => ({
+      actor: log.actorId ?? log.actorType,
+      at: log.createdAt,
+      detail: `${log.moduleName} · ${log.actionName} · ${log.resourceType}${log.resourceId ? ` ${log.resourceId}` : ""}`,
+      label: log.actionName,
+      realm: mapAuditRealm(log.actorType),
+      tone:
+        log.actorType === "ops_user" || log.actorType === "platform_admin"
+          ? "warning"
+          : "default",
+    }));
+}
+
 function findRelatedInvoices(
   invoices: TenantInvoiceRecord[],
   orderId: string,
@@ -246,18 +316,53 @@ function findRelatedInvoices(
   );
 }
 
-function deriveBookingView(booking: BookingRecord): DerivedBookingView {
+function deriveTimelineStep(orderStatus: BookingRecord["orderStatus"]) {
+  switch (orderStatus) {
+    case "created":
+      return 0;
+    case "ready_for_dispatch":
+    case "preassigned":
+      return 1;
+    case "assigned":
+    case "driver_accepted":
+      return 2;
+    case "enroute_pickup":
+    case "arrived_pickup":
+      return 3;
+    case "on_trip":
+      return 4;
+    case "completed":
+    case "cancelled":
+      return 5;
+    default:
+      return 0;
+  }
+}
+
+function deriveBookingView(
+  booking: BookingDetailRecord,
+  commandReceipt: ActionReceipt | null,
+): DerivedBookingView {
   const source = getBookingSourceVisibility(booking);
-  const actions = buildBookingActions(booking);
-  const updateAction = actions.find((action) => action.action === "update");
+  const actions =
+    booking.availableActions && booking.availableActions.length > 0
+      ? booking.availableActions
+      : buildBookingActions(booking);
+  const updateAction = actions.find(
+    (action: ResourceActionDescriptor) => action.action === "update",
+  );
   const opsConsoleBase =
     process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003";
   const auditBase = "/audit";
   const deepLinks = [
     {
-      href: `${auditBase}?bookingId=${encodeURIComponent(booking.bookingId)}`,
+      href: commandReceipt?.auditId
+        ? `${auditBase}?auditId=${encodeURIComponent(commandReceipt.auditId)}`
+        : `${auditBase}?bookingId=${encodeURIComponent(booking.bookingId)}`,
       label: "View audit subset",
-      note: "Tenant audit includes actor realm chips for tenant, ops, platform, and system actions.",
+      note: commandReceipt?.auditId
+        ? "Open the action receipt audit trail directly when a command has already been accepted."
+        : "Tenant audit includes actor realm chips for tenant, ops, platform, and system actions.",
     },
     {
       href: `/rules?bookingId=${encodeURIComponent(booking.bookingId)}`,
@@ -278,17 +383,18 @@ function deriveBookingView(booking: BookingRecord): DerivedBookingView {
 
   return {
     actions,
-    acceptedPending:
-      ACCEPTED_PENDING_STATUSES.has(booking.orderStatus) &&
-      booking.approvalState !== "pending",
+    acceptedPending: commandReceipt?.status === "accepted",
+    commandReceipt,
     deepLinks,
-    editableUntil: booking.modifiableUntil,
+    editableUntil: booking.editableUntil ?? booking.modifiableUntil,
     events: buildBookingEvents(booking),
     generatedAt: new Date().toISOString(),
     readOnlyReasonCode:
-      updateAction && !updateAction.enabled
+      booking.readOnlyReasonCode ??
+      (updateAction && !updateAction.enabled
         ? (updateAction.disabledReasonCode ?? null)
-        : null,
+        : null),
+    timelineStep: deriveTimelineStep(booking.orderStatus),
   };
 }
 
@@ -305,6 +411,22 @@ function describeReadOnlyReason(reasonCode: string | null) {
     default:
       return "This booking currently exposes no tenant update command.";
   }
+}
+
+function describeEditableWindow(
+  editableUntil: string | null,
+  editable: boolean,
+) {
+  const relativeWindow = formatRelativeTime(editableUntil);
+  if (!editableUntil) {
+    return editable
+      ? "The backend currently exposes no edit deadline for this booking."
+      : "The booking is read-only even though no edit deadline was published.";
+  }
+
+  return editable
+    ? `The tenant edit window remains open until ${formatDateTime(editableUntil)}${relativeWindow ? ` (${relativeWindow})` : ""}.`
+    : `The tenant edit window closed at ${formatDateTime(editableUntil)}${relativeWindow ? ` (${relativeWindow})` : ""}.`;
 }
 
 function describeApprovalState(state: BookingRecord["approvalState"]) {
@@ -327,7 +449,30 @@ function describeApprovalState(state: BookingRecord["approvalState"]) {
 }
 
 function renderEmptyState(reason: EmptyReason, bookingId: string) {
-  const copy = EMPTY_REASON_COPY[reason] ?? EMPTY_REASON_COPY.fetch_failed;
+  let copy: EmptyStateCopy;
+  switch (reason) {
+    case "no_data":
+      copy = EMPTY_REASON_COPY.no_data as EmptyStateCopy;
+      break;
+    case "not_provisioned":
+      copy = EMPTY_REASON_COPY.not_provisioned as EmptyStateCopy;
+      break;
+    case "fetch_failed":
+      copy = EMPTY_REASON_COPY.fetch_failed as EmptyStateCopy;
+      break;
+    case "permission_denied":
+      copy = EMPTY_REASON_COPY.permission_denied as EmptyStateCopy;
+      break;
+    case "external_unavailable":
+      copy = EMPTY_REASON_COPY.external_unavailable as EmptyStateCopy;
+      break;
+    case "filtered_empty":
+      copy = EMPTY_REASON_COPY.filtered_empty as EmptyStateCopy;
+      break;
+    default:
+      copy = EMPTY_REASON_COPY.fetch_failed as EmptyStateCopy;
+      break;
+  }
   return (
     <div className="page-shell">
       <PageHero
@@ -366,6 +511,35 @@ function renderEmptyState(reason: EmptyReason, bookingId: string) {
   );
 }
 
+function parseCommandReceipt(
+  query: Record<string, string | string[] | undefined>,
+  bookingId: string,
+): ActionReceipt | null {
+  const status =
+    typeof query.commandStatus === "string" ? query.commandStatus : null;
+  if (status !== "accepted") {
+    return null;
+  }
+
+  return {
+    actionId:
+      typeof query.commandId === "string"
+        ? query.commandId
+        : `cmd-${bookingId}`,
+    auditId:
+      typeof query.auditId === "string"
+        ? query.auditId
+        : `audit-${bookingId.toLowerCase()}`,
+    resourceType: "booking",
+    resourceId: bookingId,
+    status: "accepted",
+    message:
+      typeof query.commandMessage === "string"
+        ? query.commandMessage
+        : "The tenant command was accepted and is waiting on external dispatch confirmation.",
+  };
+}
+
 export default async function BookingDetailPage({
   params,
   searchParams,
@@ -385,33 +559,90 @@ export default async function BookingDetailPage({
   }
 
   const client = getTenantClient();
-  const [bookingResult, invoicesResult] = await Promise.allSettled([
-    client.getTenantBooking(bookingId) as Promise<BookingRecord>,
-    client.listInvoices(),
-  ]);
+  const [bookingResult, invoicesResult, auditLogsResult] =
+    await Promise.allSettled([
+      client.getTenantBooking(bookingId) as Promise<BookingDetailRecord>,
+      client.listInvoices(),
+      client.listTenantAuditLogs(),
+    ]);
 
   if (bookingResult.status === "rejected") {
     notFound();
   }
 
   const booking = bookingResult.value;
-  const bookingView = deriveBookingView(booking);
+  const commandReceipt =
+    booking.lastActionReceipt ?? parseCommandReceipt(query, bookingId);
+  const bookingView = deriveBookingView(booking, commandReceipt);
   const source = getBookingSourceVisibility(booking);
   const relatedInvoices =
     invoicesResult.status === "fulfilled"
       ? findRelatedInvoices(invoicesResult.value, booking.orderId)
       : [];
+  const recentEvents =
+    auditLogsResult.status === "fulfilled"
+      ? buildAuditSubsetEvents(auditLogsResult.value, booking, commandReceipt)
+      : [];
   const editable =
     bookingView.actions.find((action) => action.action === "update")?.enabled ??
     false;
+  const auditHref = bookingView.commandReceipt?.auditId
+    ? `/audit?auditId=${encodeURIComponent(bookingView.commandReceipt.auditId)}`
+    : `/audit?bookingId=${encodeURIComponent(booking.bookingId)}`;
+  const bookingFiltersHref = `/bookings?bookingId=${encodeURIComponent(
+    booking.bookingId,
+  )}`;
+  const passengerHref = `/passengers?bookingId=${encodeURIComponent(
+    booking.bookingId,
+  )}`;
+  const pickupAddressHref = `/addresses?query=${encodeURIComponent(
+    booking.pickup.address,
+  )}`;
+  const dropoffAddressHref = `/addresses?query=${encodeURIComponent(
+    booking.dropoff.address,
+  )}`;
+  const costCenterHref = booking.costCenter
+    ? `/cost-centers?code=${encodeURIComponent(booking.costCenter)}`
+    : "/cost-centers";
 
   return (
     <div className="page-shell">
       <PageHero
         eyebrow="Booking detail"
-        title={`${booking.bookingId} · ${booking.businessDispatchSubtype}`}
+        title={
+          <span className="booking-hero-title">
+            <span>{`${booking.bookingId} · ${booking.businessDispatchSubtype}`}</span>
+            <span
+              className={`status-chip ${
+                bookingView.acceptedPending
+                  ? "booking-pill-warning"
+                  : booking.orderStatus === "completed"
+                    ? "booking-pill-success"
+                    : "booking-pill-accent"
+              }`}
+            >
+              {bookingView.acceptedPending
+                ? "accepted_pending"
+                : booking.orderStatus}
+            </span>
+          </span>
+        }
         description="Booking detail now follows the Tenant Console canvas: editable-until visibility, approval context, driver-assignment state, audit subset, refresh tier, and action descriptors all sit on one tenant-owned screen."
       />
+
+      {bookingView.acceptedPending && bookingView.commandReceipt ? (
+        <CalloutPanel
+          title={`Command accepted · awaiting external confirmation · ${bookingView.commandReceipt.actionId}`}
+          description={bookingView.commandReceipt.message}
+          tone="warning"
+        >
+          <p>
+            Audit link {bookingView.commandReceipt.auditId} is already assigned.
+            Keep this detail open or refresh after the next T5 cycle if the
+            status has not advanced.
+          </p>
+        </CalloutPanel>
+      ) : null}
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
@@ -439,7 +670,10 @@ export default async function BookingDetailPage({
               </div>
               <div>
                 <dt>Manual refresh</dt>
-                <dd>Browser refresh or command receipt refresh</dd>
+                <dd>
+                  Browser refresh, notification reopen, or command receipt
+                  refresh
+                </dd>
               </div>
             </dl>
           </div>
@@ -481,18 +715,9 @@ export default async function BookingDetailPage({
                 <dd>{booking.approvalRequestIds.length}</dd>
               </div>
             </dl>
-            {bookingView.acceptedPending ? (
-              <CalloutPanel
-                title="accepted+pending external confirmation"
-                description="The last command was accepted into the tenant workflow, but external dispatch confirmation is still settling."
-                tone="warning"
-              >
-                <p>
-                  Keep this screen open or refresh the detail if the status has
-                  not advanced after the next T5 cycle.
-                </p>
-              </CalloutPanel>
-            ) : null}
+            <div className="booking-inline-note">
+              {describeEditableWindow(bookingView.editableUntil, editable)}
+            </div>
             {booking.approvalState === "pending" ? (
               <CalloutPanel
                 title="Approval-required state"
@@ -521,6 +746,33 @@ export default async function BookingDetailPage({
             title="Booking, rider, and routing detail"
             description="The page keeps the full tenant-visible booking payload close to the action lane so a user does not need a separate ops-only surface to validate the reservation."
           >
+            <div
+              className="booking-stepper"
+              aria-label="Booking workflow state"
+            >
+              {BOOKING_TIMELINE_STEPS.map((step, index) => {
+                const isActive = index === bookingView.timelineStep;
+                const isComplete = index < bookingView.timelineStep;
+                const isTerminalCancelled =
+                  booking.orderStatus === "cancelled" &&
+                  step ===
+                    BOOKING_TIMELINE_STEPS[BOOKING_TIMELINE_STEPS.length - 1];
+                const stepLabel =
+                  isTerminalCancelled && step === "completed"
+                    ? "cancelled"
+                    : step;
+
+                return (
+                  <div
+                    className={`booking-step${isActive ? " is-active" : ""}${isComplete ? " is-complete" : ""}${isTerminalCancelled ? " is-cancelled" : ""}`}
+                    key={step}
+                  >
+                    <span className="booking-step-dot" />
+                    <span>{stepLabel}</span>
+                  </div>
+                );
+              })}
+            </div>
             <dl className="definition-grid">
               <div>
                 <dt>Booking ID</dt>
@@ -532,7 +784,11 @@ export default async function BookingDetailPage({
               </div>
               <div>
                 <dt>Passenger</dt>
-                <dd>{booking.passenger.name}</dd>
+                <dd>
+                  <Link className="text-link" href={passengerHref}>
+                    {booking.passenger.name}
+                  </Link>
+                </dd>
               </div>
               <div>
                 <dt>Phone</dt>
@@ -540,11 +796,19 @@ export default async function BookingDetailPage({
               </div>
               <div>
                 <dt>Pickup</dt>
-                <dd>{booking.pickup.address}</dd>
+                <dd>
+                  <Link className="text-link" href={pickupAddressHref}>
+                    {booking.pickup.address}
+                  </Link>
+                </dd>
               </div>
               <div>
                 <dt>Dropoff</dt>
-                <dd>{booking.dropoff.address}</dd>
+                <dd>
+                  <Link className="text-link" href={dropoffAddressHref}>
+                    {booking.dropoff.address}
+                  </Link>
+                </dd>
               </div>
               <div>
                 <dt>Window start</dt>
@@ -555,8 +819,24 @@ export default async function BookingDetailPage({
                 <dd>{formatDateTime(booking.reservationWindowEnd)}</dd>
               </div>
               <div>
+                <dt>Booked by</dt>
+                <dd>{booking.bookedBy?.name ?? "Tenant intake"}</dd>
+              </div>
+              <div>
+                <dt>Onsite contact</dt>
+                <dd>{booking.onsiteContact?.name ?? "Not published"}</dd>
+              </div>
+              <div>
                 <dt>Cost center</dt>
-                <dd>{booking.costCenter ?? "Not published"}</dd>
+                <dd>
+                  {booking.costCenter ? (
+                    <Link className="text-link" href={costCenterHref}>
+                      {booking.costCenter}
+                    </Link>
+                  ) : (
+                    "Not published"
+                  )}
+                </dd>
               </div>
               <div>
                 <dt>Vehicle preference</dt>
@@ -574,6 +854,23 @@ export default async function BookingDetailPage({
                 <dd>{booking.notes ?? "No notes"}</dd>
               </div>
             </dl>
+            <div className="booking-reference-links">
+              <Link className="text-link" href={passengerHref}>
+                Open passenger directory reference
+              </Link>
+              <Link className="text-link" href={pickupAddressHref}>
+                Open pickup address reference
+              </Link>
+              <Link className="text-link" href={dropoffAddressHref}>
+                Open dropoff address reference
+              </Link>
+              <Link className="text-link" href={costCenterHref}>
+                Open cost center governance
+              </Link>
+              <Link className="text-link" href={bookingFiltersHref}>
+                Return to booking list context
+              </Link>
+            </div>
           </SurfaceCard>
 
           <SurfaceCard
@@ -582,7 +879,10 @@ export default async function BookingDetailPage({
             description="Tenant audit visibility includes cross-actor changes on tenant-owned resources, so the recent update lane must not pretend every event came from the tenant actor."
           >
             <ol className="booking-event-list">
-              {bookingView.events.map((event) => (
+              {(recentEvents.length > 0
+                ? recentEvents
+                : bookingView.events
+              ).map((event) => (
                 <li
                   className={`booking-event booking-event-${event.tone}`}
                   key={`${event.label}-${event.at ?? "none"}`}
@@ -682,7 +982,7 @@ export default async function BookingDetailPage({
                 <dt>ETA</dt>
                 <dd>
                   {ACTIVE_ORDER_STATUSES.has(booking.orderStatus)
-                    ? "Live ETA not published by current read model"
+                    ? "Live ETA pending from dispatch read model"
                     : "Not active"}
                 </dd>
               </div>
@@ -698,6 +998,14 @@ export default async function BookingDetailPage({
                     : "Tenant detail remains the primary owner view"}
                 </dd>
               </div>
+              <div>
+                <dt>Command receipt</dt>
+                <dd>
+                  {bookingView.commandReceipt
+                    ? `${bookingView.commandReceipt.status} · ${bookingView.commandReceipt.actionId}`
+                    : "No pending receipt"}
+                </dd>
+              </div>
             </dl>
           </SurfaceCard>
 
@@ -709,7 +1017,7 @@ export default async function BookingDetailPage({
             <BookingCommandPanel
               actions={bookingView.actions}
               approvalHref={`/rules?bookingId=${encodeURIComponent(booking.bookingId)}`}
-              auditHref={`/audit?bookingId=${encodeURIComponent(booking.bookingId)}`}
+              auditHref={auditHref}
               booking={booking}
               readOnlyReasonCode={bookingView.readOnlyReasonCode}
             />
@@ -735,6 +1043,10 @@ export default async function BookingDetailPage({
                 </li>
               ))}
             </ul>
+            <p className="muted-copy">
+              Cross-app routes open in a new tab when authority belongs to ops
+              or another deployment.
+            </p>
           </SurfaceCard>
         </div>
       </section>
