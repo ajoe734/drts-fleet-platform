@@ -52,4 +52,7 @@ if [[ -x "$ROOT_DIR/scripts/codex-wrapper.sh" ]]; then
   ln -sfn "$ROOT_DIR/scripts/codex-wrapper.sh" "$ROOT_DIR/.orchestrator/bin/codex"
 fi
 
+if [[ -x "$ROOT_DIR/scripts/ensure-local-node-modules.py" ]]; then
+  python3 "$ROOT_DIR/scripts/ensure-local-node-modules.py" repair
+fi
 exec python3 "$ROOT_DIR/.orchestrator/supervisor.py" "$@"
