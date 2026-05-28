@@ -19,6 +19,7 @@ type TenantNavIcon =
   | "reports"
   | "apiKeys"
   | "webhooks"
+  | "sla"
   | "audit"
   | "users";
 
@@ -106,6 +107,12 @@ export const tenantNavEntries: TenantNavEntry[] = [
     href: "/webhooks",
     icon: "webhooks",
     label: "Webhook",
+  },
+  {
+    key: "sla",
+    href: "/sla",
+    icon: "sla",
+    label: "SLA",
   },
   {
     key: "audit",
