@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 type BookingsRefreshControlProps = {
   generatedAt: string | null;
-  pollIntervalMs: number;
+  staleAfterMs: number;
 };
 
 function getRemainingSeconds(targetAt: number) {
@@ -15,30 +15,30 @@ function getRemainingSeconds(targetAt: number) {
 
 export function BookingsRefreshControl({
   generatedAt,
-  pollIntervalMs,
+  staleAfterMs,
 }: BookingsRefreshControlProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(
     () => {
-      if (!generatedAt || pollIntervalMs <= 0) {
+      if (!generatedAt || staleAfterMs <= 0) {
         return null;
       }
 
       return getRemainingSeconds(
-        new Date(generatedAt).getTime() + pollIntervalMs,
+        new Date(generatedAt).getTime() + staleAfterMs,
       );
     },
   );
 
   useEffect(() => {
-    if (!generatedAt || pollIntervalMs <= 0) {
+    if (!generatedAt || staleAfterMs <= 0) {
       setRemainingSeconds(null);
       return;
     }
 
     const generatedAtMs = new Date(generatedAt).getTime();
-    const nextRefreshAt = generatedAtMs + pollIntervalMs;
+    const nextRefreshAt = generatedAtMs + staleAfterMs;
 
     setRemainingSeconds(getRemainingSeconds(nextRefreshAt));
 
@@ -55,15 +55,15 @@ export function BookingsRefreshControl({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [generatedAt, pollIntervalMs, router]);
+  }, [generatedAt, staleAfterMs, router]);
 
   return (
     <div className="bookings-refresh-control">
       <span className="status-chip">
         {isPending
           ? "更新中"
-          : pollIntervalMs > 0
-            ? `自動輪詢 ${pollIntervalMs / 1000}s`
+          : staleAfterMs > 0
+            ? `自動輪詢 ${staleAfterMs / 1000}s`
             : "手動更新"}
       </span>
       <span className="bookings-refresh-countdown">

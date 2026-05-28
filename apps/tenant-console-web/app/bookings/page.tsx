@@ -5,7 +5,6 @@ import type {
   CrossAppResourceLink,
   EmptyReason,
   OwnedOrderStatus,
-  RefreshTier,
   ResourceActionDescriptor,
   TenantBookingListEnvelope,
   TenantBookingListItem,
@@ -76,25 +75,7 @@ const ACTION_COPY: Record<string, string> = {
   filter: "篩選",
   refresh: "立即更新",
 };
-const TENANT_BOOKINGS_REFRESH_TIER: RefreshTier = "slow";
-const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number> = {
-  urgent: 5000,
-  fast: 3000,
-  dispatch: 5000,
-  medium: 15000,
-  medium_slow: 30000,
-  slow: 30000,
-  manual: 0,
-};
-const REFRESH_TIER_COPY: Record<RefreshTier, string> = {
-  urgent: "Urgent",
-  fast: "T2 Fast",
-  dispatch: "T3 Dispatch",
-  medium: "T4 Medium",
-  medium_slow: "T5 Tenant slow",
-  slow: "T5 Tenant slow",
-  manual: "T6 Manual",
-};
+const TENANT_BOOKINGS_REFRESH_TIER_COPY = "T5 Tenant slow";
 
 type SearchParamValue = string | string[] | undefined;
 
@@ -543,18 +524,15 @@ function getRefreshTone(refresh: UiRefreshMetadata | null) {
 }
 
 function getRefreshCopy(refresh: UiRefreshMetadata | null) {
-  const tierCopy = REFRESH_TIER_COPY[TENANT_BOOKINGS_REFRESH_TIER];
-  const tierIntervalMs = REFRESH_TIER_INTERVAL_MS[TENANT_BOOKINGS_REFRESH_TIER];
-
   if (!refresh) {
-    return tierIntervalMs > 0
-      ? `${tierCopy} · ${tierIntervalMs / 1000}s cadence · 等待後端 refresh metadata`
-      : `${tierCopy} · 手動更新`;
+    return `${TENANT_BOOKINGS_REFRESH_TIER_COPY} · 等待後端 refresh metadata`;
   }
 
   return [
-    tierCopy,
-    tierIntervalMs > 0 ? `${tierIntervalMs / 1000}s cadence` : "手動更新",
+    TENANT_BOOKINGS_REFRESH_TIER_COPY,
+    refresh.staleAfterMs > 0
+      ? `${refresh.staleAfterMs / 1000}s cadence`
+      : "手動更新",
     REFRESH_FRESHNESS_COPY[refresh.dataFreshness],
     `快照 ${formatDateTime(refresh.generatedAt)}`,
     REFRESH_SOURCE_COPY[refresh.source],
@@ -576,10 +554,6 @@ function getApprovalCopy(booking: TenantBookingListRecord) {
   }
 
   return null;
-}
-
-function getServiceLabel(booking: TenantBookingListRecord) {
-  return `企業派遣 / ${booking.businessDispatchSubtype}`;
 }
 
 function buildBookingsHref(
@@ -710,8 +684,7 @@ export default async function TenantBookingsPage({
     (booking) =>
       Array.isArray(booking.crossAppLinks) && booking.crossAppLinks.length > 0,
   );
-  const refreshPollIntervalMs =
-    REFRESH_TIER_INTERVAL_MS[TENANT_BOOKINGS_REFRESH_TIER];
+  const refreshPollIntervalMs = refreshMetadata?.staleAfterMs ?? 0;
   const liveCount = bookings.filter((booking) =>
     LIVE_ORDER_STATUSES.has(booking.orderStatus),
   ).length;
@@ -729,10 +702,7 @@ export default async function TenantBookingsPage({
         <div className="bookings-console-headline">
           <span className="eyebrow">Bookings</span>
           <h1>訂單</h1>
-          <p>
-            本月所有預約，含進行中與已完成。以 tenant snapshot
-            先判斷狀態，再進入 detail 或 cross-app deep link 繼續處理。
-          </p>
+          <p>本月所有預約，含進行中與已完成。</p>
         </div>
         <div className="bookings-header-actions">
           <a
@@ -792,7 +762,7 @@ export default async function TenantBookingsPage({
           </span>
           <BookingsRefreshControl
             generatedAt={refreshMetadata?.generatedAt ?? null}
-            pollIntervalMs={refreshPollIntervalMs}
+            staleAfterMs={refreshPollIntervalMs}
           />
           <span className="status-chip">全部 {bookings.length} 筆</span>
           <span className="status-chip is-active">進行中 {liveCount}</span>
@@ -951,7 +921,7 @@ export default async function TenantBookingsPage({
             <div className="bookings-priority-head">
               <div>
                 <span className="surface-kicker">審批焦點</span>
-                <h3>待審批 booking 需要浮出，不埋在清單深處。</h3>
+                <h3>待審批 booking 需優先浮出處理。</h3>
               </div>
               <Link
                 className="text-link"
@@ -1104,6 +1074,7 @@ export default async function TenantBookingsPage({
               <thead>
                 <tr>
                   <th>BK</th>
+                  <th>ORDER</th>
                   <th>TYPE</th>
                   <th>PICKUP → DROP</th>
                   <th>WIN</th>
@@ -1140,9 +1111,11 @@ export default async function TenantBookingsPage({
                               {booking.bookingId}
                             </span>
                           )}
-                          <span className="table-secondary">
-                            ORDER {booking.orderId}
-                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="table-primary table-mono">
+                          <span>{booking.orderId}</span>
                         </div>
                       </td>
                       <td>
@@ -1151,7 +1124,7 @@ export default async function TenantBookingsPage({
                             {booking.businessDispatchSubtype}
                           </span>
                           <span className="table-secondary">
-                            {getServiceLabel(booking)} ·{" "}
+                            {booking.serviceBucket} ·{" "}
                             {getBookingTypeLabel(booking.bookingType)}
                           </span>
                         </div>
@@ -1215,7 +1188,7 @@ export default async function TenantBookingsPage({
                             {booking.passenger.phone}
                           </span>
                           <span className="bookings-inline-meta">
-                            建立 {getRelativeAge(booking.createdAt)}
+                            Age {getRelativeAge(booking.createdAt)}
                           </span>
                         </div>
                       </td>
