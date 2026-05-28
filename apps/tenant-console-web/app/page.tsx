@@ -239,6 +239,10 @@ type WorkspaceBookingRecord = BookingRecord & {
   readOnlyReasonCode?: string | null;
 };
 
+type WorkspaceNotificationRecord = NotificationRecord & {
+  resourceLink?: CrossAppResourceLink | null;
+};
+
 type WorkspaceActionTile = {
   key: string;
   title: string;
@@ -262,7 +266,7 @@ type HomePageData = {
   featureFlags: FeatureFlagSummary | null;
   bookings: WorkspaceBookingRecord[];
   invoices: TenantInvoiceRecord[];
-  notifications: NotificationRecord[];
+  notifications: WorkspaceNotificationRecord[];
   readiness: TenantIntegrationReadinessSummary | null;
   billingProfile: TenantBillingProfile | null;
   quotaSummary: TenantQuotaSummary | null;
@@ -454,110 +458,84 @@ function buildWorkspaceAvailableActions(
     }
   }
 
-  if (!actionMap.has("create_booking")) {
-    actionMap.set("create_booking", {
-      action: "create_booking",
-      enabled: true,
-      riskLevel: "medium",
-    });
-  }
-
-  if (!actionMap.has("view_todays_bookings")) {
-    actionMap.set("view_todays_bookings", {
-      action: "view_todays_bookings",
-      enabled: true,
-      riskLevel: "low",
-    });
-  }
-
-  if (!actionMap.has("open_integration_governance")) {
-    actionMap.set("open_integration_governance", {
-      action: "open_integration_governance",
-      enabled: true,
-      riskLevel: "low",
-    });
-  }
-
-  if (!actionMap.has("open_ops_case")) {
-    const blocked = (data.readiness?.items ?? []).some(
-      (item) => item.status === "blocked",
-    );
-    const descriptor: ResourceActionDescriptor = {
-      action: "open_ops_case",
-      enabled: blocked || data.notifications.length > 0,
-      riskLevel: "low",
-      ...(!blocked && data.notifications.length === 0
-        ? { disabledReasonCode: "no_cross_app_case" }
-        : {}),
-    };
-    actionMap.set("open_ops_case", descriptor);
-  }
-
   return [
-    actionMap.get("create_booking")!,
-    actionMap.get("view_todays_bookings")!,
-    actionMap.get("open_integration_governance")!,
-    actionMap.get("open_ops_case")!,
-  ];
+    "create_booking",
+    "view_todays_bookings",
+    "open_integration_governance",
+    "open_ops_case",
+  ]
+    .map((action) => actionMap.get(action))
+    .filter((descriptor): descriptor is ResourceActionDescriptor =>
+      Boolean(descriptor),
+    );
 }
 
 function buildQuickActions(
   availableActions: ResourceActionDescriptor[],
+  crossAppLinks: CrossAppResourceLink[],
 ): WorkspaceActionTile[] {
-  return availableActions.map((descriptor) => {
+  return availableActions.flatMap((descriptor) => {
     if (descriptor.action === "create_booking") {
-      return {
-        key: descriptor.action,
-        title: "建立叫車",
-        href: "/bookings/new",
-        label: "New booking",
-        description:
-          "同步 command 入口；若外部確認尚未完成，後續頁面會呈現 accepted+pending。",
-        descriptor,
-      };
+      return [
+        {
+          key: descriptor.action,
+          title: "建立叫車",
+          href: "/bookings/new",
+          label: "New booking",
+          description:
+            "同步 command 入口；若外部確認尚未完成，後續頁面會呈現 accepted+pending。",
+          descriptor,
+        },
+      ];
     }
 
     if (descriptor.action === "view_todays_bookings") {
-      return {
-        key: descriptor.action,
-        title: "查看今日訂單",
-        href: "/bookings",
-        label: "Today's bookings",
-        description:
-          "查看 T5 cadence 的 booking 狀態，不從角色或狀態字串推導可操作性。",
-        descriptor,
-      };
+      return [
+        {
+          key: descriptor.action,
+          title: "查看今日訂單",
+          href: "/bookings",
+          label: "Today's bookings",
+          description:
+            "查看 T5 cadence 的 booking 狀態，不從角色或狀態字串推導可操作性。",
+          descriptor,
+        },
+      ];
     }
 
     if (descriptor.action === "open_integration_governance") {
-      return {
-        key: descriptor.action,
-        title: "整合就緒度",
-        href: "/integration-governance",
-        label: "Open integration governance",
-        description:
-          "聚合 API key、webhook、notifications、SLA、reports readiness 的單一入口。",
-        descriptor,
-      };
+      return [
+        {
+          key: descriptor.action,
+          title: "整合就緒度",
+          href: "/integration-governance",
+          label: "Open integration governance",
+          description:
+            "聚合 API key、webhook、notifications、SLA、reports readiness 的單一入口。",
+          descriptor,
+        },
+      ];
     }
 
-    return {
-      key: descriptor.action,
-      title: "跨應用追蹤",
-      href: buildCrossAppHref({
-        targetApp: "ops-console",
-        route: "/complaints/CMP-240528-17",
-        resourceType: "complaint",
-        resourceId: "CMP-240528-17",
-        openMode: "new_tab",
-        label: "Ops complaint",
-      }),
-      label: "Open ops case",
-      description:
-        "外部依賴 blocked 或跨 actor 事件時，直接新分頁跳往 owning app 追蹤。",
-      descriptor,
-      external: true,
-    };
+    if (descriptor.action === "open_ops_case") {
+      const link = crossAppLinks[0];
+      if (!link) return [];
+
+      return [
+        {
+          key: descriptor.action,
+          title: "跨應用追蹤",
+          href: buildCrossAppHref(link),
+          label: link.label,
+          description:
+            "外部依賴 blocked 或跨 actor 事件時，直接新分頁跳往 owning app 追蹤。",
+          descriptor,
+          external: link.openMode === "new_tab",
+        },
+      ];
+    }
+
+    return [];
   });
 }
 
@@ -860,40 +838,25 @@ function buildEmptyReasonShowcase(
 }
 
 function buildCrossAppLinks(
-  blockedReadiness: number,
-  tenantId: string,
+  notifications: WorkspaceNotificationRecord[],
 ): CrossAppResourceLink[] {
-  const links: CrossAppResourceLink[] = [
-    {
-      targetApp: "ops-console",
-      route: "/complaints/CMP-240528-17",
-      resourceType: "complaint",
-      resourceId: "CMP-240528-17",
-      openMode: "new_tab",
-      label: "Ops complaint",
-    },
-    {
-      targetApp: "platform-admin",
-      route: `/audit?tenantId=${encodeURIComponent(tenantId)}`,
-      resourceType: "audit",
-      resourceId: tenantId,
-      openMode: "new_tab",
-      label: "Platform audit",
-    },
-  ];
+  const links = new Map<string, CrossAppResourceLink>();
 
-  if (blockedReadiness > 0) {
-    links.push({
-      targetApp: "platform-admin",
-      route: `/tenants/${encodeURIComponent(tenantId)}`,
-      resourceType: "tenant",
-      resourceId: tenantId,
-      openMode: "new_tab",
-      label: "Tenant rollout",
-    });
+  for (const notification of notifications) {
+    const link = notification.resourceLink;
+    if (!link) continue;
+
+    const key = [
+      link.targetApp,
+      link.route,
+      link.resourceType,
+      link.resourceId,
+      link.openMode,
+    ].join(":");
+    if (!links.has(key)) links.set(key, link);
   }
 
-  return links;
+  return Array.from(links.values());
 }
 
 function ActionLink({
@@ -981,7 +944,9 @@ async function loadHomePageData(): Promise<HomePageData> {
     }) as Promise<FeatureFlagSummary>,
     client.listTenantBookings() as Promise<WorkspaceBookingRecord[]>,
     client.listInvoices() as Promise<TenantInvoiceRecord[]>,
-    client.listTenantNotificationFeed() as Promise<NotificationRecord[]>,
+    client.listTenantNotificationFeed() as Promise<
+      WorkspaceNotificationRecord[]
+    >,
     client.getTenantIntegrationReadinessSummary() as Promise<TenantIntegrationReadinessSummary>,
     client.getBillingProfile() as Promise<TenantBillingProfile>,
     client.getTenantQuotaSummary() as Promise<TenantQuotaSummary>,
@@ -1063,17 +1028,17 @@ export default async function HomePage() {
   );
   const refreshPresentation = getRefreshPresentation(refresh, blockedReadiness);
   const availableActions = buildWorkspaceAvailableActions(data, activeBookings);
+  const crossAppLinks = buildCrossAppLinks(data.notifications);
   const actionMap = new Map(
     availableActions.map((descriptor) => [descriptor.action, descriptor]),
   );
-  const quickActions = buildQuickActions(availableActions);
+  const quickActions = buildQuickActions(availableActions, crossAppLinks);
   const emptyReasonCards = buildEmptyReasonShowcase(
     data,
     activeBookings,
     actionMap,
   );
   const tenantId = data.identity?.tenantId ?? DEMO_TENANT_ID;
-  const crossAppLinks = buildCrossAppLinks(blockedReadiness, tenantId);
   const tenantStatus =
     blockedReadiness > 0 ? "degraded" : data.readiness ? "active" : "unknown";
   const actorLabel =
@@ -1397,21 +1362,41 @@ export default async function HomePage() {
                       </strong>
                       <div style={smallMetaStyle}>{section.description}</div>
                     </div>
-                    {section.routes.map((route) => (
-                      <Link
-                        key={route.key}
-                        href={route.href}
-                        style={sitemapLinkStyle}
-                      >
-                        <div>
-                          <div style={listTitleStyle}>{route.title}</div>
-                          <div style={smallMetaStyle}>{route.description}</div>
+                    {section.routes.map((route) =>
+                      route.enabled ? (
+                        <Link
+                          key={route.key}
+                          href={route.href}
+                          style={sitemapLinkStyle}
+                        >
+                          <div>
+                            <div style={listTitleStyle}>{route.title}</div>
+                            <div style={smallMetaStyle}>
+                              {route.description}
+                            </div>
+                          </div>
+                          <CanvasPill theme={th} tone={route.tone}>
+                            visible
+                          </CanvasPill>
+                        </Link>
+                      ) : (
+                        <div
+                          key={route.key}
+                          aria-disabled="true"
+                          style={{ ...sitemapLinkStyle, opacity: 0.56 }}
+                        >
+                          <div>
+                            <div style={listTitleStyle}>{route.title}</div>
+                            <div style={smallMetaStyle}>
+                              {route.description}
+                            </div>
+                          </div>
+                          <CanvasPill theme={th} tone={route.tone}>
+                            hidden
+                          </CanvasPill>
                         </div>
-                        <CanvasPill theme={th} tone={route.tone}>
-                          {route.enabled ? "visible" : "hidden"}
-                        </CanvasPill>
-                      </Link>
-                    ))}
+                      ),
+                    )}
                   </div>
                 ))}
               </div>
@@ -1544,22 +1529,34 @@ export default async function HomePage() {
                 </div>
               ) : null}
 
-              <div style={linkRowStyle}>
-                {crossAppLinks.map((link) => (
+              {crossAppLinks.length > 0 ? (
+                <div style={linkRowStyle}>
+                  {crossAppLinks.map((link) => (
+                    <ActionLink
+                      key={`${link.targetApp}:${link.resourceId}:${link.route}`}
+                      href={buildCrossAppHref(link)}
+                      external={link.openMode === "new_tab"}
+                      label={link.label}
+                      variant="ghost"
+                    />
+                  ))}
                   <ActionLink
-                    key={`${link.targetApp}:${link.resourceId}`}
-                    href={buildCrossAppHref(link)}
-                    external={link.openMode === "new_tab"}
-                    label={link.label}
-                    variant="ghost"
+                    href="/audit"
+                    label="Tenant audit"
+                    variant="secondary"
                   />
-                ))}
-                <ActionLink
-                  href="/audit"
-                  label="Tenant audit"
-                  variant="secondary"
-                />
-              </div>
+                </div>
+              ) : (
+                <div style={emptyStateStyle}>
+                  <strong style={{ color: th.text }}>
+                    目前沒有 runtime cross-app deep links
+                  </strong>
+                  <span style={mutedStyle}>
+                    只有 backend 返回 `CrossAppResourceLink`
+                    時才顯示新分頁追蹤入口。
+                  </span>
+                </div>
+              )}
             </div>
           </CanvasCard>
         </div>
