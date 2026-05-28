@@ -5,6 +5,7 @@ import type {
   ResourceActionDescriptor,
   TenantPassengerQualityIssue,
   TenantPassengerRecord,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -43,7 +44,7 @@ const kpiGridStyle: CSSProperties = {
 const filterBarStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns:
-    "minmax(240px, 1.4fr) repeat(2, minmax(180px, 0.8fr)) auto",
+    "minmax(220px, 1.4fr) repeat(3, minmax(160px, 0.8fr)) auto",
   gap: 12,
   alignItems: "end",
 };
@@ -200,19 +201,25 @@ type PassengerRow = RuntimePassengerRecord &
 type PassengerPageData = {
   passengers: RuntimePassengerRecord[];
   errors: string[];
+  fetchedAt: string;
+  refreshMetadata: UiRefreshMetadata | null;
 };
 
 type PassengerFilters = {
   q: string;
   department: string;
+  activeState: "all" | "active" | "inactive";
   selectedPassengerId: string;
-  emptyReasonOverride: EmptyReason | null;
+  emptyReasonOverride: PassengerEmptyReason | null;
 };
+
+type PassengerEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
 
 type EmptyStateView = {
   title: string;
   body: string;
   accent: string;
+  tone: CanvasTone;
   ctaLabel?: string;
   ctaHref?: string;
 };
@@ -229,16 +236,18 @@ const PASSENGER_TABS: PassengerTabDefinition[] = [
   { key: "disabled", label: "停用" },
 ];
 
-const EMPTY_STATE_VIEWS: Record<EmptyReason, EmptyStateView> = {
+const EMPTY_STATE_VIEWS: Record<PassengerEmptyReason, EmptyStateView> = {
   no_data: {
     title: "還沒有乘客資料",
     body: "這個租戶尚未建立常用乘客名冊。新增後即可在新建預訂流程直接帶入乘客資料。",
     accent: "ND",
+    tone: "info",
   },
   not_provisioned: {
     title: "乘客目錄尚未啟用",
     body: "租戶資料維護流程尚未完成佈署或初始化，暫時無法建立名冊。",
     accent: "NP",
+    tone: "warn",
     ctaLabel: "前往設定",
     ctaHref: "/settings",
   },
@@ -246,26 +255,25 @@ const EMPTY_STATE_VIEWS: Record<EmptyReason, EmptyStateView> = {
     title: "乘客資料讀取失敗",
     body: "頁面已載入，但本次無法完成 passenger directory 讀取。請稍後重新整理或查看 API 狀態。",
     accent: "FF",
+    tone: "danger",
   },
   permission_denied: {
     title: "目前角色無法管理乘客",
     body: "這個帳號缺少 passenger directory 存取權限。CTA 仍保留，但會以 disabled reason 呈現。",
     accent: "PD",
+    tone: "neutral",
   },
   external_unavailable: {
     title: "相依服務暫時不可用",
     body: "租戶目錄依賴的外部整合目前不可用，因此無法回傳 passenger directory。",
     accent: "EU",
-  },
-  driver_not_eligible: {
-    title: "Driver-only empty state",
-    body: "此狀態不適用於 tenant console passenger directory。",
-    accent: "DN",
+    tone: "danger",
   },
   filtered_empty: {
     title: "目前篩選沒有結果",
     body: "放寬關鍵字、部門或切換 active/inactive 篩選後，即可回到完整乘客目錄。",
     accent: "FE",
+    tone: "accent",
     ctaLabel: "清除篩選",
     ctaHref: "/passengers",
   },
@@ -355,14 +363,35 @@ function getSelectedTab(rawTab: string | undefined): PassengerTabKey {
   return matched?.key ?? "all";
 }
 
-function normalizeEmptyReason(value: string | undefined): EmptyReason | null {
+function getFilters(
+  searchParams: Record<string, string | string[] | undefined>,
+) {
+  const activeState = getSingleQueryValue(searchParams.state)?.trim();
+
+  return {
+    q: getSingleQueryValue(searchParams.q)?.trim() ?? "",
+    department: getSingleQueryValue(searchParams.department)?.trim() ?? "",
+    activeState:
+      activeState === "active" || activeState === "inactive"
+        ? activeState
+        : "all",
+    selectedPassengerId:
+      getSingleQueryValue(searchParams.selected)?.trim() ?? "",
+    emptyReasonOverride: normalizeEmptyReason(
+      getSingleQueryValue(searchParams.emptyReason),
+    ),
+  } satisfies PassengerFilters;
+}
+
+function normalizeEmptyReason(
+  value: string | undefined,
+): PassengerEmptyReason | null {
   switch (value) {
     case "no_data":
     case "not_provisioned":
     case "fetch_failed":
     case "permission_denied":
     case "external_unavailable":
-    case "driver_not_eligible":
     case "filtered_empty":
       return value;
     default:
@@ -370,18 +399,47 @@ function normalizeEmptyReason(value: string | undefined): EmptyReason | null {
   }
 }
 
-function getFilters(
-  searchParams: Record<string, string | string[] | undefined>,
+function buildPassengersHref(
+  selectedTab: PassengerTabKey,
+  filters: PassengerFilters,
+  overrides: Partial<{
+    q: string;
+    department: string;
+    activeState: PassengerFilters["activeState"];
+    selectedPassengerId: string;
+    emptyReasonOverride: PassengerEmptyReason | null;
+  }> = {},
 ) {
-  return {
-    q: getSingleQueryValue(searchParams.q)?.trim() ?? "",
-    department: getSingleQueryValue(searchParams.department)?.trim() ?? "",
-    selectedPassengerId:
-      getSingleQueryValue(searchParams.selected)?.trim() ?? "",
-    emptyReasonOverride: normalizeEmptyReason(
-      getSingleQueryValue(searchParams.emptyReason),
-    ),
-  } satisfies PassengerFilters;
+  const params = new URLSearchParams();
+  const q = overrides.q ?? filters.q;
+  const department = overrides.department ?? filters.department;
+  const activeState = overrides.activeState ?? filters.activeState;
+  const selectedPassengerId =
+    overrides.selectedPassengerId ?? filters.selectedPassengerId;
+  const emptyReasonOverride =
+    overrides.emptyReasonOverride ?? filters.emptyReasonOverride;
+
+  if (selectedTab !== "all") {
+    params.set("tab", selectedTab);
+  }
+  if (q) {
+    params.set("q", q);
+  }
+  if (department) {
+    params.set("department", department);
+  }
+  if (activeState !== "all") {
+    params.set("state", activeState);
+  }
+  if (selectedPassengerId) {
+    params.set("selected", selectedPassengerId);
+  }
+  if (emptyReasonOverride) {
+    params.set("emptyReason", emptyReasonOverride);
+  }
+
+  const query = params.toString();
+  return `/passengers${query ? `?${query}` : ""}`;
 }
 
 function getDisabledReasonLabel(code: string | undefined) {
@@ -498,8 +556,14 @@ function buildTabNodes(
     if (filters.department) {
       params.set("department", filters.department);
     }
+    if (filters.activeState !== "all") {
+      params.set("state", filters.activeState);
+    }
     if (filters.selectedPassengerId) {
       params.set("selected", filters.selectedPassengerId);
+    }
+    if (filters.emptyReasonOverride) {
+      params.set("emptyReason", filters.emptyReasonOverride);
     }
 
     const href = `/passengers${params.toString() ? `?${params.toString()}` : ""}`;
@@ -560,6 +624,14 @@ function matchesFilters(
     return false;
   }
 
+  if (filters.activeState === "active" && !passenger.activeFlag) {
+    return false;
+  }
+
+  if (filters.activeState === "inactive" && passenger.activeFlag) {
+    return false;
+  }
+
   if (!filters.q) {
     return true;
   }
@@ -578,6 +650,7 @@ function matchesFilters(
 async function loadPassengersData(): Promise<PassengerPageData> {
   const client = getTenantClient();
   const errors: string[] = [];
+  const fetchedAt = new Date().toISOString();
   const [passengersResult] = await Promise.allSettled([
     client.listPassengers() as Promise<RuntimePassengerRecord[]>,
   ]);
@@ -591,14 +664,19 @@ async function loadPassengersData(): Promise<PassengerPageData> {
     errors.push(`乘客目錄: ${toErrorMessage(passengersResult.reason)}`);
   }
 
-  return { passengers, errors };
+  return {
+    passengers,
+    errors,
+    fetchedAt,
+    refreshMetadata: getRefreshMetadata(passengers),
+  };
 }
 
 function resolveEmptyReason(params: {
   errors: string[];
   hasAnyPassengers: boolean;
   hasFilteredRows: boolean;
-  emptyReasonOverride: EmptyReason | null;
+  emptyReasonOverride: PassengerEmptyReason | null;
 }) {
   if (params.emptyReasonOverride) {
     return params.emptyReasonOverride;
@@ -689,8 +767,9 @@ function getActionLabel(action: string) {
   }
 }
 
-function renderEmptyState(reason: EmptyReason) {
-  const view = EMPTY_STATE_VIEWS[reason];
+function renderEmptyState(reason: PassengerEmptyReason) {
+  const fallbackView = EMPTY_STATE_VIEWS.fetch_failed;
+  const view = EMPTY_STATE_VIEWS[reason] ?? fallbackView;
 
   return (
     <div style={emptyStateWrapStyle}>
@@ -716,10 +795,73 @@ function renderEmptyState(reason: EmptyReason) {
           {view.ctaLabel}
         </Link>
       ) : null}
-      <CanvasPill theme={th} tone="neutral">
+      <CanvasPill theme={th} tone={view.tone}>
         emptyReason: {reason}
       </CanvasPill>
     </div>
+  );
+}
+
+function isRefreshMetadata(value: unknown): value is UiRefreshMetadata {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.generatedAt === "string" &&
+    typeof candidate.staleAfterMs === "number" &&
+    typeof candidate.dataFreshness === "string" &&
+    typeof candidate.source === "string"
+  );
+}
+
+function getRefreshMetadata(
+  passengers: RuntimePassengerRecord[],
+): UiRefreshMetadata | null {
+  const candidate = passengers
+    .map((passenger) => passenger.metadata?.refreshMetadata)
+    .find((value): value is UiRefreshMetadata => isRefreshMetadata(value));
+  return candidate ?? null;
+}
+
+function getRefreshTone(
+  refreshMetadata: UiRefreshMetadata | null,
+  errors: string[],
+): CanvasTone {
+  if (errors.length > 0) {
+    return "warn";
+  }
+
+  switch (refreshMetadata?.dataFreshness) {
+    case "stale":
+      return "warn";
+    case "degraded":
+      return "danger";
+    case "unknown":
+      return "neutral";
+    case "fresh":
+    default:
+      return "success";
+  }
+}
+
+function getRefreshSummary(
+  refreshMetadata: UiRefreshMetadata | null,
+  fetchedAt: string,
+) {
+  if (!refreshMetadata) {
+    return `30s tenant slow tier · fallback ${formatUpdated(fetchedAt)}`;
+  }
+
+  return `${refreshMetadata.dataFreshness} · ${formatUpdated(
+    refreshMetadata.generatedAt,
+  )} · ${refreshMetadata.source}`;
+}
+
+function getRecordActions(passenger: RuntimePassengerRecord) {
+  return getPassengerActions(passenger).filter(
+    (action) => action.action !== "create",
   );
 }
 
@@ -733,7 +875,8 @@ export default async function PassengersPage({
     getSingleQueryValue(resolvedSearchParams.tab),
   );
   const filters = getFilters(resolvedSearchParams);
-  const { passengers, errors } = await loadPassengersData();
+  const { passengers, errors, fetchedAt, refreshMetadata } =
+    await loadPassengersData();
   const duplicateNames = findDuplicateNames(passengers);
   const filteredPassengers = passengers.filter((passenger) =>
     matchesFilters(passenger, filters, selectedTab),
@@ -742,11 +885,10 @@ export default async function PassengersPage({
     toPassengerRow(passenger, duplicateNames),
   );
   const selectedPassenger =
-    passengers.find(
+    rows.find(
       (passenger) => passenger.passengerId === filters.selectedPassengerId,
     ) ??
     rows[0] ??
-    passengers[0] ??
     null;
   const selectedActions = selectedPassenger
     ? getPassengerActions(selectedPassenger)
@@ -778,6 +920,9 @@ export default async function PassengersPage({
     hasFilteredRows: rows.length > 0,
     emptyReasonOverride: filters.emptyReasonOverride,
   });
+  const refreshHref = buildPassengersHref(selectedTab, filters);
+  const refreshTone = getRefreshTone(refreshMetadata, errors);
+  const refreshSummary = getRefreshSummary(refreshMetadata, fetchedAt);
 
   const columns: CanvasTableColumn<PassengerRow>[] = [
     {
@@ -786,12 +931,9 @@ export default async function PassengersPage({
       r: (row) => (
         <div style={{ display: "grid", gap: 5 }}>
           <Link
-            href={`/passengers?${new URLSearchParams({
-              ...(selectedTab !== "all" ? { tab: selectedTab } : {}),
-              ...(filters.q ? { q: filters.q } : {}),
-              ...(filters.department ? { department: filters.department } : {}),
-              selected: row.passengerId,
-            }).toString()}`}
+            href={buildPassengersHref(selectedTab, filters, {
+              selectedPassengerId: row.passengerId,
+            })}
             style={{
               ...primaryCellStyle,
               textDecoration: "none",
@@ -860,17 +1002,9 @@ export default async function PassengersPage({
           >
             建立預訂
           </Link>
-          <Link
-            href={`/passengers?${new URLSearchParams({
-              ...(selectedTab !== "all" ? { tab: selectedTab } : {}),
-              ...(filters.q ? { q: filters.q } : {}),
-              ...(filters.department ? { department: filters.department } : {}),
-              selected: row.passengerId,
-            }).toString()}`}
-            style={linkButtonStyle}
-          >
-            查看
-          </Link>
+          {getRecordActions(row).map((action) =>
+            renderActionDescriptor(action, getActionLabel(action.action)),
+          )}
         </div>
       ),
     },
@@ -895,12 +1029,9 @@ export default async function PassengersPage({
         activeTab={activeTab}
         actions={
           <div style={actionsWrapStyle}>
-            <span
-              style={disabledActionStyle}
-              title="匯入流程未在 tenant console rebuild 範圍內"
-            >
-              CSV 匯入
-            </span>
+            <Link href={refreshHref} style={linkButtonStyle}>
+              重新整理
+            </Link>
             {pageActions.map((action) =>
               renderActionDescriptor(action, getActionLabel(action.action)),
             )}
@@ -946,7 +1077,7 @@ export default async function PassengersPage({
             theme={th}
             label="Refresh"
             value="T5"
-            sub="30s tenant slow tier"
+            sub={refreshSummary}
           />
           <CanvasKPI
             theme={th}
@@ -964,6 +1095,13 @@ export default async function PassengersPage({
           <form action="/passengers" method="get" style={filterBarStyle}>
             {selectedTab !== "all" ? (
               <input name="tab" type="hidden" value={selectedTab} />
+            ) : null}
+            {filters.emptyReasonOverride ? (
+              <input
+                name="emptyReason"
+                type="hidden"
+                value={filters.emptyReasonOverride}
+              />
             ) : null}
             <label style={fieldStackStyle}>
               <span style={fieldLabelStyle}>Search</span>
@@ -990,23 +1128,32 @@ export default async function PassengersPage({
               </select>
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Empty reason QA</span>
+              <span style={fieldLabelStyle}>State</span>
               <select
-                defaultValue={filters.emptyReasonOverride ?? ""}
-                name="emptyReason"
+                defaultValue={filters.activeState}
+                name="state"
                 style={fieldStyle}
               >
-                <option value="">auto</option>
-                <option value="no_data">no_data</option>
-                <option value="not_provisioned">not_provisioned</option>
-                <option value="fetch_failed">fetch_failed</option>
-                <option value="permission_denied">permission_denied</option>
-                <option value="external_unavailable">
-                  external_unavailable
-                </option>
-                <option value="driver_not_eligible">driver_not_eligible</option>
-                <option value="filtered_empty">filtered_empty</option>
+                <option value="all">全部狀態</option>
+                <option value="active">僅啟用</option>
+                <option value="inactive">僅停用</option>
               </select>
+            </label>
+            <label style={fieldStackStyle}>
+              <span style={fieldLabelStyle}>Refresh tier</span>
+              <div
+                style={{
+                  ...fieldStyle,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span>T5 / 30s</span>
+                <CanvasPill theme={th} tone={refreshTone}>
+                  {refreshMetadata?.dataFreshness ?? "fallback"}
+                </CanvasPill>
+              </div>
             </label>
             <div style={{ display: "flex", gap: 8 }}>
               <button style={fieldStyle} type="submit">
@@ -1025,7 +1172,7 @@ export default async function PassengersPage({
             padding={0}
             style={cardStyle}
             title="Passenger roster"
-            subtitle={`${rows.length} visible row(s) in current filter set`}
+            subtitle={`${rows.length} visible row(s) · state ${filters.activeState}`}
           >
             {emptyReason ? (
               renderEmptyState(emptyReason)
@@ -1141,6 +1288,9 @@ export default async function PassengersPage({
                       style={linkButtonStyle}
                     >
                       查看稽核
+                    </Link>
+                    <Link href={refreshHref} style={linkButtonStyle}>
+                      重新整理目錄
                     </Link>
                   </div>
                 </div>
