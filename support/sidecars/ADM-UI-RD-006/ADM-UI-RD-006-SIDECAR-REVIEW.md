@@ -54,7 +54,7 @@ The review packet does not attempt to override that parent-task lifecycle state.
 
 ## 5. Reviewer Disposition
 
-`Codex2` reviewed the sidecar packet content and found the support-only scope acceptable. The remaining gap is control-plane bookkeeping: `ADM-UI-RD-006-SIDECAR-REVIEW` is not present as a standalone task in `ai-status.json`, so this review cannot be lifecycle-approved through `scripts/ai-status.sh approve <task-id>` until the task exists in machine truth.
+`Codex2` reviewed the sidecar packet content and found the support-only scope acceptable. During review, the sidecar task was missing from `ai-status.json`; that control-plane gap has since been materialized so the task now exists in machine truth. The remaining lifecycle gap is still owner-to-reviewer handoff: until `Gemini2` records `scripts/ai-status.sh handoff ADM-UI-RD-006-SIDECAR-REVIEW Codex2 "<message>"`, this packet cannot be formally advanced to `review_approved`.
 
 ---
 
@@ -68,4 +68,4 @@ Reviewer conclusion:
 
 - support artifact: ready
 - parent implementation task: still blocked independently
-- control-plane follow-up: add or reconcile the missing `ADM-UI-RD-006-SIDECAR-REVIEW` task entry before expecting a standalone review approval event
+- control-plane follow-up: task entry now needs a proper owner handoff into `review` before reviewer approval can be recorded
