@@ -10,6 +10,7 @@ import {
 } from "@/lib/localized-labels";
 import type {
   CrossAppResourceLink,
+  CreateVehicleContractCommand,
   DispatchExclusivityRecord,
   DriverDeviceBindingSummary,
   DriverRegistryRecord,
@@ -111,11 +112,26 @@ type ContractView = VehicleContractRecord & {
   revenueShareLabel: string;
 };
 
+type RuntimeResource<T> = T & {
+  availableActions?: ResourceActionDescriptor[];
+  crossAppLinks?: CrossAppResourceLink[];
+};
+
 type DriverCreateForm = {
   name: string;
   phone: string;
   email: string;
   licensesValid: boolean;
+};
+
+type ContractCreateForm = {
+  vehicleId: string;
+  partnerId: string;
+  partnerType: string;
+  contractType: string;
+  serviceScope: string;
+  startAt: string;
+  endAt: string;
 };
 
 const REFRESH_TIER: RefreshTier = "medium_slow";
@@ -146,16 +162,16 @@ const EMPTY_REASON_VALUES: EmptyReason[] = [
 ];
 const theme = buildCanvasTheme({
   surface: "platform",
-  dark: true,
+  dark: false,
   density: "compact",
 });
 
 const pageStyle: CSSProperties = {
   minHeight: "100%",
   background:
-    "radial-gradient(circle at top left, rgba(99,102,241,0.24), transparent 28%), radial-gradient(circle at top right, rgba(20,184,166,0.16), transparent 22%), #06111f",
+    "linear-gradient(180deg, rgba(252, 250, 245, 0.96), rgba(244, 239, 231, 0.94))",
   color: theme.text,
-  borderRadius: 18,
+  borderRadius: 14,
   overflow: "hidden",
   fontFamily: theme.fontFamily,
 };
@@ -176,7 +192,7 @@ const summaryCardStyle: CSSProperties = {
   padding: 16,
   borderRadius: 16,
   border: `1px solid ${theme.border}`,
-  background: "rgba(7, 20, 38, 0.72)",
+  background: theme.bg,
   display: "grid",
   gap: 8,
 };
@@ -192,7 +208,7 @@ const summaryLabelStyle: CSSProperties = {
 const summaryValueStyle: CSSProperties = {
   fontSize: 28,
   fontWeight: 700,
-  color: "#ffffff",
+  color: theme.text,
   lineHeight: 1,
 };
 
@@ -212,8 +228,8 @@ const tabButtonStyle = (selected: boolean): CSSProperties => ({
   padding: "10px 14px",
   borderRadius: 999,
   border: `1px solid ${selected ? theme.accent : theme.border}`,
-  background: selected ? "rgba(79, 70, 229, 0.22)" : "rgba(7, 20, 38, 0.56)",
-  color: selected ? "#ffffff" : theme.textMuted,
+  background: selected ? theme.accentBg : theme.bg,
+  color: selected ? theme.text : theme.textMuted,
   fontSize: 12.5,
   fontWeight: 600,
   cursor: "pointer",
@@ -240,12 +256,43 @@ const searchBarStyle: CSSProperties = {
   alignItems: "center",
 };
 
+const tabMetaGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "minmax(0, 1.25fr) minmax(280px, 0.75fr)",
+  alignItems: "start",
+};
+
+const tabPanelStyle: CSSProperties = {
+  padding: 16,
+  borderRadius: 16,
+  border: `1px solid ${theme.border}`,
+  background: theme.bg,
+  display: "grid",
+  gap: 12,
+};
+
+const tabKpiGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(126px, 1fr))",
+};
+
+const tabKpiCardStyle: CSSProperties = {
+  padding: 12,
+  borderRadius: 14,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  display: "grid",
+  gap: 6,
+};
+
 const searchInputStyle: CSSProperties = {
   minWidth: 220,
   flex: "1 1 260px",
   borderRadius: 10,
   border: `1px solid ${theme.border}`,
-  background: "rgba(7, 20, 38, 0.84)",
+  background: theme.bg,
   color: theme.text,
   padding: "9px 12px",
   fontSize: 12.5,
@@ -308,8 +355,7 @@ const modalStyle: CSSProperties = {
   width: "min(520px, 100%)",
   borderRadius: 18,
   border: `1px solid ${theme.border}`,
-  background:
-    "linear-gradient(180deg, rgba(14, 26, 48, 0.98), rgba(6, 17, 31, 0.98))",
+  background: theme.bg,
   padding: 18,
   display: "grid",
   gap: 14,
@@ -334,6 +380,18 @@ function createInitialDriverForm(): DriverCreateForm {
     phone: "",
     email: "",
     licensesValid: false,
+  };
+}
+
+function createInitialContractForm(): ContractCreateForm {
+  return {
+    vehicleId: "",
+    partnerId: "",
+    partnerType: "fleet_partner",
+    contractType: "lease",
+    serviceScope: "standard_taxi",
+    startAt: "",
+    endAt: "",
   };
 }
 
@@ -501,6 +559,20 @@ function disabledReasonLabel(
   );
 }
 
+function normalizeActions(
+  actions: ResourceActionDescriptor[] | undefined,
+  fallback: ResourceActionDescriptor[],
+) {
+  return actions && actions.length > 0 ? actions : fallback;
+}
+
+function normalizeLinks(
+  links: CrossAppResourceLink[] | undefined,
+  fallback: CrossAppResourceLink[],
+) {
+  return links && links.length > 0 ? links : fallback;
+}
+
 function getFleetCopy(locale: string) {
   return locale === "en"
     ? {
@@ -541,6 +613,11 @@ function getFleetCopy(locale: string) {
         deepLinkTitle: "Cross-app links",
         selected: "Selected",
         openLink: "Open",
+        routeLabel: "Route",
+        actionCountLabel: "Available CTAs",
+        actionModelTitle: "Action model",
+        actionModelBody:
+          "Buttons remain visible even when disabled; backend `availableActions` decides enablement and risk treatment.",
         tab: {
           vehicles: "Vehicles",
           drivers: "Drivers",
@@ -548,6 +625,20 @@ function getFleetCopy(locale: string) {
           device: "Device Binding",
           exclusivity: "Exclusivity Reviews",
           offboard: "Offboarding",
+        },
+        tabDescription: {
+          vehicles:
+            "Vehicle registry, insurance, dispatch hold, and operational cross-checks.",
+          drivers:
+            "Driver lifecycle, license readiness, service buckets, and device posture.",
+          contracts:
+            "Contract ownership, active periods, and editability boundaries.",
+          device:
+            "Driver-device binding state, issuance timing, and revocation control.",
+          exclusivity:
+            "Governed review queue that blocks dispatch restoration until approved.",
+          offboard:
+            "State-machine workflow with actor, evidence, and timestamp accountability.",
         },
         empty: {
           no_data: {
@@ -656,6 +747,11 @@ function getFleetCopy(locale: string) {
         deepLinkTitle: "跨 app 連結",
         selected: "已選",
         openLink: "開啟",
+        routeLabel: "路由",
+        actionCountLabel: "可用 CTA",
+        actionModelTitle: "動作模型",
+        actionModelBody:
+          "按鈕即使停用也要保留；是否可執行與風險等級都由後端 `availableActions` 決定。",
         tab: {
           vehicles: "車輛",
           drivers: "司機",
@@ -663,6 +759,14 @@ function getFleetCopy(locale: string) {
           device: "裝置綁定",
           exclusivity: "排他審查",
           offboard: "下線流程",
+        },
+        tabDescription: {
+          vehicles: "車輛主檔、保險、派遣 hold 與營運交叉檢查。",
+          drivers: "司機生命週期、證照狀態、服務類型與裝置風險姿態。",
+          contracts: "合約歸屬、生效期間與可編輯邊界。",
+          device: "司機與裝置的綁定狀態、簽發時間與撤銷治理。",
+          exclusivity: "核准前會阻擋恢復派遣的治理審查佇列。",
+          offboard: "帶有操作者、證據與時間戳責任的狀態機流程。",
         },
         empty: {
           no_data: {
@@ -757,6 +861,9 @@ export default function FleetPage() {
   const [searchText, setSearchText] = useState("");
   const [driverForm, setDriverForm] = useState<DriverCreateForm>(
     createInitialDriverForm(),
+  );
+  const [contractForm, setContractForm] = useState<ContractCreateForm>(
+    createInitialContractForm(),
   );
   const [offboardingForm, setOffboardingForm] = useState(
     createInitialOffboardingForm(),
@@ -880,31 +987,43 @@ export default function FleetPage() {
           client.listExclusivities(),
         ]);
 
-      const mappedVehicles: VehicleView[] = (vehicleRows ?? []).map(
-        (vehicle) => ({
-          ...vehicle,
-          availableActions: buildVehicleActions(vehicle),
-          crossAppLinks: [opsVehicleLink(locale, vehicle.vehicleId)],
-          regulatoryProfile: [
-            vehicle.operatingArea,
-            vehicle.supportedServiceBuckets.join("/"),
-          ]
-            .filter(Boolean)
-            .join(" · "),
-          currentBindingSummary: vehicle.dispatchableFlag
-            ? locale === "en"
-              ? "Dispatch path available"
-              : "可進入派遣流程"
-            : locale === "en"
-              ? "Dispatch blocked"
-              : "派遣受阻",
-          insuranceExpiresAt: vehicle.supplyLifecycle.insurance.endAt ?? null,
-        }),
-      );
-      const mappedDrivers: DriverView[] = (driverRows ?? []).map((driver) => ({
+      const mappedVehicles: VehicleView[] = (
+        (vehicleRows ?? []) as RuntimeResource<VehicleRegistryRecord>[]
+      ).map((vehicle) => ({
+        ...vehicle,
+        availableActions: normalizeActions(
+          vehicle.availableActions,
+          buildVehicleActions(vehicle),
+        ),
+        crossAppLinks: normalizeLinks(vehicle.crossAppLinks, [
+          opsVehicleLink(locale, vehicle.vehicleId),
+        ]),
+        regulatoryProfile: [
+          vehicle.operatingArea,
+          vehicle.supportedServiceBuckets.join("/"),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        currentBindingSummary: vehicle.dispatchableFlag
+          ? locale === "en"
+            ? "Dispatch path available"
+            : "可進入派遣流程"
+          : locale === "en"
+            ? "Dispatch blocked"
+            : "派遣受阻",
+        insuranceExpiresAt: vehicle.supplyLifecycle.insurance.endAt ?? null,
+      }));
+      const mappedDrivers: DriverView[] = (
+        (driverRows ?? []) as RuntimeResource<DriverRegistryRecord>[]
+      ).map((driver) => ({
         ...driver,
-        availableActions: buildDriverActions(driver),
-        crossAppLinks: [opsDriverLink(locale, driver.driverId)],
+        availableActions: normalizeActions(
+          driver.availableActions,
+          buildDriverActions(driver),
+        ),
+        crossAppLinks: normalizeLinks(driver.crossAppLinks, [
+          opsDriverLink(locale, driver.driverId),
+        ]),
         licenseExpiresAt: driver.licensesValid ? driver.updatedAt : null,
         currentVehicleLabel:
           driver.deviceBindings.find(
@@ -920,31 +1039,34 @@ export default function FleetPage() {
             ? "blocked"
             : "受阻",
       }));
-      const mappedContracts: ContractView[] = (contractRows ?? []).map(
-        (contract) => ({
-          ...contract,
-          availableActions: [
-            {
-              action: `contract.edit:${contract.contractId}`,
-              enabled: false,
-              disabledReasonCode: "backend_action_unavailable",
-              riskLevel: "medium",
-            },
-          ],
-          crossAppLinks: [opsVehicleLink(locale, contract.vehicleId)],
-          revenueShareLabel:
-            contract.contractType === "lease"
-              ? "lease"
-              : contract.contractType === "commission"
-                ? "commission"
-                : "mixed",
-        }),
-      );
+      const mappedContracts: ContractView[] = (
+        (contractRows ?? []) as RuntimeResource<VehicleContractRecord>[]
+      ).map((contract) => ({
+        ...contract,
+        availableActions: normalizeActions(contract.availableActions, [
+          {
+            action: `contract.edit:${contract.contractId}`,
+            enabled: false,
+            disabledReasonCode: "backend_action_unavailable",
+            riskLevel: "medium",
+          },
+        ]),
+        crossAppLinks: normalizeLinks(contract.crossAppLinks, [
+          opsVehicleLink(locale, contract.vehicleId),
+        ]),
+        revenueShareLabel:
+          contract.contractType === "lease"
+            ? "lease"
+            : contract.contractType === "commission"
+              ? "commission"
+              : "mixed",
+      }));
       const mappedExclusivities: ExclusivityRow[] = mappedVehicles.map(
         (vehicle) => {
-          const record = (exclusivityRows ?? []).find(
-            (item) => item.vehicleId === vehicle.vehicleId,
-          ) ?? {
+          const record = (
+            (exclusivityRows ??
+              []) as RuntimeResource<DispatchExclusivityRecord>[]
+          ).find((item) => item.vehicleId === vehicle.vehicleId) ?? {
             vehicleId: vehicle.vehicleId,
             declarationStatus:
               vehicle.supplyLifecycle.exclusivity.declarationStatus ??
@@ -973,12 +1095,17 @@ export default function FleetPage() {
             operatingArea: vehicle.operatingArea,
             dispatchableFlag: vehicle.dispatchableFlag,
             record,
-            availableActions: buildExclusivityActions(
-              vehicle.vehicleId,
-              record.reviewStatus,
-              record.declarationStatus,
+            availableActions: normalizeActions(
+              record.availableActions,
+              buildExclusivityActions(
+                vehicle.vehicleId,
+                record.reviewStatus,
+                record.declarationStatus,
+              ),
             ),
-            crossAppLinks: [opsVehicleLink(locale, vehicle.vehicleId)],
+            crossAppLinks: normalizeLinks(record.crossAppLinks, [
+              opsVehicleLink(locale, vehicle.vehicleId),
+            ]),
             scopeLabel: `vehicle:${vehicle.vehicleId}`,
             submittedAt: record.updatedAt,
             submitter: "fleet_admin",
@@ -1149,17 +1276,24 @@ export default function FleetPage() {
       driverName: driver.name,
       lifecycleStatus: driver.lifecycleStatus,
       binding,
-      availableActions: [
-        {
-          action: `binding.revoke:${binding.bindingId}`,
-          enabled: binding.status === "active",
-          disabledReasonCode:
-            binding.status === "active" ? undefined : "no_active_binding",
-          requiresReason: true,
-          riskLevel: "high",
-        },
-      ],
-      crossAppLinks: [opsDriverLink(locale, driver.driverId)],
+      availableActions: normalizeActions(
+        (binding as RuntimeResource<DriverDeviceBindingSummary>)
+          .availableActions,
+        [
+          {
+            action: `binding.revoke:${binding.bindingId}`,
+            enabled: binding.status === "active",
+            disabledReasonCode:
+              binding.status === "active" ? undefined : "no_active_binding",
+            requiresReason: true,
+            riskLevel: "high",
+          },
+        ],
+      ),
+      crossAppLinks: normalizeLinks(
+        (binding as RuntimeResource<DriverDeviceBindingSummary>).crossAppLinks,
+        [opsDriverLink(locale, driver.driverId)],
+      ),
       osLabel: binding.deviceId.startsWith("ios") ? "iOS" : "Android",
       lastSeenLabel: formatTimestamp(binding.refreshedAt),
     })),
@@ -1171,36 +1305,48 @@ export default function FleetPage() {
     id: vehicle.vehicleId,
     vehicle,
     timeline: offboardingTimeline(vehicle),
-    availableActions: [
-      {
-        action: `offboarding.initiate:${vehicle.vehicleId}`,
-        enabled: vehicle.supplyLifecycle.offboarding.status === "none",
-        riskLevel: "high",
-        requiresReason: true,
-      },
-      {
-        action: `offboarding.advance:${vehicle.vehicleId}`,
-        enabled:
-          vehicle.supplyLifecycle.offboarding.status !== "none" &&
-          vehicle.dispatchableFlag,
-        disabledReasonCode:
-          vehicle.supplyLifecycle.offboarding.status === "none"
-            ? "offboarding_not_started"
-            : undefined,
-        riskLevel: "medium",
-      },
-      {
-        action: `offboarding.complete:${vehicle.vehicleId}`,
-        enabled:
-          vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending",
-        disabledReasonCode:
-          vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"
-            ? undefined
-            : "debranding_not_pending",
-        riskLevel: "medium",
-      },
-    ],
-    crossAppLinks: [opsVehicleLink(locale, vehicle.vehicleId)],
+    availableActions: normalizeActions(
+      (
+        vehicle.supplyLifecycle.offboarding as RuntimeResource<
+          VehicleRegistryRecord["supplyLifecycle"]["offboarding"]
+        >
+      ).availableActions,
+      [
+        {
+          action: `offboarding.initiate:${vehicle.vehicleId}`,
+          enabled: vehicle.supplyLifecycle.offboarding.status === "none",
+          riskLevel: "high",
+          requiresReason: true,
+        },
+        {
+          action: `offboarding.advance:${vehicle.vehicleId}`,
+          enabled:
+            vehicle.supplyLifecycle.offboarding.status !== "none" &&
+            vehicle.supplyLifecycle.offboarding.status !== "completed" &&
+            vehicle.dispatchableFlag,
+          disabledReasonCode:
+            vehicle.supplyLifecycle.offboarding.status === "none"
+              ? "offboarding_not_started"
+              : vehicle.dispatchableFlag
+                ? undefined
+                : "already_held",
+          riskLevel: "medium",
+        },
+        {
+          action: `offboarding.complete:${vehicle.vehicleId}`,
+          enabled:
+            vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending",
+          disabledReasonCode:
+            vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"
+              ? undefined
+              : "debranding_not_pending",
+          riskLevel: "medium",
+        },
+      ],
+    ),
+    crossAppLinks: normalizeLinks(vehicle.crossAppLinks, [
+      opsVehicleLink(locale, vehicle.vehicleId),
+    ]),
     actor:
       vehicle.supplyLifecycle.offboarding.requestedBy ||
       (locale === "en" ? "Governance queue" : "治理佇列"),
@@ -1295,6 +1441,19 @@ export default function FleetPage() {
       (row) => row.vehicle.vehicleId === selectedOffboardingId,
     ) ?? null;
 
+  const selectedRecord =
+    activeTab === "vehicles"
+      ? selectedVehicle
+      : activeTab === "drivers"
+        ? selectedDriver
+        : activeTab === "contracts"
+          ? selectedContract
+          : activeTab === "device"
+            ? selectedBinding
+            : activeTab === "exclusivity"
+              ? selectedExclusivity
+              : selectedOffboarding;
+
   const copyEmpty = copy.empty as Record<
     EmptyReason,
     { title: string; description: string }
@@ -1322,6 +1481,72 @@ export default function FleetPage() {
   const licenseWarningCount = drivers.filter(
     (driver) => !driver.licensesValid,
   ).length;
+  const actionCountByTab: Record<FleetTab, number> = {
+    vehicles: vehicles.reduce(
+      (total, row) =>
+        total +
+        row.availableActions.filter(
+          (action: ResourceActionDescriptor) => action.enabled,
+        ).length,
+      0,
+    ),
+    drivers: drivers.reduce(
+      (total, row) =>
+        total +
+        row.availableActions.filter(
+          (action: ResourceActionDescriptor) => action.enabled,
+        ).length,
+      0,
+    ),
+    contracts: contracts.reduce(
+      (total, row) =>
+        total +
+        row.availableActions.filter(
+          (action: ResourceActionDescriptor) => action.enabled,
+        ).length,
+      0,
+    ),
+    device: deviceBindings.reduce(
+      (total, row) =>
+        total +
+        row.availableActions.filter(
+          (action: ResourceActionDescriptor) => action.enabled,
+        ).length,
+      0,
+    ),
+    exclusivity: exclusivityRows.reduce(
+      (total, row) =>
+        total +
+        row.availableActions.filter(
+          (action: ResourceActionDescriptor) => action.enabled,
+        ).length,
+      0,
+    ),
+    offboard: offboardingRows.reduce(
+      (total, row) =>
+        total +
+        row.availableActions.filter(
+          (action: ResourceActionDescriptor) => action.enabled,
+        ).length,
+      0,
+    ),
+  };
+  const countsByTab: Record<FleetTab, number> = {
+    vehicles: vehicles.length,
+    drivers: drivers.length,
+    contracts: contracts.length,
+    device: deviceBindings.length,
+    exclusivity: exclusivityRows.length,
+    offboard: offboardingRows.length,
+  };
+  const tabRoutes: Record<FleetTab, string> = {
+    vehicles: "/fleet?tab=vehicles",
+    drivers: "/fleet?tab=drivers",
+    contracts: "/fleet?tab=contracts",
+    device: "/fleet?tab=device",
+    exclusivity: "/fleet?tab=exclusivity",
+    offboard: "/fleet?tab=offboard",
+  };
 
   const vehicleColumns: CanvasTableColumn<Record<string, unknown>>[] = [
     {
@@ -2251,6 +2476,9 @@ export default function FleetPage() {
         sticky={false}
         actions={
           <>
+            <CanvasBtn theme={theme} variant="ghost">
+              {locale === "en" ? "Filter" : "篩選"}
+            </CanvasBtn>
             {activeTab === "drivers" ? (
               <CanvasBtn
                 theme={theme}
@@ -2263,6 +2491,39 @@ export default function FleetPage() {
                 }}
               >
                 {copy.createDriver}
+              </CanvasBtn>
+            ) : null}
+            {activeTab === "contracts" ? (
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                onClick={() => {
+                  document
+                    .getElementById("fleet-contract-form")
+                    ?.scrollIntoView({
+                      block: "start",
+                      behavior: "smooth",
+                    });
+                }}
+              >
+                {copy.actions.createContract}
+              </CanvasBtn>
+            ) : null}
+            {activeTab === "offboard" ? (
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                danger
+                onClick={() => {
+                  document
+                    .getElementById("fleet-offboarding-form")
+                    ?.scrollIntoView({
+                      block: "start",
+                      behavior: "smooth",
+                    });
+                }}
+              >
+                {copy.actions.initiateOffboarding}
               </CanvasBtn>
             ) : null}
             <CanvasBtn
@@ -2385,6 +2646,57 @@ export default function FleetPage() {
           </div>
         </CanvasCard>
 
+        <div style={tabMetaGridStyle}>
+          <div style={tabPanelStyle}>
+            <div style={{ ...metaBarStyle, justifyContent: "space-between" }}>
+              <div style={{ display: "grid", gap: 4 }}>
+                <span style={summaryLabelStyle}>{copy.selected}</span>
+                <strong style={{ fontSize: 20, color: theme.text }}>
+                  {copy.tab[activeTab]}
+                </strong>
+              </div>
+              <CanvasPill theme={theme} tone="accent">
+                {countsByTab[activeTab]} {locale === "en" ? "rows" : "筆"}
+              </CanvasPill>
+            </div>
+            <span style={secondaryTextStyle}>
+              {copy.tabDescription[activeTab]}
+            </span>
+            <div style={tabKpiGridStyle}>
+              <div style={tabKpiCardStyle}>
+                <span style={summaryLabelStyle}>{copy.routeLabel}</span>
+                <span style={{ ...secondaryTextStyle, ...monoStyle }}>
+                  {tabRoutes[activeTab]}
+                </span>
+              </div>
+              <div style={tabKpiCardStyle}>
+                <span style={summaryLabelStyle}>{copy.actionCountLabel}</span>
+                <span
+                  style={{ fontSize: 22, fontWeight: 700, color: theme.text }}
+                >
+                  {actionCountByTab[activeTab]}
+                </span>
+              </div>
+              <div style={tabKpiCardStyle}>
+                <span style={summaryLabelStyle}>{copy.summaryTier}</span>
+                <span
+                  style={{ fontSize: 22, fontWeight: 700, color: theme.text }}
+                >
+                  T4
+                </span>
+                <span style={secondaryTextStyle}>{copy.summaryTierMeta}</span>
+              </div>
+            </div>
+          </div>
+
+          <CanvasBanner
+            theme={theme}
+            tone="info"
+            title={copy.actionModelTitle}
+            body={copy.actionModelBody}
+          />
+        </div>
+
         {activeTab === "drivers" && licenseWarningCount > 0 ? (
           <CanvasBanner
             theme={theme}
@@ -2459,15 +2771,6 @@ export default function FleetPage() {
           <div style={{ padding: 16, display: "grid", gap: 14 }}>
             <div style={tabBarStyle}>
               {TAB_ORDER.map((tab) => {
-                const counts: Record<FleetTab, number> = {
-                  vehicles: vehicles.length,
-                  drivers: drivers.length,
-                  contracts: contracts.length,
-                  device: deviceBindings.length,
-                  exclusivity: exclusivityRows.length,
-                  offboard: offboardingRows.length,
-                };
-
                 return (
                   <button
                     key={tab}
@@ -2475,7 +2778,7 @@ export default function FleetPage() {
                     onClick={() => setTab(tab)}
                     style={tabButtonStyle(activeTab === tab)}
                   >
-                    {copy.tab[tab]} ({counts[tab]})
+                    {copy.tab[tab]} ({countsByTab[tab]})
                   </button>
                 );
               })}
@@ -2831,20 +3134,158 @@ export default function FleetPage() {
                 <div style={actionRowStyle}>
                   {renderCrossAppLinks(selectedContract.crossAppLinks)}
                 </div>
-                <CanvasCard theme={theme}>
-                  <div style={{ padding: 14, display: "grid", gap: 10 }}>
-                    <strong>{copy.actions.createContract}</strong>
-                    <span style={secondaryTextStyle}>
-                      {locale === "en"
-                        ? "Create contract is specified for this screen, but the platform admin API client does not expose a contract-create command yet."
-                        : "這個畫面規格需要支援建立合約，但目前 platform admin API client 尚未暴露 create contract 指令。"}
-                    </span>
-                    <CanvasBtn theme={theme} variant="primary" disabled>
-                      {copy.actions.createContract}
-                    </CanvasBtn>
-                  </div>
-                </CanvasCard>
               </>
+            ) : null}
+
+            {activeTab === "contracts" ? (
+              <CanvasCard theme={theme}>
+                <div id="fleet-contract-form" />
+                <div style={{ padding: 14, display: "grid", gap: 10 }}>
+                  <strong>{copy.actions.createContract}</strong>
+                  <span style={secondaryTextStyle}>
+                    {locale === "en"
+                      ? "Draft contracts are created here, while row-level terms remain governed by availableActions."
+                      : "草稿合約在這裡建立；既有合約的條款操作仍由各列的 availableActions 治理。"}
+                  </span>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Vehicle ID" : "車輛 ID"}
+                  >
+                    <input
+                      value={contractForm.vehicleId}
+                      onChange={(event) =>
+                        setContractForm((current) => ({
+                          ...current,
+                          vehicleId: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Partner ID" : "合作夥伴 ID"}
+                  >
+                    <input
+                      value={contractForm.partnerId}
+                      onChange={(event) =>
+                        setContractForm((current) => ({
+                          ...current,
+                          partnerId: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Partner type" : "合作夥伴類型"}
+                  >
+                    <input
+                      value={contractForm.partnerType}
+                      onChange={(event) =>
+                        setContractForm((current) => ({
+                          ...current,
+                          partnerType: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Contract type" : "合約類型"}
+                  >
+                    <input
+                      value={contractForm.contractType}
+                      onChange={(event) =>
+                        setContractForm((current) => ({
+                          ...current,
+                          contractType: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Service scope" : "服務範圍"}
+                  >
+                    <input
+                      value={contractForm.serviceScope}
+                      onChange={(event) =>
+                        setContractForm((current) => ({
+                          ...current,
+                          serviceScope: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Start at" : "開始時間"}
+                  >
+                    <input
+                      value={contractForm.startAt}
+                      onChange={(event) =>
+                        setContractForm((current) => ({
+                          ...current,
+                          startAt: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "End at" : "結束時間"}
+                  >
+                    <input
+                      value={contractForm.endAt}
+                      onChange={(event) =>
+                        setContractForm((current) => ({
+                          ...current,
+                          endAt: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    disabled={
+                      !contractForm.vehicleId.trim() ||
+                      !contractForm.partnerId.trim() ||
+                      !contractForm.partnerType.trim() ||
+                      !contractForm.contractType.trim() ||
+                      !contractForm.serviceScope.trim() ||
+                      !contractForm.startAt.trim() ||
+                      !contractForm.endAt.trim() ||
+                      busyActionId === "contract:create"
+                    }
+                    onClick={() =>
+                      void runAction("contract:create", async () => {
+                        const command: CreateVehicleContractCommand = {
+                          vehicleId: contractForm.vehicleId.trim(),
+                          partnerId: contractForm.partnerId.trim(),
+                          partnerType: contractForm.partnerType.trim(),
+                          contractType: contractForm.contractType.trim(),
+                          operatingAreaId: null,
+                          serviceScope: contractForm.serviceScope.trim(),
+                          startAt: contractForm.startAt.trim(),
+                          endAt: contractForm.endAt.trim(),
+                        };
+                        await client.createContract(command);
+                        setContractForm(createInitialContractForm());
+                      })
+                    }
+                  >
+                    {copy.actions.createContract}
+                  </CanvasBtn>
+                </div>
+              </CanvasCard>
             ) : null}
 
             {activeTab === "device" && selectedBinding ? (
@@ -3069,12 +3510,7 @@ export default function FleetPage() {
               </>
             ) : null}
 
-            {!selectedVehicle &&
-            !selectedDriver &&
-            !selectedContract &&
-            !selectedBinding &&
-            !selectedExclusivity &&
-            !selectedOffboarding ? (
+            {!selectedRecord ? (
               <WorkflowEmptyState
                 density="compact"
                 title={copy.noSelection}
@@ -3099,7 +3535,7 @@ export default function FleetPage() {
                     ? copy.mediumRisk
                     : copy.lowRisk}
               </CanvasPill>
-              <strong style={{ fontSize: 18, color: "#ffffff" }}>
+              <strong style={{ fontSize: 18, color: theme.text }}>
                 {pendingAction.label}
               </strong>
               <span style={secondaryTextStyle}>{pendingAction.body}</span>

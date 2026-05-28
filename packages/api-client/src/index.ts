@@ -46,6 +46,7 @@ import type {
   CreatePlatformPricingRuleCommand,
   CreatePlatformTenantCommand,
   CreateReportJobCommand,
+  CreateVehicleContractCommand,
   CreateTenantBookingCommand,
   CreateCallCenterOrderCommand,
   CreateCallbackTaskCommand,
@@ -2240,6 +2241,17 @@ export class ApiClient {
   async listContracts(): Promise<VehicleContractRecord[]> {
     return this.getList<VehicleContractRecord>(
       "/api/regulatory-registry/contracts",
+    );
+  }
+
+  async createContract(
+    command: CreateVehicleContractCommand,
+  ): Promise<VehicleContractRecord> {
+    return this.post<VehicleContractRecord>(
+      "/api/regulatory-registry/contracts",
+      {
+        body: command,
+      },
     );
   }
 
