@@ -1,12 +1,15 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import type {
   AuditLogRecord,
+  CrossAppResourceLink,
   EmptyReason,
   IncidentRecord,
   MaintenanceRecord,
   ResourceActionDescriptor,
   ShiftRecord,
+  UiRefreshMetadata,
   VehicleContractRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
@@ -34,6 +37,14 @@ type VehicleDetailPageProps = {
 
 type Locale = "en" | "zh";
 
+type VehicleWithActions = VehicleRegistryRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type ContractWithActions = VehicleContractRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
 type LoadState<T> = {
   data: T;
   error: string | null;
@@ -56,6 +67,11 @@ const theme = buildCanvasTheme({
 
 const PLATFORM_ADMIN_BASE_URL =
   process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002";
+const TENANT_CONSOLE_BASE_URL =
+  process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3003";
+
+const REFRESH_LABEL = "T3 / 15s";
+const REFRESH_STALE_AFTER_MS = 15_000;
 
 const pageStackStyle: CSSProperties = {
   display: "grid",
@@ -63,10 +79,20 @@ const pageStackStyle: CSSProperties = {
   padding: "18px 24px 28px",
 };
 
-const heroGridStyle: CSSProperties = {
+const splitGridStyle: CSSProperties = {
   display: "grid",
   gap: "16px",
-  gridTemplateColumns: "minmax(0, 1.7fr) minmax(320px, 1fr)",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
+};
+
+const leftRailStyle: CSSProperties = {
+  display: "grid",
+  gap: "16px",
+};
+
+const rightRailStyle: CSSProperties = {
+  display: "grid",
+  gap: "16px",
 };
 
 const summaryGridStyle: CSSProperties = {
@@ -122,6 +148,12 @@ const actionLinkStyle: CSSProperties = {
   color: theme.accent,
   textDecoration: "none",
   fontSize: "12px",
+  fontWeight: 600,
+};
+
+const subtleLinkStyle: CSSProperties = {
+  color: theme.text,
+  textDecoration: "none",
   fontWeight: 600,
 };
 
@@ -197,24 +229,6 @@ async function loadOptional<T>(
   }
 }
 
-function lifecycleTone(status: string) {
-  if (status === "active" || status === "approved" || status === "completed") {
-    return "success" as const;
-  }
-  if (
-    status === "expired" ||
-    status === "terminated" ||
-    status === "revoked" ||
-    status === "rejected"
-  ) {
-    return "danger" as const;
-  }
-  if (status === "none" || status === "missing") {
-    return "neutral" as const;
-  }
-  return "warn" as const;
-}
-
 function dispatchTone(vehicle: VehicleRegistryRecord) {
   return vehicle.dispatchableFlag ? ("success" as const) : ("danger" as const);
 }
@@ -240,6 +254,40 @@ function getCurrentBinding(
   };
 }
 
+function refreshTone(metadata: UiRefreshMetadata) {
+  switch (metadata.dataFreshness) {
+    case "fresh":
+      return "success" as const;
+    case "stale":
+      return "warn" as const;
+    case "degraded":
+      return "danger" as const;
+    default:
+      return "neutral" as const;
+  }
+}
+
+function buildRefreshMetadata(
+  vehicle: VehicleRegistryRecord,
+  overrides?: {
+    dataFreshness?: UiRefreshMetadata["dataFreshness"];
+    source?: UiRefreshMetadata["source"];
+  },
+): UiRefreshMetadata {
+  const generatedAt = vehicle.updatedAt || new Date().toISOString();
+
+  return {
+    generatedAt,
+    staleAfterMs: REFRESH_STALE_AFTER_MS,
+    dataFreshness:
+      overrides?.dataFreshness ??
+      (Date.now() - new Date(generatedAt).getTime() > REFRESH_STALE_AFTER_MS
+        ? "stale"
+        : "fresh"),
+    source: overrides?.source ?? "live",
+  };
+}
+
 function getEmptyCopy(
   reason: EmptyReason,
   locale: Locale,
@@ -250,8 +298,8 @@ function getEmptyCopy(
         title: copy(locale, "Not provisioned yet", "尚未佈建"),
         description: copy(
           locale,
-          "This vehicle has not been provisioned for the required operational surface yet.",
-          "這台車尚未完成此營運模組所需的佈建。",
+          "This vehicle surface exists, but the supporting operational module is not provisioned yet.",
+          "此車輛頁面存在，但支撐它的營運模組尚未完成佈建。",
         ),
         tone: "warning",
       };
@@ -260,8 +308,8 @@ function getEmptyCopy(
         title: copy(locale, "Unable to load data", "資料載入失敗"),
         description: copy(
           locale,
-          "The control-plane request failed before vehicle detail could be assembled.",
-          "控制平面請求失敗，無法組裝車輛詳情。",
+          "The control-plane request failed before the vehicle snapshot could be assembled.",
+          "控制平面請求失敗，無法組裝車輛詳情快照。",
         ),
         tone: "danger",
       };
@@ -271,7 +319,7 @@ function getEmptyCopy(
         description: copy(
           locale,
           "Your current role cannot access this vehicle surface.",
-          "你目前的角色無法存取這個車輛頁面。",
+          "你目前的角色無法存取這個車輛營運視圖。",
         ),
         tone: "danger",
       };
@@ -280,8 +328,8 @@ function getEmptyCopy(
         title: copy(locale, "External system unavailable", "外部系統不可用"),
         description: copy(
           locale,
-          "A dependent service is unavailable, so the vehicle snapshot is partial.",
-          "依賴的外部系統目前不可用，因此車輛快照不完整。",
+          "A dependent service is unavailable, so this section is temporarily partial.",
+          "依賴的外部服務目前不可用，因此此區塊暫時只有部分資料。",
         ),
         tone: "warning",
       };
@@ -290,8 +338,8 @@ function getEmptyCopy(
         title: copy(locale, "No matching records", "沒有符合條件的資料"),
         description: copy(
           locale,
-          "The section is working, but nothing matches the current slice.",
-          "區塊本身可用，但目前切片條件下沒有符合資料。",
+          "The surface is working, but nothing matches the current slice.",
+          "畫面本身可用，但目前切片條件下沒有符合資料。",
         ),
         tone: "info",
       };
@@ -327,11 +375,26 @@ function renderEmptyState(
   );
 }
 
+function getCrossAppUrl(link: CrossAppResourceLink) {
+  const baseUrl =
+    link.targetApp === "platform-admin"
+      ? PLATFORM_ADMIN_BASE_URL
+      : link.targetApp === "tenant-console"
+        ? TENANT_CONSOLE_BASE_URL
+        : "";
+
+  return `${baseUrl}${link.route}`;
+}
+
 function createActionDescriptors(
-  vehicle: VehicleRegistryRecord,
+  vehicle: VehicleWithActions,
   binding: CurrentBinding | null,
-  contracts: VehicleContractRecord[],
+  contracts: ContractWithActions[],
 ): ResourceActionDescriptor[] {
+  if (vehicle.availableActions && vehicle.availableActions.length > 0) {
+    return vehicle.availableActions;
+  }
+
   return [
     {
       action: "open_driver_binding",
@@ -370,17 +433,28 @@ function createActionDescriptors(
       requiresReason: true,
       riskLevel: "medium",
     },
-    {
-      action: "review_dispatch_hold",
-      enabled: vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
-      riskLevel: "medium",
-      ...(vehicle.supplyLifecycle.dispatch.blockedReasons.length === 0
-        ? {
-            disabledReasonCode: "dispatch_hold_clear",
-          }
-        : {}),
-    },
   ];
+}
+
+function getActionLabel(action: ResourceActionDescriptor, locale: Locale) {
+  switch (action.action) {
+    case "open_driver_binding":
+      return copy(locale, "Open driver binding", "打開司機綁定");
+    case "open_maintenance_workspace":
+      return copy(locale, "Open maintenance board", "打開保修工作台");
+    case "open_contract_reference":
+      return copy(locale, "Open contract detail", "打開合約詳情");
+    case "open_platform_admin_fleet":
+      return copy(
+        locale,
+        "Open fleet in platform-admin",
+        "到 platform-admin 開啟車隊主檔",
+      );
+    case "add_operational_note":
+      return copy(locale, "Add operational note", "新增營運備註");
+    default:
+      return formatOpsCodeLabel(locale, action.action);
+  }
 }
 
 function renderActionLink(
@@ -388,7 +462,7 @@ function renderActionLink(
   locale: Locale,
   vehicleId: string,
   binding: CurrentBinding | null,
-  contracts: VehicleContractRecord[],
+  contracts: ContractWithActions[],
 ) {
   switch (action.action) {
     case "open_driver_binding":
@@ -402,14 +476,24 @@ function renderActionLink(
       ) : null;
     case "open_maintenance_workspace":
       return (
-        <Link href="/maintenance" style={actionLinkStyle}>
-          {copy(locale, "Open maintenance board", "打開保修工作台")}
+        <Link
+          href={`/maintenance?vehicleId=${encodeURIComponent(vehicleId)}`}
+          style={actionLinkStyle}
+        >
+          {copy(
+            locale,
+            "Filter maintenance for this vehicle",
+            "切到此車的保修清單",
+          )}
         </Link>
       );
     case "open_contract_reference":
       return contracts[0] ? (
-        <Link href="/contracts" style={actionLinkStyle}>
-          {copy(locale, "Open contract registry", "打開合約清單")}
+        <Link
+          href={`/contracts/${encodeURIComponent(contracts[0].contractId)}`}
+          style={actionLinkStyle}
+        >
+          {copy(locale, "Open current contract", "打開目前合約")}
         </Link>
       ) : null;
     case "open_platform_admin_fleet":
@@ -420,13 +504,11 @@ function renderActionLink(
           rel="noreferrer"
           style={actionLinkStyle}
         >
-          {copy(locale, "Open in platform-admin", "到 platform-admin 開啟")}
-        </Link>
-      );
-    case "review_dispatch_hold":
-      return (
-        <Link href="/vehicles" style={actionLinkStyle}>
-          {copy(locale, "Return to fleet watchlist", "回到車隊監看清單")}
+          {copy(
+            locale,
+            "Cross-app to fleet governance",
+            "跨 app 前往 fleet 治理",
+          )}
         </Link>
       );
     case "add_operational_note":
@@ -452,9 +534,9 @@ function buildMaintenanceRows(
     key: record.maintenanceId,
     workOrder: record.maintenanceId,
     type: formatOpsCodeLabel(locale, record.type),
-    status: formatOpsCodeLabel(locale, record.status),
+    status: record.status,
     scheduledAt: formatDateTime(locale, record.scheduledAt),
-    detail: record.description,
+    technician: record.technician ?? "—",
   }));
 }
 
@@ -464,11 +546,13 @@ function buildIncidentRows(
 ): TableRow[] {
   return incidents.map((incident) => ({
     key: incident.incidentId,
-    incident: incident.incidentId,
-    severity: formatOpsCodeLabel(locale, incident.severity),
-    status: formatOpsCodeLabel(locale, incident.status),
+    incidentId: incident.incidentId,
+    title: incident.title,
+    severity: incident.severity,
+    status: incident.status,
     occurredAt: formatDateTime(locale, incident.occurredAt),
-    detail: incident.title,
+    severityLabel: formatOpsCodeLabel(locale, incident.severity),
+    statusLabel: formatOpsCodeLabel(locale, incident.status),
   }));
 }
 
@@ -492,6 +576,12 @@ export default async function VehicleDetailPage({
   const forcedReason = firstParam(query?.emptyReason) as
     | EmptyReason
     | undefined;
+  const forcedFreshness = firstParam(query?.dataFreshness) as
+    | UiRefreshMetadata["dataFreshness"]
+    | undefined;
+  const forcedSource = firstParam(query?.source) as
+    | UiRefreshMetadata["source"]
+    | undefined;
 
   const [client, locale] = await Promise.all([
     getServerOpsClient(),
@@ -509,7 +599,7 @@ export default async function VehicleDetailPage({
         rel="noreferrer"
         style={actionLinkStyle}
       >
-        {copy(locale, "Platform admin", "Platform Admin")}
+        {copy(locale, "Platform admin fleet", "Platform Admin 車隊主檔")}
       </Link>
     </>
   );
@@ -524,13 +614,19 @@ export default async function VehicleDetailPage({
           actions={headerActions}
         />
         <div style={pageStackStyle}>
-          {renderEmptyState(forcedReason, locale)}
+          {renderEmptyState(
+            forcedReason,
+            locale,
+            <Link href="/vehicles" style={actionLinkStyle}>
+              {copy(locale, "Return to registry", "回到車輛名冊")}
+            </Link>,
+          )}
         </div>
       </>
     );
   }
 
-  const vehiclesResult = await loadOptional<VehicleRegistryRecord[]>(() =>
+  const vehiclesResult = await loadOptional<VehicleWithActions[]>(() =>
     client.listVehicles(),
   );
 
@@ -555,25 +651,7 @@ export default async function VehicleDetailPage({
   );
 
   if (!vehicle) {
-    return (
-      <>
-        <PageHeader
-          theme={theme}
-          title={copy(locale, "Vehicle detail", "車輛詳情")}
-          subtitle={vehicleId}
-          actions={headerActions}
-        />
-        <div style={pageStackStyle}>
-          {renderEmptyState(
-            "no_data",
-            locale,
-            <Link href="/vehicles" style={actionLinkStyle}>
-              {copy(locale, "Return to vehicle registry", "回到車輛名冊")}
-            </Link>,
-          )}
-        </div>
-      </>
-    );
+    notFound();
   }
 
   const [
@@ -594,7 +672,7 @@ export default async function VehicleDetailPage({
     loadOptional(() => client.listAuditLogs()),
   ]);
 
-  const contracts = (contractsResult.data as VehicleContractRecord[])
+  const contracts = (contractsResult.data as ContractWithActions[])
     .filter((contract) => contract.vehicleId === vehicleId)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   const policy = (
@@ -630,40 +708,117 @@ export default async function VehicleDetailPage({
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
     .slice(0, 6);
 
+  const refreshMetadata = buildRefreshMetadata(vehicle, {
+    ...(forcedFreshness ? { dataFreshness: forcedFreshness } : {}),
+    ...(forcedSource ? { source: forcedSource } : {}),
+  });
+  const refreshPillTone = refreshTone(refreshMetadata);
+  const auditLink: CrossAppResourceLink | null =
+    audits[0] != null
+      ? {
+          targetApp: "platform-admin",
+          route: `/audit?auditId=${encodeURIComponent(audits[0].auditId)}`,
+          resourceType: "audit_log",
+          resourceId: audits[0].auditId,
+          openMode: "new_tab",
+          label: copy(locale, "View audit", "查看稽核"),
+        }
+      : null;
+
   const actionDescriptors = createActionDescriptors(
     vehicle,
     currentBinding,
     contracts,
   );
-  const overdueMaintenanceCount = (
+  const overdueMaintenance = (
     maintenanceResult.data as MaintenanceRecord[]
-  ).filter((record) => record.status === "overdue").length;
+  ).filter((record) => record.status === "overdue");
 
   const maintenanceColumns: CanvasTableColumn<TableRow>[] = [
     {
-      h: copy(locale, "Work order", "工單"),
+      h: "WO",
       k: "workOrder",
       mono: true,
-      w: 130,
+      w: 110,
     },
-    { h: copy(locale, "Type", "類型"), k: "type", w: 120 },
-    { h: copy(locale, "Status", "狀態"), k: "status", w: 120 },
-    { h: copy(locale, "Scheduled", "排程"), k: "scheduledAt", w: 170 },
-    { h: copy(locale, "Detail", "內容"), k: "detail" },
+    { h: copy(locale, "Type", "類別"), k: "type", w: 170 },
+    {
+      h: "STATUS",
+      w: 130,
+      r: (row) => (
+        <Pill
+          theme={theme}
+          tone={
+            row.status === "completed"
+              ? "success"
+              : row.status === "overdue"
+                ? "danger"
+                : "warn"
+          }
+          dot
+        >
+          {formatOpsCodeLabel(locale, String(row.status))}
+        </Pill>
+      ),
+    },
+    { h: copy(locale, "Scheduled", "排定"), k: "scheduledAt", mono: true },
+    { h: copy(locale, "Technician", "技師"), k: "technician", w: 110 },
   ];
   const incidentColumns: CanvasTableColumn<TableRow>[] = [
-    { h: copy(locale, "Incident", "事件"), k: "incident", mono: true, w: 140 },
-    { h: copy(locale, "Severity", "嚴重度"), k: "severity", w: 120 },
-    { h: copy(locale, "Status", "狀態"), k: "status", w: 120 },
-    { h: copy(locale, "Occurred", "發生時間"), k: "occurredAt", w: 170 },
-    { h: copy(locale, "Detail", "內容"), k: "detail" },
+    {
+      h: copy(locale, "Incident", "事件"),
+      w: 210,
+      r: (row) => (
+        <Link
+          href={`/incidents/${encodeURIComponent(String(row.incidentId))}`}
+          style={subtleLinkStyle}
+        >
+          <span style={{ display: "grid", gap: "4px" }}>
+            <span style={monoStyle}>{String(row.incidentId)}</span>
+            <span style={mutedTextStyle}>{String(row.title)}</span>
+          </span>
+        </Link>
+      ),
+    },
+    {
+      h: copy(locale, "Severity", "嚴重度"),
+      w: 120,
+      r: (row) => (
+        <Pill
+          theme={theme}
+          tone={String(row.severity) === "critical" ? "danger" : "warn"}
+          dot
+        >
+          {String(row.severityLabel)}
+        </Pill>
+      ),
+    },
+    {
+      h: copy(locale, "Status", "狀態"),
+      w: 120,
+      r: (row) => <span>{String(row.statusLabel)}</span>,
+    },
+    { h: copy(locale, "Occurred", "發生時間"), k: "occurredAt", mono: true },
   ];
   const auditColumns: CanvasTableColumn<TableRow>[] = [
-    { h: "Audit ID", k: "auditId", mono: true, w: 150 },
+    {
+      h: "AUDIT",
+      w: 170,
+      r: (row) => (
+        <Link
+          href={`${PLATFORM_ADMIN_BASE_URL}/audit?auditId=${encodeURIComponent(String(row.auditId))}`}
+          target="_blank"
+          rel="noreferrer"
+          style={subtleLinkStyle}
+        >
+          <span style={monoStyle}>{String(row.auditId)}</span>
+        </Link>
+      ),
+    },
     { h: copy(locale, "Module", "模組"), k: "moduleName", w: 120 },
     { h: copy(locale, "Action", "動作"), k: "actionName", w: 170 },
-    { h: copy(locale, "Actor", "執行者"), k: "actor", w: 160 },
-    { h: copy(locale, "Created", "建立時間"), k: "createdAt", w: 170 },
+    { h: copy(locale, "Actor", "執行者"), k: "actor", w: 150 },
+    { h: copy(locale, "Created", "建立時間"), k: "createdAt", mono: true },
   ];
 
   return (
@@ -679,471 +834,444 @@ export default async function VehicleDetailPage({
               flexWrap: "wrap",
             }}
           >
-            <span>{copy(locale, "Vehicle detail", "車輛詳情")}</span>
-            <Pill theme={theme} tone={dispatchTone(vehicle)}>
-              {vehicle.vehicleId}
-            </Pill>
-            <Pill
-              theme={theme}
-              tone={vehicle.dispatchableFlag ? "success" : "danger"}
-            >
+            <span>{vehicle.plateNo}</span>
+            <Pill theme={theme} tone={dispatchTone(vehicle)} dot>
               {vehicle.dispatchableFlag
-                ? copy(locale, "Dispatchable", "可派遣")
-                : copy(locale, "Dispatch hold", "派遣暫停")}
+                ? copy(locale, "dispatchable", "可派遣")
+                : copy(locale, "not_dispatchable", "不可派遣")}
+            </Pill>
+            {vehicle.supplyLifecycle.offboarding.status !== "none" ? (
+              <Pill theme={theme} tone="warn">
+                {formatOpsCodeLabel(
+                  locale,
+                  vehicle.supplyLifecycle.offboarding.status,
+                )}
+              </Pill>
+            ) : null}
+            <Pill theme={theme} tone={refreshPillTone}>
+              {`${REFRESH_LABEL} · ${refreshMetadata.dataFreshness}`}
             </Pill>
           </span>
         }
-        subtitle={`${vehicle.plateNo} · ${vehicle.operatingArea} · T3 / 15s`}
+        subtitle={`${vehicle.vehicleId} · ${vehicle.operatingArea} · ${refreshMetadata.source} · ${formatDateTime(locale, refreshMetadata.generatedAt)}`}
         actions={headerActions}
       />
       <div style={pageStackStyle}>
-        {vehicle.supplyLifecycle.offboarding.status !== "none" ? (
+        {refreshMetadata.dataFreshness !== "fresh" ? (
           <Banner
             theme={theme}
             tone={
-              vehicle.supplyLifecycle.offboarding.status === "completed"
-                ? "info"
-                : "warn"
+              refreshMetadata.dataFreshness === "degraded" ? "danger" : "warn"
             }
             title={copy(
               locale,
-              "Vehicle in offboarding flow",
-              "車輛正在退場流程中",
+              "Vehicle snapshot is not fresh",
+              "車輛快照不是最新",
             )}
-            body={`${formatOpsCodeLabel(locale, vehicle.supplyLifecycle.offboarding.status)} · ${
-              vehicle.supplyLifecycle.offboarding.reason ??
-              copy(locale, "No reason provided", "未提供原因")
-            }`}
+            body={copy(
+              locale,
+              `Generated at ${formatDateTime(locale, refreshMetadata.generatedAt)} via ${refreshMetadata.source}; use refresh affordances before acting.`,
+              `此快照於 ${formatDateTime(locale, refreshMetadata.generatedAt)} 由 ${refreshMetadata.source} 來源產生；操作前請先重新整理。`,
+            )}
           />
         ) : null}
 
-        {overdueMaintenanceCount > 0 ? (
+        {vehicle.supplyLifecycle.offboarding.status !== "none" ? (
+          <Banner
+            theme={theme}
+            tone="warn"
+            title={copy(
+              locale,
+              "Vehicle is in the offboarding state machine",
+              "此車輛已進入 offboarding 狀態機",
+            )}
+            body={`${formatOpsCodeLabel(locale, vehicle.supplyLifecycle.offboarding.status)} · ${formatOpsCodeLabel(locale, vehicle.supplyLifecycle.offboarding.debrandingStatus)} · ${copy(locale, "Debrand due", "去識別化期限")} ${formatDateTime(locale, vehicle.supplyLifecycle.offboarding.debrandingDueAt)}`}
+            actions={
+              <Link
+                href={`${PLATFORM_ADMIN_BASE_URL}/fleet`}
+                target="_blank"
+                rel="noreferrer"
+                style={actionLinkStyle}
+              >
+                {copy(
+                  locale,
+                  "Cross-app to Platform Admin fleet",
+                  "跨 app 前往 Platform Admin 車隊",
+                )}
+              </Link>
+            }
+          />
+        ) : null}
+
+        {overdueMaintenance.length > 0 ? (
           <Banner
             theme={theme}
             tone="danger"
             title={copy(
               locale,
-              "Overdue maintenance requires attention",
-              "逾期保修需立即處理",
+              "Overdue maintenance affects dispatchable supply",
+              "逾期保修正在影響可派遣供給",
             )}
             body={copy(
               locale,
-              `${overdueMaintenanceCount} maintenance records are overdue for this vehicle.`,
-              `這台車有 ${overdueMaintenanceCount} 筆保修工單已逾期。`,
+              `${overdueMaintenance.length} records are overdue for this vehicle.`,
+              `這台車有 ${overdueMaintenance.length} 筆工單已逾期。`,
             )}
+            actions={
+              <Link
+                href={`/maintenance?vehicleId=${encodeURIComponent(vehicleId)}`}
+                style={actionLinkStyle}
+              >
+                {copy(locale, "Review maintenance", "檢視保修")}
+              </Link>
+            }
           />
         ) : null}
 
-        <section style={heroGridStyle}>
-          <Card
-            theme={theme}
-            title={copy(locale, "Vehicle summary", "車輛摘要")}
-            subtitle={copy(
-              locale,
-              "Dispatch, compliance, contract, and audit context.",
-              "派遣、合規、合約與稽核情境總覽。",
-            )}
-          >
-            <div style={summaryGridStyle}>
-              <div style={summaryTileStyle}>
-                <div style={summaryLabelStyle}>
-                  {copy(locale, "Dispatch block reasons", "派遣阻擋原因")}
+        <section style={splitGridStyle}>
+          <div style={leftRailStyle}>
+            <Card
+              theme={theme}
+              title={copy(locale, "Regulatory profile", "法規與合規檔案")}
+              subtitle={copy(
+                locale,
+                "Dispatchability, insurance, contract, and lifecycle context.",
+                "派遣、保險、合約與生命週期情境。",
+              )}
+            >
+              <div style={summaryGridStyle}>
+                <div style={summaryTileStyle}>
+                  <div style={summaryLabelStyle}>
+                    {copy(locale, "Dispatch holds", "派遣阻擋")}
+                  </div>
+                  <div style={summaryValueStyle}>
+                    {vehicle.supplyLifecycle.dispatch.blockedReasons.length}
+                  </div>
+                  <div style={summaryNoteStyle}>
+                    {vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0
+                      ? vehicle.supplyLifecycle.dispatch.blockedReasons
+                          .map((reason) => formatOpsCodeLabel(locale, reason))
+                          .join(" / ")
+                      : copy(locale, "No active hold.", "目前沒有阻擋。")}
+                  </div>
                 </div>
-                <div style={summaryValueStyle}>
-                  {vehicle.supplyLifecycle.dispatch.blockedReasons.length}
+                <div style={summaryTileStyle}>
+                  <div style={summaryLabelStyle}>
+                    {copy(locale, "Current driver", "目前司機")}
+                  </div>
+                  <div style={summaryValueStyle}>
+                    {currentBinding ? currentBinding.shift.driverId : "—"}
+                  </div>
+                  <div style={summaryNoteStyle}>
+                    {driver?.name ??
+                      copy(locale, "No driver binding.", "目前沒有司機綁定。")}
+                  </div>
                 </div>
-                <div style={summaryNoteStyle}>
-                  {vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0
-                    ? vehicle.supplyLifecycle.dispatch.blockedReasons
-                        .map((reason) => formatOpsCodeLabel(locale, reason))
-                        .join(" / ")
-                    : copy(
+                <div style={summaryTileStyle}>
+                  <div style={summaryLabelStyle}>
+                    {copy(locale, "Contracts", "合約")}
+                  </div>
+                  <div style={summaryValueStyle}>{contracts.length}</div>
+                  <div style={summaryNoteStyle}>
+                    {contracts[0]
+                      ? `${contracts[0].contractId} · ${formatOpsCodeLabel(locale, contracts[0].lifecycleStatus)}`
+                      : copy(locale, "No linked contract.", "尚未綁定合約。")}
+                  </div>
+                </div>
+                <div style={summaryTileStyle}>
+                  <div style={summaryLabelStyle}>
+                    {copy(locale, "Incidents", "事件")}
+                  </div>
+                  <div style={summaryValueStyle}>{incidents.length}</div>
+                  <div style={summaryNoteStyle}>
+                    {incidents[0]?.title ??
+                      copy(locale, "No linked incidents.", "沒有關聯事件。")}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: "16px" }}>
+                <DL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      label: copy(locale, "Vehicle ID", "車輛編號"),
+                      value: <span style={monoStyle}>{vehicle.vehicleId}</span>,
+                    },
+                    {
+                      label: copy(locale, "Plate", "車牌"),
+                      value: vehicle.plateNo,
+                    },
+                    {
+                      label: copy(locale, "Operating area", "營運區域"),
+                      value: vehicle.operatingArea,
+                    },
+                    {
+                      label: copy(locale, "Service buckets", "服務桶"),
+                      value: vehicle.supportedServiceBuckets.join(" · ") || "—",
+                    },
+                    {
+                      label: copy(locale, "Insurance expiry", "保單到期"),
+                      value: formatDateTime(locale, policy?.endAt),
+                    },
+                    {
+                      label: copy(locale, "Insurance status", "保險狀態"),
+                      value: policy
+                        ? `${policy.policyNo} · ${policy.insurerName}`
+                        : copy(locale, "No active policy.", "沒有有效保單。"),
+                    },
+                    {
+                      label: copy(locale, "Offboarding state", "退場狀態"),
+                      value: formatOpsCodeLabel(
                         locale,
-                        "No active dispatch hold.",
-                        "目前沒有派遣阻擋。",
-                      )}
-                </div>
+                        vehicle.supplyLifecycle.offboarding.status,
+                      ),
+                    },
+                    {
+                      label: copy(locale, "Debrand due", "去識別化期限"),
+                      value: formatDateTime(
+                        locale,
+                        vehicle.supplyLifecycle.offboarding.debrandingDueAt,
+                      ),
+                    },
+                  ]}
+                />
               </div>
-              <div style={summaryTileStyle}>
-                <div style={summaryLabelStyle}>
-                  {copy(locale, "Current driver", "目前司機")}
-                </div>
-                <div style={summaryValueStyle}>
-                  {currentBinding ? currentBinding.shift.driverId : "—"}
-                </div>
-                <div style={summaryNoteStyle}>
-                  {driver?.name ??
-                    copy(
-                      locale,
-                      "No active shift binding.",
-                      "目前沒有進行中的班次綁定。",
-                    )}
-                </div>
-              </div>
-              <div style={summaryTileStyle}>
-                <div style={summaryLabelStyle}>
-                  {copy(locale, "Contract refs", "合約參照")}
-                </div>
-                <div style={summaryValueStyle}>{contracts.length}</div>
-                <div style={summaryNoteStyle}>
-                  {contracts[0]
-                    ? `${contracts[0].contractId} · ${formatOpsCodeLabel(locale, contracts[0].lifecycleStatus)}`
-                    : copy(locale, "No linked contract yet.", "尚未綁定合約。")}
-                </div>
-              </div>
-              <div style={summaryTileStyle}>
-                <div style={summaryLabelStyle}>
-                  {copy(locale, "Recent incidents", "近期事件")}
-                </div>
-                <div style={summaryValueStyle}>{incidents.length}</div>
-                <div style={summaryNoteStyle}>
-                  {incidents[0]?.title ??
-                    copy(
-                      locale,
-                      "No vehicle-linked incidents.",
-                      "沒有與車輛相關的事件。",
-                    )}
-                </div>
-              </div>
-            </div>
+            </Card>
 
-            <div style={{ marginTop: "16px" }}>
-              <DL
-                theme={theme}
-                cols={2}
-                items={[
-                  {
-                    label: copy(locale, "Vehicle ID", "車輛編號"),
-                    value: <span style={monoStyle}>{vehicle.vehicleId}</span>,
-                  },
-                  {
-                    label: copy(locale, "Plate", "車牌"),
-                    value: vehicle.plateNo,
-                  },
-                  {
-                    label: copy(locale, "Supported buckets", "服務桶"),
-                    value: vehicle.supportedServiceBuckets.join(" · ") || "—",
-                  },
-                  {
-                    label: copy(locale, "Dispatchable flag", "派遣旗標"),
-                    value: formatOpsCodeLabel(
+            <Card
+              theme={theme}
+              title={copy(locale, "Maintenance records", "保修紀錄")}
+              subtitle={copy(
+                locale,
+                "Recent, scheduled, and overdue maintenance for this vehicle.",
+                "此車的近期、排程中、逾期保修紀錄。",
+              )}
+            >
+              {maintenanceResult.error ? (
+                renderEmptyState(
+                  maintenanceResult.reason ?? "fetch_failed",
+                  locale,
+                )
+              ) : (maintenanceResult.data as MaintenanceRecord[]).length > 0 ? (
+                <>
+                  <Table
+                    theme={theme}
+                    columns={maintenanceColumns}
+                    rows={buildMaintenanceRows(
                       locale,
-                      String(vehicle.dispatchableFlag),
-                    ),
-                  },
-                  {
-                    label: copy(locale, "Insurance status", "保險狀態"),
-                    value: formatOpsCodeLabel(locale, vehicle.insuranceStatus),
-                  },
-                  {
-                    label: copy(locale, "Updated at", "更新時間"),
-                    value: formatDateTime(locale, vehicle.updatedAt),
-                  },
-                ]}
-              />
-            </div>
-          </Card>
-
-          <Card
-            theme={theme}
-            title={copy(locale, "Available actions", "可用動作")}
-            subtitle={copy(
-              locale,
-              "Rendered from action descriptors instead of hard-coded role gates.",
-              "由 action descriptor 驅動，不直接硬編角色按鈕。",
-            )}
-          >
-            <div style={actionGridStyle}>
-              {actionDescriptors.map((action) => (
-                <div key={action.action} style={actionItemStyle}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: "12px",
-                      alignItems: "center",
-                    }}
-                  >
-                    <strong style={{ color: theme.text, fontSize: "12.5px" }}>
-                      {formatOpsCodeLabel(locale, action.action)}
-                    </strong>
-                    <Pill
-                      theme={theme}
-                      tone={action.enabled ? "success" : "neutral"}
+                      maintenanceResult.data as MaintenanceRecord[],
+                    )}
+                  />
+                  <div style={{ marginTop: "12px" }}>
+                    <Link
+                      href={`/maintenance?vehicleId=${encodeURIComponent(vehicleId)}`}
+                      style={actionLinkStyle}
                     >
-                      {action.enabled
-                        ? copy(locale, "enabled", "可用")
-                        : copy(locale, "disabled", "不可用")}
-                    </Pill>
+                      {copy(
+                        locale,
+                        "Open full maintenance board",
+                        "打開完整保修工作台",
+                      )}
+                    </Link>
                   </div>
-                  <div style={mutedTextStyle}>
-                    {action.disabledReasonCode
-                      ? formatOpsCodeLabel(locale, action.disabledReasonCode)
-                      : copy(
-                          locale,
-                          "Operational surface ready.",
-                          "此操作面可直接使用。",
-                        )}
-                  </div>
-                  {renderActionLink(
-                    action,
-                    locale,
-                    vehicleId,
-                    currentBinding,
-                    contracts,
-                  )}
-                </div>
-              ))}
-            </div>
-          </Card>
-        </section>
+                </>
+              ) : (
+                renderEmptyState("no_data", locale)
+              )}
+            </Card>
 
-        <section
-          style={{
-            display: "grid",
-            gap: "16px",
-            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          }}
-        >
-          <Card
-            theme={theme}
-            title={copy(locale, "Driver binding", "司機綁定")}
-          >
-            {currentBinding ? (
-              <DL
-                theme={theme}
-                cols={1}
-                items={[
-                  {
-                    label: copy(locale, "Driver", "司機"),
-                    value: (
+            <Card
+              theme={theme}
+              title={copy(locale, "Contract references", "合約參照")}
+              subtitle={copy(
+                locale,
+                "Ops is read-only here; contract mutation stays in the owner app.",
+                "Ops 在此唯讀；合約異動仍留在 owner app。",
+              )}
+            >
+              {contracts.length > 0 ? (
+                <DL
+                  theme={theme}
+                  cols={2}
+                  items={contracts.slice(0, 4).flatMap((contract) => [
+                    {
+                      label: contract.contractId,
+                      value: (
+                        <Link
+                          href={`/contracts/${encodeURIComponent(contract.contractId)}`}
+                          style={subtleLinkStyle}
+                        >
+                          {`${formatOpsCodeLabel(locale, contract.status)} · ${contract.serviceScope}`}
+                        </Link>
+                      ),
+                    },
+                    {
+                      label: copy(locale, "Range", "期間"),
+                      value: `${formatDateTime(locale, contract.startAt)} → ${formatDateTime(locale, contract.endAt)}`,
+                    },
+                  ])}
+                />
+              ) : (
+                renderEmptyState(
+                  "not_provisioned",
+                  locale,
+                  <Link href="/contracts" style={actionLinkStyle}>
+                    {copy(locale, "Open contract registry", "打開合約清單")}
+                  </Link>,
+                )
+              )}
+            </Card>
+          </div>
+
+          <div style={rightRailStyle}>
+            <Card
+              theme={theme}
+              title={copy(locale, "Current driver binding", "目前司機綁定")}
+            >
+              {currentBinding ? (
+                <DL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      label: copy(locale, "Driver", "司機"),
+                      value: (
+                        <Link
+                          href={`/drivers/${encodeURIComponent(currentBinding.shift.driverId)}`}
+                          style={actionLinkStyle}
+                        >
+                          {currentBinding.shift.driverId}
+                          {driver?.name ? ` · ${driver.name}` : ""}
+                        </Link>
+                      ),
+                    },
+                    {
+                      label: copy(locale, "Shift status", "班次狀態"),
+                      value: formatOpsCodeLabel(
+                        locale,
+                        currentBinding.shift.status,
+                      ),
+                    },
+                    {
+                      label: copy(locale, "Clocked in", "上線時間"),
+                      value: formatDateTime(
+                        locale,
+                        currentBinding.shift.clockedInAt,
+                      ),
+                    },
+                    {
+                      label: copy(locale, "Start location", "出發地"),
+                      value: currentBinding.shift.startLocation ?? "—",
+                    },
+                  ]}
+                />
+              ) : (
+                renderEmptyState(
+                  vehicle.supplyLifecycle.offboarding.status !== "none"
+                    ? "not_provisioned"
+                    : "filtered_empty",
+                  locale,
+                )
+              )}
+            </Card>
+
+            <Card
+              theme={theme}
+              title={copy(locale, "Available actions", "可用動作")}
+            >
+              <div style={actionGridStyle}>
+                {actionDescriptors.map((action) => (
+                  <div key={action.action} style={actionItemStyle}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        alignItems: "center",
+                      }}
+                    >
+                      <strong style={{ color: theme.text, fontSize: "12.5px" }}>
+                        {getActionLabel(action, locale)}
+                      </strong>
+                      <Pill
+                        theme={theme}
+                        tone={action.enabled ? "success" : "neutral"}
+                      >
+                        {action.enabled
+                          ? copy(locale, "enabled", "可用")
+                          : copy(locale, "disabled", "不可用")}
+                      </Pill>
+                    </div>
+                    <div style={mutedTextStyle}>
+                      {action.disabledReasonCode
+                        ? formatOpsCodeLabel(locale, action.disabledReasonCode)
+                        : `${copy(locale, "risk", "風險")} ${action.riskLevel}${action.requiresReason ? ` · ${copy(locale, "reason required", "需填原因")}` : ""}`}
+                    </div>
+                    {renderActionLink(
+                      action,
+                      locale,
+                      vehicleId,
+                      currentBinding,
+                      contracts,
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card
+              theme={theme}
+              title={copy(locale, "Linked incidents", "關聯事件")}
+            >
+              {incidentsResult.error ? (
+                renderEmptyState(
+                  incidentsResult.reason ?? "fetch_failed",
+                  locale,
+                )
+              ) : incidents.length > 0 ? (
+                <Table
+                  theme={theme}
+                  columns={incidentColumns}
+                  rows={buildIncidentRows(locale, incidents)}
+                />
+              ) : (
+                renderEmptyState("no_data", locale)
+              )}
+            </Card>
+
+            <Card
+              theme={theme}
+              title={copy(locale, "Audit subset", "稽核子集")}
+            >
+              {auditsResult.error ? (
+                renderEmptyState(auditsResult.reason ?? "fetch_failed", locale)
+              ) : audits.length > 0 ? (
+                <>
+                  <Table
+                    theme={theme}
+                    columns={auditColumns}
+                    rows={buildAuditRows(locale, audits)}
+                  />
+                  {auditLink ? (
+                    <div style={{ marginTop: "12px" }}>
                       <Link
-                        href={`/drivers/${encodeURIComponent(currentBinding.shift.driverId)}`}
+                        href={getCrossAppUrl(auditLink)}
+                        target="_blank"
+                        rel="noreferrer"
                         style={actionLinkStyle}
                       >
-                        {currentBinding.shift.driverId}
-                        {driver?.name ? ` · ${driver.name}` : ""}
+                        {auditLink.label}
                       </Link>
-                    ),
-                  },
-                  {
-                    label: copy(locale, "Shift status", "班次狀態"),
-                    value: formatOpsCodeLabel(
-                      locale,
-                      currentBinding.shift.status,
-                    ),
-                  },
-                  {
-                    label: copy(locale, "Clocked in", "上線時間"),
-                    value: formatDateTime(
-                      locale,
-                      currentBinding.shift.clockedInAt,
-                    ),
-                  },
-                  {
-                    label: copy(locale, "Start location", "出發地"),
-                    value: currentBinding.shift.startLocation ?? "—",
-                  },
-                ]}
-              />
-            ) : (
-              renderEmptyState("filtered_empty", locale)
-            )}
-          </Card>
-
-          <Card
-            theme={theme}
-            title={copy(locale, "Regulatory profile", "法規與保單檔案")}
-          >
-            <DL
-              theme={theme}
-              cols={1}
-              items={[
-                {
-                  label: copy(locale, "Insurance", "保險"),
-                  value: policy
-                    ? `${policy.policyNo} · ${policy.insurerName}`
-                    : copy(
-                        locale,
-                        "No active policy file.",
-                        "沒有有效保單檔案。",
-                      ),
-                },
-                {
-                  label: copy(locale, "Insurance expiry", "保單到期"),
-                  value: formatDateTime(locale, policy?.endAt),
-                },
-                {
-                  label: copy(locale, "Contract lifecycle", "合約生命週期"),
-                  value: (
-                    <span>
-                      <Pill
-                        theme={theme}
-                        tone={lifecycleTone(
-                          vehicle.supplyLifecycle.contract.lifecycleStatus,
-                        )}
-                      >
-                        {formatOpsCodeLabel(
-                          locale,
-                          vehicle.supplyLifecycle.contract.lifecycleStatus,
-                        )}
-                      </Pill>
-                    </span>
-                  ),
-                },
-                {
-                  label: copy(locale, "Exclusivity", "專屬合作"),
-                  value: (
-                    <span>
-                      <Pill
-                        theme={theme}
-                        tone={lifecycleTone(
-                          vehicle.supplyLifecycle.exclusivity.lifecycleStatus,
-                        )}
-                      >
-                        {formatOpsCodeLabel(
-                          locale,
-                          vehicle.supplyLifecycle.exclusivity.lifecycleStatus,
-                        )}
-                      </Pill>
-                    </span>
-                  ),
-                },
-              ]}
-            />
-          </Card>
-
-          <Card
-            theme={theme}
-            title={copy(locale, "Offboarding / debranding", "退場 / 去識別化")}
-          >
-            <DL
-              theme={theme}
-              cols={1}
-              items={[
-                {
-                  label: copy(locale, "Offboarding status", "退場狀態"),
-                  value: formatOpsCodeLabel(
-                    locale,
-                    vehicle.supplyLifecycle.offboarding.status,
-                  ),
-                },
-                {
-                  label: copy(locale, "Debranding", "去識別化"),
-                  value: formatOpsCodeLabel(
-                    locale,
-                    vehicle.supplyLifecycle.offboarding.debrandingStatus,
-                  ),
-                },
-                {
-                  label: copy(locale, "Due at", "應完成時間"),
-                  value: formatDateTime(
-                    locale,
-                    vehicle.supplyLifecycle.offboarding.debrandingDueAt,
-                  ),
-                },
-                {
-                  label: copy(locale, "Ticket", "工單"),
-                  value:
-                    vehicle.supplyLifecycle.offboarding.debrandingTicketId ??
-                    "—",
-                },
-              ]}
-            />
-          </Card>
-        </section>
-
-        <Card
-          theme={theme}
-          title={copy(locale, "Contract references", "合約參照")}
-          subtitle={copy(
-            locale,
-            "Read-only ops view. Mutation stays in platform-admin.",
-            "Ops 端唯讀；變更仍在 platform-admin。",
-          )}
-        >
-          {contracts.length > 0 ? (
-            <DL
-              theme={theme}
-              cols={2}
-              items={contracts.slice(0, 4).flatMap((contract) => [
-                {
-                  label: contract.contractId,
-                  value: `${formatOpsCodeLabel(locale, contract.status)} · ${contract.serviceScope}`,
-                },
-                {
-                  label: copy(locale, "Range", "期間"),
-                  value: `${formatDateTime(locale, contract.startAt)} → ${formatDateTime(locale, contract.endAt)}`,
-                },
-              ])}
-            />
-          ) : (
-            renderEmptyState("not_provisioned", locale)
-          )}
-        </Card>
-
-        <Card
-          theme={theme}
-          title={copy(locale, "Maintenance", "保修")}
-          subtitle={copy(
-            locale,
-            "Recent, scheduled, and overdue records tied to this vehicle.",
-            "此車相關的近期、排程中、逾期工單。",
-          )}
-        >
-          {maintenanceResult.error ? (
-            renderEmptyState(maintenanceResult.reason ?? "fetch_failed", locale)
-          ) : (maintenanceResult.data as MaintenanceRecord[]).length > 0 ? (
-            <Table
-              theme={theme}
-              columns={maintenanceColumns}
-              rows={buildMaintenanceRows(
-                locale,
-                maintenanceResult.data as MaintenanceRecord[],
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                renderEmptyState("no_data", locale)
               )}
-            />
-          ) : (
-            renderEmptyState("no_data", locale)
-          )}
-        </Card>
-
-        <section
-          style={{
-            display: "grid",
-            gap: "16px",
-            gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-          }}
-        >
-          <Card
-            theme={theme}
-            title={copy(locale, "Linked incidents", "關聯事件")}
-          >
-            {incidentsResult.error ? (
-              renderEmptyState(incidentsResult.reason ?? "fetch_failed", locale)
-            ) : incidents.length > 0 ? (
-              <Table
-                theme={theme}
-                columns={incidentColumns}
-                rows={buildIncidentRows(locale, incidents)}
-              />
-            ) : (
-              renderEmptyState("filtered_empty", locale)
-            )}
-          </Card>
-
-          <Card theme={theme} title={copy(locale, "Audit events", "稽核事件")}>
-            {auditsResult.error ? (
-              renderEmptyState(auditsResult.reason ?? "fetch_failed", locale)
-            ) : audits.length > 0 ? (
-              <Table
-                theme={theme}
-                columns={auditColumns}
-                rows={buildAuditRows(locale, audits)}
-              />
-            ) : (
-              renderEmptyState("external_unavailable", locale)
-            )}
-          </Card>
+            </Card>
+          </div>
         </section>
       </div>
     </>
