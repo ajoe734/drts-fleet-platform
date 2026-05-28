@@ -313,6 +313,7 @@ type DeliveryRow = Record<string, unknown> & {
   codeTone: CanvasTone;
   tries: number;
   at: string;
+  signature: string;
 };
 
 type EmptyStateCopy = {
@@ -517,13 +518,15 @@ function toDeliveryRow(delivery: WebhookDeliveryRecord): DeliveryRow {
     deliveryId: delivery.deliveryId,
     webhookId: delivery.webhookId,
     eventType: delivery.eventType,
-    statusLabel: delivery.status,
+    statusLabel:
+      delivery.status === "delivery_failed" ? "failed" : delivery.status,
     statusTone: getDeliveryStatusTone(delivery.status),
     codeLabel:
       delivery.httpStatus === null ? "timeout" : String(delivery.httpStatus),
     codeTone: getDeliveryCodeTone(delivery.httpStatus),
     tries: delivery.attempt,
     at: formatDateTime(delivery.createdAt),
+    signature: delivery.signature,
   };
 }
 
@@ -687,10 +690,12 @@ function getActionHref(
   action: string,
   options?: {
     webhookId?: string;
+    deliveryId?: string;
     status?: string;
   },
 ) {
   const webhookId = options?.webhookId;
+  const deliveryId = options?.deliveryId;
   const status =
     options?.status && options.status !== "all"
       ? `&status=${encodeURIComponent(options.status)}`
@@ -715,9 +720,12 @@ function getActionHref(
         ? `/webhooks?mode=rotate&webhookId=${encodeURIComponent(webhookId)}${status}`
         : undefined;
     case "viewDeliveryLog":
-      return webhookId
-        ? `/webhooks?webhookId=${encodeURIComponent(webhookId)}${status}`
-        : undefined;
+      if (!webhookId) {
+        return undefined;
+      }
+      return deliveryId
+        ? `/webhooks?webhookId=${encodeURIComponent(webhookId)}&deliveryId=${encodeURIComponent(deliveryId)}${status}`
+        : `/webhooks?webhookId=${encodeURIComponent(webhookId)}${status}`;
     default:
       return undefined;
   }
@@ -727,6 +735,7 @@ function decorateActions(
   descriptors: ResourceActionDescriptor[],
   options?: {
     webhookId?: string;
+    deliveryId?: string;
     status?: string;
   },
 ): ActionDescriptor[] {
@@ -765,7 +774,7 @@ function derivePageActions(
     {
       action: "createWebhookEndpoint",
       enabled: canManage,
-      disabledReasonCode: canManage ? undefined : "tenant_role_missing",
+      ...(!canManage ? { disabledReasonCode: "tenant_role_missing" } : {}),
       riskLevel: "medium",
     },
   ];
@@ -791,32 +800,38 @@ function getEndpointActions(
     {
       action: "updateWebhookEndpoint",
       enabled: canManage,
-      disabledReasonCode: canManage ? undefined : "tenant_role_missing",
+      ...(!canManage ? { disabledReasonCode: "tenant_role_missing" } : {}),
       riskLevel: "medium",
     },
     {
       action: "disableWebhookEndpoint",
       enabled: canManage && endpoint.status !== "disabled",
-      disabledReasonCode:
-        endpoint.status === "disabled"
-          ? "already_disabled"
-          : canManage
-            ? undefined
-            : "tenant_role_missing",
+      ...((endpoint.status === "disabled"
+        ? "already_disabled"
+        : canManage
+          ? null
+          : "tenant_role_missing") !== null
+        ? {
+            disabledReasonCode:
+              endpoint.status === "disabled"
+                ? "already_disabled"
+                : "tenant_role_missing",
+          }
+        : {}),
       requiresReason: true,
       riskLevel: "high",
     },
     {
       action: "deleteWebhookEndpoint",
       enabled: canManage,
-      disabledReasonCode: canManage ? undefined : "tenant_role_missing",
+      ...(!canManage ? { disabledReasonCode: "tenant_role_missing" } : {}),
       requiresReason: true,
       riskLevel: "high",
     },
     {
       action: "rotateWebhookSecret",
       enabled: canManage,
-      disabledReasonCode: canManage ? undefined : "tenant_role_missing",
+      ...(!canManage ? { disabledReasonCode: "tenant_role_missing" } : {}),
       requiresReason: true,
       riskLevel: "high",
     },
@@ -841,6 +856,37 @@ function getEndpointActions(
       ? { ...action, label: "已停用" }
       : action,
   );
+}
+
+function getDeliveryActions(
+  delivery: WebhookDeliveryRecord,
+  canManage: boolean,
+  statusFilter = "all",
+): ActionDescriptor[] {
+  const fallbackActions: ResourceActionDescriptor[] = [
+    {
+      action: "viewDeliveryLog",
+      enabled: true,
+      riskLevel: "low",
+    },
+    {
+      action: "retryFailedDelivery",
+      enabled: false,
+      disabledReasonCode:
+        delivery.status === "delivery_failed"
+          ? canManage
+            ? "backend_retry_endpoint_pending"
+            : "tenant_role_missing"
+          : "delivery_not_failed",
+      riskLevel: "medium",
+    },
+  ];
+
+  return decorateActions(delivery.availableActions ?? fallbackActions, {
+    webhookId: delivery.webhookId,
+    deliveryId: delivery.deliveryId,
+    status: statusFilter,
+  });
 }
 
 function renderAction(
@@ -1246,7 +1292,7 @@ function EndpointForm({
         </div>
         <EventChecklist
           baselineEvents={baselineEvents}
-          selectedEvents={webhook?.events}
+          {...(webhook?.events ? { selectedEvents: webhook.events } : {})}
         />
         {baselineEvents.length > 0 ? (
           <CanvasField theme={th} label="ADDITIONAL EVENTS">
@@ -1406,6 +1452,7 @@ export default async function WebhooksPage({
     "overview";
   const statusFilter = getSearchParam(resolvedSearchParams.status) ?? "all";
   const selectedWebhookId = getSearchParam(resolvedSearchParams.webhookId);
+  const selectedDeliveryId = getSearchParam(resolvedSearchParams.deliveryId);
   const success = getSearchParam(resolvedSearchParams.success);
   const error = getSearchParam(resolvedSearchParams.error);
 
@@ -1432,6 +1479,12 @@ export default async function WebhooksPage({
     (selectedWebhookId
       ? data.endpoints.find(
           (endpoint) => endpoint.webhookId === selectedWebhookId,
+        )
+      : undefined) ?? null;
+  const selectedDelivery =
+    (selectedDeliveryId
+      ? scopedDeliveries.find(
+          (delivery) => delivery.deliveryId === selectedDeliveryId,
         )
       : undefined) ?? null;
   const summary = summarizeDeliveries(scopedDeliveries);
@@ -1570,6 +1623,26 @@ export default async function WebhooksPage({
     },
     { h: "TRIES", k: "tries", w: 72, align: "right", mono: true },
     { h: "AT", k: "at", mono: true },
+    {
+      h: "ACTIONS",
+      w: 190,
+      r: (row) => {
+        const delivery = scopedDeliveries.find(
+          (item) => item.deliveryId === row.deliveryId,
+        );
+        if (!delivery) {
+          return null;
+        }
+        return (
+          <div style={buttonWrapStyle}>
+            {getDeliveryActions(delivery, canManage, statusFilter).map(
+              (action, index) =>
+                renderAction(action, `${row.deliveryId}-${index}`),
+            )}
+          </div>
+        );
+      },
+    },
   ];
 
   const globalErrors = [
@@ -1589,9 +1662,9 @@ export default async function WebhooksPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="Webhook"
+        title="Webhook management"
         subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — real engine per Q-TEN08"
-        tabs={["Endpoints", "Deliveries", "Replay"]}
+        tabs={["Endpoints", "Deliveries"]}
         activeTab={selectedWebhookId ? "Deliveries" : "Endpoints"}
         actions={
           <>
@@ -1862,8 +1935,9 @@ export default async function WebhooksPage({
                   )}
                 </div>
                 <p style={mutedStyle}>
-                  `retry failed` 仍保留為 disabled CTA，原因是目前 repo
-                  內沒有對應 retry endpoint；UI 不會假裝此能力已上線。
+                  Endpoint 層保留 lifecycle actions；delivery-specific `retry
+                  failed` 會在下方 delivery rows / selected delivery detail 依
+                  `delivery.availableActions` 顯示。
                 </p>
               </div>
             ) : (
@@ -1882,8 +1956,8 @@ export default async function WebhooksPage({
                     `/api/tenant/webhooks/:id/rotate-secret`。
                   </li>
                   <li>
-                    Retry failed delivery 目前僅顯示 disabled reason，避免 UI
-                    造成功能錯覺。
+                    Delivery row 會直接反映 `retryFailedDelivery` 的
+                    enabled/disabled 狀態。
                   </li>
                 </ul>
               </div>
@@ -1941,10 +2015,61 @@ export default async function WebhooksPage({
 
           <CanvasCard
             theme={th}
-            title="Related signals"
-            subtitle="Entry/exit per packet: notification deep link + integration governance + audit."
+            title={selectedDelivery ? "Selected delivery" : "Related signals"}
+            subtitle={
+              selectedDelivery
+                ? "Per-delivery actions come from delivery.availableActions[]."
+                : "Entry/exit per packet: notification deep link + integration governance + audit."
+            }
           >
             <div style={stackStyle}>
+              {selectedDelivery ? (
+                <div style={panelStyle}>
+                  <div style={{ color: th.text, fontWeight: 600 }}>
+                    {selectedDelivery.eventType}
+                  </div>
+                  <div style={detailLineStyle}>
+                    <span>delivery</span>
+                    <span style={monoStyle}>{selectedDelivery.deliveryId}</span>
+                  </div>
+                  <div style={detailLineStyle}>
+                    <span>endpoint</span>
+                    <span style={monoStyle}>{selectedDelivery.webhookId}</span>
+                  </div>
+                  <div style={detailLineStyle}>
+                    <span>signature</span>
+                    <span style={monoStyle}>{selectedDelivery.signature}</span>
+                  </div>
+                  <div style={detailLineStyle}>
+                    <span>attempt</span>
+                    <span style={monoStyle}>{selectedDelivery.attempt}</span>
+                  </div>
+                  <div style={buttonWrapStyle}>
+                    {getDeliveryActions(
+                      selectedDelivery,
+                      canManage,
+                      statusFilter,
+                    ).map((action, index) =>
+                      renderAction(action, `delivery-${index}`),
+                    )}
+                    <Link
+                      href={
+                        selectedWebhookId
+                          ? `/webhooks?webhookId=${encodeURIComponent(selectedWebhookId)}`
+                          : "/webhooks"
+                      }
+                      style={getLinkButtonStyle()}
+                    >
+                      Clear delivery scope
+                    </Link>
+                  </div>
+                  <p style={mutedStyle}>
+                    Retry CTA 直接跟著 delivery read model 的
+                    `availableActions`；若 backend 尚未提供 retry
+                    endpoint，畫面會保留 disabled reason。
+                  </p>
+                </div>
+              ) : null}
               <div style={panelStyle}>
                 <div style={{ color: th.text, fontWeight: 600 }}>
                   Notification feed
@@ -1966,7 +2091,7 @@ export default async function WebhooksPage({
                     目前 notification feed 沒有 webhook / delivery 相關項目。
                   </p>
                 )}
-                <Link href="/settings" style={secondaryLinkStyle}>
+                <Link href="/notifications" style={secondaryLinkStyle}>
                   Open notification preferences
                 </Link>
               </div>
