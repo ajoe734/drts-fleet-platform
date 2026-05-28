@@ -61,12 +61,6 @@ const linkChipStyle: CSSProperties = {
   textDecoration: "none",
 };
 
-const previewGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-};
-
 const helperTextStyle: CSSProperties = {
   fontSize: 11.5,
   lineHeight: 1.5,
@@ -87,6 +81,19 @@ const supportGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)",
   gap: 16,
+};
+
+const emptyStateCardStyle: CSSProperties = {
+  padding: "28px 20px",
+  display: "grid",
+  gap: 12,
+  justifyItems: "start",
+};
+
+const emptyStateBodyStyle: CSSProperties = {
+  fontSize: 12.5,
+  lineHeight: 1.6,
+  color: th.textMuted,
 };
 
 const emptyReasonKeys = [
@@ -125,7 +132,14 @@ type NotificationPreferencesRuntime = TenantNotificationPreferences & {
   availableActions?: ResourceActionDescriptor[];
   emptyState?: {
     reason: EmptyReason;
+    nextAction?: ResourceActionDescriptor | null;
   } | null;
+  refresh?: {
+    dataFreshness?: "fresh" | "stale" | "degraded" | "unknown";
+    generatedAt?: string;
+  } | null;
+  dataFreshness?: "fresh" | "stale" | "degraded" | "unknown";
+  generatedAt?: string;
 };
 
 type NotificationPageLink = ResourceActionDescriptor & {
@@ -219,12 +233,12 @@ function resolveActionHref(action: string) {
   }
 }
 
-function toPreviewTone(tone: "neutral" | "info" | "warn" | "danger") {
-  return tone === "neutral" ? "accent" : tone;
-}
-
 function toBannerTone(tone: "neutral" | "info" | "warn" | "danger") {
   return tone === "neutral" ? "info" : tone;
+}
+
+function toPillTone(tone: "neutral" | "info" | "warn" | "danger") {
+  return tone === "neutral" ? "accent" : tone;
 }
 
 function buildNotificationActions(
@@ -404,6 +418,29 @@ function renderActionLink(action: NotificationPageLink) {
   );
 }
 
+function toNotificationPageLink(
+  action: ResourceActionDescriptor & {
+    label?: string;
+    href?: string;
+    target?: "_blank" | "_self";
+  },
+): NotificationPageLink {
+  const href = action.href ?? resolveActionHref(action.action);
+  const target =
+    action.target ??
+    (action.action === "open_webhook_audit" ||
+    action.action === "open_platform_webhook_debug"
+      ? "_blank"
+      : "_self");
+
+  return {
+    ...action,
+    label: action.label ?? resolveActionLabel(action.action),
+    ...(href ? { href } : {}),
+    ...(href ? { target } : {}),
+  };
+}
+
 export default async function NotificationsPage({
   searchParams,
 }: NotificationsPageProps) {
@@ -414,11 +451,6 @@ export default async function NotificationsPage({
     emptyReasonKeys.includes(previewReasonValue as NotificationEmptyReason)
       ? (previewReasonValue as NotificationEmptyReason)
       : null;
-  const freshness =
-    typeof resolvedSearchParams.freshness === "string"
-      ? resolvedSearchParams.freshness
-      : "fresh";
-
   const data = await loadPageData();
   const rows = buildRows(data);
   const webhookProvisioned = data.webhooks.length > 0;
@@ -427,19 +459,46 @@ export default async function NotificationsPage({
   const customRouteCount = data.preferences?.subscriptions.length ?? 0;
   const usesBaseline = customRouteCount === 0;
   const { saveAction, deepLinks } = buildNotificationActions(data, rows.length);
+  const runtimePreferences = isNotificationPreferencesRuntime(data.preferences)
+    ? data.preferences
+    : null;
+  const freshness =
+    typeof resolvedSearchParams.freshness === "string"
+      ? resolvedSearchParams.freshness
+      : (runtimePreferences?.refresh?.dataFreshness ??
+        runtimePreferences?.dataFreshness ??
+        "fresh");
 
   const derivedEmptyReason: NotificationEmptyReason | null =
     previewReason ??
-    (isNotificationPreferencesRuntime(data.preferences)
-      ? (data.preferences.emptyState?.reason as NotificationEmptyReason | null)
-      : null) ??
+    (runtimePreferences?.emptyState
+      ?.reason as NotificationEmptyReason | null) ??
     (data.errors.length > 0 && rows.length === 0
       ? "fetch_failed"
-      : !webhookProvisioned
-        ? "not_provisioned"
-        : !saveAction.enabled && saveAction.disabledReasonCode
-          ? "permission_denied"
-          : null);
+      : rows.length === 0
+        ? "no_data"
+        : !webhookProvisioned
+          ? "not_provisioned"
+          : !saveAction.enabled && saveAction.disabledReasonCode
+            ? "permission_denied"
+            : null);
+  const emptyStateAction = derivedEmptyReason
+    ? runtimePreferences?.emptyState?.nextAction
+      ? toNotificationPageLink(runtimePreferences.emptyState.nextAction)
+      : EMPTY_REASON_COPY[derivedEmptyReason].action
+        ? toNotificationPageLink(EMPTY_REASON_COPY[derivedEmptyReason].action)
+        : null
+    : null;
+  const effectiveUpdatedAt =
+    data.preferences?.updatedAt ??
+    runtimePreferences?.refresh?.generatedAt ??
+    runtimePreferences?.generatedAt ??
+    data.governance?.generatedAt;
+  const shouldRenderEmptyBody =
+    rows.length === 0 &&
+    derivedEmptyReason !== null &&
+    derivedEmptyReason !== "not_provisioned" &&
+    derivedEmptyReason !== "permission_denied";
 
   return (
     <div>
@@ -496,7 +555,11 @@ export default async function NotificationsPage({
                   : "info"
             }
             title={EMPTY_REASON_COPY[derivedEmptyReason].title}
-            body={EMPTY_REASON_COPY[derivedEmptyReason].body}
+            body={
+              emptyStateAction
+                ? `${EMPTY_REASON_COPY[derivedEmptyReason].body} · 下一步：${emptyStateAction.label}`
+                : EMPTY_REASON_COPY[derivedEmptyReason].body
+            }
           />
         ) : null}
 
@@ -528,18 +591,37 @@ export default async function NotificationsPage({
               { k: "Tenant", v: DEMO_TENANT_ID, mono: true },
               {
                 k: "Last updated",
-                v: formatDateTime(data.preferences?.updatedAt),
+                v: formatDateTime(effectiveUpdatedAt),
               },
               { k: "Custom routes", v: String(customRouteCount), mono: true },
               { k: "Baseline routes", v: String(baselineCount), mono: true },
             ]}
           />
           <div style={{ height: 12 }} />
-          <NotificationMatrixForm
-            rows={rows}
-            saveAction={saveAction}
-            action={updateNotificationPreferencesAction}
-          />
+          {shouldRenderEmptyBody ? (
+            <div style={emptyStateCardStyle}>
+              <CanvasPill
+                theme={th}
+                tone={toPillTone(EMPTY_REASON_COPY[derivedEmptyReason].tone)}
+                dot
+              >
+                {derivedEmptyReason}
+              </CanvasPill>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>
+                {EMPTY_REASON_COPY[derivedEmptyReason].title}
+              </div>
+              <div style={emptyStateBodyStyle}>
+                {EMPTY_REASON_COPY[derivedEmptyReason].body}
+              </div>
+              {emptyStateAction ? renderActionLink(emptyStateAction) : null}
+            </div>
+          ) : (
+            <NotificationMatrixForm
+              rows={rows}
+              saveAction={saveAction}
+              action={updateNotificationPreferencesAction}
+            />
+          )}
         </CanvasCard>
 
         <div style={supportGridStyle}>
@@ -561,49 +643,41 @@ export default async function NotificationsPage({
 
           <CanvasCard
             theme={th}
-            title="EmptyReason states"
-            subtitle="6 distinct treatments required by packet"
+            title="State contract"
+            subtitle="Q-X15 empty reasons + tenant notification posture"
           >
-            <div style={previewGridStyle}>
-              {emptyReasonKeys.map((reason) => {
-                const copy = EMPTY_REASON_COPY[reason];
-
-                return (
-                  <div
-                    key={reason}
-                    style={{
-                      border: `1px solid ${th.border}`,
-                      background: th.surfaceLo,
-                      borderRadius: 10,
-                      padding: 12,
-                    }}
-                  >
-                    <CanvasPill theme={th} tone={toPreviewTone(copy.tone)} dot>
+            <div style={{ display: "grid", gap: 12 }}>
+              <div>
+                <div style={{ ...helperTextStyle, marginBottom: 8 }}>
+                  Supported EmptyReason values
+                </div>
+                <div style={linkRowStyle}>
+                  {emptyReasonKeys.map((reason) => (
+                    <CanvasPill
+                      key={reason}
+                      theme={th}
+                      tone={
+                        derivedEmptyReason === reason
+                          ? toPillTone(EMPTY_REASON_COPY[reason].tone)
+                          : "neutral"
+                      }
+                      dot={derivedEmptyReason === reason}
+                    >
                       {reason}
                     </CanvasPill>
-                    <div style={{ marginTop: 10, fontWeight: 600 }}>
-                      {copy.title}
-                    </div>
-                    <div style={{ ...helperTextStyle, marginTop: 6 }}>
-                      {copy.body}
-                    </div>
-                    <div
-                      style={{
-                        ...helperTextStyle,
-                        marginTop: 10,
-                        ...monoStyle,
-                      }}
-                    >
-                      /notifications?emptyReason={reason}
-                    </div>
-                    {copy.action ? (
-                      <div style={{ marginTop: 10 }}>
-                        {renderActionLink(copy.action)}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              </div>
+              <div style={helperTextStyle}>
+                Entry from sidebar or `/integration-governance`. Custom routes
+                stay machine-driven by `availableActions`; webhook authority and
+                degraded delivery investigation always deep-link out of this
+                page.
+              </div>
+              <div style={{ ...helperTextStyle, ...monoStyle }}>
+                Preview override:
+                /notifications?emptyReason=no_data&freshness=stale
+              </div>
             </div>
           </CanvasCard>
         </div>
