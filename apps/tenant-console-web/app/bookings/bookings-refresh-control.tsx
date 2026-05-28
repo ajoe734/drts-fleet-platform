@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 type BookingsRefreshControlProps = {
-  generatedAt: string;
+  generatedAt: string | null;
   pollIntervalMs: number;
 };
 
@@ -19,11 +19,24 @@ export function BookingsRefreshControl({
 }: BookingsRefreshControlProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [remainingSeconds, setRemainingSeconds] = useState(() =>
-    getRemainingSeconds(new Date(generatedAt).getTime() + pollIntervalMs),
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(
+    () => {
+      if (!generatedAt || pollIntervalMs <= 0) {
+        return null;
+      }
+
+      return getRemainingSeconds(
+        new Date(generatedAt).getTime() + pollIntervalMs,
+      );
+    },
   );
 
   useEffect(() => {
+    if (!generatedAt || pollIntervalMs <= 0) {
+      setRemainingSeconds(null);
+      return;
+    }
+
     const generatedAtMs = new Date(generatedAt).getTime();
     const nextRefreshAt = generatedAtMs + pollIntervalMs;
 
@@ -47,12 +60,18 @@ export function BookingsRefreshControl({
   return (
     <div className="bookings-refresh-control">
       <span className="status-chip">
-        {isPending ? "Refreshing…" : `Auto ${pollIntervalMs / 1000}s`}
+        {isPending
+          ? "Refreshing…"
+          : pollIntervalMs > 0
+            ? `Auto ${pollIntervalMs / 1000}s`
+            : "Manual refresh"}
       </span>
       <span className="bookings-refresh-countdown">
         {isPending
           ? "syncing backend snapshot"
-          : `next poll ${remainingSeconds}s`}
+          : remainingSeconds === null
+            ? "waiting for backend freshness metadata"
+            : `next poll ${remainingSeconds}s`}
       </span>
       <button
         className="action-button action-button-secondary bookings-refresh-button"

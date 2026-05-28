@@ -4,6 +4,7 @@ import type {
   ApiSuccessEnvelope,
   BookingRecord,
   CrossAppResourceLink,
+  EmptyStateEnvelope,
   EmptyReason,
   OwnedOrderStatus,
   RefreshTier,
@@ -48,14 +49,6 @@ const TERMINAL_ORDER_STATUSES = new Set<OwnedOrderStatus>([
   "completed",
   "cancelled",
 ]);
-const ATTENTION_ORDER_STATUSES = new Set<OwnedOrderStatus>([
-  "dispatch_failed",
-  "dispatch_timeout",
-  "exception_hold",
-  "no_supply",
-  "proof_pending",
-  "redispatch_required",
-]);
 const RESERVATION_STATUSES: OwnedOrderStatus[] = [
   "created",
   "recording_pending",
@@ -72,10 +65,20 @@ const ACTION_COPY: Record<string, string> = {
   create: "建立叫車",
   create_booking: "建立叫車",
   view_detail: "查看詳情",
+  filter: "篩選",
+  refresh: "立即更新",
 };
 const ACTION_PRIORITY = ["view_detail", "update", "cancel"];
 const REFRESH_TIER: RefreshTier = "slow";
-const REFRESH_POLL_INTERVAL_MS = 30_000;
+const REFRESH_TIER_POLL_INTERVAL_MS: Record<RefreshTier, number> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 0,
+};
 
 type SearchParamValue = string | string[] | undefined;
 
@@ -91,16 +94,12 @@ type TenantBookingListRecord = TenantBookingRuntimeRecord & {
   editableUntil: string | null;
   readOnlyReasonCode: string | null;
   availableActions: ResourceActionDescriptor[];
-  slaStatus: "healthy" | "at_risk" | "breach" | null;
-  crossAppLinks: CrossAppResourceLink[];
 };
 
 type TenantEmptyReason = (typeof TENANT_EMPTY_REASONS)[number];
 
 type BookingListEnvelope = ApiListData<TenantBookingRuntimeRecord> & {
-  emptyState?: {
-    reason: TenantEmptyReason;
-  } | null;
+  emptyState?: EmptyStateEnvelope | null;
   refresh?: UiRefreshMetadata | null;
 };
 
@@ -242,90 +241,16 @@ function hasActiveFilters(searchParams: Record<string, SearchParamValue>) {
   );
 }
 
-function deriveReadOnlyReasonCode(booking: TenantBookingRuntimeRecord) {
-  if (booking.readOnlyReasonCode) {
-    return booking.readOnlyReasonCode;
-  }
-  if (
-    booking.orderStatus === "completed" ||
-    booking.orderStatus === "cancelled"
-  ) {
-    return "terminal_order_state";
-  }
-  if (booking.orderStatus === "on_trip") {
-    return "on_trip";
-  }
-  if (booking.modifiableUntil) {
-    const timestamp = new Date(booking.modifiableUntil).getTime();
-    if (!Number.isNaN(timestamp) && timestamp <= Date.now()) {
-      return "past_editable_until";
-    }
-  }
-
-  return null;
-}
-
-function deriveSlaStatus(booking: TenantBookingRuntimeRecord) {
-  if (booking.slaStatus !== undefined) {
-    return booking.slaStatus;
-  }
-  if (ATTENTION_ORDER_STATUSES.has(booking.orderStatus)) {
-    return "breach";
-  }
-  if (booking.approvalState === "pending") {
-    return "at_risk";
-  }
-
-  return null;
-}
-
-function deriveCrossAppLinks(
-  booking: TenantBookingRuntimeRecord,
-): CrossAppResourceLink[] {
-  if (Array.isArray(booking.crossAppLinks)) {
-    return booking.crossAppLinks;
-  }
-
-  const links: CrossAppResourceLink[] = [];
-  const source = getBookingSourceVisibility(booking);
-
-  if (source.domain === "forwarded_authority") {
-    links.push({
-      targetApp: "ops-console",
-      route: `/dispatch?orderId=${encodeURIComponent(booking.orderId)}`,
-      resourceType: "owned_order",
-      resourceId: booking.orderId,
-      openMode: "new_tab",
-      label: "在 Ops Console 查看 dispatch",
-    });
-  }
-
-  if (booking.partnerEntrySlug) {
-    links.push({
-      targetApp: "platform-admin",
-      route: `/partners/${encodeURIComponent(booking.partnerEntrySlug)}`,
-      resourceType: "partner_entry",
-      resourceId: booking.partnerEntrySlug,
-      openMode: "new_tab",
-      label: "在 Platform Admin 查看 partner entry",
-    });
-  }
-
-  return links;
-}
-
 function normalizeBooking(
   booking: TenantBookingRuntimeRecord,
 ): TenantBookingListRecord {
   return {
     ...booking,
     editableUntil: booking.editableUntil ?? booking.modifiableUntil,
-    readOnlyReasonCode: deriveReadOnlyReasonCode(booking),
+    readOnlyReasonCode: booking.readOnlyReasonCode ?? null,
     availableActions: Array.isArray(booking.availableActions)
       ? booking.availableActions
       : [],
-    slaStatus: deriveSlaStatus(booking),
-    crossAppLinks: deriveCrossAppLinks(booking),
   };
 }
 
@@ -354,14 +279,24 @@ function getActionHref(
   booking: TenantBookingListRecord,
   descriptor: ResourceActionDescriptor,
 ) {
-  if (
-    descriptor.action === "create" ||
-    descriptor.action === "create_booking"
-  ) {
-    return "/bookings/new";
+  const actionRoute = getActionRoute(descriptor.action);
+  if (actionRoute) {
+    return actionRoute;
   }
 
   return `/bookings/${booking.bookingId}`;
+}
+
+function getActionRoute(action: string) {
+  if (action === "create" || action === "create_booking") {
+    return "/bookings/new";
+  }
+
+  if (action === "filter") {
+    return "#bookings-filters";
+  }
+
+  return null;
 }
 
 function getActionDisabledReason(descriptor: ResourceActionDescriptor) {
@@ -446,25 +381,10 @@ function getRelativeAge(iso: string) {
 
   return `${Math.floor(diffHours / 24)} 天前`;
 }
-
-function getFallbackRefresh(
-  bookings: TenantBookingListRecord[],
-): UiRefreshMetadata {
-  const latestUpdatedAt =
-    bookings
-      .map((booking) => new Date(booking.updatedAt).getTime())
-      .filter((value) => !Number.isNaN(value))
-      .sort((left, right) => right - left)[0] ?? Date.now();
-
-  return {
-    generatedAt: new Date(latestUpdatedAt).toISOString(),
-    staleAfterMs: REFRESH_POLL_INTERVAL_MS,
-    dataFreshness: bookings.length > 0 ? "fresh" : "unknown",
-    source: "sandbox",
-  };
-}
-
-function getRefreshTone(refresh: UiRefreshMetadata) {
+function getRefreshTone(refresh: UiRefreshMetadata | null) {
+  if (!refresh) {
+    return "is-warning";
+  }
   if (refresh.dataFreshness === "degraded") {
     return "is-warning";
   }
@@ -475,13 +395,39 @@ function getRefreshTone(refresh: UiRefreshMetadata) {
   return "";
 }
 
-function getRefreshCopy(refresh: UiRefreshMetadata) {
+function getRefreshCopy(refresh: UiRefreshMetadata | null) {
+  if (!refresh) {
+    return [
+      `T5 ${REFRESH_TIER.replaceAll("_", " ")}`,
+      "awaiting backend refresh envelope",
+    ].join(" · ");
+  }
+
   return [
     `T5 ${REFRESH_TIER.replaceAll("_", " ")}`,
     refresh.dataFreshness,
     `snapshot ${formatDateTime(refresh.generatedAt)}`,
     refresh.source,
   ].join(" · ");
+}
+
+function getEmptyStateAction(
+  emptyState: EmptyStateEnvelope | null | undefined,
+): { href: string; label: string } | null {
+  const descriptor = emptyState?.nextAction;
+  if (!descriptor?.enabled) {
+    return null;
+  }
+
+  const href = getActionRoute(descriptor.action);
+  if (!href) {
+    return null;
+  }
+
+  return {
+    href,
+    label: getActionLabel(descriptor.action),
+  };
 }
 
 function getApprovalCopy(booking: TenantBookingListRecord) {
@@ -614,10 +560,11 @@ export default async function TenantBookingsPage({
   const rawBookings = listEnvelope?.items ?? [];
   const bookings = rawBookings.map(normalizeBooking);
   const result = applyBookingListQuery(bookings, query);
-  const refreshMetadata = listEnvelope?.refresh ?? getFallbackRefresh(bookings);
+  const refreshMetadata = listEnvelope?.refresh ?? null;
   const emptyReason: TenantEmptyReason | null =
     emptyReasonOverride ??
-    listEnvelope?.emptyState?.reason ??
+    (listEnvelope?.emptyState?.reason as TenantEmptyReason | undefined) ??
+    undefined ??
     (bookingsSettled.status === "rejected"
       ? getEmptyReasonFromError(bookingsSettled.reason)
       : result.total === 0
@@ -626,6 +573,7 @@ export default async function TenantBookingsPage({
           : "no_data"
         : null);
   const emptyState = emptyReason ? EMPTY_STATE_COPY[emptyReason] : null;
+  const emptyStateAction = getEmptyStateAction(listEnvelope?.emptyState);
   const pageTabs = getPageStatusTabs(bookings, query, {
     focusedBookingId,
     notificationRef,
@@ -640,10 +588,13 @@ export default async function TenantBookingsPage({
         new Date(right.updatedAt).getTime(),
     )
     .slice(0, 3);
-  const hasForwardedAuthority = result.items.some(
+  const hasCrossAppLinks = result.items.some(
     (booking) =>
-      getBookingSourceVisibility(booking).domain === "forwarded_authority",
+      Array.isArray(booking.crossAppLinks) && booking.crossAppLinks.length > 0,
   );
+  const refreshPollIntervalMs =
+    refreshMetadata?.staleAfterMs ??
+    REFRESH_TIER_POLL_INTERVAL_MS[REFRESH_TIER];
 
   return (
     <div className="page-shell">
@@ -697,10 +648,8 @@ export default async function TenantBookingsPage({
             {getRefreshCopy(refreshMetadata)}
           </span>
           <BookingsRefreshControl
-            generatedAt={refreshMetadata.generatedAt}
-            pollIntervalMs={
-              refreshMetadata.staleAfterMs ?? REFRESH_POLL_INTERVAL_MS
-            }
+            generatedAt={refreshMetadata?.generatedAt ?? null}
+            pollIntervalMs={refreshPollIntervalMs}
           />
           <span className="status-chip">
             {result.total} visible / {bookings.length} total
@@ -712,14 +661,18 @@ export default async function TenantBookingsPage({
                 : `focus ${focusedBookingId}`}
             </span>
           )}
-          {hasForwardedAuthority ? (
+          {hasCrossAppLinks ? (
             <span className="status-chip is-warning">
-              forwarded authority deep links available
+              cross-app deep links available
             </span>
           ) : null}
         </div>
 
-        <form action="/bookings" className="bookings-filter-panel">
+        <form
+          action="/bookings"
+          className="bookings-filter-panel"
+          id="bookings-filters"
+        >
           <label className="field-stack booking-search-field">
             <span>搜尋</span>
             <input
@@ -958,6 +911,11 @@ export default async function TenantBookingsPage({
                   {emptyState.actionLabel}
                 </Link>
               ) : null}
+              {emptyStateAction ? (
+                <Link className="text-link" href={emptyStateAction.href}>
+                  {emptyStateAction.label}
+                </Link>
+              ) : null}
               {emptyReason !== "filtered_empty" ? (
                 <Link
                   className="text-link"
@@ -1122,7 +1080,8 @@ export default async function TenantBookingsPage({
                           <span className="table-secondary">
                             {booking.bookedBy?.name ?? "Self-service tenant"}
                           </span>
-                          {booking.crossAppLinks.length > 0 ? (
+                          {Array.isArray(booking.crossAppLinks) &&
+                          booking.crossAppLinks.length > 0 ? (
                             <div className="link-row">
                               {booking.crossAppLinks.map((link) => (
                                 <a
