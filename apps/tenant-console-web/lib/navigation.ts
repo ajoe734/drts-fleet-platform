@@ -19,6 +19,7 @@ type TenantNavIcon =
   | "reports"
   | "apiKeys"
   | "webhooks"
+  | "integrationGov"
   | "audit"
   | "users";
 
@@ -106,6 +107,12 @@ export const tenantNavEntries: TenantNavEntry[] = [
     href: "/webhooks",
     icon: "webhooks",
     label: "Webhook",
+  },
+  {
+    key: "integration-governance",
+    href: "/integration-governance",
+    icon: "integrationGov",
+    label: "整合就緒度",
   },
   {
     key: "audit",

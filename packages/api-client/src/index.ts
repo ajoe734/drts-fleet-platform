@@ -186,6 +186,7 @@ import type {
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
   TenantIntegrationGovernancePackage,
+  TenantIntegrationReadinessSummary,
   TenantInvoiceRecord,
   TenantPassengerRecord,
   TenantQuotaLedgerEntry,
@@ -1625,6 +1626,12 @@ export class ApiClient {
   async getTenantIntegrationGovernancePackage(): Promise<TenantIntegrationGovernancePackage> {
     return this.get<TenantIntegrationGovernancePackage>(
       "/api/tenant/integration-governance",
+    );
+  }
+
+  async getTenantIntegrationReadiness(): Promise<TenantIntegrationReadinessSummary> {
+    return this.get<TenantIntegrationReadinessSummary>(
+      "/api/tenant/integration-governance/readiness",
     );
   }
 
