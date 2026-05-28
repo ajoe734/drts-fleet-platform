@@ -5,6 +5,7 @@ import type {
   CrossAppResourceLink,
   EmptyReason,
   OwnedOrderStatus,
+  RefreshTier,
   ResourceActionDescriptor,
   TenantBookingListEnvelope,
   TenantBookingListItem,
@@ -75,7 +76,7 @@ const ACTION_COPY: Record<string, string> = {
   filter: "篩選",
   refresh: "立即更新",
 };
-const TENANT_BOOKINGS_REFRESH_TIER_COPY = "T5 Tenant slow";
+const BOOKINGS_REFRESH_TIER: RefreshTier = "slow";
 
 type SearchParamValue = string | string[] | undefined;
 
@@ -305,21 +306,10 @@ function hasActiveFilters(searchParams: Record<string, SearchParamValue>) {
   );
 }
 
-function normalizeBooking(
-  booking: TenantBookingListRecord,
-): TenantBookingListRecord {
-  return {
-    ...booking,
-    editableUntil: booking.editableUntil ?? null,
-    readOnlyReasonCode: booking.readOnlyReasonCode ?? null,
-    availableActions: Array.isArray(booking.availableActions)
-      ? booking.availableActions
-      : [],
-  };
-}
-
 function getActionDescriptorsForRow(booking: TenantBookingListRecord) {
-  return booking.availableActions;
+  return Array.isArray(booking.availableActions)
+    ? booking.availableActions
+    : null;
 }
 
 function getActionLabel(action: string) {
@@ -348,34 +338,6 @@ function getApprovalStateLabel(state: BookingRecord["approvalState"]) {
 
 function getBookingTypeLabel(type: BookingRecord["bookingType"]) {
   return BOOKING_TYPE_COPY[type] ?? type;
-}
-
-function getEmptyReasonFromError(error: unknown): TenantEmptyReason {
-  const message =
-    error instanceof Error
-      ? error.message.toLowerCase()
-      : String(error).toLowerCase();
-
-  if (
-    message.includes("403") ||
-    message.includes("401") ||
-    message.includes("forbidden") ||
-    message.includes("permission")
-  ) {
-    return "permission_denied";
-  }
-  if (
-    message.includes("502") ||
-    message.includes("503") ||
-    message.includes("504") ||
-    message.includes("external") ||
-    message.includes("gateway") ||
-    message.includes("partner")
-  ) {
-    return "external_unavailable";
-  }
-
-  return "fetch_failed";
 }
 
 function buildCrossAppHref(link: CrossAppResourceLink) {
@@ -451,7 +413,12 @@ function getActionHref(
 }
 
 function getPrimaryBookingHref(booking: TenantBookingListRecord) {
-  const primaryAction = getActionDescriptorsForRow(booking).find(
+  const rowActions = getActionDescriptorsForRow(booking);
+  if (!rowActions) {
+    return null;
+  }
+
+  const primaryAction = rowActions.find(
     (descriptor) =>
       descriptor.enabled &&
       Boolean(
@@ -525,11 +492,10 @@ function getRefreshTone(refresh: UiRefreshMetadata | null) {
 
 function getRefreshCopy(refresh: UiRefreshMetadata | null) {
   if (!refresh) {
-    return `${TENANT_BOOKINGS_REFRESH_TIER_COPY} · 等待後端 refresh metadata`;
+    return "等待後端 refresh metadata";
   }
 
   return [
-    TENANT_BOOKINGS_REFRESH_TIER_COPY,
     refresh.staleAfterMs > 0
       ? `${refresh.staleAfterMs / 1000}s cadence`
       : "手動更新",
@@ -644,10 +610,10 @@ export default async function TenantBookingsPage({
   const bookingsSettled = bookingsResult[0];
   const listEnvelope =
     bookingsSettled.status === "fulfilled" ? bookingsSettled.value : null;
-  const rawBookings = listEnvelope?.items ?? [];
-  const bookings = rawBookings.map(normalizeBooking);
+  const bookings = listEnvelope?.items ?? [];
   const result = applyBookingListQuery(bookings, query);
   const refreshMetadata = listEnvelope?.refresh ?? null;
+  const fetchFailed = bookingsSettled.status === "rejected";
   const backendEmptyReason = EMPTY_REASON_SET.has(
     listEnvelope?.emptyState?.reason as EmptyReason,
   )
@@ -655,13 +621,9 @@ export default async function TenantBookingsPage({
     : null;
   const emptyReason: TenantEmptyReason | null =
     backendEmptyReason ??
-    (bookingsSettled.status === "rejected"
-      ? getEmptyReasonFromError(bookingsSettled.reason)
-      : result.total === 0
-        ? hasActiveFilters(resolvedSearchParams)
-          ? "filtered_empty"
-          : null
-        : null);
+    (result.total === 0 && hasActiveFilters(resolvedSearchParams)
+      ? "filtered_empty"
+      : null);
   const emptyState = emptyReason ? EMPTY_STATE_COPY[emptyReason] : null;
   const showGenericEmptyState =
     bookingsSettled.status === "fulfilled" &&
@@ -762,6 +724,7 @@ export default async function TenantBookingsPage({
           </span>
           <BookingsRefreshControl
             generatedAt={refreshMetadata?.generatedAt ?? null}
+            refreshTier={BOOKINGS_REFRESH_TIER}
             staleAfterMs={refreshPollIntervalMs}
           />
           <span className="status-chip">全部 {bookings.length} 筆</span>
@@ -916,7 +879,7 @@ export default async function TenantBookingsPage({
           })}
         </div>
 
-        {pendingApprovalBookings.length > 0 && !emptyState ? (
+        {pendingApprovalBookings.length > 0 && !emptyState && !fetchFailed ? (
           <div className="bookings-priority-strip">
             <div className="bookings-priority-head">
               <div>
@@ -987,7 +950,30 @@ export default async function TenantBookingsPage({
           </div>
         ) : null}
 
-        {emptyState ? (
+        {fetchFailed ? (
+          <div className="bookings-empty-state is-fetch-failed">
+            <div className="bookings-empty-hero">
+              <div className="bookings-empty-orb">sync</div>
+              <div className="bookings-empty-copy">
+                <span className="surface-kicker">Load Failed</span>
+                <h3>目前無法取得 bookings snapshot</h3>
+                <p>
+                  這次請求沒有拿到可用的 backend envelope，因此此頁不會自行補判
+                  `EmptyReason` 或 refresh 狀態。請稍後重新整理，或確認 API /
+                  upstream health。
+                </p>
+              </div>
+            </div>
+            <div className="bookings-empty-highlights">
+              <span className="status-chip is-warning">
+                backend envelope unavailable
+              </span>
+              <span className="bookings-empty-highlight">
+                canonical emptyState / refresh metadata missing
+              </span>
+            </div>
+          </div>
+        ) : emptyState ? (
           <div className={`bookings-empty-state is-${emptyReason}`}>
             <div className="bookings-empty-hero">
               <div className="bookings-empty-orb">
@@ -1226,7 +1212,7 @@ export default async function TenantBookingsPage({
                             {formatMoney(booking.quotedFare)}
                           </span>
                           <div className="row-actions">
-                            {rowActions.length > 0 ? (
+                            {rowActions && rowActions.length > 0 ? (
                               rowActions.map((descriptor) => {
                                 const presentation = getActionHref(descriptor, {
                                   bookingId: booking.bookingId,
@@ -1264,9 +1250,13 @@ export default async function TenantBookingsPage({
                                   </span>
                                 );
                               })
-                            ) : (
+                            ) : rowActions ? (
                               <span className="bookings-inline-meta">
                                 backend 未回傳可執行動作
+                              </span>
+                            ) : (
+                              <span className="bookings-inline-meta">
+                                availableActions contract missing
                               </span>
                             )}
                           </div>
