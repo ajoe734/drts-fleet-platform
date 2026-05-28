@@ -1,20 +1,63 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
   BookingRecord,
+  ResourceActionDescriptor,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 import { formatDateTime, isFutureIso } from "@/lib/formatters";
 
 type Mode = "update" | "cancel" | null;
 
-export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
+type BookingCommandPanelProps = {
+  booking: BookingRecord;
+  actions?: ResourceActionDescriptor[];
+  readOnlyReasonCode?: string | null;
+  auditHref?: string;
+  approvalHref?: string;
+};
+
+function getActionDescriptor(
+  actions: ResourceActionDescriptor[],
+  action: string,
+): ResourceActionDescriptor | null {
+  return actions.find((descriptor) => descriptor.action === action) ?? null;
+}
+
+function describeReason(reasonCode: string | null | undefined) {
+  switch (reasonCode) {
+    case "past_editable_until":
+      return "The tenant edit window has already closed.";
+    case "past_cancelable_until":
+      return "The tenant cancellation window has already closed.";
+    case "booking_terminal":
+      return "Completed or cancelled bookings are read-only.";
+    case "on_trip_locked":
+      return "On-trip bookings cannot be changed from tenant control.";
+    case "approval_pending":
+      return "The booking is waiting on approval resolution before it can change again.";
+    case "approval_not_retryable":
+      return "There is no approval workflow step that can be retried from this detail page.";
+    default:
+      return reasonCode ? `Backend reason: ${reasonCode}` : null;
+  }
+}
+
+export function BookingCommandPanel({
+  booking,
+  actions,
+  readOnlyReasonCode,
+  auditHref = "/audit",
+  approvalHref = "/rules",
+}: BookingCommandPanelProps) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<string | null>(null);
   const [pickupAddress, setPickupAddress] = useState(booking.pickup.address);
   const [dropoffAddress, setDropoffAddress] = useState(booking.dropoff.address);
   const [notes, setNotes] = useState(booking.notes ?? "");
@@ -24,7 +67,7 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
   );
   const [cancelReason, setCancelReason] = useState("");
 
-  const commandState = useMemo(() => {
+  const fallbackActions = useMemo<ResourceActionDescriptor[]>(() => {
     const isTerminal =
       booking.orderStatus === "completed" ||
       booking.orderStatus === "cancelled";
@@ -34,23 +77,52 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
     const withinCancelWindow =
       booking.cancelableUntil == null || isFutureIso(booking.cancelableUntil);
 
-    return {
-      canUpdate: !isTerminal && !isOnTrip && withinUpdateWindow,
-      canCancel: !isTerminal && withinCancelWindow,
-      updateReason: isTerminal
-        ? "Completed and cancelled bookings are read-only."
-        : isOnTrip
-          ? "On-trip bookings can no longer be edited from tenant control."
-          : withinUpdateWindow
-            ? null
-            : `Update window closed at ${formatDateTime(booking.modifiableUntil)}.`,
-      cancelReason: isTerminal
-        ? "Completed and cancelled bookings cannot be cancelled again."
-        : withinCancelWindow
-          ? null
-          : `Cancellation window closed at ${formatDateTime(booking.cancelableUntil)}.`,
-    };
+    return [
+      {
+        action: "update",
+        enabled: !isTerminal && !isOnTrip && withinUpdateWindow,
+        disabledReasonCode: isTerminal
+          ? "booking_terminal"
+          : isOnTrip
+            ? "on_trip_locked"
+            : withinUpdateWindow
+              ? undefined
+              : "past_editable_until",
+        riskLevel: "medium",
+      },
+      {
+        action: "cancel",
+        enabled: !isTerminal && withinCancelWindow,
+        disabledReasonCode: isTerminal
+          ? "booking_terminal"
+          : withinCancelWindow
+            ? undefined
+            : "past_cancelable_until",
+        requiresReason: true,
+        riskLevel: "high",
+      },
+    ];
   }, [booking]);
+  const effectiveActions =
+    actions && actions.length > 0 ? actions : fallbackActions;
+  const updateAction = getActionDescriptor(effectiveActions, "update");
+  const cancelAction = getActionDescriptor(effectiveActions, "cancel");
+  const resubmitAction = getActionDescriptor(
+    effectiveActions,
+    "resubmit_approval",
+  );
+  const notesList = [
+    updateAction?.disabledReasonCode
+      ? describeReason(updateAction.disabledReasonCode)
+      : null,
+    cancelAction?.disabledReasonCode
+      ? describeReason(cancelAction.disabledReasonCode)
+      : null,
+    readOnlyReasonCode ? describeReason(readOnlyReasonCode) : null,
+  ].filter(
+    (value, index, list): value is string =>
+      Boolean(value) && list.indexOf(value) === index,
+  );
 
   async function submitUpdate() {
     setLoading(true);
@@ -79,6 +151,9 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
       }
 
       setMode(null);
+      setReceipt(
+        `Update accepted at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
+      );
       router.refresh();
     } catch (submissionError) {
       setError(
@@ -110,6 +185,9 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
       }
 
       setMode(null);
+      setReceipt(
+        `Cancellation accepted at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
+      );
       router.refresh();
     } catch (submissionError) {
       setError(
@@ -128,39 +206,79 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
         <div className="action-copy">
           <strong>Allowed tenant actions</strong>
           <p>
-            Tenant users can only call supported booking commands. They cannot
-            override dispatch state, fare authority, or fulfillment ownership.
+            Every CTA on this panel is driven by the booking action descriptors.
+            Disabled actions stay visible with a reason instead of disappearing.
           </p>
         </div>
         <div className="action-row">
-          <button
+          {updateAction ? (
+            <button
+              className="action-button action-button-secondary"
+              disabled={!updateAction.enabled}
+              type="button"
+              onClick={() => {
+                setError(null);
+                setReceipt(null);
+                setMode("update");
+              }}
+            >
+              Update booking
+            </button>
+          ) : null}
+          {cancelAction ? (
+            <button
+              className="action-button action-button-danger"
+              disabled={!cancelAction.enabled}
+              type="button"
+              onClick={() => {
+                setError(null);
+                setReceipt(null);
+                setMode("cancel");
+              }}
+            >
+              Cancel booking
+            </button>
+          ) : null}
+          {resubmitAction ? (
+            <Link
+              className={`action-button action-button-secondary${!resubmitAction.enabled ? " is-disabled-link" : ""}`}
+              href={approvalHref}
+              aria-disabled={!resubmitAction.enabled}
+              onClick={(event) => {
+                if (!resubmitAction.enabled) {
+                  event.preventDefault();
+                }
+              }}
+            >
+              Resubmit approval
+            </Link>
+          ) : null}
+          <Link
             className="action-button action-button-secondary"
-            disabled={!commandState.canUpdate}
-            type="button"
-            onClick={() => {
-              setError(null);
-              setMode("update");
-            }}
+            href={auditHref}
           >
-            Update booking
-          </button>
-          <button
-            className="action-button action-button-danger"
-            disabled={!commandState.canCancel}
-            type="button"
-            onClick={() => {
-              setError(null);
-              setMode("cancel");
-            }}
-          >
-            Cancel booking
-          </button>
+            View audit
+          </Link>
         </div>
-        {commandState.updateReason ? (
-          <p className="action-note">{commandState.updateReason}</p>
+        {receipt ? <div className="booking-receipt">{receipt}</div> : null}
+        {notesList.length > 0 ? (
+          <div className="booking-action-notes">
+            {notesList.map((note) => (
+              <p className="action-note" key={note}>
+                {note}
+              </p>
+            ))}
+          </div>
         ) : null}
-        {commandState.cancelReason ? (
-          <p className="action-note">{commandState.cancelReason}</p>
+        {updateAction?.disabledReasonCode === "past_editable_until" ? (
+          <p className="action-note">
+            Editable until {formatDateTime(booking.modifiableUntil)}.
+          </p>
+        ) : null}
+        {cancelAction?.disabledReasonCode === "past_cancelable_until" ? (
+          <p className="action-note">
+            Cancelable until {formatDateTime(booking.cancelableUntil)}.
+          </p>
         ) : null}
       </div>
 

@@ -516,6 +516,111 @@ textarea {
   gap: 1rem;
 }
 
+.booking-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.95fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.booking-detail-main,
+.booking-detail-side,
+.booking-refresh-card,
+.booking-empty-state,
+.booking-action-notes {
+  display: grid;
+  gap: 1rem;
+}
+
+.booking-pill-accent {
+  background: rgba(184, 92, 56, 0.14);
+  color: var(--accent);
+}
+
+.booking-pill-success {
+  background: rgba(29, 107, 87, 0.12);
+  color: var(--success);
+}
+
+.booking-pill-warning {
+  background: rgba(139, 94, 20, 0.12);
+  color: var(--warning);
+}
+
+.booking-event-list {
+  display: grid;
+  gap: 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.booking-event {
+  display: grid;
+  gap: 0.5rem;
+  border-radius: 20px;
+  border: 1px solid rgba(16, 35, 58, 0.08);
+  background: rgba(255, 255, 255, 0.78);
+  padding: 1rem;
+}
+
+.booking-event-warning {
+  border-color: rgba(184, 92, 56, 0.18);
+  background: rgba(255, 247, 238, 0.92);
+}
+
+.booking-event-success {
+  border-color: rgba(29, 107, 87, 0.14);
+  background: rgba(241, 252, 248, 0.94);
+}
+
+.booking-event-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.booking-event p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.booking-realm-tenant {
+  background: rgba(16, 35, 58, 0.08);
+  color: var(--shell);
+}
+
+.booking-realm-ops {
+  background: rgba(184, 92, 56, 0.14);
+  color: var(--accent);
+}
+
+.booking-realm-platform {
+  background: rgba(29, 107, 87, 0.12);
+  color: var(--success);
+}
+
+.booking-realm-system {
+  background: rgba(95, 111, 130, 0.14);
+  color: var(--muted);
+}
+
+.booking-receipt {
+  border: 1px solid rgba(29, 107, 87, 0.16);
+  border-radius: 18px;
+  background: rgba(241, 252, 248, 0.92);
+  padding: 0.85rem 0.95rem;
+  color: var(--success);
+  line-height: 1.5;
+}
+
+.is-disabled-link {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
 .booking-field-span {
   grid-column: 1 / -1;
 }
@@ -652,6 +757,10 @@ textarea {
 
 @media (max-width: 980px) {
   .booking-create-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-detail-layout {
     grid-template-columns: 1fr;
   }
 }
