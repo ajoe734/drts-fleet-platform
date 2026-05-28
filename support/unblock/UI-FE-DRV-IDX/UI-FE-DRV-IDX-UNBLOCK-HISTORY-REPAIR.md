@@ -19,7 +19,8 @@ The parent is no longer blocked.
 - The parent state changed to `done` at `2026-05-28T03:21:30Z`.
 
 This helper task stayed open because its previously pushed evidence branch and
-artifact were stale relative to current trunk and current machine truth.
+artifact were stale relative to current trunk and current machine truth, and
+the helper branch later drifted again when `origin/dev` advanced.
 
 ## Exact Contamination
 
@@ -51,19 +52,42 @@ That means `47f5ce96` was a valid documentation commit, but it was sitting on an
 outdated helper branch base and therefore could not be reviewed as a clean
 task-only repair branch.
 
+### 3. Refreshed helper evidence drifted again
+
+After the first repair pass, the branch was pushed at
+`origin/codex/ui-fe-drv-idx-unblock-history-repair @ 77ee65845a041d812abb69c5dbfedd2e34bbcb45`.
+
+- At `2026-05-28T03:58:18Z`, review reopened because the artifact still claimed
+  helper merge tip `94551202` and divergence `0 left / 2 right`, while the
+  actual pushed helper branch was already `77ee6584` with divergence
+  `0 left / 3 right`.
+- By the time this dispatch started, `origin/dev` had advanced by two more
+  commits to `c105959b597bf00e40cf87a6a96955a3767196e7`, so the helper branch
+  was stale again:
+  `git rev-list --left-right --count origin/dev...origin/codex/ui-fe-drv-idx-unblock-history-repair`
+  returned `2 3`.
+
 ## Repair Applied
 
 The helper branch itself has now been repaired without rewriting shared history.
 
 1. Kept the existing documentation commit `47f5ce96` intact.
-2. Merged `origin/dev` into the helper branch instead of force-pushing or
-   rebasing.
-3. Produced new helper tip `94551202`:
-   `Merge origin/dev into codex/ui-fe-drv-idx-unblock-history-repair to repair stale helper base`
-4. After the merge, the helper branch is clean relative to current trunk:
+2. Kept the first repair merge `94551202` and the evidence refresh commit
+   `77ee6584` intact.
+3. Merged `origin/dev` into the helper branch again instead of force-pushing or
+   rebasing after `dev` advanced.
+4. Produced new repair merge tip `07efd8f4`:
+   `Merge origin/dev into codex/ui-fe-drv-idx-unblock-history-repair to refresh helper base after dev advanced`
+5. Added a final artifact refresh commit after that merge so the branch evidence
+   matches the actual pushed helper tip.
+6. After the second merge repair, the helper branch is clean relative to current
+   trunk:
    - merge-base of `origin/dev` and `HEAD` is now
-     `75674c4c678c195dff5e709bd2622a0e713ae216`
-   - `git rev-list --left-right --count origin/dev...HEAD` now returns `0 2`
+     `c105959b597bf00e40cf87a6a96955a3767196e7`
+   - immediately after the merge, `git rev-list --left-right --count origin/dev...HEAD`
+     returned `0 4`
+   - after the final evidence-refresh commit, the pushed helper branch should
+     report `0 left / 5 right`
 
 This preserves the old evidence commit, avoids force-push, and makes the helper
 reviewable on top of current `dev`.
@@ -106,23 +130,33 @@ The concrete unblocked next step is therefore:
   `ai-activity-log.jsonl` explicitly cited helper-branch contamination
   (`15 left / 1 right`) and instructed the owner to refresh against current
   machine truth or close the helper as obsolete.
+- Review failure recorded at `2026-05-28T03:58:18Z` in `ai-activity-log.jsonl`
+  explicitly cited stale artifact evidence versus the already-pushed helper tip
+  `77ee6584` and required the artifact to be refreshed to final branch truth.
 
 ### Helper branch state
 
 - old helper tip: `47f5ce96`
-- repaired helper merge tip: `94551202` (local before push)
+- first repaired helper merge tip: `94551202`
+- evidence refresh commit: `77ee6584`
+- second repaired helper merge tip: `07efd8f4`
 - old merge-base versus `origin/dev`: `070f9aea`
-- new merge-base versus `origin/dev`: `75674c4c`
+- intermediate merge-base versus `origin/dev`: `75674c4c`
+- final merge-base versus `origin/dev`: `c105959b`
 - old divergence versus `origin/dev`: `15 left / 1 right`
-- new divergence versus `origin/dev`: `0 left / 2 right`
+- divergence after first merge: `0 left / 2 right`
+- divergence after first evidence refresh push: `0 left / 3 right`
+- divergence at start of this dispatch: `2 left / 3 right`
+- divergence after second merge repair: `0 left / 4 right`
+- expected divergence after final evidence refresh push: `0 left / 5 right`
 
 ## Verification Performed
 
 - Read `AI_COLLABORATION_GUIDE.md`
 - Read `.orchestrator/skills/worker-anchor-commit.md`
 - Inspected canonical machine truth:
-  - `sed -n '23090,23145p' /home/edna/workspace/drts-fleet-platform/ai-status.json`
-  - `sed -n '23970,24030p' /home/edna/workspace/drts-fleet-platform/ai-status.json`
+  - `grep -n '"id": "UI-FE-DRV-IDX"' -A30 -B5 /home/edna/workspace/drts-fleet-platform/ai-status.json`
+  - `grep -n 'UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR' -A30 -B10 /home/edna/workspace/drts-fleet-platform/ai-status.json`
   - `grep -R -n 'UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR' /home/edna/workspace/drts-fleet-platform/ai-status.json /home/edna/workspace/drts-fleet-platform/current-work.md /home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl`
 - Verified helper contamination and repair:
   - `git merge-base origin/dev origin/codex/ui-fe-drv-idx-unblock-history-repair`
@@ -130,4 +164,4 @@ The concrete unblocked next step is therefore:
   - `git merge --no-ff origin/dev`
   - `git merge-base origin/dev HEAD`
   - `git rev-list --left-right --count origin/dev...HEAD`
-  - `git log --oneline --decorate --graph --max-count=6 HEAD`
+  - `git log --oneline --decorate --graph --max-count=8 HEAD`
