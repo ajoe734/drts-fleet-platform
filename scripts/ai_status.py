@@ -1430,9 +1430,9 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     open_blockers = [blocker for blocker in state.get("blockers", []) if blocker.get("status") == "open"]
     if open_blockers:
         for blocker in open_blockers:
-            message = blocker.get("message") or blocker.get("reason") or ""
+            blocker_message = blocker.get("message") or blocker.get("reason") or "-"
             lines.append(
-                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {message} | {blocker['status']} |"
+                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {blocker_message} | {blocker['status']} |"
             )
     else:
         lines.append("| _(none)_ | - | - | - | - |")
