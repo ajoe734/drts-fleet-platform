@@ -1,83 +1,162 @@
 import type {
+  EmptyReason,
   TenantAddressRecord,
   TenantCostCenterRecord,
   TenantPassengerRecord,
+  UiRefreshMetadata,
 } from "@drts/contracts";
-import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
 import { getTenantClient } from "@/lib/api-client";
-import { TenantBookingCreateForm } from "./tenant-booking-create-form";
+import {
+  TenantBookingCreateForm,
+  type BookingCreateDirectorySnapshot,
+  type BookingCreatePrefill,
+} from "./tenant-booking-create-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewBookingPage() {
+function buildDirectorySnapshot(params: {
+  kind: BookingCreateDirectorySnapshot["kind"];
+  label: string;
+  href: string;
+  ctaLabel: string;
+  result:
+    | PromiseSettledResult<
+        TenantPassengerRecord[] | TenantAddressRecord[] | TenantCostCenterRecord[]
+      >
+    | undefined;
+  activeCount: number;
+}): BookingCreateDirectorySnapshot {
+  const { kind, label, href, ctaLabel, result, activeCount } = params;
+
+  if (!result || result.status === "rejected") {
+    return {
+      kind,
+      label,
+      href,
+      ctaLabel,
+      count: 0,
+      reason: "fetch_failed",
+      message:
+        "Directory data could not be loaded from the tenant API. Retry the page refresh before creating a command.",
+    };
+  }
+
+  if (activeCount > 0) {
+    return {
+      kind,
+      label,
+      href,
+      ctaLabel,
+      count: activeCount,
+      reason: null,
+      message:
+        kind === "cost_centers"
+          ? "Canonical tenant cost-center rows are available for quota and approval evaluation."
+          : "Directory-backed records are available for quick booking prefill.",
+    };
+  }
+
+  const emptyReason: EmptyReason =
+    kind === "cost_centers" ? "not_provisioned" : "no_data";
+
+  return {
+    kind,
+    label,
+    href,
+    ctaLabel,
+    count: 0,
+    reason: emptyReason,
+    message:
+      emptyReason === "not_provisioned"
+        ? "No active cost-center register is published for this tenant yet."
+        : "This tenant does not have any active records yet for booking prefill.",
+  };
+}
+
+function readSearchParam(
+  searchParams: Record<string, string | string[] | undefined>,
+  key: string,
+) {
+  const value = searchParams[key];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function NewBookingPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const client = getTenantClient();
-  const [passengers, addresses, costCenters] = await Promise.all([
-    client.listPassengers() as Promise<TenantPassengerRecord[]>,
-    client.listAddresses() as Promise<TenantAddressRecord[]>,
-    client.listCostCenters({ activeOnly: true }) as Promise<
-      TenantCostCenterRecord[]
-    >,
-  ]);
+  const resolvedSearchParams = await searchParams;
+  const [passengersResult, addressesResult, costCentersResult] =
+    await Promise.allSettled([
+      client.listPassengers() as Promise<TenantPassengerRecord[]>,
+      client.listAddresses() as Promise<TenantAddressRecord[]>,
+      client.listCostCenters({ activeOnly: true }) as Promise<
+        TenantCostCenterRecord[]
+      >,
+    ]);
+
+  const passengers =
+    passengersResult.status === "fulfilled" ? passengersResult.value : [];
+  const addresses =
+    addressesResult.status === "fulfilled" ? addressesResult.value : [];
+  const costCenters =
+    costCentersResult.status === "fulfilled" ? costCentersResult.value : [];
 
   const activePassengers = passengers.filter((row) => row.activeFlag);
   const activeAddresses = addresses.filter((row) => row.activeFlag);
   const activeCostCenters = costCenters.filter((row) => row.activeFlag);
 
+  const directorySnapshots: BookingCreateDirectorySnapshot[] = [
+    buildDirectorySnapshot({
+      kind: "passengers",
+      label: "Passenger directory",
+      href: "/passengers",
+      ctaLabel: "Open passengers",
+      result: passengersResult,
+      activeCount: activePassengers.length,
+    }),
+    buildDirectorySnapshot({
+      kind: "addresses",
+      label: "Address book",
+      href: "/addresses",
+      ctaLabel: "Open addresses",
+      result: addressesResult,
+      activeCount: activeAddresses.length,
+    }),
+    buildDirectorySnapshot({
+      kind: "cost_centers",
+      label: "Cost centers",
+      href: "/cost-centers",
+      ctaLabel: "Open cost centers",
+      result: costCentersResult,
+      activeCount: activeCostCenters.length,
+    }),
+  ];
+
+  const initialPrefill: BookingCreatePrefill = {
+    passengerId: readSearchParam(resolvedSearchParams, "passengerId") ?? null,
+    pickupAddressId:
+      readSearchParam(resolvedSearchParams, "pickupAddressId") ?? null,
+    dropoffAddressId:
+      readSearchParam(resolvedSearchParams, "dropoffAddressId") ?? null,
+  };
+  const refreshMetadata: UiRefreshMetadata = {
+    generatedAt: new Date().toISOString(),
+    staleAfterMs: 0,
+    dataFreshness: "fresh",
+    source: "live",
+  };
+
   return (
-    <div className="page-shell">
-      <PageHero
-        eyebrow="New booking"
-        title="Create a tenant booking with passenger, cost-center, quota, and approval context in one route."
-        description="This route now stays on the published tenant contracts: directory-backed passenger and address selection, canonical cost-center selection, quota impact preview, approval-rule evaluation, and submit through `/api/tenant/bookings` without inventing a local draft state."
-      />
-
-      <section className="metric-grid">
-        <article className="metric-card">
-          <span className="metric-label">Passengers</span>
-          <strong>{activePassengers.length}</strong>
-          <p>Active tenant passengers available for booking-on-behalf flows.</p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Addresses</span>
-          <strong>{activeAddresses.length}</strong>
-          <p>
-            Saved pickup and drop-off locations reusable from the directory.
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Cost centers</span>
-          <strong>{activeCostCenters.length}</strong>
-          <p>Active cost centers that can trigger quota and approval rules.</p>
-        </article>
-      </section>
-
-      <TenantBookingCreateForm
-        addresses={activeAddresses}
-        costCenters={activeCostCenters}
-        passengers={activePassengers}
-      />
-
-      <section className="surface-grid">
-        <SurfaceCard
-          kicker="Contract boundary"
-          title="No fake draft or tenant-side fare override"
-          description="The page evaluates cost-center policy from the published quota preview and approval-evaluation contracts. Estimated spend stays preview-only input because tenant booking create cannot set `quotedFare`, and no estimate endpoint is published here."
-        />
-        <SurfaceCard
-          kicker="Authority safety"
-          title="Booking-on-behalf stays explicit"
-          description="Passenger selection is directory-scoped, `bookedBy` is optional metadata, and blocked approval outcomes stop the local submit button instead of guessing a hidden override path."
-        />
-      </section>
-
-      <CalloutPanel
-        title="What happens on submit"
-        description="A clean evaluation submits directly to the tenant booking command. Approval-required evaluations still allow submit, but the created booking carries backend-owned approval state and request IDs. Blocked evaluations stay client-blocked until the input changes."
-      />
-    </div>
+    <TenantBookingCreateForm
+      addresses={activeAddresses}
+      costCenters={activeCostCenters}
+      directorySnapshots={directorySnapshots}
+      initialPrefill={initialPrefill}
+      passengers={activePassengers}
+      refreshMetadata={refreshMetadata}
+    />
   );
 }
