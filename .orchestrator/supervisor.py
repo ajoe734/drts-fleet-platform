@@ -185,6 +185,7 @@ WORKSPACE_BASELINE_MARKERS = (
     "isolated-worktree toolchain",
     "worktree toolchain",
 )
+TASK_ID_MENTION_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b")
 
 
 def supervisor_pid_path(config: dict[str, Any]) -> Path:
@@ -5240,6 +5241,98 @@ def dependency_ready_blocked_task_records(
     return records[:limit]
 
 
+def chair_task_action_index(payload: dict[str, Any]) -> dict[str, set[str]]:
+    action_index: dict[str, set[str]] = {}
+    for action in payload.get("task_actions", []) or []:
+        if not isinstance(action, dict):
+            continue
+        task_id = str(action.get("task_id") or "").strip()
+        action_name = str(action.get("action") or "").strip()
+        if not task_id or not action_name:
+            continue
+        action_index.setdefault(task_id, set()).add(action_name)
+    return action_index
+
+
+def reassignment_followup_task_records(
+    config: dict[str, Any],
+    payload: dict[str, Any],
+    status: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict) or not isinstance(status, dict):
+        return []
+    mentioned_task_ids: list[str] = []
+    seen_task_ids: set[str] = set()
+    for entry in [*(payload.get("blocked_by") or []), *(payload.get("recommended_focus") or [])]:
+        if not isinstance(entry, str):
+            continue
+        for task_id in TASK_ID_MENTION_PATTERN.findall(entry):
+            if task_id in seen_task_ids:
+                continue
+            seen_task_ids.add(task_id)
+            mentioned_task_ids.append(task_id)
+    if not mentioned_task_ids:
+        return []
+    ready_blocked = {
+        str(item.get("task_id") or "").strip(): item
+        for item in dependency_ready_blocked_task_records(config, status, include_sidecars=False)
+        if str(item.get("task_id") or "").strip()
+    }
+    return [
+        ready_blocked[task_id]
+        for task_id in mentioned_task_ids
+        if task_id in ready_blocked and str(ready_blocked[task_id].get("action") or "").strip() in {
+            "create_unblock_task",
+            "resume_parent_task",
+        }
+    ]
+
+
+def synthesize_reassignment_followup_task_actions(
+    config: dict[str, Any],
+    payload: dict[str, Any],
+    status: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    action_index = chair_task_action_index(payload)
+    synthesized: list[dict[str, Any]] = []
+    for item in reassignment_followup_task_records(config, payload, status):
+        task_id = str(item.get("task_id") or "").strip()
+        action_name = str(item.get("action") or "").strip()
+        if not task_id or not action_name or action_name in action_index.get(task_id, set()):
+            continue
+        if action_name == "create_unblock_task":
+            unblock_kind = str(item.get("kind") or "manual_unblock").strip() or "manual_unblock"
+            synthesized.append(
+                {
+                    "task_id": task_id,
+                    "action": "create_unblock_task",
+                    "unblock_kind": unblock_kind,
+                    "reason": (
+                        f"Chairman follow-up from reassignment_triage: {task_id} remains dependency-ready blocked; "
+                        f"materialize the {unblock_kind} unblock path now."
+                    ),
+                }
+            )
+        elif action_name == "resume_parent_task":
+            helper_task_id = str(item.get("helper_task_id") or "").strip()
+            synthesized.append(
+                {
+                    "task_id": task_id,
+                    "action": "resume_parent_task",
+                    "resume_status": "todo",
+                    "reason": (
+                        "Chairman follow-up from reassignment_triage: "
+                        f"{helper_task_id or 'a completed unblock child'} already resolved the blocker for {task_id}; "
+                        "resume the parent."
+                    ),
+                }
+            )
+        action_index.setdefault(task_id, set()).add(action_name)
+    return synthesized
+
+
 def _chair_review_summary_lines(
     config: dict[str, Any],
     approval_state: dict[str, Any],
@@ -5421,11 +5514,13 @@ def build_chair_review_message(
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
         "- `resume_parent_task` 只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
+        "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
         "- 若 Chair review reason 是 `blocked_task_triage`，不可只評論；每個 listed blocked task 都要依摘要建議採取 `create_unblock_task` 或 `resume_parent_task`，讓 machine truth 真正往前走。\n"
         "- `provider_actions` 目前只允許 `pause` / `clear_pause`，只針對 exact lane 生效；暫停原因必須具體；不要重複 pause 已在 Provider lane pauses 列出的 lane，除非你要改變其狀態。\n"
         "- 若 Chair review reason 是 `approval_triage`，Pending approvals 不可只評論；每一個 pending approval 都必須在 `approval_actions` 中明確 `allow` 或 `deny`，並寫具體 reason。\n"
         "- `approval_actions` 必須使用 `decision` 欄位，不要用 `action`；格式是 `{\"approval_id\":\"...\",\"decision\":\"allow|deny\",\"reason\":\"...\"}`。\n"
         "- `approval_triage` 只處理 approval；不要輸出 `provider_actions`。Provider 狀態放在 recommended_focus，等 `provider_health_triage` 再改 lane。\n"
+        "- `recommended_focus` 只保留監看、待外部條件、或目前無法由 machine truth 直接執行的事項；已經能執行的 follow-up 一律寫進 action arrays。\n"
         "- `Agent`/subagent approval 只有在 prompt 明確是 read-only explore/review、無修改/無祕密/無破壞性操作時才可 allow；否則 deny，不要留空。\n"
         "- approval allow 只能放行 read-only、focused test、scoped validation，或 branch/upstream 清楚的普通 non-force `git push`。\n"
         "- `git push --force`、`--mirror`、`--delete`、`--all`、`--tags` 這類 broad push 一律不要 allow。\n"
@@ -5672,7 +5767,13 @@ def normalize_chair_review_payload_defaults(config: dict[str, Any], payload: Any
     return normalized
 
 
-def normalize_chair_review_payload_for_reason(payload: Any, *, reason: str | None) -> Any:
+def normalize_chair_review_payload_for_reason(
+    payload: Any,
+    *,
+    reason: str | None,
+    config: dict[str, Any] | None = None,
+    status: dict[str, Any] | None = None,
+) -> Any:
     if not isinstance(payload, dict):
         return payload
     normalized = dict(payload)
@@ -5680,6 +5781,13 @@ def normalize_chair_review_payload_for_reason(payload: Any, *, reason: str | Non
         # Approval triage must not mutate provider state, but a noisy chairman
         # response should not block safe approval decisions from being applied.
         normalized["provider_actions"] = []
+    if reason == "reassignment_triage" and config is not None:
+        task_actions = normalized.get("task_actions")
+        if not isinstance(task_actions, list):
+            task_actions = []
+        synthesized = synthesize_reassignment_followup_task_actions(config, normalized, status)
+        if synthesized:
+            normalized["task_actions"] = [*task_actions, *synthesized]
     return normalized
 
 
@@ -5815,15 +5923,7 @@ def validate_chair_review_context(
     if reason == "blocked_task_triage" and config is not None:
         ready_blocked = dependency_ready_blocked_task_records(config, status, include_sidecars=False)
         if ready_blocked:
-            action_index: dict[str, set[str]] = {}
-            for action in payload.get("task_actions", []) or []:
-                if not isinstance(action, dict):
-                    continue
-                task_id = str(action.get("task_id") or "").strip()
-                action_name = str(action.get("action") or "").strip()
-                if not task_id or not action_name:
-                    continue
-                action_index.setdefault(task_id, set()).add(action_name)
+            action_index = chair_task_action_index(payload)
             missing: list[str] = []
             for item in ready_blocked:
                 task_id = str(item.get("task_id") or "").strip()
@@ -5834,6 +5934,20 @@ def validate_chair_review_context(
                     missing.append(f"{task_id}:{expected_action}")
             if missing:
                 return "blocked_task_triage must resolve blocked tasks via " + ", ".join(missing[:6])
+    if reason == "reassignment_triage" and config is not None:
+        followup_records = reassignment_followup_task_records(config, payload, status)
+        if followup_records:
+            action_index = chair_task_action_index(payload)
+            missing: list[str] = []
+            for item in followup_records:
+                task_id = str(item.get("task_id") or "").strip()
+                expected_action = str(item.get("action") or "").strip()
+                if not task_id or not expected_action:
+                    continue
+                if expected_action not in action_index.get(task_id, set()):
+                    missing.append(f"{task_id}:{expected_action}")
+            if missing:
+                return "reassignment_triage must materialize follow-up task actions via " + ", ".join(missing[:6])
     return None
 
 
@@ -6936,7 +7050,12 @@ def refresh_chair_review_state(
     if json_path.exists():
         payload = load_json(json_path, default=None)
         payload = normalize_chair_review_payload_defaults(config, payload)
-        payload = normalize_chair_review_payload_for_reason(payload, reason=str(active.get("reason") or ""))
+        payload = normalize_chair_review_payload_for_reason(
+            payload,
+            reason=str(active.get("reason") or ""),
+            config=config,
+            status=load_status(config),
+        )
         error = validate_chair_review_payload(payload)
         if not error and isinstance(payload, dict):
             error = validate_chair_review_context(
