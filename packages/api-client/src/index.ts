@@ -551,6 +551,42 @@ export class ApiClient {
     );
   }
 
+  async approveOpsApprovalRequest(
+    approvalRequestId: string,
+    command: ApproveTenantBookingApprovalRequestCommand = {},
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/approve`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async rejectOpsApprovalRequest(
+    approvalRequestId: string,
+    command: RejectTenantBookingApprovalRequestCommand,
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/reject`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async escalateOpsApprovalRequest(
+    approvalRequestId: string,
+    command: EscalateTenantBookingApprovalRequestCommand = {},
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/escalate`,
+      {
+        body: command,
+      },
+    );
+  }
+
   // ── Owned Mobility: Orders ──
 
   async createOrder(command: CreateOwnedOrderCommand) {

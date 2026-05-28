@@ -395,6 +395,63 @@ export class TenantPartnerController {
     );
   }
 
+  @Post("ops/approval-requests/:approvalRequestId/approve")
+  @RequireRealms("platform", "ops")
+  async approveOpsApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: ApproveTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.approveOpsApprovalRequest(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("ops/approval-requests/:approvalRequestId/reject")
+  @RequireRealms("platform", "ops")
+  async rejectOpsApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: RejectTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.rejectOpsApprovalRequest(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("ops/approval-requests/:approvalRequestId/escalate")
+  @RequireRealms("platform", "ops")
+  async escalateOpsApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: EscalateTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.escalateOpsApprovalRequest(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Get("tenant/passengers")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listPassengers(

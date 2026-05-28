@@ -43,6 +43,7 @@ import type {
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
   ResolvePartnerEligibilityReviewCommand,
+  ResourceActionDescriptor,
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
@@ -2440,6 +2441,64 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       requestId,
     );
     return this.buildOpsPendingApprovalRequestRecord(request);
+  }
+
+  async approveOpsApprovalRequest(
+    approvalRequestId: string,
+    command: ApproveTenantBookingApprovalRequestCommand,
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    const actor = this.requireOpsApprovalQueueIdentity(identity);
+    return this.recordOpsApprovalDecision({
+      approvalRequestId,
+      actorId: actor.actorId,
+      actorType: actor.actorType,
+      actorRoleCode: this.resolveOpsApprovalQueueRoleCode(identity),
+      decision: "approve",
+      reasonCode: null,
+      reasonNote: this.normalizeNullableText(command.reasonNote),
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  async rejectOpsApprovalRequest(
+    approvalRequestId: string,
+    command: RejectTenantBookingApprovalRequestCommand,
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    const actor = this.requireOpsApprovalQueueIdentity(identity);
+    return this.recordOpsApprovalDecision({
+      approvalRequestId,
+      actorId: actor.actorId,
+      actorType: actor.actorType,
+      actorRoleCode: this.resolveOpsApprovalQueueRoleCode(identity),
+      decision: "reject",
+      reasonCode: this.requireNonBlank(command.reasonCode, "reasonCode"),
+      reasonNote: this.normalizeNullableText(command.reasonNote),
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  async escalateOpsApprovalRequest(
+    approvalRequestId: string,
+    command: EscalateTenantBookingApprovalRequestCommand,
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    const actor = this.requireOpsApprovalQueueIdentity(identity);
+    const request = this.requirePendingApprovalRequestById(approvalRequestId);
+    return this.buildOpsPendingApprovalRequestRecord(
+      await this.escalateApprovalRequestInternal({
+        tenantId: request.tenantId,
+        approvalRequestId,
+        actorUserId: actor.actorId,
+        actorType: actor.actorType,
+        reasonNote: this.normalizeNullableText(command.reasonNote),
+        ...(requestId ? { requestId } : {}),
+      }),
+    );
   }
 
   summarizeCostCenterCoverage(
@@ -6296,6 +6355,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private resolveOpsApprovalQueueRoleCode(identity: IdentityContext | null) {
+    return identity?.roles?.[0] ?? null;
+  }
+
   private buildOpsPendingApprovalRequestRecord(
     request: TenantBookingApprovalRequestRecord,
   ): OpsPendingApprovalRequestRecord {
@@ -6330,7 +6393,37 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       opsSlaAcknowledgedByActorId: lastAck?.actorId ?? null,
       opsSlaAcknowledgedByActorType: (lastAck?.actorType ??
         null) as OpsPendingApprovalRequestRecord["opsSlaAcknowledgedByActorType"],
+      availableActions: this.buildOpsApprovalRequestAvailableActions(request),
     };
+  }
+
+  private buildOpsApprovalRequestAvailableActions(
+    request: TenantBookingApprovalRequestRecord,
+  ): ResourceActionDescriptor[] {
+    if (request.status !== "pending") {
+      return [];
+    }
+
+    return [
+      {
+        action: "approve",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "reject",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "escalate",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      },
+    ];
   }
 
   private replaceApprovalRequest(request: TenantBookingApprovalRequestRecord) {
@@ -6561,6 +6654,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     tenantId: string;
     approvalRequestId: string;
     actorUserId: string;
+    actorType?: AuditLogRecord["actorType"];
     reasonNote: string | null;
     requestId?: string;
   }) {
@@ -6615,7 +6709,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.recordTenantAudit(
       {
         actorId: input.actorUserId,
-        actorType: "tenant_admin",
+        actorType: input.actorType ?? "tenant_admin",
         tenantId: input.tenantId,
         moduleName: "tenant-partner",
         actionName: "booking.approval_request.timeout_escalated",
@@ -6638,6 +6732,85 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...(input.requestId ? { requestId: input.requestId } : {}),
     });
     return this.cloneApprovalRequest(escalated);
+  }
+
+  private async recordOpsApprovalDecision(input: {
+    approvalRequestId: string;
+    actorId: string;
+    actorType: Extract<AuditLogRecord["actorType"], "ops_user" | "platform_admin">;
+    actorRoleCode: string | null;
+    decision: "approve" | "reject";
+    reasonCode: string | null;
+    reasonNote: string | null;
+    requestId?: string;
+  }) {
+    const request = this.requirePendingApprovalRequestById(input.approvalRequestId);
+    const decidedAt = new Date().toISOString();
+    const decision: TenantBookingApprovalDecisionRecord = {
+      decisionId: `approval-decision-${randomUUID()}`,
+      approvalRequestId: request.approvalRequestId,
+      actorUserId: input.actorId,
+      actorRoleCode: input.actorRoleCode,
+      decision: input.decision,
+      reasonCode: input.reasonCode,
+      reasonNote: input.reasonNote,
+      decidedAt,
+    };
+    const persistedRequest: TenantBookingApprovalRequestRecord = {
+      ...request,
+      decisions: [...request.decisions, this.cloneApprovalDecision(decision)],
+      status: input.decision === "approve" ? "approved" : "rejected",
+      resolvedAt: decidedAt,
+    };
+
+    this.approvalDecisions = [
+      this.cloneApprovalDecision(decision),
+      ...this.approvalDecisions.filter(
+        (candidate) => candidate.decisionId !== decision.decisionId,
+      ),
+    ];
+    this.replaceApprovalRequest(persistedRequest);
+    await this.persistApprovalWorkflow({
+      approvalRequests: [persistedRequest],
+      approvalDecisions: [decision],
+      context: "record ops approval decision",
+    });
+
+    this.recordTenantAudit(
+      {
+        actorId: input.actorId,
+        actorType: input.actorType,
+        tenantId: request.tenantId,
+        moduleName: "tenant-partner",
+        actionName:
+          input.decision === "approve"
+            ? "booking.approval_request.approved"
+            : "booking.approval_request.rejected",
+        resourceType: "booking",
+        resourceId: persistedRequest.bookingId,
+        newValuesSummary: {
+          approvalRequestId: request.approvalRequestId,
+          bookingId: persistedRequest.bookingId,
+          orderId: persistedRequest.orderId,
+          reasonCode: input.reasonCode,
+          reasonNote: input.reasonNote,
+          actorRoleCode: input.actorRoleCode,
+        },
+      },
+      input.requestId,
+    );
+    await this.dispatchApprovalNotifications(
+      input.decision === "approve" ? "approved" : "rejected",
+      persistedRequest,
+      {
+        actorUserId: input.actorId,
+        reasonCode: input.reasonCode,
+        reasonNote: input.reasonNote,
+        ...(input.requestId ? { requestId: input.requestId } : {}),
+      },
+    );
+
+    return this.buildOpsPendingApprovalRequestRecord(persistedRequest);
   }
 
   private async recordApprovalDecision(input: {
