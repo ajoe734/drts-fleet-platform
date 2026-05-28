@@ -115,6 +115,7 @@ import type {
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
   PlacardVersionRecord,
+  PlatformAdminTenantListEnvelope,
   PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
   PlatformEarningsByPlatformResponse,
@@ -1858,6 +1859,18 @@ export class ApiClient {
 
   async listPlatformTenants(): Promise<PlatformAdminTenantRecord[]> {
     return this.getList<PlatformAdminTenantRecord>(
+      "/api/platform-admin/tenants",
+    );
+  }
+
+  // Envelope-returning variant for the /tenants list page per packet §5.2.
+  // Carries items[] + page-level availableActions + EmptyStateEnvelope +
+  // UiRefreshMetadata so the page does not have to invent staleness or
+  // role-to-action heuristics. Other callers may keep using the array
+  // variant above (which still resolves because both surfaces share the
+  // same backend endpoint and `data.items` path).
+  async listPlatformTenantsEnvelope(): Promise<PlatformAdminTenantListEnvelope> {
+    return this.get<PlatformAdminTenantListEnvelope>(
       "/api/platform-admin/tenants",
     );
   }

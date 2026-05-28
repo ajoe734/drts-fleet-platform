@@ -43,6 +43,49 @@ function createService() {
 }
 
 describe("TenantsService", () => {
+  it("emits a UI runtime envelope from listEnvelope() with availableActions, emptyState, refresh, and per-row UI fields", () => {
+    const { service } = createService();
+
+    // Seed tenant only -> items.length > 0 -> emptyState should be null.
+    const envelope = service.listEnvelope();
+
+    expect(envelope.refresh).toMatchObject({
+      dataFreshness: "fresh",
+      source: "live",
+      staleAfterMs: 30_000,
+    });
+    expect(envelope.availableActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "create_tenant",
+          enabled: true,
+          riskLevel: "medium",
+        }),
+      ]),
+    );
+    expect(envelope.emptyState).toBeNull();
+    expect(envelope.items.length).toBeGreaterThan(0);
+    const item = envelope.items[0];
+    expect(item.cutoverOwnerDisplayName).toBe(item.rollout.cutoverOwner);
+    expect(item.rollbackOwnerDisplayName).toBe(item.rollout.rollbackOwner);
+    expect(item.lastActivityAt).toBe(item.updatedAt);
+    expect(item.availableActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "view", enabled: true }),
+      ]),
+    );
+    expect(item.crossAppLinks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetApp: "ops-console",
+          resourceType: "tenant",
+          resourceId: item.id,
+          openMode: "new_tab",
+        }),
+      ]),
+    );
+  });
+
   it("provisions bootstrap defaults and rollout state when creating a tenant", () => {
     const { service, platformAdminRepository } = createService();
 

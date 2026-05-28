@@ -11,16 +11,18 @@ import type {
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { TenantsService } from "./tenants.service";
-import type { TenantSummary } from "./tenants.service";
 
 @Controller("platform-admin")
 export class TenantsController {
   constructor(private readonly tenants: TenantsService) {}
 
+  // List endpoint emits a PlatformAdminTenantListEnvelope (items +
+  // availableActions + emptyState + refresh) per packet §5.2 / Q-X01 / Q-X13 /
+  // Q-X15. Legacy `listPlatformTenants()` callers still resolve because the
+  // envelope keeps `items` at the same path inside `data`.
   @Get("tenants")
   list(@Headers("x-request-id") requestId?: string) {
-    const items: TenantSummary[] = this.tenants.list();
-    return toApiSuccessEnvelope({ items }, requestId);
+    return toApiSuccessEnvelope(this.tenants.listEnvelope(), requestId);
   }
 
   @Post("tenants")

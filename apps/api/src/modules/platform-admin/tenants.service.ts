@@ -10,7 +10,11 @@ import type {
   AcknowledgeTenantRoleCommand,
   AuditLogRecord,
   CreatePlatformTenantCommand,
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
   InviteTenantRoleCommand,
+  PlatformAdminTenantListEnvelope,
+  PlatformAdminTenantListItem,
   PlatformAdminTenantRecord,
   PlatformTenantBootstrapDefaults,
   PlatformTenantBootstrapRoleDefault,
@@ -21,8 +25,10 @@ import type {
   PlatformTenantQuotaSummary,
   PlatformTenantRolloutStage,
   PlatformTenantRolloutState,
+  ResourceActionDescriptor,
   SetPlatformTenantRolloutStageCommand,
   TenantNotificationSubscription,
+  UiRefreshMetadata,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
 } from "@drts/contracts";
@@ -155,8 +161,112 @@ export class TenantsService implements OnModuleInit {
     );
   }
 
+  // UI runtime envelope per packet §5.2: items[] with per-row UI fields
+  // (cutover/rollback owner displayName snapshots, lastActivityAt,
+  // per-row availableActions, crossAppLinks), plus envelope-level
+  // page availableActions, emptyState (Q-X15), and refresh (Q-X01).
+  // The page consumes this instead of the raw array payload.
+  listEnvelope(): PlatformAdminTenantListEnvelope {
+    const tenants = this.list();
+    const items: PlatformAdminTenantListItem[] = tenants.map((tenant) =>
+      this.toListItem(tenant),
+    );
+
+    const generatedAt = new Date().toISOString();
+    const refresh: UiRefreshMetadata = {
+      generatedAt,
+      staleAfterMs: 30_000,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+
+    const emptyState: EmptyStateEnvelope | null =
+      items.length === 0
+        ? {
+            reason: "no_data",
+            messageCode: "platform_admin.tenants.empty.no_data",
+            nextAction: {
+              action: "create_tenant",
+              enabled: true,
+              riskLevel: "medium",
+            },
+          }
+        : null;
+
+    const availableActions: ResourceActionDescriptor[] = [
+      {
+        action: "create_tenant",
+        enabled: true,
+        riskLevel: "medium",
+      },
+    ];
+
+    return {
+      items,
+      availableActions,
+      emptyState,
+      refresh,
+    };
+  }
+
   get(tenantId: string): TenantSummary {
     return this.cloneTenant(this.requireTenant(tenantId));
+  }
+
+  private toListItem(
+    tenant: PlatformAdminTenantRecord,
+  ): PlatformAdminTenantListItem {
+    return {
+      ...tenant,
+      cutoverOwnerDisplayName: tenant.rollout.cutoverOwner,
+      rollbackOwnerDisplayName: tenant.rollout.rollbackOwner,
+      // Phase 1: governance edits are the source of activity for the list.
+      // Once the audit-driven activity feed lands the controller can override
+      // this with the true last-audited timestamp.
+      lastActivityAt: tenant.updatedAt,
+      availableActions: this.computeRowActions(tenant),
+      crossAppLinks: this.computeCrossAppLinks(tenant),
+    };
+  }
+
+  private computeRowActions(
+    tenant: PlatformAdminTenantRecord,
+  ): ResourceActionDescriptor[] {
+    const actions: ResourceActionDescriptor[] = [
+      { action: "view", enabled: true, riskLevel: "low" },
+    ];
+
+    if (tenant.status === "rollback_hold") {
+      actions.push({
+        action: "review_rollback_hold",
+        enabled: true,
+        riskLevel: "high",
+        requiresReason: true,
+      });
+    } else if (tenant.rollout.stage !== "production") {
+      actions.push({
+        action: "set_rollout_stage",
+        enabled: true,
+        riskLevel: "medium",
+      });
+    }
+
+    return actions;
+  }
+
+  private computeCrossAppLinks(
+    tenant: PlatformAdminTenantRecord,
+  ): CrossAppResourceLink[] {
+    return [
+      {
+        targetApp: "ops-console",
+        route: `/dispatch?tenantId=${encodeURIComponent(tenant.id)}`,
+        resourceType: "tenant",
+        resourceId: tenant.id,
+        openMode: "new_tab",
+        label: "Open in Ops Console",
+      },
+    ];
   }
 
   create(

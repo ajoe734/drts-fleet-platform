@@ -1,5 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4585,6 +4591,34 @@ export interface PlatformAdminTenantRecord {
   rollout: PlatformTenantRolloutState;
   createdAt: string;
   updatedAt: string;
+}
+
+// UI runtime list-item shape served by GET /api/platform-admin/tenants per
+// packet §5.2. Wraps `PlatformAdminTenantRecord` with the per-row UI runtime
+// fields: cutover/rollback owner displayName snapshots (Q-ADM06), last
+// activity (packet §5.2 must-show data), per-row `availableActions`
+// (Q-X13), and emitted `CrossAppResourceLink`s (Q-X03) so the page does not
+// have to hard-code deep-link routes.
+export interface PlatformAdminTenantListItem extends PlatformAdminTenantRecord {
+  cutoverOwnerDisplayName: string | null;
+  rollbackOwnerDisplayName: string | null;
+  lastActivityAt: string;
+  availableActions: ResourceActionDescriptor[];
+  crossAppLinks: CrossAppResourceLink[];
+}
+
+// UI runtime envelope for the tenants list. Per packet §5.2 + Q-X01/Q-X13/
+// Q-X15 the list response carries:
+//   - items[]: PlatformAdminTenantListItem
+//   - availableActions: page-level CTAs (e.g. create tenant) per Q-X13
+//   - emptyState: server-emitted EmptyStateEnvelope per Q-X15 (null when
+//     items has rows)
+//   - refresh: UiRefreshMetadata per Q-X01
+export interface PlatformAdminTenantListEnvelope {
+  items: PlatformAdminTenantListItem[];
+  availableActions: ResourceActionDescriptor[];
+  emptyState: EmptyStateEnvelope | null;
+  refresh: UiRefreshMetadata;
 }
 
 export interface PlatformTenantGovernanceSummaryQuery {

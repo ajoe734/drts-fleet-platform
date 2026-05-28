@@ -29,11 +29,15 @@ import type {
   CreatePlatformTenantCommand,
   CrossAppResourceLink,
   EmptyReason,
+  EmptyStateEnvelope,
+  PlatformAdminTenantListEnvelope,
+  PlatformAdminTenantListItem,
   PlatformAdminTenantRecord,
   PlatformTenantGateStatus,
   RefreshTier,
   ResourceActionDescriptor,
   TenantRolloutGateStatus,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   PLATFORM_TENANT_INTEGRATION_MODES,
@@ -59,11 +63,10 @@ type TenantFilter =
   | "production"
   | "rollback_hold";
 
-type TenantRow = PlatformAdminTenantRecord & Record<string, unknown>;
+type TenantRow = PlatformAdminTenantListItem & Record<string, unknown>;
 
 const TENANT_LIST_REFRESH_TIER: RefreshTier = "medium_slow";
 const TENANT_LIST_REFRESH_INTERVAL_MS = 30_000;
-const OPS_CONSOLE_DEEP_LINK_PREFIX = "/dispatch?tenantId=";
 
 const th = buildCanvasTheme({
   surface: "platform",
@@ -387,28 +390,28 @@ function deriveGateStatus(
   return perStage as TenantRolloutGateStatus;
 }
 
-// Default `availableActions` descriptor for the page-level Create action.
-// Backend may return per-resource descriptors in the future; in the meantime
-// the page surfaces the descriptor pattern so the CTA respects the same
-// enabled/disabled + risk/confirmation contract everywhere.
-function getDefaultCreateActionDescriptor(): ResourceActionDescriptor {
+// Fallback page-level descriptor used until the first envelope arrives. The
+// envelope's `availableActions` is the source of truth once data lands; this
+// is just so initial render doesn't crash without an action shape.
+function getFallbackCreateActionDescriptor(): ResourceActionDescriptor {
   return {
-    action: "create",
+    action: "create_tenant",
     enabled: true,
     riskLevel: "medium",
   };
 }
 
-// Q-X15: choose which of the six EmptyReason states should render. This is
-// derived client-side until the list endpoint emits a real `EmptyStateEnvelope`
-// (UI-BE-006 / UI-CL-001).
-function deriveEmptyReason(input: {
+// Q-X15: pick the EmptyReason for client-only failure modes (network error,
+// 401/403, 5xx, and the filter-applied case). The `no_data` reason comes
+// from the server-emitted EmptyStateEnvelope on the envelope, NOT from this
+// function — when items are simply absent, the envelope provides the
+// authoritative empty-state copy + nextAction descriptor.
+function deriveClientEmptyReason(input: {
   hasError: boolean;
   errorMessage: string | null;
-  totalCount: number;
   visibleCount: number;
   filterApplied: boolean;
-}): EmptyReason {
+}): EmptyReason | null {
   if (input.hasError) {
     const message = input.errorMessage?.toLowerCase() ?? "";
     if (
@@ -432,13 +435,10 @@ function deriveEmptyReason(input: {
     }
     return "fetch_failed";
   }
-  if (input.totalCount === 0) {
-    return "no_data";
-  }
   if (input.filterApplied && input.visibleCount === 0) {
     return "filtered_empty";
   }
-  return "no_data";
+  return null;
 }
 
 type EmptyStateCopy = {
@@ -453,7 +453,8 @@ type EmptyStateCopy = {
 export default function TenantsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
+  const [envelope, setEnvelope] =
+    useState<PlatformAdminTenantListEnvelope | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -463,9 +464,15 @@ export default function TenantsPage() {
   const [search, setSearch] = useState("");
   const [createForm, setCreateForm] =
     useState<TenantFormState>(EMPTY_TENANT_FORM);
-  const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const showCreateRef = useRef(showCreate);
   showCreateRef.current = showCreate;
+
+  const tenants: PlatformAdminTenantListItem[] = envelope?.items ?? [];
+  const serverEmptyState: EmptyStateEnvelope | null =
+    envelope?.emptyState ?? null;
+  const refreshMetadata: UiRefreshMetadata | null = envelope?.refresh ?? null;
+  const pageAvailableActions: ResourceActionDescriptor[] =
+    envelope?.availableActions ?? [];
 
   const copy =
     locale === "en"
@@ -499,10 +506,16 @@ export default function TenantsPage() {
             tenant: "TENANT",
             stage: "STAGE",
             gate: "GATE",
+            owners: "OWNERS",
             modules: "MODULES",
             quotas: "Quota / month",
             integration: "Integration",
-            updated: "Updated",
+            lastActivity: "Last activity",
+          },
+          ownerLabels: {
+            cutover: "Cutover",
+            rollback: "Rollback",
+            unassigned: "—",
           },
           moduleState: {
             enabled: "enabled",
@@ -575,10 +588,16 @@ export default function TenantsPage() {
             tenant: "TENANT",
             stage: "STAGE",
             gate: "GATE",
+            owners: "OWNERS",
             modules: "MODULES",
             quotas: "配額 / 月",
             integration: "介接",
-            updated: "更新",
+            lastActivity: "最近活動",
+          },
+          ownerLabels: {
+            cutover: "Cutover owner",
+            rollback: "Rollback owner",
+            unassigned: "未指派",
           },
           moduleState: {
             enabled: "已啟用",
@@ -633,9 +652,8 @@ export default function TenantsPage() {
       }
       setError(null);
       try {
-        const result = await client.listPlatformTenants();
-        setTenants(result ?? []);
-        setLastFetchedAt(new Date());
+        const result = await client.listPlatformTenantsEnvelope();
+        setEnvelope(result);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -717,20 +735,22 @@ export default function TenantsPage() {
       copy.columns.tenant,
       copy.columns.stage,
       copy.columns.gate,
+      copy.columns.owners,
       copy.columns.modules,
       copy.columns.quotas,
       copy.columns.integration,
-      copy.columns.updated,
+      copy.columns.lastActivity,
     ];
 
     const rows = visibleTenants.map((tenant) => [
       `${tenant.name} (${tenant.code})`,
       tenant.rollout.stage,
       deriveGateStatus(tenant),
+      `cutover:${tenant.cutoverOwnerDisplayName ?? "-"} | rollback:${tenant.rollbackOwnerDisplayName ?? "-"}`,
       tenant.enabledModules.join(" | "),
       `${tenant.quotas.monthlyBookings}/${tenant.quotas.activeDrivers}/${tenant.quotas.monthlyApiCalls}`,
       tenant.integrationPackage.mode,
-      formatDateTime(tenant.updatedAt),
+      formatDateTime(tenant.lastActivityAt),
     ]);
 
     const csv = [header, ...rows]
@@ -780,25 +800,16 @@ export default function TenantsPage() {
     }
   };
 
-  const buildOpsConsoleLink = useCallback(
-    (tenant: PlatformAdminTenantRecord): CrossAppResourceLink => ({
-      targetApp: "ops-console",
-      route: `${OPS_CONSOLE_DEEP_LINK_PREFIX}${encodeURIComponent(tenant.id)}`,
-      resourceType: "tenant",
-      resourceId: tenant.id,
-      openMode: "new_tab",
-      label: copy.openInOps,
-    }),
-    [copy.openInOps],
-  );
-
   const columns = useMemo<CanvasTableColumn<TenantRow>[]>(
     () => [
       {
         h: copy.columns.tenant,
         w: 260,
         r: (tenant) => {
-          const opsLink = buildOpsConsoleLink(tenant);
+          const opsLink: CrossAppResourceLink | undefined =
+            tenant.crossAppLinks.find(
+              (link) => link.targetApp === "ops-console",
+            );
           return (
             <div style={stackedCellStyle}>
               <Link href={`/tenants/${tenant.id}`} style={tenantLinkStyle}>
@@ -814,16 +825,18 @@ export default function TenantsPage() {
                     : "rollout 已停在治理審視中"}
                 </span>
               ) : null}
-              <a
-                href={opsLink.route}
-                target={opsLink.openMode === "new_tab" ? "_blank" : "_self"}
-                rel="noreferrer"
-                style={crossAppLinkStyle}
-                data-cross-app-target={opsLink.targetApp}
-                data-cross-app-resource={`${opsLink.resourceType}:${opsLink.resourceId}`}
-              >
-                ↗ {opsLink.label}
-              </a>
+              {opsLink ? (
+                <a
+                  href={opsLink.route}
+                  target={opsLink.openMode === "new_tab" ? "_blank" : "_self"}
+                  rel="noreferrer"
+                  style={crossAppLinkStyle}
+                  data-cross-app-target={opsLink.targetApp}
+                  data-cross-app-resource={`${opsLink.resourceType}:${opsLink.resourceId}`}
+                >
+                  ↗ {opsLink.label}
+                </a>
+              ) : null}
             </div>
           );
         },
@@ -862,6 +875,24 @@ export default function TenantsPage() {
             </div>
           );
         },
+      },
+      {
+        h: copy.columns.owners,
+        w: 180,
+        r: (tenant) => (
+          <div style={stackedCellStyle}>
+            <span>
+              {copy.ownerLabels.cutover}:{" "}
+              <strong style={tenantNameStyle}>
+                {tenant.cutoverOwnerDisplayName ?? copy.ownerLabels.unassigned}
+              </strong>
+            </span>
+            <span style={tenantSecondaryStyle}>
+              {copy.ownerLabels.rollback}:{" "}
+              {tenant.rollbackOwnerDisplayName ?? copy.ownerLabels.unassigned}
+            </span>
+          </div>
+        ),
       },
       {
         h: copy.columns.modules,
@@ -913,13 +944,13 @@ export default function TenantsPage() {
         ),
       },
       {
-        h: copy.columns.updated,
+        h: copy.columns.lastActivity,
         w: 160,
         mono: true,
-        r: (tenant) => formatDateTime(tenant.updatedAt),
+        r: (tenant) => formatDateTime(tenant.lastActivityAt),
       },
     ],
-    [copy.columns, locale, moduleLabels, buildOpsConsoleLink],
+    [copy.columns, copy.ownerLabels, locale, moduleLabels],
   );
 
   const tabDefs: Array<{
@@ -984,23 +1015,42 @@ export default function TenantsPage() {
   );
   const activeTabNode = tabNodes[activeIndex];
 
-  const createActionDescriptor = getDefaultCreateActionDescriptor();
+  // Resolve the page-level Create CTA from the envelope's availableActions
+  // (Q-X13). If the actor lacks the action, fall back to a disabled shape so
+  // initial render still has a visible affordance + disabled tooltip per
+  // Q-X13's "show disabled, don't hide" rule.
+  const createActionDescriptor: ResourceActionDescriptor =
+    pageAvailableActions.find(
+      (descriptor) => descriptor.action === "create_tenant",
+    ) ?? {
+      ...getFallbackCreateActionDescriptor(),
+      enabled: pageAvailableActions.length === 0,
+    };
   const createCtaDisabled = !createActionDescriptor.enabled || creating;
 
-  const emptyReason = deriveEmptyReason({
+  // The 6 EmptyReason states are driven by:
+  //   1. Server-emitted EmptyStateEnvelope on the envelope (no_data /
+  //      not_provisioned / driver_not_eligible) — authoritative when items=0.
+  //   2. Client-side fetch state (fetch_failed / permission_denied /
+  //      external_unavailable / filtered_empty) — the server cannot know
+  //      these because they reflect the client's transport state or the
+  //      user-applied filter.
+  const clientEmptyReason = deriveClientEmptyReason({
     hasError: Boolean(error),
     errorMessage: error,
-    totalCount: tenants.length,
     visibleCount: visibleTenants.length,
     filterApplied,
   });
+  const emptyReason: EmptyReason | null =
+    clientEmptyReason ?? serverEmptyState?.reason ?? null;
 
   const emptyCopyMap: Record<EmptyReason, EmptyStateCopy> = useMemo(() => {
     const dictEntries = copy.empty;
+    const serverNextAction = serverEmptyState?.nextAction;
     const map: Record<EmptyReason, EmptyStateCopy> = {
       no_data: {
         ...dictEntries.no_data,
-        primaryAction: createActionDescriptor,
+        primaryAction: serverNextAction ?? createActionDescriptor,
         onPrimary: () => setShowCreate(true),
       },
       filtered_empty: {
@@ -1026,6 +1076,9 @@ export default function TenantsPage() {
       },
       not_provisioned: {
         ...dictEntries.not_provisioned,
+        ...(serverNextAction
+          ? { primaryAction: serverNextAction, onPrimary: () => undefined }
+          : {}),
       },
       driver_not_eligible: {
         tag: "driver_not_eligible",
@@ -1034,11 +1087,13 @@ export default function TenantsPage() {
       },
     };
     return map;
-  }, [copy.empty, createActionDescriptor, loadTenants]);
+  }, [copy.empty, createActionDescriptor, loadTenants, serverEmptyState]);
 
-  const lastSyncCopy = lastFetchedAt
-    ? copy.lastSyncedAt(formatDateTime(lastFetchedAt.toISOString()))
+  const lastSyncCopy = refreshMetadata
+    ? copy.lastSyncedAt(formatDateTime(refreshMetadata.generatedAt))
     : copy.neverSynced;
+  const refreshChipIntervalMs =
+    refreshMetadata?.staleAfterMs ?? TENANT_LIST_REFRESH_INTERVAL_MS;
 
   if (initialLoading) {
     return <div style={loadingStateStyle}>{t("tenants.loading")}</div>;
@@ -1047,7 +1102,7 @@ export default function TenantsPage() {
   const renderEmptyState = (reason: EmptyReason) => {
     const e = emptyCopyMap[reason];
     return (
-      <div style={emptyCardBodyStyle}>
+      <div style={emptyCardBodyStyle} data-empty-reason={reason}>
         <span style={emptyTagStyle}>{e.tag}</span>
         <h3 style={emptyTitleStyle}>{e.title}</h3>
         <p style={emptyBodyStyle}>{e.body}</p>
@@ -1127,8 +1182,10 @@ export default function TenantsPage() {
           <span
             style={refreshChipStyle}
             data-refresh-tier={TENANT_LIST_REFRESH_TIER}
+            data-data-freshness={refreshMetadata?.dataFreshness ?? "unknown"}
+            data-refresh-source={refreshMetadata?.source ?? "static"}
           >
-            ⟳ {copy.refreshTierLabel(TENANT_LIST_REFRESH_INTERVAL_MS)}
+            ⟳ {copy.refreshTierLabel(refreshChipIntervalMs)}
           </span>
           <span style={refreshChipStyle}>{lastSyncCopy}</span>
         </div>
@@ -1441,7 +1498,7 @@ export default function TenantsPage() {
               rows={visibleTenants as TenantRow[]}
             />
           ) : (
-            renderEmptyState(emptyReason)
+            renderEmptyState(emptyReason ?? "no_data")
           )}
         </CanvasCard>
       </div>
