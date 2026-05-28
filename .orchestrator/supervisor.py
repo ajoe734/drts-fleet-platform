@@ -7168,6 +7168,14 @@ def dispatch_ready_tasks(
     provider_report = provider_report or load_provider_report(config)
 
     agent_ids = list(config.get("agents", {}).keys())
+    dispatcher_state = state.setdefault("ready_dispatcher", {})
+    start_cursor = 0
+    if agent_ids:
+        try:
+            start_cursor = int(dispatcher_state.get("next_agent_cursor", 0)) % len(agent_ids)
+        except (TypeError, ValueError):
+            start_cursor = 0
+    ordered_agent_ids = agent_ids[start_cursor:] + agent_ids[:start_cursor]
     active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
     active_agent_counts = active_worker_agent_counts(state, active_statuses)
@@ -7177,158 +7185,185 @@ def dispatch_ready_tasks(
     agent_loads = agent_dispatch_loads(config, state, active_statuses)
     helper_settings = helper_claim_settings(config)
     seen = state.setdefault("seen_event_keys", {})
-    idle_agent_names: list[str] = []
-    for agent_id in agent_ids:
-        display_name = display_name_for(config, agent_id)
-        lane_capacity = max_tasks_per_agent_for_lane(settings, agent_id)
-        lane_load = active_agent_counts.get(agent_id, 0) + pending_agent_counts.get(agent_id, 0)
-        if (
-            display_name
-            and lane_load < lane_capacity
-            and not display_name_is_legacy_alias(display_name)
-            and not is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report)
-        ):
-            idle_agent_names.append(display_name)
-
     changed = False
     dispatches = 0
-    for agent_id in agent_ids:
-        if dispatches >= max_dispatches_per_tick:
-            break
-        lane_capacity = max_tasks_per_agent_for_lane(settings, agent_id)
-        lane_load = active_agent_counts.get(agent_id, 0) + pending_agent_counts.get(agent_id, 0)
-        if lane_load >= lane_capacity:
-            continue
-        if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
-            continue
+    last_dispatched_agent_id: str | None = None
 
-        target_agent = display_name_for(config, agent_id)
-        if not target_agent or display_name_is_legacy_alias(target_agent):
-            continue
-        candidates: list[tuple[int, int, dict[str, Any], str]] = []
-        for index, task in enumerate(tasks):
-            task_id = str(task.get(task_id_field) or "")
-            if not task_id:
-                continue
-            task_status = str(task.get("status") or "").lower()
-            task_owner = task.get(owner_field)
-            task_reviewer = task.get(reviewer_field)
+    def record_pending_dispatch(agent_id: str, target_agent: str, task_id: str, reason: str, event_key: str) -> None:
+        seen[event_key] = utc_now()
+        pending_event_keys.add(event_key)
+        pending_agents.add(agent_id)
+        pending_task_agents.add((task_id, agent_id))
+        pending_task_ids.add(task_id)
+        active_task_ids.add(task_id)
+        pending_agent_counts[agent_id] = pending_agent_counts.get(agent_id, 0) + 1
+        priority = dispatch_reason_priority(reason)
+        if priority is not None:
+            agent_loads.setdefault(target_agent, []).append(priority)
 
-            if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
-                continue
-            if not task_is_dispatch_eligible_for_agent(task, target_agent):
-                continue
-
-            reason = None
-            priority = None
-            if task_status in review_statuses and task_reviewer == target_agent:
-                reason = "review_ready_dispatch"
-                priority = 0
-            elif task_status in finalize_statuses and task_owner == target_agent:
-                reason = "owned_finalize_dispatch"
-                priority = 1
-            elif task_status == "in_progress" and task_owner == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses):
-                reason = "owned_in_progress_dispatch"
-                priority = 2
-            elif task_status in {"todo", "backlog"} and task_owner == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses):
-                reason = "owned_ready_dispatch"
-                priority = 3
-
-            if reason and task_waiting_on_chair_reassignment(state, task, reason=reason, target_agent=target_agent):
-                continue
-
-            helper_claim_allowed_statuses = {str(v).lower() for v in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}
-            helper_claim_plan = None
+    # Dispatch in rounds so one busy lane cannot consume the whole tick budget
+    # before other eligible lanes get a chance to claim their next review/owner task.
+    while dispatches < max_dispatches_per_tick:
+        idle_agent_names: list[str] = []
+        for agent_id in ordered_agent_ids:
+            display_name = display_name_for(config, agent_id)
+            lane_capacity = max_tasks_per_agent_for_lane(settings, agent_id)
+            lane_load = active_agent_counts.get(agent_id, 0) + pending_agent_counts.get(agent_id, 0)
             if (
-                task_status in helper_claim_allowed_statuses
-                and task_id not in active_task_ids
-                and task_id not in pending_task_ids
-                and not task_waiting_on_chair_reassignment(state, task, reason=reason or "", target_agent=target_agent)
+                display_name
+                and lane_load < lane_capacity
+                and not display_name_is_legacy_alias(display_name)
+                and not is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report)
             ):
-                helper_claim_plan = proactive_claim_plan_for_idle_agent(
-                    config,
-                    task=task,
-                    task_map=task_map,
-                    idle_agent_name=target_agent,
-                    idle_agent_names=idle_agent_names,
-                    agent_loads=agent_loads,
-                    helper_settings=helper_settings,
-                    review_statuses=review_statuses,
-                    finalize_statuses=finalize_statuses,
-                    dependency_done_statuses=dependency_done_statuses,
-                    state=state,
-                )
+                idle_agent_names.append(display_name)
 
-            if helper_claim_plan:
-                helper_message = (
-                    f"Availability-first reassignment: {helper_claim_plan['claim_agent']} claimed "
-                    f"{task_id} while {helper_claim_plan['assigned_agent']} was unavailable or occupied."
-                )
-                if persist_task_reassignment(
-                    config,
-                    task_id=task_id,
-                    new_owner=helper_claim_plan["new_owner"],
-                    new_reviewer=helper_claim_plan["new_reviewer"],
-                    message=helper_message,
-                    handoff_to=helper_claim_plan["handoff_to"],
-                    handoff_from=helper_claim_plan["handoff_from"],
+        round_progress = False
+        for agent_id in ordered_agent_ids:
+            if dispatches >= max_dispatches_per_tick:
+                break
+            lane_capacity = max_tasks_per_agent_for_lane(settings, agent_id)
+            lane_load = active_agent_counts.get(agent_id, 0) + pending_agent_counts.get(agent_id, 0)
+            if lane_load >= lane_capacity:
+                continue
+            if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
+                continue
+
+            target_agent = display_name_for(config, agent_id)
+            if not target_agent or display_name_is_legacy_alias(target_agent):
+                continue
+            candidates: list[tuple[int, int, dict[str, Any], str]] = []
+            helper_claim_queued = False
+            for index, task in enumerate(tasks):
+                task_id = str(task.get(task_id_field) or "")
+                if not task_id:
+                    continue
+                task_status = str(task.get("status") or "").lower()
+                task_owner = task.get(owner_field)
+                task_reviewer = task.get(reviewer_field)
+
+                if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
+                    continue
+                if not task_is_dispatch_eligible_for_agent(task, target_agent):
+                    continue
+
+                reason = None
+                priority = None
+                if task_status in review_statuses and task_reviewer == target_agent:
+                    reason = "review_ready_dispatch"
+                    priority = 0
+                elif task_status in finalize_statuses and task_owner == target_agent:
+                    reason = "owned_finalize_dispatch"
+                    priority = 1
+                elif task_status == "in_progress" and task_owner == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses):
+                    reason = "owned_in_progress_dispatch"
+                    priority = 2
+                elif task_status in {"todo", "backlog"} and task_owner == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses):
+                    reason = "owned_ready_dispatch"
+                    priority = 3
+
+                if reason and task_waiting_on_chair_reassignment(state, task, reason=reason, target_agent=target_agent):
+                    continue
+
+                helper_claim_allowed_statuses = {str(v).lower() for v in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}
+                helper_claim_plan = None
+                if (
+                    task_status in helper_claim_allowed_statuses
+                    and task_id not in active_task_ids
+                    and task_id not in pending_task_ids
+                    and not task_waiting_on_chair_reassignment(state, task, reason=reason or "", target_agent=target_agent)
                 ):
-                    task[owner_field] = helper_claim_plan["new_owner"]
-                    task[reviewer_field] = helper_claim_plan["new_reviewer"]
-                    task["last_update"] = utc_now()
-                    task["next"] = helper_message
-                    claim_reason = helper_claim_plan["reason"]
-                    event = build_dispatch_event(task, target_agent, claim_reason, task_map)
-                    if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
-                        seen[event["key"]] = utc_now()
-                        pending_event_keys.add(event["key"])
-                        pending_agents.add(agent_id)
-                        pending_agent_counts[agent_id] = pending_agent_counts.get(agent_id, 0) + 1
-                        lane_load += 1
-                        active_task_ids.add(task_id)
-                        changed = True
-                        dispatches += 1
-                        write_activity_log(
-                            config,
-                            {
-                                "type": "task_proactive_rebalanced",
-                                "task_id": task_id,
-                                "message": helper_message,
-                                "from_owner": task_owner,
-                                "to_owner": helper_claim_plan["new_owner"],
-                                "from_reviewer": task_reviewer,
-                                "to_reviewer": helper_claim_plan["new_reviewer"],
-                                "claim_role": helper_claim_plan["claim_role"],
-                            },
-                        )
-                        console_log(
-                            f"availability-first claim: task={task_id} role={helper_claim_plan['claim_role']} to={target_agent}",
-                            quiet=SUPERVISOR_LOG_QUIET,
-                        )
-                        break
+                    helper_claim_plan = proactive_claim_plan_for_idle_agent(
+                        config,
+                        task=task,
+                        task_map=task_map,
+                        idle_agent_name=target_agent,
+                        idle_agent_names=idle_agent_names,
+                        agent_loads=agent_loads,
+                        helper_settings=helper_settings,
+                        review_statuses=review_statuses,
+                        finalize_statuses=finalize_statuses,
+                        dependency_done_statuses=dependency_done_statuses,
+                        state=state,
+                    )
 
-            if reason is None or priority is None:
+                if helper_claim_plan:
+                    helper_message = (
+                        f"Availability-first reassignment: {helper_claim_plan['claim_agent']} claimed "
+                        f"{task_id} while {helper_claim_plan['assigned_agent']} was unavailable or occupied."
+                    )
+                    if persist_task_reassignment(
+                        config,
+                        task_id=task_id,
+                        new_owner=helper_claim_plan["new_owner"],
+                        new_reviewer=helper_claim_plan["new_reviewer"],
+                        message=helper_message,
+                        handoff_to=helper_claim_plan["handoff_to"],
+                        handoff_from=helper_claim_plan["handoff_from"],
+                    ):
+                        task[owner_field] = helper_claim_plan["new_owner"]
+                        task[reviewer_field] = helper_claim_plan["new_reviewer"]
+                        task["last_update"] = utc_now()
+                        task["next"] = helper_message
+                        claim_reason = helper_claim_plan["reason"]
+                        event = build_dispatch_event(task, target_agent, claim_reason, task_map)
+                        if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
+                            record_pending_dispatch(agent_id, target_agent, task_id, claim_reason, event["key"])
+                            changed = True
+                            round_progress = True
+                            helper_claim_queued = True
+                            last_dispatched_agent_id = agent_id
+                            dispatches += 1
+                            write_activity_log(
+                                config,
+                                {
+                                    "type": "task_proactive_rebalanced",
+                                    "task_id": task_id,
+                                    "message": helper_message,
+                                    "from_owner": task_owner,
+                                    "to_owner": helper_claim_plan["new_owner"],
+                                    "from_reviewer": task_reviewer,
+                                    "to_reviewer": helper_claim_plan["new_reviewer"],
+                                    "claim_role": helper_claim_plan["claim_role"],
+                                },
+                            )
+                            console_log(
+                                f"availability-first claim: task={task_id} role={helper_claim_plan['claim_role']} to={target_agent}",
+                                quiet=SUPERVISOR_LOG_QUIET,
+                            )
+                            break
+
+                if reason is None or priority is None:
+                    continue
+
+                event = build_dispatch_event(task, target_agent, reason, task_map)
+                if event["key"] in pending_event_keys:
+                    continue
+                candidates.append((priority, index, task, reason))
+
+            if helper_claim_queued:
                 continue
 
-            event = build_dispatch_event(task, target_agent, reason, task_map)
-            if event["key"] in pending_event_keys:
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            if not candidates:
                 continue
-            candidates.append((priority, index, task, reason))
-
-        candidates.sort(key=lambda item: (item[0], item[1]))
-        available_slots = max(0, lane_capacity - lane_load)
-        for _, _, task, reason in candidates[:available_slots]:
+            _priority, _index, task, reason = candidates[0]
+            task_id = str(task.get(task_id_field) or "")
             event = build_dispatch_event(task, target_agent, reason, task_map)
             if queue_delivery_event(config, event):
-                seen[event["key"]] = utc_now()
-                pending_event_keys.add(event["key"])
-                pending_agents.add(agent_id)
-                pending_agent_counts[agent_id] = pending_agent_counts.get(agent_id, 0) + 1
-                lane_load += 1
+                record_pending_dispatch(agent_id, target_agent, task_id, reason, event["key"])
                 changed = True
+                round_progress = True
+                last_dispatched_agent_id = agent_id
                 dispatches += 1
-                if dispatches >= max_dispatches_per_tick:
-                    break
+
+        if not round_progress:
+            break
+
+    if agent_ids:
+        if last_dispatched_agent_id is not None:
+            dispatcher_state["next_agent_cursor"] = (agent_ids.index(last_dispatched_agent_id) + 1) % len(agent_ids)
+        else:
+            dispatcher_state["next_agent_cursor"] = start_cursor
 
     return changed
 
