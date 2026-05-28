@@ -6,17 +6,20 @@
 **Parent Reviewer:** `Codex`
 **Sidecar Owner:** `Claude2`
 **Sidecar Reviewer:** `Codex2`
-**Generated:** `2026-05-28` (UTC)
+**Generated:** `2026-05-28` (UTC), refreshed `2026-05-28T14:07Z` after parent
+reached `status=done` at `2026-05-28T14:05:38Z`.
 **Status:** `REVIEW SUPPORT ARTIFACT` — support-only; does not modify
 canonical truth, runtime behavior, the parent review verdict, or the parent
 closeout evidence.
 
 This packet exists only to support sidecar reviewer handoff for
-`UI-FE-TEN-UMBRELLA`. It does not approve, reopen, or alter the parent review
-outcome. It records the stable machine-truth anchors, the sub-task dependency
-closure, the source anchors that justify the umbrella integration, and the
-exact checks the sidecar reviewer (`Codex2`) should repeat before approving
-this support slice.
+`UI-FE-TEN-UMBRELLA`. It does not re-approve, reopen, or alter the parent
+review outcome — the parent track between `Codex2` and `Codex` already ran
+its own approval and finalize closeout. This packet records the stable
+machine-truth anchors, the sub-task dependency closure, the source anchors
+that justify the umbrella integration, the parent's now-completed lifecycle
+through approval and finalize, and the exact checks the sidecar reviewer
+(`Codex2`) should repeat before approving this support slice.
 
 Transient sidecar lifecycle truth (`status`, `next`, `last_update`) remains
 authoritative only in `ai-status.json`. This packet intentionally avoids
@@ -31,9 +34,9 @@ In scope:
 - summarize the stable machine-truth fields of parent `UI-FE-TEN-UMBRELLA` and
   this sidecar task
 - record the dependency closure across the 20 declared sub-tasks
-- pin the parent's lifecycle chain through the chairman reassignment, the
-  umbrella integration commit, the pending review handoff, and the closeout
-  doc
+- pin the parent's full lifecycle chain through the chairman reassignment,
+  the umbrella integration commit, the review handoff, the reviewer
+  approval, the finalize closeout commit, and the closeout doc
 - capture the concrete source anchors that back the umbrella claim: the
   integration commit, the closeout doc, navigation IA, contract additions
   (Q-X16), api-client additions, and the 9 NEW build-route receipts
@@ -49,8 +52,9 @@ Out of scope:
   `docs/01-decisions/**`
 - editing `ai-status.json`, `current-work.md`, or `ai-activity-log.jsonl`
   except through the normal lifecycle commands for this sidecar task
-- approving, reopening, or finalizing parent `UI-FE-TEN-UMBRELLA`; that
-  parent review remains owned by `Codex2` and `Codex`
+- re-approving, reopening, or re-finalizing parent `UI-FE-TEN-UMBRELLA`;
+  that parent review and closeout completed on the parent track owned by
+  `Codex2` and `Codex` (see §3 lifecycle)
 - treating this packet as a substitute for the parent commit, push,
   closeout doc, or sub-task closeout evidence
 
@@ -96,10 +100,23 @@ Stable fields in `ai-status.json`:
 - phase=`phase1-ui-implementation-wave-202605`
 - owner=`Codex2`
 - reviewer=`Codex`
-- status=`review` (review handoff is pending — see §3 lifecycle)
+- status=`done` (finalize closeout recorded at `2026-05-28T14:05:38Z`)
 - artifacts=`docs/05-ui/tenant-console-rebuild-closeout-*.md`
 - acceptance:
   - `All 20 sub-tasks done; closeout doc; 9 NEW routes ship; smoke test clean; Q-TEN01 cutover plan referenced`
+
+Finalize closeout record in `ai-status.json` for the parent:
+
+- `commit_hash`=`6bc1ace77f3476913b4fe2de25f551507bdf9811`
+- `commit_subject`=`UI-FE-TEN-UMBRELLA: finalize tenant-console rebuild closeout`
+- `commit_agent`=`Codex2`
+- `commit_reviewer`=`Codex`
+- `commit_recorded_at`=`2026-05-28T14:05:38Z`
+- `push_remote`=`origin`
+- `push_branch`=`codex2/ui-fe-ten-umbrella`
+- `push_ref`=`origin/codex2/ui-fe-ten-umbrella`
+- `push_commit`=`6bc1ace77f3476913b4fe2de25f551507bdf9811`
+- `push_recorded_at`=`2026-05-28T14:05:38Z`
 
 Umbrella integration commit (anchor):
 
@@ -110,13 +127,34 @@ Umbrella integration commit (anchor):
 - trailers=`LLM-Agent: codex2`, `Task-ID: UI-FE-TEN-UMBRELLA`, `Reviewer: Codex`
 - diff shape: `53 files changed, 25,573 insertions(+), 3,456 deletions(-)`
 
-Branch reachability checks at packet generation:
+Finalize closeout commit (parent track closure on top of integration):
 
-- `git branch -r --contains b7c6a8fe` resolves only to
+- hash=`6bc1ace77f3476913b4fe2de25f551507bdf9811`
+- subject=`UI-FE-TEN-UMBRELLA: finalize tenant-console rebuild closeout`
+- author=`Codex`
+- author_timestamp=`2026-05-28T14:05:21Z`
+- trailers=`LLM-Agent: Codex2`, `Task-ID: UI-FE-TEN-UMBRELLA`,
+  `Reviewer: Codex`, plus a `Verification:` trailer listing
+  `pnpm --filter @drts/contracts build`,
+  `pnpm --filter @drts/tenant-console-web build`,
+  `pnpm --filter @drts/tenant-console-web typecheck`, and
+  `pnpm --filter @drts/tenant-console-web test`
+- diff shape: empty tree-delta over its parent `b7c6a8fe` — this is a
+  closeout marker commit, not a second integration; all umbrella file
+  surfaces remain those introduced by `b7c6a8fe`
+
+Branch reachability checks at packet refresh:
+
+- `git branch -r --contains 6bc1ace7` resolves only to
   `origin/codex2/ui-fe-ten-umbrella`
-- `git log b7c6a8fe ^origin/dev` confirms the umbrella branch is one
-  integration commit ahead of `dev` — the umbrella has not been merged into
-  `dev` yet, which is consistent with `status=review`
+- `git branch -r --contains b7c6a8fe` likewise resolves only to
+  `origin/codex2/ui-fe-ten-umbrella`
+- `git log 6bc1ace7 ^origin/dev --oneline` returns exactly two commits
+  (`6bc1ace7` finalize closeout, then `b7c6a8fe` integration) — the umbrella
+  branch is two commits ahead of `dev` and has not been merged into `dev`;
+  `status=done` here means the umbrella task closure was approved and
+  recorded against this branch tip, not that the branch has merged into
+  `dev` or that production cutover happened (see §4 Q-TEN01 posture)
 
 ### Dependency baseline — 20 tenant sub-tasks
 
@@ -156,26 +194,33 @@ Dependency role:
 
 ## 3. Parent Lifecycle Summary
 
-Final lifecycle events recorded in `ai-status.json::handoffs`:
+Final lifecycle events recorded in `ai-status.json::handoffs` (and the
+parent task row):
 
-| Timestamp UTC          | Event                       | Meaning                                                                                                                                                                                                       |
-| ---------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `2026-05-28T09:39:54Z` | chairman reassignment       | Owner reassigned from `Claude` to `Codex2` because Claude lane was paused for auth failure; backlog status permitted owner reassignment, and `Codex2` preserves reviewer separation from `Codex`.             |
-| `2026-05-28T13:45:56Z` | reassignment resolved       | Chairman reassignment marked `done`; `Codex2` now formally owns the umbrella slice.                                                                                                                           |
-| `2026-05-28T13:57:37Z` | integration commit          | `Codex2` committed `b7c6a8fe` consolidating the 20 sub-task surfaces into `apps/tenant-console-web` plus the closeout doc and shared client/contract additions.                                               |
-| `2026-05-28T13:58:17Z` | review handoff (pending)    | `Codex2` handed off to `Codex` with verification PASS receipts (`pnpm` contracts build, ui-tokens build, tenant-console build/typecheck/test) and confirmed push to `origin/codex2/ui-fe-ten-umbrella`.       |
-| `2026-05-28T13:58:43Z` | sidecar created             | Supervisor auto-created `UI-FE-TEN-UMBRELLA-SIDECAR-REVIEW` against `Claude2` / `Codex2` as a parallel review packet helper.                                                                                  |
+| Timestamp UTC          | Event                            | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `2026-05-28T09:39:54Z` | chairman reassignment            | Owner reassigned from `Claude` to `Codex2` because Claude lane was paused for auth failure; backlog status permitted owner reassignment, and `Codex2` preserves reviewer separation from `Codex`.                                                                                                                                                                                                                                             |
+| `2026-05-28T13:45:56Z` | reassignment resolved            | Chairman reassignment marked `done`; `Codex2` now formally owns the umbrella slice.                                                                                                                                                                                                                                                                                                                                                          |
+| `2026-05-28T13:57:37Z` | integration commit               | `Codex2` committed `b7c6a8fe` consolidating the 20 sub-task surfaces into `apps/tenant-console-web` plus the closeout doc and shared client/contract additions.                                                                                                                                                                                                                                                                              |
+| `2026-05-28T13:58:17Z` | review handoff                   | `Codex2` handed off to `Codex` with verification PASS receipts (`pnpm` contracts build, ui-tokens build, tenant-console build/typecheck/test) and confirmed push to `origin/codex2/ui-fe-ten-umbrella`. Handoff entry resolved at `2026-05-28T14:02:32Z`.                                                                                                                                                                                     |
+| `2026-05-28T13:58:43Z` | sidecar created                  | Supervisor auto-created `UI-FE-TEN-UMBRELLA-SIDECAR-REVIEW` against `Claude2` / `Codex2` as a parallel review packet helper.                                                                                                                                                                                                                                                                                                                |
+| `2026-05-28T14:02:32Z` | reviewer approval handoff        | `Codex` reviewed commit `b7c6a8fe` plus the closeout doc and handed back to `Codex2` with acceptance confirmed: closeout doc present, 9 required routes shipped (`/addresses`, `/notifications`, `/sla`, `/billing`, `/integration-governance`, `/reports`, `/feature-flags`, `/bookings/new`, `/bookings/[bookingId]`), Q-TEN01 posture referenced, and verification PASS rerun on a detached review worktree after `pnpm install`.            |
+| `2026-05-28T14:05:38Z` | finalize closeout (`status=done`) | Parent task row transitioned to `status=done` with closeout commit `6bc1ace7` on `origin/codex2/ui-fe-ten-umbrella`; the closeout commit is an empty-tree marker over `b7c6a8fe`, carrying trailers `LLM-Agent: Codex2`, `Task-ID: UI-FE-TEN-UMBRELLA`, `Reviewer: Codex`, and a `Verification:` trailer for the contracts and tenant-console builds. Reviewer approval handoff entry resolved at the same timestamp.                          |
 
 Reviewer interpretation:
 
-- the load-bearing review work belongs to the parent track between `Codex2`
-  and `Codex`
+- the load-bearing review work belonged to the parent track between
+  `Codex2` and `Codex`; that review and finalize closeout have both
+  completed
 - this sidecar review is about whether this packet accurately describes the
-  current parent state, not whether the parent should be approved or
-  rejected
-- at packet generation, the parent is still `status=review`; the sidecar
-  should not assert parent `done` or claim commit closure on the parent's
-  behalf
+  current parent state, not whether the parent should be (re)approved or
+  rejected — the parent verdict already exists in machine truth
+- the sidecar must report parent state honestly: parent is now
+  `status=done` with `commit_hash=6bc1ace7` and `push_branch=
+  codex2/ui-fe-ten-umbrella`
+- `status=done` here is task closure on the umbrella branch tip and is not
+  a claim that the umbrella branch has merged into `dev` or that live
+  production cutover has happened; Q-TEN01 posture in §4 still applies
 
 ---
 
@@ -320,25 +365,36 @@ That set matches the umbrella acceptance's `9 NEW routes` count when the
 two redesigned booking-flow routes are counted alongside the seven brand-new
 tenant surfaces, as documented in the closeout doc's build-output section.
 
-Packet-refresh verification performed for this sidecar:
+Packet-refresh verification performed for this sidecar (initial draft and
+the `2026-05-28T14:07Z` refresh after Codex2's staleness reopen):
 
 - read back `ai-status.json` for parent `UI-FE-TEN-UMBRELLA`, sidecar
   `UI-FE-TEN-UMBRELLA-SIDECAR-REVIEW`, and the 20 declared sub-tasks
 - read `ai-status.json::handoffs` for the chairman reassignment, the
-  reassignment resolution, and the parent review handoff
+  reassignment resolution, the parent review handoff, and — on refresh —
+  the reviewer approval handoff (`Codex` → `Codex2` at
+  `2026-05-28T14:02:32Z`) plus the parent finalize transition to
+  `status=done` at `2026-05-28T14:05:38Z`
 - inspected commit `b7c6a8fe` via `git show --stat --summary`
-- verified `git branch -r --contains b7c6a8fe` resolves only to
+- inspected commit `6bc1ace7` (the finalize closeout marker) via
+  `git show --stat --summary` and `git log --pretty=fuller`; confirmed
+  trailers `LLM-Agent: Codex2`, `Task-ID: UI-FE-TEN-UMBRELLA`,
+  `Reviewer: Codex`, and the empty tree-delta over `b7c6a8fe`
+- verified `git branch -r --contains 6bc1ace7` and
+  `git branch -r --contains b7c6a8fe` both resolve only to
   `origin/codex2/ui-fe-ten-umbrella`
-- verified `git log b7c6a8fe ^origin/dev` returns exactly the one umbrella
-  integration commit (no other unmerged commits on the umbrella branch)
+- verified `git log 6bc1ace7 ^origin/dev --oneline` returns exactly two
+  commits (`6bc1ace7` finalize closeout, then `b7c6a8fe` integration); the
+  umbrella branch is two commits ahead of `dev` and not yet merged
 - read the closeout doc content out of `b7c6a8fe:docs/05-ui/...20260528.md`
 - spot-checked the contract additions in
   `b7c6a8fe:packages/contracts/src/ui-runtime.ts`, the api-client additions
   in `b7c6a8fe:packages/api-client/src/index.ts`, and the navigation IA in
   `b7c6a8fe:apps/tenant-console-web/lib/navigation.ts`
 
-No runtime tests were rerun during this sidecar packet creation because
-this task only adds a support artifact and `mutates_canonical=false`.
+No runtime tests were rerun during this sidecar packet creation or refresh
+because this task only adds a support artifact and
+`mutates_canonical=false`.
 
 ---
 
@@ -348,28 +404,42 @@ this task only adds a support artifact and `mutates_canonical=false`.
    - Sidecar row still identifies `owner=Claude2`, `reviewer=Codex2`,
      `helper_parent=UI-FE-TEN-UMBRELLA`, `helper_kind=review_packet`, and
      `mutates_canonical=false`.
-   - Parent row still shows `status=review` with `owner=Codex2`,
-     `reviewer=Codex`, and the pending review handoff at
-     `2026-05-28T13:58:17Z`.
+   - Parent row shows `status=done` with `owner=Codex2`,
+     `reviewer=Codex`, `commit_hash=6bc1ace77f3476913b4fe2de25f551507bdf9811`,
+     `push_branch=codex2/ui-fe-ten-umbrella`, and
+     `commit_recorded_at=2026-05-28T14:05:38Z`.
+   - Lifecycle entries in `ai-status.json::handoffs` still cover the
+     chairman reassignment, the `Codex2`→`Codex` review handoff at
+     `2026-05-28T13:58:17Z`, and the `Codex`→`Codex2` approval handoff at
+     `2026-05-28T14:02:32Z`.
    - The 20 sub-task dependency rows remain `done` with the commit hashes
      listed above.
 
-2. Confirm the packet does not overclaim the parent.
-   - It must not say parent `UI-FE-TEN-UMBRELLA` is already `done`.
-   - It must not assert reviewer approval or owner closeout for the umbrella.
-   - It must not invent live production-cutover claims; the Q-TEN01 posture
-     must remain "canonical repo-local productization checkpoint".
+2. Confirm the packet does not overclaim beyond machine truth.
+   - It does not assert that this sidecar approved or finalized the
+     umbrella — the parent track between `Codex2` and `Codex` did that;
+     this packet only describes the state.
+   - It does not claim that the umbrella has merged into `dev`; the
+     reachability check still shows the umbrella branch is two commits
+     ahead of `origin/dev` and not merged.
+   - It does not invent live production-cutover claims; the Q-TEN01 posture
+     remains "canonical repo-local productization checkpoint", which is
+     consistent with parent `status=done` on a non-merged branch.
 
 3. Confirm the source anchors are accurate.
-   - Commit `b7c6a8fe` still resolves locally and still carries trailers
-     `LLM-Agent: codex2`, `Task-ID: UI-FE-TEN-UMBRELLA`, `Reviewer: Codex`.
-   - The 53-file diff shape (per `git show --stat`) still matches the route
-     and shared-package surface listed above.
+   - Integration commit `b7c6a8fe` still resolves locally and still carries
+     trailers `LLM-Agent: codex2`, `Task-ID: UI-FE-TEN-UMBRELLA`,
+     `Reviewer: Codex`; its 53-file diff shape (per `git show --stat`)
+     still matches the route and shared-package surface listed above.
+   - Finalize closeout commit `6bc1ace7` still resolves locally with
+     trailers `LLM-Agent: Codex2`, `Task-ID: UI-FE-TEN-UMBRELLA`,
+     `Reviewer: Codex`, and an empty tree-delta over `b7c6a8fe`.
+   - Both commits are reachable only from `origin/codex2/ui-fe-ten-umbrella`.
    - `packages/contracts/src/ui-runtime.ts` still exposes the
      `TenantFeatureFlagVisibilityRecord` / `TenantFeatureFlagVisibilityList`
-     additions.
+     additions in commit `b7c6a8fe`.
    - `packages/api-client/src/index.ts` still exposes `getTenantFeatureFlags`
-     and `getTenantIntegrationReadiness`.
+     and `getTenantIntegrationReadiness` in commit `b7c6a8fe`.
 
 4. Confirm the dependency baseline is honest.
    - Every row in the 20-row dependency table remains `done` in
@@ -390,12 +460,18 @@ this task only adds a support artifact and `mutates_canonical=false`.
 
 Expected sidecar reviewer conclusion if this packet passes:
 
-- the packet reflects the current parent state at `2026-05-28T13:58:17Z`
-  (pending review handoff) without overclaiming approval or closeout
-- the chairman reassignment, integration commit, push, closeout doc, and
-  verification PASS receipts are represented accurately
-- the file/line anchors match the live umbrella commit and the new tenant
-  console contract/api-client additions
+- the packet reflects the current parent state at `2026-05-28T14:05:38Z`
+  (parent `status=done` with finalize closeout commit `6bc1ace7` on
+  `origin/codex2/ui-fe-ten-umbrella`) without overclaiming a merge into
+  `dev` or live production cutover
+- the parent lifecycle is represented from chairman reassignment through
+  integration commit, review handoff, reviewer approval, and finalize
+  closeout, matching the entries in `ai-status.json::handoffs` and the
+  parent task row
+- the file/line anchors match the live umbrella commit `b7c6a8fe` and the
+  new tenant-console contract/api-client additions; the finalize closeout
+  commit `6bc1ace7` is described accurately as an empty-tree marker on top
+  of `b7c6a8fe`
 - the 20 sub-task dependency closure is correct against `ai-status.json`
 - the packet remains support-only and does not mutate canonical truth
 
@@ -403,11 +479,14 @@ If the sidecar review fails, the failure should point to one of these
 classes:
 
 - parent lifecycle chronology is wrong or incomplete
-- commit/push/branch evidence is misstated (hash, trailers, or branch
-  reachability)
+- commit/push/branch evidence is misstated (hash, trailers, branch
+  reachability, or whether `b7c6a8fe` carries the file diff vs `6bc1ace7`
+  being an empty closeout marker)
 - a source anchor (route file, contract addition, api-client method,
   navigation entry) no longer matches the live file in commit `b7c6a8fe`
-- Q-TEN01 cutover posture is overclaimed as live production switch
+- Q-TEN01 cutover posture is overclaimed as live production switch, or
+  parent `status=done` is presented as if it implied a `dev` merge or
+  production cutover
 - the 20-sub-task dependency baseline has silently changed
-- the packet still carries stale pre-handoff language or asserts parent
-  closeout
+- the packet still carries stale pre-approval language, or asserts that
+  the sidecar (rather than the parent track) drove approval or closeout
