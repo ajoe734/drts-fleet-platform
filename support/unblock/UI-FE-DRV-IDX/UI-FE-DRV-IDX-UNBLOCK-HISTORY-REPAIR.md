@@ -79,16 +79,22 @@ The helper branch itself has now been repaired without rewriting shared history.
 4. Produced new repair merge tip `07efd8f4`:
    `Merge origin/dev into codex/ui-fe-drv-idx-unblock-history-repair to refresh helper base after dev advanced`
 5. Added a final artifact refresh commit after that merge so the branch evidence
-   matches the actual pushed helper tip `9fdce296`:
+   matches the pushed helper tip at that point, `9fdce296`:
    `UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR: refresh helper branch truth after dev drift`
-6. After the second merge repair, the helper branch is clean relative to current
+6. Added one more additive documentation commit for the reviewer-requested PR/no-PR
+   evidence without rewriting any shared branch:
+   `3a99fdae`:
+   `UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR: add PR/no-PR evidence to unblock artifact`
+7. After the second merge repair and final evidence refresh, the helper branch is clean relative to current
    trunk:
    - merge-base of `origin/dev` and `HEAD` is now
      `c105959b597bf00e40cf87a6a96955a3767196e7`
    - immediately after the merge, `git rev-list --left-right --count origin/dev...HEAD`
      returned `0 4`
-   - after the final evidence-refresh commit, the pushed helper branch now
-     reports `0 left / 5 right`
+   - after the drift-refresh commit, the pushed helper branch reported
+     `0 left / 5 right`
+   - after the PR/no-PR evidence refresh commit, the pushed helper branch now
+     reports `0 left / 6 right`
 
 This preserves the old evidence commit, avoids force-push, and makes the helper
 reviewable on top of current `dev`.
@@ -144,7 +150,8 @@ The concrete unblocked next step is therefore:
 - first repaired helper merge tip: `94551202`
 - evidence refresh commit: `77ee6584`
 - second repaired helper merge tip: `07efd8f4`
-- final evidence refresh commit and pushed helper tip: `9fdce296`
+- drift-refresh evidence commit: `9fdce296`
+- final PR/no-PR evidence commit and pushed helper tip: `3a99fdae`
 - old merge-base versus `origin/dev`: `070f9aea`
 - intermediate merge-base versus `origin/dev`: `75674c4c`
 - final merge-base versus `origin/dev`: `c105959b`
@@ -153,18 +160,19 @@ The concrete unblocked next step is therefore:
 - divergence after first evidence refresh push: `0 left / 3 right`
 - divergence at start of this dispatch: `2 left / 3 right`
 - divergence after second merge repair: `0 left / 4 right`
-- final pushed divergence after evidence refresh push: `0 left / 5 right`
+- divergence after drift-refresh evidence push: `0 left / 5 right`
+- final pushed divergence after PR/no-PR evidence push: `0 left / 6 right`
 
 ### Commit, push, and PR evidence
 
-- Helper task commit evidence:
-  `9fdce2966cd36a615b3e58d50ead2e88141d0d2d`
+- Reviewer-approved helper task commit evidence:
+  `3a99fdaeb3073b983931f2cbb5477db0be128de5`
   with subject
-  `UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR: refresh helper branch truth after dev drift`
+  `UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR: add PR/no-PR evidence to unblock artifact`
 - Helper task push evidence:
   `git ls-remote --heads origin refs/heads/codex/ui-fe-drv-idx-unblock-history-repair`
   returns
-  `9fdce2966cd36a615b3e58d50ead2e88141d0d2d refs/heads/codex/ui-fe-drv-idx-unblock-history-repair`
+  `3a99fdaeb3073b983931f2cbb5477db0be128de5 refs/heads/codex/ui-fe-drv-idx-unblock-history-repair`
 - Canonical parent push evidence remains:
   `b334ef9663d026e9ca37da636a158219dc75eff2 refs/heads/codex/ui-fe-drv-idx`
 - Alternate stale parent rail still exists but is not canonical:
@@ -174,6 +182,10 @@ The concrete unblocked next step is therefore:
   returned `[]`
 - Therefore the non-destructive canonical repair evidence for this helper task
   is branch-and-commit only, with no separate PR object to preserve.
+- Reviewer approval evidence:
+  `ai-activity-log.jsonl` records `review_approved` at `2026-05-28T05:31:40Z`
+  for commit `3a99fdaeb3073b983931f2cbb5477db0be128de5`, confirming the refreshed
+  artifact satisfies acceptance and that the helper should be closed as obsolete.
 
 ## Verification Performed
 
