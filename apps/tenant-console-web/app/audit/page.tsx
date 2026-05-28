@@ -11,6 +11,9 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
+  CanvasTable,
+  type CanvasTableColumn,
+  type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { API_URL, getTenantClient } from "@/lib/api-client";
@@ -30,8 +33,30 @@ const PLATFORM_ADMIN_URL =
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
-  display: "flex",
-  flexDirection: "column",
+  display: "grid",
+  gap: 16,
+};
+
+const kpiGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gap: 12,
+};
+
+const contentGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(280px, 0.85fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const mainLaneStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
+const sideLaneStyle: CSSProperties = {
+  display: "grid",
   gap: 16,
 };
 
@@ -41,24 +66,10 @@ const filterGridStyle: CSSProperties = {
   gap: 12,
 };
 
-const kpiGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-  gap: 12,
-};
-
-const controlRowStyle: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  flexWrap: "wrap",
-};
-
 const fieldStackStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 6,
-  minWidth: 0,
 };
 
 const fieldLabelStyle: CSSProperties = {
@@ -69,7 +80,7 @@ const fieldLabelStyle: CSSProperties = {
   color: th.textMuted,
 };
 
-const nativeInputStyle: CSSProperties = {
+const inputStyle: CSSProperties = {
   width: "100%",
   minWidth: 0,
   background: th.bgRaised,
@@ -83,129 +94,150 @@ const nativeInputStyle: CSSProperties = {
   fontFamily: th.fontFamily,
 };
 
-const nativeMonoInputStyle: CSSProperties = {
-  ...nativeInputStyle,
+const monoInputStyle: CSSProperties = {
+  ...inputStyle,
   fontFamily: th.monoFamily,
   fontSize: 11.5,
 };
 
-const primaryButtonStyle: CSSProperties = {
+const controlRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+};
+
+const linkButtonBaseStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
   gap: 6,
-  padding: "6px 11px",
   minHeight: 28,
+  padding: "6px 11px",
+  borderRadius: 7,
+  border: `1px solid ${th.border}`,
+  textDecoration: "none",
+  fontFamily: th.fontFamily,
   fontSize: 12,
   fontWeight: 600,
-  background: th.accent,
-  color: "#fff",
-  border: `1px solid ${th.accent}`,
-  borderRadius: 7,
-  cursor: "pointer",
-  textDecoration: "none",
   lineHeight: 1,
-  fontFamily: th.fontFamily,
 };
 
-const secondaryButtonStyle: CSSProperties = {
-  ...primaryButtonStyle,
-  background: th.surface,
-  color: th.text,
-  border: `1px solid ${th.border}`,
+const summaryGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: 12,
 };
 
-const ghostButtonStyle: CSSProperties = {
-  ...secondaryButtonStyle,
-  background: "transparent",
-};
-
-const auditTableStyle: CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
-  fontSize: 12.5,
-  fontFamily: th.fontFamily,
-};
-
-const auditHeaderCellStyle: CSSProperties = {
-  textAlign: "left",
-  padding: "9px 12px",
-  fontSize: 10.5,
-  fontWeight: 600,
-  color: th.textMuted,
-  textTransform: "uppercase",
-  letterSpacing: 0.4,
+const summaryCellStyle: CSSProperties = {
+  padding: 12,
+  borderRadius: 10,
   background: th.surfaceLo,
-  borderBottom: `1px solid ${th.border}`,
-  whiteSpace: "nowrap",
-  verticalAlign: "bottom",
+  border: `1px solid ${th.border}`,
+  display: "grid",
+  gap: 4,
 };
 
-const auditCellStyle: CSSProperties = {
-  padding: "12px",
-  borderBottom: `1px solid ${th.border}`,
-  verticalAlign: "top",
+const summaryLabelStyle: CSSProperties = {
+  fontSize: 10.5,
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  color: th.textMuted,
+  fontWeight: 600,
+};
+
+const summaryValueStyle: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
   color: th.text,
 };
 
-const monoCellStyle: CSSProperties = {
-  ...auditCellStyle,
-  fontFamily: th.monoFamily,
+const summarySubStyle: CSSProperties = {
   fontSize: 11.5,
-  whiteSpace: "nowrap",
+  color: th.textMuted,
+  lineHeight: 1.45,
 };
 
 const stackedCellStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 3,
+  gap: 4,
   minWidth: 0,
+};
+
+const primaryTextStyle: CSSProperties = {
+  color: th.text,
+  fontWeight: 600,
 };
 
 const secondaryTextStyle: CSSProperties = {
   color: th.textMuted,
-  fontSize: 11,
-  lineHeight: 1.35,
+  fontSize: 11.5,
+  lineHeight: 1.45,
+};
+
+const monoTextStyle: CSSProperties = {
+  color: th.text,
+  fontFamily: th.monoFamily,
+  fontSize: 11.5,
+};
+
+const inlineLinkStyle: CSSProperties = {
+  color: th.accent,
+  textDecoration: "none",
 };
 
 const detailGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1.15fr 0.85fr",
+  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
   gap: 16,
 };
 
 const detailCodeStyle: CSSProperties = {
   margin: 0,
   padding: 12,
-  borderRadius: 8,
+  borderRadius: 10,
   background: th.bg,
   border: `1px solid ${th.border}`,
   color: th.text,
-  fontSize: 11.5,
-  lineHeight: 1.5,
-  overflowX: "auto",
   fontFamily: th.monoFamily,
+  fontSize: 11.5,
+  lineHeight: 1.45,
   whiteSpace: "pre-wrap",
   wordBreak: "break-word",
+  overflowX: "auto",
 };
 
-const emptyStateWrapStyle: CSSProperties = {
-  padding: "24px 22px",
-  display: "flex",
-  flexDirection: "column",
+const listStyle: CSSProperties = {
+  margin: 0,
+  padding: 0,
+  listStyle: "none",
+  display: "grid",
+  gap: 10,
+};
+
+const listItemStyle: CSSProperties = {
+  paddingBottom: 10,
+  borderBottom: `1px solid ${th.border}`,
+  display: "grid",
+  gap: 4,
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: "24px 20px",
+  display: "grid",
   gap: 12,
-  alignItems: "flex-start",
+  alignItems: "start",
 };
 
-const actionRowStyle: CSSProperties = {
+const emptyReasonPreviewStyle: CSSProperties = {
   display: "flex",
-  gap: 8,
   flexWrap: "wrap",
+  gap: 8,
 };
 
-const inlineLinkStyle: CSSProperties = {
-  color: th.accent,
-  textDecoration: "none",
+const tableCardStyle: CSSProperties = {
+  overflow: "hidden",
 };
 
 const actorToneByScope = {
@@ -214,29 +246,22 @@ const actorToneByScope = {
   platform: "warn",
   system: "neutral",
   partner: "success",
-} as const;
+} satisfies Record<string, CanvasTone>;
 
-const auditDateFormatter = new Intl.DateTimeFormat("sv-SE", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hour12: false,
-});
-
-const dayFormatter = new Intl.DateTimeFormat("sv-SE", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-const pageActions: ResourceActionDescriptor[] = [
+const pageActionCatalog = [
   { action: "filter", enabled: true, riskLevel: "low" },
   { action: "refresh", enabled: true, riskLevel: "low" },
   { action: "export", enabled: true, riskLevel: "low" },
-];
+] satisfies ResourceActionDescriptor[];
+
+const auditDateFormatter = new Intl.DateTimeFormat("zh-Hant", {
+  dateStyle: "short",
+  timeStyle: "medium",
+});
+
+const dayFormatter = new Intl.DateTimeFormat("zh-Hant", {
+  dateStyle: "medium",
+});
 
 type SearchParamsInput = Record<string, string | string[] | undefined>;
 
@@ -251,32 +276,53 @@ type FilterState = {
   empty: EmptyReason | "";
 };
 
-type AuditViewModel = {
-  record: AuditLogRecord;
-  createdAtLabel: string;
-  actorScope: keyof typeof actorToneByScope;
-  actorLabel: string;
-  actorSubLabel: string;
-  resourceLabel: string;
-  masked: boolean;
-  detailLink: ResourceLink;
-  auditLink: string;
-  oldSummary: string;
-  newSummary: string;
-};
-
 type ResourceLink = {
   href: string;
   label: string;
   external: boolean;
+  appLabel: string;
+};
+
+type AuditViewModel = {
+  record: AuditLogRecord;
+  actorScope: keyof typeof actorToneByScope;
+  createdAtLabel: string;
+  actorLabel: string;
+  actorSubLabel: string;
+  masked: boolean;
+  resourceLabel: string;
+  resourceLink: ResourceLink;
+  requestAuditLink: string;
+  oldSummary: string;
+  newSummary: string;
+};
+
+type AuditTableRow = AuditViewModel &
+  Record<string, unknown> & {
+    _selected: boolean;
+  };
+
+type EmptyStateSpec = {
+  title: string;
+  body: string;
+  tone: CanvasTone;
+  actions: Array<{ href: string; label: string }>;
 };
 
 function getSingleParam(searchParams: SearchParamsInput, key: string): string {
   const value = searchParams[key];
-  if (Array.isArray(value)) {
-    return value[0] ?? "";
-  }
-  return value ?? "";
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+}
+
+function isEmptyReason(value: string): value is EmptyReason {
+  return (
+    value === "no_data" ||
+    value === "not_provisioned" ||
+    value === "fetch_failed" ||
+    value === "permission_denied" ||
+    value === "external_unavailable" ||
+    value === "filtered_empty"
+  );
 }
 
 function parseFilters(searchParams: SearchParamsInput): FilterState {
@@ -294,29 +340,45 @@ function parseFilters(searchParams: SearchParamsInput): FilterState {
   };
 }
 
-function isEmptyReason(value: string): value is EmptyReason {
-  return (
-    value === "no_data" ||
-    value === "not_provisioned" ||
-    value === "fetch_failed" ||
-    value === "permission_denied" ||
-    value === "external_unavailable" ||
-    value === "filtered_empty"
-  );
+function buildAuditHref(overrides: Partial<FilterState>) {
+  const merged: FilterState = {
+    actor: "",
+    module: "",
+    action: "",
+    from: "",
+    to: "",
+    auditId: "",
+    expanded: "",
+    empty: "",
+    ...overrides,
+  };
+  const params = new URLSearchParams();
+
+  if (merged.actor) params.set("actor", merged.actor);
+  if (merged.module) params.set("module", merged.module);
+  if (merged.action) params.set("action", merged.action);
+  if (merged.from) params.set("from", merged.from);
+  if (merged.to) params.set("to", merged.to);
+  if (merged.auditId) params.set("auditId", merged.auditId);
+  if (merged.expanded) params.set("expanded", merged.expanded);
+  if (merged.empty) params.set("empty", merged.empty);
+
+  const query = params.toString();
+  return query ? `/audit?${query}` : "/audit";
 }
 
 function formatAuditAt(value: string | null | undefined) {
   if (!value) return "—";
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return auditDateFormatter.format(parsed);
+  return Number.isNaN(parsed.getTime())
+    ? "—"
+    : auditDateFormatter.format(parsed);
 }
 
 function formatDay(value: string | null | undefined) {
   if (!value) return "—";
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return dayFormatter.format(parsed);
+  return Number.isNaN(parsed.getTime()) ? "—" : dayFormatter.format(parsed);
 }
 
 function normalizeActorScope(
@@ -348,8 +410,7 @@ function maskString(value: string) {
 function maskEmail(value: string) {
   const [name, domain] = value.split("@");
   if (!domain) return maskString(value);
-  const head = (name ?? "").slice(0, 2) || "••";
-  return `${head}•••@${domain}`;
+  return `${(name ?? "").slice(0, 2) || "••"}•••@${domain}`;
 }
 
 function shouldMaskByKey(key: string) {
@@ -386,19 +447,10 @@ function stringifySummary(value: Record<string, unknown> | undefined) {
   return JSON.stringify(sanitizeValue(value), null, 2);
 }
 
-function isLikelyMaskedActor(
-  actorId: string | null,
-  actorType: AuditLogRecord["actorType"],
-) {
-  if (!actorId) return actorType !== "system";
-  return actorId.includes("@");
-}
-
 function formatActorPrimary(record: AuditLogRecord) {
   if (!record.actorId) {
     return record.actorType === "system" ? "System actor" : "Masked by policy";
   }
-
   return record.actorId.includes("@")
     ? maskEmail(record.actorId)
     : record.actorId;
@@ -410,50 +462,33 @@ function formatActorSecondary(record: AuditLogRecord) {
       ? "background automation"
       : "sensitive identity";
   }
-
   return record.actorId.includes("@")
     ? "masked sensitive identity"
-    : record.actorId;
+    : record.actorType;
+}
+
+function isLikelyMaskedActor(record: AuditLogRecord) {
+  if (!record.actorId) {
+    return record.actorType !== "system";
+  }
+  return record.actorId.includes("@");
 }
 
 function formatResource(record: AuditLogRecord) {
-  if (record.resourceId) return `${record.resourceType} · ${record.resourceId}`;
-  return record.resourceType || "—";
-}
-
-function buildAuditSelfLink(filters: FilterState, auditId: string) {
-  const params = new URLSearchParams();
-  if (filters.actor) params.set("actor", filters.actor);
-  if (filters.module) params.set("module", filters.module);
-  if (filters.action) params.set("action", filters.action);
-  if (filters.from) params.set("from", filters.from);
-  if (filters.to) params.set("to", filters.to);
-  params.set("auditId", auditId);
-  params.set("expanded", auditId);
-  return `/audit?${params.toString()}#audit-${encodeURIComponent(auditId)}`;
+  if (!record.resourceId) return record.resourceType || "—";
+  return `${record.resourceType} · ${record.resourceId}`;
 }
 
 function buildBaseUrl(base: string, route: string) {
   return `${base.replace(/\/$/, "")}${route}`;
 }
 
+function buildRequestAuditLink(filters: FilterState, auditId: string) {
+  return `${buildAuditHref({ ...filters, auditId, expanded: auditId, empty: "" })}#audit-detail`;
+}
+
 function buildResourceLink(record: AuditLogRecord): ResourceLink {
   const auditRoute = `/audit?auditId=${encodeURIComponent(record.auditId)}`;
-  if (record.actorType === "ops_user") {
-    return {
-      href: buildBaseUrl(OPS_CONSOLE_URL, auditRoute),
-      label: "前往 Ops Console",
-      external: true,
-    };
-  }
-
-  if (record.actorType === "platform_admin") {
-    return {
-      href: buildBaseUrl(PLATFORM_ADMIN_URL, auditRoute),
-      label: "前往 Platform Admin",
-      external: true,
-    };
-  }
 
   switch (record.resourceType) {
     case "booking":
@@ -462,50 +497,78 @@ function buildResourceLink(record: AuditLogRecord): ResourceLink {
         href: record.resourceId
           ? `/bookings/${encodeURIComponent(record.resourceId)}`
           : auditRoute,
-        label: "查看叫車",
+        label: "查看叫車詳情",
         external: false,
+        appLabel: "Tenant Console",
       };
     case "invoice":
       return {
         href: "/invoices",
         label: "查看對帳單",
         external: false,
+        appLabel: "Tenant Console",
       };
     case "report_job":
       return {
         href: "/reports",
-        label: "查看報表",
+        label: "查看報表工作",
         external: false,
+        appLabel: "Tenant Console",
       };
     case "tenant_settings":
       return {
         href: "/settings",
         label: "查看租戶設定",
         external: false,
+        appLabel: "Tenant Console",
       };
     case "tenant_user":
       return {
         href: "/users",
         label: "查看人員與角色",
         external: false,
+        appLabel: "Tenant Console",
       };
     case "cost_center":
       return {
         href: "/cost-centers",
         label: "查看成本中心",
         external: false,
+        appLabel: "Tenant Console",
       };
     default:
-      return {
-        href: `/audit?auditId=${encodeURIComponent(record.auditId)}`,
-        label: "回到稽核詳細",
-        external: false,
-      };
+      break;
   }
+
+  if (record.actorType === "ops_user") {
+    return {
+      href: buildBaseUrl(OPS_CONSOLE_URL, auditRoute),
+      label: "在 Ops Console 開啟",
+      external: true,
+      appLabel: "Ops Console",
+    };
+  }
+
+  if (record.actorType === "platform_admin") {
+    return {
+      href: buildBaseUrl(PLATFORM_ADMIN_URL, auditRoute),
+      label: "在 Platform Admin 開啟",
+      external: true,
+      appLabel: "Platform Admin",
+    };
+  }
+
+  return {
+    href: auditRoute,
+    label: "固定連結此稽核列",
+    external: false,
+    appLabel: "Tenant Console",
+  };
 }
 
 function matchesDateRange(record: AuditLogRecord, filters: FilterState) {
   if (!filters.from && !filters.to) return true;
+
   const createdAt = new Date(record.createdAt);
   if (Number.isNaN(createdAt.getTime())) return false;
 
@@ -536,7 +599,11 @@ function applyFilters(records: AuditLogRecord[], filters: FilterState) {
     if (filters.action && record.actionName !== filters.action) {
       return false;
     }
-    if (filters.auditId && record.auditId !== filters.auditId) {
+    if (
+      filters.auditId &&
+      !record.auditId.includes(filters.auditId) &&
+      !record.requestId.includes(filters.auditId)
+    ) {
       return false;
     }
     return matchesDateRange(record, filters);
@@ -548,16 +615,17 @@ function toViewModel(
   filters: FilterState,
 ): AuditViewModel {
   const actorScope = normalizeActorScope(record.actorType);
+
   return {
     record,
-    createdAtLabel: formatAuditAt(record.createdAt),
     actorScope,
+    createdAtLabel: formatAuditAt(record.createdAt),
     actorLabel: formatActorPrimary(record),
     actorSubLabel: formatActorSecondary(record),
+    masked: isLikelyMaskedActor(record),
     resourceLabel: formatResource(record),
-    masked: isLikelyMaskedActor(record.actorId, record.actorType),
-    detailLink: buildResourceLink(record),
-    auditLink: buildAuditSelfLink(filters, record.auditId),
+    resourceLink: buildResourceLink(record),
+    requestAuditLink: buildRequestAuditLink(filters, record.auditId),
     oldSummary: stringifySummary(record.oldValuesSummary),
     newSummary: stringifySummary(record.newValuesSummary),
   };
@@ -566,6 +634,7 @@ function toViewModel(
 function describeErrorReason(error: unknown): EmptyReason {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
+
   if (
     normalized.includes("403") ||
     normalized.includes("401") ||
@@ -588,87 +657,61 @@ function describeErrorReason(error: unknown): EmptyReason {
   return "fetch_failed";
 }
 
-function buildEmptyState(reason: EmptyReason) {
-  const clearHref = "/audit";
-  const filteredHref = buildAuditHref({
-    empty: "",
-  });
-
+function buildEmptyState(reason: EmptyReason): EmptyStateSpec {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "稽核匯出治理尚未啟用",
-        body: "租戶端仍可閱讀稽核列，但簽章匯出與治理附件尚未在此租戶完成 provisioning。",
+        title: "稽核治理尚未完成 provisioning",
+        body: "列表可讀，但簽章匯出與治理附件尚未在此租戶啟用，需先完成設定與治理接線。",
+        tone: "warn",
         actions: [
           { href: "/settings", label: "查看租戶設定" },
-          { href: clearHref, label: "回到稽核" },
+          { href: "/audit", label: "回到稽核" },
         ],
       };
     case "permission_denied":
       return {
-        title: "目前角色無法查看稽核資料",
-        body: "此頁依 §9.6.12 只對具 audit read 的租戶角色開放。請請求 `tc_admin` 或 `tc_finance` 協助。",
-        actions: [{ href: "/settings", label: "查看租戶設定" }],
+        title: "目前角色無法讀取稽核資料",
+        body: "此畫面僅對具 audit read 權限的租戶角色開放，請由 `tc_admin` 或 `tc_finance` 協助。",
+        tone: "danger",
+        actions: [{ href: "/users", label: "查看角色配置" }],
       };
     case "external_unavailable":
       return {
         title: "上游稽核服務暫時不可用",
-        body: `無法自 ${API_URL} 取得 tenant audit snapshot。此頁為 T6 手動刷新，請稍後重試。`,
-        actions: [{ href: clearHref, label: "重新整理" }],
+        body: `Tenant snapshot 無法自 ${API_URL} 取得最新資料。此頁 refresh tier 為 T6，只支援手動重新整理。`,
+        tone: "warn",
+        actions: [{ href: "/audit", label: "重新整理" }],
       };
     case "fetch_failed":
       return {
         title: "稽核資料讀取失敗",
-        body: "請保留目前篩選條件並重新整理；若問題持續，請以 request correlation 通知平台支援。",
-        actions: [{ href: clearHref, label: "重新整理" }],
+        body: "保留目前篩選條件後重試；若持續失敗，請帶著 request correlation 聯絡平台支援。",
+        tone: "danger",
+        actions: [{ href: "/audit", label: "重新整理" }],
       };
     case "filtered_empty":
       return {
         title: "目前篩選條件沒有命中任何稽核列",
-        body: "可放寬 actor / module / action / 時間範圍，或直接清除所有篩選。",
+        body: "可放寬 actor、module、action 或時間範圍，或直接清除所有篩選後重新檢視。",
+        tone: "info",
         actions: [
-          { href: clearHref, label: "清除篩選" },
-          { href: filteredHref, label: "退出示範空態" },
+          { href: "/audit", label: "清除篩選" },
+          { href: buildAuditHref({ empty: "" }), label: "退出空態預覽" },
         ],
       };
     case "no_data":
     default:
       return {
         title: "目前沒有可顯示的稽核列",
-        body: "此租戶尚未產生任何 state-changing action，或資料保留快照仍在初始化。",
+        body: "此租戶尚未產生任何 state-changing action，或 audit snapshot 仍在初始化中。",
+        tone: "neutral",
         actions: [
           { href: "/bookings/new", label: "建立第一筆叫車" },
-          { href: clearHref, label: "重新整理" },
+          { href: "/audit", label: "重新整理" },
         ],
       };
   }
-}
-
-function buildAuditHref(overrides: Partial<FilterState>) {
-  const params = new URLSearchParams();
-  const merged: FilterState = {
-    actor: "",
-    module: "",
-    action: "",
-    from: "",
-    to: "",
-    auditId: "",
-    expanded: "",
-    empty: "",
-    ...overrides,
-  };
-
-  if (merged.actor) params.set("actor", merged.actor);
-  if (merged.module) params.set("module", merged.module);
-  if (merged.action) params.set("action", merged.action);
-  if (merged.from) params.set("from", merged.from);
-  if (merged.to) params.set("to", merged.to);
-  if (merged.auditId) params.set("auditId", merged.auditId);
-  if (merged.expanded) params.set("expanded", merged.expanded);
-  if (merged.empty) params.set("empty", merged.empty);
-
-  const query = params.toString();
-  return query ? `/audit?${query}` : "/audit";
 }
 
 function buildCsv(rows: AuditViewModel[]) {
@@ -708,43 +751,140 @@ function exportHref(rows: AuditViewModel[]) {
   return `data:text/csv;charset=utf-8,${encodeURIComponent(buildCsv(rows))}`;
 }
 
+function resolvePageActions(rowCount: number) {
+  return pageActionCatalog.map((action) => {
+    if (action.action !== "export") {
+      return action;
+    }
+    return rowCount > 0
+      ? action
+      : {
+          ...action,
+          enabled: false,
+          disabledReasonCode: "No visible audit rows to export",
+        };
+  });
+}
+
+function renderActionLink(
+  action: ResourceActionDescriptor,
+  href: string,
+  label: string,
+) {
+  const style: CSSProperties =
+    action.action === "refresh"
+      ? {
+          ...linkButtonBaseStyle,
+          background: th.accent,
+          borderColor: th.accent,
+          color: "#fff",
+        }
+      : action.action === "export"
+        ? {
+            ...linkButtonBaseStyle,
+            background: "transparent",
+            color: th.textMuted,
+          }
+        : {
+            ...linkButtonBaseStyle,
+            background: th.surface,
+            color: th.text,
+          };
+
+  return (
+    <a
+      href={action.enabled ? href : undefined}
+      style={{
+        ...style,
+        ...(action.enabled
+          ? null
+          : { opacity: 0.45, cursor: "not-allowed", pointerEvents: "none" }),
+      }}
+      title={!action.enabled ? action.disabledReasonCode : undefined}
+    >
+      {label}
+    </a>
+  );
+}
+
+function buildTableColumns(
+  filters: FilterState,
+): CanvasTableColumn<AuditTableRow>[] {
+  return [
+    {
+      h: "AT",
+      w: 150,
+      mono: true,
+      r: (row) => row.createdAtLabel,
+    },
+    {
+      h: "ACTOR",
+      w: 220,
+      r: (row) => (
+        <div style={stackedCellStyle}>
+          <span style={primaryTextStyle}>{row.actorLabel}</span>
+          <span style={secondaryTextStyle}>{row.actorSubLabel}</span>
+          {row.masked ? (
+            <span style={secondaryTextStyle}>masked sensitive identity</span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      h: "SCOPE",
+      w: 108,
+      r: (row) => (
+        <CanvasPill theme={th} tone={actorToneByScope[row.actorScope]} dot>
+          {actorScopeLabel(row.actorScope)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: "MODULE / ACTION",
+      w: 210,
+      r: (row) => (
+        <div style={stackedCellStyle}>
+          <span style={monoTextStyle}>{row.record.moduleName}</span>
+          <span style={secondaryTextStyle}>{row.record.actionName}</span>
+        </div>
+      ),
+    },
+    {
+      h: "RESOURCE",
+      w: 230,
+      r: (row) => (
+        <div style={stackedCellStyle}>
+          <span>{row.resourceLabel}</span>
+          <span style={secondaryTextStyle}>{row.resourceLink.appLabel}</span>
+        </div>
+      ),
+    },
+    {
+      h: "REQUEST",
+      w: 170,
+      mono: true,
+      r: (row) => row.record.requestId || "—",
+    },
+    {
+      h: "DETAIL",
+      w: 116,
+      r: (row) => (
+        <a
+          href={`${buildAuditHref({ ...filters, expanded: row.record.auditId, empty: "" })}#audit-detail`}
+          style={inlineLinkStyle}
+        >
+          {row._selected ? "已展開" : "查看細節"}
+        </a>
+      ),
+    },
+  ];
+}
+
 async function loadAuditLogs() {
   const client = getTenantClient();
   const logs = (await client.listTenantAuditLogs()) as AuditLogRecord[];
   return [...logs].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
-  );
-}
-
-function renderActionButton(
-  action: ResourceActionDescriptor,
-  href: string,
-  label: string,
-  icon?: string,
-) {
-  const baseStyle =
-    action.action === "refresh"
-      ? primaryButtonStyle
-      : action.action === "filter"
-        ? secondaryButtonStyle
-        : ghostButtonStyle;
-
-  return (
-    <a
-      href={action.enabled ? href : undefined}
-      title={!action.enabled ? action.disabledReasonCode : undefined}
-      style={{
-        ...baseStyle,
-        ...(!action.enabled
-          ? { opacity: 0.45, cursor: "not-allowed", pointerEvents: "none" }
-          : {}),
-      }}
-    >
-      <span style={{ fontFamily: th.monoFamily, fontSize: 11.5 }}>
-        {icon ? `[${icon}]` : null}
-      </span>
-      <span>{label}</span>
-    </a>
   );
 }
 
@@ -767,25 +907,50 @@ export default async function AuditPage({
 
   const filteredRecords = applyFilters(records, filters);
   const rows = filteredRecords.map((record) => toViewModel(record, filters));
+  const focusedAuditId =
+    filters.expanded || filters.auditId || rows[0]?.record.auditId || "";
+  const focusedRow =
+    rows.find((row) => row.record.auditId === focusedAuditId) ??
+    rows[0] ??
+    null;
+  const tableRows: AuditTableRow[] = rows.map((row) => ({
+    ...row,
+    _selected: row.record.auditId === focusedRow?.record.auditId,
+  }));
+
   const actorOptions = Array.from(
     new Set(records.map((record) => normalizeActorScope(record.actorType))),
   );
   const moduleOptions = Array.from(
     new Set(records.map((record) => record.moduleName)),
-  ).sort();
+  ).sort((left, right) => left.localeCompare(right, "en"));
   const actionOptions = Array.from(
     new Set(records.map((record) => record.actionName)),
-  ).sort();
+  ).sort((left, right) => left.localeCompare(right, "en"));
+  const visibleActorScopes = Array.from(
+    new Set(
+      filteredRecords.map((record) => normalizeActorScope(record.actorType)),
+    ),
+  );
   const moduleCount = new Set(
     filteredRecords.map((record) => record.moduleName),
   ).size;
-  const requestLinkedCount = filteredRecords.filter(
-    (record) => record.requestId,
+  const maskedActorCount = rows.filter((row) => row.masked).length;
+  const requestLinkedCount = filteredRecords.filter((record) =>
+    Boolean(record.requestId),
   ).length;
-  const visibleActorScopes = new Set(
-    filteredRecords.map((record) => normalizeActorScope(record.actorType)),
-  );
-  const focusedAuditId = filters.expanded || filters.auditId;
+  const exportCount = rows.length;
+  const availableActions = resolvePageActions(exportCount);
+  const filterAction = availableActions.find(
+    (action) => action.action === "filter",
+  )!;
+  const refreshAction = availableActions.find(
+    (action) => action.action === "refresh",
+  )!;
+  const exportAction = availableActions.find(
+    (action) => action.action === "export",
+  )!;
+
   const emptyReason =
     filters.empty ||
     errorReason ||
@@ -795,46 +960,22 @@ export default async function AuditPage({
         : "no_data"
       : null);
   const emptyState = emptyReason ? buildEmptyState(emptyReason) : null;
-  const refreshAction = pageActions.find(
-    (action) => action.action === "refresh",
-  )!;
-  const filterAction = pageActions.find(
-    (action) => action.action === "filter",
-  )!;
-  const exportAction = {
-    ...pageActions.find((action) => action.action === "export")!,
-    enabled: filteredRecords.length > 0,
-    ...(filteredRecords.length > 0
-      ? {}
-      : { disabledReasonCode: "No visible audit rows to export" }),
-  };
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
         title="稽核"
-        subtitle="cross-actor visibility · request correlation · manual refresh T6"
+        subtitle="cross-actor visibility · request correlation · refresh tier T6"
         actions={
           <>
-            {renderActionButton(
-              filterAction,
-              buildAuditHref({ empty: "" }),
-              "清除篩選",
-              "filter",
-            )}
-            {renderActionButton(
+            {renderActionLink(filterAction, "/audit", "清除篩選")}
+            {renderActionLink(
               refreshAction,
               buildAuditHref(filters),
               "重新整理",
-              "refresh",
             )}
-            {renderActionButton(
-              exportAction,
-              exportHref(rows),
-              "匯出篩選結果",
-              "export",
-            )}
+            {renderActionLink(exportAction, exportHref(rows), "匯出篩選結果")}
           </>
         }
       />
@@ -844,8 +985,8 @@ export default async function AuditPage({
           theme={th}
           tone="info"
           icon="audit"
-          title="Tenant audit includes cross-actor tenant-owned actions"
-          body="Q-TEN13 要求 tenant admin / finance 可看見 tenant、ops、platform、system 對租戶資源的操作；敏感欄位在此頁以 policy-safe 方式呈現。"
+          title="Tenant audit includes tenant, ops, platform, system, and partner actors on tenant-owned resources"
+          body="Q-TEN13 要求租戶側可檢視跨 actor realm 的租戶資源操作。此頁保留 request correlation，並對 sensitive fields 做 policy-safe masking。"
         />
 
         <div style={kpiGridStyle}>
@@ -854,8 +995,16 @@ export default async function AuditPage({
             label="Visible Rows"
             value={String(filteredRecords.length)}
             sub={
-              records.length ? `of ${records.length} rows` : "current snapshot"
+              records.length
+                ? `of ${records.length} in snapshot`
+                : "current snapshot"
             }
+          />
+          <CanvasKPI
+            theme={th}
+            label="Actor Scopes"
+            value={String(visibleActorScopes.length)}
+            sub={visibleActorScopes.join(" · ") || "—"}
           />
           <CanvasKPI
             theme={th}
@@ -865,370 +1014,452 @@ export default async function AuditPage({
           />
           <CanvasKPI
             theme={th}
-            label="Actor Scopes"
-            value={String(visibleActorScopes.size)}
-            sub={Array.from(visibleActorScopes).join(" · ") || "—"}
-          />
-          <CanvasKPI
-            theme={th}
-            label="Request-linked"
-            value={String(requestLinkedCount)}
-            sub="rows retaining request correlation"
+            label="Masked Fields"
+            value={String(maskedActorCount)}
+            sub="rows with policy-safe identity masking"
           />
         </div>
 
-        <CanvasCard theme={th}>
-          <form
-            action="/audit"
-            method="get"
-            style={{ display: "flex", flexDirection: "column", gap: 14 }}
-          >
-            <div style={filterGridStyle}>
-              <label style={fieldStackStyle}>
-                <span style={fieldLabelStyle}>Actor Scope</span>
-                <select
-                  defaultValue={filters.actor}
-                  name="actor"
-                  style={nativeInputStyle}
-                >
-                  <option value="">全部</option>
-                  {actorOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {actorScopeLabel(option)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={fieldStackStyle}>
-                <span style={fieldLabelStyle}>Module</span>
-                <select
-                  defaultValue={filters.module}
-                  name="module"
-                  style={nativeInputStyle}
-                >
-                  <option value="">全部</option>
-                  {moduleOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={fieldStackStyle}>
-                <span style={fieldLabelStyle}>Action</span>
-                <select
-                  defaultValue={filters.action}
-                  name="action"
-                  style={nativeInputStyle}
-                >
-                  <option value="">全部</option>
-                  {actionOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={fieldStackStyle}>
-                <span style={fieldLabelStyle}>From</span>
-                <input
-                  defaultValue={filters.from}
-                  name="from"
-                  type="date"
-                  style={nativeInputStyle}
-                />
-              </label>
-              <label style={fieldStackStyle}>
-                <span style={fieldLabelStyle}>To</span>
-                <input
-                  defaultValue={filters.to}
-                  name="to"
-                  type="date"
-                  style={nativeInputStyle}
-                />
-              </label>
-              <label style={fieldStackStyle}>
-                <span style={fieldLabelStyle}>Audit ID</span>
-                <input
-                  defaultValue={filters.auditId}
-                  name="auditId"
-                  placeholder="req / audit deep link"
-                  style={nativeMonoInputStyle}
-                />
-              </label>
-            </div>
-
-            <div style={controlRowStyle}>
-              <button style={primaryButtonStyle} type="submit">
-                套用篩選
-              </button>
-              <a href="/audit" style={secondaryButtonStyle}>
-                重設
-              </a>
-              <span style={secondaryTextStyle}>
-                T6 manual refresh only. Filters are applied server-side on the
-                tenant snapshot.
-              </span>
-            </div>
-          </form>
-        </CanvasCard>
-
-        <CanvasCard
-          theme={th}
-          title="Recent audit rows"
-          subtitle="Expand a row for masked detail and resource exit paths."
-        >
-          {errorMessage ? (
-            <div style={{ padding: "0 0 12px" }}>
-              <CanvasBanner
-                theme={th}
-                tone="warn"
-                title="Latest fetch returned an error"
-                body={errorMessage}
-              />
-            </div>
-          ) : null}
-
-          {emptyState ? (
-            <div style={emptyStateWrapStyle}>
-              <CanvasPill theme={th} tone="warn" dot>
-                {emptyReason}
-              </CanvasPill>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>
-                  {emptyState.title}
+        <div style={contentGridStyle}>
+          <div style={mainLaneStyle}>
+            <CanvasCard
+              theme={th}
+              title="篩選"
+              subtitle="server-side on tenant snapshot"
+            >
+              <form
+                action="/audit"
+                method="get"
+                style={{ display: "grid", gap: 14 }}
+              >
+                <div style={filterGridStyle}>
+                  <label style={fieldStackStyle}>
+                    <span style={fieldLabelStyle}>Actor Scope</span>
+                    <select
+                      defaultValue={filters.actor}
+                      name="actor"
+                      style={inputStyle}
+                    >
+                      <option value="">全部</option>
+                      {actorOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {actorScopeLabel(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={fieldStackStyle}>
+                    <span style={fieldLabelStyle}>Module</span>
+                    <select
+                      defaultValue={filters.module}
+                      name="module"
+                      style={inputStyle}
+                    >
+                      <option value="">全部</option>
+                      {moduleOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={fieldStackStyle}>
+                    <span style={fieldLabelStyle}>Action</span>
+                    <select
+                      defaultValue={filters.action}
+                      name="action"
+                      style={inputStyle}
+                    >
+                      <option value="">全部</option>
+                      {actionOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={fieldStackStyle}>
+                    <span style={fieldLabelStyle}>From</span>
+                    <input
+                      defaultValue={filters.from}
+                      name="from"
+                      type="date"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={fieldStackStyle}>
+                    <span style={fieldLabelStyle}>To</span>
+                    <input
+                      defaultValue={filters.to}
+                      name="to"
+                      type="date"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={fieldStackStyle}>
+                    <span style={fieldLabelStyle}>Audit / Request ID</span>
+                    <input
+                      defaultValue={filters.auditId}
+                      name="auditId"
+                      placeholder="audit-… or req-…"
+                      style={monoInputStyle}
+                    />
+                  </label>
                 </div>
-                <div
-                  style={{
-                    ...secondaryTextStyle,
-                    fontSize: 12.5,
-                    maxWidth: 620,
-                  }}
-                >
-                  {emptyState.body}
-                </div>
-              </div>
-              <div style={actionRowStyle}>
-                {emptyState.actions.map((action) => (
-                  <a
-                    key={action.href + action.label}
-                    href={action.href}
-                    style={secondaryButtonStyle}
+
+                <div style={controlRowStyle}>
+                  <button
+                    type="submit"
+                    style={{
+                      ...linkButtonBaseStyle,
+                      background: th.accent,
+                      borderColor: th.accent,
+                      color: "#fff",
+                    }}
                   >
-                    {action.label}
+                    套用篩選
+                  </button>
+                  <a
+                    href="/audit"
+                    style={{
+                      ...linkButtonBaseStyle,
+                      background: th.surface,
+                      color: th.text,
+                    }}
+                  >
+                    重設
                   </a>
-                ))}
-              </div>
-              <div style={secondaryTextStyle}>
-                EmptyReason previews:{" "}
+                  <span style={secondaryTextStyle}>
+                    Refresh tier T6: manual refresh only. Export follows the
+                    current filtered subset.
+                  </span>
+                </div>
+              </form>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
+              title="稽核列表"
+              subtitle="Cross-actor rows remain visible on tenant-owned resources regardless of actor realm."
+              padding={0}
+              style={tableCardStyle}
+            >
+              {errorMessage ? (
+                <div style={{ padding: 16 }}>
+                  <CanvasBanner
+                    theme={th}
+                    tone="warn"
+                    title="Latest fetch returned an error"
+                    body={errorMessage}
+                  />
+                </div>
+              ) : null}
+
+              {emptyState ? (
+                <div style={emptyStateStyle}>
+                  <CanvasPill theme={th} tone={emptyState.tone} dot>
+                    {emptyReason}
+                  </CanvasPill>
+                  <div>
+                    <div
+                      style={{ fontSize: 18, fontWeight: 700, color: th.text }}
+                    >
+                      {emptyState.title}
+                    </div>
+                    <div
+                      style={{
+                        ...secondaryTextStyle,
+                        marginTop: 6,
+                        maxWidth: 640,
+                      }}
+                    >
+                      {emptyState.body}
+                    </div>
+                  </div>
+                  <div style={controlRowStyle}>
+                    {emptyState.actions.map((action) => (
+                      <a
+                        key={`${action.href}-${action.label}`}
+                        href={action.href}
+                        style={{
+                          ...linkButtonBaseStyle,
+                          background: th.surface,
+                          color: th.text,
+                        }}
+                      >
+                        {action.label}
+                      </a>
+                    ))}
+                  </div>
+                  <div style={emptyReasonPreviewStyle}>
+                    {(
+                      [
+                        "no_data",
+                        "not_provisioned",
+                        "fetch_failed",
+                        "permission_denied",
+                        "external_unavailable",
+                        "filtered_empty",
+                      ] as EmptyReason[]
+                    ).map((reason) => (
+                      <a
+                        key={reason}
+                        href={buildAuditHref({ ...filters, empty: reason })}
+                        style={inlineLinkStyle}
+                      >
+                        {reason}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <CanvasTable<AuditTableRow>
+                  theme={th}
+                  rows={tableRows}
+                  columns={buildTableColumns(filters)}
+                />
+              )}
+            </CanvasCard>
+
+            {focusedRow ? (
+              <CanvasCard
+                theme={th}
+                title="稽核細節"
+                subtitle="Expanded detail for the currently focused audit record."
+              >
+                <div id="audit-detail" style={{ display: "grid", gap: 16 }}>
+                  <CanvasDL
+                    theme={th}
+                    cols={2}
+                    items={[
+                      {
+                        label: "Audit ID",
+                        value: focusedRow.record.auditId,
+                        mono: true,
+                      },
+                      {
+                        label: "Request ID",
+                        value: focusedRow.record.requestId || "—",
+                        mono: true,
+                      },
+                      {
+                        label: "Actor Type",
+                        value: focusedRow.record.actorType,
+                        mono: true,
+                      },
+                      {
+                        label: "Tenant",
+                        value: focusedRow.record.tenantId ?? "—",
+                        mono: true,
+                      },
+                      {
+                        label: "Resource",
+                        value: focusedRow.resourceLabel,
+                        mono: true,
+                      },
+                      {
+                        label: "Created At",
+                        value: formatDay(focusedRow.record.createdAt),
+                        mono: true,
+                      },
+                    ]}
+                  />
+
+                  <div style={summaryGridStyle}>
+                    <div style={summaryCellStyle}>
+                      <span style={summaryLabelStyle}>Exit path</span>
+                      <span style={summaryValueStyle}>
+                        {focusedRow.resourceLink.appLabel}
+                      </span>
+                      <span style={summarySubStyle}>
+                        In-app for tenant resources, new tab for
+                        ops/platform-owned follow-up.
+                      </span>
+                    </div>
+                    <div style={summaryCellStyle}>
+                      <span style={summaryLabelStyle}>Masking</span>
+                      <span style={summaryValueStyle}>
+                        {focusedRow.masked
+                          ? "Sensitive fields masked"
+                          : "No masking applied"}
+                      </span>
+                      <span style={summarySubStyle}>
+                        Email / contact-like values are rendered with
+                        policy-safe obfuscation.
+                      </span>
+                    </div>
+                    <div style={summaryCellStyle}>
+                      <span style={summaryLabelStyle}>Correlation</span>
+                      <span style={summaryValueStyle}>
+                        {focusedRow.record.requestId
+                          ? "Request-linked"
+                          : "Standalone"}
+                      </span>
+                      <span style={summarySubStyle}>
+                        Use request ID to trace the same action across services.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={detailGridStyle}>
+                    <div>
+                      <div style={fieldLabelStyle}>Old Values Summary</div>
+                      <pre style={detailCodeStyle}>{focusedRow.oldSummary}</pre>
+                    </div>
+                    <div>
+                      <div style={fieldLabelStyle}>New Values Summary</div>
+                      <pre style={detailCodeStyle}>{focusedRow.newSummary}</pre>
+                    </div>
+                  </div>
+
+                  <div style={controlRowStyle}>
+                    <a
+                      href={focusedRow.requestAuditLink}
+                      style={{
+                        ...linkButtonBaseStyle,
+                        background: th.surface,
+                        color: th.text,
+                      }}
+                    >
+                      固定連結此稽核列
+                    </a>
+                    <a
+                      href={focusedRow.resourceLink.href}
+                      target={
+                        focusedRow.resourceLink.external ? "_blank" : undefined
+                      }
+                      rel={
+                        focusedRow.resourceLink.external
+                          ? "noreferrer"
+                          : undefined
+                      }
+                      style={{
+                        ...linkButtonBaseStyle,
+                        background: th.accent,
+                        borderColor: th.accent,
+                        color: "#fff",
+                      }}
+                    >
+                      {focusedRow.resourceLink.label}
+                    </a>
+                  </div>
+                </div>
+              </CanvasCard>
+            ) : null}
+          </div>
+
+          <div style={sideLaneStyle}>
+            <CanvasCard
+              theme={th}
+              title="Cross-actor coverage"
+              subtitle="Each actor realm stays visually distinct for Q-TEN13 review."
+            >
+              <div style={summaryGridStyle}>
                 {(
                   [
-                    "no_data",
-                    "not_provisioned",
-                    "fetch_failed",
-                    "permission_denied",
-                    "external_unavailable",
-                    "filtered_empty",
-                  ] as EmptyReason[]
-                ).map((reason, index, all) => (
-                  <span key={reason}>
-                    <a
-                      href={buildAuditHref({ ...filters, empty: reason })}
-                      style={inlineLinkStyle}
-                    >
-                      {reason}
-                    </a>
-                    {index < all.length - 1 ? " · " : ""}
-                  </span>
+                    [
+                      "tenant",
+                      "Tenant admins / finance can verify tenant-originated changes.",
+                    ],
+                    [
+                      "ops",
+                      "Ops interventions remain visible without leaving the tenant realm.",
+                    ],
+                    [
+                      "platform",
+                      "Platform overrides and governance actions are surfaced distinctly.",
+                    ],
+                    [
+                      "system",
+                      "Automations stay readable even when no human actor is attached.",
+                    ],
+                    [
+                      "partner",
+                      "Partner API key mutations remain attributable in the shared audit lane.",
+                    ],
+                  ] as Array<[keyof typeof actorToneByScope, string]>
+                ).map(([scope, body]) => (
+                  <div key={scope} style={summaryCellStyle}>
+                    <CanvasPill theme={th} tone={actorToneByScope[scope]} dot>
+                      {actorScopeLabel(scope)}
+                    </CanvasPill>
+                    <div style={summarySubStyle}>{body}</div>
+                  </div>
                 ))}
               </div>
-            </div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={auditTableStyle}>
-                <thead>
-                  <tr>
-                    <th style={{ ...auditHeaderCellStyle, width: 168 }}>AT</th>
-                    <th style={{ ...auditHeaderCellStyle, width: 230 }}>
-                      ACTOR
-                    </th>
-                    <th style={{ ...auditHeaderCellStyle, width: 132 }}>
-                      SCOPE
-                    </th>
-                    <th style={{ ...auditHeaderCellStyle, width: 144 }}>
-                      MODULE
-                    </th>
-                    <th style={{ ...auditHeaderCellStyle, width: 220 }}>
-                      ACTION
-                    </th>
-                    <th style={{ ...auditHeaderCellStyle, width: 220 }}>
-                      RESOURCE
-                    </th>
-                    <th style={{ ...auditHeaderCellStyle, width: 160 }}>
-                      REQUEST
-                    </th>
-                    <th style={auditHeaderCellStyle}>DETAIL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => {
-                    const open = row.record.auditId === focusedAuditId;
-                    return (
-                      <tr
-                        id={`audit-${row.record.auditId}`}
-                        key={row.record.auditId}
-                      >
-                        <td style={monoCellStyle}>{row.createdAtLabel}</td>
-                        <td style={auditCellStyle}>
-                          <div style={stackedCellStyle}>
-                            <strong>{row.actorLabel}</strong>
-                            <span style={secondaryTextStyle}>
-                              {row.actorSubLabel}
-                            </span>
-                            {row.masked ? (
-                              <span style={secondaryTextStyle}>
-                                masked sensitive identity
-                              </span>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td style={auditCellStyle}>
-                          <CanvasPill
-                            theme={th}
-                            tone={actorToneByScope[row.actorScope]}
-                            dot
-                          >
-                            {actorScopeLabel(row.actorScope)}
-                          </CanvasPill>
-                        </td>
-                        <td style={monoCellStyle}>{row.record.moduleName}</td>
-                        <td style={monoCellStyle}>{row.record.actionName}</td>
-                        <td style={auditCellStyle}>
-                          <div style={stackedCellStyle}>
-                            <span>{row.resourceLabel}</span>
-                            <a
-                              href={row.detailLink.href}
-                              style={inlineLinkStyle}
-                              target={
-                                row.detailLink.external ? "_blank" : undefined
-                              }
-                              rel={
-                                row.detailLink.external
-                                  ? "noreferrer"
-                                  : undefined
-                              }
-                            >
-                              {row.detailLink.label}
-                            </a>
-                          </div>
-                        </td>
-                        <td style={monoCellStyle}>
-                          {row.record.requestId || "—"}
-                        </td>
-                        <td style={auditCellStyle}>
-                          <details open={open}>
-                            <summary
-                              style={{ cursor: "pointer", color: th.accent }}
-                            >
-                              {open ? "收合細節" : "展開細節"}
-                            </summary>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 12,
-                                marginTop: 12,
-                              }}
-                            >
-                              <CanvasDL
-                                theme={th}
-                                cols={2}
-                                items={[
-                                  {
-                                    label: "Audit ID",
-                                    value: row.record.auditId,
-                                    mono: true,
-                                  },
-                                  {
-                                    label: "Actor Type",
-                                    value: row.record.actorType,
-                                    mono: true,
-                                  },
-                                  {
-                                    label: "Tenant",
-                                    value: row.record.tenantId ?? "—",
-                                    mono: true,
-                                  },
-                                  {
-                                    label: "Resource ID",
-                                    value: row.record.resourceId ?? "—",
-                                    mono: true,
-                                  },
-                                  {
-                                    label: "Request",
-                                    value: row.record.requestId || "—",
-                                    mono: true,
-                                  },
-                                  {
-                                    label: "Date",
-                                    value: formatDay(row.record.createdAt),
-                                    mono: true,
-                                  },
-                                ]}
-                              />
-                              <div style={detailGridStyle}>
-                                <div>
-                                  <div style={fieldLabelStyle}>
-                                    Old Values Summary
-                                  </div>
-                                  <pre style={detailCodeStyle}>
-                                    {row.oldSummary}
-                                  </pre>
-                                </div>
-                                <div>
-                                  <div style={fieldLabelStyle}>
-                                    New Values Summary
-                                  </div>
-                                  <pre style={detailCodeStyle}>
-                                    {row.newSummary}
-                                  </pre>
-                                </div>
-                              </div>
-                              <div style={actionRowStyle}>
-                                <a
-                                  href={row.auditLink}
-                                  style={secondaryButtonStyle}
-                                >
-                                  固定連結此稽核列
-                                </a>
-                                <a
-                                  href={row.detailLink.href}
-                                  style={secondaryButtonStyle}
-                                  target={
-                                    row.detailLink.external
-                                      ? "_blank"
-                                      : undefined
-                                  }
-                                  rel={
-                                    row.detailLink.external
-                                      ? "noreferrer"
-                                      : undefined
-                                  }
-                                >
-                                  {row.detailLink.label}
-                                </a>
-                              </div>
-                            </div>
-                          </details>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CanvasCard>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
+              title="Current filter summary"
+              subtitle="What this snapshot is showing right now."
+            >
+              <div style={summaryGridStyle}>
+                <div style={summaryCellStyle}>
+                  <span style={summaryLabelStyle}>Request-linked rows</span>
+                  <span style={summaryValueStyle}>{requestLinkedCount}</span>
+                  <span style={summarySubStyle}>
+                    Rows retaining request correlation.
+                  </span>
+                </div>
+                <div style={summaryCellStyle}>
+                  <span style={summaryLabelStyle}>Export set</span>
+                  <span style={summaryValueStyle}>{exportCount}</span>
+                  <span style={summarySubStyle}>
+                    Rows included in the signed export subset.
+                  </span>
+                </div>
+                <div style={summaryCellStyle}>
+                  <span style={summaryLabelStyle}>Pinned query</span>
+                  <span style={summaryValueStyle}>
+                    {filters.auditId ? "Deep-linked" : "Ad hoc"}
+                  </span>
+                  <span style={summarySubStyle}>
+                    {filters.auditId
+                      ? "Opened from a receipt or copied audit/request link."
+                      : "Browsing the tenant audit snapshot directly."}
+                  </span>
+                </div>
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
+              title="Exit paths"
+              subtitle="Cross-app deep links open a new tab when the owning console is outside tenant."
+            >
+              <ul style={listStyle}>
+                <li style={listItemStyle}>
+                  <span style={primaryTextStyle}>Tenant resources</span>
+                  <span style={secondaryTextStyle}>
+                    Booking, invoice, report, settings, users, and cost-center
+                    records open in-app.
+                  </span>
+                </li>
+                <li style={listItemStyle}>
+                  <span style={primaryTextStyle}>Ops-owned follow-up</span>
+                  <span style={secondaryTextStyle}>
+                    Unknown ops-origin rows exit to `Ops Console
+                    /audit?auditId=...` in a new tab.
+                  </span>
+                </li>
+                <li
+                  style={{
+                    ...listItemStyle,
+                    borderBottom: "none",
+                    paddingBottom: 0,
+                  }}
+                >
+                  <span style={primaryTextStyle}>Platform-owned follow-up</span>
+                  <span style={secondaryTextStyle}>
+                    Governance or platform-admin trails exit to `Platform Admin
+                    /audit?auditId=...`.
+                  </span>
+                </li>
+              </ul>
+            </CanvasCard>
+          </div>
+        </div>
       </div>
     </div>
   );
