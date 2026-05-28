@@ -10,15 +10,14 @@ import {
 
 export type BookingDateField = "reservationStart" | "createdAt";
 
-export type BookingServiceFilter =
-  | "all"
-  | BookingRecord["serviceBucket"]
-  | BusinessDispatchSubtype;
+export type BookingServiceBucketFilter = "all" | BookingRecord["serviceBucket"];
+export type BookingSubtypeFilter = "all" | BusinessDispatchSubtype;
 
 export type BookingListQuery = {
   q: string;
   statuses: OwnedOrderStatus[];
-  service: BookingServiceFilter;
+  serviceBucket: BookingServiceBucketFilter;
+  subtype: BookingSubtypeFilter;
   approval: BookingRecord["approvalState"] | "all";
   dateField: BookingDateField;
   dateFrom: string;
@@ -32,9 +31,12 @@ type SearchParamValue = string | string[] | undefined;
 const DEFAULT_PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = new Set([10, 25, 50]);
 const ORDER_STATUS_SET = new Set<OwnedOrderStatus>(OWNED_ORDER_STATUSES);
-const SERVICE_FILTER_SET = new Set<BookingServiceFilter>([
+const SERVICE_BUCKET_FILTER_SET = new Set<BookingServiceBucketFilter>([
   "all",
   "business_dispatch",
+]);
+const SUBTYPE_FILTER_SET = new Set<BookingSubtypeFilter>([
+  "all",
   ...BUSINESS_DISPATCH_SUBTYPES,
 ]);
 
@@ -58,6 +60,11 @@ export function parseBookingListQuery(
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+  const legacyService = first(searchParams.service) as
+    | BookingServiceBucketFilter
+    | BookingSubtypeFilter;
+  const serviceBucketValue = first(searchParams.serviceBucket);
+  const subtypeValue = first(searchParams.subtype);
 
   const statuses = rawStatuses.filter((entry): entry is OwnedOrderStatus =>
     ORDER_STATUS_SET.has(entry as OwnedOrderStatus),
@@ -70,11 +77,20 @@ export function parseBookingListQuery(
   return {
     q: first(searchParams.q).trim(),
     statuses,
-    service: SERVICE_FILTER_SET.has(
-      first(searchParams.service) as BookingServiceFilter,
+    serviceBucket: SERVICE_BUCKET_FILTER_SET.has(
+      serviceBucketValue as BookingServiceBucketFilter,
     )
-      ? (first(searchParams.service) as BookingServiceFilter)
-      : "all",
+      ? (serviceBucketValue as BookingServiceBucketFilter)
+      : SERVICE_BUCKET_FILTER_SET.has(
+            legacyService as BookingServiceBucketFilter,
+          )
+        ? (legacyService as BookingServiceBucketFilter)
+        : "all",
+    subtype: SUBTYPE_FILTER_SET.has(subtypeValue as BookingSubtypeFilter)
+      ? (subtypeValue as BookingSubtypeFilter)
+      : SUBTYPE_FILTER_SET.has(legacyService as BookingSubtypeFilter)
+        ? (legacyService as BookingSubtypeFilter)
+        : "all",
     approval:
       first(searchParams.approval) === "pending" ||
       first(searchParams.approval) === "approved" ||
@@ -139,10 +155,14 @@ export function applyBookingListQuery<T extends BookingRecord>(
         : query.statuses.includes(booking.orderStatus),
     )
     .filter((booking) =>
-      query.service === "all"
+      query.serviceBucket === "all"
         ? true
-        : booking.serviceBucket === query.service ||
-          booking.businessDispatchSubtype === query.service,
+        : booking.serviceBucket === query.serviceBucket,
+    )
+    .filter((booking) =>
+      query.subtype === "all"
+        ? true
+        : booking.businessDispatchSubtype === query.subtype,
     )
     .filter((booking) =>
       query.approval === "all"
@@ -209,8 +229,11 @@ export function buildBookingListQueryString(
   if (next.statuses.length > 0) {
     params.set("status", next.statuses.join(","));
   }
-  if (next.service !== "all") {
-    params.set("service", next.service);
+  if (next.serviceBucket !== "all") {
+    params.set("serviceBucket", next.serviceBucket);
+  }
+  if (next.subtype !== "all") {
+    params.set("subtype", next.subtype);
   }
   if (next.approval !== "all") {
     params.set("approval", next.approval);

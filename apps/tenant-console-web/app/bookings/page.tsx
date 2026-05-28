@@ -12,9 +12,9 @@ import {
   BUSINESS_DISPATCH_SUBTYPES,
   OWNED_ORDER_STATUSES,
 } from "@drts/contracts";
-import { CalloutPanel } from "@/components/page-primitives";
 import {
   applyBookingListQuery,
+  type BookingListQuery,
   buildBookingListQueryString,
   parseBookingListQuery,
   toggleStatus,
@@ -109,6 +109,51 @@ type EmptyStateDescriptor = {
   actionHref?: string;
 };
 
+type TabFilterPreset = {
+  id: string;
+  label: string;
+  statuses?: OwnedOrderStatus[];
+  approval?: BookingRecord["approvalState"] | "all";
+};
+
+type PageTabDescriptor = {
+  label: string;
+  value: number;
+  href: string;
+  isActive: boolean;
+};
+
+const PAGE_TAB_PRESETS: TabFilterPreset[] = [
+  { id: "all", label: "全部" },
+  {
+    id: "live",
+    label: "進行中",
+    statuses: OWNED_ORDER_STATUSES.filter((status) =>
+      LIVE_ORDER_STATUSES.has(status),
+    ),
+  },
+  {
+    id: "reserve",
+    label: "預約",
+    statuses: RESERVATION_STATUSES,
+  },
+  {
+    id: "approval",
+    label: "待審批",
+    approval: "pending",
+  },
+  {
+    id: "done",
+    label: "已完成",
+    statuses: ["completed"],
+  },
+  {
+    id: "cancel",
+    label: "取消",
+    statuses: ["cancelled"],
+  },
+];
+
 const EMPTY_STATE_COPY: Record<TenantEmptyReason, EmptyStateDescriptor> = {
   no_data: {
     eyebrow: "No Data",
@@ -183,6 +228,8 @@ function hasActiveFilters(searchParams: Record<string, SearchParamValue>) {
   return Boolean(
     first(searchParams.q) ||
     first(searchParams.status) ||
+    first(searchParams.serviceBucket) ||
+    first(searchParams.subtype) ||
     first(searchParams.service) ||
     first(searchParams.approval) ||
     first(searchParams.dateFrom) ||
@@ -487,57 +534,102 @@ function getServiceLabel(booking: TenantBookingListRecord) {
   return `${booking.serviceBucket} / ${booking.businessDispatchSubtype.replaceAll("_", " ")}`;
 }
 
-function getPageStatusTabs(bookings: TenantBookingListRecord[]) {
-  const approvalCount = bookings.filter(
-    (booking) => booking.approvalState === "pending",
-  ).length;
-  const reserveCount = bookings.filter((booking) =>
-    RESERVATION_STATUSES.includes(booking.orderStatus),
-  ).length;
-  const liveCount = bookings.filter((booking) =>
-    LIVE_ORDER_STATUSES.has(booking.orderStatus),
-  ).length;
-  const doneCount = bookings.filter(
-    (booking) => booking.orderStatus === "completed",
-  ).length;
-  const cancelCount = bookings.filter(
-    (booking) => booking.orderStatus === "cancelled",
-  ).length;
+function buildBookingsHref(
+  query: BookingListQuery,
+  overrides: Partial<BookingListQuery> = {},
+  extras: {
+    focusedBookingId?: string;
+    notificationRef?: string;
+    emptyReasonOverride?: TenantEmptyReason | null;
+  } = {},
+) {
+  const params = new URLSearchParams(
+    buildBookingListQueryString(query, overrides),
+  );
 
-  return [
-    { label: "全部", value: bookings.length, href: "/bookings" },
-    {
-      label: "進行中",
-      value: liveCount,
-      href: `/bookings?status=${encodeURIComponent(
-        OWNED_ORDER_STATUSES.filter((status) =>
-          LIVE_ORDER_STATUSES.has(status),
-        ).join(","),
-      )}`,
-    },
-    {
-      label: "預約",
-      value: reserveCount,
-      href: `/bookings?status=${encodeURIComponent(
-        RESERVATION_STATUSES.join(","),
-      )}`,
-    },
-    {
-      label: "待審批",
-      value: approvalCount,
-      href: "/bookings?approval=pending",
-    },
-    {
-      label: "已完成",
-      value: doneCount,
-      href: "/bookings?status=completed",
-    },
-    {
-      label: "取消",
-      value: cancelCount,
-      href: "/bookings?status=cancelled",
-    },
-  ];
+  if (extras.focusedBookingId) {
+    params.set("bookingId", extras.focusedBookingId);
+  }
+  if (extras.notificationRef) {
+    params.set("notification", extras.notificationRef);
+  }
+  if (extras.emptyReasonOverride) {
+    params.set("emptyReason", extras.emptyReasonOverride);
+  }
+
+  const queryString = params.toString();
+  return queryString ? `/bookings?${queryString}` : "/bookings";
+}
+
+function areStatusesEqual(
+  left: OwnedOrderStatus[],
+  right: OwnedOrderStatus[] | undefined,
+) {
+  if (!right) {
+    return left.length === 0;
+  }
+
+  return (
+    left.length === right.length &&
+    left.every((status) => right.includes(status))
+  );
+}
+
+function getTabCount(
+  bookings: TenantBookingListRecord[],
+  preset: TabFilterPreset,
+) {
+  return bookings.filter((booking) => {
+    const matchesStatuses = preset.statuses
+      ? preset.statuses.includes(booking.orderStatus)
+      : true;
+    const matchesApproval = preset.approval
+      ? booking.approvalState === preset.approval
+      : true;
+
+    return matchesStatuses && matchesApproval;
+  }).length;
+}
+
+function getPageStatusTabs(
+  bookings: TenantBookingListRecord[],
+  query: BookingListQuery,
+  extras: {
+    focusedBookingId?: string;
+    notificationRef?: string;
+    emptyReasonOverride?: TenantEmptyReason | null;
+  },
+): PageTabDescriptor[] {
+  return PAGE_TAB_PRESETS.map((preset) => {
+    const statuses = preset.statuses ?? [];
+    const approval = preset.approval ?? "all";
+
+    return {
+      label: preset.label,
+      value: getTabCount(bookings, preset),
+      href: buildBookingsHref(
+        query,
+        {
+          statuses,
+          approval,
+          page: 1,
+        },
+        extras,
+      ),
+      isActive:
+        areStatusesEqual(query.statuses, preset.statuses) &&
+        query.approval === approval,
+    };
+  });
+}
+
+function getSubtypeCounts(bookings: TenantBookingListRecord[]) {
+  return BUSINESS_DISPATCH_SUBTYPES.map((subtype) => ({
+    subtype,
+    count: bookings.filter(
+      (booking) => booking.businessDispatchSubtype === subtype,
+    ).length,
+  }));
 }
 
 export default async function BookingsPage({
@@ -583,7 +675,20 @@ export default async function BookingsPage({
           : "no_data"
         : null);
   const emptyState = emptyReason ? EMPTY_STATE_COPY[emptyReason] : null;
-  const pageTabs = getPageStatusTabs(bookings);
+  const pageTabs = getPageStatusTabs(bookings, query, {
+    focusedBookingId,
+    notificationRef,
+    emptyReasonOverride,
+  });
+  const subtypeCounts = getSubtypeCounts(bookings);
+  const pendingApprovalBookings = bookings
+    .filter((booking) => booking.approvalState === "pending")
+    .sort(
+      (left, right) =>
+        new Date(left.updatedAt).getTime() -
+        new Date(right.updatedAt).getTime(),
+    )
+    .slice(0, 3);
   const hasForwardedAuthority = result.items.some(
     (booking) =>
       getBookingSourceVisibility(booking).domain === "forwarded_authority",
@@ -621,38 +726,16 @@ export default async function BookingsPage({
 
       <div className="bookings-tab-row">
         {pageTabs.map((tab) => (
-          <Link className="bookings-tab-chip" href={tab.href} key={tab.label}>
+          <Link
+            className={`bookings-tab-chip${tab.isActive ? " is-active" : ""}`}
+            href={tab.href}
+            key={tab.label}
+          >
             <span>{tab.label}</span>
             <strong>{tab.value}</strong>
           </Link>
         ))}
       </div>
-
-      {notificationRef || focusedBookingId ? (
-        <CalloutPanel
-          title="Notification deep link context"
-          description="這個列表可以承接通知或快捷 deep link；若帶了 bookingId，對應列會被高亮，方便 tenant operator 直接 triage。"
-        >
-          <p>
-            {notificationRef
-              ? `notification=${notificationRef}`
-              : "bookingId focus"}
-          </p>
-        </CalloutPanel>
-      ) : null}
-
-      {hasForwardedAuthority ? (
-        <CalloutPanel
-          title="Forwarded-authority bookings stay externally owned"
-          description="forwarded bookings 在 tenant list 上可讀，但 adapter-native dispatch / recovery 仍需透過 ops-console 或 platform-admin 追查。"
-          tone="warning"
-        >
-          <p>
-            這些列會附上新分頁 deep link，直接打開對應的 ops dispatch 或 partner
-            entry。
-          </p>
-        </CalloutPanel>
-      ) : null}
 
       <section className="bookings-board">
         <div className="bookings-meta-strip">
@@ -662,7 +745,21 @@ export default async function BookingsPage({
           >
             {getRefreshCopy(refreshMetadata)}
           </span>
-          <span className="status-chip">search / filter / detail open</span>
+          <span className="status-chip">
+            {result.total} visible / {bookings.length} total
+          </span>
+          {(notificationRef || focusedBookingId) && (
+            <span className="status-chip is-warning">
+              {notificationRef
+                ? `notification ${notificationRef}`
+                : `focus ${focusedBookingId}`}
+            </span>
+          )}
+          {hasForwardedAuthority ? (
+            <span className="status-chip is-warning">
+              forwarded authority deep links available
+            </span>
+          ) : null}
         </div>
 
         <form action="/bookings" className="bookings-filter-panel">
@@ -683,9 +780,15 @@ export default async function BookingsPage({
           </label>
           <label className="field-stack">
             <span>Service bucket</span>
-            <select defaultValue={query.service} name="service">
+            <select defaultValue={query.serviceBucket} name="serviceBucket">
               <option value="all">All</option>
               <option value="business_dispatch">business_dispatch</option>
+            </select>
+          </label>
+          <label className="field-stack">
+            <span>Service subtype</span>
+            <select defaultValue={query.subtype} name="subtype">
+              <option value="all">All</option>
               {BUSINESS_DISPATCH_SUBTYPES.map((subtype) => (
                 <option key={subtype} value={subtype}>
                   {subtype}
@@ -755,13 +858,64 @@ export default async function BookingsPage({
           </div>
         </form>
 
+        <div className="bookings-subtype-strip">
+          <span className="metric-label">Subtype</span>
+          <Link
+            className={`status-chip${query.subtype === "all" ? " is-active" : ""}`}
+            href={buildBookingsHref(
+              query,
+              {
+                subtype: "all",
+                page: 1,
+              },
+              {
+                focusedBookingId,
+                notificationRef,
+                emptyReasonOverride,
+              },
+            )}
+          >
+            all
+            <span>{bookings.length}</span>
+          </Link>
+          {subtypeCounts.map((entry) => (
+            <Link
+              className={`status-chip${query.subtype === entry.subtype ? " is-active" : ""}`}
+              href={buildBookingsHref(
+                query,
+                {
+                  subtype: entry.subtype,
+                  page: 1,
+                },
+                {
+                  focusedBookingId,
+                  notificationRef,
+                  emptyReasonOverride,
+                },
+              )}
+              key={entry.subtype}
+            >
+              {entry.subtype}
+              <span>{entry.count}</span>
+            </Link>
+          ))}
+        </div>
+
         <div className="bookings-status-strip">
           {OWNED_ORDER_STATUSES.map((status) => {
             const nextStatuses = toggleStatus(query.statuses, status);
-            const href = `/bookings?${buildBookingListQueryString(query, {
-              statuses: nextStatuses,
-              page: 1,
-            })}`;
+            const href = buildBookingsHref(
+              query,
+              {
+                statuses: nextStatuses,
+                page: 1,
+              },
+              {
+                focusedBookingId,
+                notificationRef,
+                emptyReasonOverride,
+              },
+            );
 
             return (
               <Link
@@ -775,6 +929,66 @@ export default async function BookingsPage({
             );
           })}
         </div>
+
+        {pendingApprovalBookings.length > 0 && !emptyState ? (
+          <div className="bookings-approval-lane">
+            <div className="bookings-approval-head">
+              <div>
+                <span className="surface-kicker">Approval lane</span>
+                <h3>待審批 booking 需要明確浮出，不埋在表格深處。</h3>
+              </div>
+              <Link
+                className="text-link"
+                href={buildBookingsHref(
+                  query,
+                  {
+                    approval: "pending",
+                    page: 1,
+                  },
+                  {
+                    focusedBookingId,
+                    notificationRef,
+                    emptyReasonOverride,
+                  },
+                )}
+              >
+                查看全部待審批
+              </Link>
+            </div>
+            <div className="bookings-approval-grid">
+              {pendingApprovalBookings.map((booking) => (
+                <article
+                  className="bookings-approval-card"
+                  key={booking.bookingId}
+                >
+                  <div className="bookings-approval-card-head">
+                    <div>
+                      <Link
+                        className="bookings-primary-link"
+                        href={`/bookings/${booking.bookingId}`}
+                      >
+                        {booking.bookingId}
+                      </Link>
+                      <p>{booking.passenger.name}</p>
+                    </div>
+                    <span className="bookings-warning-pill">
+                      {booking.approvalRequestIds.length} request
+                    </span>
+                  </div>
+                  <p>
+                    {booking.pickup.address} → {booking.dropoff.address}
+                  </p>
+                  <div className="bookings-approval-meta">
+                    <span className="status-chip">{booking.orderStatus}</span>
+                    <span className="status-chip">
+                      {formatDateTime(booking.reservationWindowStart)}
+                    </span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {emptyState ? (
           <div className={`bookings-empty-state is-${emptyReason}`}>
@@ -804,7 +1018,7 @@ export default async function BookingsPage({
                 <tr>
                   <th>BK</th>
                   <th>ORDER</th>
-                  <th>TYPE</th>
+                  <th>SERVICE</th>
                   <th>PICKUP → DROP</th>
                   <th>WIN</th>
                   <th>PASS</th>
@@ -978,9 +1192,17 @@ export default async function BookingsPage({
             {result.page > 1 ? (
               <Link
                 className="text-link"
-                href={`/bookings?${buildBookingListQueryString(query, {
-                  page: result.page - 1,
-                })}`}
+                href={buildBookingsHref(
+                  query,
+                  {
+                    page: result.page - 1,
+                  },
+                  {
+                    focusedBookingId,
+                    notificationRef,
+                    emptyReasonOverride,
+                  },
+                )}
               >
                 Previous
               </Link>
@@ -988,9 +1210,17 @@ export default async function BookingsPage({
             {result.page < result.totalPages ? (
               <Link
                 className="text-link"
-                href={`/bookings?${buildBookingListQueryString(query, {
-                  page: result.page + 1,
-                })}`}
+                href={buildBookingsHref(
+                  query,
+                  {
+                    page: result.page + 1,
+                  },
+                  {
+                    focusedBookingId,
+                    notificationRef,
+                    emptyReasonOverride,
+                  },
+                )}
               >
                 Next
               </Link>
