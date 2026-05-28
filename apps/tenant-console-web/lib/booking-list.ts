@@ -1,11 +1,25 @@
-import type { BookingRecord, OwnedOrderStatus } from "@drts/contracts";
-import { OWNED_ORDER_STATUSES } from "@drts/contracts";
+import type {
+  BookingRecord,
+  BusinessDispatchSubtype,
+  OwnedOrderStatus,
+} from "@drts/contracts";
+import {
+  BUSINESS_DISPATCH_SUBTYPES,
+  OWNED_ORDER_STATUSES,
+} from "@drts/contracts";
 
 export type BookingDateField = "reservationStart" | "createdAt";
+
+export type BookingServiceFilter =
+  | "all"
+  | BookingRecord["serviceBucket"]
+  | BusinessDispatchSubtype;
 
 export type BookingListQuery = {
   q: string;
   statuses: OwnedOrderStatus[];
+  service: BookingServiceFilter;
+  approval: BookingRecord["approvalState"] | "all";
   dateField: BookingDateField;
   dateFrom: string;
   dateTo: string;
@@ -18,6 +32,11 @@ type SearchParamValue = string | string[] | undefined;
 const DEFAULT_PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = new Set([10, 25, 50]);
 const ORDER_STATUS_SET = new Set<OwnedOrderStatus>(OWNED_ORDER_STATUSES);
+const SERVICE_FILTER_SET = new Set<BookingServiceFilter>([
+  "all",
+  "business_dispatch",
+  ...BUSINESS_DISPATCH_SUBTYPES,
+]);
 
 function first(value: SearchParamValue) {
   if (Array.isArray(value)) {
@@ -51,6 +70,18 @@ export function parseBookingListQuery(
   return {
     q: first(searchParams.q).trim(),
     statuses,
+    service: SERVICE_FILTER_SET.has(
+      first(searchParams.service) as BookingServiceFilter,
+    )
+      ? (first(searchParams.service) as BookingServiceFilter)
+      : "all",
+    approval:
+      first(searchParams.approval) === "pending" ||
+      first(searchParams.approval) === "approved" ||
+      first(searchParams.approval) === "rejected" ||
+      first(searchParams.approval) === "blocked"
+        ? (first(searchParams.approval) as BookingRecord["approvalState"])
+        : "all",
     dateField:
       first(searchParams.dateField) === "createdAt"
         ? "createdAt"
@@ -85,6 +116,8 @@ function matchesTextQuery(booking: BookingRecord, query: string) {
     booking.passenger.phone,
     booking.pickup.address,
     booking.dropoff.address,
+    booking.serviceBucket,
+    booking.businessDispatchSubtype,
     booking.costCenter ?? "",
     booking.notes ?? "",
   ]
@@ -94,8 +127,8 @@ function matchesTextQuery(booking: BookingRecord, query: string) {
   return haystack.includes(query.toLowerCase());
 }
 
-export function applyBookingListQuery(
-  bookings: BookingRecord[],
+export function applyBookingListQuery<T extends BookingRecord>(
+  bookings: T[],
   query: BookingListQuery,
 ) {
   const filtered = bookings
@@ -104,6 +137,17 @@ export function applyBookingListQuery(
       query.statuses.length === 0
         ? true
         : query.statuses.includes(booking.orderStatus),
+    )
+    .filter((booking) =>
+      query.service === "all"
+        ? true
+        : booking.serviceBucket === query.service ||
+          booking.businessDispatchSubtype === query.service,
+    )
+    .filter((booking) =>
+      query.approval === "all"
+        ? true
+        : booking.approvalState === query.approval,
     )
     .filter((booking) => {
       const value = getBookingDateValue(booking, query.dateField);
@@ -165,6 +209,12 @@ export function buildBookingListQueryString(
   if (next.statuses.length > 0) {
     params.set("status", next.statuses.join(","));
   }
+  if (next.service !== "all") {
+    params.set("service", next.service);
+  }
+  if (next.approval !== "all") {
+    params.set("approval", next.approval);
+  }
   if (next.dateField !== "reservationStart") {
     params.set("dateField", next.dateField);
   }
@@ -198,7 +248,7 @@ export function toggleStatus(
   return OWNED_ORDER_STATUSES.filter((status) => next.has(status));
 }
 
-export function getStatusCounts(bookings: BookingRecord[]) {
+export function getStatusCounts<T extends BookingRecord>(bookings: T[]) {
   return bookings.reduce(
     (summary, booking) => {
       summary[booking.orderStatus] = (summary[booking.orderStatus] ?? 0) + 1;
