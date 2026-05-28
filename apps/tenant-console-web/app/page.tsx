@@ -30,7 +30,11 @@ import {
 } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
 import { formatCount, formatDateTime, formatMoney } from "@/lib/formatters";
-import { TENANT_CONSOLE_ENV, tenantNavItems } from "@/lib/navigation";
+import {
+  TENANT_CONSOLE_CONTEXT,
+  TENANT_CONSOLE_ENV,
+  tenantNavItems,
+} from "@/lib/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +73,54 @@ const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "grid",
   gap: 16,
+};
+
+const heroGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.2fr 0.8fr",
+  gap: 16,
+  alignItems: "start",
+};
+
+const heroPanelStyle: CSSProperties = {
+  border: `1px solid ${th.border}`,
+  borderRadius: 24,
+  padding: 18,
+  background:
+    "linear-gradient(135deg, rgba(63, 217, 191, 0.16), rgba(11, 16, 21, 0.92) 62%)",
+  display: "grid",
+  gap: 14,
+};
+
+const heroChipRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const heroEyebrowStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  letterSpacing: 1.8,
+  textTransform: "uppercase",
+  color: th.textMuted,
+};
+
+const heroTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 28,
+  lineHeight: 1.12,
+  fontWeight: 700,
+  color: th.text,
+};
+
+const heroBodyStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  lineHeight: 1.6,
+  color: th.textMuted,
+  maxWidth: 720,
 };
 
 const actionGridStyle: CSSProperties = {
@@ -234,13 +286,6 @@ type AvailableAction = {
   descriptor: ResourceActionDescriptor;
 };
 
-type WorkspaceShortcut = {
-  key: string;
-  label: string;
-  href: string;
-  description: string;
-};
-
 type WorkspaceModule = {
   key: string;
   title: string;
@@ -268,6 +313,30 @@ type EmptyPresentation = {
   body: string;
   nextAction?: AvailableAction;
 };
+
+const EMPTY_REASON_ORDER: HomeEmptyReason[] = [
+  "not_provisioned",
+  "external_unavailable",
+  "fetch_failed",
+  "permission_denied",
+  "no_data",
+  "filtered_empty",
+];
+
+const EMPTY_REASON_LABEL: Record<HomeEmptyReason, string> = {
+  no_data: "尚無資料",
+  not_provisioned: "尚未開通",
+  fetch_failed: "載入失敗",
+  permission_denied: "權限不足",
+  external_unavailable: "外部依賴不可用",
+  filtered_empty: "篩選後為空",
+};
+
+const WORKSPACE_QUICK_ACTION_ORDER = [
+  "booking.create",
+  "booking.list_today",
+  "integration.open_governance",
+] as const;
 
 async function loadDashboardData(): Promise<DashboardData> {
   const client = getTenantClient();
@@ -355,7 +424,52 @@ function buildRefreshMetadata(data: DashboardData): UiRefreshMetadata {
 }
 
 function getRefreshLabel(refresh: UiRefreshMetadata) {
-  return `T5 · ${REFRESH_TIER} · ${refresh.dataFreshness}`;
+  return `T5 / 30s · ${refresh.dataFreshness === "degraded" ? "degraded" : "fresh"}`;
+}
+
+function getRiskLabel(riskLevel: ResourceActionDescriptor["riskLevel"]) {
+  switch (riskLevel) {
+    case "high":
+      return "高風險";
+    case "medium":
+      return "中風險";
+    default:
+      return "低風險";
+  }
+}
+
+function getChannelLabel(channel: NotificationRecord["channel"]) {
+  switch (channel) {
+    case "ops_notice":
+      return "ops_notice";
+    case "tenant_sla":
+      return "tenant_sla";
+    case "driver_task":
+      return "driver_task";
+    case "tenant_approval":
+      return "tenant_approval";
+  }
+}
+
+function getSubSystemLabel(
+  subSystem: TenantIntegrationReadinessItem["subSystem"],
+) {
+  switch (subSystem) {
+    case "api_keys":
+      return "API 金鑰";
+    case "webhooks":
+      return "Webhook";
+    case "notifications":
+      return "通知";
+    case "sla":
+      return "SLA";
+    case "reports":
+      return "報表";
+    case "modules":
+      return "模組";
+    case "partner_entries":
+      return "Partner entries";
+  }
 }
 
 function getReadinessItem(
@@ -410,22 +524,22 @@ function getActionRoute(action: string) {
 function getActionLabel(action: string) {
   switch (action) {
     case "booking.create":
-      return "New booking";
+      return "建立叫車";
     case "booking.list_today":
-      return "View today's bookings";
+      return "查看今日叫車";
     case "issue_api_key":
-      return "Issue API key";
+      return "簽發 API 金鑰";
     case "integration.open_governance":
-      return "Open integration governance";
+      return "開啟整合就緒度";
     default:
       if (action.includes("webhook")) {
-        return "Set up webhook";
+        return "設定 Webhook";
       }
       if (action.includes("notification")) {
-        return "Configure notifications";
+        return "設定通知";
       }
       if (action.includes("sla")) {
-        return "Configure SLA";
+        return "設定 SLA";
       }
       return action.replaceAll("_", " ");
   }
@@ -433,30 +547,30 @@ function getActionLabel(action: string) {
 
 function getActionDescription(action: string) {
   if (action === "booking.create") {
-    return "Open the command-based booking flow directly from workspace home.";
+    return "直接從工作面進入 command-based 建立叫車流程。";
   }
 
   if (action === "booking.list_today") {
-    return "Jump into the live queue and review today’s booking changes.";
+    return "查看今日佇列與最新狀態變更。";
   }
 
   if (action.includes("api_key")) {
-    return "Resolve tenant integration onboarding by issuing or rotating an API credential.";
+    return "用簽發或輪替憑證完成租戶整合開通。";
   }
 
   if (action.includes("webhook")) {
-    return "Connect delivery events and verify the endpoint before cutover.";
+    return "接通事件投遞並在 cutover 前完成端點驗證。";
   }
 
   if (action.includes("notification")) {
-    return "Review baseline subscriptions and tenant-specific notification overrides.";
+    return "檢查基線訂閱與租戶通知覆寫。";
   }
 
   if (action.includes("sla")) {
-    return "Inspect the SLA profile and close any remaining governance gap.";
+    return "檢查 SLA 門檻並補齊治理缺口。";
   }
 
-  return "Follow the backend-supplied action descriptor from the current readiness state.";
+  return "依後端回傳的 action descriptor 執行目前狀態允許的下一步。";
 }
 
 function toAvailableAction(
@@ -494,40 +608,13 @@ function buildAvailableActions(data: DashboardData): AvailableAction[] {
   return dedupeAvailableActions(readinessActions).map(toAvailableAction);
 }
 
-function buildWorkspaceShortcuts(
-  identity: IdentityContext | null,
-): WorkspaceShortcut[] {
-  const tenantId = identity?.tenantId ?? DEMO_TENANT_ID;
-
-  return [
-    {
-      key: "bookings-new",
-      label: "New booking",
-      href: "/bookings/new",
-      description:
-        "Open the booking command flow directly from workspace home.",
-    },
-    {
-      key: "bookings-today",
-      label: "View today's bookings",
-      href: "/bookings",
-      description:
-        "Jump to the live tenant queue and review today’s booking changes.",
-    },
-    {
-      key: "integration-governance",
-      label: "Open integration governance",
-      href: "/integration-governance",
-      description:
-        "Inspect aggregated readiness and drill into onboarding blockers.",
-    },
-    {
-      key: "ops-audit",
-      label: "Ops complaints for this tenant",
-      href: `${getExternalAppBaseUrl("ops-console")}/complaints?tenantId=${encodeURIComponent(tenantId)}`,
-      description: "Open the tenant-scoped ops complaint queue in a new tab.",
-    },
-  ];
+function buildQuickActions(actions: AvailableAction[]) {
+  return WORKSPACE_QUICK_ACTION_ORDER.flatMap((actionId) => {
+    const match = actions.find(
+      (action) => action.descriptor.action === actionId,
+    );
+    return match ? [match] : [];
+  });
 }
 
 function isModuleFlagEnabled(flags: FeatureFlagSummary["flags"], key: string) {
@@ -581,22 +668,22 @@ function buildModuleSummary(data: DashboardData): WorkspaceModule[] {
       body: "Current queue, recent status changes, and today’s operator follow-up.",
       meta:
         activeBookings.length > 0
-          ? `${formatCount(activeBookings.length)} active · ${formatCount(attentionBookings.length)} attention`
-          : "No active booking rows returned.",
+          ? `${formatCount(activeBookings.length)} 進行中 · ${formatCount(attentionBookings.length)} 待處理`
+          : "目前沒有進行中的叫車。",
     },
     {
       key: "integration",
-      title: "Integration",
+      title: "整合",
       href: "/integration-governance",
       status: mapReadinessStatus(getReadinessItem(data.readiness, "modules")),
-      body: "Aggregated API key, webhook, notification, SLA, and module readiness.",
+      body: "整合 API 金鑰、Webhook、通知、SLA 與模組 readiness。",
       meta:
         getReadinessItem(data.readiness, "modules")?.detail ??
-        "No module-level readiness detail returned.",
+        "目前沒有模組層級的 readiness 詳情。",
     },
     {
       key: "billing",
-      title: "Billing",
+      title: "帳務",
       href: "/billing",
       status:
         openInvoices.length > 0
@@ -604,21 +691,21 @@ function buildModuleSummary(data: DashboardData): WorkspaceModule[] {
           : data.invoices.length > 0
             ? "ready"
             : "not_provisioned",
-      body: "Invoice posture, current period visibility, and finance-facing follow-up.",
+      body: "查看當期帳務、發票狀態與財務待辦。",
       meta:
         data.invoices.length > 0
-          ? `${formatCount(openInvoices.length)} invoice(s) not paid`
-          : "No invoice artifacts visible yet.",
+          ? `${formatCount(openInvoices.length)} 張尚未結清`
+          : "目前沒有可見發票。",
     },
     {
       key: "users",
-      title: "Access",
+      title: "帳號與權限",
       href: "/users",
       status: data.identity?.tenantId ? "ready" : "not_provisioned",
-      body: "Tenant roles, actor context, and module visibility guardrails.",
+      body: "租戶角色、actor context 與可見模組權限。",
       meta: data.identity?.roles.length
         ? data.identity.roles.join(" / ")
-        : "Role context unavailable.",
+        : "目前沒有角色上下文。",
     },
   ] satisfies WorkspaceModule[];
 
@@ -662,7 +749,9 @@ function getWorkspaceEmptyReason(
 
   if (
     data.readiness?.items.some((item) => item.status === "blocked") ||
-    data.notifications.length === 0
+    data.errors.some((error) =>
+      /Notifications|Integration governance|Tenant quota/.test(error),
+    )
   ) {
     return "external_unavailable";
   }
@@ -705,45 +794,45 @@ function getEmptyPresentation(
       return {
         tone: "info",
         icon: "info",
-        title: "No tenant activity yet",
-        body: "This tenant has no recent bookings, so workspace home stays focused on entry actions and visible modules.",
+        title: "尚無租戶活動",
+        body: "目前沒有近期叫車，工作面維持在入口動作與模組總覽狀態。",
       };
     case "not_provisioned":
       return {
         tone: "warn",
         icon: "warn",
-        title: "Provisioning is still incomplete",
-        body: "At least one subsystem still needs onboarding across API keys, webhooks, notifications, or SLA.",
+        title: "租戶尚未完成開通",
+        body: "至少一個子系統仍需完成 API 金鑰、Webhook、通知或 SLA 開通。",
         ...(integrationAction ? { nextAction: integrationAction } : {}),
       };
     case "fetch_failed":
       return {
         tone: "warn",
         icon: "clock",
-        title: "Some workspace data failed to load",
-        body: "The current snapshot is partial. Refresh and drill into the affected module for more detail.",
+        title: "部分工作面資料載入失敗",
+        body: "這次快照為 partial snapshot。請重新整理，並進一步查看受影響模組。",
       };
     case "permission_denied":
       return {
         tone: "warn",
         icon: "warn",
-        title: "Tenant context is unavailable for this actor",
-        body: "Workspace home cannot render tenant-scoped actions without a valid tenant identity context.",
+        title: "目前 actor 缺少租戶上下文",
+        body: "缺少有效的 tenant identity context，因此無法顯示租戶範圍操作。",
       };
     case "external_unavailable":
       return {
         tone: "warn",
         icon: "clock",
-        title: "An external dependency is unavailable",
-        body: "At least one upstream integration or notification dependency is currently degraded.",
+        title: "外部依賴目前不可用",
+        body: "至少一個上游整合或通知依賴處於 degraded 狀態。",
         ...(integrationAction ? { nextAction: integrationAction } : {}),
       };
     case "filtered_empty":
       return {
         tone: "info",
         icon: "info",
-        title: "Visible modules are fully filtered out",
-        body: "Feature visibility and module gating currently hide every workspace entry point for this actor.",
+        title: "可見模組目前都被篩掉",
+        body: "feature visibility 與模組 gating 讓這個 actor 暫時看不到任何入口。",
       };
   }
 }
@@ -834,33 +923,33 @@ function buildRecentBookingRows(bookings: BookingRecord[]): RecentBookingRow[] {
     }));
 }
 
-function buildCrossAppLinks(tenantId: string): CrossAppResourceLink[] {
-  return [
-    {
-      targetApp: "ops-console",
-      route: `/complaints?tenantId=${encodeURIComponent(tenantId)}`,
-      resourceType: "complaint_case",
-      resourceId: tenantId,
-      openMode: "new_tab",
-      label: "Ops complaints for this tenant",
-    },
-    {
-      targetApp: "ops-console",
-      route: `/audit?tenantId=${encodeURIComponent(tenantId)}`,
-      resourceType: "audit_log",
-      resourceId: tenantId,
-      openMode: "new_tab",
-      label: "Ops-side execution audit",
-    },
-    {
-      targetApp: "platform-admin",
-      route: `/tenants/${encodeURIComponent(tenantId)}`,
-      resourceType: "platform_tenant",
-      resourceId: tenantId,
-      openMode: "new_tab",
-      label: "Platform governance for this tenant",
-    },
-  ];
+function getTenantLifecycleLabel(data: DashboardData) {
+  if (getTenantSuspendedSignal(data)) {
+    return "suspended";
+  }
+  if (
+    data.readiness?.items.some(
+      (item) => item.status === "not_provisioned" || item.status === "blocked",
+    ) ||
+    (data.governance?.onboardingChecklist.length ?? 0) > 0
+  ) {
+    return "onboarding";
+  }
+  if (data.errors.length > 0) {
+    return "degraded";
+  }
+  return "active";
+}
+
+function getTenantLifecycleTone(data: DashboardData): CanvasTone {
+  const lifecycle = getTenantLifecycleLabel(data);
+  if (lifecycle === "suspended") {
+    return "danger";
+  }
+  if (lifecycle === "onboarding" || lifecycle === "degraded") {
+    return "warn";
+  }
+  return "success";
 }
 
 function getExternalAppBaseUrl(targetApp: CrossAppResourceLink["targetApp"]) {
@@ -881,6 +970,48 @@ function toExternalHref(link: CrossAppResourceLink) {
   return `${getExternalAppBaseUrl(link.targetApp)}${link.route}`;
 }
 
+function isCrossAppResourceLink(value: unknown): value is CrossAppResourceLink {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<CrossAppResourceLink>;
+  return (
+    (candidate.targetApp === "ops-console" ||
+      candidate.targetApp === "platform-admin" ||
+      candidate.targetApp === "tenant-console") &&
+    typeof candidate.route === "string" &&
+    typeof candidate.resourceType === "string" &&
+    typeof candidate.resourceId === "string" &&
+    (candidate.openMode === "new_tab" || candidate.openMode === "same_tab") &&
+    typeof candidate.label === "string"
+  );
+}
+
+function buildRuntimeCrossAppLinks(
+  data: DashboardData,
+): CrossAppResourceLink[] {
+  const notificationLinks = data.notifications.flatMap((notification) => {
+    const candidate = (
+      notification as NotificationRecord & {
+        resourceLink?: unknown;
+      }
+    ).resourceLink;
+
+    return isCrossAppResourceLink(candidate) ? [candidate] : [];
+  });
+
+  const deduped = new Map<string, CrossAppResourceLink>();
+  for (const link of notificationLinks) {
+    deduped.set(
+      `${link.targetApp}:${link.route}:${link.resourceType}:${link.resourceId}`,
+      link,
+    );
+  }
+
+  return [...deduped.values()];
+}
+
 function renderActionTile(action: AvailableAction) {
   const content = (
     <>
@@ -893,7 +1024,7 @@ function renderActionTile(action: AvailableAction) {
           theme={th}
           tone={action.descriptor.enabled ? "accent" : "neutral"}
         >
-          {action.descriptor.riskLevel}
+          {getRiskLabel(action.descriptor.riskLevel)}
         </CanvasPill>
         <span style={statusCopyStyle}>
           {action.descriptor.enabled
@@ -949,51 +1080,41 @@ function renderEmptyAction(
   );
 }
 
-function renderShortcutTile(shortcut: WorkspaceShortcut) {
-  const isExternal =
-    shortcut.href.startsWith("http://") || shortcut.href.startsWith("https://");
-
-  if (isExternal) {
-    return (
-      <a
-        href={shortcut.href}
-        key={shortcut.key}
-        rel="noreferrer"
-        style={actionTileBaseStyle}
-        target="_blank"
-      >
-        <div style={cardStackStyle}>
-          <p style={sectionTitleStyle}>{shortcut.label}</p>
-          <p style={sectionBodyStyle}>{shortcut.description}</p>
-        </div>
-        <div style={actionMetaStyle}>
-          <CanvasPill theme={th} tone="info">
-            shortcut
-          </CanvasPill>
-          <span style={statusCopyStyle}>new_tab</span>
-        </div>
-      </a>
-    );
-  }
+function renderEmptyReasonTile(
+  reason: HomeEmptyReason,
+  currentReason: HomeEmptyReason | null,
+  availableActions: AvailableAction[],
+) {
+  const presentation = getEmptyPresentation(reason, availableActions);
+  const isCurrent = currentReason === reason;
 
   return (
-    <Link href={shortcut.href} key={shortcut.key} style={actionTileBaseStyle}>
-      <div style={cardStackStyle}>
-        <p style={sectionTitleStyle}>{shortcut.label}</p>
-        <p style={sectionBodyStyle}>{shortcut.description}</p>
-      </div>
-      <div style={actionMetaStyle}>
-        <CanvasPill theme={th} tone="neutral">
-          shortcut
+    <div
+      key={reason}
+      style={{
+        ...moduleTileStyle,
+        borderColor: isCurrent ? th.accent : th.border,
+        background: isCurrent
+          ? "rgba(63, 217, 191, 0.08)"
+          : moduleTileStyle.background,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          alignItems: "center",
+        }}
+      >
+        <p style={sectionTitleStyle}>{EMPTY_REASON_LABEL[reason]}</p>
+        <CanvasPill theme={th} tone={isCurrent ? "accent" : presentation.tone}>
+          {isCurrent ? "目前狀態" : reason}
         </CanvasPill>
-        <span style={statusCopyStyle}>{shortcut.href}</span>
-        {!EXISTING_APP_ROUTES.has(shortcut.href) ? (
-          <CanvasPill theme={th} tone="warn">
-            spec route
-          </CanvasPill>
-        ) : null}
       </div>
-    </Link>
+      <p style={sectionBodyStyle}>{presentation.body}</p>
+      {renderEmptyAction(presentation.nextAction, "secondary")}
+    </div>
   );
 }
 
@@ -1017,7 +1138,7 @@ export default async function HomePage() {
   const data = await loadDashboardData();
   const refresh = buildRefreshMetadata(data);
   const availableActions = buildAvailableActions(data);
-  const workspaceShortcuts = buildWorkspaceShortcuts(data.identity);
+  const quickActions = buildQuickActions(availableActions);
   const visibleNavItems = getVisibleNavItems(data);
   const modules = buildModuleSummary(data);
   const emptyReason = getWorkspaceEmptyReason(data, modules);
@@ -1029,12 +1150,14 @@ export default async function HomePage() {
   const attentionBookings = activeBookings.filter((booking) =>
     ATTENTION_STATUSES.has(booking.orderStatus),
   );
+  const bookingCreateAction = availableActions.find(
+    (action) => action.descriptor.action === "booking.create",
+  );
   const recentRows = buildRecentBookingRows(data.bookings);
   const latestInvoice = getLatestInvoice(data.invoices);
-  const externalLinks = buildCrossAppLinks(
-    data.identity?.tenantId ?? DEMO_TENANT_ID,
-  );
+  const externalLinks = buildRuntimeCrossAppLinks(data);
   const readinessItems = data.readiness?.items ?? [];
+  const tenantLifecycle = getTenantLifecycleLabel(data);
 
   const recentBookingColumns: CanvasTableColumn<RecentBookingRow>[] = [
     {
@@ -1079,10 +1202,10 @@ export default async function HomePage() {
         theme={th}
         title={
           data.identity?.tenantId
-            ? `Workspace for ${data.identity.tenantId}`
-            : "Tenant workspace"
+            ? `${TENANT_CONSOLE_CONTEXT} 工作面`
+            : "租戶工作面"
         }
-        subtitle="Identity context, module capability, integration health, and quick action entry points."
+        subtitle="首頁集中呈現 tenant identity、模組能力、整合健康度、最近叫車與 quick actions。"
         actions={
           <CanvasPill
             theme={th}
@@ -1094,13 +1217,72 @@ export default async function HomePage() {
       />
 
       <div style={pageBodyStyle}>
+        <div style={heroGridStyle}>
+          <div style={heroPanelStyle}>
+            <p style={heroEyebrowStyle}>Workspace / Home</p>
+            <div style={heroChipRowStyle}>
+              <CanvasPill theme={th} tone={getTenantLifecycleTone(data)} dot>
+                {tenantLifecycle}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="info">
+                tenant / {TENANT_CONSOLE_ENV}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                {data.identity?.tenantId ?? DEMO_TENANT_ID}
+              </CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                {data.identity?.realm ?? "tenant"} /{" "}
+                {data.identity?.actorType ?? "unknown"}
+              </CanvasPill>
+            </div>
+            <div style={cardStackStyle}>
+              <h2 style={heroTitleStyle}>先看今日待處理，再決定下一步。</h2>
+              <p style={heroBodyStyle}>
+                依 packet
+                §5.1，這裡同時回答三件事：租戶現在是否健康、今天是否有急件、以及後端目前允許你做哪些動作。
+              </p>
+            </div>
+          </div>
+
+          <CanvasCard
+            theme={th}
+            title="租戶識別上下文"
+            subtitle="name / code / status / environment"
+          >
+            <CanvasDL
+              theme={th}
+              cols={2}
+              items={[
+                { k: "Name", v: TENANT_CONSOLE_CONTEXT },
+                {
+                  k: "Code",
+                  v: data.identity?.tenantId ?? DEMO_TENANT_ID,
+                  mono: true,
+                },
+                { k: "Status", v: tenantLifecycle, mono: true },
+                { k: "Environment", v: TENANT_CONSOLE_ENV, mono: true },
+                {
+                  k: "Realm",
+                  v: data.identity?.realm ?? "unknown",
+                  mono: true,
+                },
+                {
+                  k: "Auth mode",
+                  v: data.identity?.authMode ?? "unknown",
+                  mono: true,
+                },
+              ]}
+            />
+          </CanvasCard>
+        </div>
+
         {isSuspended ? (
           <CanvasBanner
             theme={th}
             tone="danger"
             icon="warn"
-            title="Tenant is currently suspended"
-            body="Workspace home stays visible for inspection, but some actions may remain blocked until the lifecycle suspension is cleared."
+            title="租戶目前為 suspended 狀態"
+            body="工作面仍保留可讀檢視，但部分操作會持續被 blocked，直到租戶 lifecycle suspension 被解除。"
           />
         ) : null}
 
@@ -1109,8 +1291,8 @@ export default async function HomePage() {
             theme={th}
             tone="warn"
             icon="clock"
-            title="Workspace home is rendering a degraded snapshot"
-            body={`Generated ${formatDateTime(refresh.generatedAt)} · poll tier ${REFRESH_TIER} · one or more slices failed to load.`}
+            title="目前顯示的是 degraded snapshot"
+            body={`生成時間 ${formatDateTime(refresh.generatedAt)} · refresh tier ${REFRESH_TIER} · 至少一個資料切片載入失敗。`}
           />
         ) : null}
 
@@ -1119,7 +1301,7 @@ export default async function HomePage() {
             theme={th}
             tone={emptyPresentation.tone}
             icon={emptyPresentation.icon}
-            title={`${emptyReason} · ${emptyPresentation.title}`}
+            title={`${EMPTY_REASON_LABEL[emptyReason as HomeEmptyReason]} · ${emptyPresentation.title}`}
             body={emptyPresentation.body}
           />
         ) : null}
@@ -1127,8 +1309,8 @@ export default async function HomePage() {
         {availableActions.length > 0 ? (
           <CanvasCard
             theme={th}
-            title="Backend-owned available actions"
-            subtitle="Home renders only authoritative action descriptors returned by tenant read models."
+            title="後端授權的可執行動作"
+            subtitle="首頁只渲染 tenant read models 回傳的 authoritative availableActions。"
           >
             <div style={actionGridStyle}>
               {availableActions.map(renderActionTile)}
@@ -1137,14 +1319,14 @@ export default async function HomePage() {
         ) : (
           <CanvasCard
             theme={th}
-            title="Backend-owned available actions"
-            subtitle="No authoritative action descriptor was returned for the current tenant snapshot."
+            title="後端授權的可執行動作"
+            subtitle="這次租戶快照沒有回傳可直接執行的 authoritative action descriptor。"
           >
             <div style={emptyPanelStyle}>
               <strong style={sectionTitleStyle}>availableActions</strong>
               <p style={sectionBodyStyle}>
-                Workspace home falls back to navigation shortcuts below instead
-                of fabricating write CTAs in the UI.
+                這次 read model 沒有提供首頁可用
+                CTA，因此此區不會由前端自行補齊。
               </p>
             </div>
           </CanvasCard>
@@ -1152,12 +1334,22 @@ export default async function HomePage() {
 
         <CanvasCard
           theme={th}
-          title="Workspace shortcuts"
-          subtitle="Packet-required entry points that remain stable even when no backend action descriptor is returned."
+          title="快捷入口"
+          subtitle="packet §5.1 的必備 quick CTAs 只從 backend-owned availableActions 取值與排序。"
         >
-          <div style={actionGridStyle}>
-            {workspaceShortcuts.map(renderShortcutTile)}
-          </div>
+          {quickActions.length > 0 ? (
+            <div style={actionGridStyle}>
+              {quickActions.map(renderActionTile)}
+            </div>
+          ) : (
+            <div style={emptyPanelStyle}>
+              <strong style={sectionTitleStyle}>workspace quick CTAs</strong>
+              <p style={sectionBodyStyle}>
+                後端這次沒有回傳 `booking.create`、`booking.list_today` 或
+                `integration.open_governance`，因此首頁不會前端合成快捷 CTA。
+              </p>
+            </div>
+          )}
         </CanvasCard>
 
         <div style={kpiGridStyle}>
@@ -1167,8 +1359,8 @@ export default async function HomePage() {
             value={formatCount(activeBookings.length)}
             sub={
               attentionBookings.length > 0
-                ? `${formatCount(attentionBookings.length)} require follow-up`
-                : "No active attention queue"
+                ? `${formatCount(attentionBookings.length)} 筆待跟進`
+                : "目前沒有急件"
             }
           />
           <CanvasKPI
@@ -1183,25 +1375,21 @@ export default async function HomePage() {
             value={
               latestInvoice?.amount ? formatMoney(latestInvoice.amount) : "—"
             }
-            sub={
-              latestInvoice
-                ? latestInvoice.invoiceId
-                : "No visible invoice artifact"
-            }
+            sub={latestInvoice ? latestInvoice.invoiceId : "目前沒有可見發票"}
           />
           <CanvasKPI
             theme={th}
             label="可見模組"
             value={formatCount(modules.length)}
-            sub={`${formatCount(visibleNavItems.length)} nav entries after feature gating`}
+            sub={`${formatCount(visibleNavItems.length)} 個導覽入口通過 feature gating`}
           />
         </div>
 
         <div style={topGridStyle}>
           <CanvasCard
             theme={th}
-            title="Current bookings and recent updates"
-            subtitle="Workspace answers whether anything urgent needs attention today."
+            title="近期叫車與最新更新"
+            subtitle="首頁先回答今天是否有需要優先處理的 booking。"
           >
             {recentRows.length > 0 ? (
               <CanvasTable<RecentBookingRow>
@@ -1211,22 +1399,19 @@ export default async function HomePage() {
               />
             ) : (
               <div style={emptyPanelStyle}>
-                <strong style={sectionTitleStyle}>no_data</strong>
+                <strong style={sectionTitleStyle}>尚無近期叫車</strong>
                 <p style={sectionBodyStyle}>
-                  No active booking rows are available for the current tenant
-                  snapshot.
+                  目前租戶快照沒有任何進行中的 booking row。
                 </p>
-                <Link href="/bookings/new" style={emptyActionStyle}>
-                  New booking
-                </Link>
+                {renderEmptyAction(bookingCreateAction)}
               </div>
             )}
           </CanvasCard>
 
           <CanvasCard
             theme={th}
-            title="Identity, environment, and visible modules"
-            subtitle="Module and nav visibility stay feature-flag aware."
+            title="環境與可見模組"
+            subtitle="模組與導覽都遵守 feature flag gating。"
           >
             <CanvasDL
               theme={th}
@@ -1266,7 +1451,7 @@ export default async function HomePage() {
             />
 
             <div style={cardStackStyle}>
-              <p style={sectionTitleStyle}>Visible module nav</p>
+              <p style={sectionTitleStyle}>可見模組導覽</p>
               <div style={navChipWrapStyle}>
                 {visibleNavItems.map((item) =>
                   renderNavChip(item.label, item.href),
@@ -1280,8 +1465,8 @@ export default async function HomePage() {
           <div style={cardStackStyle}>
             <CanvasCard
               theme={th}
-              title="Module enablement summary"
-              subtitle="Per-spec module capability stays visible on the landing page."
+              title="模組啟用摘要"
+              subtitle="依 spec 顯示首頁必備的 module enablement summary。"
             >
               {modules.length > 0 ? (
                 <div style={moduleSummaryStyle}>
@@ -1313,10 +1498,9 @@ export default async function HomePage() {
                 </div>
               ) : (
                 <div style={emptyPanelStyle}>
-                  <strong style={sectionTitleStyle}>filtered_empty</strong>
+                  <strong style={sectionTitleStyle}>篩選後為空</strong>
                   <p style={sectionBodyStyle}>
-                    No module is currently visible after feature and role
-                    gating.
+                    feature 與 role gating 後，目前沒有任何可見模組。
                   </p>
                 </div>
               )}
@@ -1324,8 +1508,8 @@ export default async function HomePage() {
 
             <CanvasCard
               theme={th}
-              title="Integration health"
-              subtitle="Aggregated readiness and governance checklist follow packet §5 behaviour."
+              title="整合健康度"
+              subtitle="aggregated readiness 與治理 checklist 依 packet §5.1 呈現。"
             >
               <div style={cardStackStyle}>
                 {readinessItems.length > 0 ? (
@@ -1338,7 +1522,9 @@ export default async function HomePage() {
                           gap: 8,
                         }}
                       >
-                        <p style={sectionTitleStyle}>{item.subSystem}</p>
+                        <p style={sectionTitleStyle}>
+                          {getSubSystemLabel(item.subSystem)}
+                        </p>
                         <CanvasPill
                           theme={th}
                           tone={getStatusTone(item.status)}
@@ -1347,7 +1533,7 @@ export default async function HomePage() {
                         </CanvasPill>
                       </div>
                       <p style={sectionBodyStyle}>
-                        {item.detail ?? "No additional detail was returned."}
+                        {item.detail ?? "目前沒有回傳額外說明。"}
                       </p>
                       <div style={actionMetaStyle}>
                         <span style={statusCopyStyle}>
@@ -1366,18 +1552,18 @@ export default async function HomePage() {
                   ))
                 ) : (
                   <div style={emptyPanelStyle}>
-                    <strong style={sectionTitleStyle}>fetch_failed</strong>
+                    <strong style={sectionTitleStyle}>
+                      readiness unavailable
+                    </strong>
                     <p style={sectionBodyStyle}>
-                      Aggregated readiness is unavailable, so only
-                      governance-based fallback messaging can render.
+                      aggregated readiness 目前不可用，因此只顯示治理層 fallback
+                      訊息。
                     </p>
                   </div>
                 )}
 
                 <div style={emptyPanelStyle}>
-                  <strong style={sectionTitleStyle}>
-                    Governance checklist
-                  </strong>
+                  <strong style={sectionTitleStyle}>開通 checklist</strong>
                   {(data.governance?.onboardingChecklist.length ?? 0) > 0 ? (
                     <div style={cardStackStyle}>
                       {data.governance?.onboardingChecklist
@@ -1389,9 +1575,7 @@ export default async function HomePage() {
                         ))}
                     </div>
                   ) : (
-                    <p style={sectionBodyStyle}>
-                      No open onboarding checklist item was returned.
-                    </p>
+                    <p style={sectionBodyStyle}>目前沒有待處理的開通項目。</p>
                   )}
                 </div>
               </div>
@@ -1402,39 +1586,53 @@ export default async function HomePage() {
             <CanvasCard
               theme={th}
               title="Cross-app deep links"
-              subtitle="Ops and platform references open in a new tab and stay tenant-scoped."
+              subtitle="只渲染 runtime contract 回傳的 tenant-scoped CrossAppResourceLink。"
             >
               <div style={cardStackStyle}>
-                {externalLinks.map((link) => (
-                  <a
-                    href={toExternalHref(link)}
-                    key={`${link.targetApp}-${link.route}`}
-                    rel="noreferrer"
-                    style={externalLinkStyle}
-                    target={link.openMode === "new_tab" ? "_blank" : undefined}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 8,
-                      }}
+                {externalLinks.length > 0 ? (
+                  externalLinks.map((link) => (
+                    <a
+                      href={toExternalHref(link)}
+                      key={`${link.targetApp}-${link.route}`}
+                      rel="noreferrer"
+                      style={externalLinkStyle}
+                      target={
+                        link.openMode === "new_tab" ? "_blank" : undefined
+                      }
                     >
-                      <p style={sectionTitleStyle}>{link.label}</p>
-                      <CanvasPill theme={th} tone="info">
-                        {link.targetApp}
-                      </CanvasPill>
-                    </div>
-                    <p style={sectionBodyStyle}>{link.route}</p>
-                  </a>
-                ))}
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 8,
+                        }}
+                      >
+                        <p style={sectionTitleStyle}>{link.label}</p>
+                        <CanvasPill theme={th} tone="info">
+                          {link.targetApp}
+                        </CanvasPill>
+                      </div>
+                      <p style={sectionBodyStyle}>{link.route}</p>
+                    </a>
+                  ))
+                ) : (
+                  <div style={emptyPanelStyle}>
+                    <strong style={sectionTitleStyle}>
+                      CrossAppResourceLink unavailable
+                    </strong>
+                    <p style={sectionBodyStyle}>
+                      目前首頁可見資料沒有回傳任何 runtime-scoped deep link，
+                      因此前端不再自行拼接 ops 或 platform-admin URL。
+                    </p>
+                  </div>
+                )}
               </div>
             </CanvasCard>
 
             <CanvasCard
               theme={th}
-              title="Notices and empty-state outcomes"
-              subtitle="Distinct `EmptyReason` branches and current tenant notices are visible from home."
+              title="通知與 EmptyReason"
+              subtitle="六種 EmptyReason 分支都用不同文案呈現，並標示目前命中的分支。"
             >
               <div style={cardStackStyle}>
                 {data.notifications.length > 0 ? (
@@ -1452,7 +1650,7 @@ export default async function HomePage() {
                       >
                         <p style={sectionTitleStyle}>{notification.title}</p>
                         <CanvasPill theme={th} tone="neutral">
-                          {notification.channel}
+                          {getChannelLabel(notification.channel)}
                         </CanvasPill>
                       </div>
                       <p style={sectionBodyStyle}>{notification.message}</p>
@@ -1463,39 +1661,22 @@ export default async function HomePage() {
                   ))
                 ) : (
                   <div style={emptyPanelStyle}>
-                    <strong style={sectionTitleStyle}>
-                      external_unavailable
-                    </strong>
+                    <strong style={sectionTitleStyle}>通知暫無資料</strong>
                     <p style={sectionBodyStyle}>
-                      No notification feed item is currently available.
+                      目前沒有可見通知；這不會自動被視為 external_unavailable。
                     </p>
                   </div>
                 )}
 
-                {emptyPresentation ? (
-                  <div style={emptyPanelStyle}>
-                    <strong style={sectionTitleStyle}>
-                      Current empty-state branch: {emptyReason}
-                    </strong>
-                    <p style={sectionBodyStyle}>{emptyPresentation.body}</p>
-                    {renderEmptyAction(emptyPresentation.nextAction)}
-                  </div>
-                ) : (
-                  <div style={emptyPanelStyle}>
-                    <strong style={sectionTitleStyle}>Normal state</strong>
-                    <p style={sectionBodyStyle}>
-                      Current tenant snapshot is not in one of the six home
-                      empty-state branches.
-                    </p>
-                    {renderEmptyAction(
-                      availableActions.find(
-                        (action) =>
-                          action.descriptor.action === "booking.list_today",
-                      ),
-                      "secondary",
-                    )}
-                  </div>
-                )}
+                <div style={moduleSummaryStyle}>
+                  {EMPTY_REASON_ORDER.map((reason) =>
+                    renderEmptyReasonTile(
+                      reason,
+                      emptyReason,
+                      availableActions,
+                    ),
+                  )}
+                </div>
               </div>
             </CanvasCard>
           </div>
@@ -1505,7 +1686,7 @@ export default async function HomePage() {
           <CanvasCard
             theme={th}
             title="Partial data warnings"
-            subtitle="Machine-visible fetch failures remain explicit on the page."
+            subtitle="機器可見的 fetch failure 會直接暴露在首頁。"
           >
             <div style={cardStackStyle}>
               {data.errors.map((error) => (
