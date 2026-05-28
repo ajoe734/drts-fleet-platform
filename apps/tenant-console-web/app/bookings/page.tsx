@@ -115,6 +115,10 @@ type EmptyStateDescriptor = {
   highlights: string[];
 };
 
+type ActionBindingContext = {
+  bookingId?: string;
+};
+
 type TabFilterPreset = {
   id: string;
   label: string;
@@ -272,7 +276,7 @@ function normalizeBooking(
 ): TenantBookingListRecord {
   return {
     ...booking,
-    editableUntil: booking.editableUntil ?? booking.modifiableUntil,
+    editableUntil: booking.editableUntil ?? null,
     readOnlyReasonCode: booking.readOnlyReasonCode ?? null,
     availableActions: Array.isArray(booking.availableActions)
       ? booking.availableActions
@@ -357,6 +361,21 @@ function isBookingDetailAction(descriptor: ResourceActionDescriptor) {
   );
 }
 
+function getActionHref(
+  descriptor: ResourceActionDescriptor,
+  context?: ActionBindingContext,
+) {
+  if (isCreateBookingAction(descriptor)) {
+    return "/bookings/new";
+  }
+
+  if (context?.bookingId && isBookingDetailAction(descriptor)) {
+    return `/bookings/${context.bookingId}`;
+  }
+
+  return null;
+}
+
 function getRelativeUrgency(iso: string | null) {
   if (!iso) {
     return null;
@@ -415,7 +434,7 @@ function getRefreshCopy(refresh: UiRefreshMetadata | null) {
   if (!refresh) {
     return [
       `T5 ${REFRESH_TIER.replaceAll("_", " ")}`,
-      "awaiting backend refresh envelope",
+      "refresh metadata unavailable",
     ].join(" · ");
   }
 
@@ -561,18 +580,25 @@ export default async function TenantBookingsPage({
   const bookings = rawBookings.map(normalizeBooking);
   const result = applyBookingListQuery(bookings, query);
   const refreshMetadata = listEnvelope?.refresh ?? null;
+  const backendEmptyReason = EMPTY_REASON_SET.has(
+    listEnvelope?.emptyState?.reason as EmptyReason,
+  )
+    ? (listEnvelope?.emptyState?.reason as TenantEmptyReason)
+    : null;
   const emptyReason: TenantEmptyReason | null =
-    (EMPTY_REASON_SET.has(listEnvelope?.emptyState?.reason as EmptyReason)
-      ? (listEnvelope?.emptyState?.reason as TenantEmptyReason)
-      : undefined) ??
+    backendEmptyReason ??
     (bookingsSettled.status === "rejected"
       ? getEmptyReasonFromError(bookingsSettled.reason)
       : result.total === 0
         ? hasActiveFilters(resolvedSearchParams)
           ? "filtered_empty"
-          : "no_data"
+          : null
         : null);
   const emptyState = emptyReason ? EMPTY_STATE_COPY[emptyReason] : null;
+  const showGenericEmptyState =
+    bookingsSettled.status === "fulfilled" &&
+    result.total === 0 &&
+    emptyReason === null;
   const pageTabs = getPageStatusTabs(bookings, query, {
     focusedBookingId,
     notificationRef,
@@ -617,11 +643,13 @@ export default async function TenantBookingsPage({
           >
             篩選
           </a>
-          {headerActions.map((descriptor) =>
-            isCreateBookingAction(descriptor) && descriptor.enabled ? (
+          {headerActions.map((descriptor) => {
+            const href = getActionHref(descriptor);
+
+            return href && descriptor.enabled ? (
               <Link
                 className="action-button action-button-primary"
-                href="/bookings/new"
+                href={href}
                 key={descriptor.action}
               >
                 {getActionLabel(descriptor.action)}
@@ -638,8 +666,8 @@ export default async function TenantBookingsPage({
               >
                 {getActionLabel(descriptor.action)}
               </span>
-            ),
-          )}
+            );
+          })}
         </div>
       </section>
 
@@ -952,20 +980,59 @@ export default async function TenantBookingsPage({
                   {listEnvelope.emptyState.messageCode}
                 </span>
               ) : null}
-              {listEnvelope?.emptyState?.nextAction ? (
-                <span
-                  className="bookings-action-pill is-disabled"
-                  title={
-                    listEnvelope.emptyState.nextAction.enabled
-                      ? "backend published nextAction without a bound navigation target"
-                      : getActionDisabledReason(
-                          listEnvelope.emptyState.nextAction,
-                        )
-                  }
-                >
-                  {getActionLabel(listEnvelope.emptyState.nextAction.action)}
-                </span>
-              ) : null}
+              {listEnvelope?.emptyState?.nextAction
+                ? (() => {
+                    const href = getActionHref(
+                      listEnvelope.emptyState.nextAction,
+                    );
+
+                    return href &&
+                      listEnvelope.emptyState.nextAction.enabled ? (
+                      <Link className="bookings-action-pill" href={href}>
+                        {getActionLabel(
+                          listEnvelope.emptyState.nextAction.action,
+                        )}
+                      </Link>
+                    ) : (
+                      <span
+                        className="bookings-action-pill is-disabled"
+                        title={
+                          listEnvelope.emptyState.nextAction.enabled
+                            ? "backend published nextAction without a bound navigation target"
+                            : getActionDisabledReason(
+                                listEnvelope.emptyState.nextAction,
+                              )
+                        }
+                      >
+                        {getActionLabel(
+                          listEnvelope.emptyState.nextAction.action,
+                        )}
+                      </span>
+                    );
+                  })()
+                : null}
+            </div>
+          </div>
+        ) : showGenericEmptyState ? (
+          <div className="bookings-empty-state">
+            <div className="bookings-empty-hero">
+              <div className="bookings-empty-orb">empty</div>
+              <div className="bookings-empty-copy">
+                <span className="surface-kicker">Empty Snapshot</span>
+                <h3>目前沒有可顯示的 booking</h3>
+                <p>
+                  後端這次回應了空清單，但沒有附上 `emptyState.reason`。
+                  這個畫面不會自行補判為 `no_data` 或 `not_provisioned`。
+                </p>
+              </div>
+            </div>
+            <div className="bookings-empty-highlights">
+              <span className="status-chip is-warning">
+                backend emptyState missing
+              </span>
+              <span className="bookings-empty-highlight">
+                需要 API 回傳 canonical empty reason
+              </span>
             </div>
           </div>
         ) : (
@@ -1075,12 +1142,15 @@ export default async function TenantBookingsPage({
                           </span>
                           <div className="row-actions">
                             {rowActions.length > 0 ? (
-                              rowActions.map((descriptor) =>
-                                descriptor.enabled &&
-                                isBookingDetailAction(descriptor) ? (
+                              rowActions.map((descriptor) => {
+                                const href = getActionHref(descriptor, {
+                                  bookingId: booking.bookingId,
+                                });
+
+                                return descriptor.enabled && href ? (
                                   <Link
                                     className="bookings-action-pill"
-                                    href={`/bookings/${booking.bookingId}`}
+                                    href={href}
                                     key={descriptor.action}
                                   >
                                     {getActionLabel(descriptor.action)}
@@ -1097,8 +1167,8 @@ export default async function TenantBookingsPage({
                                   >
                                     {getActionLabel(descriptor.action)}
                                   </span>
-                                ),
-                              )
+                                );
+                              })
                             ) : (
                               <span className="bookings-inline-meta">
                                 backend returned no resource actions
