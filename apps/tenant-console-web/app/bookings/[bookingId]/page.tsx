@@ -8,6 +8,7 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { BookingCommandPanel } from "@/components/booking-command-panel";
+import { RefreshButton } from "@/components/refresh-button";
 import {
   CalloutPanel,
   PageHero,
@@ -27,6 +28,13 @@ type BookingDetailRecord = BookingRecord & {
   readOnlyReasonCode?: string | null;
   availableActions?: ResourceActionDescriptor[];
   refreshMetadata?: UiRefreshMetadata | null;
+  reservationHoldStatus?:
+    | "none"
+    | "requested"
+    | "released"
+    | "redispatch_queue"
+    | "exception_hold";
+  reservationHoldExpiresAt?: string | null;
   assignment?: {
     driverName?: string | null;
     driverId?: string | null;
@@ -77,32 +85,10 @@ type EmptyReasonCard = {
   active: boolean;
 };
 
+type DetailCommandState = "accepted_pending" | "editable" | "read_only";
+
 function getEditableUntil(booking: BookingDetailRecord) {
   return booking.editableUntil ?? booking.modifiableUntil ?? null;
-}
-
-function getReadOnlyReasonCode(booking: BookingDetailRecord) {
-  if (booking.readOnlyReasonCode) {
-    return booking.readOnlyReasonCode;
-  }
-
-  const editableUntil = getEditableUntil(booking);
-  if (editableUntil && !isFutureIso(editableUntil)) {
-    return "past_editable_until";
-  }
-
-  if (
-    booking.orderStatus === "completed" ||
-    booking.orderStatus === "cancelled"
-  ) {
-    return "terminal_order";
-  }
-
-  if (booking.orderStatus === "on_trip") {
-    return "in_fulfillment";
-  }
-
-  return null;
 }
 
 function getFallbackActions(
@@ -118,34 +104,73 @@ function getFallbackActions(
     booking.orderStatus !== "completed" &&
     booking.orderStatus !== "cancelled" &&
     (booking.cancelableUntil == null || isFutureIso(booking.cancelableUntil));
+  const updateDisabledReasonCode = canUpdate
+    ? null
+    : editableUntil && !isFutureIso(editableUntil)
+      ? "past_editable_until"
+      : booking.orderStatus === "on_trip"
+        ? "in_fulfillment"
+        : "terminal_order";
+  const cancelDisabledReasonCode = canCancel
+    ? null
+    : booking.cancelableUntil && !isFutureIso(booking.cancelableUntil)
+      ? "past_cancelable_until"
+      : "terminal_order";
 
   return [
     {
       action: "update",
       enabled: canUpdate,
-      disabledReasonCode: canUpdate
-        ? undefined
-        : getReadOnlyReasonCode(booking),
       riskLevel: "medium",
+      ...(updateDisabledReasonCode
+        ? { disabledReasonCode: updateDisabledReasonCode }
+        : {}),
     },
     {
       action: "cancel",
       enabled: canCancel,
-      disabledReasonCode: canCancel
-        ? undefined
-        : booking.cancelableUntil && !isFutureIso(booking.cancelableUntil)
-          ? "past_cancelable_until"
-          : "terminal_order",
       requiresReason: true,
       riskLevel: "high",
+      ...(cancelDisabledReasonCode
+        ? { disabledReasonCode: cancelDisabledReasonCode }
+        : {}),
     },
   ];
 }
 
 function getAvailableActions(booking: BookingDetailRecord) {
-  return booking.availableActions?.length
-    ? booking.availableActions
-    : getFallbackActions(booking);
+  return {
+    actions:
+      booking.availableActions && booking.availableActions.length > 0
+        ? booking.availableActions
+        : getFallbackActions(booking),
+    source:
+      booking.availableActions && booking.availableActions.length > 0
+        ? ("published" as const)
+        : ("derived" as const),
+  };
+}
+
+function getReadOnlyReasonCode(
+  booking: BookingDetailRecord,
+  availableActions: ResourceActionDescriptor[],
+) {
+  if (booking.readOnlyReasonCode) {
+    return booking.readOnlyReasonCode;
+  }
+
+  const updateAction =
+    availableActions.find((action) => action.action === "update") ?? null;
+  if (updateAction && !updateAction.enabled) {
+    return updateAction.disabledReasonCode ?? null;
+  }
+
+  const editableUntil = getEditableUntil(booking);
+  if (editableUntil && !isFutureIso(editableUntil)) {
+    return "past_editable_until";
+  }
+
+  return null;
 }
 
 function buildTimeline(booking: BookingDetailRecord): TimelineRow[] {
@@ -320,6 +345,69 @@ function getEditableCountdownLabel(editableUntil: string | null) {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return minutes > 0 ? `${hours}h ${minutes}m left` : `${hours}h left`;
+}
+
+function getCommandState(
+  booking: BookingDetailRecord,
+  availableActions: ResourceActionDescriptor[],
+  readOnlyReasonCode: string | null,
+): DetailCommandState {
+  if (
+    booking.reservationHoldStatus === "requested" ||
+    booking.reservationHoldStatus === "redispatch_queue"
+  ) {
+    return "accepted_pending";
+  }
+
+  const updateAction =
+    availableActions.find((action) => action.action === "update") ?? null;
+  if (updateAction?.enabled) {
+    return "editable";
+  }
+
+  return readOnlyReasonCode ? "read_only" : "editable";
+}
+
+function getCommandStateLabel(state: DetailCommandState) {
+  switch (state) {
+    case "accepted_pending":
+      return "Accepted + pending";
+    case "editable":
+      return "Editable window open";
+    default:
+      return "Read-only";
+  }
+}
+
+function getCommandStateDescription(
+  state: DetailCommandState,
+  booking: BookingDetailRecord,
+  editableUntil: string | null,
+  readOnlyReasonCode: string | null,
+) {
+  switch (state) {
+    case "accepted_pending":
+      return booking.reservationHoldExpiresAt
+        ? `The tenant command was accepted. External confirmation is still settling until ${formatDateTime(booking.reservationHoldExpiresAt)}.`
+        : "The tenant command was accepted. External confirmation is still settling before the next snapshot is published.";
+    case "editable":
+      return editableUntil
+        ? `Tenant-safe edits remain available until ${formatDateTime(editableUntil)}.`
+        : "Tenant-safe edits remain available in the current snapshot.";
+    default:
+      return describeReadOnlyReason(readOnlyReasonCode, booking);
+  }
+}
+
+function getCommandStateTone(state: DetailCommandState) {
+  switch (state) {
+    case "accepted_pending":
+      return "attention";
+    case "editable":
+      return "fresh";
+    default:
+      return "warning";
+  }
 }
 
 function getRefreshTone(
@@ -547,9 +635,10 @@ export default async function BookingDetailPage({
   const source = getBookingSourceVisibility(booking);
   const timeline = buildTimeline(booking);
   const activity = buildActivity(booking);
-  const availableActions = getAvailableActions(booking);
+  const { actions: availableActions, source: actionSource } =
+    getAvailableActions(booking);
   const editableUntil = getEditableUntil(booking);
-  const readOnlyReasonCode = getReadOnlyReasonCode(booking);
+  const readOnlyReasonCode = getReadOnlyReasonCode(booking, availableActions);
   const refreshSummary = buildRefreshSummary(booking);
   const refreshTone = getRefreshTone(refreshSummary.freshness);
   const relatedInvoices =
@@ -567,6 +656,18 @@ export default async function BookingDetailPage({
   const approvalState = describeApprovalState(booking.approvalState);
   const isApprovalWaiting = booking.approvalState === "pending";
   const editableCountdownLabel = getEditableCountdownLabel(editableUntil);
+  const commandState = getCommandState(
+    booking,
+    availableActions,
+    readOnlyReasonCode,
+  );
+  const commandStateDescription = getCommandStateDescription(
+    commandState,
+    booking,
+    editableUntil,
+    readOnlyReasonCode,
+  );
+  const activeEmptyReasons = emptyReasonCards.filter((item) => item.active);
 
   return (
     <div className="page-shell">
@@ -589,15 +690,46 @@ export default async function BookingDetailPage({
       />
 
       <section className="booking-detail-hero">
+        <div className="booking-state-banner">
+          <div className="booking-state-copy">
+            <span
+              className={`booking-state-pill booking-state-pill-${getCommandStateTone(commandState)}`}
+            >
+              {getCommandStateLabel(commandState)}
+            </span>
+            <strong>{commandStateDescription}</strong>
+            <p>
+              Action descriptors are{" "}
+              {actionSource === "published"
+                ? "published by the backend for this booking."
+                : "temporarily derived in the UI until the backend descriptor upgrade lands."}
+            </p>
+          </div>
+          <div className="booking-state-actions">
+            <div className="booking-refresh-stack">
+              <span className="metric-label">Refresh tier</span>
+              <span
+                className={`booking-refresh-pill booking-refresh-pill-${refreshTone}`}
+              >
+                {refreshSummary.tierCode} · {refreshSummary.cadenceLabel} ·{" "}
+                {refreshSummary.freshness} · {refreshSummary.source}
+              </span>
+            </div>
+            <RefreshButton label="Refresh snapshot" />
+          </div>
+        </div>
         <div className="booking-detail-title-row">
           <div className="chip-row">
             <span className="status-badge">{booking.orderStatus}</span>
             <span
-              className={`status-chip${readOnlyReasonCode ? " is-warning" : ""}`}
+              className={`status-chip${commandState !== "editable" ? " is-warning" : ""}`}
             >
-              {readOnlyReasonCode ? "Read-only" : "Editable"}
+              {getCommandStateLabel(commandState)}
             </span>
             <span className="status-chip">{approvalState}</span>
+            <span className="status-chip">
+              Actions {actionSource === "published" ? "published" : "derived"}
+            </span>
             <span className={getSourceToneClassName(source.tone)}>
               {source.badge}
             </span>
@@ -619,6 +751,17 @@ export default async function BookingDetailPage({
         </div>
         <div className="booking-detail-highlights">
           <div className="booking-highlight-card">
+            <span className="booking-highlight-label">Available actions</span>
+            <strong>{availableActions.length}</strong>
+            <p>
+              {availableActions.length > 0
+                ? availableActions
+                    .map((action: ResourceActionDescriptor) => action.action)
+                    .join(", ")
+                : "No tenant-safe command descriptors published"}
+            </p>
+          </div>
+          <div className="booking-highlight-card">
             <span className="booking-highlight-label">Editable until</span>
             <strong>
               {editableUntil ? formatDateTime(editableUntil) : "Not published"}
@@ -635,9 +778,13 @@ export default async function BookingDetailPage({
             </p>
           </div>
           <div className="booking-highlight-card">
-            <span className="booking-highlight-label">Dispatch state</span>
-            <strong>{booking.orderStatus}</strong>
-            <p>{source.statusBoundary}</p>
+            <span className="booking-highlight-label">Empty reasons</span>
+            <strong>{activeEmptyReasons.length} active</strong>
+            <p>
+              {activeEmptyReasons.length > 0
+                ? activeEmptyReasons.map((reason) => reason.reason).join(", ")
+                : "No degraded or empty support lanes in this snapshot"}
+            </p>
           </div>
         </div>
         <div className="booking-detail-link-row">
@@ -662,6 +809,16 @@ export default async function BookingDetailPage({
           tone="warning"
         >
           <p>{source.escalationHint}</p>
+        </CalloutPanel>
+      ) : null}
+
+      {commandState === "accepted_pending" ? (
+        <CalloutPanel
+          title="Accepted command is still settling"
+          description="Q-TEN04 requires tenant booking commands to show the accepted+pending state whenever downstream confirmation has not fully republished yet."
+          tone="warning"
+        >
+          <p>{commandStateDescription}</p>
         </CalloutPanel>
       ) : null}
 
@@ -720,11 +877,25 @@ export default async function BookingDetailPage({
               </div>
               <div>
                 <dt>Pickup</dt>
-                <dd>{booking.pickup.address}</dd>
+                <dd>
+                  <Link
+                    className="text-link"
+                    href={`/addresses?query=${encodeURIComponent(booking.pickup.address)}`}
+                  >
+                    {booking.pickup.address}
+                  </Link>
+                </dd>
               </div>
               <div>
                 <dt>Dropoff</dt>
-                <dd>{booking.dropoff.address}</dd>
+                <dd>
+                  <Link
+                    className="text-link"
+                    href={`/addresses?query=${encodeURIComponent(booking.dropoff.address)}`}
+                  >
+                    {booking.dropoff.address}
+                  </Link>
+                </dd>
               </div>
               <div>
                 <dt>Window</dt>
@@ -747,7 +918,7 @@ export default async function BookingDetailPage({
               </div>
               <div>
                 <dt>Read-only reason</dt>
-                <dd>{readOnlyReasonCode ?? "Active action window"}</dd>
+                <dd>{readOnlyReasonCode ?? "Not published"}</dd>
               </div>
               <div>
                 <dt>Cost center</dt>
@@ -826,6 +997,13 @@ export default async function BookingDetailPage({
             title="Available actions"
             description="CTAs stay backend-driven. Disabled actions remain visible with a reason instead of disappearing by role."
           >
+            {actionSource === "derived" ? (
+              <div className="empty-panel booking-inline-empty">
+                Backend `availableActions[]` have not been published for this
+                booking yet. The UI is rendering a temporary fallback so the
+                detail screen stays usable until the dependency lands.
+              </div>
+            ) : null}
             <BookingCommandPanel
               availableActions={availableActions}
               booking={booking}
@@ -947,6 +1125,17 @@ export default async function BookingDetailPage({
               </div>
             </dl>
             <div className="booking-route-link-list">
+              <div className="booking-route-link-card">
+                <div className="booking-route-link-header">
+                  <span className="metric-label">tenant-console</span>
+                </div>
+                <strong>Refresh current detail</strong>
+                <p>
+                  Manual refresh remains available even on the T5 cadence when
+                  dispatch action is expected upstream.
+                </p>
+                <RefreshButton label="Refresh now" />
+              </div>
               {detailRouteLinks.map((link) => (
                 <div className="booking-route-link-card" key={link.label}>
                   <div className="booking-route-link-header">
