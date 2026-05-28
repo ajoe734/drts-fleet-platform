@@ -105,6 +105,20 @@ type StoredFilingPackage = FilingPackageRecord & {
 
 type OrderFeedProvider = () => OwnedOrderRecord[];
 
+function toAuditActorType(
+  identity?: EvidenceAccessIdentity | null,
+): AuditLogRecord["actorType"] {
+  switch (identity?.actorType) {
+    case "platform_admin":
+    case "tenant_admin":
+    case "ops_user":
+    case "partner_api_key":
+      return identity.actorType;
+    default:
+      return "system";
+  }
+}
+
 @Injectable()
 export class ReportingFilingService implements OnModuleInit {
   private reportJobs: StoredReportJob[] = [];
@@ -181,6 +195,7 @@ export class ReportingFilingService implements OnModuleInit {
     command: CreateReportJobCommand,
     requestId?: string,
     tenantScopeId?: string | null,
+    identity?: EvidenceAccessIdentity | null,
   ): ReportJobAccepted {
     this.assertNonBlank(command.jobType, "jobType");
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
@@ -212,6 +227,9 @@ export class ReportingFilingService implements OnModuleInit {
       status: "queued",
       filters: normalizedFilters,
       artifact: null,
+      submittedByActorId: identity?.actorId ?? null,
+      submittedByActorType: identity?.actorType ?? null,
+      failureReason: null,
       rows: [],
       partnerRevenueRows: [],
       settlementMatrix: [],
@@ -228,9 +246,9 @@ export class ReportingFilingService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
+        actorId: identity?.actorId ?? null,
+        actorType: toAuditActorType(identity),
+        tenantId: normalizedTenantScopeId ?? identity?.tenantId ?? null,
         moduleName: "reporting-filing",
         actionName: "create_report_job",
         resourceType: "report_job",
@@ -352,6 +370,7 @@ export class ReportingFilingService implements OnModuleInit {
   generateFilingPackage(
     command: GenerateFilingPackageCommand,
     requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
   ): FilingPackageAccepted {
     const createdAt = new Date().toISOString();
     const filingPackage: StoredFilingPackage = {
@@ -360,7 +379,13 @@ export class ReportingFilingService implements OnModuleInit {
       status: "queued",
       artifactZipUrl: null,
       artifactPdfUrl: null,
+      expiresAt: null,
       manifestHash: null,
+      scope: command.scope ? { ...command.scope } : null,
+      period: command.period ? { ...command.period } : null,
+      submittedByActorId: identity?.actorId ?? null,
+      submittedByActorType: identity?.actorType ?? null,
+      failureReason: null,
       items: [],
       generatedAt: null,
       createdAt,
@@ -378,9 +403,9 @@ export class ReportingFilingService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
+        actorId: identity?.actorId ?? null,
+        actorType: toAuditActorType(identity),
+        tenantId: identity?.tenantId ?? null,
         moduleName: "reporting-filing",
         actionName: "generate_filing_package_requested",
         resourceType: "filing_package",
@@ -388,6 +413,8 @@ export class ReportingFilingService implements OnModuleInit {
         newValuesSummary: {
           packageType: filingPackage.packageType,
           status: filingPackage.status,
+          scope: filingPackage.scope,
+          period: filingPackage.period,
         },
       },
       requestId,
@@ -544,6 +571,7 @@ export class ReportingFilingService implements OnModuleInit {
     const updatedAt = new Date().toISOString();
     job.status = "running";
     job.updatedAt = updatedAt;
+    job.failureReason = null;
     this.persistChanges(
       {
         reportJobs: [this.cloneStoredReportJob(job)],
@@ -573,6 +601,7 @@ export class ReportingFilingService implements OnModuleInit {
     job.artifact = this.createArtifact("report", job.jobId, artifactPayload);
     job.status = "completed";
     job.updatedAt = new Date().toISOString();
+    job.failureReason = null;
     this.persistChanges(
       {
         reportJobs: [this.cloneStoredReportJob(job)],
@@ -609,6 +638,8 @@ export class ReportingFilingService implements OnModuleInit {
   ) {
     job.status = "failed";
     job.updatedAt = new Date().toISOString();
+    job.failureReason =
+      error instanceof Error ? error.message : "unknown reporting error";
     this.persistChanges(
       {
         reportJobs: [this.cloneStoredReportJob(job)],
@@ -627,8 +658,7 @@ export class ReportingFilingService implements OnModuleInit {
         newValuesSummary: {
           jobType: job.jobType,
           status: job.status,
-          error:
-            error instanceof Error ? error.message : "unknown reporting error",
+          error: job.failureReason,
         },
       },
       requestId,
@@ -639,6 +669,7 @@ export class ReportingFilingService implements OnModuleInit {
     const generatedAt = new Date().toISOString();
     filingPackage.status = "running";
     filingPackage.updatedAt = generatedAt;
+    filingPackage.failureReason = null;
     this.persistChanges(
       {
         filingPackages: [this.cloneStoredFilingPackage(filingPackage)],
@@ -713,8 +744,10 @@ export class ReportingFilingService implements OnModuleInit {
       zip: zipDownloadMetadata,
       pdf: pdfDownloadMetadata,
     };
+    filingPackage.expiresAt = zipDownloadMetadata.expiresAt;
     filingPackage.status = "completed";
     filingPackage.updatedAt = generatedAt;
+    filingPackage.failureReason = null;
     this.persistChanges(
       {
         filingPackages: [this.cloneStoredFilingPackage(filingPackage)],
@@ -751,6 +784,8 @@ export class ReportingFilingService implements OnModuleInit {
   ) {
     filingPackage.status = "failed";
     filingPackage.updatedAt = new Date().toISOString();
+    filingPackage.failureReason =
+      error instanceof Error ? error.message : "unknown filing error";
     this.persistChanges(
       {
         filingPackages: [this.cloneStoredFilingPackage(filingPackage)],
@@ -769,8 +804,7 @@ export class ReportingFilingService implements OnModuleInit {
         newValuesSummary: {
           packageType: filingPackage.packageType,
           status: filingPackage.status,
-          error:
-            error instanceof Error ? error.message : "unknown filing error",
+          error: filingPackage.failureReason,
         },
       },
       requestId,

@@ -3723,6 +3723,9 @@ export interface ReportJobRecord {
   status: ReportJobStatus;
   filters: Record<string, unknown>;
   artifact: ReportArtifactRecord | null;
+  submittedByActorId?: string | null;
+  submittedByActorType?: IdentityContext["actorType"] | null;
+  failureReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -3821,7 +3824,13 @@ export interface FilingPackageRecord {
   status: FilingPackageStatus;
   artifactZipUrl: string | null;
   artifactPdfUrl: string | null;
+  expiresAt?: string | null;
   manifestHash: string | null;
+  scope?: Record<string, unknown> | null;
+  period?: Record<string, unknown> | null;
+  submittedByActorId?: string | null;
+  submittedByActorType?: IdentityContext["actorType"] | null;
+  failureReason?: string | null;
   items: PackageItemRecord[];
   generatedAt: string | null;
   createdAt: string;
