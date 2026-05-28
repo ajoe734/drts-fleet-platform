@@ -1102,6 +1102,14 @@ export class ApiClient {
     return this.getList<ReimbursementBatchRecord>(url);
   }
 
+  async getReimbursementBatch(
+    batchId: string,
+  ): Promise<ReimbursementBatchRecord> {
+    return this.get<ReimbursementBatchRecord>(
+      `/api/reimbursements/${encodeURIComponent(batchId)}`,
+    );
+  }
+
   async approveReimbursementBatch(
     batchId: string,
     command: ApproveReimbursementBatchCommand,
