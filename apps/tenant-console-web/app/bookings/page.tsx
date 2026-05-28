@@ -36,6 +36,7 @@ const OPS_CONSOLE_URL =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003";
 const PLATFORM_ADMIN_URL =
   process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002";
+const TENANT_CONSOLE_URL = process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "";
 const TENANT_EMPTY_REASONS = [
   "no_data",
   "not_provisioned",
@@ -69,6 +70,10 @@ const ACTION_COPY: Record<string, string> = {
   refresh: "立即更新",
 };
 const ACTION_PRIORITY = ["view_detail", "update", "cancel"];
+const DEFAULT_PAGE_ACTIONS: ResourceActionDescriptor[] = [
+  { action: "filter", enabled: true, riskLevel: "low" },
+  { action: "create_booking", enabled: true, riskLevel: "medium" },
+];
 const REFRESH_TIER: RefreshTier = "slow";
 const REFRESH_TIER_POLL_INTERVAL_MS: Record<RefreshTier, number> = {
   urgent: 5_000,
@@ -99,6 +104,7 @@ type TenantBookingListRecord = TenantBookingRuntimeRecord & {
 type TenantEmptyReason = (typeof TENANT_EMPTY_REASONS)[number];
 
 type BookingListEnvelope = ApiListData<TenantBookingRuntimeRecord> & {
+  availableActions?: ResourceActionDescriptor[];
   emptyState?: EmptyStateEnvelope | null;
   refresh?: UiRefreshMetadata | null;
 };
@@ -109,6 +115,7 @@ type EmptyStateDescriptor = {
   description: string;
   actionLabel?: string;
   actionHref?: string;
+  actionOpenInNewTab?: boolean;
 };
 
 type TabFilterPreset = {
@@ -123,6 +130,12 @@ type PageTabDescriptor = {
   value: number;
   href: string;
   isActive: boolean;
+};
+
+type ResolvedActionLink = {
+  href: string;
+  label: string;
+  openInNewTab: boolean;
 };
 
 const PAGE_TAB_PRESETS: TabFilterPreset[] = [
@@ -170,8 +183,9 @@ const EMPTY_STATE_COPY: Record<TenantEmptyReason, EmptyStateDescriptor> = {
     title: "租戶尚未完成 booking capability 開通",
     description:
       "目前不是單純的空列表，而是 tenant booking surface 尚未 ready。先完成 integration governance / module enablement，再回到這個 route。",
-    actionLabel: "查看整合就緒度",
-    actionHref: "/integration-governance",
+    actionLabel: "查看 tenant 設定與就緒度",
+    actionHref: `${PLATFORM_ADMIN_URL}/tenants/${DEMO_TENANT_ID}`,
+    actionOpenInNewTab: true,
   },
   fetch_failed: {
     eyebrow: "Fetch Failed",
@@ -194,8 +208,9 @@ const EMPTY_STATE_COPY: Record<TenantEmptyReason, EmptyStateDescriptor> = {
     title: "外部依賴暫時無法提供 booking 狀態",
     description:
       "forwarded / partner 相關依賴目前不穩定。tenant list 不能假裝資料完整，請改從 integration governance 或 ops console 深入查明。",
-    actionLabel: "查看整合就緒度",
-    actionHref: "/integration-governance",
+    actionLabel: "查看 tenant 設定與就緒度",
+    actionHref: `${PLATFORM_ADMIN_URL}/tenants/${DEMO_TENANT_ID}`,
+    actionOpenInNewTab: true,
   },
   filtered_empty: {
     eyebrow: "Filtered Empty",
@@ -275,25 +290,31 @@ function getActionLabel(action: string) {
   return ACTION_COPY[action] ?? action.replaceAll("_", " ");
 }
 
-function getActionHref(
-  booking: TenantBookingListRecord,
-  descriptor: ResourceActionDescriptor,
-) {
-  const actionRoute = getActionRoute(descriptor.action);
-  if (actionRoute) {
-    return actionRoute;
-  }
-
-  return `/bookings/${booking.bookingId}`;
+function normalizeActionToken(action: string) {
+  return action.trim().toLowerCase();
 }
 
-function getActionRoute(action: string) {
-  if (action === "create" || action === "create_booking") {
+function getActionRoute(action: string, bookingId?: string) {
+  const normalizedAction = normalizeActionToken(action);
+  if (normalizedAction === "create" || normalizedAction === "create_booking") {
     return "/bookings/new";
   }
 
-  if (action === "filter") {
+  if (normalizedAction === "filter") {
     return "#bookings-filters";
+  }
+
+  if (
+    bookingId &&
+    ["view_detail", "open_detail", "detail", "update", "cancel"].includes(
+      normalizedAction,
+    )
+  ) {
+    return `/bookings/${bookingId}`;
+  }
+
+  if (normalizedAction === "view_audit" || normalizedAction === "audit") {
+    return "/audit";
   }
 
   return null;
@@ -337,8 +358,89 @@ function getEmptyReasonFromError(error: unknown): TenantEmptyReason {
 
 function buildCrossAppHref(link: CrossAppResourceLink) {
   const baseUrl =
-    link.targetApp === "ops-console" ? OPS_CONSOLE_URL : PLATFORM_ADMIN_URL;
-  return `${baseUrl}${link.route}`;
+    link.targetApp === "ops-console"
+      ? OPS_CONSOLE_URL
+      : link.targetApp === "platform-admin"
+        ? PLATFORM_ADMIN_URL
+        : TENANT_CONSOLE_URL;
+  return baseUrl ? `${baseUrl}${link.route}` : link.route;
+}
+
+function matchCrossAppLinkForAction(
+  links: CrossAppResourceLink[] | undefined,
+  action: string,
+) {
+  if (!Array.isArray(links) || links.length === 0) {
+    return null;
+  }
+
+  const normalizedAction = normalizeActionToken(action);
+  return (
+    links.find((link) => {
+      const normalizedLabel = normalizeActionToken(link.label);
+      return (
+        normalizedLabel.includes(normalizedAction) ||
+        normalizedAction.includes(normalizedLabel) ||
+        (normalizedAction.includes("complaint") &&
+          (link.resourceType === "complaint" ||
+            link.route.includes("/complaints/"))) ||
+        ((normalizedAction.includes("audit") ||
+          normalizedAction.includes("receipt")) &&
+          (link.resourceType === "audit" || link.route.startsWith("/audit"))) ||
+        (normalizedAction.includes("invoice") &&
+          (link.resourceType === "invoice" ||
+            link.route.includes("/invoices/"))) ||
+        (normalizedAction.includes("webhook") &&
+          (link.resourceType === "webhook" ||
+            link.route.includes("/webhooks"))) ||
+        (normalizedAction.includes("integration") &&
+          link.route.includes("/integration-governance"))
+      );
+    }) ?? null
+  );
+}
+
+function resolvePageActionLink(
+  descriptor: ResourceActionDescriptor,
+): ResolvedActionLink | null {
+  const href = getActionRoute(descriptor.action);
+  if (!href) {
+    return null;
+  }
+
+  return {
+    href,
+    label: getActionLabel(descriptor.action),
+    openInNewTab: false,
+  };
+}
+
+function resolveBookingActionLink(
+  booking: TenantBookingListRecord,
+  descriptor: ResourceActionDescriptor,
+): ResolvedActionLink | null {
+  const actionRoute = getActionRoute(descriptor.action, booking.bookingId);
+  if (actionRoute) {
+    return {
+      href: actionRoute,
+      label: getActionLabel(descriptor.action),
+      openInNewTab: false,
+    };
+  }
+
+  const matchedCrossAppLink = matchCrossAppLinkForAction(
+    booking.crossAppLinks,
+    descriptor.action,
+  );
+  if (!matchedCrossAppLink) {
+    return null;
+  }
+
+  return {
+    href: buildCrossAppHref(matchedCrossAppLink),
+    label: matchedCrossAppLink.label,
+    openInNewTab: matchedCrossAppLink.openMode === "new_tab",
+  };
 }
 
 function getRelativeUrgency(iso: string | null) {
@@ -413,21 +515,13 @@ function getRefreshCopy(refresh: UiRefreshMetadata | null) {
 
 function getEmptyStateAction(
   emptyState: EmptyStateEnvelope | null | undefined,
-): { href: string; label: string } | null {
+): ResolvedActionLink | null {
   const descriptor = emptyState?.nextAction;
   if (!descriptor?.enabled) {
     return null;
   }
 
-  const href = getActionRoute(descriptor.action);
-  if (!href) {
-    return null;
-  }
-
-  return {
-    href,
-    label: getActionLabel(descriptor.action),
-  };
+  return resolvePageActionLink(descriptor);
 }
 
 function getApprovalCopy(booking: TenantBookingListRecord) {
@@ -578,6 +672,16 @@ export default async function TenantBookingsPage({
     notificationRef,
     emptyReasonOverride,
   });
+  const headerActions = (
+    listEnvelope?.availableActions?.length
+      ? listEnvelope.availableActions
+      : DEFAULT_PAGE_ACTIONS
+  )
+    .filter((descriptor) => descriptor.enabled)
+    .map(resolvePageActionLink)
+    .filter(
+      (descriptor): descriptor is ResolvedActionLink => descriptor !== null,
+    );
   const subtypeCounts = getSubtypeCounts(bookings);
   const pendingApprovalBookings = bookings
     .filter((booking) => booking.approvalState === "pending")
@@ -604,24 +708,21 @@ export default async function TenantBookingsPage({
           <p>本月所有預約，含進行中、待審批、已完成與取消。</p>
         </div>
         <div className="bookings-header-actions">
-          <Link
-            className="action-button action-button-secondary"
-            href="/bookings"
-          >
-            篩選
-          </Link>
-          <Link
-            className="action-button action-button-secondary"
-            href="/reports"
-          >
-            匯出
-          </Link>
-          <Link
-            className="action-button action-button-primary"
-            href="/bookings/new"
-          >
-            新增
-          </Link>
+          {headerActions.map((action) => (
+            <Link
+              className={
+                action.href === "/bookings/new"
+                  ? "action-button action-button-primary"
+                  : "action-button action-button-secondary"
+              }
+              href={action.href}
+              key={`${action.label}-${action.href}`}
+              rel={action.openInNewTab ? "noreferrer" : undefined}
+              target={action.openInNewTab ? "_blank" : undefined}
+            >
+              {action.label}
+            </Link>
+          ))}
         </div>
       </section>
 
@@ -906,21 +1007,23 @@ export default async function TenantBookingsPage({
             <p>{emptyState.description}</p>
             <div className="link-row">
               {emptyState.actionHref && emptyState.actionLabel ? (
-                <Link className="text-link" href={emptyState.actionHref}>
+                <Link
+                  className="text-link"
+                  href={emptyState.actionHref}
+                  rel={emptyState.actionOpenInNewTab ? "noreferrer" : undefined}
+                  target={emptyState.actionOpenInNewTab ? "_blank" : undefined}
+                >
                   {emptyState.actionLabel}
                 </Link>
               ) : null}
               {emptyStateAction ? (
-                <Link className="text-link" href={emptyStateAction.href}>
-                  {emptyStateAction.label}
-                </Link>
-              ) : null}
-              {emptyReason !== "filtered_empty" ? (
                 <Link
                   className="text-link"
-                  href="/bookings?emptyReason=filtered_empty"
+                  href={emptyStateAction.href}
+                  rel={emptyStateAction.openInNewTab ? "noreferrer" : undefined}
+                  target={emptyStateAction.openInNewTab ? "_blank" : undefined}
                 >
-                  查看 filtered_empty 範例
+                  {emptyStateAction.label}
                 </Link>
               ) : null}
             </div>
@@ -947,6 +1050,10 @@ export default async function TenantBookingsPage({
                   const urgency = getRelativeUrgency(booking.editableUntil);
                   const approvalCopy = getApprovalCopy(booking);
                   const rowActions = getActionDescriptorsForRow(booking);
+                  const resolvedRowActions = rowActions.map((descriptor) => ({
+                    descriptor,
+                    link: resolveBookingActionLink(booking, descriptor),
+                  }));
                   const isFocused = focusedBookingId === booking.bookingId;
 
                   return (
@@ -1032,20 +1139,32 @@ export default async function TenantBookingsPage({
                           </span>
                           <div className="row-actions">
                             {rowActions.length > 0 ? (
-                              rowActions.map((descriptor) =>
-                                descriptor.enabled ? (
+                              resolvedRowActions.map(({ descriptor, link }) =>
+                                descriptor.enabled && link ? (
                                   <Link
                                     className="bookings-action-pill"
-                                    href={getActionHref(booking, descriptor)}
+                                    href={link.href}
                                     key={descriptor.action}
+                                    rel={
+                                      link.openInNewTab
+                                        ? "noreferrer"
+                                        : undefined
+                                    }
+                                    target={
+                                      link.openInNewTab ? "_blank" : undefined
+                                    }
                                   >
-                                    {getActionLabel(descriptor.action)}
+                                    {link.label}
                                   </Link>
                                 ) : (
                                   <span
                                     className="bookings-action-pill is-disabled"
                                     key={descriptor.action}
-                                    title={getActionDisabledReason(descriptor)}
+                                    title={
+                                      descriptor.enabled
+                                        ? "backend published an action without a bound route"
+                                        : getActionDisabledReason(descriptor)
+                                    }
                                   >
                                     {getActionLabel(descriptor.action)}
                                   </span>
@@ -1087,8 +1206,16 @@ export default async function TenantBookingsPage({
                                   className="text-link"
                                   href={buildCrossAppHref(link)}
                                   key={`${link.targetApp}-${link.resourceId}-${link.label}`}
-                                  rel="noreferrer"
-                                  target="_blank"
+                                  rel={
+                                    link.openMode === "new_tab"
+                                      ? "noreferrer"
+                                      : undefined
+                                  }
+                                  target={
+                                    link.openMode === "new_tab"
+                                      ? "_blank"
+                                      : undefined
+                                  }
                                 >
                                   {link.label}
                                 </a>
