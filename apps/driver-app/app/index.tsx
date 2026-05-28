@@ -156,15 +156,37 @@ type DeepLinkTileModel = {
   tone?: Exclude<CanvasTone, "neutral"> | "accent";
 };
 
+type ReadinessStripItem = {
+  key: string;
+  label: string;
+  value: string;
+  tone: CanvasTone;
+};
+
+type CrossAppNoticeModel = {
+  notificationId: string;
+  title: string;
+  body: string;
+  createdAt: string;
+};
+
 type WorkspaceActionModel = {
   route: WorkspaceRoute;
   descriptor: ResourceActionDescriptor;
 };
 
 const THEME = driverCanvasTheme;
-const REFRESH_INTERVAL_MS = 15_000;
 const WORKSPACE_REFRESH_TIER: RefreshTier = "medium";
 const WORKSPACE_CROSS_APP_LINKS: CrossAppResourceLink[] = [];
+const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number | null> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: null,
+};
 
 const INITIAL_WORKSPACE: WorkspaceLoadResult = {
   taskViews: [],
@@ -209,6 +231,18 @@ function createWorkspaceAction(
 
 function getActionLabel(action: string) {
   switch (action) {
+    case "accept":
+      return "接受任務";
+    case "reject":
+      return "婉拒任務";
+    case "depart":
+      return "前往上車點";
+    case "arrived_pickup":
+      return "已抵達上車點";
+    case "start":
+      return "開始行程";
+    case "complete":
+      return "完成行程";
     case "start_shift":
       return "前往打卡";
     case "go_online":
@@ -286,6 +320,10 @@ function getRefreshTierLabel(tier: RefreshTier) {
     default:
       return tier;
   }
+}
+
+function getRefreshTierIntervalMs(tier: RefreshTier) {
+  return REFRESH_TIER_INTERVAL_MS[tier];
 }
 
 function classifyErrorReason(message: string | null): EmptyReason {
@@ -502,7 +540,7 @@ function formatTaskRouteSummary(task: UnifiedDriverTaskView) {
 
 function formatTaskActionSummary(task: UnifiedDriverTaskView) {
   if (task.allowedActions.length > 0) {
-    return `可執行 ${task.allowedActions.join(" / ")}`;
+    return `可執行 ${task.allowedActions.map(getActionLabel).join(" / ")}`;
   }
 
   if (task.blockingReason?.trim()) {
@@ -519,6 +557,7 @@ function formatTaskActionSummary(task: UnifiedDriverTaskView) {
 function getRefreshSnapshot(
   loadedAt: string | null,
   nowSeed: number,
+  tier: RefreshTier,
 ): { freshness: "fresh" | "stale" | "unknown"; label: string } {
   if (!loadedAt) {
     return { freshness: "unknown", label: "尚未同步" };
@@ -529,11 +568,52 @@ function getRefreshSnapshot(
     return { freshness: "unknown", label: "等待校時" };
   }
 
-  if (age <= REFRESH_INTERVAL_MS) {
+  const staleAfterMs = getRefreshTierIntervalMs(tier);
+  if (staleAfterMs !== null && age <= staleAfterMs) {
     return { freshness: "fresh", label: "Fresh" };
   }
 
   return { freshness: "stale", label: "Stale" };
+}
+
+function getTaskActionRoute(task: UnifiedDriverTaskView): WorkspaceRoute {
+  if (task.driverActionState === "in_progress") {
+    return "/trip";
+  }
+
+  return "/jobs";
+}
+
+function getPrimaryTaskAction(
+  task: UnifiedDriverTaskView,
+): WorkspaceActionModel {
+  const preferredAction: string =
+    task.allowedActions[0] ??
+    (task.driverActionState === "in_progress" ? "return_to_trip" : "open_jobs");
+
+  return createWorkspaceAction(
+    getTaskActionRoute(task),
+    preferredAction,
+    task.allowedActions.length > 0 || preferredAction === "return_to_trip",
+    task.allowedActions.length > 0
+      ? undefined
+      : task.blockingReason
+        ? "external_unavailable"
+        : "no_active_trip",
+    task.allowedActions.length > 0 ? "medium" : "low",
+  );
+}
+
+function dedupeActions(actions: WorkspaceActionModel[]) {
+  const seen = new Set<string>();
+  return actions.filter((action) => {
+    const key = `${action.route}:${action.descriptor.action}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
@@ -694,17 +774,19 @@ function HeaderActionButton({
 function RefreshTierPill({
   loadedAt,
   nowSeed,
+  tier,
 }: {
   loadedAt: string | null;
   nowSeed: number;
+  tier: RefreshTier;
 }) {
-  const snapshot = getRefreshSnapshot(loadedAt, nowSeed);
+  const snapshot = getRefreshSnapshot(loadedAt, nowSeed, tier);
   const tone = snapshot.freshness === "fresh" ? "success" : "warn";
 
   return (
     <View style={styles.refreshRow}>
       <Pill theme={THEME} tone={tone} dot>
-        {getRefreshTierLabel(WORKSPACE_REFRESH_TIER)}
+        {getRefreshTierLabel(tier)}
       </Pill>
       <Text style={styles.refreshLabel}>
         {snapshot.label} · {formatCompactDateTime(loadedAt)}
@@ -1382,10 +1464,15 @@ export default function WorkspaceIndex() {
       return;
     }
 
+    const refreshIntervalMs = getRefreshTierIntervalMs(WORKSPACE_REFRESH_TIER);
+    if (refreshIntervalMs === null) {
+      return;
+    }
+
     const timer = setInterval(() => {
       setRefreshSeed((current) => current + 1);
       setNowSeed(Date.now());
-    }, REFRESH_INTERVAL_MS);
+    }, refreshIntervalMs);
 
     return () => clearInterval(timer);
   }, [provisioned, ready]);
@@ -1802,6 +1889,24 @@ export default function WorkspaceIndex() {
     [workspace.notifications],
   );
 
+  const crossAppNotices = useMemo<CrossAppNoticeModel[]>(
+    () =>
+      workspace.notifications
+        .filter((notification) => notification.channel === "ops_notice")
+        .map((notification) => ({
+          notificationId: notification.notificationId,
+          title: notification.title,
+          body: notification.message,
+          createdAt: notification.createdAt,
+        }))
+        .sort(
+          (left, right) =>
+            Date.parse(right.createdAt) - Date.parse(left.createdAt),
+        )
+        .slice(0, 2),
+    [workspace.notifications],
+  );
+
   const persistentSosNotification = useMemo(
     () =>
       notificationItems.find(
@@ -1839,6 +1944,7 @@ export default function WorkspaceIndex() {
 
     if (taskSummary.actionRequiredTask) {
       const task = taskSummary.actionRequiredTask;
+      const primaryAction = getPrimaryTaskAction(task);
       return {
         state: "urgent_task",
         tone: "info",
@@ -1846,13 +1952,7 @@ export default function WorkspaceIndex() {
         title: `優先回應 ${formatTaskHeadline(task)}`,
         detail: formatTaskRouteSummary(task),
         meta: `${task.platformDisplayName} · ${formatTaskActionSummary(task)}`,
-        primaryAction: createWorkspaceAction(
-          "/jobs",
-          "review_urgent_task",
-          true,
-          undefined,
-          task.allowedActions.length > 0 ? "medium" : "low",
-        ),
+        primaryAction,
         secondaryAction: createWorkspaceAction(
           "/platform-presence",
           "open_platform_presence",
@@ -1865,6 +1965,7 @@ export default function WorkspaceIndex() {
       const fareLabel = workspace.orderMap[task.orderId]?.quotedFare
         ? formatMoney(workspace.orderMap[task.orderId]?.quotedFare)
         : "車資待確認";
+      const primaryAction = getPrimaryTaskAction(task);
 
       return {
         state: "trip",
@@ -1873,7 +1974,7 @@ export default function WorkspaceIndex() {
         title: `返回進行中的行程`,
         detail: formatTaskRouteSummary(task),
         meta: `${task.taskId} · ${fareLabel} · ${formatCompactDateTime(task.updatedAt)}`,
-        primaryAction: createWorkspaceAction("/trip", "return_to_trip"),
+        primaryAction,
         secondaryAction: createWorkspaceAction("/jobs", "open_jobs"),
       };
     }
@@ -2048,18 +2149,76 @@ export default function WorkspaceIndex() {
     ],
   );
 
-  const availableActions = useMemo(
+  const readinessItems = useMemo<ReadinessStripItem[]>(
     () => [
-      heroAction.primaryAction,
-      heroAction.secondaryAction,
-      ...(focusEmptyState ? [focusEmptyState.action] : []),
-      ...deepLinks.map((item) => item.action),
+      {
+        key: "identity",
+        label: "身份",
+        value: identityIssue ? "需重建" : "已啟用",
+        tone: identityIssue ? "danger" : "success",
+      },
+      {
+        key: "shift",
+        label: "班次",
+        value: workspace.shiftLoadError
+          ? "同步延遲"
+          : isDriverOnShift
+            ? "上班中"
+            : "未上班",
+        tone: workspace.shiftLoadError
+          ? "warn"
+          : isDriverOnShift
+            ? "success"
+            : "neutral",
+      },
+      {
+        key: "platforms",
+        label: "平台",
+        value: `${onlinePlatformCount}/${platformRows.length} 在線`,
+        tone: reauthPlatforms.length > 0 ? "warn" : "accent",
+      },
+      {
+        key: "urgent",
+        label: "Urgent",
+        value:
+          taskSummary.urgentCount > 0
+            ? `${taskSummary.urgentCount} 件`
+            : "已清空",
+        tone: taskSummary.urgentCount > 0 ? "info" : "neutral",
+      },
     ],
+    [
+      identityIssue,
+      isDriverOnShift,
+      onlinePlatformCount,
+      platformRows.length,
+      reauthPlatforms.length,
+      taskSummary.urgentCount,
+      workspace.shiftLoadError,
+    ],
+  );
+
+  const availableActions = useMemo(
+    () =>
+      dedupeActions([
+        heroAction.primaryAction,
+        heroAction.secondaryAction,
+        ...(focusEmptyState ? [focusEmptyState.action] : []),
+        ...(taskSummary.actionRequiredTask
+          ? [getPrimaryTaskAction(taskSummary.actionRequiredTask)]
+          : []),
+        ...(taskSummary.activeTripTask
+          ? [getPrimaryTaskAction(taskSummary.activeTripTask)]
+          : []),
+        ...deepLinks.map((item) => item.action),
+      ]),
     [
       deepLinks,
       focusEmptyState,
       heroAction.primaryAction,
       heroAction.secondaryAction,
+      taskSummary.actionRequiredTask,
+      taskSummary.activeTripTask,
     ],
   );
 
@@ -2164,7 +2323,11 @@ export default function WorkspaceIndex() {
               <Text style={styles.headerStatusText}>{headerStatusLabel}</Text>
               <Text style={styles.headerMetaText}>{getDriverId()}</Text>
             </View>
-            <RefreshTierPill loadedAt={workspace.loadedAt} nowSeed={nowSeed} />
+            <RefreshTierPill
+              loadedAt={workspace.loadedAt}
+              nowSeed={nowSeed}
+              tier={WORKSPACE_REFRESH_TIER}
+            />
           </View>
         }
         actions={
@@ -2259,6 +2422,38 @@ export default function WorkspaceIndex() {
         onPrimaryPress={navigate(heroAction.primaryAction.route)}
         onSecondaryPress={navigate(heroAction.secondaryAction.route)}
       />
+
+      <View style={styles.sectionBlock}>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionEyebrow}>Readiness summary</Text>
+            <Text style={styles.sectionTitle}>
+              裝置 / 身份 / 平台 readiness
+            </Text>
+          </View>
+        </View>
+        <View style={styles.readinessStrip}>
+          {readinessItems.map((item) => (
+            <View key={item.key} style={styles.readinessStripCell}>
+              <Card theme={THEME} padding={12}>
+                <Text style={styles.readinessStripLabel}>{item.label}</Text>
+                <Text style={styles.readinessStripValue}>{item.value}</Text>
+                <Pill theme={THEME} tone={item.tone} dot>
+                  {item.tone === "success"
+                    ? "ready"
+                    : item.tone === "danger"
+                      ? "blocked"
+                      : item.tone === "warn"
+                        ? "attention"
+                        : item.tone === "info"
+                          ? "active"
+                          : "idle"}
+                </Pill>
+              </Card>
+            </View>
+          ))}
+        </View>
+      </View>
 
       {activeTripCard ? (
         <ActiveTripSummaryCard
@@ -2387,26 +2582,48 @@ export default function WorkspaceIndex() {
       <View style={styles.sectionBlock}>
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionEyebrow}>Cross-app / deep links</Text>
-            <Text style={styles.sectionTitle}>
-              Phase 1 driver app 不跨連 web console
-            </Text>
+            <Text style={styles.sectionEyebrow}>Workspace sitemap</Text>
+            <Text style={styles.sectionTitle}>工作台入口與深連結</Text>
           </View>
         </View>
         <Text style={styles.sectionBody}>
-          依 spec，driver app 目前沒有對 web consoles 的 cross-app deep
-          links。下列快捷動作全部導向本 app 內頁面。
+          依 packet §5.1，workspace cockpit 必須提供 sitemap 級入口：
+          任務、行程、平台中心、收入、班次與設定，且 next-best-action 置於其上。
         </Text>
         <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
           <Text style={styles.crossAppPolicyTitle}>
             {`CrossAppResourceLink = ${WORKSPACE_CROSS_APP_LINKS.length}`}
           </Text>
           <Text style={styles.crossAppPolicyBody}>
-            平台管理端仍可發送給 driver audience 的 notice，但 cockpit 僅顯示
-            app 內通知與本 app 深連結，不導向 platform-admin / ops / tenant
-            web。
+            Phase 1 driver app 沒有直接開啟 web console 的 deep link；跨 app
+            訊息會落在本頁通知／notice 卡片，由司機留在 app 內處理。
           </Text>
         </Card>
+        {crossAppNotices.length > 0 ? (
+          <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
+            <Text style={styles.crossAppPolicyTitle}>
+              Cross-app notices routed into cockpit
+            </Text>
+            <View style={styles.crossAppNoticeList}>
+              {crossAppNotices.map((notice) => (
+                <View
+                  key={notice.notificationId}
+                  style={styles.crossAppNoticeRow}
+                >
+                  <View style={styles.crossAppNoticeCopy}>
+                    <Text style={styles.availableActionLabel}>
+                      {notice.title}
+                    </Text>
+                    <Text style={styles.sectionBody}>{notice.body}</Text>
+                  </View>
+                  <Text style={styles.platformRowMeta}>
+                    {formatCompactDateTime(notice.createdAt)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
         <View style={styles.deepLinkGrid}>
           {deepLinks.map((item) => (
             <DeepLinkTile
@@ -2450,9 +2667,10 @@ export default function WorkspaceIndex() {
             </Pill>
           </View>
           <Text style={styles.readinessBody}>
-            必備資料已就位：裝置身份、班次狀態、多平台健康、urgent task count、
-            active trip summary 與 next-best-action。當 backend 尚未提供
-            ui-runtime envelope 時，工作台以現有 contract 做降級呈現。
+            必備資料已就位：裝置身份、班次狀態、多平台健康、urgent task
+            count、active trip summary、next-best-action、6 種 EmptyReason 與
+            app 內 deep-link sitemap。CTAs 優先由 task `allowedActions` 與
+            `ResourceActionDescriptor` 驅動；舊版 task API 僅作 fallback。
           </Text>
         </Card>
       </View>
@@ -2660,6 +2878,27 @@ const styles = StyleSheet.create({
   },
   kpiCell: {
     flex: 1,
+  },
+  readinessStrip: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  readinessStripCell: {
+    width: "48%",
+  },
+  readinessStripLabel: {
+    color: THEME.textDim,
+    fontFamily: THEME.monoFamily,
+    fontSize: 10.5,
+    marginBottom: 6,
+  },
+  readinessStripValue: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 10,
   },
   emptyStateCard: {
     overflow: "hidden",
@@ -2968,6 +3207,18 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 12,
     lineHeight: 17,
+  },
+  crossAppNoticeList: {
+    gap: 10,
+  },
+  crossAppNoticeRow: {
+    gap: 6,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: THEME.border,
+  },
+  crossAppNoticeCopy: {
+    gap: 4,
   },
   readinessRow: {
     flexDirection: "row",
