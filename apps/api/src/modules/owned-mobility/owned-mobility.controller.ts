@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   Body,
   Controller,
@@ -17,6 +19,7 @@ import type {
   ApplyManualFareOverrideCommand,
   ApproveExceptionOverrideCommand,
   AssignDispatchCommand,
+  BookingRecord,
   CancelOwnedOrderCommand,
   CreateCallCenterOrderCommand,
   CreateOwnedOrderCommand,
@@ -35,6 +38,7 @@ import type {
   RejectExceptionOverrideCommand,
   RequestExceptionOverrideCommand,
   ResolveExceptionHoldCommand,
+  TenantBookingCommandResult,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
@@ -97,6 +101,25 @@ export class OwnedMobilityController {
     }
 
     return normalizedTenantId;
+  }
+
+  private toTenantBookingCommandResult(
+    booking: BookingRecord,
+    requestId?: string,
+  ): TenantBookingCommandResult {
+    if (booking.approvalState === "pending") {
+      return {
+        state: "accepted",
+        commandId: requestId?.trim() || randomUUID(),
+        pendingReasonCode: "approval_pending",
+        booking,
+      };
+    }
+
+    return {
+      state: "completed",
+      booking,
+    };
   }
 
   @Post("orders")
@@ -198,6 +221,31 @@ export class OwnedMobilityController {
     );
   }
 
+  @Post("tenant/bookings/commands/create")
+  async createTenantBookingCommand(
+    @Body() command: CreateTenantBookingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const normalizedTenantId = this.requireTenantId(tenantId);
+    const created = await this.ownedMobilityService.createTenantBooking(
+      command,
+      normalizedTenantId,
+      identity,
+      requestId,
+    );
+    const booking = this.ownedMobilityService.getTenantBooking(
+      normalizedTenantId,
+      created.bookingId,
+    );
+
+    return toApiSuccessEnvelope(
+      this.toTenantBookingCommandResult(booking, requestId),
+      requestId,
+    );
+  }
+
   @Get("tenant/bookings")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listTenantBookings(
@@ -249,6 +297,28 @@ export class OwnedMobilityController {
     );
   }
 
+  @Post("tenant/bookings/:bookingId/commands/update")
+  async updateTenantBookingCommand(
+    @Param("bookingId") bookingId: string,
+    @Body() command: UpdateTenantBookingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const booking = await this.ownedMobilityService.updateTenantBooking(
+      this.requireTenantId(tenantId),
+      bookingId,
+      command,
+      identity,
+      requestId,
+    );
+
+    return toApiSuccessEnvelope(
+      this.toTenantBookingCommandResult(booking, requestId),
+      requestId,
+    );
+  }
+
   @Post("orders/:orderId/manual-fare-override")
   applyManualFareOverride(
     @Param("orderId") orderId: string,
@@ -281,6 +351,26 @@ export class OwnedMobilityController {
         command,
         requestId,
       ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/bookings/:bookingId/commands/cancel")
+  async cancelTenantBookingCommand(
+    @Param("bookingId") bookingId: string,
+    @Body() command: CancelOwnedOrderCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const booking = await this.ownedMobilityService.cancelTenantBooking(
+      this.requireTenantId(tenantId),
+      bookingId,
+      command,
+      requestId,
+    );
+
+    return toApiSuccessEnvelope(
+      this.toTenantBookingCommandResult(booking, requestId),
       requestId,
     );
   }

@@ -168,6 +168,7 @@ import type {
   TenantApiKeyIssued,
   TenantBillingProfile,
   TenantBootstrapSession,
+  TenantBookingCommandResult,
   TenantBookingApprovalRequestRecord,
   TenantApprovalEvaluationResult,
   TenantApprovalRuleRecord,
@@ -678,25 +679,31 @@ export class ApiClient {
 
   // ── Owned Mobility: Tenant Bookings ──
 
-  async createTenantBooking(command: CreateTenantBookingCommand) {
-    return this.post("/api/tenant/bookings", { body: command });
+  async createTenantBooking(
+    command: CreateTenantBookingCommand,
+  ): Promise<TenantBookingCommandResult> {
+    return this.post<TenantBookingCommandResult>(
+      "/api/tenant/bookings/commands/create",
+      { body: command },
+    );
   }
 
   async listTenantBookings(): Promise<BookingRecord[]> {
     return this.getList<BookingRecord>("/api/tenant/bookings");
   }
 
-  async getTenantBooking(bookingId: string) {
-    return this.get(`/api/tenant/bookings/${encodeURIComponent(bookingId)}`);
+  async getTenantBooking(bookingId: string): Promise<BookingRecord> {
+    return this.get<BookingRecord>(
+      `/api/tenant/bookings/${encodeURIComponent(bookingId)}`,
+    );
   }
 
   async updateTenantBooking(
     bookingId: string,
     command: UpdateTenantBookingCommand,
-  ) {
-    return this.request(
-      "PUT",
-      `/api/tenant/bookings/${encodeURIComponent(bookingId)}`,
+  ): Promise<TenantBookingCommandResult> {
+    return this.post<TenantBookingCommandResult>(
+      `/api/tenant/bookings/${encodeURIComponent(bookingId)}/commands/update`,
       { body: command },
     );
   }
@@ -704,9 +711,9 @@ export class ApiClient {
   async cancelTenantBooking(
     bookingId: string,
     command: CancelOwnedOrderCommand,
-  ) {
-    return this.post(
-      `/api/tenant/bookings/${encodeURIComponent(bookingId)}/cancel`,
+  ): Promise<TenantBookingCommandResult> {
+    return this.post<TenantBookingCommandResult>(
+      `/api/tenant/bookings/${encodeURIComponent(bookingId)}/commands/cancel`,
       { body: command },
     );
   }
