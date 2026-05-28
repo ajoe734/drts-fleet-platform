@@ -227,6 +227,7 @@ type EmptyStateView = {
   tone: CanvasTone;
   ctaLabel?: string;
   ctaHref?: string;
+  usePrimaryAction?: boolean;
 };
 
 type PassengerTabDefinition = {
@@ -262,6 +263,7 @@ const EMPTY_STATE_VIEWS: Record<PassengerEmptyReason, EmptyStateView> = {
     body: "這個租戶尚未建立常用乘客名冊。新增後即可在新建預訂流程直接帶入乘客資料。",
     accent: "ND",
     tone: "info",
+    usePrimaryAction: true,
   },
   not_provisioned: {
     title: "乘客目錄尚未啟用",
@@ -282,6 +284,7 @@ const EMPTY_STATE_VIEWS: Record<PassengerEmptyReason, EmptyStateView> = {
     body: "這個帳號缺少 passenger directory 存取權限。CTA 仍保留，但會以 disabled reason 呈現。",
     accent: "PD",
     tone: "neutral",
+    usePrimaryAction: true,
   },
   external_unavailable: {
     title: "相依服務暫時不可用",
@@ -692,7 +695,6 @@ function matchesFilters(
     passenger.fullName,
     passenger.employeeNo ?? "",
     passenger.mobile ?? "",
-    passenger.email ?? "",
   ].map((value) => value.toLocaleLowerCase("zh-Hant"));
 
   const needle = filters.q.toLocaleLowerCase("zh-Hant");
@@ -819,7 +821,10 @@ function getActionLabel(action: string) {
   }
 }
 
-function renderEmptyState(reason: PassengerEmptyReason) {
+function renderEmptyState(
+  reason: PassengerEmptyReason,
+  primaryAction: ResourceActionDescriptor | null,
+) {
   const view: EmptyStateView =
     EMPTY_STATE_VIEWS[reason] ?? EMPTY_STATE_VIEWS.fetch_failed!;
 
@@ -846,6 +851,11 @@ function renderEmptyState(reason: PassengerEmptyReason) {
         <Link href={view.ctaHref} style={linkButtonStyle}>
           {view.ctaLabel}
         </Link>
+      ) : view.usePrimaryAction && primaryAction ? (
+        renderActionDescriptor(
+          primaryAction,
+          getActionLabel(primaryAction.action),
+        )
       ) : null}
       <CanvasPill theme={th} tone={view.tone}>
         emptyReason: {reason}
@@ -1066,6 +1076,7 @@ export default async function PassengersPage({
     ? getPassengerActions(selectedPassenger)
     : [];
   const pageActions = getPageActions(passengers);
+  const primaryPageAction = pageActions[0] ?? null;
   const departmentOptions = buildDepartmentOptions(passengers);
   const counts = {
     all: passengers.filter((passenger) => matchesTab(passenger, "all")).length,
@@ -1171,10 +1182,12 @@ export default async function PassengersPage({
       r: (row) => (
         <div style={tableActionCellStyle}>
           <Link
-            href={`/bookings/new?passengerId=${encodeURIComponent(row.passengerId)}`}
+            href={buildPassengersHref(selectedTab, filters, {
+              selectedPassengerId: row.passengerId,
+            })}
             style={linkButtonStyle}
           >
-            建立預訂
+            檢視
           </Link>
           {getRecordActions(row).map((action) =>
             renderActionDescriptor(action, getActionLabel(action.action)),
@@ -1366,7 +1379,7 @@ export default async function PassengersPage({
             subtitle={`${rows.length} visible row(s) · state ${filters.activeState}`}
           >
             {emptyReason ? (
-              renderEmptyState(emptyReason)
+              renderEmptyState(emptyReason, primaryPageAction)
             ) : (
               <CanvasTable<PassengerRow>
                 theme={th}
@@ -1468,6 +1481,11 @@ export default async function PassengersPage({
                     CTAs are driven from `availableActions` when present; this
                     page falls back to spec-safe disabled affordances until the
                     mutation route lands.
+                  </div>
+                  <div style={helperTextStyle}>
+                    Q-TEN06: passenger deactivation is soft-only. Existing
+                    bookings retain their snapshot; inactive records disappear
+                    from pickers but stay visible in historical detail.
                   </div>
                 </div>
 
