@@ -56,7 +56,7 @@ const topRowStyle: CSSProperties = {
 
 const generalGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 12,
 };
 
@@ -168,6 +168,23 @@ const linkListStyle: CSSProperties = {
   gap: 10,
 };
 
+const sitemapListStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+const sitemapRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 160px) minmax(0, 1fr) auto",
+  gap: 12,
+  alignItems: "center",
+  borderRadius: 12,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceHi,
+  padding: "12px 14px",
+};
+
 const linkCardStyle: CSSProperties = {
   borderRadius: 12,
   border: `1px solid ${th.border}`,
@@ -197,6 +214,12 @@ const paragraphStyle: CSSProperties = {
   fontSize: 12.5,
   lineHeight: 1.6,
   margin: 0,
+};
+
+const codeTextStyle: CSSProperties = {
+  fontFamily: th.monoFamily,
+  color: th.text,
+  fontSize: 12,
 };
 
 const emptyStateStyle: CSSProperties = {
@@ -239,6 +262,22 @@ type SettingsDeepLink = {
   description: string;
   link: CrossAppResourceLink;
 };
+
+type SettingsRoute = {
+  route: string;
+  label: string;
+  owner: string;
+  summary: string;
+};
+
+const SETTINGS_EMPTY_REASONS = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "filtered_empty",
+] as const satisfies readonly EmptyReason[];
 
 const EMPTY_REASON_COPY: Record<
   EmptyReason,
@@ -360,11 +399,12 @@ function compareSubscriptions(
     return left.enabled ? -1 : 1;
   }
 
-  const channelRank = {
-    ops_console: 0,
-    webhook: 1,
-    email: 2,
-  } as const;
+  const channelRank: Record<TenantNotificationSubscription["channel"], number> =
+    {
+      ops_console: 0,
+      webhook: 1,
+      email: 2,
+    };
 
   if (left.channel !== right.channel) {
     return channelRank[left.channel] - channelRank[right.channel];
@@ -622,6 +662,47 @@ function buildCrossAppLinks(tenantId: string): SettingsDeepLink[] {
   });
 }
 
+function buildSettingsRoutes(): SettingsRoute[] {
+  return [
+    {
+      route: "/settings",
+      label: "設定",
+      owner: "此頁",
+      summary: "保留 tenant-level defaults 與跨模組設定入口。",
+    },
+    {
+      route: "/users",
+      label: "人員與角色",
+      owner: "Access",
+      summary: "角色、核准路徑與權限不足處理落在 users。",
+    },
+    {
+      route: "/integration-governance",
+      label: "整合就緒度",
+      owner: "Integration",
+      summary: "檢查 API key / webhook / 通知基線是否已佈建。",
+    },
+    {
+      route: "/sla",
+      label: "SLA",
+      owner: "Service level",
+      summary: "門檻分鐘數與 recalculation 指令另有專屬 surface。",
+    },
+    {
+      route: "/billing",
+      label: "帳務概覽",
+      owner: "Finance",
+      summary: "發票抬頭、聯絡資訊與帳務姿態以 billing authority 為準。",
+    },
+    {
+      route: "/rules",
+      label: "審批規則",
+      owner: "Governance",
+      summary: "配額、成本中心與 approval posture 不在 settings 內重覆編輯。",
+    },
+  ];
+}
+
 function getLinkTarget(link: CrossAppResourceLink) {
   return link.openMode === "new_tab" ? "_blank" : undefined;
 }
@@ -700,7 +781,9 @@ export default async function SettingsPage({
   const billingContact = data.billingProfile
     ? `${data.billingProfile.contactName ?? "未指派"} · ${data.billingProfile.email}`
     : "未設定";
-  const enabledFlags =
+  const defaultLocale = "zh-Hant";
+  const defaultTimezone = "Asia/Taipei";
+  const enabledFlags: FeatureFlagSummary["flags"] =
     data.flags?.flags
       .filter((flag) => flag.enabled)
       .sort((left, right) => left.key.localeCompare(right.key, "en")) ?? [];
@@ -711,23 +794,25 @@ export default async function SettingsPage({
   const webhookRetry = data.governance
     ? `${data.governance.webhookPolicy.retryPolicy.maxAttempts} 次重送`
     : "—";
-  const subscriptions =
+  const subscriptions: TenantNotificationSubscription[] =
     data.preferences?.subscriptions?.slice().sort(compareSubscriptions) ?? [];
-  const baselineSubscriptions =
+  const baselineSubscriptions: TenantNotificationSubscription[] =
     data.governance?.baselineNotificationSubscriptions
       ?.slice()
       .sort(compareSubscriptions) ?? [];
-  const checklist = data.governance?.onboardingChecklist ?? [];
-  const baselineEvents = data.governance?.baselineWebhookEvents ?? [];
-  const notificationRows: SettingsNotificationRow[] = (
-    subscriptions.length > 0 ? subscriptions : baselineSubscriptions
-  ).map((subscription) => ({
-    ...subscription,
-    updatedAt:
-      subscriptions.length > 0
-        ? (data.preferences?.updatedAt ?? null)
-        : (data.governance?.generatedAt ?? null),
-  }));
+  const checklist: string[] = data.governance?.onboardingChecklist ?? [];
+  const baselineEvents: string[] = data.governance?.baselineWebhookEvents ?? [];
+  const notificationSource: TenantNotificationSubscription[] =
+    subscriptions.length > 0 ? subscriptions : baselineSubscriptions;
+  const notificationRows: SettingsNotificationRow[] = notificationSource.map(
+    (subscription) => ({
+      ...subscription,
+      updatedAt:
+        subscriptions.length > 0
+          ? (data.preferences?.updatedAt ?? null)
+          : (data.governance?.generatedAt ?? null),
+    }),
+  );
   const notificationFootnote =
     subscriptions.length > 0
       ? `最後更新 ${formatUpdated(data.preferences?.updatedAt)}`
@@ -740,21 +825,13 @@ export default async function SettingsPage({
   const refresh = getRefreshMetadata(data);
   const actions = buildSettingsActions(data);
   const crossAppLinks = buildCrossAppLinks(tenantCode);
-  const emptyReasons = [
-    "no_data",
-    "not_provisioned",
-    "fetch_failed",
-    "permission_denied",
-    "external_unavailable",
-    "filtered_empty",
-  ] as const satisfies EmptyReason[];
-
+  const relatedRoutes = buildSettingsRoutes();
   return (
     <div>
       <CanvasPageHeader
         theme={th}
         title="租戶設定"
-        subtitle="一般 · 通知 · 隱私 · 整合"
+        subtitle="一般 · 通知預設 · 隱私 · 整合預設"
         tabs={["一般", "通知", "隱私", "整合"]}
         activeTab="一般"
       />
@@ -781,30 +858,23 @@ export default async function SettingsPage({
         <div style={topRowStyle}>
           <CanvasCard theme={th} title="一般">
             <div style={generalGridStyle}>
-              <CanvasField theme={th} label="租戶代碼">
+              <CanvasField theme={th} label="租戶代碼 · tenant_code">
                 <CanvasInput theme={th} value={tenantCode} mono />
               </CanvasField>
-              <CanvasField theme={th} label="顯示名稱">
+              <CanvasField theme={th} label="顯示名稱 · display_name">
                 <CanvasInput theme={th} value={displayName} />
               </CanvasField>
-              <CanvasField theme={th} label="統一編號">
+              <CanvasField theme={th} label="統一編號 · tax_id">
                 <CanvasInput theme={th} value={taxId} mono />
               </CanvasField>
               <CanvasField theme={th} label="計費聯絡人">
                 <CanvasInput theme={th} value={billingContact} />
               </CanvasField>
-              <CanvasField theme={th} label="Realm">
-                <CanvasInput
-                  theme={th}
-                  value={data.identity?.realm ?? "tenant"}
-                />
+              <CanvasField theme={th} label="預設語系 · default_locale">
+                <CanvasInput theme={th} value={defaultLocale} mono />
               </CanvasField>
-              <CanvasField theme={th} label="Auth mode">
-                <CanvasInput
-                  theme={th}
-                  value={data.identity?.authMode ?? "bootstrap_headers"}
-                  mono
-                />
+              <CanvasField theme={th} label="預設時區 · timezone">
+                <CanvasInput theme={th} value={defaultTimezone} mono />
               </CanvasField>
             </div>
           </CanvasCard>
@@ -818,6 +888,7 @@ export default async function SettingsPage({
                 {
                   k: "啟用模組",
                   v: `${enabledFlags.length} / ${totalFlags}`,
+                  mono: true,
                 },
                 {
                   k: "配額",
@@ -835,10 +906,41 @@ export default async function SettingsPage({
                   v: consentValue,
                   mono: true,
                 },
+                {
+                  k: "Realm",
+                  v: data.identity?.realm ?? "tenant",
+                  mono: true,
+                },
+                {
+                  k: "Auth mode",
+                  v: data.identity?.authMode ?? "bootstrap_headers",
+                  mono: true,
+                },
               ]}
             />
           </CanvasCard>
         </div>
+
+        <CanvasCard
+          theme={th}
+          title="設定邊界與 sitemap"
+          subtitle="依 packet §5.20，`/settings` 作為 tenant-level defaults 與跨模組入口，不重覆承接專屬設定 surface"
+        >
+          <div style={sitemapListStyle}>
+            {relatedRoutes.map((item) => (
+              <div key={item.route} style={sitemapRowStyle}>
+                <div>
+                  <div style={actionTitleStyle}>{item.label}</div>
+                  <div style={subtextStyle}>{item.summary}</div>
+                </div>
+                <code style={codeTextStyle}>{item.route}</code>
+                <CanvasPill theme={th} tone="info">
+                  {item.owner}
+                </CanvasPill>
+              </div>
+            ))}
+          </div>
+        </CanvasCard>
 
         <CanvasCard
           theme={th}
@@ -984,7 +1086,7 @@ export default async function SettingsPage({
         <div style={twoColumnStyle}>
           <CanvasCard
             theme={th}
-            title="能力與整合準備"
+            title="能力與整合預設"
             subtitle="功能旗標 · webhook 基線 · onboarding checklist"
           >
             <div style={sectionLabelStyle}>Enabled flags</div>
@@ -1007,9 +1109,11 @@ export default async function SettingsPage({
             </div>
             {checklist.length > 0 ? (
               <ul style={checklistStyle}>
-                {checklist.map((item) => (
+                {checklist.map((item, index) => (
                   <li key={item} style={checklistItemStyle}>
-                    <span style={checklistBulletStyle}>01</span>
+                    <span style={checklistBulletStyle}>
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
                     <span>{item}</span>
                   </li>
                 ))}
@@ -1064,7 +1168,7 @@ export default async function SettingsPage({
           subtitle="六種 management-surface empty states 必須 distinct；`?empty=` 可高亮單一狀態"
         >
           <div style={emptyReasonGridStyle}>
-            {emptyReasons.map((reason) => {
+            {SETTINGS_EMPTY_REASONS.map((reason) => {
               const copy = EMPTY_REASON_COPY[reason];
               const highlighted = selectedEmptyReason === reason;
               return (
