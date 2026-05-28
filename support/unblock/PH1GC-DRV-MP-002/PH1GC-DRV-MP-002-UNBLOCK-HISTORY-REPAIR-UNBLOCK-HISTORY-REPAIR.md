@@ -24,20 +24,22 @@ treated as the canonical replay rail for the parent.
    - `support/sidecars/PH1GC-DRV-MP-002/PH1GC-DRV-MP-002-SIDECAR-ACCEPTANCE.md`
    - `support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE/*`
 2. The owner helper branch
-   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d`
-   now sits at `21 left / 4 right` from current `origin/dev` with merge-base
+   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ebeb84e0e40865195b239cfe1dcddbc809bd4068`
+   now sits at `21 left / 7 right` from current `origin/dev` with merge-base
    `6607dea8b788ef2ab6f01a2ab14c6dbd8ab48e21`.
-3. Its newest commit `7d23cc19` is not a support-only replay. It modifies:
+3. Its newest two commits, `08aaa8df` and `ebeb84e0`, only refresh the support
+   repair note, but the branch was already contaminated earlier by mixed-content
+   commit `7d23cc19`, which modifies:
    - `ai-status.json`
    - `current-work.md`
    - `docs-site/ai-status.json`
    - `docs-site/current-work.md`
    - `support/unblock/PH1GC-DRV-MP-002/PH1GC-DRV-MP-002-UNBLOCK-HISTORY-REPAIR.md`
 4. That means the owner helper branch superseded the earlier support-only audit
-   commit `0f3f3b5588bb609430b40c9ca50406cc72920ca5` with a mixed-content
-   control-plane refresh. The replay story is therefore contaminated again:
-   the same branch name now means both "support replay provenance" and
-   "machine-truth/dashboard refresh."
+   commit `0f3f3b5588bb609430b40c9ca50406cc72920ca5`, then kept moving through
+   `7d23cc19`, `5aaf3b05`, `08aaa8df`, and `ebeb84e0`. The replay story is
+   therefore contaminated again: the same branch name now means both "support
+   replay provenance" and "machine-truth/dashboard refresh."
 5. The parent branch
    `origin/codex2/ph1gc-drv-mp-002 @ 9be1a098361ec90b4e30f26854d24441c1c59a8b`
    remains stale-base mixed ancestry (`15 left / 15 right` from current
@@ -53,11 +55,11 @@ treated as the canonical replay rail for the parent.
 The contamination keeping the parent blocked on history is:
 
 1. The owner helper branch that should have stayed a replay/audit branch was
-   advanced by `7d23cc19` to include control-plane files in addition to support
-   artifacts.
-2. The earlier history-repair note therefore became self-invalidating: it
-   named the reviewer helper as canonical, but the owner helper kept moving and
-   mixed in non-replay content.
+   advanced by mixed-content commit `7d23cc19`, then continued moving through
+   `5aaf3b05`, `08aaa8df`, and `ebeb84e0`.
+2. The earlier history-repair note therefore became self-invalidating again:
+   it named the reviewer helper as canonical, but the owner helper kept moving
+   and the control-plane text lagged the newest remote head.
 3. The pushed parent branch is still stale-base mixed ancestry, so the owner
    lane still lacks a clean canonical replay branch of its own.
 4. Because the helper task itself is not a canonical task row in
@@ -77,7 +79,7 @@ by freezing branch roles instead of rewriting history.
    `origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469`
    as the canonical support-artifact replay branch for review/merge purposes.
 2. Freeze
-   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d`
+   `origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ebeb84e0e40865195b239cfe1dcddbc809bd4068`
    as audit evidence only. It remains useful provenance for how the owner lane
    drifted, but it is not the replay target anymore.
 3. Keep
@@ -95,7 +97,7 @@ The parent should be updated with this concrete next step:
 
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh progress PH1GC-DRV-MP-002 \
-  "History repair complete: treat origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469 as the canonical clean replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE. Treat origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d and origin/codex2/ph1gc-drv-mp-002 @ 9be1a098361ec90b4e30f26854d24441c1c59a8b as audit evidence only. After replay/merge review, parent remains blocked only on external Android+iPhone device-lab, Expo/EAS, Apple/TestFlight, weak-network, and human capture prerequisites."
+  "History repair complete: treat origin/codex/ph1gc-drv-mp-002-unblock-history-repair @ dfe8aaafad35e57f38ae78d35a19e70014d09469 as the canonical clean replay of support/unblock/PH1GC-DRV-MP-002, support/sidecars/PH1GC-DRV-MP-002, and support/sidecars/WF-DRV-MP-001-DEVICE-EVIDENCE. Treat origin/codex2/ph1gc-drv-mp-002-unblock-history-repair @ ebeb84e0e40865195b239cfe1dcddbc809bd4068 (superseding ancestors 08aaa8df486fdc9196fed618114014d3272a8de8, 5aaf3b05775ccaa84aed7b51186e982706a12f23, 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d, 0f3f3b5588bb609430b40c9ca50406cc72920ca5, and 38ae69390790f98d627d55967a3739ef9f5b6403) and origin/codex2/ph1gc-drv-mp-002 @ 9be1a098361ec90b4e30f26854d24441c1c59a8b as audit evidence only. After replay/merge review, parent remains blocked only on external Android+iPhone device-lab, Expo/EAS, Apple/TestFlight, weak-network, and human capture prerequisites."
 ```
 
 ## Why This Is Safe
@@ -130,4 +132,7 @@ AI_NAME=Codex2 scripts/ai-status.sh progress PH1GC-DRV-MP-002 \
   - `git show --stat --summary --name-only dfe8aaafad35e57f38ae78d35a19e70014d09469`
   - `git show --stat --summary --name-only 0f3f3b5588bb609430b40c9ca50406cc72920ca5`
   - `git show --stat --summary --name-only 7d23cc19c8f6fea6b533d61c714590ab4eab3e4d`
+  - `git show --stat --summary --name-only 5aaf3b05775ccaa84aed7b51186e982706a12f23`
+  - `git show --stat --summary --name-only 08aaa8df486fdc9196fed618114014d3272a8de8`
+  - `git show --stat --summary --name-only ebeb84e0e40865195b239cfe1dcddbc809bd4068`
   - `git show --stat --summary --name-only 9be1a098361ec90b4e30f26854d24441c1c59a8b`
