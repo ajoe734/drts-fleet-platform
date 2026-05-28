@@ -708,9 +708,9 @@ textarea {
 
 .bookings-board {
   border-radius: 32px;
-  border: 1px solid rgba(16, 35, 58, 0.08);
+  border: 1px solid rgba(15, 118, 110, 0.12);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(244, 248, 248, 0.92));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 247, 246, 0.94));
   box-shadow: var(--shadow);
   padding: 1.35rem;
 }
@@ -728,12 +728,43 @@ textarea {
 }
 
 .bookings-tab-chip.is-active {
-  background: rgba(184, 92, 56, 0.18);
-  border-color: rgba(184, 92, 56, 0.2);
+  background: rgba(15, 118, 110, 0.12);
+  border-color: rgba(15, 118, 110, 0.22);
 }
 
 .bookings-tab-chip strong {
   color: var(--accent);
+}
+
+.bookings-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.bookings-overview-card {
+  display: grid;
+  gap: 0.35rem;
+  border-radius: 24px;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96),
+    rgba(240, 253, 250, 0.94)
+  );
+  padding: 1rem 1.05rem;
+}
+
+.bookings-overview-card strong {
+  color: var(--shell);
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.bookings-overview-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .bookings-filter-panel {
@@ -812,19 +843,83 @@ textarea {
 
 .bookings-empty-state {
   display: grid;
-  gap: 0.8rem;
-  border-radius: 24px;
+  gap: 1rem;
+  border-radius: 28px;
   border: 1px dashed rgba(16, 35, 58, 0.15);
-  background: rgba(255, 255, 255, 0.82);
-  padding: 1.25rem;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 1.35rem;
 }
 
 .bookings-empty-state.is-not_provisioned {
-  background: rgba(255, 250, 244, 0.92);
+  background: rgba(255, 250, 244, 0.96);
 }
 
 .bookings-empty-state.is-permission_denied {
-  background: rgba(248, 244, 252, 0.92);
+  background: rgba(248, 244, 252, 0.96);
+}
+
+.bookings-empty-state.is-fetch_failed {
+  background: rgba(244, 248, 252, 0.96);
+}
+
+.bookings-empty-state.is-external_unavailable {
+  background: rgba(240, 253, 250, 0.96);
+}
+
+.bookings-empty-state.is-filtered_empty {
+  background: rgba(250, 250, 249, 0.96);
+}
+
+.bookings-empty-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+}
+
+.bookings-empty-orb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  min-height: 88px;
+  padding: 1rem;
+  border-radius: 28px;
+  background: radial-gradient(
+    circle at top,
+    rgba(94, 234, 212, 0.24),
+    rgba(15, 118, 110, 0.08)
+  );
+  border: 1px solid rgba(15, 118, 110, 0.14);
+  color: var(--shell);
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bookings-empty-copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.bookings-empty-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.bookings-empty-highlight {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.42rem 0.78rem;
+  border: 1px solid rgba(16, 35, 58, 0.08);
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--shell);
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .bookings-table-wrap {
@@ -909,6 +1004,11 @@ textarea {
 @media (max-width: 980px) {
   .booking-create-layout,
   .bookings-page-header {
+    grid-template-columns: 1fr;
+  }
+
+  .bookings-overview-grid,
+  .bookings-empty-hero {
     grid-template-columns: 1fr;
   }
 

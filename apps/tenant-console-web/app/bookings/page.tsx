@@ -111,6 +111,8 @@ type EmptyStateDescriptor = {
   eyebrow: string;
   title: string;
   description: string;
+  accent: string;
+  highlights: string[];
 };
 
 type TabFilterPreset = {
@@ -164,37 +166,82 @@ const EMPTY_STATE_COPY: Record<TenantEmptyReason, EmptyStateDescriptor> = {
     title: "還沒有任何 tenant booking",
     description:
       "這個租戶尚未建立任何預約。從這裡直接開始 booking intake，之後列表會依 reservation window 與 order state 持續刷新。",
+    accent: "brand-new tenant",
+    highlights: [
+      "列表是空白起始，不是錯誤",
+      "建立第一筆 booking 後會進入 T5 refresh cadence",
+      "這個狀態應該仍可看到 create 類 action",
+    ],
   },
   not_provisioned: {
     eyebrow: "Not Provisioned",
     title: "租戶尚未完成 booking capability 開通",
     description:
       "目前不是單純的空列表，而是 tenant booking surface 尚未 ready。先完成 integration governance / module enablement，再回到這個 route。",
+    accent: "module enablement required",
+    highlights: [
+      "booking capability 還沒 provision",
+      "需要回到 integration governance 排查",
+      "不能把它誤判成沒有資料",
+    ],
   },
   fetch_failed: {
     eyebrow: "Fetch Failed",
     title: "目前無法讀取 booking 列表",
     description:
       "系統沒有拿到可靠的 tenant booking snapshot。先檢查 API 連線與後端健康，再決定是否重新整理或改從 audit 追查。",
+    accent: "snapshot unavailable",
+    highlights: [
+      "目前沒有可靠 snapshot",
+      "先驗證 API 連線與 backend health",
+      "必要時改從 audit route 追查",
+    ],
   },
   permission_denied: {
     eyebrow: "Permission Denied",
     title: "目前身分無法查看這份 booking 列表",
     description:
       "這是權限不足，不是資料為空。必須改由有 tenant booking read 權限的 actor 進入，或回到使用者角色設定確認授權。",
+    accent: "role scope mismatch",
+    highlights: [
+      "資料存在，但目前 actor 看不到",
+      "需要 tenant booking read scope",
+      "先確認 user / role assignment",
+    ],
   },
   external_unavailable: {
     eyebrow: "External Unavailable",
     title: "外部依賴暫時無法提供 booking 狀態",
     description:
       "forwarded / partner 相關依賴目前不穩定。tenant list 不能假裝資料完整，請改從 integration governance 或 ops console 深入查明。",
+    accent: "upstream dependency degraded",
+    highlights: [
+      "外部 dispatch / partner feed 不穩定",
+      "tenant list 不能假裝資料完整",
+      "需要 cross-app 深入排查",
+    ],
   },
   filtered_empty: {
     eyebrow: "Filtered Empty",
     title: "目前的篩選條件沒有命中任何 booking",
     description:
       "清單本身存在資料，但狀態、service bucket、日期區間或搜尋詞把結果縮成 0 筆。可重設 filter 或切回全部狀態。",
+    accent: "query returned zero rows",
+    highlights: [
+      "底層資料仍存在",
+      "目前是 query / filter 結果為 0",
+      "重設 filter 後應恢復列表",
+    ],
   },
+};
+
+const EMPTY_STATE_ORBS: Record<TenantEmptyReason, string> = {
+  no_data: "seed",
+  not_provisioned: "setup",
+  fetch_failed: "sync",
+  permission_denied: "lock",
+  external_unavailable: "bridge",
+  filtered_empty: "filter",
 };
 
 function first(value: SearchParamValue) {
@@ -413,6 +460,15 @@ function getSubtypeCounts(bookings: TenantBookingListRecord[]) {
     .sort((left, right) => left.subtype.localeCompare(right.subtype));
 }
 
+function getAttentionCount(bookings: TenantBookingListRecord[]) {
+  return bookings.filter(
+    (booking) =>
+      booking.approvalState === "pending" ||
+      booking.slaStatus === "at_risk" ||
+      booking.slaStatus === "breach",
+  ).length;
+}
+
 function buildBookingsHref(
   query: BookingListQuery,
   nextQuery: Partial<BookingListQuery>,
@@ -538,6 +594,13 @@ export default async function TenantBookingsPage({
   const refreshPollIntervalMs =
     refreshMetadata?.staleAfterMs ??
     REFRESH_TIER_POLL_INTERVAL_MS[REFRESH_TIER];
+  const liveCount = bookings.filter((booking) =>
+    LIVE_ORDER_STATUSES.has(booking.orderStatus),
+  ).length;
+  const reserveCount = bookings.filter((booking) =>
+    RESERVATION_STATUSES.includes(booking.orderStatus),
+  ).length;
+  const attentionCount = getAttentionCount(bookings);
 
   return (
     <div className="page-shell">
@@ -545,9 +608,15 @@ export default async function TenantBookingsPage({
         <div className="bookings-console-headline">
           <span className="eyebrow">Bookings</span>
           <h1>訂單</h1>
-          <p>本月所有預約，含進行中、待審批、已完成與取消。</p>
+          <p>本月所有預約 · 含進行中、待審批、已完成與取消。</p>
         </div>
         <div className="bookings-header-actions">
+          <a
+            className="action-button action-button-secondary"
+            href="#bookings-filters"
+          >
+            篩選
+          </a>
           {headerActions.map((descriptor) =>
             isCreateBookingAction(descriptor) && descriptor.enabled ? (
               <Link
@@ -588,6 +657,26 @@ export default async function TenantBookingsPage({
       </div>
 
       <section className="bookings-board">
+        <div className="bookings-overview-grid">
+          <article className="bookings-overview-card">
+            <span className="metric-label">Visible</span>
+            <strong>{result.total}</strong>
+            <p>{bookings.length} total bookings in tenant snapshot</p>
+          </article>
+          <article className="bookings-overview-card">
+            <span className="metric-label">Live / Reserve</span>
+            <strong>
+              {liveCount} / {reserveCount}
+            </strong>
+            <p>進行中與預約 booking 需要持續看 T5 freshness</p>
+          </article>
+          <article className="bookings-overview-card">
+            <span className="metric-label">Needs Attention</span>
+            <strong>{attentionCount}</strong>
+            <p>pending approval 或 SLA 已進入 at-risk / breach</p>
+          </article>
+        </div>
+
         <div className="bookings-meta-strip">
           <span className="metric-label">Refresh tier</span>
           <span
@@ -839,15 +928,30 @@ export default async function TenantBookingsPage({
 
         {emptyState ? (
           <div className={`bookings-empty-state is-${emptyReason}`}>
-            <span className="surface-kicker">{emptyState.eyebrow}</span>
-            <h3>{emptyState.title}</h3>
-            <p>{emptyState.description}</p>
-            {listEnvelope?.emptyState?.messageCode ? (
-              <p className="table-secondary">
-                {listEnvelope.emptyState.messageCode}
-              </p>
-            ) : null}
+            <div className="bookings-empty-hero">
+              <div className="bookings-empty-orb">
+                {emptyReason ? EMPTY_STATE_ORBS[emptyReason] : "state"}
+              </div>
+              <div className="bookings-empty-copy">
+                <span className="surface-kicker">{emptyState.eyebrow}</span>
+                <h3>{emptyState.title}</h3>
+                <p>{emptyState.description}</p>
+              </div>
+            </div>
+            <div className="bookings-empty-highlights">
+              <span className="status-chip is-active">{emptyState.accent}</span>
+              {emptyState.highlights.map((highlight) => (
+                <span className="bookings-empty-highlight" key={highlight}>
+                  {highlight}
+                </span>
+              ))}
+            </div>
             <div className="link-row">
+              {listEnvelope?.emptyState?.messageCode ? (
+                <span className="bookings-inline-meta">
+                  {listEnvelope.emptyState.messageCode}
+                </span>
+              ) : null}
               {listEnvelope?.emptyState?.nextAction ? (
                 <span
                   className="bookings-action-pill is-disabled"
