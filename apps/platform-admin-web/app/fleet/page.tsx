@@ -22,9 +22,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
-  CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -78,30 +75,6 @@ const pageStyle = {
 
 const tableCardStyle = {
   overflow: "hidden",
-} satisfies CSSProperties;
-
-const summaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-} satisfies CSSProperties;
-
-const detailGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(240px, 320px) minmax(0, 1fr)",
-  gap: 16,
-} satisfies CSSProperties;
-
-const fieldStackStyle = {
-  display: "grid",
-  gap: 12,
-} satisfies CSSProperties;
-
-const buttonRowStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  marginTop: 6,
 } satisfies CSSProperties;
 
 const loadingStyle = {
@@ -287,30 +260,6 @@ function getTone(value: string | null | undefined): CanvasTone {
   return "neutral";
 }
 
-function formatJobLabel(locale: Locale, jobType: FleetReportJobType) {
-  if (locale === "en") {
-    if (jobType === "driver_roster") return "Drivers";
-    if (jobType === "vehicle_roster") return "Vehicles";
-    return "Contracts";
-  }
-  if (jobType === "driver_roster") return "司機";
-  if (jobType === "vehicle_roster") return "車輛";
-  return "合約";
-}
-
-function formatJobStatus(
-  locale: Locale,
-  detail: ReportJobDetailRecord | undefined,
-): string {
-  if (!detail) {
-    return locale === "en" ? "No artifact yet" : "尚未建立 artifact";
-  }
-  if (detail.artifact?.downloadMetadata.downloadUrl) {
-    return locale === "en" ? "artifact ready" : "artifact 已就緒";
-  }
-  return formatPlatformCodeLabel(locale, detail.status);
-}
-
 export default function FleetPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -339,21 +288,6 @@ export default function FleetPage() {
             "dispatch.compliance.license_warn_30d is enabled; ops dispatch stays blocked until licensing holds are cleared.",
           filter: "Filter",
           add: "Add driver",
-          refresh: "Refresh",
-          summaryTitle: "Governance posture",
-          summarySubtitle:
-            "Keep export lineage and dispatch blockers visible in the same platform lane.",
-          selectedView: "Selected view",
-          latestExport: "Latest export",
-          currentWarning: "Current warning",
-          warningValue: "license_warn_30d",
-          warningHint: "Dispatch is blocked when compliance holds remain open.",
-          latestJob: "Latest job",
-          visibleRows: "Visible rows",
-          blockedDrivers: "Blocked drivers",
-          blockedVehicles: "Blocked vehicles",
-          pendingExclusivity: "Pending exclusivity",
-          pendingOffboarding: "Pending offboarding",
         }
       : {
           title: "車隊與合規",
@@ -366,21 +300,6 @@ export default function FleetPage() {
             "dispatch.compliance.license_warn_30d 已啟用；ops 端會擋下不合規派遣。",
           filter: "篩選",
           add: "新增司機",
-          refresh: "重新整理",
-          summaryTitle: "治理概況",
-          summarySubtitle:
-            "把匯出 lineage 與 dispatch blocker 放在同一條 fleet lane 內。",
-          selectedView: "目前檢視",
-          latestExport: "最新匯出",
-          currentWarning: "目前警示",
-          warningValue: "license_warn_30d",
-          warningHint: "只要合規 hold 尚未清除，就會持續阻擋 dispatch。",
-          latestJob: "最近 job",
-          visibleRows: "顯示列數",
-          blockedDrivers: "受阻司機",
-          blockedVehicles: "受阻車輛",
-          pendingExclusivity: "待審獨家供應",
-          pendingOffboarding: "待完成下線",
         };
 
   const navItems = useMemo(() => buildPlatformNav(locale), [locale]);
@@ -459,41 +378,6 @@ export default function FleetPage() {
     [client, t],
   );
 
-  const blockedVehicles = useMemo(
-    () =>
-      vehicles.filter(
-        (vehicle) =>
-          !vehicle.dispatchableFlag ||
-          vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
-      ).length,
-    [vehicles],
-  );
-  const blockedDrivers = useMemo(
-    () =>
-      drivers.filter(
-        (driver) =>
-          !driver.dispatchEligible ||
-          driver.eligibilityBlockedReasons.length > 0,
-      ).length,
-    [drivers],
-  );
-  const pendingExclusivity = useMemo(
-    () =>
-      vehicles.filter(
-        (vehicle) =>
-          vehicle.supplyLifecycle.exclusivity.reviewStatus === "pending",
-      ).length,
-    [vehicles],
-  );
-  const pendingOffboarding = useMemo(
-    () =>
-      vehicles.filter((vehicle) => {
-        const status = vehicle.supplyLifecycle.offboarding.status;
-        return status !== "none" && status !== "completed";
-      }).length,
-    [vehicles],
-  );
-
   const driverRows = useMemo<DriverRow[]>(
     () =>
       drivers.map((driver, index) => {
@@ -528,27 +412,6 @@ export default function FleetPage() {
     () => contracts.map((contract) => ({ contract })),
     [contracts],
   );
-
-  const visibleRowCount = useMemo(() => {
-    if (activeTab === "drivers") return driverRows.length;
-    if (activeTab === "vehicles") return vehicleRows.length;
-    if (activeTab === "contracts") return contractRows.length;
-    if (activeTab === "exclusivity") return pendingExclusivity;
-    return pendingOffboarding;
-  }, [
-    activeTab,
-    contractRows.length,
-    driverRows.length,
-    pendingExclusivity,
-    pendingOffboarding,
-    vehicleRows.length,
-  ]);
-
-  const latestReportJob = useMemo(() => {
-    return FLEET_REPORT_JOB_TYPES.map((jobType) => reportJobs[jobType]).find(
-      Boolean,
-    );
-  }, [reportJobs]);
 
   const tabLabels = useMemo(
     () => ({
@@ -928,7 +791,11 @@ export default function FleetPage() {
           actions={
             <CanvasBtn
               theme={theme}
-              variant="secondary"
+              variant={
+                reportJobs.driver_roster?.artifact?.downloadMetadata.downloadUrl
+                  ? "primary"
+                  : "secondary"
+              }
               onClick={() => void requestFleetReport("driver_roster")}
               disabled={reportActionId === "driver_roster"}
             >
@@ -943,157 +810,6 @@ export default function FleetPage() {
 
         <CanvasCard theme={theme} padding={0} style={tableCardStyle}>
           {content}
-        </CanvasCard>
-
-        <CanvasCard
-          theme={theme}
-          title={copy.summaryTitle}
-          subtitle={copy.summarySubtitle}
-          actions={
-            <CanvasBtn theme={theme} onClick={() => void loadData()}>
-              {copy.refresh}
-            </CanvasBtn>
-          }
-        >
-          <div style={{ display: "grid", gap: 16 }}>
-            <div style={summaryGridStyle}>
-              <CanvasKPI
-                theme={theme}
-                label={copy.blockedVehicles}
-                value={blockedVehicles}
-                sub={
-                  locale === "en"
-                    ? "dispatch hold or compliance block"
-                    : "dispatch hold 或合規阻擋"
-                }
-              />
-              <CanvasKPI
-                theme={theme}
-                label={copy.blockedDrivers}
-                value={blockedDrivers}
-                delta={blockedDrivers > 0 ? `${blockedDrivers}` : undefined}
-                deltaTone={blockedDrivers > 0 ? "down" : "neutral"}
-                sub={
-                  locale === "en"
-                    ? "eligibility review required"
-                    : "需完成資格審查"
-                }
-              />
-              <CanvasKPI
-                theme={theme}
-                label={copy.pendingExclusivity}
-                value={pendingExclusivity}
-                sub={locale === "en" ? "review queue" : "review queue"}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={copy.pendingOffboarding}
-                value={pendingOffboarding}
-                sub={
-                  locale === "en"
-                    ? "debranding or effectiveAt outstanding"
-                    : "debranding 或 effectiveAt 尚未完成"
-                }
-              />
-            </div>
-
-            <div style={detailGridStyle}>
-              <div style={fieldStackStyle}>
-                <CanvasField theme={theme} label={copy.selectedView}>
-                  <input
-                    value={tabLabels[activeTab]}
-                    readOnly
-                    style={{
-                      width: "100%",
-                      border: `1px solid ${theme.border}`,
-                      borderRadius: 7,
-                      background: theme.bgRaised,
-                      color: theme.text,
-                      fontSize: 12.5,
-                      padding: "8px 10px",
-                      fontFamily: theme.fontFamily,
-                    }}
-                  />
-                </CanvasField>
-                <CanvasField theme={theme} label={copy.currentWarning}>
-                  <input
-                    value={copy.warningValue}
-                    readOnly
-                    style={{
-                      width: "100%",
-                      border: `1px solid ${theme.border}`,
-                      borderRadius: 7,
-                      background: theme.bgRaised,
-                      color: theme.text,
-                      fontSize: 12.5,
-                      padding: "8px 10px",
-                      fontFamily: theme.monoFamily,
-                    }}
-                  />
-                </CanvasField>
-                <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
-                  {copy.warningHint}
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gap: 16 }}>
-                <CanvasDL
-                  theme={theme}
-                  cols={2}
-                  items={[
-                    {
-                      label: copy.visibleRows,
-                      value: `${visibleRowCount}`,
-                      mono: true,
-                    },
-                    {
-                      label: copy.latestJob,
-                      value: latestReportJob?.jobId ?? "—",
-                      mono: true,
-                    },
-                    {
-                      label: copy.latestExport,
-                      value: latestReportJob
-                        ? formatJobStatus(locale, latestReportJob)
-                        : "—",
-                    },
-                    {
-                      label: locale === "en" ? "Updated" : "更新時間",
-                      value: latestReportJob
-                        ? formatDateTime(latestReportJob.updatedAt)
-                        : "—",
-                      mono: true,
-                    },
-                  ]}
-                />
-
-                <div style={buttonRowStyle}>
-                  {FLEET_REPORT_JOB_TYPES.map((jobType) => {
-                    const detail = reportJobs[jobType];
-                    return (
-                      <CanvasBtn
-                        key={jobType}
-                        theme={theme}
-                        variant={
-                          detail?.artifact?.downloadMetadata.downloadUrl
-                            ? "primary"
-                            : "secondary"
-                        }
-                        onClick={() => void requestFleetReport(jobType)}
-                        disabled={reportActionId === jobType}
-                      >
-                        {reportActionId === jobType
-                          ? locale === "en"
-                            ? "Preparing..."
-                            : "準備中..."
-                          : formatJobLabel(locale, jobType)}
-                      </CanvasBtn>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
         </CanvasCard>
       </div>
     </CanvasShell>
