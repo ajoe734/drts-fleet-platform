@@ -173,7 +173,7 @@ async function loadRulesPageData(
   const generatedAt =
     quotaSummary?.refreshedAt ??
     sortedLedgerEntries[0]?.createdAt ??
-    approvalRequests[0]?.updatedAt ??
+    approvalRequests[0]?.createdAt ??
     rules[0]?.updatedAt ??
     new Date().toISOString();
 
