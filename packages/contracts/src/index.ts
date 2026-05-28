@@ -593,6 +593,25 @@ export interface AuditLogRecord {
   createdAt: string;
 }
 
+export const TENANT_AUDIT_EXPORT_SCOPES = [
+  "tenant",
+  "ops",
+  "platform",
+  "system",
+  "partner",
+] as const;
+export type TenantAuditExportScope =
+  (typeof TENANT_AUDIT_EXPORT_SCOPES)[number];
+
+export interface ExportTenantAuditCommand {
+  actorScope?: TenantAuditExportScope | null;
+  moduleName?: string | null;
+  actionName?: string | null;
+  from?: string | null;
+  to?: string | null;
+  auditId?: string | null;
+}
+
 export const EVIDENCE_RETENTION_FAMILIES = [
   "call_recording",
   "report_artifact",

@@ -32,6 +32,7 @@ import type {
   CreateDriverMasterCommand,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
+  ControlledDownloadRecord,
   DriverForwardedOrderAcceptCommand,
   DriverForwardedOrderRejectCommand,
   CreatePartnerChannelEntryCommand,
@@ -84,6 +85,7 @@ import type {
   EvidenceRetentionFamily,
   EvidenceRetentionPolicyRecord,
   EvidenceSubjectGovernanceRecord,
+  ExportTenantAuditCommand,
   FeatureFlag,
   FeatureFlagSummary,
   FilingPackageAccepted,
@@ -1666,6 +1668,22 @@ export class ApiClient {
 
   async listTenantAuditLogs(options: { tenantId?: string } = {}) {
     return this.getList<AuditLogRecord>("/api/tenant/audit", {
+      ...(options.tenantId
+        ? {
+            headers: {
+              "x-tenant-id": options.tenantId,
+            },
+          }
+        : {}),
+    });
+  }
+
+  async exportTenantAudit(
+    command: ExportTenantAuditCommand,
+    options: { tenantId?: string } = {},
+  ): Promise<ControlledDownloadRecord> {
+    return this.post<ControlledDownloadRecord>("/api/tenant/audit/export", {
+      body: command,
       ...(options.tenantId
         ? {
             headers: {

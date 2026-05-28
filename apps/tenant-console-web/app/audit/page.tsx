@@ -1,7 +1,9 @@
 import type { CSSProperties } from "react";
 import type {
   AuditLogRecord,
+  ControlledDownloadRecord,
   EmptyReason,
+  ExportTenantAuditCommand,
   ResourceActionDescriptor,
 } from "@drts/contracts";
 import {
@@ -307,6 +309,11 @@ type EmptyStateSpec = {
   body: string;
   tone: CanvasTone;
   actions: Array<{ href: string; label: string }>;
+};
+
+type ExportState = {
+  href: string | null;
+  error: string | null;
 };
 
 function getSingleParam(searchParams: SearchParamsInput, key: string): string {
@@ -714,43 +721,6 @@ function buildEmptyState(reason: EmptyReason): EmptyStateSpec {
   }
 }
 
-function buildCsv(rows: AuditViewModel[]) {
-  const lines = [
-    [
-      "createdAt",
-      "actorScope",
-      "actorId",
-      "moduleName",
-      "actionName",
-      "resourceType",
-      "resourceId",
-      "requestId",
-      "auditId",
-    ],
-    ...rows.map((row) => [
-      row.record.createdAt,
-      row.actorScope,
-      row.record.actorId ?? "",
-      row.record.moduleName,
-      row.record.actionName,
-      row.record.resourceType,
-      row.record.resourceId ?? "",
-      row.record.requestId,
-      row.record.auditId,
-    ]),
-  ];
-
-  return lines
-    .map((line) =>
-      line.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","),
-    )
-    .join("\n");
-}
-
-function exportHref(rows: AuditViewModel[]) {
-  return `data:text/csv;charset=utf-8,${encodeURIComponent(buildCsv(rows))}`;
-}
-
 function resolvePageActions(rowCount: number) {
   return pageActionCatalog.map((action) => {
     if (action.action !== "export") {
@@ -888,6 +858,45 @@ async function loadAuditLogs() {
   );
 }
 
+function normalizeExportScope(
+  value: string,
+): NonNullable<ExportTenantAuditCommand["actorScope"]> | null {
+  switch (value) {
+    case "tenant":
+    case "ops":
+    case "platform":
+    case "system":
+    case "partner":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function buildExportCommand(filters: FilterState): ExportTenantAuditCommand {
+  return {
+    actorScope: normalizeExportScope(filters.actor),
+    moduleName: filters.module || null,
+    actionName: filters.action || null,
+    from: filters.from || null,
+    to: filters.to || null,
+    auditId: filters.auditId || null,
+  } as ExportTenantAuditCommand;
+}
+
+async function loadAuditExport(filters: FilterState): Promise<ExportState> {
+  try {
+    const client = getTenantClient();
+    const download = (await client.exportTenantAudit(
+      buildExportCommand(filters),
+    )) as ControlledDownloadRecord;
+    return { href: download.downloadUrl, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { href: null, error: message };
+  }
+}
+
 export default async function AuditPage({
   searchParams,
 }: {
@@ -950,7 +959,6 @@ export default async function AuditPage({
   const exportAction = availableActions.find(
     (action) => action.action === "export",
   )!;
-
   const emptyReason =
     filters.empty ||
     errorReason ||
@@ -960,6 +968,25 @@ export default async function AuditPage({
         : "no_data"
       : null);
   const emptyState = emptyReason ? buildEmptyState(emptyReason) : null;
+  const exportState =
+    exportAction.enabled && !emptyState
+      ? await loadAuditExport(filters)
+      : { href: null, error: null };
+  const exportDisabledReason =
+    "disabledReasonCode" in exportAction
+      ? exportAction.disabledReasonCode
+      : undefined;
+  const exportActionResolved =
+    exportAction.enabled && exportState.href
+      ? exportAction
+      : {
+          ...exportAction,
+          enabled: false,
+          disabledReasonCode:
+            exportDisabledReason ??
+            exportState.error ??
+            "Signed export unavailable",
+        };
 
   return (
     <div>
@@ -975,7 +1002,11 @@ export default async function AuditPage({
               buildAuditHref(filters),
               "重新整理",
             )}
-            {renderActionLink(exportAction, exportHref(rows), "匯出篩選結果")}
+            {renderActionLink(
+              exportActionResolved,
+              exportState.href ?? "#",
+              "匯出篩選結果",
+            )}
           </>
         }
       />
@@ -1151,6 +1182,17 @@ export default async function AuditPage({
                     tone="warn"
                     title="Latest fetch returned an error"
                     body={errorMessage}
+                  />
+                </div>
+              ) : null}
+
+              {exportState.error ? (
+                <div style={{ padding: 16 }}>
+                  <CanvasBanner
+                    theme={th}
+                    tone="warn"
+                    title="Signed export is temporarily unavailable"
+                    body={exportState.error}
                   />
                 </div>
               ) : null}

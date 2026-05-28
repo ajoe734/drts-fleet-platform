@@ -21,6 +21,7 @@ import type {
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
+  ControlledDownloadRecord,
   PartnerEntryBrandingMetadata,
   CreateTenantUserCommand,
   EscalateTenantBookingApprovalRequestCommand,
@@ -48,6 +49,7 @@ import type {
   SendTestWebhookCommand,
   DisableTenantCostCenterCommand,
   EvaluateTenantApprovalRuleCommand,
+  ExportTenantAuditCommand,
   ListOpsPendingApprovalRequestsQuery,
   ListTenantBookingApprovalRequestsQuery,
   NudgeOpsApprovalRequestCommand,
@@ -106,9 +108,11 @@ import type {
   WebhookEventPayload,
   WebhookDeliveryRecord,
   WebhookRetryPolicyRecord,
+  TenantAuditExportScope,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { createControlledDownloadMetadata } from "../../common/controlled-download";
 import {
   assertEvidenceAccess,
   buildEvidenceAccessAuditSummary,
@@ -5271,6 +5275,163 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       requestId,
     );
     return items;
+  }
+
+  exportTenantAudit(
+    tenantId: string,
+    command: ExportTenantAuditCommand,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): ControlledDownloadRecord {
+    const policy = assertEvidenceAccess({
+      family: "audit_log",
+      identity,
+      tenantId,
+    });
+    const items = this.filterTenantAuditItems(
+      this.auditNotificationService
+        .listAuditLogs(identity, requestId)
+        .filter((auditLog) => auditLog.tenantId === tenantId),
+      command,
+    );
+    const manifestHash = this.computeTenantAuditExportHash({
+      tenantId,
+      filters: command,
+      items,
+    });
+    const subjectId = `tenant-audit-export-${tenantId}-${manifestHash.slice(7, 19)}`;
+    const download = createControlledDownloadMetadata({
+      kind: "tenant_audit_export",
+      subjectId,
+      manifestHash,
+    });
+
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "export_tenant_audit_evidence",
+        resourceType: "audit_log",
+        resourceId: subjectId,
+        newValuesSummary: {
+          ...buildEvidenceAccessAuditSummary(policy, "export", {
+            itemCount: items.length,
+          }),
+          filters: this.normalizeTenantAuditExportFilters(command),
+          manifestHash,
+          signedDownloadUrl: download.downloadUrl,
+          expiresAt: download.expiresAt,
+        },
+      },
+      requestId,
+    );
+
+    return { ...download };
+  }
+
+  private filterTenantAuditItems(
+    auditLogs: AuditLogRecord[],
+    command: ExportTenantAuditCommand,
+  ) {
+    const filters = this.normalizeTenantAuditExportFilters(command);
+
+    return auditLogs.filter((auditLog) => {
+      if (
+        filters.actorScope &&
+        this.resolveTenantAuditActorScope(auditLog) !== filters.actorScope
+      ) {
+        return false;
+      }
+      if (filters.moduleName && auditLog.moduleName !== filters.moduleName) {
+        return false;
+      }
+      if (filters.actionName && auditLog.actionName !== filters.actionName) {
+        return false;
+      }
+      if (
+        filters.auditId &&
+        !auditLog.auditId.includes(filters.auditId) &&
+        !auditLog.requestId.includes(filters.auditId)
+      ) {
+        return false;
+      }
+
+      const createdAt = new Date(auditLog.createdAt);
+      if (Number.isNaN(createdAt.getTime())) {
+        return false;
+      }
+      if (filters.from) {
+        const from = new Date(`${filters.from}T00:00:00.000Z`);
+        if (createdAt < from) {
+          return false;
+        }
+      }
+      if (filters.to) {
+        const to = new Date(`${filters.to}T23:59:59.999Z`);
+        if (createdAt > to) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+
+  private normalizeTenantAuditExportFilters(command: ExportTenantAuditCommand) {
+    return {
+      actorScope: this.normalizeTenantAuditActorScope(command.actorScope),
+      moduleName: this.normalizeNullableText(command.moduleName),
+      actionName: this.normalizeNullableText(command.actionName),
+      from: this.normalizeNullableText(command.from),
+      to: this.normalizeNullableText(command.to),
+      auditId: this.normalizeNullableText(command.auditId),
+    };
+  }
+
+  private normalizeTenantAuditActorScope(
+    value: TenantAuditExportScope | null | undefined,
+  ): TenantAuditExportScope | null {
+    switch (value) {
+      case "tenant":
+      case "ops":
+      case "platform":
+      case "system":
+      case "partner":
+        return value;
+      default:
+        return null;
+    }
+  }
+
+  private resolveTenantAuditActorScope(
+    auditLog: AuditLogRecord,
+  ): TenantAuditExportScope {
+    switch (auditLog.actorType) {
+      case "tenant_admin":
+        return "tenant";
+      case "ops_user":
+        return "ops";
+      case "platform_admin":
+        return "platform";
+      case "partner_api_key":
+        return "partner";
+      default:
+        return "system";
+    }
+  }
+
+  private computeTenantAuditExportHash(input: {
+    tenantId: string;
+    filters: ExportTenantAuditCommand;
+    items: AuditLogRecord[];
+  }) {
+    return `sha256:${createHash("sha256")
+      .update(JSON.stringify(input))
+      .digest("hex")}`;
   }
 
   private buildIssuedApiKey(

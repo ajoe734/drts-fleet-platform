@@ -22,6 +22,7 @@ import type {
   CreateTenantWebhookEndpointCommand,
   DisableTenantCostCenterCommand,
   EvaluateTenantApprovalRuleCommand,
+  ExportTenantAuditCommand,
   ListOpsPendingApprovalRequestsQuery,
   TenantBookingQuotaImpactPreview,
   TenantBookingQuotaImpactQuery,
@@ -1203,5 +1204,24 @@ export class TenantPartnerController {
       identity,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Post("tenant/audit/export")
+  @RequireRealms("tenant", "platform", "ops")
+  exportTenantAudit(
+    @Body() command: ExportTenantAuditCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.exportTenantAudit(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
   }
 }
