@@ -45,6 +45,7 @@ const EMPTY_REASONS = [
   "external_unavailable",
   "filtered_empty",
 ] as const satisfies readonly EmptyReason[];
+type SupportedEmptyReason = (typeof EMPTY_REASONS)[number];
 const STATE_FLOW = [
   "draft",
   "pending_approval",
@@ -80,6 +81,11 @@ type EmptyStateVisual = {
   cta: string | null;
   href?: string;
 };
+
+type BannerTone = Extract<
+  CanvasTone,
+  "accent" | "warn" | "info" | "success" | "danger"
+>;
 
 type BatchDetailRecord = ReimbursementBatchRecord & {
   state: DetailState;
@@ -317,36 +323,36 @@ function defaultAvailableActions(
       enabled: state === "pending_approval" || state === "draft",
       riskLevel: "high",
       requiresReason: true,
-      disabledReasonCode:
-        state === "pending_approval" || state === "draft"
-          ? undefined
-          : "batch_not_pending_approval",
+      ...(!(state === "pending_approval" || state === "draft")
+        ? { disabledReasonCode: "batch_not_pending_approval" }
+        : {}),
     },
     {
       action: "exportReimbursementBatch",
       enabled: state === "approved",
       riskLevel: "medium",
-      disabledReasonCode:
-        state === "approved" ? undefined : "batch_not_approved",
+      ...(state !== "approved"
+        ? { disabledReasonCode: "batch_not_approved" }
+        : {}),
     },
     {
       action: "markReimbursementPaid",
       enabled: state === "exported",
       riskLevel: "high",
       requiresReason: true,
-      disabledReasonCode:
-        state === "exported" ? undefined : "batch_not_exported",
+      ...(state !== "exported"
+        ? { disabledReasonCode: "batch_not_exported" }
+        : {}),
     },
     {
       action: "markReimbursementReconciled",
       enabled: state === "paid",
       riskLevel: "medium",
-      disabledReasonCode:
-        state !== "paid"
-          ? "batch_not_paid"
-          : linkedReconciliationIssueId
-            ? undefined
-            : "no_linked_reconciliation_issue",
+      ...(state !== "paid"
+        ? { disabledReasonCode: "batch_not_paid" }
+        : !linkedReconciliationIssueId
+          ? { disabledReasonCode: "no_linked_reconciliation_issue" }
+          : {}),
     },
     {
       action: "addComment",
@@ -523,8 +529,11 @@ function buildBatchDetail(
   return detail;
 }
 
-function emptyStateCopy(reason: EmptyReason, locale: string): EmptyStateVisual {
-  const zh: Record<EmptyReason, EmptyStateVisual> = {
+function emptyStateCopy(
+  reason: SupportedEmptyReason,
+  locale: string,
+): EmptyStateVisual {
+  const zh: Record<SupportedEmptyReason, EmptyStateVisual> = {
     no_data: {
       tone: "neutral",
       title: "目前沒有代墊批次",
@@ -565,12 +574,6 @@ function emptyStateCopy(reason: EmptyReason, locale: string): EmptyStateVisual {
       body: "清除 detail preview 或切回原始批次 id 後再重試。",
       cta: "回到原始批次",
       href: "/payments/reimbursements",
-    },
-    driver_not_eligible: {
-      tone: "neutral",
-      title: "",
-      body: "",
-      cta: null,
     },
   };
   const en: typeof zh = {
@@ -615,18 +618,13 @@ function emptyStateCopy(reason: EmptyReason, locale: string): EmptyStateVisual {
       cta: "Return to batch",
       href: "/payments/reimbursements",
     },
-    driver_not_eligible: {
-      tone: "neutral",
-      title: "",
-      body: "",
-      cta: null,
-    },
   };
   const lookup = locale === "en" ? en : zh;
-  return lookup[reason] ?? lookup.no_data;
+  const copy = lookup[reason];
+  return copy ?? lookup.no_data;
 }
 
-function inferEmptyReason(error: string | null): EmptyReason | null {
+function inferEmptyReason(error: string | null): SupportedEmptyReason | null {
   if (!error) return null;
   const value = error.toLowerCase();
   if (value.includes("403") || value.includes("forbidden")) {
@@ -649,8 +647,10 @@ function inferEmptyReason(error: string | null): EmptyReason | null {
   return "fetch_failed";
 }
 
-function isEmptyReason(value: string | null): value is EmptyReason {
-  return value !== null && EMPTY_REASONS.includes(value as EmptyReason);
+function isEmptyReason(value: string | null): value is SupportedEmptyReason {
+  return (
+    value !== null && EMPTY_REASONS.includes(value as SupportedEmptyReason)
+  );
 }
 
 function buildExportArtifact(batch: BatchDetailRecord): Blob {
@@ -667,7 +667,7 @@ function buildExportArtifact(batch: BatchDetailRecord): Blob {
     "",
     "lineItems:",
     ...batch.items.map(
-      (item) =>
+      (item: BatchDetailRecord["items"][number]) =>
         `- ${item.itemId} | ${item.orderId} | ${formatMoney(item.amount)} | ${item.reason}`,
     ),
   ];
@@ -679,10 +679,10 @@ function buildExportArtifact(batch: BatchDetailRecord): Blob {
 function stateCopy(
   state: DetailState,
   locale: string,
-): { tone: CanvasTone; title: string; body: string } {
+): { tone: BannerTone; title: string; body: string } {
   const zh: Record<
     DetailState,
-    { tone: CanvasTone; title: string; body: string }
+    { tone: BannerTone; title: string; body: string }
   > = {
     draft: {
       tone: "accent",
@@ -953,28 +953,30 @@ export default function ReimbursementBatchDetailPage() {
 
   const stepIndex = batch ? STATE_FLOW.indexOf(batch.state) : 0;
   const lineItemRows: ReimbursementLineRow[] = useMemo(() => {
-    return (batch?.items ?? []).map((item) => {
-      const recipient =
-        item.channelKey === "partner_airport"
-          ? locale === "en"
-            ? "Partner reimbursement"
-            : "合作夥伴補償"
-          : item.channelKey === "forwarded_shadow"
+    return (batch?.items ?? []).map(
+      (item: BatchDetailRecord["items"][number]) => {
+        const recipient =
+          item.channelKey === "partner_airport"
             ? locale === "en"
-              ? "Forwarded mirror order"
-              : "轉單鏡像訂單"
-            : locale === "en"
-              ? "Driver / internal adjustment"
-              : "司機 / 內部調整";
-      return {
-        itemId: item.itemId,
-        recipient,
-        amount: formatMoney(item.amount),
-        sourceReference: item.orderId,
-        note: item.reason,
-        href: `/payments?orderId=${encodeURIComponent(item.orderId)}`,
-      };
-    });
+              ? "Partner reimbursement"
+              : "合作夥伴補償"
+            : item.channelKey === "forwarded_shadow"
+              ? locale === "en"
+                ? "Forwarded mirror order"
+                : "轉單鏡像訂單"
+              : locale === "en"
+                ? "Driver / internal adjustment"
+                : "司機 / 內部調整";
+        return {
+          itemId: item.itemId,
+          recipient,
+          amount: formatMoney(item.amount),
+          sourceReference: item.orderId,
+          note: item.reason,
+          href: `/payments?orderId=${encodeURIComponent(item.orderId)}`,
+        };
+      },
+    );
   }, [batch?.items, locale]);
 
   const lineItemColumns: CanvasTableColumn<ReimbursementLineRow>[] = [
@@ -1117,8 +1119,10 @@ export default function ReimbursementBatchDetailPage() {
         );
       } else if (kind === "markPaid") {
         const updated = await client.markReimbursementPaid(batch.batchId, {
-          remittanceProofId: paymentProofId.trim() || undefined,
           paidAt: new Date().toISOString(),
+          ...(paymentProofId.trim()
+            ? { remittanceProofId: paymentProofId.trim() }
+            : {}),
         });
         const nextPatch: BatchPatch = {
           state: "paid",
@@ -1333,12 +1337,15 @@ export default function ReimbursementBatchDetailPage() {
             </CanvasCard>
           ) : activeEmptyState ? (
             (() => {
-              const copy = emptyStateCopy(activeEmptyState.reason, locale);
+              const reason = isEmptyReason(activeEmptyState.reason)
+                ? activeEmptyState.reason
+                : "no_data";
+              const copy = emptyStateCopy(reason, locale);
               return (
                 <CanvasCard theme={theme} title={copy.title}>
                   <div style={emptyStateStyle(theme)}>
                     <CanvasPill theme={theme} tone={copy.tone} dot>
-                      {activeEmptyState.reason}
+                      {reason}
                     </CanvasPill>
                     <div
                       style={{
