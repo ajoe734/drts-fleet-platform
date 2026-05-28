@@ -1021,13 +1021,13 @@ function ActionFormCard({
             style={{
               ...fieldStackStyle,
               justifyContent: "end",
-              minHeight: 76,
+              minHeight: 52,
               textTransform: "none",
               letterSpacing: 0,
             }}
           >
             <span style={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
-              Flags
+              Export flag
             </span>
             <label style={{ color: th.text, display: "flex", gap: 8 }}>
               <input
@@ -1039,16 +1039,10 @@ function ActionFormCard({
               />
               Sensitive / export masked
             </label>
-            <label style={{ color: th.text, display: "flex", gap: 8 }}>
-              <input
-                type="checkbox"
-                name="activeFlag"
-                defaultChecked={
-                  isCreate ? true : (selectedAddress?.activeFlag ?? true)
-                }
-              />
-              Active
-            </label>
+            <span style={secondaryTextStyle}>
+              啟用狀態僅能透過 row availableActions 的 deactivate / reactivate
+              變更。
+            </span>
           </label>
         </div>
         <div style={actionRowStyle}>

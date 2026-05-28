@@ -87,11 +87,13 @@ function buildUpsertCommand(formData: FormData): UpsertTenantAddressCommand {
     ownerPassengerId: ownerPassengerId ?? null,
     tags: readTags(formData),
     sensitiveFlag: readCheckbox(formData, "sensitiveFlag"),
-    activeFlag: readCheckbox(formData, "activeFlag"),
   };
 
   if (addressId) {
     command.addressId = addressId;
+  } else {
+    // Lifecycle transitions are handled by dedicated deactivate/reactivate actions.
+    command.activeFlag = true;
   }
   if (lat !== undefined) {
     command.lat = lat;
