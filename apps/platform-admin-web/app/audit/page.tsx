@@ -11,6 +11,7 @@ import { useSearchParams } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
 import type {
   AuditLogRecord,
   CreateEvidenceDeletionExceptionCommand,
@@ -27,15 +28,23 @@ import {
   EVIDENCE_LEGAL_HOLD_REASON_CODES,
 } from "@drts/contracts";
 import {
+  CanvasBanner,
   CanvasBtn,
   CanvasCard,
+  CanvasShell,
   CanvasPageHeader,
   CanvasPill,
   buildCanvasTheme,
+  type CanvasShellNavItem,
 } from "@drts/ui-web";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 const DEFAULT_REVIEWER_ACTOR_ID = "platform-admin.audit";
+
+const shellStyle = {
+  margin: "-32px",
+  minHeight: "calc(100vh - 64px)",
+} satisfies CSSProperties;
 
 type FilterState = {
   moduleName: string;
@@ -60,15 +69,19 @@ type ActionableEvidenceLegalHoldRecord = EvidenceLegalHoldRecord & {
   availableActions?: ResourceActionDescriptor[];
 };
 
-type ActionableEvidenceDeletionExceptionRecord = EvidenceDeletionExceptionRecord & {
-  availableActions?: ResourceActionDescriptor[];
-};
+type ActionableEvidenceDeletionExceptionRecord =
+  EvidenceDeletionExceptionRecord & {
+    availableActions?: ResourceActionDescriptor[];
+  };
 
 type ActionModalState =
   | { action: "grant_legal_hold"; record: AuditLogRecord }
   | { action: "lift_legal_hold"; hold: EvidenceLegalHoldRecord }
   | { action: "grant_deletion_exception"; record: AuditLogRecord }
-  | { action: "revoke_deletion_exception"; exception: EvidenceDeletionExceptionRecord }
+  | {
+      action: "revoke_deletion_exception";
+      exception: EvidenceDeletionExceptionRecord;
+    }
   | null;
 
 const pageStyle = {
@@ -95,6 +108,13 @@ const statGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
+} satisfies CSSProperties;
+
+const topGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.9fr)",
+  alignItems: "start",
 } satisfies CSSProperties;
 
 const filterGridStyle = {
@@ -178,6 +198,20 @@ const clusterListStyle = {
   gap: 10,
 } satisfies CSSProperties;
 
+const appLinkStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  border: `1px solid ${theme.border}`,
+  borderRadius: 999,
+  padding: "4px 10px",
+  background: "#fff",
+  color: theme.text,
+  fontSize: 11.5,
+  fontWeight: 600,
+  cursor: "pointer",
+} satisfies CSSProperties;
+
 const overlayStyle = {
   position: "fixed",
   inset: 0,
@@ -206,8 +240,120 @@ const formGridStyle = {
   gap: 12,
 } satisfies CSSProperties;
 
-function text(locale: string, en: string, zh: string) {
+function text(locale: Locale, en: string, zh: string) {
   return locale === "en" ? en : zh;
+}
+
+function buildPlatformNav(locale: Locale): CanvasShellNavItem[] {
+  const labels =
+    locale === "en"
+      ? {
+          workspace: "Workspace",
+          home: "Governance Home",
+          health: "Platform Health",
+          tenantGroup: "Tenant Governance",
+          tenants: "Tenants",
+          partners: "Partner entry",
+          users: "Platform staff",
+          fleetGroup: "Fleet & Compliance",
+          fleet: "Fleet & compliance",
+          switchboard: "Public info & placards",
+          pricingGroup: "Pricing & Settlement",
+          pricing: "Pricing",
+          payments: "Settlement governance",
+          platformGroup: "Platform Layer",
+          notices: "Notices & maintenance",
+          audit: "Audit & evidence",
+          flags: "Feature flags",
+          adapters: "Adapter registry",
+        }
+      : {
+          workspace: "工作面",
+          home: "工作首頁",
+          health: "平台健康",
+          tenantGroup: "租戶治理",
+          tenants: "租戶",
+          partners: "合作夥伴 entry",
+          users: "平台人員",
+          fleetGroup: "車隊與法遵",
+          fleet: "車隊與合規",
+          switchboard: "法定資訊與牌貼",
+          pricingGroup: "計價與結算",
+          pricing: "計價",
+          payments: "結算治理",
+          platformGroup: "平台層",
+          notices: "公告與維護",
+          audit: "稽核與證據",
+          flags: "功能旗標",
+          adapters: "介接登錄",
+        };
+
+  return [
+    { divider: labels.workspace },
+    { key: "home", href: "/", icon: "home", label: labels.home },
+    {
+      key: "health",
+      href: "/health",
+      icon: "health",
+      label: labels.health,
+    },
+    { divider: labels.tenantGroup },
+    {
+      key: "tenants",
+      href: "/tenants",
+      icon: "tenants",
+      label: labels.tenants,
+    },
+    {
+      key: "partners",
+      href: "/partners",
+      icon: "partners",
+      label: labels.partners,
+    },
+    { key: "users", href: "/users", icon: "users", label: labels.users },
+    { divider: labels.fleetGroup },
+    { key: "fleet", href: "/fleet", icon: "fleet", label: labels.fleet },
+    {
+      key: "switchboard",
+      href: "/switchboard",
+      icon: "switchboard",
+      label: labels.switchboard,
+    },
+    { divider: labels.pricingGroup },
+    {
+      key: "pricing",
+      href: "/pricing",
+      icon: "pricing",
+      label: labels.pricing,
+    },
+    {
+      key: "payments",
+      href: "/payments",
+      icon: "payments",
+      label: labels.payments,
+    },
+    { divider: labels.platformGroup },
+    { key: "notices", href: "/notices", icon: "notice", label: labels.notices },
+    {
+      key: "audit",
+      href: "/audit",
+      icon: "audit",
+      label: labels.audit,
+      badgeTone: "warn",
+    },
+    {
+      key: "flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: labels.flags,
+    },
+    {
+      key: "adapters",
+      href: "/adapter-registry",
+      icon: "registry",
+      label: labels.adapters,
+    },
+  ];
 }
 
 function toneForEmpty(reason: EmptyReason) {
@@ -235,11 +381,13 @@ function inferTimeRange(iso: string, timeRange: string) {
 }
 
 function mapRecordFamily(record: AuditLogRecord): EvidenceRetentionFamily {
-  const joined = `${record.resourceType} ${record.moduleName} ${record.actionName}`.toLowerCase();
+  const joined =
+    `${record.resourceType} ${record.moduleName} ${record.actionName}`.toLowerCase();
   if (joined.includes("webhook")) return "webhook_delivery";
   if (joined.includes("eligibility")) return "eligibility_verification";
   if (joined.includes("filing")) return "filing_package";
-  if (joined.includes("report") || joined.includes("export")) return "report_artifact";
+  if (joined.includes("report") || joined.includes("export"))
+    return "report_artifact";
   if (joined.includes("call")) return "call_recording";
   if (joined.includes("audit")) return "audit_log";
   return "proof_bundle";
@@ -258,7 +406,10 @@ function matchesSubject(record: AuditLogRecord, subjectId: string) {
   return buildSubjectCandidates(record).includes(subjectId);
 }
 
-function inferCrossLink(record: AuditLogRecord, locale: string): CrossLink | null {
+function inferCrossLink(
+  record: AuditLogRecord,
+  locale: Locale,
+): CrossLink | null {
   const resourceType = record.resourceType.toLowerCase();
   const moduleName = record.moduleName.toLowerCase();
   const resourceId = record.resourceId ?? record.auditId;
@@ -402,7 +553,8 @@ function fallbackHoldActions(
     {
       action: "lift_legal_hold",
       enabled: hold.status === "active",
-      disabledReasonCode: hold.status === "active" ? undefined : "hold_not_active",
+      disabledReasonCode:
+        hold.status === "active" ? undefined : "hold_not_active",
       requiresReason: true,
       riskLevel: "high",
     },
@@ -430,7 +582,9 @@ export default function AuditPage() {
   const searchParams = useSearchParams();
   const [records, setRecords] = useState<ActionableAuditLogRecord[]>([]);
   const [policies, setPolicies] = useState<EvidenceRetentionPolicyRecord[]>([]);
-  const [legalHolds, setLegalHolds] = useState<ActionableEvidenceLegalHoldRecord[]>([]);
+  const [legalHolds, setLegalHolds] = useState<
+    ActionableEvidenceLegalHoldRecord[]
+  >([]);
   const [deletionExceptions, setDeletionExceptions] = useState<
     ActionableEvidenceDeletionExceptionRecord[]
   >([]);
@@ -470,19 +624,21 @@ export default function AuditPage() {
     setLoading(true);
     setError(null);
     try {
-      const [auditList, policyList, holdList, exceptionList] = await Promise.all([
-        client.listAuditLogs(),
-        client.listEvidencePolicies(),
-        client.listEvidenceLegalHolds(),
-        client.listEvidenceDeletionExceptions(),
-      ]);
+      const [auditList, policyList, holdList, exceptionList] =
+        await Promise.all([
+          client.listAuditLogs(),
+          client.listEvidencePolicies(),
+          client.listEvidenceLegalHolds(),
+          client.listEvidenceDeletionExceptions(),
+        ]);
       setRecords(auditList);
       setPolicies(policyList);
       setLegalHolds(holdList);
       setDeletionExceptions(exceptionList);
       if (!selectedAuditId && auditList[0]?.auditId) {
         setSelectedAuditId(
-          searchParams.get("auditId") && auditList.some((r) => r.auditId === searchParams.get("auditId"))
+          searchParams.get("auditId") &&
+            auditList.some((r) => r.auditId === searchParams.get("auditId"))
             ? (searchParams.get("auditId") as string)
             : auditList[0].auditId,
         );
@@ -503,30 +659,45 @@ export default function AuditPage() {
     [legalHolds],
   );
   const activeDeletionExceptions = useMemo(
-    () => deletionExceptions.filter((exception) => exception.status === "active"),
+    () =>
+      deletionExceptions.filter((exception) => exception.status === "active"),
     [deletionExceptions],
   );
   const modules = useMemo(
-    () => [...new Set(records.map((record) => record.moduleName).filter(Boolean))],
+    () => [
+      ...new Set(records.map((record) => record.moduleName).filter(Boolean)),
+    ],
     [records],
   );
   const actorTypes = useMemo(
-    () => [...new Set(records.map((record) => record.actorType).filter(Boolean))],
+    () => [
+      ...new Set(records.map((record) => record.actorType).filter(Boolean)),
+    ],
     [records],
   );
   const resourceTypes = useMemo(
     () =>
-      [...new Set(records.map((record) => record.resourceType).filter(Boolean))].sort(),
+      [
+        ...new Set(
+          records.map((record) => record.resourceType).filter(Boolean),
+        ),
+      ].sort(),
     [records],
   );
 
   const filteredRecords = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
     return records.filter((record) => {
-      if (filters.moduleName && record.moduleName !== filters.moduleName) return false;
-      if (filters.actorType && record.actorType !== filters.actorType) return false;
-      if (filters.resourceType && record.resourceType !== filters.resourceType) return false;
-      if (filters.timeRange && !inferTimeRange(record.createdAt, filters.timeRange)) {
+      if (filters.moduleName && record.moduleName !== filters.moduleName)
+        return false;
+      if (filters.actorType && record.actorType !== filters.actorType)
+        return false;
+      if (filters.resourceType && record.resourceType !== filters.resourceType)
+        return false;
+      if (
+        filters.timeRange &&
+        !inferTimeRange(record.createdAt, filters.timeRange)
+      ) {
         return false;
       }
       if (!query) return true;
@@ -550,19 +721,27 @@ export default function AuditPage() {
       setSelectedAuditId(null);
       return;
     }
-    if (!selectedAuditId || !filteredRecords.some((record) => record.auditId === selectedAuditId)) {
+    if (
+      !selectedAuditId ||
+      !filteredRecords.some((record) => record.auditId === selectedAuditId)
+    ) {
       setSelectedAuditId(filteredRecords[0].auditId);
     }
   }, [filteredRecords, selectedAuditId]);
 
   const selectedRecord =
-    filteredRecords.find((record) => record.auditId === selectedAuditId) ?? null;
+    filteredRecords.find((record) => record.auditId === selectedAuditId) ??
+    null;
+  const selectedCrossLink = selectedRecord
+    ? inferCrossLink(selectedRecord, locale)
+    : null;
 
   const selectedGovernance = useMemo(() => {
     if (!selectedRecord) return { hold: null, deletionException: null };
     const hold =
-      activeLegalHolds.find((candidate) => matchesSubject(selectedRecord, candidate.subjectId)) ??
-      null;
+      activeLegalHolds.find((candidate) =>
+        matchesSubject(selectedRecord, candidate.subjectId),
+      ) ?? null;
     const deletionException =
       activeDeletionExceptions.find((candidate) =>
         matchesSubject(selectedRecord, candidate.subjectId),
@@ -697,9 +876,12 @@ export default function AuditPage() {
         };
         await client.registerEvidenceDeletionException(command);
       } else if (modal.action === "revoke_deletion_exception") {
-        await client.resolveEvidenceDeletionException(modal.exception.exceptionId, {
-          resolutionNote: resolutionNote.trim(),
-        });
+        await client.resolveEvidenceDeletionException(
+          modal.exception.exceptionId,
+          {
+            resolutionNote: resolutionNote.trim(),
+          },
+        );
       }
       setModal(null);
       setReleaseReason("");
@@ -754,15 +936,70 @@ export default function AuditPage() {
     },
   ];
 
+  const moduleBreakdown = useMemo(() => {
+    const counts = new Map<string, number>();
+    records.forEach((record) => {
+      counts.set(record.moduleName, (counts.get(record.moduleName) ?? 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+  }, [records]);
+
+  const queryContextPills = [
+    searchParams.get("auditId")
+      ? {
+          tone: "info" as const,
+          label: text(
+            locale,
+            "Action receipt audit link",
+            "由 action receipt 帶入",
+          ),
+        }
+      : null,
+    searchParams.get("resourceId")
+      ? {
+          tone: "accent" as const,
+          label: text(locale, "Scoped to resource context", "已鎖定資源上下文"),
+        }
+      : null,
+    filters.moduleName
+      ? {
+          tone: "neutral" as const,
+          label: formatPlatformCodeLabel(locale, filters.moduleName),
+        }
+      : null,
+  ].filter(Boolean) as Array<{
+    tone: "neutral" | "info" | "accent";
+    label: string;
+  }>;
+
   return (
-    <div style={pageStyle}>
+    <CanvasShell
+      theme={theme}
+      nav={buildPlatformNav(locale)}
+      active="audit"
+      currentPath="/audit"
+      breadcrumb={[
+        text(locale, "Platform Layer", "平台層"),
+        text(locale, "Audit & evidence", "稽核與證據"),
+      ]}
+      searchPlaceholder={text(
+        locale,
+        "Search audit, tenant, request, resource…",
+        "搜尋 audit、租戶、request、resource…",
+      )}
+      avatarLabel={locale === "en" ? "PA" : "平台"}
+      versionLabel="canvas"
+      style={shellStyle}
+    >
       <CanvasPageHeader
         theme={theme}
         title={text(locale, "Audit & evidence governance", "稽核與證據治理")}
         subtitle={text(
           locale,
-          "append-only · manual refresh · cross-app drill-in",
-          "append-only · 手動刷新 · 跨 app 深連結",
+          "Append-only investigation surface with legal hold, deletion exception, and cross-app drill-in.",
+          "append-only 調查面，含 legal hold、刪除例外與跨 app drill-in。",
         )}
         tabs={[
           "Audit log",
@@ -793,580 +1030,839 @@ export default function AuditPage() {
         }
       />
 
-      <div style={pillRowStyle}>
-        <CanvasPill theme={theme} tone="accent" dot>
-          {text(locale, "Refresh tier T6", "Refresh tier T6")}
-        </CanvasPill>
-        <CanvasPill theme={theme} tone="neutral">
-          {manualRefreshCopy}
-        </CanvasPill>
-        {searchParams.get("auditId") ? (
-          <CanvasPill theme={theme} tone="info">
-            {text(locale, "Deep-linked from action receipt", "由 action receipt 深連結進入")}
-          </CanvasPill>
+      <div style={pageStyle}>
+        {error ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            title={text(
+              locale,
+              "Audit surface fetch failed",
+              "Audit 畫面抓取失敗",
+            )}
+            body={error}
+          />
         ) : null}
-      </div>
 
-      {error ? (
-        <CanvasCard theme={theme}>
-          <div style={{ color: theme.danger, fontWeight: 600 }}>{error}</div>
-        </CanvasCard>
-      ) : null}
-
-      <div style={statGridStyle}>
-        {summaryCards.map((card) => (
-          <CanvasCard key={card.label} theme={theme}>
-            <div style={{ display: "grid", gap: 6 }}>
-              <div style={subTextStyle}>{card.label}</div>
-              <div style={{ fontSize: 28, fontWeight: 700 }}>{card.value}</div>
-              <div style={subTextStyle}>{card.note}</div>
-            </div>
-          </CanvasCard>
-        ))}
-      </div>
-
-      <CanvasCard theme={theme}>
-        <div style={{ display: "grid", gap: 14 }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 700 }}>
-                {text(locale, "Evidence filters", "證據篩選")}
-              </div>
-              <div style={subTextStyle}>
-                {text(
-                  locale,
-                  "Filter by module, actor, resource type, time range, or free text.",
-                  "依模組、操作者、資源類型、時間範圍與文字關鍵字篩選。",
-                )}
-              </div>
-            </div>
-            <div style={actionRowStyle}>
-              {(["audit", "policies", "holds", "exceptions"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                  style={{
-                    border: `1px solid ${activeTab === tab ? theme.accent : theme.border}`,
-                    borderRadius: 999,
-                    background: activeTab === tab ? theme.accent : "#fff",
-                    color: activeTab === tab ? "#fff" : theme.text,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: "6px 12px",
-                    cursor: "pointer",
-                  }}
-                >
-                  {tab === "audit"
-                    ? text(locale, "Audit log", "Audit log")
-                    : tab === "policies"
-                      ? text(locale, "Retention policies", "Retention policies")
-                      : tab === "holds"
-                        ? text(locale, "Legal holds", "Legal holds")
-                        : text(locale, "Deletion exceptions", "Deletion exceptions")}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={filterGridStyle}>
-            <FieldLabel label={text(locale, "Module", "模組")}>
-              <select
-                value={filters.moduleName}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    moduleName: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              >
-                <option value="">{text(locale, "All modules", "全部模組")}</option>
-                {modules.map((value) => (
-                  <option key={value} value={value}>
-                    {formatPlatformCodeLabel(locale, value)}
-                  </option>
-                ))}
-              </select>
-            </FieldLabel>
-            <FieldLabel label={text(locale, "Actor type", "操作者類型")}>
-              <select
-                value={filters.actorType}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    actorType: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              >
-                <option value="">{text(locale, "All actors", "全部操作者")}</option>
-                {actorTypes.map((value) => (
-                  <option key={value} value={value}>
-                    {formatPlatformCodeLabel(locale, value)}
-                  </option>
-                ))}
-              </select>
-            </FieldLabel>
-            <FieldLabel label={text(locale, "Resource type", "資源類型")}>
-              <select
-                value={filters.resourceType}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    resourceType: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              >
-                <option value="">{text(locale, "All resources", "全部資源")}</option>
-                {resourceTypes.map((value) => (
-                  <option key={value} value={value}>
-                    {formatPlatformCodeLabel(locale, value)}
-                  </option>
-                ))}
-              </select>
-            </FieldLabel>
-            <FieldLabel label={text(locale, "Time range", "時間範圍")}>
-              <select
-                value={filters.timeRange}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    timeRange: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              >
-                <option value="24">{text(locale, "Last 24h", "最近 24 小時")}</option>
-                <option value="168">{text(locale, "Last 7d", "最近 7 天")}</option>
-                <option value="720">{text(locale, "Last 30d", "最近 30 天")}</option>
-                <option value="">{text(locale, "All time", "全部時間")}</option>
-              </select>
-            </FieldLabel>
-            <FieldLabel label={text(locale, "Audit / request / resource", "Audit / request / 資源")}>
-              <input
-                value={filters.query}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    query: event.target.value,
-                  }))
-                }
-                placeholder={text(
-                  locale,
-                  "auditId, requestId, resourceId...",
-                  "auditId、requestId、resourceId...",
-                )}
-                style={inputStyle}
-              />
-            </FieldLabel>
-          </div>
-        </div>
-      </CanvasCard>
-
-      {activeTab === "audit" ? (
-        <div style={sectionGridStyle}>
+        <div style={topGridStyle}>
           <CanvasCard theme={theme}>
             <div style={{ display: "grid", gap: 14 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 700 }}>
-                    {text(locale, "Audit log", "Audit log")}
-                  </div>
-                  <div style={subTextStyle}>
-                    {text(
-                      locale,
-                      `${filteredRecords.length} / ${records.length} records shown`,
-                      `顯示 ${filteredRecords.length} / ${records.length} 筆記錄`,
-                    )}
-                  </div>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 700 }}>
+                  {text(locale, "Audit governance posture", "證據治理態勢")}
                 </div>
-                <div style={actionRowStyle}>
-                  {availableActions.map((action) => (
-                    <ActionButton
-                      key={action.action}
-                      locale={locale}
-                      descriptor={action}
-                      onClick={() =>
-                        handleAction(action, {
-                          record: selectedRecord,
-                          hold: selectedGovernance.hold,
-                          deletionException: selectedGovernance.deletionException,
-                        })
-                      }
-                    />
-                  ))}
+                <div style={subTextStyle}>
+                  {text(
+                    locale,
+                    "T6 manual refresh only. High-risk actions require reason capture and resolve back into audit.",
+                    "Refresh tier 為 T6 手動刷新。所有高風險動作都必須收集原因並回寫 audit。",
+                  )}
                 </div>
               </div>
 
-              {filteredRecords.length === 0 ? (
-                <EmptyStateCard
-                  locale={locale}
-                  reason={emptyReason}
-                  nextAction={emptyAction}
-                  onAction={() => void loadData()}
-                />
-              ) : (
-                <div style={tableWrapStyle}>
-                  <table style={tableStyle}>
-                    <thead>
-                      <tr>
-                        <th style={thStyle}>{text(locale, "When", "時間")}</th>
-                        <th style={thStyle}>{text(locale, "Actor", "操作者")}</th>
-                        <th style={thStyle}>{text(locale, "Module", "模組")}</th>
-                        <th style={thStyle}>{text(locale, "Action", "動作")}</th>
-                        <th style={thStyle}>{text(locale, "Resource", "資源")}</th>
-                        <th style={thStyle}>{text(locale, "Governance", "治理")}</th>
-                        <th style={thStyle}>{text(locale, "Drill-in", "連結")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredRecords.map((record) => {
-                        const hold = activeLegalHolds.find((candidate) =>
-                          matchesSubject(record, candidate.subjectId),
-                        );
-                        const deletionException = activeDeletionExceptions.find((candidate) =>
-                          matchesSubject(record, candidate.subjectId),
-                        );
-                        const crossLink = inferCrossLink(record, locale);
-                        const expanded = expandedAuditId === record.auditId;
-                        const selected = selectedAuditId === record.auditId;
-                        return (
-                          <React.Fragment key={record.auditId}>
-                            <tr
-                              style={{
-                                background: selected ? theme.accentBg : undefined,
-                                cursor: "pointer",
-                              }}
-                              onClick={() => setSelectedAuditId(record.auditId)}
-                            >
-                              <td style={tdStyle}>
-                                <div style={{ ...monoStyle, fontWeight: 600 }}>
-                                  {formatDateTime(record.createdAt)}
-                                </div>
-                                <div style={subTextStyle}>{record.auditId}</div>
-                              </td>
-                              <td style={tdStyle}>
-                                <div style={{ display: "grid", gap: 6 }}>
-                                  <CanvasPill theme={theme} tone="neutral">
-                                    {formatPlatformCodeLabel(locale, record.actorType)}
-                                  </CanvasPill>
-                                  <div style={monoStyle}>{record.actorId ?? "system"}</div>
-                                </div>
-                              </td>
-                              <td style={tdStyle}>
-                                {formatPlatformCodeLabel(locale, record.moduleName)}
-                              </td>
-                              <td style={tdStyle}>
-                                <div style={{ display: "grid", gap: 6 }}>
-                                  <div style={{ ...monoStyle, color: theme.accent }}>
-                                    {record.actionName}
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setExpandedAuditId((current) =>
-                                        current === record.auditId ? null : record.auditId,
-                                      );
-                                    }}
-                                    style={{
-                                      border: "none",
-                                      background: "transparent",
-                                      color: theme.accent,
-                                      padding: 0,
-                                      fontSize: 12,
-                                      fontWeight: 700,
-                                      cursor: "pointer",
-                                      textAlign: "left",
-                                    }}
-                                  >
-                                    {expanded
-                                      ? text(locale, "Collapse detail", "收合詳情")
-                                      : text(locale, "Expand detail", "展開詳情")}
-                                  </button>
-                                </div>
-                              </td>
-                              <td style={tdStyle}>
-                                <div style={{ display: "grid", gap: 6 }}>
-                                  <div>{formatPlatformCodeLabel(locale, record.resourceType)}</div>
-                                  <div style={monoStyle}>
-                                    {record.resourceId ?? record.requestId}
-                                  </div>
-                                </div>
-                              </td>
-                              <td style={tdStyle}>
-                                <div style={{ display: "grid", gap: 8 }}>
-                                  <div style={pillRowStyle}>
-                                    {hold ? (
-                                      <CanvasPill theme={theme} tone="warn">
-                                        {text(locale, "Legal hold", "Legal hold")}
-                                      </CanvasPill>
-                                    ) : null}
-                                    {deletionException ? (
-                                      <CanvasPill theme={theme} tone="danger">
-                                        {text(locale, "Deletion exception", "刪除例外")}
-                                      </CanvasPill>
-                                    ) : null}
-                                    {!hold && !deletionException ? (
-                                      <CanvasPill theme={theme} tone="neutral">
-                                        {text(locale, "Standard retention", "標準保存")}
-                                      </CanvasPill>
-                                    ) : null}
-                                  </div>
-                                  {hold ? (
-                                    <div style={subTextStyle}>
-                                      {text(locale, "Owner", "Owner")}: {hold.placedByActorId}
-                                    </div>
-                                  ) : null}
-                                  {deletionException ? (
-                                    <div style={subTextStyle}>
-                                      {text(locale, "Reason", "原因")}:{" "}
-                                      {formatPlatformCodeLabel(
-                                        locale,
-                                        deletionException.reasonCode,
-                                      )}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              </td>
-                              <td style={tdStyle}>
-                                {crossLink ? (
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      openLink(crossLink);
-                                    }}
-                                    style={{
-                                      border: "none",
-                                      background: "transparent",
-                                      color: theme.accent,
-                                      fontWeight: 700,
-                                      padding: 0,
-                                      cursor: "pointer",
-                                      textAlign: "left",
-                                    }}
-                                  >
-                                    {crossLink.label}
-                                  </button>
-                                ) : (
-                                  <span style={subTextStyle}>—</span>
-                                )}
-                              </td>
-                            </tr>
-                            {expanded ? (
-                              <tr>
-                                <td style={{ ...tdStyle, background: theme.bgRaised }} colSpan={7}>
-                                  <div style={filterGridStyle}>
-                                    <PayloadCard
-                                      title={text(locale, "Old values", "舊值")}
-                                      payload={record.oldValuesSummary}
-                                      locale={locale}
-                                    />
-                                    <PayloadCard
-                                      title={text(locale, "New values", "新值")}
-                                      payload={record.newValuesSummary}
-                                      locale={locale}
-                                    />
-                                  </div>
-                                </td>
-                              </tr>
-                            ) : null}
-                          </React.Fragment>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <div style={pillRowStyle}>
+                <CanvasPill theme={theme} tone="accent" dot>
+                  {text(locale, "Refresh tier T6", "Refresh tier T6")}
+                </CanvasPill>
+                <CanvasPill theme={theme} tone="neutral">
+                  {manualRefreshCopy}
+                </CanvasPill>
+                {queryContextPills.map((pill) => (
+                  <CanvasPill key={pill.label} theme={theme} tone={pill.tone}>
+                    {pill.label}
+                  </CanvasPill>
+                ))}
+              </div>
+
+              <div style={pillRowStyle}>
+                {moduleBreakdown.map(([moduleName, count]) => (
+                  <CanvasPill key={moduleName} theme={theme} tone="neutral" dot>
+                    {formatPlatformCodeLabel(locale, moduleName)} {count}
+                  </CanvasPill>
+                ))}
+              </div>
             </div>
           </CanvasCard>
 
-          <div style={sidebarStackStyle}>
+          <CanvasCard theme={theme}>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div>
+                <div style={{ fontWeight: 700 }}>
+                  {text(locale, "Cross-app evidence links", "跨 app 證據連結")}
+                </div>
+                <div style={subTextStyle}>
+                  {text(
+                    locale,
+                    "Use auditId/resource context as the stable handoff between Platform Admin, Ops Console, and Tenant Console.",
+                    "以 auditId / resource 上下文作為 Platform Admin、Ops Console、Tenant Console 間的穩定交接點。",
+                  )}
+                </div>
+              </div>
+              <div style={pillRowStyle}>
+                <button
+                  type="button"
+                  style={appLinkStyle}
+                  onClick={() => window.location.assign("/payments")}
+                >
+                  {text(locale, "Settlement governance", "結算治理")}
+                </button>
+                <button
+                  type="button"
+                  style={appLinkStyle}
+                  onClick={() => window.location.assign("/adapter-registry")}
+                >
+                  {text(locale, "Adapter registry", "介接登錄")}
+                </button>
+                <button
+                  type="button"
+                  style={appLinkStyle}
+                  onClick={() => window.location.assign("/notices")}
+                >
+                  {text(locale, "Notices & maintenance", "公告與維護")}
+                </button>
+              </div>
+            </div>
+          </CanvasCard>
+        </div>
+
+        <div style={statGridStyle}>
+          {summaryCards.map((card) => (
+            <CanvasCard key={card.label} theme={theme}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={subTextStyle}>{card.label}</div>
+                <div style={{ fontSize: 28, fontWeight: 700 }}>
+                  {card.value}
+                </div>
+                <div style={subTextStyle}>{card.note}</div>
+              </div>
+            </CanvasCard>
+          ))}
+        </div>
+
+        <CanvasCard theme={theme}>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 700 }}>
+                  {text(locale, "Evidence filters", "證據篩選")}
+                </div>
+                <div style={subTextStyle}>
+                  {text(
+                    locale,
+                    "Filter by module, actor, resource type, time range, or free text.",
+                    "依模組、操作者、資源類型、時間範圍與文字關鍵字篩選。",
+                  )}
+                </div>
+              </div>
+              <div style={actionRowStyle}>
+                {(["audit", "policies", "holds", "exceptions"] as const).map(
+                  (tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setActiveTab(tab)}
+                      style={{
+                        border: `1px solid ${activeTab === tab ? theme.accent : theme.border}`,
+                        borderRadius: 999,
+                        background: activeTab === tab ? theme.accent : "#fff",
+                        color: activeTab === tab ? "#fff" : theme.text,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        padding: "6px 12px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {tab === "audit"
+                        ? text(locale, "Audit log", "Audit log")
+                        : tab === "policies"
+                          ? text(
+                              locale,
+                              "Retention policies",
+                              "Retention policies",
+                            )
+                          : tab === "holds"
+                            ? text(locale, "Legal holds", "Legal holds")
+                            : text(
+                                locale,
+                                "Deletion exceptions",
+                                "Deletion exceptions",
+                              )}
+                    </button>
+                  ),
+                )}
+              </div>
+            </div>
+
+            <div style={filterGridStyle}>
+              <FieldLabel label={text(locale, "Module", "模組")}>
+                <select
+                  value={filters.moduleName}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      moduleName: event.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                >
+                  <option value="">
+                    {text(locale, "All modules", "全部模組")}
+                  </option>
+                  {modules.map((value) => (
+                    <option key={value} value={value}>
+                      {formatPlatformCodeLabel(locale, value)}
+                    </option>
+                  ))}
+                </select>
+              </FieldLabel>
+              <FieldLabel label={text(locale, "Actor type", "操作者類型")}>
+                <select
+                  value={filters.actorType}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      actorType: event.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                >
+                  <option value="">
+                    {text(locale, "All actors", "全部操作者")}
+                  </option>
+                  {actorTypes.map((value) => (
+                    <option key={value} value={value}>
+                      {formatPlatformCodeLabel(locale, value)}
+                    </option>
+                  ))}
+                </select>
+              </FieldLabel>
+              <FieldLabel label={text(locale, "Resource type", "資源類型")}>
+                <select
+                  value={filters.resourceType}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      resourceType: event.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                >
+                  <option value="">
+                    {text(locale, "All resources", "全部資源")}
+                  </option>
+                  {resourceTypes.map((value) => (
+                    <option key={value} value={value}>
+                      {formatPlatformCodeLabel(locale, value)}
+                    </option>
+                  ))}
+                </select>
+              </FieldLabel>
+              <FieldLabel label={text(locale, "Time range", "時間範圍")}>
+                <select
+                  value={filters.timeRange}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      timeRange: event.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                >
+                  <option value="24">
+                    {text(locale, "Last 24h", "最近 24 小時")}
+                  </option>
+                  <option value="168">
+                    {text(locale, "Last 7d", "最近 7 天")}
+                  </option>
+                  <option value="720">
+                    {text(locale, "Last 30d", "最近 30 天")}
+                  </option>
+                  <option value="">
+                    {text(locale, "All time", "全部時間")}
+                  </option>
+                </select>
+              </FieldLabel>
+              <FieldLabel
+                label={text(
+                  locale,
+                  "Audit / request / resource",
+                  "Audit / request / 資源",
+                )}
+              >
+                <input
+                  value={filters.query}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      query: event.target.value,
+                    }))
+                  }
+                  placeholder={text(
+                    locale,
+                    "auditId, requestId, resourceId...",
+                    "auditId、requestId、resourceId...",
+                  )}
+                  style={inputStyle}
+                />
+              </FieldLabel>
+            </div>
+          </div>
+        </CanvasCard>
+
+        {activeTab === "audit" ? (
+          <div style={sectionGridStyle}>
             <CanvasCard theme={theme}>
               <div style={{ display: "grid", gap: 14 }}>
-                <div>
-                  <div style={{ fontWeight: 700 }}>
-                    {text(locale, "Selected evidence", "已選證據")}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700 }}>
+                      {text(locale, "Audit log", "Audit log")}
+                    </div>
+                    <div style={subTextStyle}>
+                      {text(
+                        locale,
+                        `${filteredRecords.length} / ${records.length} records shown`,
+                        `顯示 ${filteredRecords.length} / ${records.length} 筆記錄`,
+                      )}
+                    </div>
                   </div>
-                  <div style={subTextStyle}>
-                    {text(
-                      locale,
-                      "Cross-app drill-in and high-risk actions are driven from the selected record's availableActions.",
-                      "跨 app 深連結與高風險動作由所選記錄的 availableActions 驅動。",
-                    )}
+                  <div style={actionRowStyle}>
+                    {availableActions.map((action) => (
+                      <ActionButton
+                        key={action.action}
+                        locale={locale}
+                        descriptor={action}
+                        onClick={() =>
+                          handleAction(action, {
+                            record: selectedRecord,
+                            hold: selectedGovernance.hold,
+                            deletionException:
+                              selectedGovernance.deletionException,
+                          })
+                        }
+                      />
+                    ))}
                   </div>
                 </div>
-                {!selectedRecord ? (
+
+                {filteredRecords.length === 0 ? (
                   <EmptyStateCard
                     locale={locale}
-                    reason="filtered_empty"
-                    nextAction={{ action: "refresh", enabled: true, riskLevel: "low" }}
+                    reason={emptyReason}
+                    nextAction={emptyAction}
                     onAction={() => void loadData()}
                   />
                 ) : (
-                  <>
-                    <div style={{ display: "grid", gap: 10 }}>
-                      <MetadataRow
-                        label={text(locale, "Audit ID", "Audit ID")}
-                        value={selectedRecord.auditId}
-                        mono
-                      />
-                      <MetadataRow
-                        label={text(locale, "Request ID", "Request ID")}
-                        value={selectedRecord.requestId}
-                        mono
-                      />
-                      <MetadataRow
-                        label={text(locale, "Tenant", "租戶")}
-                        value={selectedRecord.tenantId ?? "—"}
-                        mono
-                      />
-                      <MetadataRow
-                        label={text(locale, "Actor", "操作者")}
-                        value={`${formatPlatformCodeLabel(locale, selectedRecord.actorType)} · ${selectedRecord.actorId ?? "system"}`}
-                      />
-                      <MetadataRow
-                        label={text(locale, "Resource", "資源")}
-                        value={`${selectedRecord.resourceType}${selectedRecord.resourceId ? ` · ${selectedRecord.resourceId}` : ""}`}
-                      />
-                      <MetadataRow
-                        label={text(locale, "Evidence family", "證據家族")}
-                        value={formatPlatformCodeLabel(locale, mapRecordFamily(selectedRecord))}
-                      />
-                    </div>
-
-                    <div style={{ display: "grid", gap: 10 }}>
-                      <GovernanceDetailCard
-                        locale={locale}
-                        title={text(locale, "Legal hold", "Legal hold")}
-                        tone={selectedGovernance.hold ? "warn" : "neutral"}
-                        lines={
-                          selectedGovernance.hold
-                            ? [
-                                `${text(locale, "Owner", "Owner")}: ${selectedGovernance.hold.placedByActorId}`,
-                                `${text(locale, "Case", "案件")}: ${selectedGovernance.hold.caseNumber}`,
-                                `${text(locale, "Placed at", "建立時間")}: ${formatDateTime(selectedGovernance.hold.placedAt)}`,
-                              ]
-                            : [text(locale, "No active hold on this subject.", "此主體沒有有效 hold。")]
-                        }
-                      />
-                      <GovernanceDetailCard
-                        locale={locale}
-                        title={text(locale, "Deletion exception", "刪除例外")}
-                        tone={selectedGovernance.deletionException ? "danger" : "neutral"}
-                        lines={
-                          selectedGovernance.deletionException
-                            ? [
-                                `${text(locale, "Reviewer", "Reviewer")}: ${selectedGovernance.deletionException.reviewerActorId}`,
-                                `${text(locale, "Reason", "原因")}: ${formatPlatformCodeLabel(locale, selectedGovernance.deletionException.reasonCode)}`,
-                                `${text(locale, "Expires", "到期")}: ${formatDateTime(selectedGovernance.deletionException.expiresAt)}`,
-                              ]
-                            : [
-                                text(
-                                  locale,
-                                  "No active deletion exception on this subject.",
-                                  "此主體沒有有效刪除例外。",
-                                ),
-                              ]
-                        }
-                      />
-                    </div>
-                  </>
+                  <div style={tableWrapStyle}>
+                    <table style={tableStyle}>
+                      <thead>
+                        <tr>
+                          <th style={thStyle}>
+                            {text(locale, "When", "時間")}
+                          </th>
+                          <th style={thStyle}>
+                            {text(locale, "Actor", "操作者")}
+                          </th>
+                          <th style={thStyle}>
+                            {text(locale, "Module", "模組")}
+                          </th>
+                          <th style={thStyle}>
+                            {text(locale, "Action", "動作")}
+                          </th>
+                          <th style={thStyle}>
+                            {text(locale, "Resource", "資源")}
+                          </th>
+                          <th style={thStyle}>
+                            {text(locale, "Governance", "治理")}
+                          </th>
+                          <th style={thStyle}>
+                            {text(locale, "Drill-in", "連結")}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredRecords.map((record) => {
+                          const hold = activeLegalHolds.find((candidate) =>
+                            matchesSubject(record, candidate.subjectId),
+                          );
+                          const deletionException =
+                            activeDeletionExceptions.find((candidate) =>
+                              matchesSubject(record, candidate.subjectId),
+                            );
+                          const crossLink = inferCrossLink(record, locale);
+                          const expanded = expandedAuditId === record.auditId;
+                          const selected = selectedAuditId === record.auditId;
+                          return (
+                            <React.Fragment key={record.auditId}>
+                              <tr
+                                style={{
+                                  background: selected
+                                    ? theme.accentBg
+                                    : undefined,
+                                  cursor: "pointer",
+                                }}
+                                onClick={() =>
+                                  setSelectedAuditId(record.auditId)
+                                }
+                              >
+                                <td style={tdStyle}>
+                                  <div
+                                    style={{ ...monoStyle, fontWeight: 600 }}
+                                  >
+                                    {formatDateTime(record.createdAt)}
+                                  </div>
+                                  <div style={subTextStyle}>
+                                    {record.auditId}
+                                  </div>
+                                </td>
+                                <td style={tdStyle}>
+                                  <div style={{ display: "grid", gap: 6 }}>
+                                    <CanvasPill theme={theme} tone="neutral">
+                                      {formatPlatformCodeLabel(
+                                        locale,
+                                        record.actorType,
+                                      )}
+                                    </CanvasPill>
+                                    <div style={monoStyle}>
+                                      {record.actorId ?? "system"}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td style={tdStyle}>
+                                  {formatPlatformCodeLabel(
+                                    locale,
+                                    record.moduleName,
+                                  )}
+                                </td>
+                                <td style={tdStyle}>
+                                  <div style={{ display: "grid", gap: 6 }}>
+                                    <div
+                                      style={{
+                                        ...monoStyle,
+                                        color: theme.accent,
+                                      }}
+                                    >
+                                      {record.actionName}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setExpandedAuditId((current) =>
+                                          current === record.auditId
+                                            ? null
+                                            : record.auditId,
+                                        );
+                                      }}
+                                      style={{
+                                        border: "none",
+                                        background: "transparent",
+                                        color: theme.accent,
+                                        padding: 0,
+                                        fontSize: 12,
+                                        fontWeight: 700,
+                                        cursor: "pointer",
+                                        textAlign: "left",
+                                      }}
+                                    >
+                                      {expanded
+                                        ? text(
+                                            locale,
+                                            "Collapse detail",
+                                            "收合詳情",
+                                          )
+                                        : text(
+                                            locale,
+                                            "Expand detail",
+                                            "展開詳情",
+                                          )}
+                                    </button>
+                                  </div>
+                                </td>
+                                <td style={tdStyle}>
+                                  <div style={{ display: "grid", gap: 6 }}>
+                                    <div>
+                                      {formatPlatformCodeLabel(
+                                        locale,
+                                        record.resourceType,
+                                      )}
+                                    </div>
+                                    <div style={monoStyle}>
+                                      {record.resourceId ?? record.requestId}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td style={tdStyle}>
+                                  <div style={{ display: "grid", gap: 8 }}>
+                                    <div style={pillRowStyle}>
+                                      {hold ? (
+                                        <CanvasPill theme={theme} tone="warn">
+                                          {text(
+                                            locale,
+                                            "Legal hold",
+                                            "Legal hold",
+                                          )}
+                                        </CanvasPill>
+                                      ) : null}
+                                      {deletionException ? (
+                                        <CanvasPill theme={theme} tone="danger">
+                                          {text(
+                                            locale,
+                                            "Deletion exception",
+                                            "刪除例外",
+                                          )}
+                                        </CanvasPill>
+                                      ) : null}
+                                      {!hold && !deletionException ? (
+                                        <CanvasPill
+                                          theme={theme}
+                                          tone="neutral"
+                                        >
+                                          {text(
+                                            locale,
+                                            "Standard retention",
+                                            "標準保存",
+                                          )}
+                                        </CanvasPill>
+                                      ) : null}
+                                    </div>
+                                    {hold ? (
+                                      <div style={subTextStyle}>
+                                        {text(locale, "Owner", "Owner")}:{" "}
+                                        {hold.placedByActorId}
+                                      </div>
+                                    ) : null}
+                                    {hold?.reasonCode ? (
+                                      <div style={subTextStyle}>
+                                        {text(
+                                          locale,
+                                          "Hold reason",
+                                          "Hold 原因",
+                                        )}
+                                        :{" "}
+                                        {formatPlatformCodeLabel(
+                                          locale,
+                                          hold.reasonCode,
+                                        )}
+                                      </div>
+                                    ) : null}
+                                    {deletionException ? (
+                                      <div style={subTextStyle}>
+                                        {text(locale, "Reason", "原因")}:{" "}
+                                        {formatPlatformCodeLabel(
+                                          locale,
+                                          deletionException.reasonCode,
+                                        )}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </td>
+                                <td style={tdStyle}>
+                                  {crossLink ? (
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openLink(crossLink);
+                                      }}
+                                      style={{
+                                        border: "none",
+                                        background: "transparent",
+                                        color: theme.accent,
+                                        fontWeight: 700,
+                                        padding: 0,
+                                        cursor: "pointer",
+                                        textAlign: "left",
+                                      }}
+                                    >
+                                      {crossLink.label}
+                                    </button>
+                                  ) : (
+                                    <span style={subTextStyle}>—</span>
+                                  )}
+                                </td>
+                              </tr>
+                              {expanded ? (
+                                <tr>
+                                  <td
+                                    style={{
+                                      ...tdStyle,
+                                      background: theme.bgRaised,
+                                    }}
+                                    colSpan={7}
+                                  >
+                                    <div style={filterGridStyle}>
+                                      <PayloadCard
+                                        title={text(
+                                          locale,
+                                          "Old values",
+                                          "舊值",
+                                        )}
+                                        payload={record.oldValuesSummary}
+                                        locale={locale}
+                                      />
+                                      <PayloadCard
+                                        title={text(
+                                          locale,
+                                          "New values",
+                                          "新值",
+                                        )}
+                                        payload={record.newValuesSummary}
+                                        locale={locale}
+                                      />
+                                    </div>
+                                  </td>
+                                </tr>
+                              ) : null}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </CanvasCard>
 
-            <GovernanceClusterCard
-              locale={locale}
-              title={text(locale, "Active legal holds", "有效 legal hold")}
-              tone="warn"
-              emptyReason={emptyReason}
-              items={activeLegalHolds.slice(0, 4).map((hold) => ({
-                id: hold.holdId,
-                headline: hold.subjectId,
-                eyebrow: formatPlatformCodeLabel(locale, hold.family),
-                lines: [
-                  `${text(locale, "Owner", "Owner")}: ${hold.placedByActorId}`,
-                  `${text(locale, "Case", "案件")}: ${hold.caseNumber}`,
-                  `${text(locale, "Placed", "建立")}: ${formatDateTime(hold.placedAt)}`,
-                ],
-              }))}
-            />
+            <div style={sidebarStackStyle}>
+              <CanvasCard theme={theme}>
+                <div style={{ display: "grid", gap: 14 }}>
+                  <div>
+                    <div style={{ fontWeight: 700 }}>
+                      {text(locale, "Selected evidence", "已選證據")}
+                    </div>
+                    <div style={subTextStyle}>
+                      {text(
+                        locale,
+                        "Cross-app drill-in and high-risk actions are driven from the selected record's availableActions.",
+                        "跨 app 深連結與高風險動作由所選記錄的 availableActions 驅動。",
+                      )}
+                    </div>
+                  </div>
+                  {!selectedRecord ? (
+                    <EmptyStateCard
+                      locale={locale}
+                      reason="filtered_empty"
+                      nextAction={{
+                        action: "refresh",
+                        enabled: true,
+                        riskLevel: "low",
+                      }}
+                      onAction={() => void loadData()}
+                    />
+                  ) : (
+                    <>
+                      <div style={{ display: "grid", gap: 10 }}>
+                        <MetadataRow
+                          label={text(locale, "Audit ID", "Audit ID")}
+                          value={selectedRecord.auditId}
+                          mono
+                        />
+                        <MetadataRow
+                          label={text(locale, "Request ID", "Request ID")}
+                          value={selectedRecord.requestId}
+                          mono
+                        />
+                        <MetadataRow
+                          label={text(locale, "Tenant", "租戶")}
+                          value={selectedRecord.tenantId ?? "—"}
+                          mono
+                        />
+                        <MetadataRow
+                          label={text(locale, "Actor", "操作者")}
+                          value={`${formatPlatformCodeLabel(locale, selectedRecord.actorType)} · ${selectedRecord.actorId ?? "system"}`}
+                        />
+                        <MetadataRow
+                          label={text(locale, "Resource", "資源")}
+                          value={`${selectedRecord.resourceType}${selectedRecord.resourceId ? ` · ${selectedRecord.resourceId}` : ""}`}
+                        />
+                        <MetadataRow
+                          label={text(locale, "Evidence family", "證據家族")}
+                          value={formatPlatformCodeLabel(
+                            locale,
+                            mapRecordFamily(selectedRecord),
+                          )}
+                        />
+                      </div>
 
-            <GovernanceClusterCard
-              locale={locale}
-              title={text(locale, "Deletion exceptions", "刪除例外")}
-              tone="danger"
-              emptyReason={emptyReason}
-              items={activeDeletionExceptions.slice(0, 4).map((exception) => ({
-                id: exception.exceptionId,
-                headline: exception.subjectId,
-                eyebrow: formatPlatformCodeLabel(locale, exception.family),
-                lines: [
-                  `${text(locale, "Reviewer", "Reviewer")}: ${exception.reviewerActorId}`,
-                  `${text(locale, "Reason", "原因")}: ${formatPlatformCodeLabel(locale, exception.reasonCode)}`,
-                  `${text(locale, "Expires", "到期")}: ${formatDateTime(exception.expiresAt)}`,
-                ],
-              }))}
-            />
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <div style={{ fontWeight: 700 }}>
+                          {text(locale, "Deep-link exits", "離開點")}
+                        </div>
+                        <div style={pillRowStyle}>
+                          <CanvasPill theme={theme} tone="info">
+                            {text(
+                              locale,
+                              "Cross-app action receipt target",
+                              "跨 app action receipt 目標",
+                            )}
+                          </CanvasPill>
+                          {selectedCrossLink ? (
+                            <button
+                              type="button"
+                              style={appLinkStyle}
+                              onClick={() => openLink(selectedCrossLink)}
+                            >
+                              {selectedCrossLink.label}
+                            </button>
+                          ) : (
+                            <CanvasPill theme={theme} tone="neutral">
+                              {text(
+                                locale,
+                                "No cross-app exit for this record",
+                                "此記錄沒有跨 app 離開點",
+                              )}
+                            </CanvasPill>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ display: "grid", gap: 10 }}>
+                        <GovernanceDetailCard
+                          locale={locale}
+                          title={text(locale, "Legal hold", "Legal hold")}
+                          tone={selectedGovernance.hold ? "warn" : "neutral"}
+                          lines={
+                            selectedGovernance.hold
+                              ? [
+                                  `${text(locale, "Owner", "Owner")}: ${selectedGovernance.hold.placedByActorId}`,
+                                  `${text(locale, "Case", "案件")}: ${selectedGovernance.hold.caseNumber}`,
+                                  `${text(locale, "Placed at", "建立時間")}: ${formatDateTime(selectedGovernance.hold.placedAt)}`,
+                                ]
+                              : [
+                                  text(
+                                    locale,
+                                    "No active hold on this subject.",
+                                    "此主體沒有有效 hold。",
+                                  ),
+                                ]
+                          }
+                        />
+                        <GovernanceDetailCard
+                          locale={locale}
+                          title={text(locale, "Deletion exception", "刪除例外")}
+                          tone={
+                            selectedGovernance.deletionException
+                              ? "danger"
+                              : "neutral"
+                          }
+                          lines={
+                            selectedGovernance.deletionException
+                              ? [
+                                  `${text(locale, "Reviewer", "Reviewer")}: ${selectedGovernance.deletionException.reviewerActorId}`,
+                                  `${text(locale, "Reason", "原因")}: ${formatPlatformCodeLabel(locale, selectedGovernance.deletionException.reasonCode)}`,
+                                  `${text(locale, "Expires", "到期")}: ${formatDateTime(selectedGovernance.deletionException.expiresAt)}`,
+                                ]
+                              : [
+                                  text(
+                                    locale,
+                                    "No active deletion exception on this subject.",
+                                    "此主體沒有有效刪除例外。",
+                                  ),
+                                ]
+                          }
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </CanvasCard>
+
+              <GovernanceClusterCard
+                locale={locale}
+                title={text(locale, "Active legal holds", "有效 legal hold")}
+                tone="warn"
+                emptyReason={emptyReason}
+                items={activeLegalHolds.slice(0, 4).map((hold) => ({
+                  id: hold.holdId,
+                  headline: hold.subjectId,
+                  eyebrow: formatPlatformCodeLabel(locale, hold.family),
+                  lines: [
+                    `${text(locale, "Owner", "Owner")}: ${hold.placedByActorId}`,
+                    `${text(locale, "Case", "案件")}: ${hold.caseNumber}`,
+                    `${text(locale, "Placed", "建立")}: ${formatDateTime(hold.placedAt)}`,
+                  ],
+                }))}
+              />
+
+              <GovernanceClusterCard
+                locale={locale}
+                title={text(locale, "Deletion exceptions", "刪除例外")}
+                tone="danger"
+                emptyReason={emptyReason}
+                items={activeDeletionExceptions
+                  .slice(0, 4)
+                  .map((exception) => ({
+                    id: exception.exceptionId,
+                    headline: exception.subjectId,
+                    eyebrow: formatPlatformCodeLabel(locale, exception.family),
+                    lines: [
+                      `${text(locale, "Reviewer", "Reviewer")}: ${exception.reviewerActorId}`,
+                      `${text(locale, "Reason", "原因")}: ${formatPlatformCodeLabel(locale, exception.reasonCode)}`,
+                      `${text(locale, "Expires", "到期")}: ${formatDateTime(exception.expiresAt)}`,
+                    ],
+                  }))}
+              />
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {activeTab === "policies" ? (
-        <PolicyTable policies={policies} locale={locale} emptyReason={emptyReason} />
-      ) : null}
-      {activeTab === "holds" ? (
-        <HoldTable
-          holds={activeLegalHolds}
-          locale={locale}
-          emptyReason={emptyReason}
-          onRelease={(hold) =>
-            handleAction(
-              hold.availableActions?.find(
-                (action) => action.action === "lift_legal_hold",
-              ) ??
-                fallbackHoldActions(hold)[0],
-              { hold },
-            )
-          }
-        />
-      ) : null}
-      {activeTab === "exceptions" ? (
-        <ExceptionTable
-          exceptions={activeDeletionExceptions}
-          locale={locale}
-          emptyReason={emptyReason}
-          onResolve={(exception) =>
-            handleAction(
-              exception.availableActions?.find(
-                (action) => action.action === "revoke_deletion_exception",
-              ) ??
-                fallbackExceptionActions(exception)[0],
-              { deletionException: exception },
-            )
-          }
-        />
-      ) : null}
+        {activeTab === "policies" ? (
+          <PolicyTable
+            policies={policies}
+            locale={locale}
+            emptyReason={emptyReason}
+          />
+        ) : null}
+        {activeTab === "holds" ? (
+          <HoldTable
+            holds={activeLegalHolds}
+            locale={locale}
+            emptyReason={emptyReason}
+            onRelease={(hold) =>
+              handleAction(
+                hold.availableActions?.find(
+                  (action: ResourceActionDescriptor) =>
+                    action.action === "lift_legal_hold",
+                ) ?? fallbackHoldActions(hold)[0],
+                { hold },
+              )
+            }
+          />
+        ) : null}
+        {activeTab === "exceptions" ? (
+          <ExceptionTable
+            exceptions={activeDeletionExceptions}
+            locale={locale}
+            emptyReason={emptyReason}
+            onResolve={(exception) =>
+              handleAction(
+                exception.availableActions?.find(
+                  (action: ResourceActionDescriptor) =>
+                    action.action === "revoke_deletion_exception",
+                ) ?? fallbackExceptionActions(exception)[0],
+                { deletionException: exception },
+              )
+            }
+          />
+        ) : null}
+      </div>
 
       {modal ? (
         <div style={overlayStyle}>
@@ -1379,7 +1875,11 @@ export default function AuditPage() {
                     ? text(locale, "Lift legal hold", "解除 legal hold")
                     : modal.action === "grant_deletion_exception"
                       ? text(locale, "Grant deletion exception", "建立刪除例外")
-                      : text(locale, "Revoke deletion exception", "撤銷刪除例外")}
+                      : text(
+                          locale,
+                          "Revoke deletion exception",
+                          "撤銷刪除例外",
+                        )}
               </div>
               <div style={subTextStyle}>
                 {text(
@@ -1430,17 +1930,21 @@ export default function AuditPage() {
                     onChange={(event) =>
                       setHoldForm((current) => ({
                         ...current,
-                        reasonCode:
-                          event.target.value as (typeof EVIDENCE_LEGAL_HOLD_REASON_CODES)[number],
+                        reasonCode: event.target
+                          .value as (typeof EVIDENCE_LEGAL_HOLD_REASON_CODES)[number],
                       }))
                     }
                     style={inputStyle}
                   >
-                    {EVIDENCE_LEGAL_HOLD_REASON_CODES.map((value) => (
-                      <option key={value} value={value}>
-                        {formatPlatformCodeLabel(locale, value)}
-                      </option>
-                    ))}
+                    {EVIDENCE_LEGAL_HOLD_REASON_CODES.map(
+                      (
+                        value: (typeof EVIDENCE_LEGAL_HOLD_REASON_CODES)[number],
+                      ) => (
+                        <option key={value} value={value}>
+                          {formatPlatformCodeLabel(locale, value)}
+                        </option>
+                      ),
+                    )}
                   </select>
                 </FieldLabel>
                 <FieldLabel label={text(locale, "Reason note", "補充說明")}>
@@ -1470,7 +1974,9 @@ export default function AuditPage() {
 
             {modal.action === "grant_deletion_exception" ? (
               <div style={formGridStyle}>
-                <FieldLabel label={text(locale, "Reviewer actor ID", "Reviewer Actor ID")}>
+                <FieldLabel
+                  label={text(locale, "Reviewer actor ID", "Reviewer Actor ID")}
+                >
                   <input
                     value={exceptionForm.reviewerActorId}
                     onChange={(event) =>
@@ -1488,17 +1994,21 @@ export default function AuditPage() {
                     onChange={(event) =>
                       setExceptionForm((current) => ({
                         ...current,
-                        reasonCode:
-                          event.target.value as (typeof EVIDENCE_DELETION_EXCEPTION_REASON_CODES)[number],
+                        reasonCode: event.target
+                          .value as (typeof EVIDENCE_DELETION_EXCEPTION_REASON_CODES)[number],
                       }))
                     }
                     style={inputStyle}
                   >
-                    {EVIDENCE_DELETION_EXCEPTION_REASON_CODES.map((value) => (
-                      <option key={value} value={value}>
-                        {formatPlatformCodeLabel(locale, value)}
-                      </option>
-                    ))}
+                    {EVIDENCE_DELETION_EXCEPTION_REASON_CODES.map(
+                      (
+                        value: (typeof EVIDENCE_DELETION_EXCEPTION_REASON_CODES)[number],
+                      ) => (
+                        <option key={value} value={value}>
+                          {formatPlatformCodeLabel(locale, value)}
+                        </option>
+                      ),
+                    )}
                   </select>
                 </FieldLabel>
                 <FieldLabel label={text(locale, "Expires at", "到期時間")}>
@@ -1548,8 +2058,10 @@ export default function AuditPage() {
                 onClick={() => void submitModal()}
                 disabled={
                   saving ||
-                  (modal.action === "grant_legal_hold" && !holdForm.caseNumber.trim()) ||
-                  (modal.action === "lift_legal_hold" && !releaseReason.trim()) ||
+                  (modal.action === "grant_legal_hold" &&
+                    !holdForm.caseNumber.trim()) ||
+                  (modal.action === "lift_legal_hold" &&
+                    !releaseReason.trim()) ||
                   (modal.action === "grant_deletion_exception" &&
                     (!exceptionForm.reviewerActorId.trim() ||
                       !exceptionForm.expiresAt.trim())) ||
@@ -1557,13 +2069,15 @@ export default function AuditPage() {
                     !resolutionNote.trim())
                 }
               >
-                {saving ? text(locale, "Saving...", "儲存中...") : t("common.apply")}
+                {saving
+                  ? text(locale, "Saving...", "儲存中...")
+                  : t("common.apply")}
               </CanvasBtn>
             </div>
           </div>
         </div>
       ) : null}
-    </div>
+    </CanvasShell>
   );
 }
 
@@ -1597,7 +2111,7 @@ function ActionButton({
   descriptor,
   onClick,
 }: {
-  locale: string;
+  locale: Locale;
   descriptor: ResourceActionDescriptor;
   onClick: () => void;
 }) {
@@ -1605,20 +2119,19 @@ function ActionButton({
     refresh: text(locale, "Refresh", "刷新"),
     grant_legal_hold: text(locale, "Grant legal hold", "建立 legal hold"),
     lift_legal_hold: text(locale, "Lift legal hold", "解除 legal hold"),
-    grant_deletion_exception: text(locale, "Grant deletion exception", "建立刪除例外"),
-    revoke_deletion_exception: text(locale, "Revoke deletion exception", "撤銷刪除例外"),
+    grant_deletion_exception: text(
+      locale,
+      "Grant deletion exception",
+      "建立刪除例外",
+    ),
+    revoke_deletion_exception: text(
+      locale,
+      "Revoke deletion exception",
+      "撤銷刪除例外",
+    ),
   };
   return (
-    <CanvasBtn
-      theme={theme}
-      onClick={onClick}
-      disabled={!descriptor.enabled}
-      title={
-        descriptor.disabledReasonCode
-          ? `${descriptor.action}: ${descriptor.disabledReasonCode}`
-          : descriptor.riskLevel
-      }
-    >
+    <CanvasBtn theme={theme} onClick={onClick} disabled={!descriptor.enabled}>
       {labelMap[descriptor.action] ?? descriptor.action}
     </CanvasBtn>
   );
@@ -1631,16 +2144,13 @@ function EmptyStateCard({
   onAction,
   compact = false,
 }: {
-  locale: string;
+  locale: Locale;
   reason: EmptyReason;
   nextAction?: ResourceActionDescriptor;
   onAction: () => void;
   compact?: boolean;
 }) {
-  const copy: Record<
-    EmptyReason,
-    { title: string; body: string }
-  > = {
+  const copy: Record<EmptyReason, { title: string; body: string }> = {
     no_data: {
       title: text(locale, "No audit records yet", "目前沒有稽核記錄"),
       body: text(
@@ -1650,7 +2160,11 @@ function EmptyStateCard({
       ),
     },
     not_provisioned: {
-      title: text(locale, "Evidence governance is not provisioned", "證據治理尚未開通"),
+      title: text(
+        locale,
+        "Evidence governance is not provisioned",
+        "證據治理尚未開通",
+      ),
       body: text(
         locale,
         "Policies and list data are both absent. This state is distinct from a normal empty result.",
@@ -1690,11 +2204,19 @@ function EmptyStateCard({
       ),
     },
     driver_not_eligible: {
-      title: "N/A",
-      body: "N/A",
+      title: text(
+        locale,
+        "Actor not eligible for this slice",
+        "目前身份不適用此切面",
+      ),
+      body: text(
+        locale,
+        "This empty state is reserved for actor-specific eligibility gating and is rendered distinctly from permission denial.",
+        "這個 empty state 保留給身份適用性限制，必須和 permission denied 明確區分。",
+      ),
     },
   };
-  const content = copy[reason];
+  const content = copy[reason] ?? copy.no_data;
   return (
     <div
       style={{
@@ -1705,7 +2227,9 @@ function EmptyStateCard({
       <CanvasPill theme={theme} tone={toneForEmpty(reason)}>
         {reason}
       </CanvasPill>
-      <div style={{ fontSize: compact ? 16 : 18, fontWeight: 700 }}>{content.title}</div>
+      <div style={{ fontSize: compact ? 16 : 18, fontWeight: 700 }}>
+        {content.title}
+      </div>
       <div style={subTextStyle}>{content.body}</div>
       {nextAction?.action === "refresh" ? (
         <CanvasBtn theme={theme} onClick={onAction} disabled={compact}>
@@ -1753,7 +2277,7 @@ function GovernanceDetailCard({
   tone,
   lines,
 }: {
-  locale: string;
+  locale: Locale;
   title: string;
   tone: "warn" | "danger" | "neutral";
   lines: string[];
@@ -1798,7 +2322,7 @@ function PayloadCard({
 }: {
   title: string;
   payload: Record<string, unknown> | undefined;
-  locale: string;
+  locale: Locale;
 }) {
   return (
     <div
@@ -1841,7 +2365,7 @@ function GovernanceClusterCard({
   items,
   emptyReason,
 }: {
-  locale: string;
+  locale: Locale;
   title: string;
   tone: "warn" | "danger";
   items: Array<{
@@ -1855,7 +2379,9 @@ function GovernanceClusterCard({
   return (
     <CanvasCard theme={theme}>
       <div style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
+        >
           <div style={{ fontWeight: 700 }}>{title}</div>
           <CanvasPill theme={theme} tone={tone}>
             {items.length}
@@ -1884,7 +2410,9 @@ function GovernanceClusterCard({
                 }}
               >
                 <div style={subTextStyle}>{item.eyebrow}</div>
-                <div style={{ ...monoStyle, fontWeight: 700 }}>{item.headline}</div>
+                <div style={{ ...monoStyle, fontWeight: 700 }}>
+                  {item.headline}
+                </div>
                 {item.lines.map((line) => (
                   <div key={line} style={subTextStyle}>
                     {line}
@@ -1905,7 +2433,7 @@ function PolicyTable({
   emptyReason,
 }: {
   policies: EvidenceRetentionPolicyRecord[];
-  locale: string;
+  locale: Locale;
   emptyReason: EmptyReason;
 }) {
   return (
@@ -1936,10 +2464,14 @@ function PolicyTable({
               <thead>
                 <tr>
                   <th style={thStyle}>{text(locale, "Family", "家族")}</th>
-                  <th style={thStyle}>{text(locale, "Authority", "權威模組")}</th>
+                  <th style={thStyle}>
+                    {text(locale, "Authority", "權威模組")}
+                  </th>
                   <th style={thStyle}>{text(locale, "Retention", "保存期")}</th>
                   <th style={thStyle}>{text(locale, "Download", "下載")}</th>
-                  <th style={thStyle}>{text(locale, "Legal hold", "Legal hold")}</th>
+                  <th style={thStyle}>
+                    {text(locale, "Legal hold", "Legal hold")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1956,7 +2488,9 @@ function PolicyTable({
                     </td>
                     <td style={tdStyle}>
                       {policy.hotRetentionDays}d /{" "}
-                      {policy.archiveRetentionDays ? `${policy.archiveRetentionDays}d` : "—"}
+                      {policy.archiveRetentionDays
+                        ? `${policy.archiveRetentionDays}d`
+                        : "—"}
                     </td>
                     <td style={tdStyle}>
                       {policy.downloadControl?.mode === "signed_url"
@@ -1991,7 +2525,7 @@ function HoldTable({
   onRelease,
 }: {
   holds: ActionableEvidenceLegalHoldRecord[];
-  locale: string;
+  locale: Locale;
   emptyReason: EmptyReason;
   onRelease: (hold: EvidenceLegalHoldRecord) => void;
 }) {
@@ -2034,13 +2568,20 @@ function HoldTable({
                 {holds.map((hold) => {
                   const rowAction =
                     hold.availableActions?.find(
-                      (action) => action.action === "lift_legal_hold",
+                      (action: ResourceActionDescriptor) =>
+                        action.action === "lift_legal_hold",
                     ) ?? fallbackHoldActions(hold)[0];
                   return (
                     <tr key={hold.holdId}>
-                      <td style={tdStyle}>{formatPlatformCodeLabel(locale, hold.family)}</td>
-                      <td style={{ ...tdStyle, ...monoStyle }}>{hold.subjectId}</td>
-                      <td style={{ ...tdStyle, ...monoStyle }}>{hold.placedByActorId}</td>
+                      <td style={tdStyle}>
+                        {formatPlatformCodeLabel(locale, hold.family)}
+                      </td>
+                      <td style={{ ...tdStyle, ...monoStyle }}>
+                        {hold.subjectId}
+                      </td>
+                      <td style={{ ...tdStyle, ...monoStyle }}>
+                        {hold.placedByActorId}
+                      </td>
                       <td style={tdStyle}>{hold.caseNumber}</td>
                       <td style={tdStyle}>{formatDateTime(hold.placedAt)}</td>
                       <td style={tdStyle}>
@@ -2069,7 +2610,7 @@ function ExceptionTable({
   onResolve,
 }: {
   exceptions: ActionableEvidenceDeletionExceptionRecord[];
-  locale: string;
+  locale: Locale;
   emptyReason: EmptyReason;
   onResolve: (exception: EvidenceDeletionExceptionRecord) => void;
 }) {
@@ -2103,7 +2644,9 @@ function ExceptionTable({
                   <th style={thStyle}>{text(locale, "Family", "家族")}</th>
                   <th style={thStyle}>{text(locale, "Subject", "主體")}</th>
                   <th style={thStyle}>{text(locale, "Reason", "原因")}</th>
-                  <th style={thStyle}>{text(locale, "Reviewer", "Reviewer")}</th>
+                  <th style={thStyle}>
+                    {text(locale, "Reviewer", "Reviewer")}
+                  </th>
                   <th style={thStyle}>{text(locale, "Expires", "到期")}</th>
                   <th style={thStyle}>{text(locale, "Action", "動作")}</th>
                 </tr>
@@ -2112,21 +2655,26 @@ function ExceptionTable({
                 {exceptions.map((exception) => {
                   const rowAction =
                     exception.availableActions?.find(
-                      (action) => action.action === "revoke_deletion_exception",
+                      (action: ResourceActionDescriptor) =>
+                        action.action === "revoke_deletion_exception",
                     ) ?? fallbackExceptionActions(exception)[0];
                   return (
                     <tr key={exception.exceptionId}>
                       <td style={tdStyle}>
                         {formatPlatformCodeLabel(locale, exception.family)}
                       </td>
-                      <td style={{ ...tdStyle, ...monoStyle }}>{exception.subjectId}</td>
+                      <td style={{ ...tdStyle, ...monoStyle }}>
+                        {exception.subjectId}
+                      </td>
                       <td style={tdStyle}>
                         {formatPlatformCodeLabel(locale, exception.reasonCode)}
                       </td>
                       <td style={{ ...tdStyle, ...monoStyle }}>
                         {exception.reviewerActorId}
                       </td>
-                      <td style={tdStyle}>{formatDateTime(exception.expiresAt)}</td>
+                      <td style={tdStyle}>
+                        {formatDateTime(exception.expiresAt)}
+                      </td>
                       <td style={tdStyle}>
                         <ActionButton
                           locale={locale}
