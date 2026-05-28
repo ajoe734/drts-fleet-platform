@@ -5,6 +5,8 @@ import json
 import signal
 import subprocess
 import tempfile
+import pathlib
+from datetime import datetime, timezone
 import unittest
 import os
 from pathlib import Path
@@ -6587,6 +6589,132 @@ class PruneDoneHandoffsTests(unittest.TestCase):
         s = {"handoffs": "not-a-list"}
         supervisor.prune_done_handoffs(s, keep=500)
         self.assertEqual(s["handoffs"], "not-a-list")  # unchanged
+
+
+
+
+class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
+    """OPS-RECONCILE-ASYNC-001: reconcile_status_from_git must spawn the
+    git-reconcile subprocess in the background (non-blocking) and finalize
+    its result on the NEXT tick, so a slow reconcile cannot freeze the
+    supervisor's main dispatch loop.
+
+    Previously the supervisor used `subprocess.run` and synchronously waited
+    for the reconcile-from-git subprocess. On a bloated ai-status.json the
+    subprocess took ~4 minutes, during which dispatch was completely starved
+    and every lane drained to zero (OPS-RECONCILE-INTERVAL-600 throttled
+    re-entry but did not address the per-call freeze).
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        root = pathlib.Path(self._tmp.name)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "ai_status.py").write_text("# stub\n")
+        (root / ".orchestrator").mkdir()
+        (root / "ai-status.json").write_text("{}")
+        self.config = {
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+            },
+            "supervisor": {"git_reconcile_interval_seconds": 60},
+        }
+        # ensure the registry is empty across tests
+        supervisor._RECONCILE_PROCS.clear()
+
+    def tearDown(self) -> None:
+        supervisor._RECONCILE_PROCS.clear()
+        self._tmp.cleanup()
+
+    def _fake_popen(self, *, alive: bool, returncode: int = 0,
+                     stdout: str = "", stderr: str = "") -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.poll.return_value = None if alive else returncode
+        proc.returncode = None if alive else returncode
+        proc._fake_stdout = stdout
+        proc._fake_stderr = stderr
+        return proc
+
+    def test_first_call_spawns_popen_and_returns_false(self) -> None:
+        # Fresh state — first call spawns Popen and returns False (no
+        # result to apply yet).
+        state: dict = {}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            popen.return_value = self._fake_popen(alive=True)
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        self.assertEqual(popen.call_count, 1)
+        # Throttle timestamp recorded so a re-entry skips spawn.
+        self.assertIn("last_git_reconcile_at", state.get("supervisor", {}))
+        # In-flight entry registered.
+        self.assertEqual(len(supervisor._RECONCILE_PROCS), 1)
+
+    def test_subsequent_call_while_in_flight_does_not_respawn(self) -> None:
+        # Simulate: previous tick spawned reconcile; this tick should observe
+        # it still running and NOT spawn a second one.
+        state: dict = {}
+        popen_proc = self._fake_popen(alive=True)
+        with mock.patch.object(supervisor.subprocess, "Popen", return_value=popen_proc) as popen:
+            supervisor.reconcile_status_from_git(self.config, state)
+            # Second call while alive=True
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        self.assertEqual(popen.call_count, 1, "must NOT re-spawn while in flight")
+
+    def test_completion_applies_stdout_and_returns_true(self) -> None:
+        # Spawn -> mark completed -> ensure next call reads stdout, emits
+        # activity-log entries, clears the registry and returns True.
+        state: dict = {}
+        # Spawn
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            proc = self._fake_popen(alive=True)
+            popen.return_value = proc
+            supervisor.reconcile_status_from_git(self.config, state)
+        # Find the tempfile paths from the registry and prefill them
+        entry = next(iter(supervisor._RECONCILE_PROCS.values()))
+        entry["stdout_path"].write_text("reconciled UI-X to done\n")
+        entry["stderr_path"].write_text("")
+        # Mark process completed (rc=0)
+        entry["proc"].poll.return_value = 0
+        entry["proc"].returncode = 0
+        with mock.patch.object(supervisor, "write_activity_log") as log:
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertTrue(changed)
+        self.assertEqual(len(supervisor._RECONCILE_PROCS), 0,
+                         "registry must clear after applying completion")
+        # Activity log invoked with the reconcile message
+        calls = [c.args[1] for c in log.call_args_list]
+        self.assertTrue(any(
+            c.get("type") == "reconcile_status_from_git" and "UI-X" in c.get("message", "")
+            for c in calls
+        ))
+
+    def test_throttle_blocks_spawn_within_interval(self) -> None:
+        # last_git_reconcile_at < interval ago and registry empty -> no spawn.
+        state = {"supervisor": {
+            "last_git_reconcile_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        popen.assert_not_called()
+
+    def test_completion_with_nonzero_rc_logs_failure_and_returns_false(self) -> None:
+        state: dict = {}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            popen.return_value = self._fake_popen(alive=True)
+            supervisor.reconcile_status_from_git(self.config, state)
+        entry = next(iter(supervisor._RECONCILE_PROCS.values()))
+        entry["stdout_path"].write_text("")
+        entry["stderr_path"].write_text("boom: missing remote\n")
+        entry["proc"].poll.return_value = 2
+        entry["proc"].returncode = 2
+        with mock.patch.object(supervisor, "write_activity_log") as log:
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        types = [c.args[1].get("type") for c in log.call_args_list]
+        self.assertIn("reconcile_status_from_git_failed", types)
 
 
 if __name__ == "__main__":

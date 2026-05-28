@@ -2855,6 +2855,14 @@ def sync_status_pipeline(config: dict[str, Any]) -> bool:
     return False
 
 
+# Module-level registry of in-flight reconcile-from-git subprocesses, keyed
+# by canonical status_file path so multiple workspaces (e.g., a test fixture)
+# don't share state. Not persisted across supervisor restarts — on restart we
+# orphan the previous Popen (it will finish on its own) and start fresh next
+# time the throttle elapses; that is safe because reconcile is idempotent.
+_RECONCILE_PROCS: dict[str, dict[str, Any]] = {}
+
+
 def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> bool:
     """Bridge git-merged closeouts → state-machine `done` periodically.
 
@@ -2863,12 +2871,82 @@ def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> 
     invokes the dedicated reconcile-from-git command which scans origin/dev
     for closeout commits and finalizes any drift.
 
-    The subprocess parses ai-status.json (multi-MB) and runs `git log`, so
-    is ~10-30s per call. Throttled to once per
-    `supervisor.git_reconcile_interval_seconds` (default 60s) to keep the
-    main tick loop responsive — workers' dispatch slots can't refill if a
-    single tick takes longer than the poll interval.
+    Non-blocking design (OPS-RECONCILE-ASYNC-001):
+    The subprocess parses ai-status.json (multi-MB) and runs `git log`. On a
+    bloated repo with many recently-merged PRs it can take minutes. Running
+    it synchronously would freeze the supervisor's main tick loop for that
+    entire window — observed up to 4 minutes, during which dispatch is
+    completely starved and every lane drains to zero. Instead we:
+      - Spawn the reconcile as a `subprocess.Popen` (no parent block).
+      - Stream stdout/stderr into tempfiles so the parent never deadlocks
+        on a full OS pipe buffer.
+      - On each subsequent tick, peek at the process via `Popen.poll()` (one
+        cheap syscall). If still running we return immediately and the
+        supervisor keeps dispatching. If completed we read the temp files,
+        emit activity-log entries the same way the synchronous path did,
+        delete the tempfiles, and clear the in-flight record.
+      - Throttle stays the same: we don't spawn a NEW reconcile until
+        `supervisor.git_reconcile_interval_seconds` has elapsed since the
+        last spawn (the existing `last_git_reconcile_at` timestamp). A
+        long-running in-flight reconcile prevents the spawn naturally.
+
+    Returns True only when a completed reconcile is fully applied (so callers
+    that OR this into `changed` still get the right signal). A fresh spawn
+    or an in-flight no-op returns False.
     """
+    try:
+        status_root = config_path(config, "status_file").parent
+    except KeyError:
+        return False
+    script = status_root / "scripts" / "ai_status.py"
+    key = str(script.resolve())
+
+    # 1. If a previous reconcile is still in flight, peek + maybe finalize.
+    in_flight = _RECONCILE_PROCS.get(key)
+    if in_flight is not None:
+        proc = in_flight["proc"]
+        if proc.poll() is None:
+            return False
+        # Completed — apply result.
+        rc = proc.returncode
+        stdout_path = in_flight["stdout_path"]
+        stderr_path = in_flight["stderr_path"]
+        try:
+            stdout = stdout_path.read_text() if stdout_path.exists() else ""
+        except OSError:
+            stdout = ""
+        try:
+            stderr = stderr_path.read_text() if stderr_path.exists() else ""
+        except OSError:
+            stderr = ""
+        for p in (stdout_path, stderr_path):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        _RECONCILE_PROCS.pop(key, None)
+        if rc != 0:
+            write_activity_log(
+                config,
+                {
+                    "type": "reconcile_status_from_git_failed",
+                    "message": (stderr.strip() or stdout.strip() or "unknown error"),
+                },
+            )
+            return False
+        stdout_stripped = stdout.strip()
+        if stdout_stripped and "no drift" not in stdout_stripped:
+            for line in stdout_stripped.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                write_activity_log(
+                    config,
+                    {"type": "reconcile_status_from_git", "message": line},
+                )
+        return True
+
+    # 2. No in-flight subprocess — honour the throttle before spawning.
     interval = float(
         config.get("supervisor", {}).get("git_reconcile_interval_seconds", 60.0)
     )
@@ -2882,42 +2960,58 @@ def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> 
                 return False
         except (ValueError, TypeError):
             pass
-    try:
-        status_root = config_path(config, "status_file").parent
-    except KeyError:
-        return False
-    script = status_root / "scripts" / "ai_status.py"
+
     if not script.exists():
         return False
-    result = subprocess.run(
-        [sys.executable, str(script), "reconcile-from-git"],
-        cwd=str(status_root),
-        capture_output=True,
-        text=True,
-    )
-    supervisor_state["last_git_reconcile_at"] = (
-        now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    )
-    if result.returncode != 0:
+
+    # 3. Spawn the reconcile in the background. Stream output into tempfiles
+    # so a chatty reconcile cannot deadlock the parent on pipe back-pressure.
+    import tempfile
+    tmp_dir = Path(tempfile.mkdtemp(prefix="drts-reconcile-"))
+    stdout_path = tmp_dir / "stdout"
+    stderr_path = tmp_dir / "stderr"
+    try:
+        stdout_fh = open(stdout_path, "wb")
+        stderr_fh = open(stderr_path, "wb")
+        proc = subprocess.Popen(
+            [sys.executable, str(script), "reconcile-from-git"],
+            cwd=str(status_root),
+            stdout=stdout_fh,
+            stderr=stderr_fh,
+        )
+    except OSError as exc:
         write_activity_log(
             config,
             {
                 "type": "reconcile_status_from_git_failed",
-                "message": result.stderr.strip() or result.stdout.strip() or "unknown error",
+                "message": f"failed to spawn reconcile subprocess: {exc}",
             },
         )
+        for p in (stdout_path, stderr_path):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        try:
+            tmp_dir.rmdir()
+        except OSError:
+            pass
         return False
-    stdout = result.stdout.strip()
-    if stdout and "no drift" not in stdout:
-        for line in stdout.splitlines():
-            write_activity_log(
-                config,
-                {
-                    "type": "reconcile_status_from_git",
-                    "message": line.strip(),
-                },
-            )
-    return True
+
+    # Record the spawn timestamp now so the throttle prevents re-spawning
+    # while this run is still in flight, even if it takes minutes.
+    supervisor_state["last_git_reconcile_at"] = (
+        now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
+    _RECONCILE_PROCS[key] = {
+        "proc": proc,
+        "stdout_path": stdout_path,
+        "stderr_path": stderr_path,
+        "stdout_fh": stdout_fh,
+        "stderr_fh": stderr_fh,
+        "started_at": now,
+    }
+    return False
 
 
 def brief_reason_text(text: str | None, max_length: int = 240) -> str:
