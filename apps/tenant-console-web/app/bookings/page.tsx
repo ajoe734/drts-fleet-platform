@@ -76,16 +76,16 @@ const ACTION_COPY: Record<string, string> = {
   filter: "篩選",
   refresh: "立即更新",
 };
-const ACTION_PRIORITY = [
-  "view_detail",
-  "open_detail",
-  "detail",
-  "update_booking",
-  "update",
-  "cancel_booking",
-  "cancel",
-];
 const TENANT_BOOKINGS_REFRESH_TIER: RefreshTier = "slow";
+const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number> = {
+  urgent: 5000,
+  fast: 3000,
+  dispatch: 5000,
+  medium: 15000,
+  medium_slow: 30000,
+  slow: 30000,
+  manual: 0,
+};
 const REFRESH_TIER_COPY: Record<RefreshTier, string> = {
   urgent: "Urgent",
   fast: "T2 Fast",
@@ -338,20 +338,7 @@ function normalizeBooking(
 }
 
 function getActionDescriptorsForRow(booking: TenantBookingListRecord) {
-  return [...booking.availableActions].sort((left, right) => {
-    const leftIndex = ACTION_PRIORITY.indexOf(left.action);
-    const rightIndex = ACTION_PRIORITY.indexOf(right.action);
-    const normalizedLeftIndex =
-      leftIndex === -1 ? ACTION_PRIORITY.length : leftIndex;
-    const normalizedRightIndex =
-      rightIndex === -1 ? ACTION_PRIORITY.length : rightIndex;
-
-    if (normalizedLeftIndex !== normalizedRightIndex) {
-      return normalizedLeftIndex - normalizedRightIndex;
-    }
-
-    return left.action.localeCompare(right.action);
-  });
+  return booking.availableActions;
 }
 
 function getActionLabel(action: string) {
@@ -557,13 +544,17 @@ function getRefreshTone(refresh: UiRefreshMetadata | null) {
 
 function getRefreshCopy(refresh: UiRefreshMetadata | null) {
   const tierCopy = REFRESH_TIER_COPY[TENANT_BOOKINGS_REFRESH_TIER];
+  const tierIntervalMs = REFRESH_TIER_INTERVAL_MS[TENANT_BOOKINGS_REFRESH_TIER];
 
   if (!refresh) {
-    return `${tierCopy} · 等待後端 refresh metadata`;
+    return tierIntervalMs > 0
+      ? `${tierCopy} · ${tierIntervalMs / 1000}s cadence · 等待後端 refresh metadata`
+      : `${tierCopy} · 手動更新`;
   }
 
   return [
     tierCopy,
+    tierIntervalMs > 0 ? `${tierIntervalMs / 1000}s cadence` : "手動更新",
     REFRESH_FRESHNESS_COPY[refresh.dataFreshness],
     `快照 ${formatDateTime(refresh.generatedAt)}`,
     REFRESH_SOURCE_COPY[refresh.source],
@@ -719,7 +710,8 @@ export default async function TenantBookingsPage({
     (booking) =>
       Array.isArray(booking.crossAppLinks) && booking.crossAppLinks.length > 0,
   );
-  const refreshPollIntervalMs = refreshMetadata?.staleAfterMs ?? 0;
+  const refreshPollIntervalMs =
+    REFRESH_TIER_INTERVAL_MS[TENANT_BOOKINGS_REFRESH_TIER];
   const liveCount = bookings.filter((booking) =>
     LIVE_ORDER_STATUSES.has(booking.orderStatus),
   ).length;
