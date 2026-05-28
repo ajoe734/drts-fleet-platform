@@ -1,0 +1,43 @@
+{
+  "driverId": "driver-fixture-001",
+  "taskCounts": {
+    "total": 3,
+    "actionRequired": 1,
+    "awaitingPlatform": 0,
+    "inProgress": 1,
+    "blocked": 0,
+    "completed": 1,
+    "readOnly": 0
+  },
+  "taskCountsByState": [
+    { "state": "action_required", "count": 1 },
+    { "state": "awaiting_platform", "count": 0 },
+    { "state": "in_progress", "count": 1 },
+    { "state": "blocked", "count": 0 },
+    { "state": "completed", "count": 1 },
+    { "state": "read_only", "count": 0 }
+  ],
+  "activeTrip": {
+    "taskId": "task-fixture-001",
+    "orderId": "order-fixture-001",
+    "sourcePlatform": "drts",
+    "platformDisplayName": "DRTS"
+  },
+  "outstandingInstructionCount": 1,
+  "instructions": [
+    {
+      "instructionId": "task-fixture-002:2026-05-26T11:57:00Z",
+      "taskId": "task-fixture-002",
+      "message": "請先完成 proof bundle，之後才能結束本次任務。",
+      "issuedBy": "system:driver-workspace",
+      "issuedAt": "2026-05-26T11:57:00Z",
+      "expiresAt": null
+    }
+  ],
+  "refresh": {
+    "generatedAt": "2026-05-26T12:00:00Z",
+    "staleAfterMs": 15000,
+    "dataFreshness": "fresh",
+    "source": "sandbox"
+  }
+}

@@ -6,6 +6,7 @@ import type {
   PlatformPresenceAdapterStatusRecord,
   PlatformPresenceRecord,
   PlatformPresenceSummary,
+  UiHealthEnvelope,
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { ForwarderService } from "../forwarder/forwarder.service";
@@ -132,6 +133,56 @@ export class PlatformPresenceService {
     }
   }
 
+  listAdapterStatuses(
+    platformCodes: PlatformCode[],
+  ): PlatformPresenceAdapterStatusRecord[] {
+    const adapterHealth = this.listAdapterHealthSafely();
+    return platformCodes.map((platformCode) =>
+      this.mapAdapterStatus(platformCode, adapterHealth),
+    );
+  }
+
+  buildUiHealth(
+    adapterStatuses: PlatformPresenceAdapterStatusRecord[],
+  ): UiHealthEnvelope {
+    const degradedServices = adapterStatuses
+      .filter(
+        (status) => status.status === "degraded" || status.status === "down",
+      )
+      .map((status) => ({
+        service: status.platformCode,
+        impact:
+          status.blockingReason ??
+          (status.status === "down"
+            ? "Platform connection is unavailable."
+            : "Platform connection is degraded."),
+        severity:
+          status.status === "down"
+            ? ("critical" as const)
+            : ("warning" as const),
+      }));
+
+    const status: UiHealthEnvelope["status"] = degradedServices.some(
+      (service) => service.severity === "critical",
+    )
+      ? "down"
+      : degradedServices.length > 0
+        ? "degraded"
+        : "healthy";
+
+    const lastCheckedAt = adapterStatuses
+      .map((record) => record.lastSyncAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1);
+
+    return {
+      status,
+      degradedServices,
+      lastCheckedAt: lastCheckedAt ?? isoNow(),
+    };
+  }
+
   private mapAdapterStatus(
     platformCode: PlatformCode,
     adapterHealth: AdapterHealthRecord[],
@@ -175,13 +226,13 @@ export class PlatformPresenceService {
 
   async summary(driverId: string): Promise<PlatformPresenceSummary> {
     const presences = await this.listForDriver(driverId);
-    const adapterHealth = this.listAdapterHealthSafely();
+    const adapterStatuses = this.listAdapterStatuses(
+      presences.map((presence) => presence.platformCode),
+    );
     return {
       driverId,
       presences,
-      adapterStatuses: presences.map((presence) =>
-        this.mapAdapterStatus(presence.platformCode, adapterHealth),
-      ),
+      adapterStatuses,
       notes: [
         "平台狀態會優先使用資料庫同步；若目前環境未啟用資料庫，會改用目前執行個體的暫存資料。",
         "可使用 POST /api/platform-presence/online 或 /api/platform-presence/offline 更新單一平台的綁定、上下線與重新驗證狀態。",

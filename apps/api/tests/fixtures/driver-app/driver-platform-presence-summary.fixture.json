@@ -1,0 +1,130 @@
+{
+  "driverId": "driver-fixture-001",
+  "bindings": [
+    {
+      "platformCode": "uber",
+      "displayName": "Uber",
+      "bindingState": "not_bound",
+      "presence": null,
+      "adapterStatus": {
+        "platformCode": "uber",
+        "status": "unknown",
+        "blockingReason": null,
+        "lastSyncAt": null
+      },
+      "outstandingInstructionCount": 0
+    },
+    {
+      "platformCode": "grab",
+      "displayName": "Grab",
+      "bindingState": "not_bound",
+      "presence": null,
+      "adapterStatus": {
+        "platformCode": "grab",
+        "status": "unknown",
+        "blockingReason": null,
+        "lastSyncAt": null
+      },
+      "outstandingInstructionCount": 0
+    },
+    {
+      "platformCode": "line-taxi",
+      "displayName": "LINE Taxi",
+      "bindingState": "not_bound",
+      "presence": null,
+      "adapterStatus": {
+        "platformCode": "line-taxi",
+        "status": "unknown",
+        "blockingReason": null,
+        "lastSyncAt": null
+      },
+      "outstandingInstructionCount": 0
+    },
+    {
+      "platformCode": "grab_taiwan",
+      "displayName": "Grab Taiwan",
+      "bindingState": "reauth_required",
+      "presence": {
+        "driverId": "driver-fixture-001",
+        "platformCode": "grab_taiwan",
+        "accountId": "acct-fixture-001",
+        "status": "online",
+        "eligibility": "eligible",
+        "tokenExpiresAt": "2026-05-27T09:00:00Z",
+        "reauthRequired": true,
+        "lastOnlineAt": "2026-05-26T11:30:00Z",
+        "lastOfflineAt": null,
+        "updatedAt": "2026-05-26T11:58:00Z"
+      },
+      "adapterStatus": {
+        "platformCode": "grab_taiwan",
+        "status": "degraded",
+        "blockingReason": "平台連線異常，接單可能延遲",
+        "lastSyncAt": "2026-05-26T11:59:30Z"
+      },
+      "outstandingInstructionCount": 2
+    },
+    {
+      "platformCode": "indriver",
+      "displayName": "InDriver",
+      "bindingState": "not_bound",
+      "presence": null,
+      "adapterStatus": {
+        "platformCode": "indriver",
+        "status": "unknown",
+        "blockingReason": null,
+        "lastSyncAt": null
+      },
+      "outstandingInstructionCount": 0
+    },
+    {
+      "platformCode": "forwarder_sandbox",
+      "displayName": "Forwarder Sandbox",
+      "bindingState": "not_bound",
+      "presence": null,
+      "adapterStatus": {
+        "platformCode": "forwarder_sandbox",
+        "status": "unknown",
+        "blockingReason": null,
+        "lastSyncAt": null
+      },
+      "outstandingInstructionCount": 0
+    }
+  ],
+  "instructions": [
+    {
+      "instructionId": "grab_taiwan:2026-05-26T11:58:00Z",
+      "taskId": "presence:grab_taiwan",
+      "message": "Grab Taiwan 需要重新授權後才能恢復正常接單。",
+      "issuedBy": "system:platform-presence",
+      "issuedAt": "2026-05-26T11:58:00Z",
+      "expiresAt": null
+    }
+  ],
+  "suppressions": [
+    {
+      "active": true,
+      "reasonCode": "manual_ops_hold",
+      "sourceIncidentId": null,
+      "expiresAt": "2026-05-27T11:58:00Z",
+      "liftedAt": null
+    }
+  ],
+  "health": {
+    "status": "degraded",
+    "degradedServices": [
+      {
+        "service": "grab_taiwan",
+        "impact": "平台連線異常，接單可能延遲",
+        "severity": "warning"
+      }
+    ],
+    "lastCheckedAt": "2026-05-26T11:59:30Z"
+  },
+  "refresh": {
+    "generatedAt": "2026-05-26T12:00:00Z",
+    "staleAfterMs": 15000,
+    "dataFreshness": "degraded",
+    "source": "sandbox"
+  }
+}

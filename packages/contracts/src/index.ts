@@ -4919,4 +4919,6 @@ export interface SetTenantStatusCommand {
 
 export * from "./platform-codes";
 export * from "./platform-adapter-registry";
+export * from "./platform-presence";
+export * from "./driver-workspace";
 export * from "./ui-runtime";

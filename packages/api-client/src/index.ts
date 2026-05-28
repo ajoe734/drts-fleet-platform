@@ -73,9 +73,11 @@ import type {
   DriverProfileRecord,
   DriverRegistryRecord,
   DriverRejectTaskCommand,
+  DriverPlatformPresenceSummary,
   DriverStartTaskCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  DriverWorkspaceSummary,
   UnifiedDriverTaskView,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
@@ -1199,6 +1201,30 @@ export class ApiClient {
       ? `/api/platform-presence?${query}`
       : "/api/platform-presence";
     return this.get<PlatformPresenceSummary>(url);
+  }
+
+  async getDriverWorkspaceSummary(filters?: {
+    driverId?: string;
+  }): Promise<DriverWorkspaceSummary> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/workspace/summary?${query}`
+      : "/api/driver/workspace/summary";
+    return this.get<DriverWorkspaceSummary>(url);
+  }
+
+  async getDriverPlatformPresenceSummary(filters?: {
+    driverId?: string;
+  }): Promise<DriverPlatformPresenceSummary> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/platform-presence/summary?${query}`
+      : "/api/driver/platform-presence/summary";
+    return this.get<DriverPlatformPresenceSummary>(url);
   }
 
   async setPlatformOnline(
