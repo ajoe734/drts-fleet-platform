@@ -79,15 +79,16 @@ The helper branch itself has now been repaired without rewriting shared history.
 4. Produced new repair merge tip `07efd8f4`:
    `Merge origin/dev into codex/ui-fe-drv-idx-unblock-history-repair to refresh helper base after dev advanced`
 5. Added a final artifact refresh commit after that merge so the branch evidence
-   matches the actual pushed helper tip.
+   matches the actual pushed helper tip `9fdce296`:
+   `UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR: refresh helper branch truth after dev drift`
 6. After the second merge repair, the helper branch is clean relative to current
    trunk:
    - merge-base of `origin/dev` and `HEAD` is now
      `c105959b597bf00e40cf87a6a96955a3767196e7`
    - immediately after the merge, `git rev-list --left-right --count origin/dev...HEAD`
      returned `0 4`
-   - after the final evidence-refresh commit, the pushed helper branch should
-     report `0 left / 5 right`
+   - after the final evidence-refresh commit, the pushed helper branch now
+     reports `0 left / 5 right`
 
 This preserves the old evidence commit, avoids force-push, and makes the helper
 reviewable on top of current `dev`.
@@ -133,6 +134,9 @@ The concrete unblocked next step is therefore:
 - Review failure recorded at `2026-05-28T03:58:18Z` in `ai-activity-log.jsonl`
   explicitly cited stale artifact evidence versus the already-pushed helper tip
   `77ee6584` and required the artifact to be refreshed to final branch truth.
+- Review failure recorded at `2026-05-28T05:21:41Z` in `ai-activity-log.jsonl`
+  accepted the refreshed branch-tip/divergence evidence, but required explicit
+  task-scoped PR evidence or verified no-PR evidence for the canonical record.
 
 ### Helper branch state
 
@@ -140,6 +144,7 @@ The concrete unblocked next step is therefore:
 - first repaired helper merge tip: `94551202`
 - evidence refresh commit: `77ee6584`
 - second repaired helper merge tip: `07efd8f4`
+- final evidence refresh commit and pushed helper tip: `9fdce296`
 - old merge-base versus `origin/dev`: `070f9aea`
 - intermediate merge-base versus `origin/dev`: `75674c4c`
 - final merge-base versus `origin/dev`: `c105959b`
@@ -148,7 +153,27 @@ The concrete unblocked next step is therefore:
 - divergence after first evidence refresh push: `0 left / 3 right`
 - divergence at start of this dispatch: `2 left / 3 right`
 - divergence after second merge repair: `0 left / 4 right`
-- expected divergence after final evidence refresh push: `0 left / 5 right`
+- final pushed divergence after evidence refresh push: `0 left / 5 right`
+
+### Commit, push, and PR evidence
+
+- Helper task commit evidence:
+  `9fdce2966cd36a615b3e58d50ead2e88141d0d2d`
+  with subject
+  `UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR: refresh helper branch truth after dev drift`
+- Helper task push evidence:
+  `git ls-remote --heads origin refs/heads/codex/ui-fe-drv-idx-unblock-history-repair`
+  returns
+  `9fdce2966cd36a615b3e58d50ead2e88141d0d2d refs/heads/codex/ui-fe-drv-idx-unblock-history-repair`
+- Canonical parent push evidence remains:
+  `b334ef9663d026e9ca37da636a158219dc75eff2 refs/heads/codex/ui-fe-drv-idx`
+- Alternate stale parent rail still exists but is not canonical:
+  `1c83f9af648a0a787fa0da41e4c1688e6a74ae1b refs/heads/codex2/ui-fe-drv-idx`
+- Verified no task-scoped PR exists for this helper repair:
+  `gh pr list --state all --search 'UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR' --json number,title,headRefName,baseRefName,state,url`
+  returned `[]`
+- Therefore the non-destructive canonical repair evidence for this helper task
+  is branch-and-commit only, with no separate PR object to preserve.
 
 ## Verification Performed
 
@@ -165,3 +190,6 @@ The concrete unblocked next step is therefore:
   - `git merge-base origin/dev HEAD`
   - `git rev-list --left-right --count origin/dev...HEAD`
   - `git log --oneline --decorate --graph --max-count=8 HEAD`
+- Verified commit/push/PR evidence:
+  - `gh pr list --state all --search 'UI-FE-DRV-IDX-UNBLOCK-HISTORY-REPAIR' --json number,title,headRefName,baseRefName,state,url`
+  - `git ls-remote --heads origin refs/heads/codex/ui-fe-drv-idx-unblock-history-repair refs/heads/codex/ui-fe-drv-idx refs/heads/codex2/ui-fe-drv-idx`
