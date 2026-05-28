@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type {
   TenantRoleCatalogRecord,
   TenantUserRoleRecord,
@@ -34,6 +34,18 @@ const pageBodyStyle: CSSProperties = {
 const namePrimaryStyle: CSSProperties = {
   color: th.text,
   fontWeight: 600,
+};
+
+const stackCellStyle: CSSProperties = {
+  display: "grid",
+  gap: 3,
+  minWidth: 0,
+};
+
+const accentMetaStyle: CSSProperties = {
+  color: th.accent,
+  fontFamily: th.monoFamily,
+  fontSize: 11,
 };
 
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
@@ -115,17 +127,42 @@ function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知錯誤";
 }
 
-type UserRow = TenantUserRoleRecord & Record<string, unknown>;
+type UserTableRow = Record<string, unknown> & {
+  name: ReactNode;
+  email: ReactNode;
+  role: ReactNode;
+  state: ReactNode;
+  updated: ReactNode;
+};
 
 export default async function UsersPage() {
   const { users, errors } = await loadUsersData();
+  const rows: UserTableRow[] = users.map((user) => ({
+    name: (
+      <div style={stackCellStyle}>
+        <span style={namePrimaryStyle}>{user.displayName}</span>
+        <span style={accentMetaStyle}>{user.userId}</span>
+      </div>
+    ),
+    email: user.email,
+    role: (
+      <CanvasPill theme={th} tone={getRoleTone(user.roleCode)}>
+        {getRoleLabel(user.roleCode)}
+      </CanvasPill>
+    ),
+    state: (
+      <CanvasPill theme={th} tone={getStateTone(user.status)} dot>
+        {getStateLabel(user.status)}
+      </CanvasPill>
+    ),
+    updated: formatUpdated(user.updatedAt),
+  }));
 
-  const columns: CanvasTableColumn<UserRow>[] = [
+  const columns: CanvasTableColumn<UserTableRow>[] = [
     {
       h: "NAME",
-      k: "displayName",
+      k: "name",
       w: 180,
-      r: (row) => <span style={namePrimaryStyle}>{row.displayName}</span>,
     },
     {
       h: "EMAIL",
@@ -134,28 +171,20 @@ export default async function UsersPage() {
     },
     {
       h: "ROLE",
+      k: "role",
       w: 180,
       mono: true,
-      r: (row) => (
-        <CanvasPill theme={th} tone={getRoleTone(row.roleCode)}>
-          {getRoleLabel(row.roleCode)}
-        </CanvasPill>
-      ),
     },
     {
       h: "STATE",
+      k: "state",
       w: 100,
-      r: (row) => (
-        <CanvasPill theme={th} tone={getStateTone(row.status)} dot>
-          {getStateLabel(row.status)}
-        </CanvasPill>
-      ),
     },
     {
       h: "UPDATED",
+      k: "updated",
       w: 160,
       mono: true,
-      r: (row) => formatUpdated(row.updatedAt),
     },
   ];
 
@@ -184,11 +213,11 @@ export default async function UsersPage() {
         ) : null}
 
         <CanvasCard theme={th} padding={0}>
-          {users.length > 0 ? (
-            <CanvasTable<UserRow>
+          {rows.length > 0 ? (
+            <CanvasTable<UserTableRow>
               theme={th}
               columns={columns}
-              rows={users as UserRow[]}
+              rows={rows}
             />
           ) : (
             <div
