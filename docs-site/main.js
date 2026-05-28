@@ -336,6 +336,17 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
     "codex2",
     "copilot",
   ];
+  // Mirrors .orchestrator/config.json ready_dispatcher.max_tasks_per_agent_by_lane
+  // (with fallback to top-level max_tasks_per_agent=1). Update both together.
+  const LANE_CAPACITY = {
+    claude: 5,
+    claude2: 3,
+    gemini: 1,
+    gemini2: 1,
+    codex: 3,
+    codex2: 3,
+    copilot: 1,
+  };
   const agentStateMap = new Map(
     (agentStates || []).map((a) => [a.name.toLowerCase(), a]),
   );
@@ -348,6 +359,7 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
     const failed = pw.filter((w) => w.status === "failed").length;
     const completed = pw.filter((w) => w.bucket === "completed").length;
     const agent = agentStateMap.get(agentId);
+    const capacity = LANE_CAPACITY[agentId] || 1;
     const runningTasks = pw
       .filter((w) => w.bucket === "running")
       .map((w) => w.task_id)
@@ -361,7 +373,7 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
       </div>
       <div class="sys-card-body">
         ${agent ? `<span class="status-pill status-${agent.status}">${statusLabel(agent.status)}</span>` : ""}
-        <span class="chip">執行中 ${running}</span>
+        <span class="chip">執行中 ${running}/${capacity}</span>
         <span class="chip">worker 等待 ${waiting}</span>
         ${transition ? `<span class="chip">改派 ${transition}</span>` : ""}
         <span class="chip">失敗 ${failed}</span>

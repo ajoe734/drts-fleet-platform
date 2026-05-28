@@ -860,6 +860,148 @@ def apply_unblock_parent_resolution(
     )
 
 
+# Closeout commit subject pattern: `<TASK-ID>: <summary>`. Deliberately
+# excludes `wip(<TASK-ID>):` anchor commits — they carry the trailer but are
+# not closeouts. Mirrors scripts/git/check_commit_trailers.py SUBJECT_RE,
+# minus the optional `wip(...)` prefix.
+CLOSEOUT_SUBJECT_RE = re.compile(r"^([A-Z][A-Z0-9-]*[A-Z0-9]):\s+\S")
+GIT_LOG_RECORD_SEP = "\x1e"
+GIT_LOG_FIELD_SEP = "\x1f"
+
+
+def _git_log_closeouts(ref: str) -> dict[str, dict[str, str]]:
+    """Return {task_id: {sha, subject, body, commit_date}} for the most recent
+    closeout commit reachable from `ref` for each task ID. A commit is a
+    closeout if its subject matches CLOSEOUT_SUBJECT_RE and the captured
+    task_id is also present as a `Task-ID:` trailer.
+    """
+    fmt = GIT_LOG_FIELD_SEP.join(
+        ["%H", "%cI", "%s", "%(trailers:key=Task-ID,valueonly,separator=%x1d)"]
+    ) + GIT_LOG_RECORD_SEP
+    try:
+        result = subprocess.run(
+            ["git", "log", ref, f"--format={fmt}"],
+            cwd=str(ROOT),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return {}
+    if result.returncode != 0:
+        return {}
+    closeouts: dict[str, dict[str, str]] = {}
+    for record in result.stdout.split(GIT_LOG_RECORD_SEP):
+        record = record.strip("\n")
+        if not record:
+            continue
+        parts = record.split(GIT_LOG_FIELD_SEP)
+        if len(parts) < 4:
+            continue
+        sha, commit_date, subject, trailers_raw = parts[0], parts[1], parts[2], parts[3]
+        match = CLOSEOUT_SUBJECT_RE.match(subject)
+        if not match:
+            continue
+        subject_task_id = match.group(1)
+        # Strip the trailing `(#NNN)` PR suffix GitHub adds on squash merges
+        # before checking trailer consistency.
+        trailer_task_ids = {
+            value.strip() for value in trailers_raw.split("\x1d") if value.strip()
+        }
+        if trailer_task_ids and subject_task_id not in trailer_task_ids:
+            continue
+        existing = closeouts.get(subject_task_id)
+        if existing is None or commit_date > existing.get("commit_date", ""):
+            closeouts[subject_task_id] = {
+                "sha": sha,
+                "subject": subject,
+                "commit_date": commit_date,
+            }
+    return closeouts
+
+
+def _git_remote_branch_for_ref(ref: str) -> tuple[str, str]:
+    """Split `origin/dev` → (`origin`, `dev`). Falls back to (`origin`, ref)."""
+    if "/" in ref:
+        remote, _, branch = ref.partition("/")
+        return remote, branch
+    return "origin", ref
+
+
+def apply_git_merge_reconciliation(
+    state: dict[str, Any], *, ref: str | None = None
+) -> list[dict[str, str]]:
+    """Bridge artifact-merged → state-machine-done drift.
+
+    Workers that ship via PR + merge but skip `ai-status.sh done` leave the
+    state machine stuck in `in_progress`/`review`/`backlog` even though the
+    closeout commit is on the integration trunk. This walks `ref` (default
+    origin/dev), finds closeout commits keyed by Task-ID, and finalizes any
+    task whose closeout has merged but whose state machine never advanced.
+
+    Returns a list of `{task_id, sha, prior_status}` dicts for everything it
+    moved.
+    """
+    target_ref = (ref or os.environ.get("RECONCILE_REF") or "origin/dev").strip() or "origin/dev"
+    closeouts = _git_log_closeouts(target_ref)
+    if not closeouts:
+        return []
+    remote, branch = _git_remote_branch_for_ref(target_ref)
+    timestamp = iso_now()
+    reconciled: list[dict[str, str]] = []
+    for task in state.get("tasks", []):
+        if task.get("status") == "done":
+            continue
+        task_id = str(task.get("id") or "")
+        closeout = closeouts.get(task_id)
+        if not closeout:
+            continue
+        prior_status = str(task.get("status") or "")
+        actor = canonical_agent_name(task.get("owner")) or current_actor()
+        task["status"] = "done"
+        task["last_update"] = timestamp
+        task["next"] = f"reconciled from {remote}/{branch}@{closeout['sha'][:12]}"
+        task["commit_hash"] = closeout["sha"]
+        task["commit_subject"] = closeout["subject"]
+        task["commit_agent"] = actor
+        task["commit_reviewer"] = canonical_agent_name(task.get("reviewer"))
+        task["commit_recorded_at"] = timestamp
+        task["push_remote"] = remote
+        task["push_branch"] = branch
+        task["push_ref"] = target_ref
+        task["push_commit"] = closeout["sha"]
+        task["push_recorded_at"] = timestamp
+        task["reconciled_from_git_at"] = timestamp
+        task["reconciled_from_git_ref"] = target_ref
+        task["reconciled_from_git_prior_status"] = prior_status
+        task.pop("waiting_for", None)
+        mark_blockers_resolved(state, task_id)
+        mark_handoffs_done(state, task_id)
+        # Unblock parents are not auto-resumed here: parent resume needs
+        # PARENT_STATUS/PARENT_NEXT input that the human flow supplies. We
+        # only resolve their open blocker/handoff via the calls above.
+        append_log(
+            {
+                "ts": timestamp,
+                "agent": actor,
+                "type": "reconciled_from_git",
+                "task_id": task_id,
+                "message": task["next"],
+                "commit_hash": closeout["sha"],
+                "prior_status": prior_status,
+                "ref": target_ref,
+            }
+        )
+        reconciled.append(
+            {
+                "task_id": task_id,
+                "sha": closeout["sha"],
+                "prior_status": prior_status,
+            }
+        )
+    return reconciled
+
+
 def validate_state(state: dict[str, Any]) -> None:
     sync_canonical_document_metadata(state)
     normalize_state_agents(state)
@@ -1288,8 +1430,9 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     open_blockers = [blocker for blocker in state.get("blockers", []) if blocker.get("status") == "open"]
     if open_blockers:
         for blocker in open_blockers:
+            message = blocker.get("message") or blocker.get("reason") or ""
             lines.append(
-                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {blocker['message']} | {blocker['status']} |"
+                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {message} | {blocker['status']} |"
             )
     else:
         lines.append("| _(none)_ | - | - | - | - |")
@@ -1759,11 +1902,84 @@ def command_mode(state: dict[str, Any], args: list[str]) -> None:
 
 
 def command_sync(state: dict[str, Any], _args: list[str]) -> None:
+    # Bridge git-merged closeouts → state-machine `done` for tasks whose
+    # workers shipped via PR + merge but skipped `ai-status.sh done`. The
+    # supervisor calls `ai-status.sh sync` on every reassignment cycle, so
+    # this catches drift soon after a merge lands on origin/dev.
+    apply_git_merge_reconciliation(state)
     return None
+
+
+def command_reconcile_from_git(state: dict[str, Any], args: list[str]) -> None:
+    ref = args[0].strip() if args else os.environ.get("RECONCILE_REF", "").strip() or "origin/dev"
+    reconciled = apply_git_merge_reconciliation(state, ref=ref)
+    if not reconciled:
+        print(f"reconcile-from-git: no drift found against {ref}")
+        return
+    print(f"reconcile-from-git: finalized {len(reconciled)} task(s) against {ref}")
+    for entry in reconciled:
+        print(
+            f"  {entry['task_id']}: {entry['prior_status']} -> done "
+            f"(commit {entry['sha'][:12]})"
+        )
 
 
 def command_prompt(state: dict[str, Any], _args: list[str]) -> None:
     print(build_onboarding_prompt(state))
+
+
+def command_show(state: dict[str, Any], args: list[str]) -> None:
+    """Print ONE task as JSON. Cheap alternative to ``Read ai-status.json``
+    (which is ~2 MB and burns ~500K input tokens every time a worker reads
+    it). Usage: ``show <TASK-ID>``."""
+    if not args:
+        raise SystemExit("Usage: show <task-id>")
+    task_id = args[0].strip()
+    for task in state.get("tasks", []) or []:
+        if str(task.get("id") or "").strip() == task_id:
+            print(json.dumps(task, ensure_ascii=False, indent=2))
+            return
+    raise SystemExit(f"Task not found: {task_id}")
+
+
+def command_list(state: dict[str, Any], args: list[str]) -> None:
+    """Print compact one-line-per-task summary (id, status, owner, reviewer,
+    last_update). Filterable by --status / --owner / --reviewer / --phase to
+    keep output small. Usage:
+
+      list                              # all tasks
+      list --status in_progress         # only tasks in this status
+      list --owner Codex2 --status todo # combine filters
+    """
+    filters = {}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--") and i + 1 < len(args):
+            filters[a[2:]] = args[i + 1].strip()
+            i += 2
+        else:
+            i += 1
+    tasks = state.get("tasks", []) or []
+    rows = []
+    for t in tasks:
+        if not isinstance(t, dict):
+            continue
+        if any(str(t.get(k) or "") != v for k, v in filters.items()):
+            continue
+        rows.append(t)
+    for t in rows:
+        print(
+            "{id:<32s} {status:<16s} owner={owner:<10s} reviewer={reviewer:<10s} {last}".format(
+                id=str(t.get("id") or "")[:32],
+                status=str(t.get("status") or "")[:16],
+                owner=str(t.get("owner") or "-")[:10],
+                reviewer=str(t.get("reviewer") or "-")[:10],
+                last=str(t.get("last_update") or "")[:19],
+            )
+        )
+    if not rows:
+        print("(no matches)")
 
 
 def command_audit(state: dict[str, Any], args: list[str]) -> None:
@@ -1784,6 +2000,8 @@ def main(argv: list[str]) -> int:
     read_only_commands = {
         "audit": command_audit,
         "prompt": command_prompt,
+        "show": command_show,
+        "list": command_list,
     }
 
     commands = {
@@ -1798,6 +2016,7 @@ def main(argv: list[str]) -> int:
         "approve": command_approve,
         "mode": command_mode,
         "sync": command_sync,
+        "reconcile-from-git": command_reconcile_from_git,
     }
 
     if command in read_only_commands:

@@ -4,7 +4,14 @@
 Refuses the following paths from being part of any commit (pre-commit hook)
 or PR diff (CI):
 
-    docs-site/**          - read-only mirror (regenerate via scripts/sync-state.sh)
+    docs-site/ai-status.json            ─┐  Files copied into docs-site/ by
+    docs-site/ai-activity-log.jsonl      │  scripts/sync-state.sh
+    docs-site/current-work.md            │  (ai_status.py::sync_docs_site).
+    docs-site/orchestrator-state.json    │  Other files in docs-site/ (main.js,
+    docs-site/approval-queue.json       ─┘  index.html, style.css, etc.) ARE
+                                            source — they are not regenerated
+                                            and must be editable in PRs.
+
     .orchestrator/runtime-logs/**
     .orchestrator/logs/**
     .orchestrator/event-queue.jsonl
@@ -33,7 +40,14 @@ import subprocess
 import sys
 
 BLOCK_PATTERNS = (
-    "docs-site/*",
+    # Only the specific files that scripts/sync-state.sh regenerates inside
+    # docs-site/. Everything else under docs-site/ (main.js, index.html,
+    # style.css, *.js modules) is source code, editable in PRs.
+    "docs-site/ai-status.json",
+    "docs-site/ai-activity-log.jsonl",
+    "docs-site/current-work.md",
+    "docs-site/orchestrator-state.json",
+    "docs-site/approval-queue.json",
     ".orchestrator/runtime-logs/*",
     ".orchestrator/logs/*",
     ".orchestrator/event-queue.jsonl",

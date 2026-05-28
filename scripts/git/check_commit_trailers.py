@@ -2,8 +2,11 @@
 """Commit-message trailers gate (used by husky commit-msg AND by CI).
 
 Each commit between `--base` and `--head` (default origin/main..HEAD) must:
-- Have a subject of the form `<TASK-ID>: <summary>` (TASK-ID matches
-  `[A-Z][A-Z0-9-]*[A-Z0-9]`).
+- Have a subject matching one of:
+  * `<TASK-ID>: <summary>`  (canonical closeout pattern)
+  * `wip(<TASK-ID>): <summary>`  (anchor commit pattern; see
+    `.orchestrator/skills/worker-anchor-commit.md` §4)
+  where TASK-ID matches `[A-Z][A-Z0-9-]*[A-Z0-9]`.
 - Include trailers `Task-ID:`, `LLM-Agent:`, and `Reviewer:`.
 
 Exit 0 if all pass. Exit 1 with a list of offenses if any commit fails.
@@ -19,7 +22,12 @@ import re
 import subprocess
 import sys
 
-SUBJECT_RE = re.compile(r"^[A-Z][A-Z0-9-]*[A-Z0-9]: \S")
+# Accept both the canonical closeout subject `<TASK-ID>: ...` AND the anchor
+# pattern `wip(<TASK-ID>): ...` that workers are instructed to use during
+# in-progress commits (see .orchestrator/skills/worker-anchor-commit.md §4).
+# Both carry the TASK-ID and the required trailers; the wip prefix is a
+# human-readable signal that the commit is an anchor, not a closeout.
+SUBJECT_RE = re.compile(r"^(?:wip\()?[A-Z][A-Z0-9-]*[A-Z0-9]\)?: \S")
 REQUIRED_TRAILERS = ("Task-ID", "LLM-Agent", "Reviewer")
 
 

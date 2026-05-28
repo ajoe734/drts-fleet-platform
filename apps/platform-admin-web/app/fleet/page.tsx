@@ -266,7 +266,7 @@ export default function FleetPage() {
         let detail: ReportJobDetailRecord | null = null;
         for (let attempt = 0; attempt < 5; attempt += 1) {
           detail = await client.getReportJob(accepted.jobId);
-          if (detail.artifact?.downloadMetadata.downloadUrl) {
+          if (detail?.artifact?.downloadMetadata.downloadUrl) {
             break;
           }
           await sleep(150);

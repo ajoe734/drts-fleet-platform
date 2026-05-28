@@ -30,7 +30,8 @@ COPY apps/platform-admin-web/ apps/platform-admin-web/
 COPY scripts/control-plane-web-proxy.mjs scripts/
 COPY tsconfig.base.json .
 
-RUN pnpm --filter @drts/contracts build && \
+RUN pnpm --filter @drts/ui-tokens build && \
+    pnpm --filter @drts/contracts build && \
     pnpm --filter @drts/platform-admin-web build
 
 FROM node:${NODE_VERSION} AS runtime

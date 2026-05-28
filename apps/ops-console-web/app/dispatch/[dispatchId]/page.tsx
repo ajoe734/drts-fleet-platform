@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 import type {
   DispatchCandidate,
   DispatchJobRecord,
@@ -14,13 +15,9 @@ import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import {
-  CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasDL as DL,
-  CanvasField as Field,
-  CanvasInput as Input,
-  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
@@ -38,8 +35,13 @@ type DispatchDetailPageProps = {
 type CandidateRow = Record<string, unknown> & {
   candidate: DispatchCandidate;
   driver: DriverRegistryRecord | null;
+  rankCell: ReactNode;
+  driverCell: ReactNode;
+  vehicle: string;
+  etaCell: ReactNode;
   gateLabel: string;
   gateTone: "success" | "warn" | "danger";
+  gateCell: ReactNode;
   score: string;
   _selected?: boolean;
 };
@@ -79,65 +81,6 @@ const DRIVER_TASK_PRIORITY: Record<string, number> = {
   cancelled: 7,
   rejected: 8,
 };
-
-function actionLinkStyle(
-  variant: "primary" | "secondary" | "ghost" = "secondary",
-) {
-  if (variant === "primary") {
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: "6px",
-      height: "28px",
-      padding: "5px 10px",
-      borderRadius: "7px",
-      background: theme.accent,
-      color: "#ffffff",
-      border: `1px solid ${theme.accent}`,
-      fontSize: "12px",
-      fontWeight: 500,
-      lineHeight: 1,
-      textDecoration: "none",
-    } as const;
-  }
-
-  if (variant === "ghost") {
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: "6px",
-      height: "28px",
-      padding: "5px 10px",
-      borderRadius: "7px",
-      background: "transparent",
-      color: theme.textMuted,
-      border: "1px solid transparent",
-      fontSize: "12px",
-      fontWeight: 500,
-      lineHeight: 1,
-      textDecoration: "none",
-    } as const;
-  }
-
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "6px",
-    height: "28px",
-    padding: "5px 10px",
-    borderRadius: "7px",
-    background: theme.surface,
-    color: theme.text,
-    border: `1px solid ${theme.border}`,
-    fontSize: "12px",
-    fontWeight: 500,
-    lineHeight: 1,
-    textDecoration: "none",
-  } as const;
-}
 
 async function resolveOrFallback<T>(
   loader: () => Promise<T>,
@@ -232,30 +175,6 @@ function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
   }
 
   return order.status;
-}
-
-function getStateTone(stateCode: string) {
-  if (stateCode === "assigned" || stateCode === "completed") {
-    return "success" as const;
-  }
-
-  if (stateCode === "no_supply") {
-    return "danger" as const;
-  }
-
-  if (
-    stateCode === "dispatch_timeout" ||
-    stateCode === "exception_hold" ||
-    stateCode === "override_pending"
-  ) {
-    return "warn" as const;
-  }
-
-  if (stateCode === "broadcasting" || stateCode === "queued") {
-    return "info" as const;
-  }
-
-  return "neutral" as const;
 }
 
 function pickCurrentTask(tasks: DriverTaskRecord[]) {
@@ -785,94 +704,97 @@ function renderWorkflowSteps(
   ];
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
-        gap: "8px",
-      }}
-    >
-      {WORKFLOW_STEPS.map((step, index) => {
-        const complete = index < currentIndex;
-        const current = index === currentIndex;
-        const idle = index > currentIndex;
-        const borderColor = current
-          ? theme.accent
-          : complete
-            ? theme.info
-            : theme.border;
-        const background = current
-          ? theme.accentBg
-          : complete
-            ? theme.infoBg
-            : theme.surfaceLo;
+    <div style={{ overflowX: "auto" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(6, minmax(96px, 1fr))",
+          gap: "8px",
+          minWidth: "640px",
+        }}
+      >
+        {WORKFLOW_STEPS.map((step, index) => {
+          const complete = index < currentIndex;
+          const current = index === currentIndex;
+          const idle = index > currentIndex;
+          const borderColor = current
+            ? theme.accent
+            : complete
+              ? theme.info
+              : theme.border;
+          const background = current
+            ? theme.accentBg
+            : complete
+              ? theme.infoBg
+              : theme.surfaceLo;
 
-        return (
-          <div
-            key={step}
-            style={{
-              display: "grid",
-              gap: "8px",
-              padding: "10px",
-              borderRadius: "8px",
-              border: `1px solid ${borderColor}`,
-              background,
-              minWidth: 0,
-            }}
-          >
+          return (
             <div
+              key={step}
               style={{
-                width: "20px",
-                height: "20px",
-                borderRadius: "999px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "11px",
-                fontWeight: 700,
-                color: current || complete ? theme.invert : theme.textMuted,
-                background: current
-                  ? theme.accent
-                  : complete
-                    ? theme.info
-                    : theme.surface,
-                border: `1px solid ${current || complete ? "transparent" : theme.border}`,
+                display: "grid",
+                gap: "8px",
+                padding: "10px",
+                borderRadius: "8px",
+                border: `1px solid ${borderColor}`,
+                background,
+                minWidth: 0,
               }}
             >
-              {index + 1}
-            </div>
-            <div style={{ display: "grid", gap: "3px", minWidth: 0 }}>
-              <strong
+              <div
                 style={{
-                  fontSize: "12px",
-                  color: idle ? theme.textMuted : theme.text,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  width: "20px",
+                  height: "20px",
+                  borderRadius: "999px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  color: current || complete ? theme.invert : theme.textMuted,
+                  background: current
+                    ? theme.accent
+                    : complete
+                      ? theme.info
+                      : theme.surface,
+                  border: `1px solid ${current || complete ? "transparent" : theme.border}`,
                 }}
               >
-                {step}
-              </strong>
-              <span
-                style={{
-                  fontSize: "10.5px",
-                  color: theme.textDim,
-                }}
-              >
-                {timestampByStep[index]
-                  ? formatDateTime(locale, timestampByStep[index])
-                  : idle
-                    ? locale === "zh"
-                      ? "waiting"
-                      : "waiting"
-                    : locale === "zh"
-                      ? "active"
-                      : "active"}
-              </span>
+                {index + 1}
+              </div>
+              <div style={{ display: "grid", gap: "3px", minWidth: 0 }}>
+                <strong
+                  style={{
+                    fontSize: "12px",
+                    color: idle ? theme.textMuted : theme.text,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {step}
+                </strong>
+                <span
+                  style={{
+                    fontSize: "10.5px",
+                    color: theme.textDim,
+                  }}
+                >
+                  {timestampByStep[index]
+                    ? formatDateTime(locale, timestampByStep[index])
+                    : idle
+                      ? locale === "zh"
+                        ? "waiting"
+                        : "waiting"
+                      : locale === "zh"
+                        ? "active"
+                        : "active"}
+                </span>
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1084,22 +1006,69 @@ export default async function DispatchDetailPage({
       return {
         candidate,
         driver,
+        rankCell: (
+          <span
+            style={{
+              color: theme.accent,
+              fontWeight: 700,
+              fontFamily: theme.monoFamily,
+            }}
+          >
+            #{index + 1}
+          </span>
+        ),
+        driverCell: (
+          <Link
+            href={`/drivers/${encodeURIComponent(candidate.driverId)}`}
+            style={{
+              display: "grid",
+              gap: "2px",
+              color: theme.text,
+              textDecoration: "none",
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>
+              {driver?.name ?? candidate.driverId}
+            </span>
+            <span
+              style={{
+                fontSize: "11px",
+                color: theme.textDim,
+                fontFamily: theme.monoFamily,
+              }}
+            >
+              {candidate.driverId}
+            </span>
+          </Link>
+        ),
+        vehicle: candidate.vehicleId,
+        etaCell: (
+          <Pill theme={theme} tone={index === 0 ? "success" : "info"}>
+            {candidate.etaMinutes}m
+          </Pill>
+        ),
         gateLabel: gate.label,
         gateTone: gate.tone,
+        gateCell: (
+          <Pill theme={theme} tone={gate.tone} dot>
+            {gate.label}
+          </Pill>
+        ),
         score: getCandidateScore(candidate, order, driver),
         _selected: index === 0,
       };
     },
   );
   const currentState = getVisibleStateCode(order, dispatchJob);
-  const currentStateTone = getStateTone(currentState);
-  const activeGate =
-    order.complianceGates?.find((gate) => gate.state !== "clear") ?? null;
+  const licenseClearCount = candidateRows.filter(
+    (row) => row.driver?.licensesValid !== false,
+  ).length;
+  const eligibleCandidateCount = candidateRows.filter(
+    (row) => row.driver?.dispatchEligible,
+  ).length;
   const liveCandidateCount = sortedCandidates.filter(
     (candidate) => getCandidateLocationState(candidate) === "live",
   ).length;
-  const bestEta =
-    sortedCandidates[0]?.etaMinutes ?? dispatchJob?.latestEtaMinutes ?? null;
   const timelineEntries = buildTimelineEntries(
     locale,
     dispatchTrace,
@@ -1108,120 +1077,39 @@ export default async function DispatchDetailPage({
     currentTask,
   );
   const overrideSummary = buildOverrideSummary(locale, order);
-  const bannerTone =
-    order.exceptionHold && !order.exceptionHold.resolution
-      ? ("warn" as const)
-      : candidateRows.length === 0
-        ? ("danger" as const)
-        : activeGate
-          ? ("warn" as const)
-          : ("info" as const);
-  const bannerTitle =
-    order.exceptionHold && !order.exceptionHold.resolution
-      ? locale === "zh"
-        ? "人工覆核待處理"
-        : "Manual override review pending"
-      : candidateRows.length === 0
-        ? locale === "zh"
-          ? "目前沒有可指派候選"
-          : "No candidates available"
-        : activeGate
-          ? locale === "zh"
-            ? "供給與合規需要人工判讀"
-            : "Candidate supply needs manual review"
-          : locale === "zh"
-            ? "最佳候選已就緒"
-            : "Best candidate ready";
-  const bannerBody =
-    order.exceptionHold && !order.exceptionHold.resolution
-      ? locale === "zh"
-        ? `${formatOpsCodeLabel(locale, order.exceptionHold.reasonCode)}，目前由 ${overrideSummary.actor} 等待 decision。`
-        : `${order.exceptionHold.reasonCode} is waiting on ${overrideSummary.actor}.`
-      : candidateRows.length === 0
-        ? locale === "zh"
-          ? "目前這筆單尚未取得候選供給，請檢查 service bucket、位置回報與 delayed queue。"
-          : "Check service bucket, location freshness, and delayed queue recovery."
-        : activeGate
-          ? locale === "zh"
-            ? `主要 gate：${formatOpsCodeLabel(locale, activeGate.gateType)}。目前 ${liveCandidateCount}/${candidateRows.length} 位候選具即時位置。`
-            : `Primary gate: ${activeGate.gateType}. ${liveCandidateCount}/${candidateRows.length} candidates have live location.`
-          : locale === "zh"
-            ? `候選 ${candidateRows.length} 名，最佳 ETA ${bestEta ?? "—"}m，可直接進行人工確認後指派。`
-            : `${candidateRows.length} candidates ready with best ETA ${bestEta ?? "—"}m.`;
 
   const candidateColumns: CanvasTableColumn<CandidateRow>[] = [
     {
       h: "RANK",
+      k: "rankCell",
       w: 52,
-      r: (_, index) => (
-        <span
-          style={{
-            color: theme.accent,
-            fontWeight: 700,
-            fontFamily: theme.monoFamily,
-          }}
-        >
-          #{index + 1}
-        </span>
-      ),
     },
     {
       h: "DRIVER",
+      k: "driverCell",
       w: 180,
-      r: (row) => (
-        <Link
-          href={`/drivers/${encodeURIComponent(row.candidate.driverId)}`}
-          style={{
-            display: "grid",
-            gap: "2px",
-            color: theme.text,
-            textDecoration: "none",
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>
-            {row.driver?.name ?? row.candidate.driverId}
-          </span>
-          <span
-            style={{
-              fontSize: "11px",
-              color: theme.textDim,
-              fontFamily: theme.monoFamily,
-            }}
-          >
-            {row.candidate.driverId}
-          </span>
-        </Link>
-      ),
     },
     {
       h: "VEHICLE",
+      k: "vehicle",
       w: 132,
       mono: true,
-      r: (row) => row.candidate.vehicleId,
     },
     {
       h: "ETA",
+      k: "etaCell",
       w: 84,
-      r: (row) => (
-        <Pill theme={theme} tone={row._selected ? "success" : "info"}>
-          {row.candidate.etaMinutes}m
-        </Pill>
-      ),
     },
     {
       h: "GATE",
+      k: "gateCell",
       w: 164,
-      r: (row) => (
-        <Pill theme={theme} tone={row.gateTone} dot>
-          {row.gateLabel}
-        </Pill>
-      ),
     },
     {
       h: "SCORE",
+      k: "score",
       w: 68,
       mono: true,
-      r: (row) => row.score,
     },
   ];
 
@@ -1251,302 +1139,110 @@ export default async function DispatchDetailPage({
         }
       />
 
-      <div style={{ padding: "24px", display: "grid", gap: "16px" }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-            gap: "10px",
-          }}
-        >
-          <KPI
+      <div
+        style={{
+          padding: "24px",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
+          gap: "16px",
+          alignItems: "start",
+        }}
+      >
+        <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
+          <Card
             theme={theme}
-            label="候選數"
-            value={candidateRows.length}
-            delta={`${liveCandidateCount} live`}
-            deltaTone={liveCandidateCount > 0 ? "up" : "down"}
-          />
-          <KPI
-            theme={theme}
-            label="最佳 ETA"
-            value={bestEta !== null ? `${bestEta}m` : "—"}
-            delta={
-              dispatchJob
-                ? formatOpsCodeLabel(locale, dispatchJob.status)
-                : "queued"
-            }
-            deltaTone={bestEta !== null && bestEta <= 10 ? "up" : "neutral"}
-          />
-          <KPI
-            theme={theme}
-            label="訂單狀態"
-            value={formatOpsCodeLabel(locale, currentState)}
-            delta={currentTask ? currentTask.vehicleId : "未指派"}
-            deltaTone={currentStateTone === "danger" ? "down" : "neutral"}
-          />
-          <KPI
-            theme={theme}
-            label="活動數"
-            value={timelineEntries.length}
-            sub={
-              timelineEntries[0]
-                ? formatDateTime(locale, timelineEntries[0].at)
-                : "—"
-            }
-            hint={dispatchJob?.dispatchJobId ?? order.orderId}
-          />
-        </div>
-
-        <Banner
-          theme={theme}
-          tone={bannerTone}
-          icon="warn"
-          title={bannerTitle}
-          body={bannerBody}
-          actions={
-            <Link
-              href={`/dispatch?view=owned&orderId=${encodeURIComponent(order.orderId)}`}
-              style={actionLinkStyle("secondary")}
-            >
-              返回 dispatch board
-            </Link>
-          }
-        />
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
-            gap: "16px",
-            alignItems: "start",
-          }}
-        >
-          <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-            <Card
-              theme={theme}
-              title={`候選 driver (${candidateRows.length})`}
-              subtitle="availability-first evaluation"
-              actions={
-                dispatchJob ? (
-                  <Pill theme={theme} tone="accent" dot>
-                    {dispatchJob.dispatchJobId}
-                  </Pill>
-                ) : undefined
-              }
-              padding={0}
-            >
-              {candidateRows.length > 0 ? (
-                <Table
-                  theme={theme}
-                  columns={candidateColumns}
-                  rows={candidateRows}
-                />
-              ) : (
-                <div
-                  style={{
-                    padding: "16px",
-                    color: theme.textMuted,
-                    fontSize: "12.5px",
-                  }}
-                >
-                  {locale === "zh"
-                    ? "目前沒有候選供給，請改由 no-supply / governance lane 處理。"
-                    : "No candidates yet. Handle through no-supply or governance lane."}
-                </div>
-              )}
-            </Card>
-
-            <Card
-              theme={theme}
-              title="Compliance gates"
-              subtitle="dispatch / pricing / queue governance"
-            >
-              <DL
+            title={`候選 driver (${candidateRows.length})`}
+            padding={0}
+          >
+            {candidateRows.length > 0 ? (
+              <Table
                 theme={theme}
-                cols={2}
-                items={[
-                  {
-                    k: "license valid",
-                    v: `${candidateRows.filter((row) => row.driver?.licensesValid !== false).length}/${candidateRows.length || 0} ${
-                      locale === "zh" ? "候選通過" : "clear"
-                    }`,
-                    mono: true,
-                  },
-                  {
-                    k: "service bucket",
-                    v: `${formatOpsCodeLabel(locale, order.serviceBucket)} · ${
-                      candidateRows.every((row) =>
-                        row.candidate.serviceBuckets.includes(
-                          order.serviceBucket,
-                        ),
-                      )
-                        ? "ok"
-                        : "review"
-                    }`,
-                    mono: true,
-                  },
-                  {
-                    k: "dispatch state",
-                    v: `${formatOpsCodeLabel(locale, currentState)} · ${dispatchJob?.dispatchJobId ?? "—"}`,
-                    mono: true,
-                  },
-                  {
-                    k: "device / location",
-                    v: `${liveCandidateCount}/${candidateRows.length || 0} live · ${
-                      candidateRows.filter(
-                        (row) => row.driver?.dispatchEligible,
-                      ).length
-                    }/${candidateRows.length || 0} eligible`,
-                    mono: true,
-                  },
-                  {
-                    k: "fare quoted",
-                    v: order.quotedFare
-                      ? `${formatMinorCurrency(
-                          order.quotedFare.amountMinor,
-                          order.quotedFare.currency,
-                        )} · ${order.quotedFareRuleVersion ?? "manual"}`
-                      : "—",
-                    mono: true,
-                  },
-                  {
-                    k: "override allowed",
-                    v: order.exceptionHold
-                      ? order.exceptionHold.overrideAllowed
-                        ? locale === "zh"
-                          ? "reviewer allowed"
-                          : "reviewer allowed"
-                        : locale === "zh"
-                          ? "reviewer required"
-                          : "reviewer required"
-                      : locale === "zh"
-                        ? "not needed"
-                        : "not needed",
-                    mono: true,
-                  },
-                ]}
+                columns={candidateColumns}
+                rows={candidateRows}
               />
-            </Card>
-
-            <Card
-              theme={theme}
-              title="Manual overrides"
-              subtitle="exception hold / fare override / redispatch note"
-            >
+            ) : (
               <div
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                  gap: "12px",
+                  padding: "16px",
+                  color: theme.textMuted,
+                  fontSize: "12.5px",
                 }}
               >
-                <Field theme={theme} label="override type">
-                  <Input theme={theme} value={overrideSummary.type} />
-                </Field>
-                <Field theme={theme} label="decision">
-                  <Input theme={theme} value={overrideSummary.status} />
-                </Field>
-                <Field theme={theme} label="actor">
-                  <Input theme={theme} value={overrideSummary.actor} mono />
-                </Field>
-                <Field theme={theme} label="next action">
-                  <Input theme={theme} value={overrideSummary.nextAction} />
-                </Field>
-                <Field theme={theme} label="reason / note">
-                  <Input theme={theme} value={overrideSummary.note} />
-                </Field>
-                <Field theme={theme} label="linked task">
-                  <Input
-                    theme={theme}
-                    value={
-                      currentTask
-                        ? `${currentTask.taskId} · ${currentTask.vehicleId}`
-                        : "—"
-                    }
-                    mono
-                  />
-                </Field>
+                {locale === "zh"
+                  ? "目前沒有候選供給，請改由 no-supply / governance lane 處理。"
+                  : "No candidates yet. Handle through no-supply or governance lane."}
               </div>
-              <div style={{ display: "flex", gap: "8px", marginTop: "2px" }}>
-                <Btn theme={theme}>request override</Btn>
-                <Btn theme={theme} variant="ghost">
-                  release back to queue
-                </Btn>
-              </div>
-            </Card>
-          </div>
+            )}
+          </Card>
 
-          <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-            <Card
+          <Card theme={theme} title="Compliance gates">
+            <DL
               theme={theme}
-              title="訂單狀態"
-              subtitle={`${formatOpsCodeLabel(locale, currentState)} · ${formatWindow(
-                order,
-                locale,
-              )}`}
-            >
-              {renderWorkflowSteps(locale, order, dispatchJob, currentTask)}
-              <div style={{ height: "14px" }} />
-              <DL
-                theme={theme}
-                cols={2}
-                items={[
-                  {
-                    k: "ORDER",
-                    v: order.orderId,
-                    mono: true,
-                  },
-                  {
-                    k: "STATE",
-                    v: (
-                      <Pill theme={theme} tone={currentStateTone} dot>
-                        {currentState}
-                      </Pill>
-                    ),
-                  },
-                  {
-                    k: "TASK",
-                    v: currentTask
-                      ? `${currentTask.vehicleId} · ${currentTask.driverId}`
-                      : "—",
-                    mono: true,
-                  },
-                  {
-                    k: "QUEUE",
-                    v: order.queueFamily
-                      ? formatOpsCodeLabel(locale, order.queueFamily)
-                      : "—",
-                    mono: true,
-                  },
-                  {
-                    k: "PASSENGER",
-                    v: order.passenger.name,
-                  },
-                  {
-                    k: "CONTACT",
-                    v: order.passenger.phone,
-                    mono: true,
-                  },
-                ]}
-              />
-            </Card>
+              cols={2}
+              items={[
+                {
+                  k: "license valid",
+                  v: `${licenseClearCount}/${candidateRows.length || 0} ${
+                    locale === "zh" ? "候選通過" : "candidates clear"
+                  }`,
+                  mono: true,
+                },
+                {
+                  k: "service bucket",
+                  v: `${formatOpsCodeLabel(locale, order.serviceBucket)} · ${
+                    candidateRows.length > 0 &&
+                    candidateRows.every((row) =>
+                      row.candidate.serviceBuckets.includes(
+                        order.serviceBucket,
+                      ),
+                    )
+                      ? "ok"
+                      : "review"
+                  }`,
+                  mono: true,
+                },
+                {
+                  k: "dispatch state",
+                  v: `${formatOpsCodeLabel(locale, currentState)} · ${dispatchJob?.dispatchJobId ?? "—"}`,
+                  mono: true,
+                },
+                {
+                  k: "device binding",
+                  v: `${liveCandidateCount}/${candidateRows.length || 0} live · ${eligibleCandidateCount}/${candidateRows.length || 0} eligible`,
+                  mono: true,
+                },
+                {
+                  k: "fare quoted",
+                  v: order.quotedFare
+                    ? `${formatMinorCurrency(
+                        order.quotedFare.amountMinor,
+                        order.quotedFare.currency,
+                      )} · ${order.quotedFareRuleVersion ?? "manual"}`
+                    : "—",
+                  mono: true,
+                },
+                {
+                  k: "override allowed",
+                  v: order.exceptionHold
+                    ? `${overrideSummary.status} · ${overrideSummary.nextAction}`
+                    : locale === "zh"
+                      ? "not needed"
+                      : "not needed",
+                  mono: true,
+                },
+              ]}
+            />
+          </Card>
+        </div>
 
-            <Card
-              theme={theme}
-              title="活動"
-              subtitle={`${timelineEntries.length} dispatch events`}
-              actions={
-                <Link
-                  href={`/dispatch?view=owned&orderId=${encodeURIComponent(order.orderId)}`}
-                  style={actionLinkStyle("ghost")}
-                >
-                  board context
-                </Link>
-              }
-            >
-              {renderTimeline(locale, timelineEntries)}
-            </Card>
-          </div>
+        <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
+          <Card theme={theme} title="訂單狀態">
+            {renderWorkflowSteps(locale, order, dispatchJob, currentTask)}
+          </Card>
+
+          <Card theme={theme} title="活動">
+            {renderTimeline(locale, timelineEntries)}
+          </Card>
         </div>
       </div>
     </>

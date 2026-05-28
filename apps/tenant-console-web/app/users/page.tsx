@@ -7,6 +7,9 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
+  CanvasDL,
+  CanvasField,
+  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -31,10 +34,79 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
+const kpiGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: 12,
+};
+
+const contentGridStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 16,
+  alignItems: "flex-start",
+};
+
+const rosterCardStyle: CSSProperties = {
+  flex: "1.45 1 720px",
+  minWidth: 0,
+};
+
+const sideCardStyle: CSSProperties = {
+  flex: "1 1 320px",
+  minWidth: 0,
+};
+
+const rolePillGridStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const roleListStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+const roleListItemStyle: CSSProperties = {
+  paddingBottom: 10,
+  borderBottom: `1px solid ${th.border}`,
+};
+
+const roleListMetaStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+};
+
+const roleListTitleStyle: CSSProperties = {
+  color: th.text,
+  fontWeight: 600,
+  lineHeight: 1.3,
+};
+
+const roleListDescriptionStyle: CSSProperties = {
+  marginTop: 4,
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.45,
+};
+
 const namePrimaryStyle: CSSProperties = {
   color: th.text,
   fontWeight: 600,
 };
+
+const emptyStateStyle: CSSProperties = {
+  padding: 24,
+  color: th.textMuted,
+  fontSize: 12.5,
+  textAlign: "center",
+};
+
+const numberFormatter = new Intl.NumberFormat("en");
 
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
   dateStyle: "short",
@@ -48,11 +120,22 @@ function formatUpdated(value: string | null | undefined) {
   return dateTimeFormatter.format(parsed);
 }
 
+function formatCount(value: number) {
+  return numberFormatter.format(value);
+}
+
 const ROLE_CANVAS_LABEL: Record<string, string> = {
   tenant_admin: "tenant_admin",
   tenant_ops_admin: "operator",
   tenant_finance_admin: "approver",
   tenant_viewer: "viewer",
+};
+
+const ROLE_SORT_ORDER: Record<string, number> = {
+  tenant_admin: 0,
+  tenant_ops_admin: 1,
+  tenant_finance_admin: 2,
+  tenant_viewer: 3,
 };
 
 function getRoleLabel(roleCode: string) {
@@ -61,6 +144,13 @@ function getRoleLabel(roleCode: string) {
 
 function getRoleTone(roleCode: string): CanvasTone {
   return roleCode === "tenant_admin" ? "accent" : "info";
+}
+
+function getRoleCatalogTone(role: TenantRoleCatalogRecord): CanvasTone {
+  if (role.roleCode === "tenant_admin") {
+    return "accent";
+  }
+  return role.assignable ? "info" : "neutral";
 }
 
 function getStateTone(status: TenantUserRoleRecord["status"]): CanvasTone {
@@ -79,6 +169,20 @@ function compareUsers(a: TenantUserRoleRecord, b: TenantUserRoleRecord) {
     return rank[a.status] - rank[b.status];
   }
   return a.displayName.localeCompare(b.displayName, "zh-Hant");
+}
+
+function compareRoles(a: TenantRoleCatalogRecord, b: TenantRoleCatalogRecord) {
+  if (a.assignable !== b.assignable) {
+    return a.assignable ? -1 : 1;
+  }
+
+  const leftOrder = ROLE_SORT_ORDER[a.roleCode] ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = ROLE_SORT_ORDER[b.roleCode] ?? Number.MAX_SAFE_INTEGER;
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+
+  return a.roleCode.localeCompare(b.roleCode, "en");
 }
 
 type UsersPageData = {
@@ -118,7 +222,27 @@ function toErrorMessage(error: unknown) {
 type UserRow = TenantUserRoleRecord & Record<string, unknown>;
 
 export default async function UsersPage() {
-  const { users, errors } = await loadUsersData();
+  const { users, roles, errors } = await loadUsersData();
+  const sortedRoles = [...roles].sort(compareRoles);
+  const assignableRoles = sortedRoles.filter((role) => role.assignable);
+  const activeUsers = users.filter((user) => user.status === "active").length;
+  const invitedUsers = users.filter((user) => user.status === "invited").length;
+  const adminUsers = users.filter(
+    (user) => user.roleCode === "tenant_admin",
+  ).length;
+  const optOutUsers = users.filter(
+    (user) => user.approvalNotificationOptOut,
+  ).length;
+  const latestUpdated = users.reduce<string | null>((latest, user) => {
+    if (!latest) return user.updatedAt;
+    return new Date(user.updatedAt) > new Date(latest)
+      ? user.updatedAt
+      : latest;
+  }, null);
+  const roleCatalogSubtitle =
+    sortedRoles.length > 0
+      ? `可指派 ${assignableRoles.length} / ${sortedRoles.length} · 最新 ${formatUpdated(latestUpdated)}`
+      : "尚未載入角色目錄";
 
   const columns: CanvasTableColumn<UserRow>[] = [
     {
@@ -183,26 +307,145 @@ export default async function UsersPage() {
           />
         ) : null}
 
-        <CanvasCard theme={th} padding={0}>
-          {users.length > 0 ? (
-            <CanvasTable<UserRow>
+        <div style={kpiGridStyle}>
+          <CanvasKPI
+            theme={th}
+            label="Users"
+            value={formatCount(users.length)}
+            sub="tenant roster"
+          />
+          <CanvasKPI
+            theme={th}
+            label="Roles"
+            value={formatCount(sortedRoles.length)}
+            sub={`${assignableRoles.length} assignable`}
+          />
+          <CanvasKPI
+            theme={th}
+            label="Active"
+            value={formatCount(activeUsers)}
+            sub="current access"
+          />
+          <CanvasKPI
+            theme={th}
+            label="Invited"
+            value={formatCount(invitedUsers)}
+            sub={
+              optOutUsers > 0
+                ? `${formatCount(optOutUsers)} opt-out`
+                : "approval mail on"
+            }
+          />
+        </div>
+
+        <div style={contentGridStyle}>
+          <CanvasCard theme={th} padding={0} style={rosterCardStyle}>
+            {users.length > 0 ? (
+              <CanvasTable<UserRow>
+                theme={th}
+                columns={columns}
+                rows={users as UserRow[]}
+              />
+            ) : (
+              <div style={emptyStateStyle}>
+                目前沒有任何租戶成員，請邀請首位成員。
+              </div>
+            )}
+          </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="角色目錄"
+            subtitle={roleCatalogSubtitle}
+            style={sideCardStyle}
+          >
+            <CanvasDL
               theme={th}
-              columns={columns}
-              rows={users as UserRow[]}
+              cols={2}
+              items={[
+                {
+                  k: "租戶成員",
+                  v: formatCount(users.length),
+                  mono: true,
+                },
+                {
+                  k: "tenant_admin",
+                  v: formatCount(adminUsers),
+                  mono: true,
+                },
+                {
+                  k: "可指派角色",
+                  v: `${formatCount(assignableRoles.length)} / ${formatCount(sortedRoles.length)}`,
+                  mono: true,
+                },
+                {
+                  k: "通知 opt-out",
+                  v: formatCount(optOutUsers),
+                  mono: true,
+                },
+              ]}
             />
-          ) : (
-            <div
-              style={{
-                padding: 24,
-                color: th.textMuted,
-                fontSize: 12.5,
-                textAlign: "center",
-              }}
+
+            <div style={{ height: 16 }} />
+
+            <CanvasField
+              theme={th}
+              label="可指派角色"
+              hint="ROLE 欄位沿用 tenant user command 可用的後端 catalog。"
             >
-              目前沒有任何租戶成員，請邀請首位成員。
-            </div>
-          )}
-        </CanvasCard>
+              {assignableRoles.length > 0 ? (
+                <div style={rolePillGridStyle}>
+                  {assignableRoles.map((role) => (
+                    <CanvasPill
+                      key={role.roleCode}
+                      theme={th}
+                      tone={getRoleCatalogTone(role)}
+                    >
+                      {getRoleLabel(role.roleCode)}
+                    </CanvasPill>
+                  ))}
+                </div>
+              ) : (
+                <div style={emptyStateStyle}>目前沒有可指派角色</div>
+              )}
+            </CanvasField>
+
+            <CanvasField
+              theme={th}
+              label="角色說明"
+              hint="display name 與 description 直接來自 role catalog。"
+            >
+              {sortedRoles.length > 0 ? (
+                <div style={roleListStyle}>
+                  {sortedRoles.map((role, index) => (
+                    <div
+                      key={role.roleCode}
+                      style={
+                        index === sortedRoles.length - 1
+                          ? undefined
+                          : roleListItemStyle
+                      }
+                    >
+                      <div style={roleListMetaStyle}>
+                        <span style={roleListTitleStyle}>
+                          {role.displayName || getRoleLabel(role.roleCode)}
+                        </span>
+                        <CanvasPill theme={th} tone={getRoleCatalogTone(role)}>
+                          {role.roleCode}
+                        </CanvasPill>
+                      </div>
+                      <div style={roleListDescriptionStyle}>
+                        {role.description}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={emptyStateStyle}>角色目錄資料目前不可用</div>
+              )}
+            </CanvasField>
+          </CanvasCard>
+        </div>
       </div>
     </div>
   );

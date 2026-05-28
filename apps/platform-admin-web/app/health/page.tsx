@@ -155,12 +155,14 @@ export default function HealthPage() {
         client.getForwarderAdaptersHealth() as Promise<AdapterHealthRecord[]>,
         client.getOperationalObservability(),
       ]);
-      const adapterList: AdapterHealth[] = adapterData.map((adapter) => ({
+      const adapterList: AdapterHealth[] = adapterData.map(
+        (adapter: AdapterHealthRecord) => ({
         adapterId: adapter.platformCode,
         status: adapter.status ?? "unknown",
         lastCheck: adapter.lastCheckedAt ?? "",
         message: adapter.lastError,
-      }));
+        }),
+      );
 
       setAdapters(adapterList);
       setObservability(operationalData);
