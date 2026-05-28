@@ -17,6 +17,7 @@ const en = {
   "nav.attendance": "Attendance",
   "nav.incidents": "Incidents",
   "nav.maintenance": "Maintenance",
+  "nav.approvalRequests": "Approval Queue",
   "nav.vehicles": "Vehicles",
   "nav.drivers": "Drivers",
   "nav.contracts": "Contracts",
@@ -1481,6 +1482,82 @@ const en = {
   "driverEarnings.revenueBeforeFees": "Revenue before fees and subsidy",
   "driverEarnings.platformFee": "Platform fee retained from gross",
   "driverEarnings.supportPrograms": "Support programs credited to driver",
+  "approvalRequests.title": "Approval Queue",
+  "approvalRequests.subtitle":
+    "Cross-tenant pending approvals with deadline focus, audit context, and read-only ops actions.",
+  "approvalRequests.kpi.pending": "Pending requests",
+  "approvalRequests.kpi.pendingSub": "Cross-tenant queue visible to ops",
+  "approvalRequests.kpi.expiringSoon": "Expires in 4h",
+  "approvalRequests.kpi.expiringSoonSub": "Deadline-first follow-up window",
+  "approvalRequests.kpi.breached": "SLA breached",
+  "approvalRequests.kpi.breachedSub": "Requests already beyond timeout",
+  "approvalRequests.kpi.acknowledged": "Breach acknowledged",
+  "approvalRequests.kpi.acknowledgedSub": "Ops has already seen the breach",
+  "approvalRequests.filters.title": "Queue filters",
+  "approvalRequests.filters.tenant": "Tenant ID",
+  "approvalRequests.filters.tenantPlaceholder": "tenant-demo-001",
+  "approvalRequests.filters.expires": "Expiry window",
+  "approvalRequests.filters.statusOutstanding": "All outstanding",
+  "approvalRequests.filters.expires4h": "Expires before now + 4h",
+  "approvalRequests.filters.expiresAll": "All deadlines",
+  "approvalRequests.filters.apply": "Apply filters",
+  "approvalRequests.queue.title": "Pending queue",
+  "approvalRequests.queue.empty":
+    "No approval requests match the current filters.",
+  "approvalRequests.queue.deadline": "Deadline",
+  "approvalRequests.queue.sla": "SLA state",
+  "approvalRequests.queue.approvers": "Resolved approvers",
+  "approvalRequests.detail.title": "Approval detail",
+  "approvalRequests.detail.empty":
+    "Select a request to inspect its evaluation snapshot.",
+  "approvalRequests.detail.tenant": "Tenant",
+  "approvalRequests.detail.booking": "Booking",
+  "approvalRequests.detail.order": "Order",
+  "approvalRequests.detail.timeout": "Timeout",
+  "approvalRequests.detail.lastNudged": "Last nudged",
+  "approvalRequests.detail.breachAcknowledged": "Breach acknowledged",
+  "approvalRequests.actions.viewAudit": "View tenant audit",
+  "approvalRequests.actions.nudge": "Nudge approver",
+  "approvalRequests.actions.nudgeUnavailableState":
+    "Only outstanding approval requests can be nudged.",
+  "approvalRequests.actions.acknowledge": "Acknowledge SLA breach",
+  "approvalRequests.actions.awaitingBreach":
+    "SLA acknowledgement becomes available after the request is overdue.",
+  "approvalRequests.actions.acknowledgedState":
+    "Ops has already acknowledged this SLA breach.",
+  "approvalRequests.snapshot.outcome": "Evaluation outcome",
+  "approvalRequests.snapshot.decision": "Decision",
+  "approvalRequests.snapshot.reasonCodes": "Reason codes",
+  "approvalRequests.snapshot.rules": "Matched rules",
+  "approvalRequests.snapshot.quota": "Quota impacts",
+  "approvalRequests.snapshot.noQuota":
+    "No quota impacts were captured in this snapshot.",
+  "approvalRequests.audit.title": "Tenant audit context",
+  "approvalRequests.audit.empty":
+    "No tenant audit rows are available for this request.",
+  "approvalRequests.flash.nudgedTitle": "Approver nudge recorded",
+  "approvalRequests.flash.nudgedBody":
+    "P1 does not send a real notification. The nudge was written as an audit event only.",
+  "approvalRequests.flash.nudgeUnavailableTitle":
+    "Approver nudge is not available",
+  "approvalRequests.flash.nudgeUnavailableBody":
+    "This approval request is no longer outstanding, so ops cannot nudge the approver.",
+  "approvalRequests.flash.ackTitle": "SLA breach acknowledged",
+  "approvalRequests.flash.ackBody":
+    "The queue now records that ops has seen this overdue approval request.",
+  "approvalRequests.flash.ackUnavailableTitle":
+    "SLA breach is not available yet",
+  "approvalRequests.flash.ackUnavailableBody":
+    "This approval request is not overdue, or the breach has already been resolved.",
+  "approvalRequests.flash.errorTitle": "Approval request missing",
+  "approvalRequests.flash.errorBody":
+    "The selected approval request could not be resolved from the current queue.",
+  "approvalRequests.status.pending": "Pending",
+  "approvalRequests.status.approved": "Approved",
+  "approvalRequests.status.rejected": "Rejected",
+  "approvalRequests.status.cancelled_by_re_evaluation":
+    "Cancelled by re-evaluation",
+  "approvalRequests.status.timeout_escalated": "Timeout escalated",
 };
 
 const zh: Record<keyof typeof en, string> = {
@@ -1500,6 +1577,7 @@ const zh: Record<keyof typeof en, string> = {
   "nav.attendance": "出勤",
   "nav.incidents": "事故管理",
   "nav.maintenance": "維修保養",
+  "nav.approvalRequests": "核准佇列",
   "nav.vehicles": "車輛",
   "nav.drivers": "司機",
   "nav.contracts": "合約",
@@ -2885,6 +2963,74 @@ const zh: Record<keyof typeof en, string> = {
   "driverEarnings.revenueBeforeFees": "扣除費用與補助前的收益",
   "driverEarnings.platformFee": "從總收入保留的平台費用",
   "driverEarnings.supportPrograms": "計入司機的支持計畫",
+  "approvalRequests.title": "核准佇列",
+  "approvalRequests.subtitle":
+    "跨 tenant 監看待核准請求，優先聚焦時限、audit 脈絡與唯讀營運動作。",
+  "approvalRequests.kpi.pending": "待處理請求",
+  "approvalRequests.kpi.pendingSub": "營運可見的跨 tenant 隊列",
+  "approvalRequests.kpi.expiringSoon": "4 小時內到期",
+  "approvalRequests.kpi.expiringSoonSub": "以 deadline 為優先的 follow-up 視窗",
+  "approvalRequests.kpi.breached": "SLA 已逾期",
+  "approvalRequests.kpi.breachedSub": "已超過 timeout 的請求",
+  "approvalRequests.kpi.acknowledged": "已確認逾期",
+  "approvalRequests.kpi.acknowledgedSub": "營運已看過該 breach",
+  "approvalRequests.filters.title": "隊列篩選",
+  "approvalRequests.filters.tenant": "Tenant ID",
+  "approvalRequests.filters.tenantPlaceholder": "tenant-demo-001",
+  "approvalRequests.filters.expires": "到期視窗",
+  "approvalRequests.filters.statusOutstanding": "所有待處理中的請求",
+  "approvalRequests.filters.expires4h": "到期時間早於現在 + 4 小時",
+  "approvalRequests.filters.expiresAll": "所有截止時間",
+  "approvalRequests.filters.apply": "套用篩選",
+  "approvalRequests.queue.title": "待處理隊列",
+  "approvalRequests.queue.empty": "目前篩選條件下沒有核准請求。",
+  "approvalRequests.queue.deadline": "截止時間",
+  "approvalRequests.queue.sla": "SLA 狀態",
+  "approvalRequests.queue.approvers": "已解析 approver",
+  "approvalRequests.detail.title": "核准詳情",
+  "approvalRequests.detail.empty": "選擇一筆請求以查看 evaluation snapshot。",
+  "approvalRequests.detail.tenant": "租戶",
+  "approvalRequests.detail.booking": "Booking",
+  "approvalRequests.detail.order": "Order",
+  "approvalRequests.detail.timeout": "Timeout",
+  "approvalRequests.detail.lastNudged": "最近一次 nudge",
+  "approvalRequests.detail.breachAcknowledged": "逾期確認時間",
+  "approvalRequests.actions.viewAudit": "查看 tenant audit",
+  "approvalRequests.actions.nudge": "催促 approver",
+  "approvalRequests.actions.nudgeUnavailableState":
+    "只有仍在待處理中的 approval request 才能催促 approver。",
+  "approvalRequests.actions.acknowledge": "確認 SLA breach",
+  "approvalRequests.actions.awaitingBreach":
+    "必須等這筆請求逾時後，才能確認 SLA breach。",
+  "approvalRequests.actions.acknowledgedState": "營運已確認這筆 SLA breach。",
+  "approvalRequests.snapshot.outcome": "Evaluation 結果",
+  "approvalRequests.snapshot.decision": "Decision",
+  "approvalRequests.snapshot.reasonCodes": "Reason codes",
+  "approvalRequests.snapshot.rules": "命中的規則",
+  "approvalRequests.snapshot.quota": "Quota 影響",
+  "approvalRequests.snapshot.noQuota": "這筆 snapshot 沒有記錄 quota impact。",
+  "approvalRequests.audit.title": "Tenant audit 脈絡",
+  "approvalRequests.audit.empty": "這筆請求目前沒有可顯示的 tenant audit 列。",
+  "approvalRequests.flash.nudgedTitle": "已記錄 approver nudge",
+  "approvalRequests.flash.nudgedBody":
+    "P1 不會真的送通知；這次 nudge 只會寫入 audit event。",
+  "approvalRequests.flash.nudgeUnavailableTitle": "目前不能催促 approver",
+  "approvalRequests.flash.nudgeUnavailableBody":
+    "這筆 approval request 已不再是 outstanding 狀態，因此營運不能再催促 approver。",
+  "approvalRequests.flash.ackTitle": "已確認 SLA breach",
+  "approvalRequests.flash.ackBody":
+    "隊列現在會記錄營運已看過這筆逾期的 approval request。",
+  "approvalRequests.flash.ackUnavailableTitle": "目前不能確認 SLA breach",
+  "approvalRequests.flash.ackUnavailableBody":
+    "這筆 approval request 尚未逾時，或 breach 已不需要再次確認。",
+  "approvalRequests.flash.errorTitle": "找不到核准請求",
+  "approvalRequests.flash.errorBody":
+    "目前隊列中無法解析你選擇的 approval request。",
+  "approvalRequests.status.pending": "待處理",
+  "approvalRequests.status.approved": "已核准",
+  "approvalRequests.status.rejected": "已拒絕",
+  "approvalRequests.status.cancelled_by_re_evaluation": "重新評估後取消",
+  "approvalRequests.status.timeout_escalated": "逾時升級",
 };
 
 export const translations: Record<Locale, Record<string, string>> = { en, zh };

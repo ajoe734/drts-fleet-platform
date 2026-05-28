@@ -1385,6 +1385,11 @@ export interface TenantBookingApprovalRequestRecord {
   escalatedAt: string | null;
   fallbackPolicy: TenantApprovalFallbackPolicy;
   escalationTarget: TenantPrincipalRef | null;
+  opsLastNudgedAt: string | null;
+  opsLastNudgedBy: string | null;
+  opsSlaAcknowledgedAt: string | null;
+  opsSlaAcknowledgedBy: string | null;
+  opsSlaAcknowledgedNote: string | null;
   createdAt: string;
   resolvedAt: string | null;
 }
@@ -1392,6 +1397,12 @@ export interface TenantBookingApprovalRequestRecord {
 export interface ListTenantBookingApprovalRequestsQuery {
   status?: TenantBookingApprovalRequestStatus;
   bookingId?: string;
+}
+
+export interface ListOpsPendingApprovalRequestsQuery {
+  tenantId?: string;
+  status?: TenantBookingApprovalRequestStatus;
+  expiresBefore?: string;
 }
 
 export interface ApproveTenantBookingApprovalRequestCommand {
@@ -1405,6 +1416,14 @@ export interface RejectTenantBookingApprovalRequestCommand {
 
 export interface EscalateTenantBookingApprovalRequestCommand {
   reasonNote?: string | null;
+}
+
+export interface NudgeOpsApprovalRequestCommand {
+  note?: string | null;
+}
+
+export interface AcknowledgeOpsApprovalRequestBreachCommand {
+  note?: string | null;
 }
 
 // --- Tenant Quotas ---

@@ -6,6 +6,7 @@
  */
 
 import type {
+  AcknowledgeOpsApprovalRequestBreachCommand,
   AddComplaintCaseNoteCommand,
   AddReconciliationIssueCommentCommand,
   ApplyManualFareOverrideCommand,
@@ -174,8 +175,10 @@ import type {
   ApproveTenantBookingApprovalRequestCommand,
   EscalateTenantBookingApprovalRequestCommand,
   EvaluateTenantApprovalRuleCommand,
+  ListOpsPendingApprovalRequestsQuery,
   ListTenantBookingApprovalRequestsQuery,
   ListTenantApprovalRulesQuery,
+  NudgeOpsApprovalRequestCommand,
   ReorderTenantApprovalRulesCommand,
   RejectTenantBookingApprovalRequestCommand,
   TenantCostCenterCoverageReport,
@@ -1500,6 +1503,44 @@ export class ApiClient {
   ): Promise<TenantBookingApprovalRequestRecord> {
     return this.post<TenantBookingApprovalRequestRecord>(
       `/api/tenant/approval-requests/${encodeURIComponent(approvalRequestId)}/escalate`,
+      { body: command },
+    );
+  }
+
+  async listOpsPendingApprovalRequests(
+    query: ListOpsPendingApprovalRequestsQuery = {},
+  ): Promise<TenantBookingApprovalRequestRecord[]> {
+    const params = new URLSearchParams();
+    if (query.tenantId) {
+      params.set("tenantId", query.tenantId);
+    }
+    if (query.status) {
+      params.set("status", query.status);
+    }
+    if (query.expiresBefore) {
+      params.set("expiresBefore", query.expiresBefore);
+    }
+    return this.getList<TenantBookingApprovalRequestRecord>(
+      `/api/ops/approval-requests${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async nudgeOpsApprovalRequest(
+    approvalRequestId: string,
+    command: NudgeOpsApprovalRequestCommand = {},
+  ): Promise<TenantBookingApprovalRequestRecord> {
+    return this.post<TenantBookingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/nudge`,
+      { body: command },
+    );
+  }
+
+  async acknowledgeOpsBreach(
+    approvalRequestId: string,
+    command: AcknowledgeOpsApprovalRequestBreachCommand = {},
+  ): Promise<TenantBookingApprovalRequestRecord> {
+    return this.post<TenantBookingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/acknowledge-breach`,
       { body: command },
     );
   }

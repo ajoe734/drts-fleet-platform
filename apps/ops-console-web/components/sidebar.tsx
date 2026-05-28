@@ -19,6 +19,7 @@ import {
   BarChart3,
   DollarSign,
   AlertTriangle,
+  ShieldAlert,
   Wrench,
   Languages,
 } from "lucide-react";
@@ -126,6 +127,13 @@ export function Sidebar({ children }: SidebarProps) {
           href: "/maintenance",
           label: t("nav.maintenance"),
           icon: <Wrench size={16} />,
+        },
+        {
+          href: "/approval-requests",
+          label: t("nav.approvalRequests"),
+          icon: <ShieldAlert size={16} />,
+          badge: "SLA",
+          badgeTone: "danger",
         },
       ],
     },
