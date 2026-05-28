@@ -17,7 +17,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -43,18 +42,20 @@ type ApiKeyManagerProps = {
 
 type ApiKeyState = "active" | "expiring" | "expired" | "revoked";
 type StatusFilter = "all" | ApiKeyState;
-type ApiKeyRow = TenantApiKeyRecord & Record<string, unknown>;
-type ConfirmIntent =
-  | {
-      kind: "rotate";
-      apiKey: TenantApiKeyRecord;
-      action: ResourceActionDescriptor;
-    }
-  | {
-      kind: "revoke";
-      apiKey: TenantApiKeyRecord;
-      action: ResourceActionDescriptor;
-    };
+type SupportedEmptyReason =
+  | "no_data"
+  | "not_provisioned"
+  | "fetch_failed"
+  | "permission_denied"
+  | "external_unavailable"
+  | "filtered_empty";
+type ApiKeyResource = TenantApiKeyRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+type GovernanceResource = TenantIntegrationGovernancePackage & {
+  availableActions?: ResourceActionDescriptor[];
+};
+type ApiKeyRow = ApiKeyResource & Record<string, unknown>;
 
 type SecretRevealState = {
   title: string;
@@ -63,6 +64,26 @@ type SecretRevealState = {
   keyName: string;
   scopes: string[];
   expiresAt: string | null;
+};
+
+type ActionComposerState = {
+  mode: "issue" | "rotate";
+  title: string;
+  subtitle: string;
+  submitLabel: string;
+  action: ResourceActionDescriptor;
+  apiKeyId?: string;
+  initialReason?: string;
+  keyName: string;
+  expiresAt: string;
+  scopes: string[];
+  reason: string;
+};
+
+type RevokeIntent = {
+  apiKey: ApiKeyResource;
+  action: ResourceActionDescriptor;
+  reason: string;
 };
 
 const th = buildCanvasTheme({
@@ -82,6 +103,11 @@ const REFRESH_LABELS: Record<RefreshTier, string> = {
   manual: "T6 manual",
 };
 
+const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
+  dateStyle: "short",
+  timeStyle: "short",
+});
+
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "flex",
@@ -89,43 +115,91 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const heroGridStyle: CSSProperties = {
+const topGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1.4fr minmax(280px, 0.8fr)",
+  gridTemplateColumns: "minmax(0, 1.25fr) minmax(280px, 0.85fr)",
   gap: 16,
 };
 
-const heroMetaStyle: CSSProperties = {
+const metaRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
   marginBottom: 12,
 };
 
-const heroCopyStyle: CSSProperties = {
+const copyStyle: CSSProperties = {
   margin: 0,
-  color: th.textMuted,
   fontSize: 12.5,
   lineHeight: 1.6,
+  color: th.textMuted,
 };
 
-const kpiGridStyle: CSSProperties = {
+const statGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: 12,
 };
 
-const toolRowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(220px, 1fr) auto auto auto",
-  gap: 12,
-  alignItems: "end",
+const statTileStyle: CSSProperties = {
+  borderRadius: 12,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
+  padding: 14,
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
 };
 
-const actionCardGridStyle: CSSProperties = {
+const statLabelStyle: CSSProperties = {
+  fontSize: 11,
+  color: th.textDim,
+  textTransform: "uppercase",
+  letterSpacing: 0.4,
+};
+
+const statValueStyle: CSSProperties = {
+  fontSize: 24,
+  fontWeight: 700,
+  color: th.text,
+};
+
+const statSubtleStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: th.textMuted,
+};
+
+const utilityStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+const linkCardStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  borderRadius: 10,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
+  color: th.text,
+  padding: "10px 12px",
+  textDecoration: "none",
+};
+
+const linkMetaStyle: CSSProperties = {
+  display: "block",
+  marginTop: 2,
+  fontSize: 11.5,
+  color: th.textMuted,
+};
+
+const filterGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(420px, 1fr) minmax(280px, 0.8fr)",
-  gap: 16,
+  gridTemplateColumns: "minmax(220px, 1fr) 180px auto auto",
+  gap: 12,
+  alignItems: "end",
 };
 
 const fieldGridStyle: CSSProperties = {
@@ -140,48 +214,14 @@ const scopeGridStyle: CSSProperties = {
   gap: 8,
 };
 
-const utilityGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 16,
-};
-
-const emptyReasonGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  gap: 12,
-};
-
-const navListStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 8,
-};
-
-const navLinkStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 12,
-  borderRadius: 10,
-  border: `1px solid ${th.border}`,
-  padding: "10px 12px",
-  textDecoration: "none",
-  background: th.surfaceLo,
-  color: th.text,
-  fontSize: 12.5,
-};
-
-const inlineActionsStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
+const scopeChipInputStyle: CSSProperties = {
+  display: "none",
 };
 
 const helperTextStyle: CSSProperties = {
   fontSize: 11,
-  color: th.textDim,
   lineHeight: 1.5,
+  color: th.textDim,
 };
 
 const nativeInputStyle: CSSProperties = {
@@ -190,81 +230,62 @@ const nativeInputStyle: CSSProperties = {
   border: `1px solid ${th.border}`,
   borderRadius: 8,
   padding: "8px 10px",
+  boxSizing: "border-box",
   fontSize: 12.5,
   color: th.text,
   outline: "none",
   fontFamily: th.fontFamily,
-  boxSizing: "border-box",
 };
 
 const nativeMonoInputStyle: CSSProperties = {
   ...nativeInputStyle,
-  fontFamily: th.monoFamily,
   fontSize: 11.5,
+  fontFamily: th.monoFamily,
 };
 
-const selectStyle: CSSProperties = {
+const textareaStyle: CSSProperties = {
   ...nativeInputStyle,
-  appearance: "none",
+  minHeight: 96,
+  resize: "vertical",
 };
 
-const primaryButtonStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 6,
-  padding: "5px 10px",
-  fontSize: 12,
-  height: 28,
-  fontWeight: 600,
-  background: th.accent,
-  color: "#fff",
-  border: `1px solid ${th.accent}`,
-  borderRadius: 7,
-  cursor: "pointer",
-  lineHeight: 1,
-  fontFamily: th.fontFamily,
-};
-
-const secondaryButtonStyle: CSSProperties = {
-  ...primaryButtonStyle,
-  background: th.surface,
-  color: th.text,
-  border: `1px solid ${th.border}`,
+const monoStyle: CSSProperties = {
+  fontFamily: th.monoFamily,
+  fontSize: 11,
 };
 
 const nameCellStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 5,
+  gap: 6,
 };
 
-const namePrimaryStyle: CSSProperties = {
-  color: th.text,
+const nameMainStyle: CSSProperties = {
   fontWeight: 600,
+  color: th.text,
 };
 
-const nameMetaRowStyle: CSSProperties = {
+const nameMetaStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
-  alignItems: "center",
   gap: 8,
   fontSize: 11,
   color: th.textDim,
   fontFamily: th.monoFamily,
 };
 
-const monoCodeStyle: CSSProperties = {
-  fontFamily: th.monoFamily,
-  fontSize: 11,
+const inlineActionStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
 };
 
-const tableEmptyStyle: CSSProperties = {
-  padding: 28,
+const emptyStateStyle: CSSProperties = {
+  padding: 24,
 };
 
 const emptyPanelStyle: CSSProperties = {
-  borderRadius: 12,
+  borderRadius: 14,
   border: `1px dashed ${th.border}`,
   background: th.surfaceLo,
   padding: 18,
@@ -273,48 +294,35 @@ const emptyPanelStyle: CSSProperties = {
   gap: 10,
 };
 
-const emptyPanelTitleStyle: CSSProperties = {
+const emptyTitleStyle: CSSProperties = {
   margin: 0,
   fontSize: 14,
   fontWeight: 700,
   color: th.text,
 };
 
-const emptyPanelBodyStyle: CSSProperties = {
+const emptyBodyStyle: CSSProperties = {
   margin: 0,
+  color: th.textMuted,
   fontSize: 12.5,
   lineHeight: 1.55,
-  color: th.textMuted,
-};
-
-const emptyBadgeRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-};
-
-const sectionLabelStyle: CSSProperties = {
-  marginBottom: 8,
-  fontSize: 10.5,
-  fontWeight: 600,
-  letterSpacing: 0.4,
-  textTransform: "uppercase",
-  color: th.textMuted,
 };
 
 const overlayStyle: CSSProperties = {
   position: "fixed",
   inset: 0,
+  padding: 24,
   background: "rgba(5, 9, 15, 0.72)",
   display: "flex",
-  alignItems: "center",
   justifyContent: "center",
-  padding: 24,
+  alignItems: "center",
   zIndex: 60,
 };
 
 const modalStyle: CSSProperties = {
-  width: "min(680px, 100%)",
+  width: "min(720px, 100%)",
+  maxHeight: "calc(100vh - 48px)",
+  overflow: "auto",
   background: th.surface,
   border: `1px solid ${th.border}`,
   borderRadius: 16,
@@ -327,8 +335,8 @@ const modalStyle: CSSProperties = {
 
 const modalHeaderStyle: CSSProperties = {
   display: "flex",
-  alignItems: "flex-start",
   justifyContent: "space-between",
+  alignItems: "flex-start",
   gap: 12,
 };
 
@@ -340,28 +348,10 @@ const modalTitleStyle: CSSProperties = {
 };
 
 const modalBodyTextStyle: CSSProperties = {
-  margin: 0,
-  color: th.textMuted,
+  margin: "6px 0 0",
   fontSize: 12.5,
   lineHeight: 1.6,
-};
-
-const plaintextKeyStyle: CSSProperties = {
-  display: "block",
-  background: "rgba(6, 11, 19, 0.72)",
-  border: `1px solid ${th.border}`,
-  borderRadius: 10,
-  padding: "12px 14px",
-  color: th.text,
-  fontSize: 12,
-  fontFamily: th.monoFamily,
-  overflowX: "auto",
-};
-
-const textareaStyle: CSSProperties = {
-  ...nativeInputStyle,
-  minHeight: 110,
-  resize: "vertical",
+  color: th.textMuted,
 };
 
 const modalFooterStyle: CSSProperties = {
@@ -370,6 +360,42 @@ const modalFooterStyle: CSSProperties = {
   alignItems: "center",
   gap: 12,
   flexWrap: "wrap",
+};
+
+const primaryButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  height: 30,
+  padding: "5px 12px",
+  borderRadius: 8,
+  border: `1px solid ${th.accent}`,
+  background: th.accent,
+  color: "#fff",
+  fontWeight: 600,
+  fontFamily: th.fontFamily,
+  fontSize: 12,
+  cursor: "pointer",
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  ...primaryButtonStyle,
+  background: th.surface,
+  color: th.text,
+  borderColor: th.border,
+};
+
+const plaintextKeyStyle: CSSProperties = {
+  display: "block",
+  padding: "12px 14px",
+  borderRadius: 10,
+  border: `1px solid ${th.border}`,
+  background: "rgba(6, 11, 19, 0.72)",
+  color: th.text,
+  fontFamily: th.monoFamily,
+  fontSize: 12,
+  overflowX: "auto",
 };
 
 const checkboxRowStyle: CSSProperties = {
@@ -384,7 +410,7 @@ const externalLinks = [
   {
     href: "https://admin.drts.io/tenants/yamato/integration-governance",
     label: "Platform Admin",
-    description: "break-glass 與治理審批",
+    description: "governance package 與 break-glass 審批",
   },
   {
     href: "https://ops.drts.io/audit?tenantId=yamato&module=tenant_api_key",
@@ -393,30 +419,28 @@ const externalLinks = [
   },
 ] as const;
 
-const integrationLinks = [
+const inAppLinks = [
   {
     href: "/integration-governance",
     label: "整合就緒度",
-    note: "aggregated readiness",
+    description: "aggregated readiness 與 onboarding checklist",
   },
-  { href: "/webhooks", label: "Webhook", note: "receiver health" },
-  { href: "/notifications", label: "通知偏好", note: "event × channel" },
-  { href: "/sla", label: "SLA", note: "tenant thresholds" },
+  {
+    href: "/webhooks",
+    label: "Webhook",
+    description: "receiver health 與 downstream delivery",
+  },
+  {
+    href: "/notifications",
+    label: "通知偏好",
+    description: "event × channel matrix",
+  },
+  {
+    href: "/sla",
+    label: "SLA",
+    description: "tenant thresholds 與 dependency policy",
+  },
 ] as const;
-
-const supportedEmptyReasons = [
-  "no_data",
-  "not_provisioned",
-  "fetch_failed",
-  "permission_denied",
-  "external_unavailable",
-  "filtered_empty",
-] as const satisfies readonly EmptyReason[];
-
-const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  dateStyle: "short",
-  timeStyle: "short",
-});
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "—";
@@ -425,7 +449,7 @@ function formatDateTime(value: string | null | undefined) {
   return dateTimeFormatter.format(parsed);
 }
 
-function formatDurationLabel(snapshotAt: string) {
+function formatFreshnessLabel(snapshotAt: string) {
   const snapshotMillis = new Date(snapshotAt).getTime();
   if (Number.isNaN(snapshotMillis)) return "unknown";
   const ageSeconds = Math.max(
@@ -433,27 +457,24 @@ function formatDurationLabel(snapshotAt: string) {
     Math.round((Date.now() - snapshotMillis) / 1000),
   );
   if (ageSeconds < 60) return `${ageSeconds}s ago`;
-  const ageMinutes = Math.round(ageSeconds / 60);
-  return `${ageMinutes}m ago`;
+  return `${Math.round(ageSeconds / 60)}m ago`;
 }
 
-function isRevoked(apiKey: TenantApiKeyRecord) {
+function isRevoked(apiKey: ApiKeyResource) {
   return Boolean(apiKey.revokedAt);
 }
 
-function resolveApiKeyState(apiKey: TenantApiKeyRecord): ApiKeyState {
+function resolveApiKeyState(apiKey: ApiKeyResource): ApiKeyState {
   if (isRevoked(apiKey)) return "revoked";
-  if (apiKey.expiresAt && new Date(apiKey.expiresAt).getTime() <= Date.now()) {
-    return "expired";
-  }
   if (apiKey.expiresAt) {
-    const millisUntilExpiry = new Date(apiKey.expiresAt).getTime() - Date.now();
-    if (millisUntilExpiry <= 7 * 24 * 60 * 60 * 1000) return "expiring";
+    const expiry = new Date(apiKey.expiresAt).getTime();
+    if (expiry <= Date.now()) return "expired";
+    if (expiry - Date.now() <= 7 * 24 * 60 * 60 * 1000) return "expiring";
   }
   return "active";
 }
 
-function getApiKeyStateTone(state: ApiKeyState): CanvasTone {
+function getApiKeyTone(state: ApiKeyState): CanvasTone {
   switch (state) {
     case "revoked":
       return "danger";
@@ -466,7 +487,7 @@ function getApiKeyStateTone(state: ApiKeyState): CanvasTone {
   }
 }
 
-function getApiKeyStateLabel(state: ApiKeyState) {
+function getApiKeyLabel(state: ApiKeyState) {
   switch (state) {
     case "revoked":
       return "revoked";
@@ -494,33 +515,39 @@ function createActionDescriptor(
   };
 }
 
-function getIssueAction(canIssue: boolean) {
+function getFallbackIssueAction(governance: GovernanceResource | null) {
   return createActionDescriptor(
     "issue",
-    canIssue,
+    Boolean(governance?.apiKeyPolicy.allowedScopes.length),
     "high",
-    canIssue ? undefined : "governance_unavailable",
+    governance ? "no_allowed_scopes" : "governance_unavailable",
   );
 }
 
-function getRotateAction(apiKey: TenantApiKeyRecord) {
-  const state = resolveApiKeyState(apiKey);
+function getFallbackRotateAction(apiKey: ApiKeyResource) {
   return createActionDescriptor(
     "rotate",
-    state !== "revoked",
+    !isRevoked(apiKey),
     "high",
-    state === "revoked" ? "already_revoked" : undefined,
+    isRevoked(apiKey) ? "already_revoked" : undefined,
   );
 }
 
-function getRevokeAction(apiKey: TenantApiKeyRecord) {
-  const state = resolveApiKeyState(apiKey);
+function getFallbackRevokeAction(apiKey: ApiKeyResource) {
   return createActionDescriptor(
     "revoke",
-    state !== "revoked",
+    !isRevoked(apiKey),
     "high",
-    state === "revoked" ? "already_revoked" : undefined,
+    isRevoked(apiKey) ? "already_revoked" : undefined,
   );
+}
+
+function resolveAction(
+  actions: ResourceActionDescriptor[] | undefined,
+  actionName: string,
+  fallback: ResourceActionDescriptor,
+) {
+  return actions?.find((action) => action.action === actionName) ?? fallback;
 }
 
 function buildCreateFormData(
@@ -535,19 +562,24 @@ function buildCreateFormData(
   return formData;
 }
 
-function buildRotateFormData(apiKey: TenantApiKeyRecord) {
+function buildRotateFormData(
+  apiKeyId: string,
+  keyName: string,
+  expiresAt: string,
+  scopes: string[],
+) {
   const formData = new FormData();
-  formData.set("apiKeyId", apiKey.apiKeyId);
-  formData.set("keyName", apiKey.keyName);
-  if (apiKey.expiresAt) formData.set("expiresAt", apiKey.expiresAt);
-  apiKey.scopes.forEach((scope: string) => formData.append("scopes", scope));
+  formData.set("apiKeyId", apiKeyId);
+  formData.set("keyName", keyName);
+  if (expiresAt.trim().length > 0) formData.set("expiresAt", expiresAt);
+  scopes.forEach((scope) => formData.append("scopes", scope));
   return formData;
 }
 
-function buildRevokeFormData(apiKey: TenantApiKeyRecord) {
+function buildRevokeFormData(apiKeyId: string, keyName: string) {
   const formData = new FormData();
-  formData.set("apiKeyId", apiKey.apiKeyId);
-  formData.set("keyName", apiKey.keyName);
+  formData.set("apiKeyId", apiKeyId);
+  formData.set("keyName", keyName);
   return formData;
 }
 
@@ -567,22 +599,11 @@ function getScopeChipStyle(selected: boolean): CSSProperties {
   };
 }
 
-function getFlashKeyName(
-  flash: ApiKeyFlashPayload,
-  fallbackName: string,
-  apiKeys: TenantApiKeyRecord[],
-) {
-  const matchedName = apiKeys.find((apiKey) => {
-    return flash.description.includes(apiKey.keyName);
-  })?.keyName;
-  return matchedName ?? fallbackName;
-}
-
-function renderActionDescriptor(
+function renderActionButton(
   descriptor: ResourceActionDescriptor,
   label: string,
-  onClick: () => void,
   pending: boolean,
+  onClick: () => void,
 ) {
   const disabled = pending || !descriptor.enabled;
   return (
@@ -596,7 +617,7 @@ function renderActionDescriptor(
       <CanvasBtn
         theme={th}
         size="xs"
-        variant={descriptor.riskLevel === "high" ? "ghost" : "ghost"}
+        variant="ghost"
         disabled={disabled}
         {...(!disabled ? { onClick } : {})}
       >
@@ -606,61 +627,70 @@ function renderActionDescriptor(
   );
 }
 
-function buildEmptyReasonCatalog(issueAction: ResourceActionDescriptor) {
-  const catalog: Record<
-    (typeof supportedEmptyReasons)[number],
-    {
-      title: string;
-      body: string;
-      tone: CanvasTone;
-      ctaLabel: string;
-      ctaHref?: string;
-      action?: ResourceActionDescriptor;
-    }
-  > = {
+function getEmptyStateCatalog(issueAction: ResourceActionDescriptor) {
+  return {
     no_data: {
+      tone: "info" as CanvasTone,
       title: "尚未建立任何 API 金鑰",
-      body: "租戶還沒有發出任何整合憑證。先建立 least-privilege key，之後系統只會顯示 mask 與 suffix。",
-      tone: "info",
-      ctaLabel: "建立第一把金鑰",
+      body: "先建立 least-privilege key；建立成功後只會在 reveal modal 顯示一次 plaintext。",
       action: issueAction,
+      ctaLabel: "建立第一把金鑰",
     },
     not_provisioned: {
+      tone: "warn" as CanvasTone,
       title: "租戶整合治理尚未開通",
-      body: "此租戶還沒有發布 API key policy，不能自助發鑰。需先完成 platform-admin 治理與 baseline package。",
-      tone: "warn",
+      body: "還沒有可用的 API key policy，無法確認 scope 與效期上限，不能安全發鑰。",
       ctaLabel: "前往 Platform Admin",
       ctaHref: externalLinks[0].href,
     },
     fetch_failed: {
+      tone: "danger" as CanvasTone,
       title: "API 金鑰清單讀取失敗",
-      body: "後端回傳失敗，清單未能完成載入。可重新整理後再試，或查看跨 app 稽核與治理狀態。",
-      tone: "danger",
+      body: "後端未回傳完整快照。請重新整理，或檢查治理與跨 actor 稽核狀態。",
       ctaLabel: "立即重整",
     },
     permission_denied: {
+      tone: "neutral" as CanvasTone,
       title: "目前身分只有只讀權限",
-      body: "你可以查看現有憑證與 audit context，但 issue / rotate / revoke 需要 tenant admin 或 integration manager authority。",
-      tone: "neutral",
-      ctaLabel: "查看稽核追溯",
+      body: "你可以查看 masked credential 與 audit context，但 issue / rotate / revoke 不可用。",
+      ctaLabel: "查看 Ops 稽核",
       ctaHref: externalLinks[1].href,
     },
     external_unavailable: {
+      tone: "warn" as CanvasTone,
       title: "外部整合依賴暫時不可用",
-      body: "治理 package 或 downstream trust service 異常，暫時不能確認 scope / expiry policy。請等外部依賴恢復後再操作。",
-      tone: "warn",
+      body: "治理 package 或 trust service 異常，無法安全確認 scope / expiry policy。",
       ctaLabel: "查看整合就緒度",
       ctaHref: "/integration-governance",
     },
     filtered_empty: {
+      tone: "info" as CanvasTone,
       title: "目前篩選條件沒有結果",
       body: "調整搜尋字詞或狀態篩選，即可重新顯示 active / expired / revoked 金鑰。",
-      tone: "info",
       ctaLabel: "清除篩選",
     },
-  };
+  } satisfies Record<
+    SupportedEmptyReason,
+    {
+      tone: CanvasTone;
+      title: string;
+      body: string;
+      ctaLabel: string;
+      ctaHref?: string;
+      action?: ResourceActionDescriptor;
+    }
+  >;
+}
 
-  return catalog;
+function getFlashKeyName(
+  flash: ApiKeyFlashPayload,
+  fallbackName: string,
+  apiKeys: ApiKeyResource[],
+) {
+  return (
+    apiKeys.find((apiKey) => flash.description.includes(apiKey.keyName))
+      ?.keyName ?? fallbackName
+  );
 }
 
 export function ApiKeyManager({
@@ -672,40 +702,27 @@ export function ApiKeyManager({
   emptyReasonOverride = null,
 }: ApiKeyManagerProps) {
   const router = useRouter();
+  const [pending, startTransition] = useTransition();
   const [flash, setFlash] = useState<ApiKeyFlashPayload | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(snapshotAt);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [query, setQuery] = useState("");
+  const [composer, setComposer] = useState<ActionComposerState | null>(null);
+  const [revokeIntent, setRevokeIntent] = useState<RevokeIntent | null>(null);
   const [secretReveal, setSecretReveal] = useState<SecretRevealState | null>(
     null,
   );
   const [secretAcknowledged, setSecretAcknowledged] = useState(false);
-  const [pending, startTransition] = useTransition();
-  const [showCreateCard, setShowCreateCard] = useState(false);
-  const [showPolicyCard, setShowPolicyCard] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [query, setQuery] = useState("");
-  const [confirmIntent, setConfirmIntent] = useState<ConfirmIntent | null>(
-    null,
-  );
-  const [reason, setReason] = useState("");
-  const [lastRefreshedAt, setLastRefreshedAt] = useState(snapshotAt);
-  const allowedScopes = governance?.apiKeyPolicy.allowedScopes ?? [];
+
+  const apiKeyResources = apiKeys as ApiKeyResource[];
+  const governanceResource = governance as GovernanceResource | null;
+  const allowedScopes = governanceResource?.apiKeyPolicy.allowedScopes ?? [];
   const compatibilityAliases = Object.entries(
-    (governance?.apiKeyPolicy.compatibilityAliases ?? {}) as Record<
+    (governanceResource?.apiKeyPolicy.compatibilityAliases ?? {}) as Record<
       string,
       string
     >,
   );
-  const [draftName, setDraftName] = useState("");
-  const [draftExpiresAt, setDraftExpiresAt] = useState("");
-  const [draftScopes, setDraftScopes] = useState<string[]>(allowedScopes);
-  const [draftReason, setDraftReason] = useState("");
-
-  useEffect(() => {
-    setDraftScopes((current) => {
-      const filtered = current.filter((scope) => allowedScopes.includes(scope));
-      if (filtered.length > 0) return filtered;
-      return [...allowedScopes];
-    });
-  }, [allowedScopes]);
 
   useEffect(() => {
     setLastRefreshedAt(snapshotAt);
@@ -713,21 +730,27 @@ export function ApiKeyManager({
 
   useEffect(() => {
     if (refreshTier === "manual") return;
-    const interval = window.setInterval(() => {
+    const timer = window.setInterval(() => {
       startTransition(() => {
         router.refresh();
         setLastRefreshedAt(new Date().toISOString());
       });
     }, AUTO_REFRESH_MS);
-    return () => window.clearInterval(interval);
+    return () => window.clearInterval(timer);
   }, [refreshTier, router]);
+
+  const issueAction = resolveAction(
+    governanceResource?.availableActions,
+    "issue",
+    getFallbackIssueAction(governanceResource),
+  );
 
   const sortedKeys = useMemo(
     () =>
-      [...apiKeys].sort((left, right) =>
+      [...apiKeyResources].sort((left, right) =>
         right.createdAt.localeCompare(left.createdAt),
       ),
-    [apiKeys],
+    [apiKeyResources],
   );
 
   const filteredKeys = useMemo(() => {
@@ -740,35 +763,35 @@ export function ApiKeyManager({
         apiKey.keyName.toLowerCase().includes(normalizedQuery) ||
         apiKey.apiKeyId.toLowerCase().includes(normalizedQuery) ||
         apiKey.keyPrefix.toLowerCase().includes(normalizedQuery) ||
-        apiKey.scopes.some((scope: string) =>
+        apiKey.scopes.some((scope) =>
           scope.toLowerCase().includes(normalizedQuery),
         )
       );
     });
   }, [query, sortedKeys, statusFilter]);
 
-  const activeCount = sortedKeys.filter(
-    (apiKey) => resolveApiKeyState(apiKey) === "active",
-  ).length;
-  const expiringCount = sortedKeys.filter(
-    (apiKey) => resolveApiKeyState(apiKey) === "expiring",
-  ).length;
-  const revokedCount = sortedKeys.filter(
-    (apiKey) => resolveApiKeyState(apiKey) === "revoked",
-  ).length;
-  const issueAction = getIssueAction(
-    Boolean(governance) && allowedScopes.length > 0,
+  const stateCounts = useMemo(
+    () => ({
+      active: sortedKeys.filter((item) => resolveApiKeyState(item) === "active")
+        .length,
+      expiring: sortedKeys.filter(
+        (item) => resolveApiKeyState(item) === "expiring",
+      ).length,
+      revoked: sortedKeys.filter(
+        (item) => resolveApiKeyState(item) === "revoked",
+      ).length,
+    }),
+    [sortedKeys],
   );
-  const emptyCatalog = buildEmptyReasonCatalog(issueAction);
 
-  const effectiveEmptyReason = useMemo<
-    (typeof supportedEmptyReasons)[number] | null
-  >(() => {
+  const emptyCatalog = getEmptyStateCatalog(issueAction);
+  const effectiveEmptyReason = useMemo<SupportedEmptyReason | null>(() => {
     if (emptyReasonOverride) {
-      return emptyReasonOverride as (typeof supportedEmptyReasons)[number];
+      return emptyReasonOverride as SupportedEmptyReason;
     }
     if (errors.length > 0 && sortedKeys.length === 0) return "fetch_failed";
-    if (!governance && sortedKeys.length === 0) return "not_provisioned";
+    if (!governanceResource && sortedKeys.length === 0)
+      return "not_provisioned";
     if (sortedKeys.length === 0) return "no_data";
     if (filteredKeys.length === 0) return "filtered_empty";
     return null;
@@ -776,61 +799,120 @@ export function ApiKeyManager({
     emptyReasonOverride,
     errors.length,
     filteredKeys.length,
-    governance,
+    governanceResource,
     sortedKeys.length,
   ]);
 
-  function resetCreateDraft() {
-    setDraftName("");
-    setDraftExpiresAt("");
-    setDraftScopes([...allowedScopes]);
-    setDraftReason("");
+  const emptyState = effectiveEmptyReason
+    ? emptyCatalog[effectiveEmptyReason]
+    : null;
+
+  function resetFilters() {
+    setQuery("");
+    setStatusFilter("all");
   }
 
-  function toggleScope(scope: string) {
-    setDraftScopes((current) =>
-      current.includes(scope)
-        ? current.filter((value) => value !== scope)
-        : [...current, scope],
+  function toggleComposerScope(scope: string) {
+    setComposer((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        scopes: current.scopes.includes(scope)
+          ? current.scopes.filter((value) => value !== scope)
+          : [...current.scopes, scope],
+      };
+    });
+  }
+
+  function openIssueComposer() {
+    setFlash(null);
+    setComposer({
+      mode: "issue",
+      title: "建立金鑰",
+      subtitle: "成功後會開啟 plaintext-once reveal modal。",
+      submitLabel: "建立金鑰",
+      action: issueAction,
+      keyName: "",
+      expiresAt: "",
+      scopes: [...allowedScopes],
+      reason: "",
+    });
+  }
+
+  function openRotateComposer(apiKey: ApiKeyResource) {
+    const rotateAction = resolveAction(
+      apiKey.availableActions,
+      "rotate",
+      getFallbackRotateAction(apiKey),
     );
+    setFlash(null);
+    setComposer({
+      mode: "rotate",
+      title: `輪替 ${apiKey.keyName}`,
+      subtitle: "輪替後舊憑證立即失效，新的 plaintext 僅會顯示一次。",
+      submitLabel: "確認輪替",
+      action: rotateAction,
+      apiKeyId: apiKey.apiKeyId,
+      keyName: apiKey.keyName,
+      expiresAt: apiKey.expiresAt ?? "",
+      scopes: [...apiKey.scopes],
+      reason: "",
+    });
+  }
+
+  function openRevokeModal(apiKey: ApiKeyResource) {
+    setFlash(null);
+    setRevokeIntent({
+      apiKey,
+      action: resolveAction(
+        apiKey.availableActions,
+        "revoke",
+        getFallbackRevokeAction(apiKey),
+      ),
+      reason: "",
+    });
   }
 
   function runAction(
     action: (formData: FormData) => Promise<ApiKeyFlashPayload>,
     formData: FormData,
-    options?: {
-      onSuccess?: () => void;
-      secretSource?: TenantApiKeyRecord;
-      reason?: string;
+    options: {
+      draftName: string;
+      draftScopes: string[];
+      draftExpiresAt: string;
+      reason: string;
     },
   ) {
     startTransition(async () => {
       const result = await action(formData);
-      const trimmedReason = options?.reason?.trim();
       const resolvedResult =
-        result.tone === "default" && trimmedReason
+        result.tone === "default" && options.reason.trim().length > 0
           ? {
               ...result,
-              description: `${result.description} Reason: ${trimmedReason}`,
+              description: `${result.description} Reason: ${options.reason.trim()}`,
             }
           : result;
+
       setFlash(resolvedResult);
 
+      if (resolvedResult.tone === "default" && resolvedResult.plaintextKey) {
+        setSecretReveal({
+          title: resolvedResult.title,
+          description: resolvedResult.description,
+          plaintextKey: resolvedResult.plaintextKey,
+          keyName: getFlashKeyName(
+            resolvedResult,
+            options.draftName,
+            apiKeyResources,
+          ),
+          scopes: options.draftScopes,
+          expiresAt: options.draftExpiresAt || null,
+        });
+        setSecretAcknowledged(false);
+      }
+
       if (resolvedResult.tone === "default") {
-        if (resolvedResult.plaintextKey) {
-          const source = options?.secretSource;
-          setSecretReveal({
-            title: resolvedResult.title,
-            description: resolvedResult.description,
-            plaintextKey: resolvedResult.plaintextKey,
-            keyName:
-              source?.keyName ?? getFlashKeyName(result, draftName, sortedKeys),
-            scopes: source?.scopes ?? draftScopes,
-            expiresAt: source?.expiresAt ?? (draftExpiresAt || null),
-          });
-          setSecretAcknowledged(false);
-        }
-        options?.onSuccess?.();
+        setComposer(null);
         router.refresh();
         setLastRefreshedAt(new Date().toISOString());
       }
@@ -839,15 +921,13 @@ export function ApiKeyManager({
 
   function downloadSecretFile() {
     if (!secretReveal) return;
-    const lines = [
+    const content = [
       `key_name=${secretReveal.keyName}`,
       `plaintext_key=${secretReveal.plaintextKey}`,
       `scopes=${secretReveal.scopes.join(",") || "none"}`,
       `expires_at=${secretReveal.expiresAt ?? "none"}`,
-    ];
-    const blob = new Blob([lines.join("\n")], {
-      type: "text/plain;charset=utf-8",
-    });
+    ].join("\n");
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = href;
@@ -864,10 +944,9 @@ export function ApiKeyManager({
   function dismissSecretModal() {
     if (!secretAcknowledged) return;
     setSecretReveal(null);
-    setFlash(null);
   }
 
-  function renderPrimaryBanner() {
+  function renderBanner() {
     if (flash?.tone === "warning") {
       return (
         <CanvasBanner
@@ -895,13 +974,13 @@ export function ApiKeyManager({
     return (
       <CanvasBanner
         theme={th}
-        tone={expiringCount > 0 ? "warn" : "info"}
-        icon={expiringCount > 0 ? "warn" : "info"}
+        tone={stateCounts.expiring > 0 ? "warn" : "info"}
+        icon={stateCounts.expiring > 0 ? "warn" : "info"}
         title="只在建立或輪替當下顯示完整金鑰"
         body={
-          expiringCount > 0
-            ? `有 ${expiringCount} 把金鑰已進入到期前 7 天視窗；請依 least-privilege 原則安排輪替。`
-            : "關閉 reveal modal 後只顯示 prefix 與 masked suffix；若遺失 plaintext，必須重新輪替。"
+          stateCounts.expiring > 0
+            ? `目前有 ${stateCounts.expiring} 把金鑰已進入到期前 7 天視窗，請安排輪替。`
+            : "關閉 reveal modal 後只保留 prefix 與 masked suffix；若遺失 plaintext，必須重新輪替或重新建立。"
         }
       />
     );
@@ -913,8 +992,8 @@ export function ApiKeyManager({
       w: 240,
       r: (row) => (
         <div style={nameCellStyle}>
-          <span style={namePrimaryStyle}>{row.keyName}</span>
-          <div style={nameMetaRowStyle}>
+          <span style={nameMainStyle}>{row.keyName}</span>
+          <div style={nameMetaStyle}>
             <span>{row.apiKeyId}</span>
             {row.revokedAt ? (
               <span>revoked {formatDateTime(row.revokedAt)}</span>
@@ -926,13 +1005,13 @@ export function ApiKeyManager({
     { h: "PREFIX", k: "keyPrefix", w: 92, mono: true },
     {
       h: "MASK",
-      w: 104,
+      w: 112,
       mono: true,
       r: (row) => `••••${row.maskedSuffix}`,
     },
     {
       h: "SCOPES",
-      w: 230,
+      w: 220,
       mono: true,
       r: (row) => (
         <div style={{ whiteSpace: "normal", lineHeight: 1.45 }}>
@@ -942,13 +1021,13 @@ export function ApiKeyManager({
     },
     {
       h: "LAST USED",
-      w: 132,
+      w: 126,
       mono: true,
       r: (row) => formatDateTime(row.lastUsedAt),
     },
     {
       h: "EXPIRES",
-      w: 132,
+      w: 126,
       mono: true,
       r: (row) => formatDateTime(row.expiresAt),
     },
@@ -958,8 +1037,8 @@ export function ApiKeyManager({
       r: (row) => {
         const state = resolveApiKeyState(row);
         return (
-          <CanvasPill theme={th} tone={getApiKeyStateTone(state)} dot>
-            {getApiKeyStateLabel(state)}
+          <CanvasPill theme={th} tone={getApiKeyTone(state)} dot>
+            {getApiKeyLabel(state)}
           </CanvasPill>
         );
       },
@@ -967,59 +1046,45 @@ export function ApiKeyManager({
     {
       h: "ACTIONS",
       w: 176,
-      r: (row) => {
-        const rotateAction = getRotateAction(row);
-        const revokeAction = getRevokeAction(row);
-        return (
-          <div style={inlineActionsStyle}>
-            {renderActionDescriptor(
-              rotateAction,
-              "輪替",
-              () => {
-                setReason("");
-                setConfirmIntent({
-                  kind: "rotate",
-                  apiKey: row,
-                  action: rotateAction,
-                });
-              },
-              pending,
-            )}
-            {renderActionDescriptor(
-              revokeAction,
-              "撤銷",
-              () => {
-                setReason("");
-                setConfirmIntent({
-                  kind: "revoke",
-                  apiKey: row,
-                  action: revokeAction,
-                });
-              },
-              pending,
-            )}
-          </div>
-        );
-      },
+      r: (row) => (
+        <div style={inlineActionStyle}>
+          {renderActionButton(
+            resolveAction(
+              row.availableActions,
+              "rotate",
+              getFallbackRotateAction(row),
+            ),
+            "輪替",
+            pending,
+            () => openRotateComposer(row),
+          )}
+          {renderActionButton(
+            resolveAction(
+              row.availableActions,
+              "revoke",
+              getFallbackRevokeAction(row),
+            ),
+            "撤銷",
+            pending,
+            () => openRevokeModal(row),
+          )}
+        </div>
+      ),
     },
   ];
-
-  const emptyState = effectiveEmptyReason
-    ? emptyCatalog[effectiveEmptyReason]
-    : null;
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
         title="API 金鑰"
-        subtitle="Live / sandbox · search / status filter · plaintext-once reveal · revoke 後永久不可復原"
+        subtitle="Live / sandbox · scope · last used · plaintext-once reveal · revoke 後永久不可復原"
         actions={
           <>
             <CanvasBtn
               theme={th}
-              icon="refresh"
               size="sm"
+              icon="refresh"
               onClick={() => {
                 startTransition(() => {
                   router.refresh();
@@ -1031,20 +1096,26 @@ export function ApiKeyManager({
             </CanvasBtn>
             <CanvasBtn
               theme={th}
-              icon="ext"
               size="sm"
-              onClick={() => setShowPolicyCard((current) => !current)}
+              icon="ext"
+              onClick={() => window.open(externalLinks[0].href, "_blank")}
             >
               API 文件
             </CanvasBtn>
-            <span title={issueAction.disabledReasonCode ?? "issue"}>
+            <span
+              title={
+                issueAction.enabled
+                  ? "建立金鑰"
+                  : (issueAction.disabledReasonCode ?? "issue_disabled")
+              }
+            >
               <CanvasBtn
                 theme={th}
                 variant="primary"
-                icon="key"
                 size="sm"
-                disabled={!issueAction.enabled}
-                onClick={() => setShowCreateCard((current) => !current)}
+                icon="key"
+                disabled={pending || !issueAction.enabled}
+                onClick={openIssueComposer}
               >
                 建立金鑰
               </CanvasBtn>
@@ -1054,15 +1125,15 @@ export function ApiKeyManager({
       />
 
       <div style={pageBodyStyle}>
-        {renderPrimaryBanner()}
+        {renderBanner()}
 
-        <div style={heroGridStyle}>
+        <div style={topGridStyle}>
           <CanvasCard
             theme={th}
             title="治理與操作"
             subtitle="§5.11 API key management"
           >
-            <div style={heroMetaStyle}>
+            <div style={metaRowStyle}>
               <CanvasPill theme={th} tone="info">
                 {REFRESH_LABELS[refreshTier]}
               </CanvasPill>
@@ -1073,363 +1144,147 @@ export function ApiKeyManager({
                 {errors.length > 0 ? "degraded snapshot" : "fresh snapshot"}
               </CanvasPill>
               <CanvasPill theme={th} tone="neutral">
-                refreshed {formatDurationLabel(lastRefreshedAt)}
+                refreshed {formatFreshnessLabel(lastRefreshedAt)}
               </CanvasPill>
             </div>
-            <p style={heroCopyStyle}>
-              API 金鑰頁面必須同時支援 issue / rotate / revoke，並且後續只保留
-              mask。 scope 與 expiry 受 tenant integration governance package
-              約束，不能在前端自行發明權限模型。
+            <p style={copyStyle}>
+              scope 與 expiry 受 tenant integration governance package 約束。 UI
+              會優先依 `availableActions` 顯示可執行 CTA；若後端尚未回傳，
+              才使用目前的安全 fallback。
             </p>
             <div style={{ height: 16 }} />
-            <div style={kpiGridStyle}>
-              <CanvasKPI
-                theme={th}
-                label="active"
-                value={String(activeCount)}
-                delta="healthy"
-                deltaTone="up"
-                sub="可用憑證"
-              />
-              <CanvasKPI
-                theme={th}
-                label="expiring"
-                value={String(expiringCount)}
-                delta="watch"
-                sub="7 天內到期"
-              />
-              <CanvasKPI
-                theme={th}
-                label="revoked"
-                value={String(revokedCount)}
-                delta="audit"
-                deltaTone="down"
-                sub="保留稽核可視"
-              />
+            <div style={statGridStyle}>
+              <div style={statTileStyle}>
+                <span style={statLabelStyle}>active</span>
+                <span style={statValueStyle}>{stateCounts.active}</span>
+                <span style={statSubtleStyle}>可用憑證</span>
+              </div>
+              <div style={statTileStyle}>
+                <span style={statLabelStyle}>expiring</span>
+                <span style={statValueStyle}>{stateCounts.expiring}</span>
+                <span style={statSubtleStyle}>7 天內到期</span>
+              </div>
+              <div style={statTileStyle}>
+                <span style={statLabelStyle}>revoked</span>
+                <span style={statValueStyle}>{stateCounts.revoked}</span>
+                <span style={statSubtleStyle}>保留稽核可視</span>
+              </div>
             </div>
           </CanvasCard>
 
           <CanvasCard
             theme={th}
-            title="Cross-app deep links"
-            subtitle="open in new tab"
+            title="治理與 deep links"
+            subtitle="cross-app targets open in new tab"
           >
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={utilityStackStyle}>
               {externalLinks.map((link) => (
                 <a
                   key={link.href}
                   href={link.href}
                   target="_blank"
                   rel="noreferrer"
-                  style={navLinkStyle}
+                  style={linkCardStyle}
                 >
                   <span>
                     <strong>{link.label}</strong>
-                    <span
-                      style={{
-                        display: "block",
-                        color: th.textMuted,
-                        marginTop: 2,
-                      }}
-                    >
-                      {link.description}
-                    </span>
+                    <span style={linkMetaStyle}>{link.description}</span>
                   </span>
-                  <span style={monoCodeStyle}>new tab</span>
+                  <span style={monoStyle}>new tab</span>
                 </a>
               ))}
             </div>
           </CanvasCard>
         </div>
 
-        {(showCreateCard || showPolicyCard) && (
-          <div style={actionCardGridStyle}>
-            {showCreateCard ? (
-              <CanvasCard
+        <CanvasCard
+          theme={th}
+          title="Governance package"
+          subtitle="published integration policy snapshot"
+        >
+          {governanceResource ? (
+            <>
+              <CanvasDL
                 theme={th}
-                title="建立金鑰"
-                subtitle="成功後會開啟 plaintext-once reveal modal"
-                actions={
-                  <CanvasBtn
-                    theme={th}
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => setShowCreateCard(false)}
-                  >
-                    收合
-                  </CanvasBtn>
-                }
-              >
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    setFlash(null);
-                    runAction(
-                      issueTenantApiKeyAction,
-                      buildCreateFormData(
-                        draftName,
-                        draftExpiresAt,
-                        draftScopes,
-                      ),
-                      {
-                        onSuccess: () => {
-                          setShowCreateCard(false);
-                          resetCreateDraft();
-                        },
-                        reason: draftReason,
-                        secretSource: {
-                          apiKeyId: "pending",
-                          tenantId: governance?.tenantId ?? "tenant-demo-001",
-                          keyName: draftName,
-                          keyPrefix: "",
-                          maskedSuffix: "",
-                          scopes: draftScopes,
-                          lastUsedAt: null,
-                          expiresAt: draftExpiresAt || null,
-                          revokedAt: null,
-                          createdAt: new Date().toISOString(),
-                        },
-                      },
-                    );
-                  }}
-                >
-                  <div style={fieldGridStyle}>
-                    <CanvasField theme={th} label="名稱" required>
-                      <input
-                        value={draftName}
-                        onChange={(event) => setDraftName(event.target.value)}
-                        placeholder="production-booking-sync"
-                        required
-                        style={nativeInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={th}
-                      label="到期時間"
-                      hint={
-                        governance
-                          ? `需帶時區。預設 ${governance.apiKeyPolicy.defaultLifetimeDays} 天，最長 ${governance.apiKeyPolicy.maxLifetimeDays} 天。`
-                          : "Governance package 未載入，無法確認預設有效期。"
-                      }
-                    >
-                      <input
-                        value={draftExpiresAt}
-                        onChange={(event) =>
-                          setDraftExpiresAt(event.target.value)
-                        }
-                        placeholder="2026-08-09T01:52:30Z"
-                        spellCheck={false}
-                        style={nativeMonoInputStyle}
-                      />
-                    </CanvasField>
-                  </div>
-
-                  <div style={{ height: 12 }} />
-
-                  <CanvasField
-                    theme={th}
-                    label="Scopes"
-                    required
-                    hint="依 least-privilege 選擇；至少一個 scope。"
-                  >
-                    <div style={scopeGridStyle}>
-                      {allowedScopes.length > 0 ? (
-                        allowedScopes.map((scope: string) => {
-                          const selected = draftScopes.includes(scope);
-                          return (
-                            <label
-                              key={scope}
-                              style={getScopeChipStyle(selected)}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selected}
-                                onChange={() => toggleScope(scope)}
-                                style={{ display: "none" }}
-                              />
-                              <span>{scope}</span>
-                            </label>
-                          );
-                        })
-                      ) : (
-                        <span style={helperTextStyle}>
-                          Governance package 尚未可用，暫時不能建立金鑰。
-                        </span>
-                      )}
-                    </div>
-                  </CanvasField>
-
-                  <div style={{ height: 12 }} />
-
-                  <CanvasField
-                    theme={th}
-                    label="建立原因"
-                    hint="High-risk action 需留下 operator reason；目前會附在成功 receipt 描述中。"
-                    required
-                  >
-                    <textarea
-                      value={draftReason}
-                      onChange={(event) => setDraftReason(event.target.value)}
-                      style={textareaStyle}
-                      placeholder="例如：new production integration for booking partner"
-                    />
-                  </CanvasField>
-
+                cols={3}
+                items={[
+                  {
+                    k: "Default lifetime",
+                    v: `${governanceResource.apiKeyPolicy.defaultLifetimeDays} days`,
+                    mono: true,
+                  },
+                  {
+                    k: "Maximum lifetime",
+                    v: `${governanceResource.apiKeyPolicy.maxLifetimeDays} days`,
+                    mono: true,
+                  },
+                  {
+                    k: "Expiry",
+                    v: governanceResource.apiKeyPolicy.requireExpiry
+                      ? "required"
+                      : "optional",
+                    mono: true,
+                  },
+                  {
+                    k: "Break-glass",
+                    v: governanceResource.apiKeyPolicy
+                      .breakGlassRequiresPlatformApproval
+                      ? "platform approval"
+                      : "not published",
+                    mono: true,
+                  },
+                  {
+                    k: "Revoke effect",
+                    v: governanceResource.apiKeyPolicy.revokeEffect,
+                    mono: true,
+                  },
+                  {
+                    k: "Generated",
+                    v: formatDateTime(governanceResource.generatedAt),
+                    mono: true,
+                  },
+                ]}
+              />
+              <div style={{ height: 14 }} />
+              <div style={scopeGridStyle}>
+                {allowedScopes.map((scope) => (
+                  <CanvasPill key={scope} theme={th} tone="info">
+                    {scope}
+                  </CanvasPill>
+                ))}
+              </div>
+              {compatibilityAliases.length > 0 ? (
+                <>
                   <div style={{ height: 14 }} />
-
-                  <div style={modalFooterStyle}>
-                    <span style={helperTextStyle}>
-                      full key 只會顯示一次；請在 reveal modal 內 copy 或下載。
-                    </span>
-                    <button
-                      type="submit"
-                      disabled={
-                        pending ||
-                        draftName.trim().length === 0 ||
-                        draftReason.trim().length === 0 ||
-                        draftScopes.length === 0 ||
-                        !governance
-                      }
-                      style={{
-                        ...primaryButtonStyle,
-                        opacity:
-                          pending ||
-                          draftName.trim().length === 0 ||
-                          draftReason.trim().length === 0 ||
-                          draftScopes.length === 0 ||
-                          !governance
-                            ? 0.55
-                            : 1,
-                        cursor:
-                          pending ||
-                          draftName.trim().length === 0 ||
-                          draftReason.trim().length === 0 ||
-                          draftScopes.length === 0 ||
-                          !governance
-                            ? "not-allowed"
-                            : "pointer",
-                      }}
-                    >
-                      {pending ? "建立中..." : "建立金鑰"}
-                    </button>
-                  </div>
-                </form>
-              </CanvasCard>
-            ) : null}
-
-            {showPolicyCard ? (
-              <CanvasCard
-                theme={th}
-                title="Governance package"
-                subtitle="Published integration policy snapshot"
-                actions={
-                  <CanvasBtn
+                  <CanvasDL
                     theme={th}
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => setShowPolicyCard(false)}
-                  >
-                    收合
-                  </CanvasBtn>
-                }
-              >
-                {governance ? (
-                  <>
-                    <CanvasDL
-                      theme={th}
-                      cols={2}
-                      items={[
-                        {
-                          k: "Default lifetime",
-                          v: `${governance.apiKeyPolicy.defaultLifetimeDays} days`,
-                          mono: true,
-                        },
-                        {
-                          k: "Maximum lifetime",
-                          v: `${governance.apiKeyPolicy.maxLifetimeDays} days`,
-                          mono: true,
-                        },
-                        {
-                          k: "Expiry",
-                          v: governance.apiKeyPolicy.requireExpiry
-                            ? "required"
-                            : "optional",
-                          mono: true,
-                        },
-                        {
-                          k: "Revoke effect",
-                          v: governance.apiKeyPolicy.revokeEffect,
-                          mono: true,
-                        },
-                        {
-                          k: "Break-glass",
-                          v: governance.apiKeyPolicy
-                            .breakGlassRequiresPlatformApproval
-                            ? "platform approval"
-                            : "not published",
-                          mono: true,
-                        },
-                        {
-                          k: "Generated",
-                          v: formatDateTime(governance.generatedAt),
-                          mono: true,
-                        },
-                      ]}
-                    />
-                    <div style={{ height: 14 }} />
-                    <div style={sectionLabelStyle}>Allowed scopes</div>
-                    <div style={scopeGridStyle}>
-                      {allowedScopes.map((scope: string) => (
-                        <CanvasPill key={scope} theme={th} tone="info">
-                          {scope}
-                        </CanvasPill>
-                      ))}
-                    </div>
-                    {compatibilityAliases.length > 0 ? (
-                      <>
-                        <div style={{ height: 14 }} />
-                        <div style={sectionLabelStyle}>
-                          Compatibility aliases
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 6,
-                          }}
-                        >
-                          {compatibilityAliases.map(([alias, target]) => (
-                            <div
-                              key={`${alias}-${target}`}
-                              style={monoCodeStyle}
-                            >
-                              {alias} {"->"} {target}
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    ) : null}
-                  </>
-                ) : (
-                  <CanvasBanner
-                    theme={th}
-                    tone="warn"
-                    icon="warn"
-                    title="Governance package unavailable"
-                    body="沒有治理封包時不能安全 issue 新金鑰，因為 scope 與 lifetime 上限不可驗證。"
+                    cols={2}
+                    items={compatibilityAliases.map(([alias, target]) => ({
+                      k: alias,
+                      v: target,
+                      mono: true,
+                    }))}
                   />
-                )}
-              </CanvasCard>
-            ) : null}
-          </div>
-        )}
+                </>
+              ) : null}
+            </>
+          ) : (
+            <CanvasBanner
+              theme={th}
+              tone="warn"
+              icon="warn"
+              title="Governance package unavailable"
+              body="沒有治理封包時無法安全確認 scope 與 lifetime 上限，因此建立金鑰會受限。"
+            />
+          )}
+        </CanvasCard>
 
         <CanvasCard
           theme={th}
           title="搜尋與篩選"
           subtitle="must-show data: search by name, filter by status"
         >
-          <div style={toolRowStyle}>
+          <div style={filterGridStyle}>
             <CanvasField theme={th} label="搜尋">
               <input
                 value={query}
@@ -1444,7 +1299,7 @@ export function ApiKeyManager({
                 onChange={(event) =>
                   setStatusFilter(event.target.value as StatusFilter)
                 }
-                style={selectStyle}
+                style={nativeInputStyle}
               >
                 <option value="all">all</option>
                 <option value="active">active</option>
@@ -1457,10 +1312,7 @@ export function ApiKeyManager({
               theme={th}
               size="sm"
               variant="ghost"
-              onClick={() => {
-                setQuery("");
-                setStatusFilter("all");
-              }}
+              onClick={resetFilters}
             >
               清除篩選
             </CanvasBtn>
@@ -1470,69 +1322,54 @@ export function ApiKeyManager({
           </div>
         </CanvasCard>
 
-        <CanvasCard theme={th} padding={0} title="金鑰清單">
+        <CanvasCard theme={th} title="金鑰清單" padding={0}>
           {emptyState ? (
-            <div style={tableEmptyStyle}>
+            <div style={emptyStateStyle}>
               <div style={emptyPanelStyle}>
-                <div style={emptyBadgeRowStyle}>
-                  <CanvasPill theme={th} tone={emptyState.tone}>
-                    {effectiveEmptyReason}
-                  </CanvasPill>
-                  {emptyReasonOverride ? (
-                    <CanvasPill theme={th} tone="accent">
-                      override active
-                    </CanvasPill>
-                  ) : null}
-                </div>
-                <h3 style={emptyPanelTitleStyle}>{emptyState.title}</h3>
-                <p style={emptyPanelBodyStyle}>{emptyState.body}</p>
-                <div style={inlineActionsStyle}>
+                <CanvasPill theme={th} tone={emptyState.tone}>
+                  {effectiveEmptyReason}
+                </CanvasPill>
+                <h3 style={emptyTitleStyle}>{emptyState.title}</h3>
+                <p style={emptyBodyStyle}>{emptyState.body}</p>
+                <div style={inlineActionStyle}>
                   {emptyState.action ? (
                     <CanvasBtn
                       theme={th}
-                      size="sm"
                       variant="primary"
+                      size="sm"
                       disabled={!emptyState.action.enabled}
-                      onClick={() => setShowCreateCard(true)}
+                      onClick={openIssueComposer}
                     >
                       {emptyState.ctaLabel}
                     </CanvasBtn>
                   ) : emptyState.ctaLabel === "立即重整" ? (
                     <CanvasBtn
                       theme={th}
-                      size="sm"
                       variant="primary"
+                      size="sm"
                       onClick={() => router.refresh()}
                     >
                       {emptyState.ctaLabel}
                     </CanvasBtn>
+                  ) : emptyState.ctaHref?.startsWith("http") ? (
+                    <a
+                      href={emptyState.ctaHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={linkCardStyle}
+                    >
+                      {emptyState.ctaLabel}
+                    </a>
                   ) : emptyState.ctaHref ? (
-                    emptyState.ctaHref.startsWith("http") ? (
-                      <a
-                        href={emptyState.ctaHref}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ ...navLinkStyle, justifyContent: "center" }}
-                      >
-                        {emptyState.ctaLabel}
-                      </a>
-                    ) : (
-                      <Link
-                        href={emptyState.ctaHref}
-                        style={{ ...navLinkStyle, justifyContent: "center" }}
-                      >
-                        {emptyState.ctaLabel}
-                      </Link>
-                    )
+                    <Link href={emptyState.ctaHref} style={linkCardStyle}>
+                      {emptyState.ctaLabel}
+                    </Link>
                   ) : (
                     <CanvasBtn
                       theme={th}
-                      size="sm"
                       variant="primary"
-                      onClick={() => {
-                        setQuery("");
-                        setStatusFilter("all");
-                      }}
+                      size="sm"
+                      onClick={resetFilters}
                     >
                       {emptyState.ctaLabel}
                     </CanvasBtn>
@@ -1549,98 +1386,234 @@ export function ApiKeyManager({
           )}
         </CanvasCard>
 
-        <div style={utilityGridStyle}>
-          <CanvasCard
-            theme={th}
-            title="整合 sitemap"
-            subtitle="entry / exits from spec"
+        <CanvasCard
+          theme={th}
+          title="關聯頁面"
+          subtitle="entry / exits from spec"
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: 10,
+            }}
           >
-            <div style={navListStyle}>
-              {integrationLinks.map((item) => (
-                <Link key={item.href} href={item.href} style={navLinkStyle}>
-                  <span>
-                    <strong>{item.label}</strong>
-                    <span
-                      style={{
-                        display: "block",
-                        color: th.textMuted,
-                        marginTop: 2,
-                      }}
-                    >
-                      {item.note}
-                    </span>
-                  </span>
-                  <span style={monoCodeStyle}>{item.href}</span>
-                </Link>
-              ))}
-            </div>
-          </CanvasCard>
-
-          <CanvasCard
-            theme={th}
-            title="EmptyReason coverage"
-            subtitle="6 states rendered distinctly via query override"
-          >
-            <div style={emptyReasonGridStyle}>
-              {supportedEmptyReasons.map((reasonCode) => (
-                <Link
-                  key={reasonCode}
-                  href={`/api-keys?emptyReason=${reasonCode}`}
-                  style={{
-                    ...navLinkStyle,
-                    flexDirection: "column",
-                    alignItems: "flex-start",
-                  }}
-                >
-                  <CanvasPill
-                    theme={th}
-                    tone={
-                      reasonCode === effectiveEmptyReason ? "accent" : "neutral"
-                    }
-                  >
-                    {reasonCode}
-                  </CanvasPill>
-                  <span style={{ color: th.textMuted, fontSize: 11.5 }}>
-                    {emptyCatalog[reasonCode]?.title ?? reasonCode}
-                  </span>
-                </Link>
-              ))}
-            </div>
-            {emptyReasonOverride ? (
-              <div style={{ marginTop: 12 }}>
-                <Link
-                  href="/api-keys"
-                  style={{ ...navLinkStyle, justifyContent: "center" }}
-                >
-                  清除 emptyReason override
-                </Link>
-              </div>
-            ) : null}
-          </CanvasCard>
-        </div>
+            {inAppLinks.map((link) => (
+              <Link key={link.href} href={link.href} style={linkCardStyle}>
+                <span>
+                  <strong>{link.label}</strong>
+                  <span style={linkMetaStyle}>{link.description}</span>
+                </span>
+                <span style={monoStyle}>{link.href}</span>
+              </Link>
+            ))}
+          </div>
+        </CanvasCard>
       </div>
 
-      {confirmIntent ? (
+      {composer ? (
         <div style={overlayStyle}>
           <div style={modalStyle}>
             <div style={modalHeaderStyle}>
               <div>
-                <h2 style={modalTitleStyle}>
-                  {confirmIntent.kind === "rotate"
-                    ? "輪替 API 金鑰"
-                    : "撤銷 API 金鑰"}
-                </h2>
+                <h2 style={modalTitleStyle}>{composer.title}</h2>
+                <p style={modalBodyTextStyle}>{composer.subtitle}</p>
+              </div>
+              <CanvasBtn
+                theme={th}
+                size="xs"
+                variant="ghost"
+                onClick={() => setComposer(null)}
+              >
+                關閉
+              </CanvasBtn>
+            </div>
+
+            <div style={fieldGridStyle}>
+              <CanvasField theme={th} label="名稱" required>
+                <input
+                  value={composer.keyName}
+                  onChange={(event) =>
+                    setComposer((current) =>
+                      current
+                        ? { ...current, keyName: event.target.value }
+                        : current,
+                    )
+                  }
+                  style={nativeInputStyle}
+                  placeholder="production-booking-sync"
+                />
+              </CanvasField>
+              <CanvasField
+                theme={th}
+                label="到期時間"
+                hint={
+                  governanceResource
+                    ? `需帶時區。預設 ${governanceResource.apiKeyPolicy.defaultLifetimeDays} 天，最長 ${governanceResource.apiKeyPolicy.maxLifetimeDays} 天。`
+                    : "Governance package 未載入，無法驗證有效期上限。"
+                }
+              >
+                <input
+                  value={composer.expiresAt}
+                  onChange={(event) =>
+                    setComposer((current) =>
+                      current
+                        ? { ...current, expiresAt: event.target.value }
+                        : current,
+                    )
+                  }
+                  style={nativeMonoInputStyle}
+                  spellCheck={false}
+                  placeholder="2026-08-09T01:52:30Z"
+                />
+              </CanvasField>
+            </div>
+
+            <CanvasField
+              theme={th}
+              label="Scopes"
+              required
+              hint="依 least-privilege 選擇；rotate 時也可同步調整 scope。"
+            >
+              <div style={scopeGridStyle}>
+                {allowedScopes.length > 0 ? (
+                  allowedScopes.map((scope) => {
+                    const selected = composer.scopes.includes(scope);
+                    return (
+                      <label key={scope} style={getScopeChipStyle(selected)}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleComposerScope(scope)}
+                          style={scopeChipInputStyle}
+                        />
+                        <span>{scope}</span>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <span style={helperTextStyle}>
+                    Governance package 不可用，沒有可發布的 scope。
+                  </span>
+                )}
+              </div>
+            </CanvasField>
+
+            <CanvasField
+              theme={th}
+              label="操作原因"
+              required
+              hint="High-risk action 需要輸入 reason，符合 Q-X09 / Q-X13。"
+            >
+              <textarea
+                value={composer.reason}
+                onChange={(event) =>
+                  setComposer((current) =>
+                    current
+                      ? { ...current, reason: event.target.value }
+                      : current,
+                  )
+                }
+                style={textareaStyle}
+                placeholder={
+                  composer.mode === "issue"
+                    ? "例如：new production integration for booking partner"
+                    : "例如：existing key exposed in CI log，立即輪替"
+                }
+              />
+            </CanvasField>
+
+            <div style={modalFooterStyle}>
+              <span style={helperTextStyle}>
+                建立或輪替成功後會進入 once-only secret reveal
+                modal，可複製或下載 `.txt`。
+              </span>
+              <div style={inlineActionStyle}>
+                <button
+                  type="button"
+                  style={secondaryButtonStyle}
+                  onClick={() => setComposer(null)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    pending ||
+                    !composer.action.enabled ||
+                    composer.keyName.trim().length === 0 ||
+                    composer.reason.trim().length === 0 ||
+                    composer.scopes.length === 0
+                  }
+                  style={{
+                    ...primaryButtonStyle,
+                    opacity:
+                      pending ||
+                      !composer.action.enabled ||
+                      composer.keyName.trim().length === 0 ||
+                      composer.reason.trim().length === 0 ||
+                      composer.scopes.length === 0
+                        ? 0.55
+                        : 1,
+                    cursor:
+                      pending ||
+                      !composer.action.enabled ||
+                      composer.keyName.trim().length === 0 ||
+                      composer.reason.trim().length === 0 ||
+                      composer.scopes.length === 0
+                        ? "not-allowed"
+                        : "pointer",
+                  }}
+                  onClick={() => {
+                    const currentComposer = composer;
+                    runAction(
+                      currentComposer.mode === "issue"
+                        ? issueTenantApiKeyAction
+                        : rotateTenantApiKeyAction,
+                      currentComposer.mode === "issue"
+                        ? buildCreateFormData(
+                            currentComposer.keyName,
+                            currentComposer.expiresAt,
+                            currentComposer.scopes,
+                          )
+                        : buildRotateFormData(
+                            currentComposer.apiKeyId ?? "",
+                            currentComposer.keyName,
+                            currentComposer.expiresAt,
+                            currentComposer.scopes,
+                          ),
+                      {
+                        draftName: currentComposer.keyName,
+                        draftScopes: currentComposer.scopes,
+                        draftExpiresAt: currentComposer.expiresAt,
+                        reason: currentComposer.reason,
+                      },
+                    );
+                  }}
+                >
+                  {pending ? "處理中..." : composer.submitLabel}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {revokeIntent ? (
+        <div style={overlayStyle}>
+          <div style={modalStyle}>
+            <div style={modalHeaderStyle}>
+              <div>
+                <h2 style={modalTitleStyle}>撤銷 API 金鑰</h2>
                 <p style={modalBodyTextStyle}>
-                  {confirmIntent.kind === "rotate"
-                    ? "輪替會立即作廢當前憑證，並在成功後只顯示一次新的 plaintext。"
-                    : "撤銷後不可回復，所有使用此憑證的整合會立即失敗。"}
+                  撤銷後不可回復，所有使用此憑證的整合會立即失敗。
                 </p>
               </div>
               <CanvasBtn
                 theme={th}
                 size="xs"
                 variant="ghost"
-                onClick={() => setConfirmIntent(null)}
+                onClick={() => setRevokeIntent(null)}
               >
                 關閉
               </CanvasBtn>
@@ -1650,16 +1623,20 @@ export function ApiKeyManager({
               theme={th}
               cols={2}
               items={[
-                { k: "Name", v: confirmIntent.apiKey.keyName },
-                { k: "ApiKeyId", v: confirmIntent.apiKey.apiKeyId, mono: true },
+                { k: "Name", v: revokeIntent.apiKey.keyName },
+                {
+                  k: "ApiKeyId",
+                  v: revokeIntent.apiKey.apiKeyId,
+                  mono: true,
+                },
                 {
                   k: "Scopes",
-                  v: confirmIntent.apiKey.scopes.join(" · "),
+                  v: revokeIntent.apiKey.scopes.join(" · "),
                   mono: true,
                 },
                 {
                   k: "Expires",
-                  v: formatDateTime(confirmIntent.apiKey.expiresAt),
+                  v: formatDateTime(revokeIntent.apiKey.expiresAt),
                   mono: true,
                 },
               ]}
@@ -1668,73 +1645,85 @@ export function ApiKeyManager({
             <CanvasField
               theme={th}
               label="操作原因"
-              hint="High-risk action requires a reason for operator context and receipt copy."
               required
+              hint="High-risk action requires a reason."
             >
               <textarea
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
+                value={revokeIntent.reason}
+                onChange={(event) =>
+                  setRevokeIntent((current) =>
+                    current
+                      ? { ...current, reason: event.target.value }
+                      : current,
+                  )
+                }
                 style={textareaStyle}
-                placeholder="例如：production key exposed in CI log，立即輪替"
+                placeholder="例如：partner integration retired，撤銷 production key"
               />
             </CanvasField>
 
             <div style={modalFooterStyle}>
               <span style={helperTextStyle}>
-                availableActions 要求高風險操作收集
-                reason；目前會寫入操作流程但後端 receipt 尚未承載該欄位。
+                UI 已收集 high-risk reason；後端 receipt 目前尚未承載此欄位。
               </span>
-              <div style={inlineActionsStyle}>
+              <div style={inlineActionStyle}>
                 <button
                   type="button"
                   style={secondaryButtonStyle}
-                  onClick={() => setConfirmIntent(null)}
+                  onClick={() => setRevokeIntent(null)}
                 >
                   取消
                 </button>
                 <button
                   type="button"
-                  disabled={pending || reason.trim().length === 0}
+                  disabled={
+                    pending ||
+                    !revokeIntent.action.enabled ||
+                    revokeIntent.reason.trim().length === 0
+                  }
                   style={{
                     ...primaryButtonStyle,
-                    background:
-                      confirmIntent.kind === "revoke" ? th.danger : th.accent,
-                    borderColor:
-                      confirmIntent.kind === "revoke" ? th.danger : th.accent,
-                    opacity: pending || reason.trim().length === 0 ? 0.55 : 1,
+                    background: th.danger,
+                    borderColor: th.danger,
+                    opacity:
+                      pending ||
+                      !revokeIntent.action.enabled ||
+                      revokeIntent.reason.trim().length === 0
+                        ? 0.55
+                        : 1,
                     cursor:
-                      pending || reason.trim().length === 0
+                      pending ||
+                      !revokeIntent.action.enabled ||
+                      revokeIntent.reason.trim().length === 0
                         ? "not-allowed"
                         : "pointer",
                   }}
                   onClick={() => {
-                    const currentIntent = confirmIntent;
-                    const currentReason = reason.trim();
-                    setConfirmIntent(null);
-                    if (currentIntent.kind === "rotate") {
-                      runAction(
-                        rotateTenantApiKeyAction,
-                        buildRotateFormData(currentIntent.apiKey),
-                        {
-                          reason: currentReason,
-                          secretSource: currentIntent.apiKey,
-                        },
+                    const currentIntent = revokeIntent;
+                    setRevokeIntent(null);
+                    startTransition(async () => {
+                      const result = await revokeTenantApiKeyAction(
+                        buildRevokeFormData(
+                          currentIntent.apiKey.apiKeyId,
+                          currentIntent.apiKey.keyName,
+                        ),
                       );
-                    } else {
-                      runAction(
-                        revokeTenantApiKeyAction,
-                        buildRevokeFormData(currentIntent.apiKey),
-                        { reason: currentReason },
-                      );
-                    }
-                    setReason("");
+                      const resolvedResult =
+                        result.tone === "default"
+                          ? {
+                              ...result,
+                              description: `${result.description} Reason: ${currentIntent.reason.trim()}`,
+                            }
+                          : result;
+                      setFlash(resolvedResult);
+                      if (resolvedResult.tone === "default") {
+                        router.refresh();
+                        setLastRefreshedAt(new Date().toISOString());
+                      }
+                    });
                   }}
                 >
-                  {pending
-                    ? "處理中..."
-                    : confirmIntent.kind === "rotate"
-                      ? "確認輪替"
-                      : "確認撤銷"}
+                  {pending ? "處理中..." : "確認撤銷"}
                 </button>
               </div>
             </div>
@@ -1773,7 +1762,11 @@ export function ApiKeyManager({
                   v: formatDateTime(secretReveal.expiresAt),
                   mono: true,
                 },
-                { k: "Scopes", v: secretReveal.scopes.join(" · "), mono: true },
+                {
+                  k: "Scopes",
+                  v: secretReveal.scopes.join(" · "),
+                  mono: true,
+                },
                 {
                   k: "Refresh tier",
                   v: REFRESH_LABELS[refreshTier],
@@ -1784,7 +1777,7 @@ export function ApiKeyManager({
 
             <code style={plaintextKeyStyle}>{secretReveal.plaintextKey}</code>
 
-            <div style={inlineActionsStyle}>
+            <div style={inlineActionStyle}>
               <button
                 type="button"
                 style={secondaryButtonStyle}
