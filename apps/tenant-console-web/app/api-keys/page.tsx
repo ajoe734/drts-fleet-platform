@@ -1,4 +1,6 @@
 import type {
+  EmptyReason,
+  RefreshTier,
   TenantApiKeyRecord,
   TenantIntegrationGovernancePackage,
 } from "@drts/contracts";
@@ -11,11 +13,14 @@ type ApiKeyPageData = {
   apiKeys: TenantApiKeyRecord[];
   governance: TenantIntegrationGovernancePackage | null;
   errors: string[];
+  refreshTier: RefreshTier;
+  snapshotAt: string;
 };
 
 async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
   const client = getTenantClient();
   const errors: string[] = [];
+  const snapshotAt = new Date().toISOString();
 
   const [apiKeysResult, governanceResult] = await Promise.allSettled([
     client.listApiKeys() as Promise<TenantApiKeyRecord[]>,
@@ -43,10 +48,49 @@ async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
     );
   }
 
-  return { apiKeys, governance, errors };
+  return {
+    apiKeys,
+    governance,
+    errors,
+    refreshTier: "slow",
+    snapshotAt,
+  };
 }
 
-export default async function ApiKeysPage() {
+function readEmptyReasonOverride(
+  value: string | string[] | undefined,
+): EmptyReason | null {
+  const normalized = Array.isArray(value) ? value[0] : value;
+  if (!normalized) return null;
+  const allowed: EmptyReason[] = [
+    "no_data",
+    "not_provisioned",
+    "fetch_failed",
+    "permission_denied",
+    "external_unavailable",
+    "filtered_empty",
+  ];
+  return allowed.includes(normalized as EmptyReason)
+    ? (normalized as EmptyReason)
+    : null;
+}
+
+export default async function ApiKeysPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{
+    emptyReason?: string | string[];
+  }>;
+}) {
   const pageData = await loadApiKeyPageData();
-  return <ApiKeyManager {...pageData} />;
+  const resolvedSearchParams = (await searchParams) ?? {};
+
+  return (
+    <ApiKeyManager
+      {...pageData}
+      emptyReasonOverride={readEmptyReasonOverride(
+        resolvedSearchParams.emptyReason,
+      )}
+    />
+  );
 }
