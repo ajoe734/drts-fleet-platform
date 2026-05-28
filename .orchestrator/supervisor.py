@@ -169,6 +169,22 @@ class WorkerFailureSignal:
 CHAIRMAN_JSON_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-decision-packet.example.json"
 CHAIRMAN_REPORT_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-review-report-template.md"
 PREMATURE_EXIT_REASON = "Worker exited before the task reached a terminal status."
+WORKSPACE_BASELINE_TASK_ID = "UI-BASELINE-001"
+WORKSPACE_BASELINE_HELPER_KIND = "workspace_baseline_repair"
+WORKSPACE_BASELINE_MARKERS = (
+    "workspace-baseline repair",
+    "workspace baseline repair",
+    "baseline repair task",
+    "shared workspace-baseline blocker",
+    "shared workspace baseline blocker",
+    "@drts/ui-tokens",
+    "@drts/contracts",
+    "module resolution",
+    "strict-ts",
+    "strict ts",
+    "isolated-worktree toolchain",
+    "worktree toolchain",
+)
 
 
 def prune_done_handoffs(status: dict[str, Any], keep: int = 500) -> None:
@@ -2311,18 +2327,60 @@ def worker_assignment_role(config: dict[str, Any], worker: dict[str, Any], task:
     return None
 
 
-def repeated_failure_records(state: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
+def _task_is_open(task: dict[str, Any]) -> bool:
+    return str(task.get("status") or "").lower() not in {"done", "superseded"}
+
+
+def workspace_baseline_cover_task_ids(task: dict[str, Any]) -> set[str]:
+    raw = task.get("covers_task_ids")
+    if not isinstance(raw, list):
+        return set()
+    return {str(item).strip() for item in raw if str(item).strip()}
+
+
+def workspace_baseline_repair_task(status: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(status, dict):
+        return None
+    candidates: list[dict[str, Any]] = []
+    for task in status.get("tasks", []) or []:
+        if not isinstance(task, dict):
+            continue
+        if not _task_is_open(task):
+            continue
+        task_id = str(task.get("id") or "").strip()
+        helper_kind = str(task.get("helper_kind") or "").strip()
+        if task_id != WORKSPACE_BASELINE_TASK_ID and helper_kind != WORKSPACE_BASELINE_HELPER_KIND:
+            continue
+        candidates.append(task)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: str(item.get("last_update") or item.get("id") or ""))
+    return candidates[-1]
+
+
+def repeated_failure_records(
+    state: dict[str, Any],
+    status: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    records = [
         dict(record)
         for record in failure_streak_registry(state).values()
         if isinstance(record, dict) and record.get("awaiting_chair")
     ]
+    baseline_task = workspace_baseline_repair_task(status)
+    covered_task_ids = workspace_baseline_cover_task_ids(baseline_task) if baseline_task else set()
+    if not covered_task_ids:
+        return records
+    return [record for record in records if str(record.get("task_id") or "").strip() not in covered_task_ids]
 
 
-def failing_agents_in_reassignment_loops(state: dict[str, Any]) -> set[str]:
+def failing_agents_in_reassignment_loops(
+    state: dict[str, Any],
+    status: dict[str, Any] | None = None,
+) -> set[str]:
     return {
         str(record.get("agent") or "").strip()
-        for record in repeated_failure_records(state)
+        for record in repeated_failure_records(state, status)
         if str(record.get("agent") or "").strip()
     }
 
@@ -2348,18 +2406,30 @@ def active_provider_pause_records(state: dict[str, Any]) -> list[dict[str, Any]]
     return sorted(records, key=lambda item: str(item.get("paused_at") or ""), reverse=True)
 
 
-def actionable_dispatch_pause_records(state: dict[str, Any], *, limit: int = 8) -> list[dict[str, Any]]:
+def actionable_dispatch_pause_records(
+    state: dict[str, Any],
+    status: dict[str, Any] | None = None,
+    *,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
     records = [
         dict(item)
         for item in state.get("dispatch_pauses", []) or []
         if isinstance(item, dict) and str(item.get("task_id") or "").strip()
     ]
+    baseline_task = workspace_baseline_repair_task(status)
+    covered_task_ids = workspace_baseline_cover_task_ids(baseline_task) if baseline_task else set()
+    if covered_task_ids:
+        records = [item for item in records if str(item.get("task_id") or "").strip() not in covered_task_ids]
     records.sort(key=lambda item: str(item.get("paused_at") or ""), reverse=True)
     return records[:limit]
 
 
-def chair_review_needs_immediate_attention(state: dict[str, Any]) -> bool:
-    if repeated_failure_records(state) or actionable_dispatch_pause_records(state, limit=1):
+def chair_review_needs_immediate_attention(
+    state: dict[str, Any],
+    status: dict[str, Any] | None = None,
+) -> bool:
+    if repeated_failure_records(state, status) or actionable_dispatch_pause_records(state, status, limit=1):
         return True
     last_review_at = _parse_iso_utc((state.get("chair_review") or {}).get("last_review_at"))
     for pause in active_provider_pause_records(state):
@@ -5387,7 +5457,7 @@ def _chair_review_summary_lines(
         approval_lines.append("- none")
 
     failure_lines: list[str] = []
-    for item in repeated_failure_records(state)[:6]:
+    for item in repeated_failure_records(state, status)[:6]:
         failure_lines.append(
             f"- {item.get('task_id')}: role={item.get('role')} agent={item.get('agent')} count={item.get('count')}/{item.get('threshold')} kind={item.get('last_failure_kind')}"
         )
@@ -5444,7 +5514,7 @@ def _chair_review_summary_lines(
         dispatchable_provider_lines.append("- none")
 
     dispatch_pause_lines: list[str] = []
-    for item in actionable_dispatch_pause_records(state):
+    for item in actionable_dispatch_pause_records(state, status):
         blocked_until = item.get("blocked_until") or "-"
         dispatch_pause_lines.append(
             f"- task={item.get('task_id')} provider={item.get('provider') or '-'} kind={item.get('failure_kind') or '-'} paused_at={item.get('paused_at') or '-'} blocked_until={blocked_until} summary={brief_reason_text(item.get('summary'), max_length=180)}"
@@ -5585,11 +5655,11 @@ def chair_review_reason(
 ) -> str | None:
     if pending_approval_items(approval_state):
         return "approval_triage"
-    if repeated_failure_records(state):
+    if repeated_failure_records(state, status):
         return "reassignment_triage"
     if config is not None and dependency_ready_blocked_task_records(config, status, include_sidecars=False, limit=1):
         return "blocked_task_triage"
-    if active_provider_pause_records(state) or actionable_dispatch_pause_records(state, limit=1):
+    if active_provider_pause_records(state) or actionable_dispatch_pause_records(state, status, limit=1):
         return "provider_health_triage"
     return "operational_review"
 
@@ -5607,7 +5677,7 @@ def choose_chair_reviewer(
     active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, _pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
     task_map = task_index_from_status(config, status)
-    failing_agents = failing_agents_in_reassignment_loops(state)
+    failing_agents = failing_agents_in_reassignment_loops(state, status)
     candidates: list[tuple[str, str]] = []
     primary_work_candidates: list[tuple[str, str]] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
@@ -5655,7 +5725,7 @@ def queue_chair_review(
     reason = chair_review_reason(state, approval_state, status=status, config=config)
     if reason is None:
         return False
-    immediate_attention = bool(chair_review_needs_immediate_attention(state) or ready_blocked_tasks)
+    immediate_attention = bool(chair_review_needs_immediate_attention(state, status) or ready_blocked_tasks)
     bypass_cooldown = bool(pending_approval_items(approval_state) or immediate_attention)
     cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
     now = datetime.now(timezone.utc)
@@ -5702,7 +5772,7 @@ def queue_chair_review(
         brief = ensure_task_brief(config, task_id=str(item.get("task_id") or ""), runtime_state=state)
         if brief is not None:
             context_files.append(brief)
-    for item in repeated_failure_records(state):
+    for item in repeated_failure_records(state, status):
         brief = ensure_task_brief(config, task_id=str(item.get("task_id") or ""), runtime_state=state)
         if brief is not None:
             context_files.append(brief)
@@ -6329,6 +6399,224 @@ def unblock_task_acceptance(unblock_kind: str) -> list[str]:
     ]
 
 
+def chair_requested_workspace_baseline_repair(payload: dict[str, Any]) -> bool:
+    text_parts = [
+        str(payload.get("reason") or ""),
+        *[str(item or "") for item in (payload.get("blocked_by") or [])],
+        *[str(item or "") for item in (payload.get("recommended_focus") or [])],
+    ]
+    text = "\n".join(text_parts).lower()
+    return any(marker in text for marker in WORKSPACE_BASELINE_MARKERS)
+
+
+def create_chair_workspace_baseline_task(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    payload: dict[str, Any],
+    provider_report: dict[str, Any],
+    *,
+    preferred_owner: str | None = None,
+) -> bool:
+    if not chair_requested_workspace_baseline_repair(payload):
+        return False
+
+    status = load_status(config)
+    if workspace_baseline_repair_task(status) is not None:
+        return False
+
+    failure_records = repeated_failure_records(state)
+    covered_task_ids = sorted(
+        {
+            str(record.get("task_id") or "").strip()
+            for record in failure_records
+            if str(record.get("task_id") or "").strip()
+        }
+    )
+    if not covered_task_ids:
+        return False
+
+    owner = chair_unblock_agent(
+        config,
+        state,
+        provider_report,
+        [preferred_owner or "", "Claude", "Codex", "Claude2", "Codex2", "Gemini2", "Gemini", "Copilot"],
+        exclude=set(),
+    )
+    if owner is None:
+        return False
+    reviewer = chair_unblock_agent(
+        config,
+        state,
+        provider_report,
+        ["Codex", "Claude", "Claude2", "Codex2", "Gemini2", "Gemini", "Copilot"],
+        exclude={owner},
+    )
+    if reviewer is None:
+        return False
+
+    script = config_path(config, "status_file").parent / "scripts" / "ai_status.py"
+    metadata = {
+        "task_class": "execution",
+        "helper_kind": WORKSPACE_BASELINE_HELPER_KIND,
+        "auto_generated": True,
+        "mutates_canonical": True,
+        "auto_created_by": "chairman-reassignment-triage",
+        "covers_task_ids": covered_task_ids,
+    }
+    env = os.environ.copy()
+    env.update(
+        {
+            "AI_NAME": preferred_owner or owner,
+            "AI_STATUS_ROOT": str(config_path(config, "status_file").parent),
+            "TASK_PHASE": "UI Completion Baseline Repair",
+            "TASK_TITLE": "Repair shared UI workspace baseline for isolated worktrees",
+            "TASK_SUMMARY_ZH": (
+                "修復共用 UI workspace baseline，處理 @drts/ui-tokens / @drts/contracts 模組解析、"
+                "packages/ui-web 既有 strict TS 錯誤，以及 isolated worktree 的 tsc/next/.next types 工具鏈缺口。"
+            ),
+            "TASK_ARTIFACTS": ",".join(
+                [
+                    "packages/ui-web/",
+                    "packages/ui-tokens/",
+                    "packages/contracts/",
+                    "apps/platform-admin-web/",
+                    "apps/tenant-console-web/",
+                ]
+            ),
+            "TASK_ACCEPTANCE": ",".join(
+                [
+                    "Fix @drts/ui-tokens and @drts/contracts module resolution for isolated worktrees",
+                    "Clear the pre existing packages/ui-web strict TypeScript failures blocking shared UI apps",
+                    "Restore isolated worktree toolchain readiness for pnpm exec tsc next and generated types",
+                    "Verify one representative platform admin and one tenant console build path no longer fail on the old baseline error",
+                ]
+            ),
+            "TASK_METADATA_JSON": json.dumps(metadata, ensure_ascii=False),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(script), "assign", WORKSPACE_BASELINE_TASK_ID, owner, reviewer],
+        cwd=str(config_path(config, "status_file").parent),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode != 0:
+        write_activity_log(
+            config,
+            {
+                "type": "chair_workspace_baseline_task_create_failed",
+                "task_id": WORKSPACE_BASELINE_TASK_ID,
+                "message": result.stderr.strip() or result.stdout.strip() or "unknown error",
+            },
+        )
+        return False
+
+    status = load_status(config)
+    task_map = task_index_from_status(config, status)
+    task = task_map.get(WORKSPACE_BASELINE_TASK_ID)
+    if task is not None:
+        state.setdefault("tasks", {})[WORKSPACE_BASELINE_TASK_ID] = snapshot_task(task, config.get("schema", {}))
+        dispatch_plan = chair_dispatch_action_reason(config, task, task_map)
+        if dispatch_plan is not None:
+            target_agent, dispatch_reason = dispatch_plan
+            active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
+            active_agent_counts = active_worker_agent_counts(state, active_statuses)
+            pending_agent_counts = outstanding_delivery_agent_counts(config, state)
+            lane_id = normalize_agent_id(target_agent)
+            lane_capacity = max_tasks_per_agent_for_lane(ready_dispatch_settings(config), lane_id)
+            lane_load = active_agent_counts.get(lane_id, 0) + pending_agent_counts.get(lane_id, 0)
+            if lane_load < lane_capacity and not is_agent_dispatch_paused(config, state, target_agent, provider_report=provider_report):
+                _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
+                event = build_dispatch_event(task, target_agent, dispatch_reason, task_map)
+                if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
+                    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
+
+    write_activity_log(
+        config,
+        {
+            "type": "chair_workspace_baseline_task_created",
+            "task_id": WORKSPACE_BASELINE_TASK_ID,
+            "owner": owner,
+            "reviewer": reviewer,
+            "message": (
+                f"Chairman materialized {WORKSPACE_BASELINE_TASK_ID} and assigned it to {owner} "
+                f"with reviewer {reviewer} after converged reassignment triage."
+            ),
+        },
+    )
+    return True
+
+
+def materialize_workspace_baseline_task_from_last_decision(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    chair_state = state.get("chair_review")
+    if not isinstance(chair_state, dict):
+        return False
+    if str(chair_state.get("last_reason") or "") != "reassignment_triage":
+        return False
+    payload = chair_state.get("last_decision")
+    if not isinstance(payload, dict):
+        return False
+    preferred_owner = str(chair_state.get("last_reviewer") or "").strip() or None
+    return create_chair_workspace_baseline_task(
+        config,
+        state,
+        payload,
+        provider_report,
+        preferred_owner=preferred_owner,
+    )
+
+
+def ensure_workspace_baseline_task_dispatch(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    status = load_status(config)
+    task_map = task_index_from_status(config, status)
+    task = task_map.get(WORKSPACE_BASELINE_TASK_ID)
+    if task is None or not _task_is_open(task):
+        return False
+    dispatch_plan = chair_dispatch_action_reason(config, task, task_map)
+    if dispatch_plan is None:
+        return False
+    target_agent, dispatch_reason = dispatch_plan
+    if is_agent_dispatch_paused(config, state, target_agent, provider_report=provider_report):
+        return False
+    active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
+    active_agent_counts = active_worker_agent_counts(state, active_statuses)
+    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
+    lane_id = normalize_agent_id(target_agent)
+    lane_capacity = max_tasks_per_agent_for_lane(ready_dispatch_settings(config), lane_id)
+    lane_load = active_agent_counts.get(lane_id, 0) + pending_agent_counts.get(lane_id, 0)
+    if lane_load >= lane_capacity:
+        return False
+    _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
+    event = build_dispatch_event(task, target_agent, dispatch_reason, task_map)
+    if event["key"] in pending_event_keys:
+        return False
+    if not queue_delivery_event(config, event):
+        return False
+    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
+    write_activity_log(
+        config,
+        {
+            "type": "workspace_baseline_dispatch_queued",
+            "task_id": WORKSPACE_BASELINE_TASK_ID,
+            "target_agent": target_agent,
+            "message": (
+                f"Queued dispatch for {WORKSPACE_BASELINE_TASK_ID} to {target_agent} "
+                f"after chairman materialized the shared baseline repair."
+            ),
+        },
+    )
+    return True
+
+
 def create_chair_unblock_task(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -6887,6 +7175,14 @@ def refresh_chair_review_state(
         changed = apply_chair_provider_actions(config, state, payload) or changed
         changed = apply_chair_reassignment_actions(config, state, payload, provider_report) or changed
         changed = apply_chair_task_actions(config, state, payload, provider_report) or changed
+        if str(active.get("reason") or "") == "reassignment_triage":
+            changed = create_chair_workspace_baseline_task(
+                config,
+                state,
+                payload,
+                provider_report,
+                preferred_owner=str(active.get("agent") or "").strip() or None,
+            ) or changed
         ttl_minutes = int(payload.get("approval_ttl_minutes") or chair_review_settings(config).get("default_approval_ttl_minutes", 45))
         if bool(payload.get("sidecar_approved")):
             chair_state["sidecar_approved_until"] = (
@@ -7541,6 +7837,8 @@ def run_once(
     changed = prune_completed_dispatch_pauses(state, status, config=config, provider_report=provider_report) or changed
     changed = prune_failure_streaks(state, status) or changed
     changed = refresh_chair_review_state(config, state, provider_report) or changed
+    changed = materialize_workspace_baseline_task_from_last_decision(config, state, provider_report) or changed
+    changed = ensure_workspace_baseline_task_dispatch(config, state, provider_report) or changed
     status = load_status(config)
     desired_focus_mode = desired_focus_mode_from_status(status)
     if desired_focus_mode == "planning":
