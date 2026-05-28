@@ -662,14 +662,16 @@ function buildRowActionLinks(row: PassengerRowRecord): PassengerActionLink[] {
     };
   });
 
-  links.push({
-    key: `new-booking-${row.passengerId}`,
-    label: "建立訂單",
-    href: `/bookings/new?passengerId=${encodeURIComponent(row.passengerId)}`,
-    variant: "primary",
-    disabled: undefined,
-    danger: undefined,
-  });
+  if (!row.availableActions) {
+    links.push({
+      key: `new-booking-${row.passengerId}`,
+      label: "建立訂單",
+      href: `/bookings/new?passengerId=${encodeURIComponent(row.passengerId)}`,
+      variant: "primary",
+      disabled: undefined,
+      danger: undefined,
+    });
+  }
 
   return dedupeActionLinks(links);
 }
