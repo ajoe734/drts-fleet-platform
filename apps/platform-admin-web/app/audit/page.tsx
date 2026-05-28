@@ -516,98 +516,13 @@ function inferCrossLink(
   return null;
 }
 
-function fallbackAuditActions(
-  selectedRecord: AuditLogRecord | null,
-  governance: {
-    hold: EvidenceLegalHoldRecord | null;
-    deletionException: EvidenceDeletionExceptionRecord | null;
-  },
-): ResourceActionDescriptor[] {
-  if (!selectedRecord) {
-    return [
-      {
-        action: "refresh",
-        enabled: true,
-        riskLevel: "low",
-      },
-    ];
-  }
-
-  return [
-    {
-      action: "refresh",
-      enabled: true,
-      riskLevel: "low",
-    },
-    {
-      action: "grant_legal_hold",
-      enabled: Boolean(selectedRecord) && !governance.hold,
-      disabledReasonCode: !selectedRecord
-        ? "select_audit_record"
-        : governance.hold
-          ? "already_on_hold"
-          : undefined,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "lift_legal_hold",
-      enabled: Boolean(governance.hold),
-      disabledReasonCode: governance.hold ? undefined : "no_active_hold",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "grant_deletion_exception",
-      enabled: Boolean(selectedRecord) && !governance.deletionException,
-      disabledReasonCode: !selectedRecord
-        ? "select_audit_record"
-        : governance.deletionException
-          ? "already_has_exception"
-          : undefined,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "revoke_deletion_exception",
-      enabled: Boolean(governance.deletionException),
-      disabledReasonCode: governance.deletionException
-        ? undefined
-        : "no_active_exception",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-  ];
-}
-
-function fallbackHoldActions(
-  hold: EvidenceLegalHoldRecord,
-): ResourceActionDescriptor[] {
-  return [
-    {
-      action: "lift_legal_hold",
-      enabled: hold.status === "active",
-      disabledReasonCode:
-        hold.status === "active" ? undefined : "hold_not_active",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-  ];
-}
-
-function fallbackExceptionActions(
-  exception: EvidenceDeletionExceptionRecord,
-): ResourceActionDescriptor[] {
-  return [
-    {
-      action: "revoke_deletion_exception",
-      enabled: exception.status === "active",
-      disabledReasonCode:
-        exception.status === "active" ? undefined : "exception_not_active",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-  ];
+function findAvailableAction(
+  descriptors: ResourceActionDescriptor[] | undefined,
+  actionName: string,
+) {
+  return (
+    descriptors?.find((descriptor) => descriptor.action === actionName) ?? null
+  );
 }
 
 export default function AuditPage() {
@@ -785,12 +700,8 @@ export default function AuditPage() {
   }, [activeDeletionExceptions, activeLegalHolds, selectedRecord]);
 
   const availableActions = useMemo<ResourceActionDescriptor[]>(() => {
-    const resourceActions = selectedRecord?.availableActions;
-    if (resourceActions) {
-      return resourceActions;
-    }
-    return fallbackAuditActions(selectedRecord, selectedGovernance);
-  }, [selectedGovernance, selectedRecord]);
+    return selectedRecord?.availableActions ?? [];
+  }, [selectedRecord]);
 
   const sharedErrorReason = useMemo(
     () => deriveEmptyReasonFromError(error),
@@ -851,6 +762,46 @@ export default function AuditPage() {
       window.location.assign(link.href);
     }
   }, []);
+
+  const exportFilteredAudit = useCallback(() => {
+    const header = [
+      "createdAt",
+      "actorType",
+      "actorId",
+      "moduleName",
+      "actionName",
+      "resourceType",
+      "resourceId",
+      "requestId",
+      "tenantId",
+    ];
+    const escapeCsv = (value: string | null | undefined) =>
+      `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const lines = filteredRecords.map((record) =>
+      [
+        record.createdAt,
+        record.actorType,
+        record.actorId,
+        record.moduleName,
+        record.actionName,
+        record.resourceType,
+        record.resourceId,
+        record.requestId,
+        record.tenantId,
+      ]
+        .map(escapeCsv)
+        .join(","),
+    );
+    const blob = new Blob([[header.join(","), ...lines].join("\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `platform-admin-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [filteredRecords]);
 
   const handleAction = useCallback(
     (
@@ -1109,6 +1060,9 @@ export default function AuditPage() {
         }
         actions={
           <div style={actionRowStyle}>
+            <CanvasBtn theme={theme} onClick={exportFilteredAudit}>
+              {text(locale, "Export CSV", "匯出 CSV")}
+            </CanvasBtn>
             <CanvasBtn
               theme={theme}
               icon="refresh"
@@ -1174,6 +1128,13 @@ export default function AuditPage() {
               </div>
 
               <div style={pillRowStyle}>
+                <CanvasPill theme={theme} tone="accent" dot>
+                  {text(
+                    locale,
+                    `All ${records.length.toLocaleString()}`,
+                    `全部 ${records.length.toLocaleString()}`,
+                  )}
+                </CanvasPill>
                 {moduleBreakdown.map(([moduleName, count]) => (
                   <CanvasPill key={moduleName} theme={theme} tone="neutral" dot>
                     {formatPlatformCodeLabel(locale, moduleName)} {count}
@@ -1971,15 +1932,15 @@ export default function AuditPage() {
             holds={activeLegalHolds}
             locale={locale}
             emptyReason={holdsEmptyReason}
-            onRelease={(hold) =>
-              handleAction(
-                hold.availableActions?.find(
-                  (action: ResourceActionDescriptor) =>
-                    action.action === "lift_legal_hold",
-                ) ?? fallbackHoldActions(hold)[0],
-                { hold },
-              )
-            }
+            onRelease={(hold) => {
+              const descriptor = findAvailableAction(
+                hold.availableActions,
+                "lift_legal_hold",
+              );
+              if (descriptor) {
+                handleAction(descriptor, { hold });
+              }
+            }}
           />
         ) : null}
         {activeTab === "exceptions" ? (
@@ -1987,15 +1948,15 @@ export default function AuditPage() {
             exceptions={activeDeletionExceptions}
             locale={locale}
             emptyReason={exceptionsEmptyReason}
-            onResolve={(exception) =>
-              handleAction(
-                exception.availableActions?.find(
-                  (action: ResourceActionDescriptor) =>
-                    action.action === "revoke_deletion_exception",
-                ) ?? fallbackExceptionActions(exception)[0],
-                { deletionException: exception },
-              )
-            }
+            onResolve={(exception) => {
+              const descriptor = findAvailableAction(
+                exception.availableActions,
+                "revoke_deletion_exception",
+              );
+              if (descriptor) {
+                handleAction(descriptor, { deletionException: exception });
+              }
+            }}
           />
         ) : null}
       </div>
@@ -2347,15 +2308,11 @@ function EmptyStateCard({
       ),
     },
     driver_not_eligible: {
-      title: text(
-        locale,
-        "This empty state is not used on Platform Admin",
-        "此空狀態不適用於 Platform Admin",
-      ),
+      title: text(locale, "Not applicable", "不適用"),
       body: text(
         locale,
-        "Driver eligibility is a driver-app-specific empty reason and should not appear on this surface.",
-        "Driver eligibility 屬於 driver app 專用空狀態，不應出現在此畫面。",
+        "This empty reason belongs to driver surfaces and is guarded here only for shared contract completeness.",
+        "這個空狀態只屬於 driver 介面；此處僅為共用 contract 完整性而保留。",
       ),
     },
     filtered_empty: {
@@ -2371,6 +2328,19 @@ function EmptyStateCard({
     title: string;
     body: string;
   };
+  const badgeCopy: Record<EmptyReason, string> = {
+    no_data: text(locale, "Awaiting first event", "等待第一筆事件"),
+    not_provisioned: text(locale, "Provisioning required", "需要開通"),
+    fetch_failed: text(locale, "Retry needed", "需要重試"),
+    permission_denied: text(locale, "Scope mismatch", "權限範圍不符"),
+    external_unavailable: text(locale, "Upstream degraded", "上游降級"),
+    driver_not_eligible: text(
+      locale,
+      "Shared contract only",
+      "僅共用 contract",
+    ),
+    filtered_empty: text(locale, "Adjust filters", "調整篩選"),
+  };
   return (
     <div
       style={{
@@ -2378,9 +2348,14 @@ function EmptyStateCard({
         padding: compact ? 16 : emptyStateStyle.padding,
       }}
     >
-      <CanvasPill theme={theme} tone={toneForEmpty(reason)}>
-        {reason}
-      </CanvasPill>
+      <div style={pillRowStyle}>
+        <CanvasPill theme={theme} tone={toneForEmpty(reason)}>
+          {reason}
+        </CanvasPill>
+        <CanvasPill theme={theme} tone="neutral">
+          {badgeCopy[reason]}
+        </CanvasPill>
+      </div>
       <div style={{ fontSize: compact ? 16 : 18, fontWeight: 700 }}>
         {content.title}
       </div>
@@ -2720,11 +2695,10 @@ function HoldTable({
               </thead>
               <tbody>
                 {holds.map((hold) => {
-                  const rowAction =
-                    hold.availableActions?.find(
-                      (action: ResourceActionDescriptor) =>
-                        action.action === "lift_legal_hold",
-                    ) ?? fallbackHoldActions(hold)[0];
+                  const rowAction = findAvailableAction(
+                    hold.availableActions,
+                    "lift_legal_hold",
+                  );
                   return (
                     <tr key={hold.holdId}>
                       <td style={tdStyle}>
@@ -2739,11 +2713,17 @@ function HoldTable({
                       <td style={tdStyle}>{hold.caseNumber}</td>
                       <td style={tdStyle}>{formatDateTime(hold.placedAt)}</td>
                       <td style={tdStyle}>
-                        <ActionButton
-                          locale={locale}
-                          descriptor={rowAction}
-                          onClick={() => onRelease(hold)}
-                        />
+                        {rowAction ? (
+                          <ActionButton
+                            locale={locale}
+                            descriptor={rowAction}
+                            onClick={() => onRelease(hold)}
+                          />
+                        ) : (
+                          <CanvasPill theme={theme} tone="neutral">
+                            {text(locale, "Read-only", "唯讀")}
+                          </CanvasPill>
+                        )}
                       </td>
                     </tr>
                   );
@@ -2807,11 +2787,10 @@ function ExceptionTable({
               </thead>
               <tbody>
                 {exceptions.map((exception) => {
-                  const rowAction =
-                    exception.availableActions?.find(
-                      (action: ResourceActionDescriptor) =>
-                        action.action === "revoke_deletion_exception",
-                    ) ?? fallbackExceptionActions(exception)[0];
+                  const rowAction = findAvailableAction(
+                    exception.availableActions,
+                    "revoke_deletion_exception",
+                  );
                   return (
                     <tr key={exception.exceptionId}>
                       <td style={tdStyle}>
@@ -2830,11 +2809,17 @@ function ExceptionTable({
                         {formatDateTime(exception.expiresAt)}
                       </td>
                       <td style={tdStyle}>
-                        <ActionButton
-                          locale={locale}
-                          descriptor={rowAction}
-                          onClick={() => onResolve(exception)}
-                        />
+                        {rowAction ? (
+                          <ActionButton
+                            locale={locale}
+                            descriptor={rowAction}
+                            onClick={() => onResolve(exception)}
+                          />
+                        ) : (
+                          <CanvasPill theme={theme} tone="neutral">
+                            {text(locale, "Read-only", "唯讀")}
+                          </CanvasPill>
+                        )}
                       </td>
                     </tr>
                   );
