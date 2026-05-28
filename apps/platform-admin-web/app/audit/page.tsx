@@ -16,6 +16,7 @@ import {
   type CanvasTableColumn,
 } from "@drts/ui-web";
 import {
+  type CrossAppResourceLink,
   EVIDENCE_DELETION_EXCEPTION_REASON_CODES,
   EVIDENCE_LEGAL_HOLD_REASON_CODES,
   EVIDENCE_RETENTION_FAMILIES,
@@ -26,6 +27,7 @@ import {
   type EvidenceLegalHoldRecord,
   type EvidenceRetentionFamily,
   type EvidenceRetentionPolicyRecord,
+  type RefreshTier,
   type ResourceActionDescriptor,
   type UiRefreshMetadata,
 } from "@drts/contracts";
@@ -328,6 +330,8 @@ const TENANT_ROUTE_TYPES = new Set([
   "tenant_report",
 ]);
 
+const AUDIT_REFRESH_TIER: RefreshTier = "manual";
+
 export default function AuditPage() {
   const { locale } = useTranslation();
   const copy = useMemo(() => getCopy(locale), [locale]);
@@ -365,8 +369,8 @@ export default function AuditPage() {
     const resourceType = searchParams.get("resourceType");
     if (auditId) {
       setSearchText(auditId);
-    }
-    if (resourceId) {
+      setExpandedAuditId(auditId);
+    } else if (resourceId) {
       setSearchText(resourceId);
     }
     if (resourceType) {
@@ -801,7 +805,7 @@ export default function AuditPage() {
               {refreshMetadata.dataFreshness}
             </CanvasPill>
             <CanvasPill theme={th} tone="neutral">
-              {copy.refreshTier}
+              {formatRefreshTierLabel(copy.refreshTier, AUDIT_REFRESH_TIER)}
             </CanvasPill>
             <CanvasBtn
               theme={th}
@@ -1951,19 +1955,14 @@ function buildResourceTarget(row: AuditRecordWithActions): {
     };
   }
 
-  const origin = OPS_ROUTE_TYPES.has(row.resourceType)
-    ? process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN
-    : TENANT_ROUTE_TYPES.has(row.resourceType)
-      ? process.env.NEXT_PUBLIC_TENANT_CONSOLE_ORIGIN
-      : null;
-
-  if (!origin) {
+  const crossAppLink = buildCrossAppResourceLink(row);
+  if (!crossAppLink) {
     return { href: null, external: true };
   }
 
   return {
-    href: `${origin}/audit?resourceType=${encodeURIComponent(row.resourceType)}&resourceId=${encodeURIComponent(resourceId)}`,
-    external: true,
+    href: resolveCrossAppHref(crossAppLink),
+    external: crossAppLink.openMode === "new_tab",
   };
 }
 
@@ -1980,6 +1979,10 @@ function formatRefreshStatus(metadata: UiRefreshMetadata, locale: Locale) {
   return `${formatDateTime(metadata.generatedAt)} · ${metadata.source} · ${
     locale === "zh" ? "手動刷新" : "manual refresh"
   }`;
+}
+
+function formatRefreshTierLabel(label: string, tier: RefreshTier) {
+  return label.replace("manual", tier);
 }
 
 function freshnessTone(metadata: UiRefreshMetadata) {
@@ -2165,6 +2168,125 @@ function inferOwnerApp(
     return "tenant-console";
   }
   return "platform-admin";
+}
+
+function buildCrossAppResourceLink(
+  row: AuditRecordWithActions,
+): CrossAppResourceLink | null {
+  const resourceId = row.resourceId;
+  if (!resourceId) {
+    return null;
+  }
+
+  const encodedId = encodeURIComponent(resourceId);
+
+  switch (row.resourceType) {
+    case "incident":
+      return {
+        targetApp: "ops-console",
+        route: `/incidents?incidentId=${encodedId}`,
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open incident",
+      };
+    case "dispatch_job":
+    case "dispatch_item":
+    case "order":
+      return {
+        targetApp: "ops-console",
+        route: `/dispatch/${encodedId}`,
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open dispatch detail",
+      };
+    case "driver":
+      return {
+        targetApp: "ops-console",
+        route: `/drivers/${encodedId}`,
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open driver detail",
+      };
+    case "vehicle":
+      return {
+        targetApp: "ops-console",
+        route: "/vehicles",
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open vehicle registry",
+      };
+    case "call_session":
+      return {
+        targetApp: "ops-console",
+        route: "/callcenter",
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open callcenter workspace",
+      };
+    case "complaint_case":
+      return {
+        targetApp: "ops-console",
+        route: "/complaints",
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open complaint queue",
+      };
+    case "maintenance_job":
+      return {
+        targetApp: "ops-console",
+        route: "/maintenance",
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open maintenance queue",
+      };
+    case "tenant_booking":
+      return {
+        targetApp: "tenant-console",
+        route: `/bookings/${encodedId}`,
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open booking detail",
+      };
+    case "tenant_user":
+      return {
+        targetApp: "tenant-console",
+        route: "/users",
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open tenant users",
+      };
+    case "tenant_report":
+      return {
+        targetApp: "tenant-console",
+        route: "/reports",
+        resourceType: row.resourceType,
+        resourceId,
+        openMode: "new_tab",
+        label: "Open tenant reports",
+      };
+    default:
+      return null;
+  }
+}
+
+function resolveCrossAppHref(link: CrossAppResourceLink) {
+  const origin =
+    link.targetApp === "ops-console"
+      ? process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN
+      : link.targetApp === "tenant-console"
+        ? process.env.NEXT_PUBLIC_TENANT_CONSOLE_ORIGIN
+        : null;
+
+  return origin ? `${origin}${link.route}` : null;
 }
 
 function modalTitle(copy: PageCopy, state: ModalState) {
