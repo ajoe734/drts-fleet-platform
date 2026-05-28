@@ -259,14 +259,12 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.cctechsupport.drts.driver";
-				PRODUCT_NAME = "DRTSDriverApp";
+				PRODUCT_BUNDLE_IDENTIFIER = org.name.DRTSDriverApp;
+				PRODUCT_NAME = DRTSDriverApp;
 				SWIFT_OBJC_BRIDGING_HEADER = "DRTSDriverApp/DRTSDriverApp-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
-				TARGETED_DEVICE_FAMILY = "1";
-				CODE_SIGN_ENTITLEMENTS = DRTSDriverApp/DRTSDriverApp.entitlements;
 			};
 			name = Debug;
 		};
@@ -288,13 +286,11 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.cctechsupport.drts.driver";
-				PRODUCT_NAME = "DRTSDriverApp";
+				PRODUCT_BUNDLE_IDENTIFIER = org.name.DRTSDriverApp;
+				PRODUCT_NAME = DRTSDriverApp;
 				SWIFT_OBJC_BRIDGING_HEADER = "DRTSDriverApp/DRTSDriverApp-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
-				TARGETED_DEVICE_FAMILY = "1";
-				CODE_SIGN_ENTITLEMENTS = DRTSDriverApp/DRTSDriverApp.entitlements;
 			};
 			name = Release;
 		};
