@@ -44,6 +44,7 @@ type ContractListView = RuntimeVehicleContractRecord & {
   counterparties: string;
   expiringSoon: boolean;
   availableActions: ResourceActionDescriptor[];
+  links: CrossAppResourceLink[];
 };
 
 type PartnerRelationView = RuntimePartnerChannelEntryRecord & {
@@ -357,6 +358,20 @@ function resolveContractActionTarget(
 ): ActionRenderTarget {
   if (action.action === "open_contract_detail") {
     return { href: buildContractDetailHref(contract.contractId) };
+  }
+
+  if (action.action === "open_platform_admin") {
+    const link = contract.links.find(
+      (current) => current.targetApp === "platform-admin",
+    );
+    return link ? buildActionRenderTarget(link) : {};
+  }
+
+  if (action.action === "open_tenant_console") {
+    const link = contract.links.find(
+      (current) => current.targetApp === "tenant-console",
+    );
+    return link ? buildActionRenderTarget(link) : {};
   }
 
   return {};
@@ -677,6 +692,31 @@ export default async function ContractsPage({
     const linkedEntries =
       partnerEntriesByPartnerId.get(contract.partnerId) ?? [];
     const linkedEntry = linkedEntries[0];
+    const platformLink: CrossAppResourceLink | null = linkedEntry
+      ? {
+          targetApp: "platform-admin",
+          route: `/partners/${encodeURIComponent(linkedEntry.entrySlug)}`,
+          resourceType: "partner_entry",
+          resourceId: linkedEntry.entrySlug,
+          openMode: "new_tab",
+          label: copyText(locale, "Partner relation", "合作夥伴關聯"),
+        }
+      : null;
+    const tenantLink: CrossAppResourceLink | null =
+      linkedEntry && linkedEntry.tenantId
+        ? {
+            targetApp: "tenant-console",
+            route: `/tenants/${encodeURIComponent(linkedEntry.tenantId)}`,
+            resourceType: "tenant",
+            resourceId: linkedEntry.tenantId,
+            openMode: "new_tab",
+            label: copyText(
+              locale,
+              "Tenant contract context",
+              "Tenant 合約上下文",
+            ),
+          }
+        : null;
     const expiringSoon =
       contract.status === "active" &&
       daysUntil(contract.endAt) <= 45 &&
@@ -707,6 +747,9 @@ export default async function ContractsPage({
                 riskLevel: "low",
               },
             ],
+      links: [platformLink, tenantLink].filter(
+        (link): link is CrossAppResourceLink => link !== null,
+      ),
     };
   });
 
@@ -1133,8 +1176,8 @@ export default async function ContractsPage({
             }
             footer={copyText(
               locale,
-              "Opening a contract detail stays in ops. Any mutation continues in Platform Admin or tenant governance via cross-app new-tab links.",
-              "開啟合約詳情仍留在 ops；所有 mutation 都要改走 Platform Admin 或 tenant governance 的新分頁 deep link。",
+              "Open detail stays in ops. Owner-app navigation continues through cross-app new-tab links exposed by each record.",
+              "開啟詳情仍留在 ops；各筆記錄若有 owner app 導航，會透過跨 app 新分頁 deep link 呈現。",
             )}
           >
             {contractsSectionEmptyState ? (
