@@ -11,6 +11,7 @@ export const TENANT_CONSOLE_SEARCH_PLACEHOLDER =
 type TenantNavIcon =
   | "home"
   | "bookings"
+  | "bell"
   | "plus"
   | "passengers"
   | "addresses"
@@ -102,16 +103,16 @@ export const tenantNavEntries: TenantNavEntry[] = [
     label: "API 金鑰",
   },
   {
+    key: "notifications",
+    href: "/notifications",
+    icon: "bell",
+    label: "通知",
+  },
+  {
     key: "webhooks",
     href: "/webhooks",
     icon: "webhooks",
     label: "Webhook",
-  },
-  {
-    key: "notifications",
-    href: "/notifications",
-    icon: "flags",
-    label: "通知偏好",
   },
   {
     key: "audit",

@@ -2,7 +2,6 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import type {
   EmptyReason,
-  IdentityContext,
   ResourceActionDescriptor,
   TenantIntegrationGovernancePackage,
   TenantNotificationPreferences,
@@ -12,23 +11,21 @@ import {
   CanvasBanner,
   CanvasCard,
   CanvasDL,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { getTenantClient } from "@/lib/api-client";
-import { NotificationPreferencesEditor } from "./notification-preferences-editor";
+import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
 import {
-  buildMatrixRows,
-  buildNotificationLinks,
-  countCustomSubscriptions,
-  createRefreshMetadata,
-  deriveEmptyReason,
-  EMPTY_REASON_META,
-  NOTIFICATION_EMPTY_REASONS,
-  resolveNotificationAction,
-} from "./notification-preferences-model";
+  EMPTY_REASON_COPY,
+  NOTIFICATION_EVENT_CATALOG,
+  type NotificationChannel,
+} from "./constants";
+import {
+  NotificationMatrixForm,
+  type NotificationMatrixRow,
+} from "./notification-matrix-form";
+import { updateNotificationPreferencesAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -45,412 +42,649 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const kpiGridStyle: CSSProperties = {
+const linkRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+};
+
+const linkChipStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "6px 10px",
+  borderRadius: 7,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
+  color: th.text,
+  fontSize: 12,
+  textDecoration: "none",
+};
+
+const helperTextStyle: CSSProperties = {
+  fontSize: 11.5,
+  lineHeight: 1.5,
+  color: th.textMuted,
+};
+
+const monoStyle: CSSProperties = {
+  fontFamily: th.monoFamily,
+};
+
+const metaRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+};
+
+const supportGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)",
+  gap: 16,
+};
+
+const emptyStateCardStyle: CSSProperties = {
+  padding: "28px 20px",
+  display: "grid",
   gap: 12,
+  justifyItems: "start",
+};
+
+const emptyStateBodyStyle: CSSProperties = {
+  fontSize: 12.5,
+  lineHeight: 1.6,
+  color: th.textMuted,
+};
+
+const emptyReasonKeys = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "filtered_empty",
+] as const satisfies Exclude<EmptyReason, "driver_not_eligible">[];
+
+type NotificationEmptyReason = (typeof emptyReasonKeys)[number];
+
+const notificationLookup = new Map<
+  string,
+  (typeof NOTIFICATION_EVENT_CATALOG)[number]
+>(NOTIFICATION_EVENT_CATALOG.map((item) => [item.eventType, item]));
+
+type NotificationsPageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
 type NotificationsPageData = {
-  identity: IdentityContext | null;
-  preferences: NotificationPreferencesRecord | null;
+  preferences: TenantNotificationPreferences | null;
   governance: TenantIntegrationGovernancePackage | null;
   webhooks: TenantWebhookEndpoint[];
   errors: string[];
-  generatedAt: string;
 };
 
-type NotificationPreferencesRecord = TenantNotificationPreferences & {
+type NotificationPageActions = {
+  saveAction: ResourceActionDescriptor;
+  deepLinks: NotificationPageLink[];
+};
+
+type NotificationPreferencesRuntime = TenantNotificationPreferences & {
   availableActions?: ResourceActionDescriptor[];
+  emptyState?: {
+    reason: EmptyReason;
+    nextAction?: ResourceActionDescriptor | null;
+  } | null;
+  refresh?: {
+    dataFreshness?: "fresh" | "stale" | "degraded" | "unknown";
+    generatedAt?: string;
+  } | null;
+  dataFreshness?: "fresh" | "stale" | "degraded" | "unknown";
+  generatedAt?: string;
 };
 
-async function loadNotificationsPageData(): Promise<NotificationsPageData> {
-  const client = getTenantClient();
-  const [identityResult, preferencesResult, governanceResult, webhooksResult] =
-    await Promise.allSettled([
-      client.getIdentityContext() as Promise<IdentityContext>,
-      client.getNotificationPreferences() as Promise<NotificationPreferencesRecord>,
-      client.getTenantIntegrationGovernancePackage() as Promise<TenantIntegrationGovernancePackage>,
-      client.listWebhooks() as Promise<TenantWebhookEndpoint[]>,
-    ]);
+type NotificationPageLink = ResourceActionDescriptor & {
+  label: string;
+  href?: string;
+  target?: "_blank" | "_self";
+};
 
-  const errors: string[] = [];
+function toErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "未知錯誤";
+}
 
-  for (const [label, result] of [
-    ["Identity", identityResult],
-    ["Notification preferences", preferencesResult],
-    ["Integration governance", governanceResult],
-    ["Webhooks", webhooksResult],
-  ] as const) {
-    if (result.status === "rejected") {
-      errors.push(
-        `${label}: ${result.reason instanceof Error ? result.reason.message : "Unknown error"}`,
-      );
-    }
+function parseDate(value: string | null | undefined) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
+  dateStyle: "short",
+  timeStyle: "short",
+});
+
+function formatDateTime(value: string | null | undefined) {
+  const parsed = parseDate(value);
+  return parsed ? dateTimeFormatter.format(parsed) : "—";
+}
+
+function loadChannelState(
+  channel: NotificationChannel,
+  subscriptionMap: Map<string, boolean>,
+  webhookProvisioned: boolean,
+) {
+  if (channel === "webhook" && !webhookProvisioned) {
+    return {
+      channel,
+      enabled: false,
+      provisioned: false,
+      disabledReason: "未建立 endpoint",
+    };
   }
 
   return {
-    identity:
-      identityResult.status === "fulfilled" ? identityResult.value : null,
-    preferences:
-      preferencesResult.status === "fulfilled" ? preferencesResult.value : null,
-    governance:
-      governanceResult.status === "fulfilled" ? governanceResult.value : null,
-    webhooks: webhooksResult.status === "fulfilled" ? webhooksResult.value : [],
+    channel,
+    enabled: subscriptionMap.get(channel) ?? false,
+    provisioned: true,
+  };
+}
+
+function isNotificationPreferencesRuntime(
+  value: TenantNotificationPreferences | null,
+): value is NotificationPreferencesRuntime {
+  return Boolean(value && typeof value === "object");
+}
+
+function resolveActionLabel(action: string) {
+  switch (action) {
+    case "update_subscription":
+      return "儲存設定";
+    case "open_webhook_audit":
+      return "Ops Console 稽核";
+    case "open_platform_webhook_debug":
+      return "Platform Admin delivery debug";
+    case "open_webhooks":
+    case "configure_webhook":
+      return "Webhook 管理";
+    case "open_integration_governance":
+      return "整合就緒度";
+    default:
+      return action;
+  }
+}
+
+function resolveActionHref(action: string) {
+  switch (action) {
+    case "open_webhook_audit":
+      return `${
+        process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3103"
+      }/audit?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}&resourceType=tenant_notifications`;
+    case "open_platform_webhook_debug":
+      return `${
+        process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3102"
+      }/tenants?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}`;
+    case "open_webhooks":
+    case "configure_webhook":
+      return "/webhooks";
+    case "open_integration_governance":
+      return "/integration-governance";
+    default:
+      return undefined;
+  }
+}
+
+function toBannerTone(tone: "neutral" | "info" | "warn" | "danger") {
+  return tone === "neutral" ? "info" : tone;
+}
+
+function toPillTone(tone: "neutral" | "info" | "warn" | "danger") {
+  return tone === "neutral" ? "accent" : tone;
+}
+
+function buildNotificationActions(
+  data: NotificationsPageData,
+  rowCount: number,
+): NotificationPageActions {
+  const runtimeActions =
+    isNotificationPreferencesRuntime(data.preferences) &&
+    Array.isArray(data.preferences.availableActions)
+      ? data.preferences.availableActions
+      : [];
+
+  const saveAction =
+    runtimeActions.find((action) => action.action === "update_subscription") ??
+    ({
+      action: "update_subscription",
+      enabled: rowCount > 0,
+      riskLevel: "medium",
+    } satisfies ResourceActionDescriptor);
+
+  const fallbackDeepLinks = [
+    {
+      action: "open_integration_governance",
+      enabled: true,
+      riskLevel: "low",
+    },
+    {
+      action: "open_webhook_audit",
+      enabled: true,
+      riskLevel: "low",
+    },
+    {
+      action: "open_platform_webhook_debug",
+      enabled: true,
+      riskLevel: "low",
+    },
+    {
+      action: "open_webhooks",
+      enabled: true,
+      riskLevel: "low",
+    },
+  ] satisfies ResourceActionDescriptor[];
+
+  const supportedDeepLinkActions = new Set([
+    "open_integration_governance",
+    "open_webhook_audit",
+    "open_platform_webhook_debug",
+    "open_webhooks",
+    "configure_webhook",
+  ]);
+
+  const linkDescriptors =
+    runtimeActions.filter((action) =>
+      supportedDeepLinkActions.has(action.action),
+    ).length > 0
+      ? runtimeActions.filter((action) =>
+          supportedDeepLinkActions.has(action.action),
+        )
+      : fallbackDeepLinks;
+
+  const deepLinks = linkDescriptors.map((action) => {
+    const href = resolveActionHref(action.action);
+    const target =
+      action.action === "open_webhook_audit" ||
+      action.action === "open_platform_webhook_debug"
+        ? ("_blank" as const)
+        : ("_self" as const);
+
+    return {
+      ...action,
+      label: resolveActionLabel(action.action),
+      ...(href ? { href } : {}),
+      ...(href ? { target } : {}),
+    };
+  });
+
+  return { saveAction, deepLinks };
+}
+
+function buildRows(data: NotificationsPageData): NotificationMatrixRow[] {
+  const webhookProvisioned = data.webhooks.length > 0;
+  const matrixSource = data.preferences?.subscriptions.length
+    ? data.preferences.subscriptions
+    : (data.governance?.baselineNotificationSubscriptions ?? []);
+
+  const byEvent = new Map<string, Map<NotificationChannel, boolean>>();
+  for (const subscription of matrixSource) {
+    const eventMap =
+      byEvent.get(subscription.eventType) ??
+      new Map<NotificationChannel, boolean>();
+    eventMap.set(subscription.channel, subscription.enabled);
+    byEvent.set(subscription.eventType, eventMap);
+  }
+
+  const eventTypes = new Set<string>([
+    ...NOTIFICATION_EVENT_CATALOG.map((item) => item.eventType),
+    ...byEvent.keys(),
+  ]);
+
+  return [...eventTypes].map((eventType) => {
+    const meta = notificationLookup.get(eventType) ?? {
+      eventType,
+      description: "未在 handoff packet 建立說明，沿用 API 回傳事件碼。",
+      defaultAudience: "review in ops / audit",
+    };
+    const eventMap = byEvent.get(eventType) ?? new Map();
+
+    return {
+      eventType,
+      description: meta.description,
+      defaultAudience: meta.defaultAudience,
+      channels: {
+        email: loadChannelState("email", eventMap, webhookProvisioned),
+        webhook: loadChannelState("webhook", eventMap, webhookProvisioned),
+        ops_console: loadChannelState(
+          "ops_console",
+          eventMap,
+          webhookProvisioned,
+        ),
+      },
+    };
+  });
+}
+
+async function loadPageData(): Promise<NotificationsPageData> {
+  const client = getTenantClient();
+  const [preferences, governance, webhooks] = await Promise.allSettled([
+    client.getNotificationPreferences() as Promise<TenantNotificationPreferences>,
+    client.getTenantIntegrationGovernancePackage() as Promise<TenantIntegrationGovernancePackage>,
+    client.listWebhooks() as Promise<TenantWebhookEndpoint[]>,
+  ]);
+
+  const errors: string[] = [];
+  if (preferences.status === "rejected") {
+    errors.push(`通知偏好: ${toErrorMessage(preferences.reason)}`);
+  }
+  if (governance.status === "rejected") {
+    errors.push(`治理基線: ${toErrorMessage(governance.reason)}`);
+  }
+  if (webhooks.status === "rejected") {
+    errors.push(`Webhook 端點: ${toErrorMessage(webhooks.reason)}`);
+  }
+
+  return {
+    preferences: preferences.status === "fulfilled" ? preferences.value : null,
+    governance: governance.status === "fulfilled" ? governance.value : null,
+    webhooks: webhooks.status === "fulfilled" ? webhooks.value : [],
     errors,
-    generatedAt:
-      (preferencesResult.status === "fulfilled"
-        ? preferencesResult.value.updatedAt
-        : null) ??
-      (governanceResult.status === "fulfilled"
-        ? governanceResult.value.generatedAt
-        : null) ??
-      new Date().toISOString(),
+  };
+}
+
+function renderActionLink(action: NotificationPageLink) {
+  if (!action.href) {
+    return (
+      <span style={linkChipStyle}>
+        {action.label}
+        {!action.enabled && action.disabledReasonCode
+          ? ` · ${action.disabledReasonCode}`
+          : ""}
+      </span>
+    );
+  }
+
+  return (
+    <Link
+      href={action.href}
+      target={action.target}
+      rel={action.target === "_blank" ? "noreferrer" : undefined}
+      style={{
+        ...linkChipStyle,
+        opacity: action.enabled ? 1 : 0.6,
+        pointerEvents: action.enabled ? "auto" : "none",
+      }}
+    >
+      {action.label}
+    </Link>
+  );
+}
+
+function toNotificationPageLink(
+  action: ResourceActionDescriptor & {
+    label?: string;
+    href?: string;
+    target?: "_blank" | "_self";
+  },
+): NotificationPageLink {
+  const href = action.href ?? resolveActionHref(action.action);
+  const target =
+    action.target ??
+    (action.action === "open_webhook_audit" ||
+    action.action === "open_platform_webhook_debug"
+      ? "_blank"
+      : "_self");
+
+  return {
+    ...action,
+    label: action.label ?? resolveActionLabel(action.action),
+    ...(href ? { href } : {}),
+    ...(href ? { target } : {}),
   };
 }
 
 export default async function NotificationsPage({
   searchParams,
-}: {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const data = await loadNotificationsPageData();
-  const params = (await searchParams) ?? {};
-  const requestedEmptyReason = parseEmptyReason(params.empty);
-  const query = getSingleParam(params.q)?.trim().toLowerCase() ?? "";
-  const tenantId =
-    data.identity?.tenantId ?? data.preferences?.tenantId ?? "tenant-demo-001";
-  const canUpdate =
-    data.identity?.actorType === "tenant_admin" ||
-    data.identity?.roles?.includes("tc_admin") ||
-    data.identity?.roles?.includes("tc_integration_mgr") ||
-    false;
-  const action = resolveNotificationAction(data.preferences, canUpdate);
-  const baselineSubscriptions =
-    data.governance?.baselineNotificationSubscriptions ?? [];
-  const hasExplicitPreferences =
-    (data.preferences?.subscriptions.length ?? 0) > 0;
-  const currentSubscriptions = hasExplicitPreferences
-    ? (data.preferences?.subscriptions ?? [])
-    : baselineSubscriptions;
-  const matrixRows = buildMatrixRows(currentSubscriptions);
-  const filteredRows = matrixRows.filter((row) =>
-    query.length === 0
-      ? true
-      : `${row.eventType} ${row.description} ${row.defaultAudience}`
-          .toLowerCase()
-          .includes(query),
-  );
-  const refreshMetadata = createRefreshMetadata(
-    data.generatedAt,
-    data.errors.length > 0 ? "degraded" : "fresh",
-  );
-  const customCount = countCustomSubscriptions(
-    currentSubscriptions,
-    baselineSubscriptions,
-  );
-  const enabledRoutes = currentSubscriptions.filter(
-    (subscription) => subscription.enabled,
-  ).length;
-  const availability = {
-    email: {
-      ready: true,
-      label: "ready",
-      detail: "Email 為 baseline channel，直接依租戶收件設定送出。",
-    },
-    webhook: {
-      ready: data.webhooks.length > 0,
-      label: data.webhooks.length > 0 ? "ready" : "not_provisioned",
-      detail:
-        data.webhooks.length > 0
-          ? `${data.webhooks.length} 個 endpoint 已可接收事件。`
-          : "尚未建立任何 webhook endpoint，因此矩陣中的 webhook 欄位不可啟用。",
-    },
-    ops_console: {
-      ready: true,
-      label: "read_scoped",
-      detail: "供 ops/dispatch 追蹤 tenant 相關事件，不等於 tenant inbox。",
-    },
-  };
-  const readyChannels = Object.values(availability).filter(
-    (item) => item.ready,
-  ).length;
-  const activeEmptyReason = deriveEmptyReason({
-    requestedReason: requestedEmptyReason,
-    hasFetchError: data.errors.length > 0,
-    action,
-    hasWebhookChannel: availability.webhook.ready,
-    hasFilteredRows: filteredRows.length > 0,
-    usesBaselineDefaults:
-      !hasExplicitPreferences && baselineSubscriptions.length > 0,
-  });
-  const deepLinks = buildNotificationLinks(tenantId);
+}: NotificationsPageProps) {
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const previewReasonValue = resolvedSearchParams.emptyReason;
+  const previewReason =
+    typeof previewReasonValue === "string" &&
+    emptyReasonKeys.includes(previewReasonValue as NotificationEmptyReason)
+      ? (previewReasonValue as NotificationEmptyReason)
+      : null;
+  const data = await loadPageData();
+  const rows = buildRows(data);
+  const webhookProvisioned = data.webhooks.length > 0;
+  const baselineCount =
+    data.governance?.baselineNotificationSubscriptions.length ?? 0;
+  const customRouteCount = data.preferences?.subscriptions.length ?? 0;
+  const usesBaseline = customRouteCount === 0;
+  const { saveAction, deepLinks } = buildNotificationActions(data, rows.length);
+  const runtimePreferences = isNotificationPreferencesRuntime(data.preferences)
+    ? data.preferences
+    : null;
+  const freshness =
+    typeof resolvedSearchParams.freshness === "string"
+      ? resolvedSearchParams.freshness
+      : (runtimePreferences?.refresh?.dataFreshness ??
+        runtimePreferences?.dataFreshness ??
+        "fresh");
+
+  const derivedEmptyReason: NotificationEmptyReason | null =
+    previewReason ??
+    (runtimePreferences?.emptyState
+      ?.reason as NotificationEmptyReason | null) ??
+    (data.errors.length > 0 && rows.length === 0
+      ? "fetch_failed"
+      : rows.length === 0
+        ? "no_data"
+        : !webhookProvisioned
+          ? "not_provisioned"
+          : !saveAction.enabled && saveAction.disabledReasonCode
+            ? "permission_denied"
+            : null);
+  const emptyStateAction = derivedEmptyReason
+    ? runtimePreferences?.emptyState?.nextAction
+      ? toNotificationPageLink(runtimePreferences.emptyState.nextAction)
+      : EMPTY_REASON_COPY[derivedEmptyReason].action
+        ? toNotificationPageLink(EMPTY_REASON_COPY[derivedEmptyReason].action)
+        : null
+    : null;
+  const effectiveUpdatedAt =
+    data.preferences?.updatedAt ??
+    runtimePreferences?.refresh?.generatedAt ??
+    runtimePreferences?.generatedAt ??
+    data.governance?.generatedAt;
+  const matrixReadOnly =
+    !saveAction.enabled || derivedEmptyReason === "permission_denied";
+  const shouldRenderEmptyBody =
+    rows.length === 0 &&
+    derivedEmptyReason !== null &&
+    derivedEmptyReason !== "not_provisioned" &&
+    derivedEmptyReason !== "permission_denied";
 
   return (
-    <>
+    <div>
       <CanvasPageHeader
         theme={th}
         title="通知偏好"
-        subtitle="決定哪些 event 經由哪些 channel 送出，並清楚區分 baseline defaults、custom overrides 與未佈建 channel。"
+        subtitle="決定哪些 event 經由哪些 channel 送出 · per-event × per-channel 矩陣"
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Link
-              href="/webhooks"
-              style={{
-                color: th.text,
-                border: `1px solid ${th.border}`,
-                background: th.surface,
-                borderRadius: 7,
-                padding: "7px 11px",
-                fontSize: 12,
-                fontWeight: 600,
-              }}
+            <CanvasPill theme={th} tone="accent">
+              T5 · slow refresh
+            </CanvasPill>
+            <CanvasPill
+              theme={th}
+              tone={freshness === "fresh" ? "success" : "warn"}
+              dot
             >
-              webhook setup
-            </Link>
-            <Link
-              href={deepLinks[1]?.href ?? "/audit"}
-              target="_blank"
-              rel="noreferrer noopener"
-              style={{
-                color: "#fff",
-                border: `1px solid ${th.accent}`,
-                background: th.accent,
-                borderRadius: 7,
-                padding: "7px 11px",
-                fontSize: 12,
-                fontWeight: 700,
-              }}
-            >
-              delivery trace
-            </Link>
+              dataFreshness={freshness}
+            </CanvasPill>
           </div>
         }
       />
 
       <div style={pageBodyStyle}>
+        {freshness !== "fresh" ? (
+          <CanvasBanner
+            theme={th}
+            tone={freshness === "degraded" ? "danger" : "warn"}
+            icon="clock"
+            title={freshness === "degraded" ? "資料來源降級" : "資料已過時"}
+            body={`Refresh tier = T5。請以 /audit 與跨 app delivery trace 為準。`}
+          />
+        ) : null}
+
         {data.errors.length > 0 ? (
           <CanvasBanner
             theme={th}
             tone="warn"
             icon="warn"
-            title="Page-critical dependencies degraded"
-            body={data.errors.join(" | ")}
+            title="部分通知資料無法載入"
+            body={data.errors.join(" · ")}
           />
         ) : null}
 
-        {activeEmptyReason ? (
+        {derivedEmptyReason ? (
           <CanvasBanner
             theme={th}
-            tone={
-              EMPTY_REASON_META[activeEmptyReason]?.tone === "neutral"
-                ? "info"
-                : (EMPTY_REASON_META[activeEmptyReason]?.tone ?? "info")
+            tone={toBannerTone(EMPTY_REASON_COPY[derivedEmptyReason].tone)}
+            icon={
+              derivedEmptyReason === "fetch_failed"
+                ? "warn"
+                : derivedEmptyReason === "not_provisioned"
+                  ? "warn"
+                  : "info"
             }
-            icon="info"
-            title={`EmptyReason preview · ${activeEmptyReason}`}
-            body={EMPTY_REASON_META[activeEmptyReason]?.body ?? ""}
+            title={EMPTY_REASON_COPY[derivedEmptyReason].title}
+            body={
+              emptyStateAction
+                ? `${EMPTY_REASON_COPY[derivedEmptyReason].body} · 下一步：${emptyStateAction.label}`
+                : EMPTY_REASON_COPY[derivedEmptyReason].body
+            }
           />
         ) : null}
 
-        <section style={kpiGridStyle}>
-          <CanvasKPI
+        <div style={metaRowStyle}>
+          <CanvasPill theme={th} tone={usesBaseline ? "neutral" : "accent"} dot>
+            {usesBaseline ? "all_defaults" : "custom_configuration"}
+          </CanvasPill>
+          <CanvasPill
             theme={th}
-            label="refresh tier"
-            value="T5"
-            sub="30s cadence"
-            hint="UiRefreshMetadata"
-          />
-          <CanvasKPI
-            theme={th}
-            label="custom overrides"
-            value={String(customCount)}
-            sub="vs governance baseline"
-            hint={`${enabledRoutes} enabled routes`}
-          />
-          <CanvasKPI
-            theme={th}
-            label="channels ready"
-            value={`${readyChannels}/3`}
-            sub="email / webhook / ops_console"
-            hint={availability.webhook.label}
-          />
-          <CanvasKPI
-            theme={th}
-            label="actor / realm"
-            value={data.identity?.actorType ?? "unknown"}
-            sub={data.identity?.realm ?? "tenant"}
-            hint={tenantId}
-          />
-        </section>
-
-        <CanvasCard
-          theme={th}
-          title="Current state"
-          subtitle="Spec-driven state treatment for defaults, permission, provisioning, fetch health, and filter empties."
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(220px, 0.8fr) minmax(0, 1.2fr)",
-              gap: 16,
-            }}
+            tone={webhookProvisioned ? "success" : "warn"}
+            dot
           >
-            <div style={{ display: "grid", gap: 8 }}>
+            webhook {webhookProvisioned ? "provisioned" : "not_provisioned"}
+          </CanvasPill>
+          <CanvasPill
+            theme={th}
+            tone={saveAction.enabled ? "success" : "warn"}
+            dot
+          >
+            update_subscription {saveAction.enabled ? "enabled" : "disabled"}
+          </CanvasPill>
+        </div>
+
+        <CanvasCard theme={th} title="通知矩陣" subtitle="event type × channel">
+          <CanvasDL
+            theme={th}
+            cols={4}
+            items={[
+              { k: "Tenant", v: DEMO_TENANT_ID, mono: true },
+              {
+                k: "Last updated",
+                v: formatDateTime(effectiveUpdatedAt),
+              },
+              { k: "Custom routes", v: String(customRouteCount), mono: true },
+              { k: "Baseline routes", v: String(baselineCount), mono: true },
+            ]}
+          />
+          <div style={{ height: 12 }} />
+          {shouldRenderEmptyBody ? (
+            <div style={emptyStateCardStyle}>
               <CanvasPill
                 theme={th}
-                tone={
-                  activeEmptyReason
-                    ? EMPTY_REASON_META[activeEmptyReason]?.tone === "neutral"
-                      ? "info"
-                      : (EMPTY_REASON_META[activeEmptyReason]?.tone ?? "info")
-                    : customCount > 0
-                      ? "accent"
-                      : "success"
-                }
+                tone={toPillTone(EMPTY_REASON_COPY[derivedEmptyReason].tone)}
+                dot
               >
-                {activeEmptyReason ??
-                  (customCount > 0 ? "custom_configuration" : "all_defaults")}
+                {derivedEmptyReason}
               </CanvasPill>
-              <strong style={{ fontSize: 14 }}>
-                {activeEmptyReason
-                  ? EMPTY_REASON_META[activeEmptyReason]?.title
-                  : customCount > 0
-                    ? "Custom configuration active"
-                    : "All defaults from governance baseline"}
-              </strong>
-              <span style={{ color: th.textMuted, fontSize: 12.5 }}>
-                {activeEmptyReason
-                  ? EMPTY_REASON_META[activeEmptyReason]?.body
-                  : customCount > 0
-                    ? `${customCount} 個 route 已偏離 baseline，儲存時會產生 tenant_notifications audit receipt。`
-                    : "目前沒有 tenant-specific override；矩陣直接反映 integration governance baseline。"}
-              </span>
-            </div>
-            <div style={{ display: "grid", gap: 10 }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <CanvasPill theme={th} tone="neutral">
-                  query: {query || "none"}
-                </CanvasPill>
-                <CanvasPill theme={th} tone="neutral">
-                  rows: {filteredRows.length}/{matrixRows.length}
-                </CanvasPill>
-                <CanvasPill
-                  theme={th}
-                  tone={action.enabled ? "success" : "warn"}
-                >
-                  {action.enabled
-                    ? "availableActions.update_subscription"
-                    : `disabled:${action.disabledReasonCode ?? "permission_denied"}`}
-                </CanvasPill>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>
+                {EMPTY_REASON_COPY[derivedEmptyReason].title}
               </div>
-              <span style={{ color: th.textDim, fontSize: 12 }}>
-                Entry follows packet §5.8: sidebar and `/integration-governance`
-                adjacency. This page keeps the nearby webhook setup and audit
-                investigation links visible even when the upstream route is
-                owned by another task.
-              </span>
+              <div style={emptyStateBodyStyle}>
+                {EMPTY_REASON_COPY[derivedEmptyReason].body}
+              </div>
+              {emptyStateAction ? renderActionLink(emptyStateAction) : null}
             </div>
-          </div>
+          ) : (
+            <NotificationMatrixForm
+              rows={rows}
+              saveAction={saveAction}
+              action={updateNotificationPreferencesAction}
+              readOnly={matrixReadOnly}
+            />
+          )}
         </CanvasCard>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.5fr) minmax(300px, 0.9fr)",
-            gap: 16,
-          }}
-        >
+        <div style={supportGridStyle}>
           <CanvasCard
             theme={th}
-            title="Notification matrix"
-            subtitle="Per event type × channel matrix, aligned to the canvas artboard and packet §5.8."
+            title="Cross-app deep links"
+            subtitle="delivery trace opens in authority lane"
           >
-            <NotificationPreferencesEditor
-              initialRows={matrixRows}
-              visibleEventTypes={filteredRows.map((row) => row.eventType)}
-              availability={availability}
-              action={action}
-              refreshMetadata={refreshMetadata}
-              deepLinks={deepLinks}
-              activeEmptyReason={activeEmptyReason}
-            />
+            <div style={linkRowStyle}>
+              {deepLinks.map((action) => (
+                <div key={action.action}>{renderActionLink(action)}</div>
+              ))}
+            </div>
+            <div style={{ ...helperTextStyle, marginTop: 12 }}>
+              `webhook.delivery_failed` 與 degraded trace 需直接跳到 ops /
+              platform authority，不在 tenant-console 混做調查。
+            </div>
           </CanvasCard>
 
-          <div style={{ display: "grid", gap: 16 }}>
-            <CanvasCard
-              theme={th}
-              title="Current posture"
-              subtitle="This side rail keeps must-show context visible while users tune the matrix."
-            >
-              <CanvasDL
-                theme={th}
-                cols={1}
-                items={[
-                  {
-                    k: "tenant",
-                    v: tenantId,
-                    mono: true,
-                  },
-                  {
-                    k: "updatedAt",
-                    v: data.preferences?.updatedAt ?? "baseline defaults",
-                    mono: true,
-                  },
-                  {
-                    k: "generatedAt",
-                    v: refreshMetadata.generatedAt,
-                    mono: true,
-                  },
-                  {
-                    k: "baseline subscriptions",
-                    v: `${baselineSubscriptions.length} routes`,
-                  },
-                  {
-                    k: "availableActions",
-                    v: action.enabled
-                      ? "update_subscription (medium)"
-                      : `disabled · ${action.disabledReasonCode ?? "permission_denied"}`,
-                  },
-                  {
-                    k: "entry",
-                    v: "sidebar / integration-governance link",
-                  },
-                ]}
-              />
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title="Adjacencies"
-              subtitle="Packet-required nearby flows and audit trace links."
-            >
-              <div style={{ display: "grid", gap: 10 }}>
-                <CanvasPill theme={th} tone="accent">
-                  /integration-governance → notification setup posture
-                </CanvasPill>
-                <CanvasPill theme={th} tone="info">
-                  /webhooks → provision webhook channel
-                </CanvasPill>
-                <CanvasPill theme={th} tone="neutral">
-                  /audit?resourceType=tenant_notifications
-                </CanvasPill>
+          <CanvasCard
+            theme={th}
+            title="State contract"
+            subtitle="Q-X15 empty reasons + tenant notification posture"
+          >
+            <div style={{ display: "grid", gap: 12 }}>
+              <div>
+                <div style={{ ...helperTextStyle, marginBottom: 8 }}>
+                  Supported EmptyReason values
+                </div>
+                <div style={linkRowStyle}>
+                  {emptyReasonKeys.map((reason) => (
+                    <CanvasPill
+                      key={reason}
+                      theme={th}
+                      tone={
+                        derivedEmptyReason === reason
+                          ? toPillTone(EMPTY_REASON_COPY[reason].tone)
+                          : "neutral"
+                      }
+                      dot={derivedEmptyReason === reason}
+                    >
+                      {reason}
+                    </CanvasPill>
+                  ))}
+                </div>
               </div>
-            </CanvasCard>
-          </div>
+              <div style={helperTextStyle}>
+                Entry from sidebar or `/integration-governance`. Custom routes
+                stay machine-driven by `availableActions`; webhook authority and
+                degraded delivery investigation always deep-link out of this
+                page.
+              </div>
+              <div style={{ ...helperTextStyle, ...monoStyle }}>
+                Preview override:
+                /notifications?emptyReason=no_data&freshness=stale
+              </div>
+            </div>
+          </CanvasCard>
         </div>
       </div>
-    </>
+    </div>
   );
-}
-
-function parseEmptyReason(
-  value: string | string[] | undefined,
-): EmptyReason | null {
-  const raw = getSingleParam(value);
-  return NOTIFICATION_EMPTY_REASONS.find((reason) => reason === raw) ?? null;
-}
-
-function getSingleParam(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
 }
