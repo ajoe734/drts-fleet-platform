@@ -86,6 +86,15 @@ type RevokeIntent = {
   reason: string;
 };
 
+type EmptyStateConfig = {
+  tone: CanvasTone;
+  title: string;
+  body: string;
+  ctaLabel: string;
+  ctaHref?: string;
+  action?: ResourceActionDescriptor;
+};
+
 const th = buildCanvasTheme({
   surface: "tenant",
   dark: true,
@@ -440,6 +449,11 @@ const inAppLinks = [
     label: "SLA",
     description: "tenant thresholds 與 dependency policy",
   },
+  {
+    href: "/reports",
+    label: "報表",
+    description: "manual exports 與 downstream readiness evidence",
+  },
 ] as const;
 
 function formatDateTime(value: string | null | undefined) {
@@ -669,17 +683,7 @@ function getEmptyStateCatalog(issueAction: ResourceActionDescriptor) {
       body: "調整搜尋字詞或狀態篩選，即可重新顯示 active / expired / revoked 金鑰。",
       ctaLabel: "清除篩選",
     },
-  } satisfies Record<
-    SupportedEmptyReason,
-    {
-      tone: CanvasTone;
-      title: string;
-      body: string;
-      ctaLabel: string;
-      ctaHref?: string;
-      action?: ResourceActionDescriptor;
-    }
-  >;
+  } satisfies Record<SupportedEmptyReason, EmptyStateConfig>;
 }
 
 function getFlashKeyName(
@@ -1100,7 +1104,7 @@ export function ApiKeyManager({
               icon="ext"
               onClick={() => window.open(externalLinks[0].href, "_blank")}
             >
-              API 文件
+              Platform Admin
             </CanvasBtn>
             <span
               title={
