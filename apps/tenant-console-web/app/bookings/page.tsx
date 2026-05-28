@@ -1,14 +1,14 @@
 import Link from "next/link";
 import type {
-  ApiListData,
   ApiSuccessEnvelope,
   BookingRecord,
   CrossAppResourceLink,
-  EmptyStateEnvelope,
   EmptyReason,
   OwnedOrderStatus,
   RefreshTier,
   ResourceActionDescriptor,
+  TenantBookingListEnvelope,
+  TenantBookingListItem,
   UiRefreshMetadata,
 } from "@drts/contracts";
 import {
@@ -71,6 +71,8 @@ const ACTION_COPY: Record<string, string> = {
   create_booking: "建立叫車",
   create_tenant_booking: "建立訂單",
   view_detail: "查看詳情",
+  open_integration_governance: "查看整合就緒度",
+  reset_filters: "清除篩選",
   filter: "篩選",
   refresh: "立即更新",
 };
@@ -96,27 +98,9 @@ const REFRESH_TIER_POLL_INTERVAL_MS: Record<RefreshTier, number> = {
 
 type SearchParamValue = string | string[] | undefined;
 
-type TenantBookingRuntimeRecord = BookingRecord & {
-  availableActions?: ResourceActionDescriptor[];
-  editableUntil?: string | null;
-  readOnlyReasonCode?: string | null;
-  slaStatus?: "healthy" | "at_risk" | "breach" | null;
-  crossAppLinks?: CrossAppResourceLink[];
-};
-
-type TenantBookingListRecord = TenantBookingRuntimeRecord & {
-  editableUntil: string | null;
-  readOnlyReasonCode: string | null;
-  availableActions: ResourceActionDescriptor[];
-};
-
+type TenantBookingListRecord = TenantBookingListItem;
 type TenantEmptyReason = (typeof TENANT_EMPTY_REASONS)[number];
-
-type BookingListEnvelope = ApiListData<TenantBookingRuntimeRecord> & {
-  availableActions?: ResourceActionDescriptor[];
-  emptyState?: EmptyStateEnvelope | null;
-  refresh?: UiRefreshMetadata | null;
-};
+type BookingListEnvelope = TenantBookingListEnvelope;
 
 type EmptyStateDescriptor = {
   eyebrow: string;
@@ -336,7 +320,7 @@ function hasActiveFilters(searchParams: Record<string, SearchParamValue>) {
 }
 
 function normalizeBooking(
-  booking: TenantBookingRuntimeRecord,
+  booking: TenantBookingListRecord,
 ): TenantBookingListRecord {
   return {
     ...booking,
@@ -447,6 +431,16 @@ function getActionHref(
 ) {
   if (isCreateBookingAction(descriptor)) {
     return "/bookings/new";
+  }
+
+  if (
+    normalizeActionToken(descriptor.action) === "open_integration_governance"
+  ) {
+    return "/integration-governance";
+  }
+
+  if (normalizeActionToken(descriptor.action) === "reset_filters") {
+    return "/bookings";
   }
 
   if (

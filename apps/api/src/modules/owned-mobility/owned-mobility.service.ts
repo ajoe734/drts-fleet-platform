@@ -57,6 +57,9 @@ import type {
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
+  TenantBookingListEnvelope,
+  TenantBookingListItem,
+  TenantBookingSlaStatus,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
@@ -100,6 +103,29 @@ type PartnerBookingContext = {
   issuerAuthorizationRef: string | null;
   benefitReference: string | null;
 };
+
+const TENANT_BOOKINGS_REFRESH_STALE_AFTER_MS = 30_000;
+const TENANT_BOOKING_ACTIONABLE_STATUSES = new Set<OwnedOrderRecord["status"]>([
+  "created",
+  "recording_pending",
+  "ready_for_dispatch",
+  "preassigned",
+  "assigned",
+  "driver_accepted",
+  "dispatch_failed",
+  "dispatch_timeout",
+  "no_supply",
+  "delayed_queue",
+  "redispatch_required",
+  "exception_hold",
+]);
+const TENANT_BOOKING_SLA_BREACH_STATUSES = new Set<OwnedOrderRecord["status"]>([
+  "dispatch_failed",
+  "dispatch_timeout",
+  "no_supply",
+  "exception_hold",
+  "redispatch_required",
+]);
 
 type CallRecordingAttachmentEvent = {
   callId: string;
@@ -883,9 +909,15 @@ export class OwnedMobilityService implements OnModuleInit {
 
   listTenantBookings(tenantId: string) {
     this.assertNonBlank(tenantId, "tenantId");
+    const generatedAt = new Date().toISOString();
     const items = this.orders
       .filter((order) => order.bookingId && order.tenantId === tenantId)
-      .map((order) => this.mapOrderToBooking(order));
+      .map((order) => this.mapOrderToTenantBookingListItem(order, generatedAt));
+
+    const emptyState =
+      items.length === 0
+        ? this.buildTenantBookingEmptyStateEnvelope(tenantId)
+        : null;
 
     return {
       items,
@@ -894,6 +926,14 @@ export class OwnedMobilityService implements OnModuleInit {
         pageSize: items.length,
         totalItems: items.length,
         totalPages: items.length > 0 ? 1 : 0,
+      },
+      availableActions: this.buildTenantBookingListActions(),
+      emptyState,
+      refresh: {
+        generatedAt,
+        staleAfterMs: TENANT_BOOKINGS_REFRESH_STALE_AFTER_MS,
+        dataFreshness: "fresh" as const,
+        source: "live" as const,
       },
     };
   }
@@ -4679,6 +4719,216 @@ export class OwnedMobilityService implements OnModuleInit {
       return value.then((resolved) => next(resolved));
     }
     return next(value);
+  }
+
+  private buildTenantBookingListActions() {
+    return [
+      {
+        action: "create_tenant_booking",
+        enabled: true,
+        riskLevel: "medium",
+      },
+    ] satisfies TenantBookingListEnvelope["availableActions"];
+  }
+
+  private buildTenantBookingEmptyStateEnvelope(
+    tenantId: string,
+  ): NonNullable<TenantBookingListEnvelope["emptyState"]> {
+    if (tenantId !== "tenant-demo-001") {
+      return {
+        reason: "not_provisioned",
+        messageCode: "TENANT_BOOKINGS_NOT_PROVISIONED",
+        nextAction: {
+          action: "open_integration_governance",
+          enabled: true,
+          riskLevel: "low",
+        },
+      };
+    }
+
+    return {
+      reason: "no_data",
+      messageCode: "TENANT_BOOKINGS_NO_DATA",
+      nextAction: {
+        action: "create_tenant_booking",
+        enabled: true,
+        riskLevel: "medium",
+      },
+    };
+  }
+
+  private mapOrderToTenantBookingListItem(
+    order: OwnedOrderRecord,
+    now: string,
+  ): TenantBookingListItem {
+    const booking = this.mapOrderToBooking(order);
+
+    return {
+      ...booking,
+      availableActions: this.buildTenantBookingRowActions(booking),
+      editableUntil: booking.modifiableUntil,
+      readOnlyReasonCode: this.deriveTenantBookingReadOnlyReasonCode(booking),
+      slaStatus: this.deriveTenantBookingSlaStatus(booking, now),
+      crossAppLinks: this.buildTenantBookingCrossAppLinks(booking),
+    };
+  }
+
+  private buildTenantBookingCrossAppLinks(
+    booking: BookingRecord,
+  ): TenantBookingListItem["crossAppLinks"] {
+    const links: TenantBookingListItem["crossAppLinks"] = [];
+
+    if (
+      booking.approvalState === "pending" ||
+      booking.approvalState === "blocked"
+    ) {
+      links.push({
+        targetApp: "ops-console",
+        route: `/approval-requests?tenantId=${encodeURIComponent(
+          booking.tenantId,
+        )}&status=pending`,
+        resourceType: "tenant_booking_approval_request",
+        resourceId: booking.bookingId,
+        openMode: "new_tab",
+        label: "在 Ops Console 查看審批佇列",
+      });
+    }
+
+    if (TENANT_BOOKING_SLA_BREACH_STATUSES.has(booking.orderStatus)) {
+      links.push({
+        targetApp: "ops-console",
+        route: `/dispatch?bookingId=${encodeURIComponent(booking.bookingId)}`,
+        resourceType: "dispatch_queue_item",
+        resourceId: booking.bookingId,
+        openMode: "new_tab",
+        label: "在 Ops Console 查看派遣佇列",
+      });
+    }
+
+    if (booking.partnerEntrySlug) {
+      links.push({
+        targetApp: "platform-admin",
+        route: `/partners/${encodeURIComponent(booking.partnerEntrySlug)}`,
+        resourceType: "partner_entry",
+        resourceId: booking.partnerEntrySlug,
+        openMode: "new_tab",
+        label: "在 Platform Admin 查看 partner entry",
+      });
+    }
+
+    return links;
+  }
+
+  private buildTenantBookingRowActions(
+    booking: BookingRecord,
+  ): TenantBookingListItem["availableActions"] {
+    const modifiableUntil = this.parseIsoDate(booking.modifiableUntil);
+    const cancelableUntil = this.parseIsoDate(booking.cancelableUntil);
+    const isActionable = TENANT_BOOKING_ACTIONABLE_STATUSES.has(
+      booking.orderStatus,
+    );
+    const canEdit =
+      isActionable &&
+      modifiableUntil !== null &&
+      modifiableUntil.getTime() > Date.now();
+    const canCancel =
+      isActionable &&
+      cancelableUntil !== null &&
+      cancelableUntil.getTime() > Date.now();
+
+    return [
+      {
+        action: "open_detail",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "update_booking",
+        enabled: canEdit,
+        ...(canEdit
+          ? {}
+          : {
+              disabledReasonCode: booking.modifiableUntil
+                ? "editable_window_passed"
+                : "workflow_locked",
+            }),
+        riskLevel: "medium",
+      },
+      {
+        action: "cancel_booking",
+        enabled: canCancel,
+        ...(canCancel
+          ? {}
+          : {
+              disabledReasonCode: booking.cancelableUntil
+                ? "cancel_window_passed"
+                : "workflow_locked",
+            }),
+        requiresReason: true,
+        riskLevel: "high",
+      },
+    ];
+  }
+
+  private deriveTenantBookingReadOnlyReasonCode(
+    booking: BookingRecord,
+  ): string | null {
+    if (
+      booking.orderStatus === "completed" ||
+      booking.orderStatus === "cancelled"
+    ) {
+      return "terminal_order_state";
+    }
+    if (booking.orderStatus === "on_trip") {
+      return "on_trip";
+    }
+    if (booking.modifiableUntil) {
+      const timestamp = new Date(booking.modifiableUntil).getTime();
+      if (!Number.isNaN(timestamp) && timestamp <= Date.now()) {
+        return "past_editable_until";
+      }
+    }
+
+    return null;
+  }
+
+  private deriveTenantBookingSlaStatus(
+    booking: BookingRecord,
+    now: string,
+  ): TenantBookingSlaStatus | null {
+    if (TENANT_BOOKING_SLA_BREACH_STATUSES.has(booking.orderStatus)) {
+      return "breach";
+    }
+    if (
+      booking.approvalState === "pending" ||
+      booking.approvalState === "blocked"
+    ) {
+      return "at_risk";
+    }
+
+    const reservationStart = this.parseIsoDate(booking.reservationWindowStart);
+    if (
+      reservationStart &&
+      TENANT_BOOKING_ACTIONABLE_STATUSES.has(booking.orderStatus)
+    ) {
+      const minutesUntilStart = Math.round(
+        (reservationStart.getTime() - new Date(now).getTime()) / 60_000,
+      );
+      if (minutesUntilStart > 0 && minutesUntilStart <= 45) {
+        return "at_risk";
+      }
+    }
+
+    return null;
+  }
+
+  private parseIsoDate(value: string | null | undefined) {
+    if (!value) {
+      return null;
+    }
+
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
   private mapOrderToBooking(order: OwnedOrderRecord): BookingRecord {

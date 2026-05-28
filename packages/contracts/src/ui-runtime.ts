@@ -1,3 +1,5 @@
+import type { ApiListData, BookingRecord } from "./index";
+
 /**
  * UI runtime contracts — 12 cross-cutting envelopes / records called out in
  * `docs/05-ui/system-design-answers-all-apps-20260524.md` §7.
@@ -299,6 +301,35 @@ export interface SearchResultRecord {
   secondaryLabel?: string;
   link: CrossAppResourceLink;
   matchedFields?: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tenant Console — Bookings list runtime
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type TenantBookingSlaStatus = "healthy" | "at_risk" | "breach";
+
+/**
+ * Tenant booking list row enriched with backend-owned UI runtime metadata.
+ * This keeps the base `BookingRecord` domain shape stable while allowing
+ * tenant-console to render canonical action authority, editability, SLA, and
+ * cross-app affordances without inventing them in the UI.
+ */
+export interface TenantBookingListItem extends BookingRecord {
+  availableActions: ResourceActionDescriptor[];
+  editableUntil: string | null;
+  readOnlyReasonCode: string | null;
+  slaStatus: TenantBookingSlaStatus | null;
+  crossAppLinks: CrossAppResourceLink[];
+}
+
+/**
+ * `/api/tenant/bookings` list envelope for tenant-console `/bookings`.
+ */
+export interface TenantBookingListEnvelope extends ApiListData<TenantBookingListItem> {
+  availableActions: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope | null;
+  refresh?: UiRefreshMetadata | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

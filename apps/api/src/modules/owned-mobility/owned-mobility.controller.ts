@@ -35,12 +35,12 @@ import type {
   RejectExceptionOverrideCommand,
   RequestExceptionOverrideCommand,
   ResolveExceptionHoldCommand,
+  TenantBookingListEnvelope,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
 import {
   ApiRequestError,
-  toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { CurrentIdentity } from "../../common/auth";
@@ -208,7 +208,13 @@ export class OwnedMobilityController {
       this.requireTenantId(tenantId),
     );
     return toApiSuccessEnvelope(
-      toApiListData(bookings.items, bookings.pagination),
+      {
+        items: bookings.items,
+        pageInfo: bookings.pagination,
+        availableActions: bookings.availableActions,
+        emptyState: bookings.emptyState,
+        refresh: bookings.refresh,
+      } satisfies TenantBookingListEnvelope,
       requestId,
     );
   }
