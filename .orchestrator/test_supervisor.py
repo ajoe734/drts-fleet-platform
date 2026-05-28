@@ -4330,6 +4330,75 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(reason, "provider_health_triage")
 
+    def test_repeated_failure_records_ignore_tasks_covered_by_workspace_baseline_task(self) -> None:
+        state = {
+            "failure_streaks": {
+                "UI-FE-ADM-FLT:owner": {
+                    "task_id": "UI-FE-ADM-FLT",
+                    "role": "owner",
+                    "agent": "Codex",
+                    "awaiting_chair": True,
+                },
+                "UI-FE-TEN-PSG:owner": {
+                    "task_id": "UI-FE-TEN-PSG",
+                    "role": "owner",
+                    "agent": "Codex",
+                    "awaiting_chair": True,
+                },
+            }
+        }
+        status = {
+            "tasks": [
+                {
+                    "id": supervisor.WORKSPACE_BASELINE_TASK_ID,
+                    "status": "in_progress",
+                    "helper_kind": supervisor.WORKSPACE_BASELINE_HELPER_KIND,
+                    "covers_task_ids": ["UI-FE-ADM-FLT"],
+                }
+            ]
+        }
+
+        records = supervisor.repeated_failure_records(state, status)
+
+        self.assertEqual([item["task_id"] for item in records], ["UI-FE-TEN-PSG"])
+
+    def test_chair_review_reason_skips_reassignment_when_workspace_baseline_task_covers_loops(self) -> None:
+        reason = supervisor.chair_review_reason(
+            {
+                "failure_streaks": {
+                    "UI-FE-ADM-FLT:owner": {
+                        "task_id": "UI-FE-ADM-FLT",
+                        "role": "owner",
+                        "agent": "Codex",
+                        "awaiting_chair": True,
+                    }
+                },
+                "provider_pauses": {},
+                "dispatch_pauses": [
+                    {
+                        "task_id": "UI-FE-ADM-FLT",
+                        "provider": "codex",
+                        "failure_kind": "terminal",
+                        "paused_at": "2026-05-28T00:00:00Z",
+                    }
+                ],
+            },
+            {"pending": []},
+            status={
+                "tasks": [
+                    {
+                        "id": supervisor.WORKSPACE_BASELINE_TASK_ID,
+                        "status": "in_progress",
+                        "helper_kind": supervisor.WORKSPACE_BASELINE_HELPER_KIND,
+                        "covers_task_ids": ["UI-FE-ADM-FLT"],
+                    }
+                ]
+            },
+            config={"paths": {}},
+        )
+
+        self.assertEqual(reason, "operational_review")
+
     def test_chair_review_reason_prioritizes_dependency_ready_blocked_tasks(self) -> None:
         status = {
             "tasks": [
@@ -5635,6 +5704,150 @@ class ChairmanFlowTests(unittest.TestCase):
             create_unblock.assert_called_once()
             self.assertIsNone(state["chair_review"]["active_review"])
             self.assertEqual(state["chair_review"]["last_reason"], "blocked_task_triage")
+
+    def test_refresh_chair_review_state_materializes_workspace_baseline_task_from_reassignment_focus(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260528T000000Z-claude.md"
+            json_path = review_dir / "20260528T000000Z-claude.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "operational_review",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "No reassignment improves machine truth.",
+                        "blocked_by": [
+                            "Shared workspace-baseline blocker keeps the UI-FE wave from typecheck/build completion."
+                        ],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [],
+                        "provider_actions": [],
+                        "recommended_focus": [
+                            "Create a workspace-baseline repair task before re-dispatching the UI-FE wave."
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text('{"tasks": []}\n', encoding="utf-8")
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "failure_streaks": {
+                    "UI-FE-ADM-FLT:owner": {
+                        "task_id": "UI-FE-ADM-FLT",
+                        "role": "owner",
+                        "agent": "Codex",
+                        "awaiting_chair": True,
+                    }
+                },
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude",
+                        "agent": "Claude",
+                        "reason": "reassignment_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "create_chair_workspace_baseline_task", return_value=True) as create_task,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            create_task.assert_called_once()
+            self.assertEqual(create_task.call_args.kwargs["preferred_owner"], "Claude")
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reason"], "reassignment_triage")
+
+    def test_materialize_workspace_baseline_task_from_last_decision_uses_last_reviewer(self) -> None:
+        config = {"paths": {"status_file": "ai-status.json"}}
+        state = {
+            "chair_review": {
+                "last_reason": "reassignment_triage",
+                "last_reviewer": "Claude",
+                "last_decision": {
+                    "reason": "Shared workspace-baseline blocker",
+                    "blocked_by": ["@drts/ui-tokens and @drts/contracts module resolution"],
+                    "recommended_focus": ["Dispatch a workspace-baseline repair task"],
+                },
+            }
+        }
+
+        with mock.patch.object(supervisor, "create_chair_workspace_baseline_task", return_value=True) as create_task:
+            changed = supervisor.materialize_workspace_baseline_task_from_last_decision(
+                config,
+                state,
+                provider_report={},
+            )
+
+        self.assertTrue(changed)
+        create_task.assert_called_once_with(
+            config,
+            state,
+            state["chair_review"]["last_decision"],
+            {},
+            preferred_owner="Claude",
+        )
+
+    def test_ensure_workspace_baseline_task_dispatch_queues_owner_event(self) -> None:
+        task = {
+            "id": "UI-BASELINE-001",
+            "status": "backlog",
+            "owner": "Claude",
+            "reviewer": "Codex",
+        }
+        state = {}
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task]}),
+            mock.patch.object(supervisor, "chair_dispatch_action_reason", return_value=("Claude", "owned_ready_dispatch")),
+            mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False),
+            mock.patch.object(supervisor, "ready_dispatch_settings", return_value={"active_worker_statuses": ["running"]}),
+            mock.patch.object(supervisor, "outstanding_delivery_agent_counts", return_value={}),
+            mock.patch.object(supervisor, "outstanding_delivery_indexes", return_value=(set(), {}, set())),
+            mock.patch.object(supervisor, "build_dispatch_event", return_value={"key": "evt-baseline", "task_id": "UI-BASELINE-001"}),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_event,
+            mock.patch.object(supervisor, "write_activity_log") as write_log,
+        ):
+            changed = supervisor.ensure_workspace_baseline_task_dispatch(
+                {"paths": {"status_file": "ai-status.json"}},
+                state,
+                provider_report={},
+            )
+
+        self.assertTrue(changed)
+        queue_event.assert_called_once()
+        write_log.assert_called_once()
+        self.assertIn("evt-baseline", state["seen_event_keys"])
 
     def test_refresh_chair_review_state_applies_resume_parent_task_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
