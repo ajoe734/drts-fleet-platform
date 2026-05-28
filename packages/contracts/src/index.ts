@@ -1,5 +1,13 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  ActionReceipt,
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4682,8 +4690,17 @@ export interface UpdatePlatformAdminUserRoleCommand {
   status?: PlatformAdminUserStatus;
 }
 
-export type PlatformNoticeSeverity = "info" | "warning" | "critical";
+export type PlatformNoticeSeverity =
+  | "info"
+  | "warning"
+  | "critical"
+  | "maintenance";
 export type PlatformNoticeStatus = "active" | "resolved" | "scheduled";
+export type PlatformNoticeAudience = "all" | "tenants" | "ops" | "drivers";
+export type PlatformNoticeBroadcastStatus =
+  | "queued"
+  | "propagating"
+  | "delivered";
 
 export interface PlatformNoticeRecord {
   noticeId: string;
@@ -4691,7 +4708,7 @@ export interface PlatformNoticeRecord {
   body: string;
   severity: PlatformNoticeSeverity;
   status: PlatformNoticeStatus;
-  targetAudience: "all" | "tenants" | "ops" | "drivers";
+  targetAudience: PlatformNoticeAudience;
   scheduledAt: string | null;
   resolvedAt: string | null;
   createdBy: string | null;
@@ -4703,8 +4720,34 @@ export interface CreatePlatformNoticeCommand {
   title: string;
   body: string;
   severity: PlatformNoticeSeverity;
-  targetAudience: "all" | "tenants" | "ops" | "drivers";
+  targetAudience: PlatformNoticeAudience;
+  reason?: string | null;
   scheduledAt?: string | null;
+}
+
+export interface ResolvePlatformNoticeCommand {
+  reason?: string | null;
+}
+
+export interface PlatformNoticeWorkspaceRecord extends PlatformNoticeRecord {
+  availableActions: ResourceActionDescriptor[];
+  crossAppLinks: CrossAppResourceLink[];
+  broadcastStatus: PlatformNoticeBroadcastStatus;
+  deliverySummary: string;
+}
+
+export interface PlatformNoticeHistoryRecord {
+  noticeId: string;
+  title: string;
+  severity: PlatformNoticeSeverity;
+  targetAudience: PlatformNoticeAudience;
+  deliveredAudienceLabels: string[];
+  deliveryStatus: PlatformNoticeBroadcastStatus;
+  deliveredCount: number;
+  targetCount: number;
+  broadcastAt: string;
+  deliveryDetail: string;
+  crossAppLinks: CrossAppResourceLink[];
 }
 
 export interface PlatformMaintenanceModeRecord {
@@ -4722,6 +4765,32 @@ export interface SetPlatformMaintenanceModeCommand {
   scheduledStart?: string | null;
   scheduledEnd?: string | null;
 }
+
+export interface PlatformMaintenanceWorkspaceRecord {
+  currentState: PlatformMaintenanceModeRecord;
+  availableActions: ResourceActionDescriptor[];
+  affectedServices: string[];
+  previewTitle: string;
+  previewBody: string;
+  crossAppLinks: CrossAppResourceLink[];
+}
+
+export interface PlatformNoticesWorkspaceResponse {
+  refreshTier: RefreshTier;
+  refresh: UiRefreshMetadata;
+  notices: {
+    items: PlatformNoticeWorkspaceRecord[];
+    availableActions: ResourceActionDescriptor[];
+    emptyState?: EmptyStateEnvelope;
+  };
+  maintenance: PlatformMaintenanceWorkspaceRecord;
+  history: {
+    items: PlatformNoticeHistoryRecord[];
+    emptyState?: EmptyStateEnvelope;
+  };
+}
+
+export type PlatformNoticeActionReceipt = ActionReceipt;
 
 export const OPERATIONAL_ALERT_KEYS = [
   "dispatch_lag",

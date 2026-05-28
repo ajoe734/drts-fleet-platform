@@ -17,6 +17,7 @@ import type {
   PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
+  ResolvePlatformNoticeCommand,
   SetPlatformMaintenanceModeCommand,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
@@ -174,6 +175,14 @@ export class PlatformAdminController {
     );
   }
 
+  @Get("notices/workspace")
+  getNoticesWorkspace(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.getNoticesWorkspace(),
+      requestId,
+    );
+  }
+
   @Post("notices")
   createPlatformNotice(
     @Body() command: CreatePlatformNoticeCommand,
@@ -188,10 +197,11 @@ export class PlatformAdminController {
   @Post("notices/:noticeId/resolve")
   resolveNotice(
     @Param("noticeId") noticeId: string,
+    @Body() command?: ResolvePlatformNoticeCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.resolveNotice(noticeId, requestId),
+      this.platformAdminService.resolveNotice(noticeId, command, requestId),
       requestId,
     );
   }

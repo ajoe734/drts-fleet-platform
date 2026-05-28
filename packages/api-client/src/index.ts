@@ -120,7 +120,9 @@ import type {
   PlatformEarningsByPlatformResponse,
   PlatformEarningsSummary,
   PlatformMaintenanceModeRecord,
+  PlatformNoticeActionReceipt,
   PlatformNoticeRecord,
+  PlatformNoticesWorkspaceResponse,
   PlatformTenantGovernanceSummaryQuery,
   PlatformTenantGovernanceSummaryResponse,
   PlatformPresenceRecord,
@@ -147,6 +149,7 @@ import type {
   ResolveReconciliationIssueCommand,
   ResolveComplaintCaseCommand,
   ResolveEvidenceDeletionExceptionCommand,
+  ResolvePlatformNoticeCommand,
   ReopenReconciliationIssueCommand,
   RejectExceptionOverrideCommand,
   RequestExceptionOverrideCommand,
@@ -2041,17 +2044,27 @@ export class ApiClient {
     return this.getList<PlatformNoticeRecord>("/api/platform-admin/notices");
   }
 
+  async getPlatformNoticesWorkspace(): Promise<PlatformNoticesWorkspaceResponse> {
+    return this.get<PlatformNoticesWorkspaceResponse>(
+      "/api/platform-admin/notices/workspace",
+    );
+  }
+
   async createPlatformNotice(
     command: CreatePlatformNoticeCommand,
-  ): Promise<PlatformNoticeRecord> {
-    return this.post<PlatformNoticeRecord>("/api/platform-admin/notices", {
+  ): Promise<PlatformNoticeActionReceipt> {
+    return this.post<PlatformNoticeActionReceipt>("/api/platform-admin/notices", {
       body: command,
     });
   }
 
-  async resolvePlatformNotice(noticeId: string): Promise<PlatformNoticeRecord> {
-    return this.post<PlatformNoticeRecord>(
+  async resolvePlatformNotice(
+    noticeId: string,
+    command?: ResolvePlatformNoticeCommand,
+  ): Promise<PlatformNoticeActionReceipt> {
+    return this.post<PlatformNoticeActionReceipt>(
       `/api/platform-admin/notices/${noticeId}/resolve`,
+      command ? { body: command } : undefined,
     );
   }
 
@@ -2063,8 +2076,8 @@ export class ApiClient {
 
   async setMaintenanceMode(
     command: SetPlatformMaintenanceModeCommand,
-  ): Promise<PlatformMaintenanceModeRecord> {
-    return this.post<PlatformMaintenanceModeRecord>(
+  ): Promise<PlatformNoticeActionReceipt> {
+    return this.post<PlatformNoticeActionReceipt>(
       "/api/platform-admin/maintenance-mode",
       { body: command },
     );
