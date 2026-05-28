@@ -4667,6 +4667,157 @@ class ChairmanFlowTests(unittest.TestCase):
             )
         )
 
+    def test_reassignment_triage_synthesizes_followup_unblock_action(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "operational_review",
+            "sidecar_approved": False,
+            "approval_ttl_minutes": 45,
+            "max_sidecars": 2,
+            "reason": "reassign the failing owner first",
+            "blocked_by": [
+                "UI-FE-DRV-ONB remains blocked (history_repair); not reassignable while blocked."
+            ],
+            "blocked_sidecar_parents": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [
+                "Run blocked_task_triage for UI-FE-DRV-ONB: create history_repair unblock task."
+            ],
+        }
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "UI-FE-DRV-ONB",
+                    "status": "blocked",
+                    "owner": "Codex2",
+                    "reviewer": "Claude2",
+                    "depends_on": ["DEP-001"],
+                    "next": "History repair audit still required.",
+                },
+            ]
+        }
+
+        self.assertEqual(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="reassignment_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            ),
+            "reassignment_triage must materialize follow-up task actions via UI-FE-DRV-ONB:create_unblock_task",
+        )
+
+        normalized = supervisor.normalize_chair_review_payload_for_reason(
+            payload,
+            reason="reassignment_triage",
+            config={"paths": {}},
+            status=status,
+        )
+
+        self.assertEqual(
+            normalized["task_actions"],
+            [
+                {
+                    "task_id": "UI-FE-DRV-ONB",
+                    "action": "create_unblock_task",
+                    "unblock_kind": "history_repair",
+                    "reason": (
+                        "Chairman follow-up from reassignment_triage: UI-FE-DRV-ONB remains "
+                        "dependency-ready blocked; materialize the history_repair unblock path now."
+                    ),
+                }
+            ],
+        )
+        self.assertIsNone(supervisor.validate_chair_review_payload(normalized))
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(
+                normalized,
+                reason="reassignment_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            )
+        )
+
+    def test_reassignment_triage_synthesizes_resume_parent_followup_action(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "operational_review",
+            "sidecar_approved": False,
+            "approval_ttl_minutes": 45,
+            "max_sidecars": 2,
+            "reason": "reassign other work but resume the repaired blocked parent",
+            "blocked_by": [
+                "ADM-UI-RD-006 remains blocked only because the parent has not been resumed yet."
+            ],
+            "blocked_sidecar_parents": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [
+                "Resume ADM-UI-RD-006 after the completed history_repair unblock child."
+            ],
+        }
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-006",
+                    "status": "blocked",
+                    "owner": "Codex2",
+                    "reviewer": "Codex",
+                    "depends_on": ["DEP-001"],
+                    "next": "Completed history-repair helper already documented the rebuild route.",
+                },
+                {
+                    "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                    "status": "done",
+                    "task_class": "unblock",
+                    "helper_parent": "ADM-UI-RD-006",
+                    "helper_kind": "history_repair",
+                    "next": "Repair route documented and pushed.",
+                },
+            ]
+        }
+
+        normalized = supervisor.normalize_chair_review_payload_for_reason(
+            payload,
+            reason="reassignment_triage",
+            config={"paths": {}},
+            status=status,
+        )
+
+        self.assertEqual(
+            normalized["task_actions"],
+            [
+                {
+                    "task_id": "ADM-UI-RD-006",
+                    "action": "resume_parent_task",
+                    "resume_status": "todo",
+                    "reason": (
+                        "Chairman follow-up from reassignment_triage: "
+                        "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR already resolved the blocker for "
+                        "ADM-UI-RD-006; resume the parent."
+                    ),
+                }
+            ],
+        )
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(
+                normalized,
+                reason="reassignment_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            )
+        )
+
     def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
         state = {
             "provider_pauses": {
@@ -5868,6 +6019,114 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertTrue(changed)
             create_task.assert_called_once()
             self.assertEqual(create_task.call_args.kwargs["preferred_owner"], "Claude")
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reason"], "reassignment_triage")
+
+    def test_refresh_chair_review_state_synthesizes_reassignment_followup_unblock_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260528T000500Z-claude2.md"
+            json_path = review_dir / "20260528T000500Z-claude2.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "operational_review",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "Move failing owner off Codex and unblock the blocked parent.",
+                        "blocked_by": [
+                            "UI-FE-DRV-ONB remains blocked (history_repair); not reassignable while blocked."
+                        ],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [],
+                        "provider_actions": [],
+                        "recommended_focus": [
+                            "Run blocked_task_triage for UI-FE-DRV-ONB: create history_repair unblock task."
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {"id": "DEP-001", "status": "done"},
+                            {
+                                "id": "UI-FE-DRV-ONB",
+                                "owner": "Codex2",
+                                "reviewer": "Claude2",
+                                "status": "blocked",
+                                "depends_on": ["DEP-001"],
+                                "next": "History repair audit still required.",
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                    "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude2",
+                        "agent": "Claude2",
+                        "reason": "reassignment_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "create_chair_unblock_task", return_value=True) as create_unblock,
+                mock.patch.object(supervisor, "create_chair_workspace_baseline_task", return_value=False),
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            create_unblock.assert_called_once()
+            action = create_unblock.call_args.args[2]
+            self.assertEqual(action["task_id"], "UI-FE-DRV-ONB")
+            self.assertEqual(action["action"], "create_unblock_task")
+            self.assertEqual(action["unblock_kind"], "history_repair")
+            self.assertIn("reassignment_triage", action["reason"])
+            self.assertEqual(
+                state["chair_review"]["last_decision"]["task_actions"][0]["task_id"],
+                "UI-FE-DRV-ONB",
+            )
             self.assertIsNone(state["chair_review"]["active_review"])
             self.assertEqual(state["chair_review"]["last_reason"], "reassignment_triage")
 
