@@ -27,6 +27,7 @@ import {
   type EvidenceRetentionFamily,
   type EvidenceRetentionPolicyRecord,
   type ResourceActionDescriptor,
+  type UiRefreshMetadata,
 } from "@drts/contracts";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -57,6 +58,7 @@ type ExceptionRecordWithActions = EvidenceDeletionExceptionRecord & {
 type GovernanceBadge = {
   owner: string;
   expiresAt?: string | null;
+  placedAt?: string | null;
   reason?: string | null;
 };
 
@@ -111,6 +113,14 @@ type CreateExceptionForm = {
   reasonNote: string;
 };
 
+type PageDataSnapshot = {
+  records: AuditRecordWithActions[];
+  policies: EvidenceRetentionPolicyRecord[];
+  holds: HoldRecordWithActions[];
+  exceptions: ExceptionRecordWithActions[];
+  refreshMetadata: UiRefreshMetadata;
+};
+
 type PageCopy = {
   title: string;
   subtitle: string;
@@ -157,7 +167,11 @@ type PageCopy = {
   banner: {
     error: string;
     receipt: string;
+    refreshMeta: string;
     descriptorFallback: string;
+  };
+  summary: {
+    deepLinks: string;
   };
   table: {
     when: string;
@@ -169,6 +183,7 @@ type PageCopy = {
     request: string;
     actions: string;
   };
+  emptyCta: Record<Exclude<EmptyReason, "driver_not_eligible">, string>;
 };
 
 const th = buildCanvasTheme({
@@ -210,6 +225,12 @@ const PANEL_GRID_STYLE: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
   gap: 16,
+};
+
+const SUMMARY_ROW_STYLE: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
 };
 
 const DETAIL_GRID_STYLE: React.CSSProperties = {
@@ -322,6 +343,12 @@ export default function AuditPage() {
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptState | null>(null);
+  const [refreshMetadata, setRefreshMetadata] = useState<UiRefreshMetadata>({
+    generatedAt: new Date(0).toISOString(),
+    staleAfterMs: 0,
+    dataFreshness: "unknown",
+    source: "live",
+  });
   const [selectedTab, setSelectedTab] = useState<AuditTab>("log");
   const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
   const [filterModule, setFilterModule] = useState("");
@@ -347,7 +374,7 @@ export default function AuditPage() {
     }
   }, [searchParams]);
 
-  async function loadPageData() {
+  async function loadPageData(): Promise<PageDataSnapshot | null> {
     setLoading(true);
     setError(null);
     try {
@@ -365,16 +392,19 @@ export default function AuditPage() {
           ownerApp: inferOwnerApp(record.resourceType, record.moduleName),
         }),
       );
+      const nextRefreshMetadata = buildManualRefreshMetadata();
 
       setRecords(normalizedRecords);
       setPolicies(policyList);
       setLegalHolds(holdList as HoldRecordWithActions[]);
       setDeletionExceptions(exceptionList as ExceptionRecordWithActions[]);
+      setRefreshMetadata(nextRefreshMetadata);
       return {
         records: normalizedRecords,
         policies: policyList,
         holds: holdList as HoldRecordWithActions[],
         exceptions: exceptionList as ExceptionRecordWithActions[],
+        refreshMetadata: nextRefreshMetadata,
       };
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -424,11 +454,15 @@ export default function AuditPage() {
           ? {
               owner: hold.placedByActorId,
               expiresAt: null,
+              placedAt: hold.placedAt,
+              reason: hold.reasonNote ?? hold.reasonCode,
             }
           : null,
         deletionException: exception
           ? {
               owner: exception.reviewerActorId,
+              expiresAt: exception.expiresAt,
+              placedAt: exception.requestedAt,
               reason: exception.reasonNote ?? exception.reasonCode,
             }
           : null,
@@ -604,9 +638,7 @@ export default function AuditPage() {
               {row.resourceId ? `:${row.resourceId}` : ""}
             </span>
             {row.legalHold ? (
-              <span
-                title={`${row.legalHold.owner} · ${row.legalHold.expiresAt ?? ""}`}
-              >
+              <span title={governanceBadgeTitle("hold", row.legalHold)}>
                 <CanvasPill theme={th} tone="danger">
                   HOLD
                 </CanvasPill>
@@ -614,7 +646,7 @@ export default function AuditPage() {
             ) : null}
             {row.deletionException ? (
               <span
-                title={`${row.deletionException.owner} · ${row.deletionException.reason ?? ""}`}
+                title={governanceBadgeTitle("exception", row.deletionException)}
               >
                 <CanvasPill theme={th} tone="warn">
                   EXEMPT
@@ -649,6 +681,7 @@ export default function AuditPage() {
                 theme={th}
                 size="sm"
                 variant="secondary"
+                icon="chevR"
                 onClick={() =>
                   setExpandedAuditId((current) =>
                     current === row.auditId ? null : row.auditId,
@@ -726,6 +759,13 @@ export default function AuditPage() {
           sticky={false}
           title={copy.title}
           subtitle={copy.subtitle}
+          tabs={[
+            copy.tabs.log,
+            copy.tabs.policy,
+            copy.tabs.hold,
+            copy.tabs.exception,
+          ]}
+          activeTab={copy.tabs.log}
           actions={
             <CanvasBtn theme={th} variant="secondary" size="sm" disabled>
               {copy.refreshing}
@@ -748,8 +788,18 @@ export default function AuditPage() {
         sticky={false}
         title={copy.title}
         subtitle={copy.subtitle}
+        tabs={[
+          copy.tabs.log,
+          copy.tabs.policy,
+          copy.tabs.hold,
+          copy.tabs.exception,
+        ]}
+        activeTab={copy.tabs[selectedTab]}
         actions={
           <>
+            <CanvasPill theme={th} tone={freshnessTone(refreshMetadata)}>
+              {refreshMetadata.dataFreshness}
+            </CanvasPill>
             <CanvasPill theme={th} tone="neutral">
               {copy.refreshTier}
             </CanvasPill>
@@ -797,7 +847,10 @@ export default function AuditPage() {
           theme={th}
           tone="info"
           icon="info"
-          body={copy.banner.descriptorFallback}
+          body={`${copy.banner.refreshMeta} ${formatRefreshStatus(
+            refreshMetadata,
+            locale,
+          )} · ${copy.banner.descriptorFallback}`}
         />
 
         <div style={KPI_STYLE}>
@@ -827,39 +880,37 @@ export default function AuditPage() {
           />
         </div>
 
-        <CanvasCard theme={th}>
-          <div style={TAB_ROW_STYLE}>
-            {(
-              [
-                ["log", filteredRows.length],
-                ["policy", policies.length],
-                ["hold", holdCount],
-                ["exception", exceptionCount],
-              ] as const
-            ).map(([tab, count]) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setSelectedTab(tab)}
-                style={{
-                  appearance: "none",
-                  border: 0,
-                  background: "transparent",
-                  padding: 0,
-                  cursor: "pointer",
-                }}
+        <div style={TAB_ROW_STYLE}>
+          {(
+            [
+              ["log", filteredRows.length],
+              ["policy", policies.length],
+              ["hold", holdCount],
+              ["exception", exceptionCount],
+            ] as const
+          ).map(([tab, count]) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setSelectedTab(tab)}
+              style={{
+                appearance: "none",
+                border: 0,
+                background: "transparent",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              <CanvasPill
+                theme={th}
+                tone={selectedTab === tab ? "accent" : "neutral"}
+                dot={tab !== "policy"}
               >
-                <CanvasPill
-                  theme={th}
-                  tone={selectedTab === tab ? "accent" : "neutral"}
-                  dot={tab !== "policy"}
-                >
-                  {copy.tabs[tab]} {count.toLocaleString(locale)}
-                </CanvasPill>
-              </button>
-            ))}
-          </div>
-        </CanvasCard>
+                {copy.tabs[tab]} {count.toLocaleString(locale)}
+              </CanvasPill>
+            </button>
+          ))}
+        </div>
 
         <CanvasCard theme={th}>
           <div style={FILTER_GRID_STYLE}>
@@ -933,9 +984,7 @@ export default function AuditPage() {
               </select>
             </label>
           </div>
-          <div
-            style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}
-          >
+          <div style={{ marginTop: 14, ...SUMMARY_ROW_STYLE }}>
             <CanvasPill theme={th} tone="accent" dot>
               {copy.filters.all} {records.length.toLocaleString(locale)}
             </CanvasPill>
@@ -945,6 +994,9 @@ export default function AuditPage() {
                 {(moduleCounts.get(moduleName) ?? 0).toLocaleString(locale)}
               </CanvasPill>
             ))}
+            <CanvasPill theme={th} tone="neutral">
+              {copy.summary.deepLinks}
+            </CanvasPill>
           </div>
         </CanvasCard>
 
@@ -1001,7 +1053,7 @@ export default function AuditPage() {
                               { k: "OWNER", v: hold.placedByActorId },
                               { k: "CASE", v: hold.caseNumber, mono: true },
                               {
-                                k: "AT",
+                                k: "GRANTED",
                                 v: formatDateTime(hold.placedAt),
                                 mono: true,
                               },
@@ -1133,7 +1185,7 @@ export default function AuditPage() {
                           { k: "OWNER", v: hold.placedByActorId },
                           { k: "CASE", v: hold.caseNumber, mono: true },
                           {
-                            k: "AT",
+                            k: "GRANTED",
                             v: formatDateTime(hold.placedAt),
                             mono: true,
                           },
@@ -1434,6 +1486,9 @@ function EmptyReasonCard({
       <CanvasPill theme={th} tone={tone.pill}>
         {reason}
       </CanvasPill>
+      <div style={{ color: th.textMuted, fontSize: 11.5 }}>
+        {copy.emptyCta[reason]}
+      </div>
     </div>
   );
 }
@@ -1723,6 +1778,22 @@ function renderExpandedDetails(row: AuditRow | null, copy: PageCopy) {
       <div style={{ fontSize: 13, fontWeight: 700 }}>
         {copy.sections.detail}
       </div>
+      <CanvasDL
+        theme={th}
+        cols={3}
+        items={[
+          { k: "AUDIT ID", v: row.auditId, mono: true },
+          { k: "REQUEST ID", v: row.requestId, mono: true },
+          {
+            k: "OWNER APP",
+            v: row.ownerApp ? row.ownerApp : "platform-admin",
+            mono: true,
+          },
+          { k: "RESOURCE", v: row.resourceType, mono: true },
+          { k: "RESOURCE ID", v: row.resourceId ?? "—", mono: true },
+          { k: "GOVERNANCE", v: describeGovernanceState(row) },
+        ]}
+      />
       <div style={DETAIL_GRID_STYLE}>
         <CanvasCard theme={th}>
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>
@@ -1894,6 +1965,56 @@ function buildResourceTarget(row: AuditRecordWithActions): {
     href: `${origin}/audit?resourceType=${encodeURIComponent(row.resourceType)}&resourceId=${encodeURIComponent(resourceId)}`,
     external: true,
   };
+}
+
+function buildManualRefreshMetadata(): UiRefreshMetadata {
+  return {
+    generatedAt: new Date().toISOString(),
+    staleAfterMs: 0,
+    dataFreshness: "fresh",
+    source: "live",
+  };
+}
+
+function formatRefreshStatus(metadata: UiRefreshMetadata, locale: Locale) {
+  return `${formatDateTime(metadata.generatedAt)} · ${metadata.source} · ${
+    locale === "zh" ? "手動刷新" : "manual refresh"
+  }`;
+}
+
+function freshnessTone(metadata: UiRefreshMetadata) {
+  switch (metadata.dataFreshness) {
+    case "fresh":
+      return "accent";
+    case "degraded":
+      return "warn";
+    case "stale":
+      return "danger";
+    case "unknown":
+    default:
+      return "neutral";
+  }
+}
+
+function governanceBadgeTitle(
+  kind: "hold" | "exception",
+  badge: GovernanceBadge,
+) {
+  if (kind === "hold") {
+    return `legal hold · ${badge.owner} · ${badge.placedAt ?? "—"} · ${badge.reason ?? "—"}`;
+  }
+  return `deletion exception · ${badge.owner} · ${badge.expiresAt ?? "—"} · ${badge.reason ?? "—"}`;
+}
+
+function describeGovernanceState(row: AuditRow) {
+  const states: string[] = [];
+  if (row.legalHold) {
+    states.push(`hold by ${row.legalHold.owner}`);
+  }
+  if (row.deletionException) {
+    states.push(`exception by ${row.deletionException.owner}`);
+  }
+  return states.join(" · ") || "none";
 }
 
 function findReceipt(
@@ -2169,11 +2290,26 @@ function getCopy(locale: Locale): PageCopy {
         filtered_empty:
           "保留目前 filter，或清空條件回到完整 append-only 視圖。",
       },
+      emptyCta: {
+        no_data: "等待新事件，或用 resource deep link 帶入特定 audit context。",
+        not_provisioned: "先完成 evidence governance 後端能力或租戶佈建。",
+        fetch_failed:
+          "使用手動 refresh；若持續失敗，改查 health 與 downstream owner。",
+        permission_denied:
+          "確認目前 actor 是否具有 `pa_ops_risk_gov` 或 `pa_super_admin` 權限。",
+        external_unavailable: "保留當前上下文，待 owning app 恢復後再重試。",
+        filtered_empty:
+          "放寬 module / actor / resource / 時間條件以回到完整軌跡。",
+      },
       banner: {
         error: "Audit governance 載入失敗",
         receipt: "Action receipt",
+        refreshMeta: "Refresh status:",
         descriptorFallback:
           "CTA 優先採用 backend `availableActions`；若目前 audit contracts 尚未回傳 descriptor，頁面會以 audit/evidence API 能力做保守 fallback，不硬編角色矩陣。",
+      },
+      summary: {
+        deepLinks: "cross-app deep links open in a new tab",
       },
       table: {
         when: "WHEN",
@@ -2257,11 +2393,29 @@ function getCopy(locale: Locale): PageCopy {
       filtered_empty:
         "Keep the current filters for incident review, or clear them to restore the full trail.",
     },
+    emptyCta: {
+      no_data:
+        "Wait for new events, or arrive here through a resource-scoped deep link.",
+      not_provisioned:
+        "Provision the backing evidence-governance capability before retrying.",
+      fetch_failed:
+        "Use manual refresh first, then inspect health and the downstream owner if it persists.",
+      permission_denied:
+        "Confirm the current actor has `pa_ops_risk_gov` or `pa_super_admin` authority.",
+      external_unavailable:
+        "Keep the current incident context and retry after the owning app recovers.",
+      filtered_empty:
+        "Widen module, actor, resource, or time filters to restore the full trail.",
+    },
     banner: {
       error: "Unable to load audit governance data",
       receipt: "Action receipt",
+      refreshMeta: "Refresh status:",
       descriptorFallback:
         "CTAs prefer backend `availableActions`. Where current audit contracts do not yet include descriptors, the page falls back to the supported audit/evidence endpoints without hard-coding role-specific visibility.",
+    },
+    summary: {
+      deepLinks: "cross-app deep links open in a new tab",
     },
     table: {
       when: "WHEN",
