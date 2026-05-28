@@ -98,7 +98,7 @@ type ActionBindingContext = {
 
 type ActionPresentation = {
   href: string | null;
-  requiresDetailSurface: boolean;
+  opensDetailSurface: boolean;
 };
 
 type TabFilterPreset = {
@@ -367,7 +367,7 @@ function getActionHref(
   if (isCreateBookingAction(descriptor)) {
     return {
       href: "/bookings/new",
-      requiresDetailSurface: false,
+      opensDetailSurface: false,
     };
   }
 
@@ -376,21 +376,21 @@ function getActionHref(
   ) {
     return {
       href: "/integration-governance",
-      requiresDetailSurface: false,
+      opensDetailSurface: false,
     };
   }
 
   if (normalizeActionToken(descriptor.action) === "reset_filters") {
     return {
       href: "/bookings",
-      requiresDetailSurface: false,
+      opensDetailSurface: false,
     };
   }
 
   if (context?.bookingId && opensBookingWorkSurface(descriptor)) {
     return {
       href: `/bookings/${context.bookingId}`,
-      requiresDetailSurface: false,
+      opensDetailSurface: false,
     };
   }
 
@@ -401,14 +401,14 @@ function getActionHref(
     )
   ) {
     return {
-      href: null,
-      requiresDetailSurface: true,
+      href: `/bookings/${context.bookingId}`,
+      opensDetailSurface: true,
     };
   }
 
   return {
     href: null,
-    requiresDetailSurface: false,
+    opensDetailSurface: false,
   };
 }
 
@@ -418,16 +418,20 @@ function getPrimaryBookingHref(booking: TenantBookingListRecord) {
     return null;
   }
 
-  const primaryAction = rowActions.find(
-    (descriptor) =>
-      descriptor.enabled &&
-      Boolean(
-        getActionHref(descriptor, {
-          bookingId: booking.bookingId,
-        }).href,
-      ) &&
-      opensBookingWorkSurface(descriptor),
-  );
+  const primaryAction = rowActions.find((descriptor) => {
+    if (!descriptor.enabled) {
+      return false;
+    }
+
+    const presentation = getActionHref(descriptor, {
+      bookingId: booking.bookingId,
+    });
+
+    return (
+      Boolean(presentation.href) &&
+      (presentation.opensDetailSurface || opensBookingWorkSurface(descriptor))
+    );
+  });
 
   return primaryAction
     ? getActionHref(primaryAction, {
@@ -1224,18 +1228,14 @@ export default async function TenantBookingsPage({
                                     className="bookings-action-pill"
                                     href={presentation.href}
                                     key={descriptor.action}
+                                    title={
+                                      presentation.opensDetailSurface
+                                        ? "此動作需進入 booking detail 執行。"
+                                        : undefined
+                                    }
                                   >
                                     {getActionLabel(descriptor.action)}
                                   </Link>
-                                ) : descriptor.enabled &&
-                                  presentation.requiresDetailSurface ? (
-                                  <span
-                                    className="bookings-action-pill"
-                                    key={descriptor.action}
-                                    title="此動作依 contract 可用，但需進入 booking detail 執行。"
-                                  >
-                                    {getActionLabel(descriptor.action)}
-                                  </span>
                                 ) : (
                                   <span
                                     className="bookings-action-pill is-disabled"
