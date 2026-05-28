@@ -461,6 +461,21 @@ export class ApiClient {
     });
   }
 
+  async upsertFeatureFlagTenantOverride(
+    key: string,
+    tenantId: string,
+    command: FeatureFlagTenantOverrideCommand,
+  ): Promise<FeatureFlag> {
+    const encodedKey = encodeURIComponent(key);
+    const encodedTenantId = encodeURIComponent(tenantId);
+    return this.post<FeatureFlag>(
+      `/api/admin/flags/${encodedKey}/tenant-overrides?tenantId=${encodedTenantId}`,
+      {
+        body: command,
+      },
+    );
+  }
+
   async isFeatureEnabled(key: string): Promise<boolean> {
     const result = await this.get<{ key: string; enabled: boolean }>(
       `/api/admin/flags/${key}/enabled`,
