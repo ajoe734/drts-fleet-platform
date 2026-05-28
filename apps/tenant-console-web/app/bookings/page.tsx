@@ -562,30 +562,6 @@ function getServiceLabel(booking: TenantBookingListRecord) {
   return `企業派遣 / ${booking.businessDispatchSubtype}`;
 }
 
-function getSubtypeCounts(bookings: TenantBookingListRecord[]) {
-  const counts = new Map<string, number>();
-  bookings.forEach((booking) => {
-    const current = counts.get(booking.businessDispatchSubtype) ?? 0;
-    counts.set(booking.businessDispatchSubtype, current + 1);
-  });
-
-  return [...counts.entries()]
-    .map(([subtype, count]) => ({
-      subtype: subtype as BookingListQuery["subtype"],
-      count,
-    }))
-    .sort((left, right) => left.subtype.localeCompare(right.subtype));
-}
-
-function getAttentionCount(bookings: TenantBookingListRecord[]) {
-  return bookings.filter(
-    (booking) =>
-      booking.approvalState === "pending" ||
-      booking.slaStatus === "at_risk" ||
-      booking.slaStatus === "breach",
-  ).length;
-}
-
 function buildBookingsHref(
   query: BookingListQuery,
   nextQuery: Partial<BookingListQuery>,
@@ -702,7 +678,6 @@ export default async function TenantBookingsPage({
     notificationRef,
   });
   const headerActions = listEnvelope?.availableActions ?? [];
-  const subtypeCounts = getSubtypeCounts(bookings);
   const pendingApprovalBookings = bookings
     .filter((booking) => booking.approvalState === "pending")
     .sort(
@@ -721,10 +696,13 @@ export default async function TenantBookingsPage({
   const liveCount = bookings.filter((booking) =>
     LIVE_ORDER_STATUSES.has(booking.orderStatus),
   ).length;
-  const reserveCount = bookings.filter((booking) =>
-    RESERVATION_STATUSES.includes(booking.orderStatus),
+  const approvalCount = bookings.filter(
+    (booking) => booking.approvalState === "pending",
   ).length;
-  const attentionCount = getAttentionCount(bookings);
+  const atRiskCount = bookings.filter(
+    (booking) =>
+      booking.slaStatus === "at_risk" || booking.slaStatus === "breach",
+  ).length;
 
   return (
     <div className="page-shell">
@@ -733,8 +711,8 @@ export default async function TenantBookingsPage({
           <span className="eyebrow">Bookings</span>
           <h1>訂單</h1>
           <p>
-            查看租戶當前 booking snapshot，快速辨識待審批、即將截止與需要跨 app
-            追查的訂單。
+            本月所有預約，含進行中與已完成。以 tenant snapshot
+            先判斷狀態，再進入 detail 或 cross-app deep link 繼續處理。
           </p>
         </div>
         <div className="bookings-header-actions">
@@ -786,32 +764,6 @@ export default async function TenantBookingsPage({
       </div>
 
       <section className="bookings-board">
-        <div className="bookings-overview-grid">
-          <article className="bookings-overview-card">
-            <span className="metric-label">目前可見</span>
-            <strong>{result.total}</strong>
-            <p>
-              本次 tenant snapshot 共 {bookings.length}{" "}
-              筆，會依當前篩選與搜尋條件縮減。
-            </p>
-          </article>
-          <article className="bookings-overview-card">
-            <span className="metric-label">進行中 / 預約</span>
-            <strong>
-              {liveCount} / {reserveCount}
-            </strong>
-            <p>
-              進行中與預約 booking 受上游派遣變動影響，需配合 T5 freshness
-              一起判讀。
-            </p>
-          </article>
-          <article className="bookings-overview-card">
-            <span className="metric-label">需要關注</span>
-            <strong>{attentionCount}</strong>
-            <p>含待審批與 SLA 進入風險中的 booking，優先從這些項目開始處理。</p>
-          </article>
-        </div>
-
         <div className="bookings-meta-strip">
           <span className="metric-label">刷新節奏</span>
           <span
@@ -823,8 +775,13 @@ export default async function TenantBookingsPage({
             generatedAt={refreshMetadata?.generatedAt ?? null}
             pollIntervalMs={refreshPollIntervalMs}
           />
-          <span className="status-chip">
-            可見 {result.total} / 全部 {bookings.length}
+          <span className="status-chip">全部 {bookings.length} 筆</span>
+          <span className="status-chip is-active">進行中 {liveCount}</span>
+          <span className="status-chip">待審批 {approvalCount}</span>
+          <span
+            className={`status-chip${atRiskCount > 0 ? " is-warning" : ""}`}
+          >
+            SLA 關注 {atRiskCount}
           </span>
           {(notificationRef || focusedBookingId) && (
             <span className="status-chip is-warning">
@@ -941,48 +898,8 @@ export default async function TenantBookingsPage({
           </div>
         </form>
 
-        <div className="bookings-subtype-strip">
-          <span className="metric-label">子類型</span>
-          <Link
-            className={`status-chip${query.subtype === "all" ? " is-active" : ""}`}
-            href={buildBookingsHref(
-              query,
-              {
-                subtype: "all",
-                page: 1,
-              },
-              {
-                focusedBookingId,
-                notificationRef,
-              },
-            )}
-          >
-            全部
-            <span>{bookings.length}</span>
-          </Link>
-          {subtypeCounts.map((entry) => (
-            <Link
-              className={`status-chip${query.subtype === entry.subtype ? " is-active" : ""}`}
-              href={buildBookingsHref(
-                query,
-                {
-                  subtype: entry.subtype,
-                  page: 1,
-                },
-                {
-                  focusedBookingId,
-                  notificationRef,
-                },
-              )}
-              key={entry.subtype}
-            >
-              {entry.subtype}
-              <span>{entry.count}</span>
-            </Link>
-          ))}
-        </div>
-
         <div className="bookings-status-strip">
+          <span className="metric-label">狀態篩選</span>
           {OWNED_ORDER_STATUSES.map((status) => {
             const nextStatuses = toggleStatus(query.statuses, status);
             const href = buildBookingsHref(
@@ -1011,11 +928,11 @@ export default async function TenantBookingsPage({
         </div>
 
         {pendingApprovalBookings.length > 0 && !emptyState ? (
-          <div className="bookings-approval-lane">
-            <div className="bookings-approval-head">
+          <div className="bookings-priority-strip">
+            <div className="bookings-priority-head">
               <div>
                 <span className="surface-kicker">審批焦點</span>
-                <h3>待審批 booking 需要明確浮出，不埋在表格深處。</h3>
+                <h3>待審批 booking 需要浮出，不埋在清單深處。</h3>
               </div>
               <Link
                 className="text-link"
@@ -1034,16 +951,16 @@ export default async function TenantBookingsPage({
                 查看全部待審批
               </Link>
             </div>
-            <div className="bookings-approval-grid">
+            <div className="bookings-priority-grid">
               {pendingApprovalBookings.map((booking) => {
                 const primaryHref = getPrimaryBookingHref(booking);
 
                 return (
                   <article
-                    className="bookings-approval-card"
+                    className="bookings-priority-card"
                     key={booking.bookingId}
                   >
-                    <div className="bookings-approval-card-head">
+                    <div className="bookings-priority-card-head">
                       <div>
                         {primaryHref ? (
                           <Link
@@ -1066,7 +983,7 @@ export default async function TenantBookingsPage({
                     <p>
                       {booking.pickup.address} → {booking.dropoff.address}
                     </p>
-                    <div className="bookings-approval-meta">
+                    <div className="bookings-priority-meta">
                       <span className="status-chip">
                         {getOrderStatusLabel(booking.orderStatus)}
                       </span>
@@ -1164,17 +1081,15 @@ export default async function TenantBookingsPage({
           </div>
         ) : (
           <div className="table-wrap bookings-table-wrap">
-            <table className="data-grid">
+            <table className="data-grid bookings-canvas-table">
               <thead>
                 <tr>
                   <th>BK</th>
-                  <th>ORDER</th>
-                  <th>SERVICE</th>
+                  <th>TYPE</th>
                   <th>PICKUP → DROP</th>
                   <th>WIN</th>
                   <th>PASS</th>
                   <th>STATE</th>
-                  <th>AGE</th>
                   <th>LAST UPDATE</th>
                 </tr>
               </thead>
@@ -1206,17 +1121,18 @@ export default async function TenantBookingsPage({
                               {booking.bookingId}
                             </span>
                           )}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="table-primary table-mono">
-                          <span>{booking.orderId}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="table-primary table-mono">
-                          <span>{getServiceLabel(booking)}</span>
                           <span className="table-secondary">
+                            ORDER {booking.orderId}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="table-primary">
+                          <span className="table-mono">
+                            {booking.businessDispatchSubtype}
+                          </span>
+                          <span className="table-secondary">
+                            {getServiceLabel(booking)} ·{" "}
                             {getBookingTypeLabel(booking.bookingType)}
                           </span>
                         </div>
@@ -1227,6 +1143,31 @@ export default async function TenantBookingsPage({
                           <span className="table-secondary">
                             ↓ {booking.dropoff.address}
                           </span>
+                          {Array.isArray(booking.crossAppLinks) &&
+                          booking.crossAppLinks.length > 0 ? (
+                            <div className="link-row">
+                              {booking.crossAppLinks.map((link) => (
+                                <a
+                                  className="text-link"
+                                  href={buildCrossAppHref(link)}
+                                  key={`${link.targetApp}-${link.resourceId}-${link.label}`}
+                                  rel={
+                                    link.openMode === "new_tab"
+                                      ? "noreferrer"
+                                      : undefined
+                                  }
+                                  target={
+                                    link.openMode === "new_tab"
+                                      ? "_blank"
+                                      : undefined
+                                  }
+                                >
+                                  {link.label}
+                                  {link.openMode === "new_tab" ? " ↗" : ""}
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </td>
                       <td>
@@ -1237,6 +1178,15 @@ export default async function TenantBookingsPage({
                           <span className="table-secondary">
                             至 {formatDateTime(booking.reservationWindowEnd)}
                           </span>
+                          {urgency ? (
+                            <span className="bookings-inline-meta">
+                              {urgency}
+                            </span>
+                          ) : booking.readOnlyReasonCode ? (
+                            <span className="bookings-inline-meta">
+                              {booking.readOnlyReasonCode}
+                            </span>
+                          ) : null}
                         </div>
                       </td>
                       <td>
@@ -1244,6 +1194,9 @@ export default async function TenantBookingsPage({
                           <span>{booking.passenger.name}</span>
                           <span className="table-secondary">
                             {booking.passenger.phone}
+                          </span>
+                          <span className="bookings-inline-meta">
+                            建立 {getRelativeAge(booking.createdAt)}
                           </span>
                         </div>
                       </td>
@@ -1318,50 +1271,12 @@ export default async function TenantBookingsPage({
                         </div>
                       </td>
                       <td>
-                        <div className="table-primary table-mono">
-                          <span>{getRelativeAge(booking.createdAt)}</span>
-                          {urgency ? (
-                            <span className="bookings-inline-meta">
-                              {urgency}
-                            </span>
-                          ) : booking.readOnlyReasonCode ? (
-                            <span className="bookings-inline-meta">
-                              {booking.readOnlyReasonCode}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td>
                         <div className="table-primary">
                           <span>{formatDateTime(booking.updatedAt)}</span>
                           <span className="table-secondary">
-                            {booking.bookedBy?.name ?? "Tenant self-service"}
+                            {booking.bookedBy?.name ?? "Tenant self-service"} ·{" "}
+                            {getRelativeAge(booking.updatedAt)}
                           </span>
-                          {Array.isArray(booking.crossAppLinks) &&
-                          booking.crossAppLinks.length > 0 ? (
-                            <div className="link-row">
-                              {booking.crossAppLinks.map((link) => (
-                                <a
-                                  className="text-link"
-                                  href={buildCrossAppHref(link)}
-                                  key={`${link.targetApp}-${link.resourceId}-${link.label}`}
-                                  rel={
-                                    link.openMode === "new_tab"
-                                      ? "noreferrer"
-                                      : undefined
-                                  }
-                                  target={
-                                    link.openMode === "new_tab"
-                                      ? "_blank"
-                                      : undefined
-                                  }
-                                >
-                                  {link.label}
-                                  {link.openMode === "new_tab" ? " ↗" : ""}
-                                </a>
-                              ))}
-                            </div>
-                          ) : null}
                         </div>
                       </td>
                     </tr>
