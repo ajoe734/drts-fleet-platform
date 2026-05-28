@@ -1,21 +1,24 @@
-import type { CSSProperties, ReactNode } from "react";
+import Link from "next/link";
+import type { ReactNode } from "react";
 import type {
   CrossAppResourceLink,
   EmptyStateEnvelope,
-  FeatureFlagVisibilityListResponse,
-  FeatureFlagVisibilityRecord,
-  FeatureFlagVisibilityScope,
+  EmptyReason,
+  FeatureFlag,
+  OpsFeatureFlagRecord,
+  OpsFeatureFlagSummary,
+  RefreshTier,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
-import { t, type Locale } from "@/lib/translations";
+import { t } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
   CanvasCard as Card,
-  CanvasField as Field,
   CanvasIcon,
+  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
@@ -30,34 +33,64 @@ type FeatureFlagsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type FeatureFlagScopeFilter = "all" | FeatureFlagVisibilityScope;
+type Locale = "en" | "zh";
+type ScopeFilter = "all" | "global" | "tenant";
+type FlagScope = Exclude<ScopeFilter, "all">;
+type FlagState = "enabled" | "disabled" | "partial";
 
-type FeatureFlagFilters = {
-  q: string;
-  scope: FeatureFlagScopeFilter;
+type FeatureFlagRecordLike = Partial<OpsFeatureFlagRecord> &
+  FeatureFlag & {
+    scope?: FlagScope;
+    currentValue?: string;
+    updatedBy?: string;
+    changedBy?: string;
+    lastChangedBy?: string;
+    availableActions?: ResourceActionDescriptor[] | null;
+    historyLink?: CrossAppResourceLink | null;
+  };
+
+type OpsFeatureFlagSummaryLike = Partial<OpsFeatureFlagSummary> & {
+  flags?: FeatureFlagRecordLike[];
+  notes?: string[];
+  refresh?: UiRefreshMetadata;
+  refreshTier?: RefreshTier;
+  emptyState?: EmptyStateEnvelope;
 };
 
-type OpsFeatureFlagEmptyReason =
-  | "no_data"
-  | "not_provisioned"
-  | "fetch_failed"
-  | "permission_denied"
-  | "external_unavailable"
-  | "filtered_empty";
-
-type OpsFeatureFlagEmptyState = Omit<EmptyStateEnvelope, "reason"> & {
-  reason: OpsFeatureFlagEmptyReason;
+type NormalizedFlag = {
+  key: string;
+  description: string;
+  scope: FlagScope;
+  state: FlagState;
+  currentValue: string;
+  lastChangedAt: string | null;
+  lastChangedBy: string | null;
+  availableActions: ResourceActionDescriptor[];
+  historyLink: CrossAppResourceLink | null;
+  tenantIds: string[];
 };
 
-type FeatureFlagTableRow = Record<string, unknown> & {
-  rowKey: string;
+type NormalizedFlagsPayload = {
+  flags: NormalizedFlag[];
+  notes: string[];
+  refresh: UiRefreshMetadata;
+  refreshTier: RefreshTier;
+  emptyState?: EmptyStateEnvelope;
+};
+
+type FlagTableRow = Record<string, unknown> & {
+  key: string;
   keyCell: ReactNode;
   scopeCell: ReactNode;
-  currentValueCell: ReactNode;
   stateCell: ReactNode;
   updatedByCell: ReactNode;
-  atCell: ReactNode;
+  updatedAt: string;
+  description: string;
+  actionsCell: ReactNode;
+  _selected?: boolean;
 };
+
+type EmptyStateIconName = "flags" | "audit" | "reports" | "search" | "warn";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -65,1514 +98,1138 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
+const REFRESH_TIER: RefreshTier = "manual";
+
+const EMPTY_REASON_VALUES = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "driver_not_eligible",
+  "filtered_empty",
+] as const satisfies readonly EmptyReason[];
+
 const pageBodyStyle = {
   padding: 24,
-  display: "grid",
-  gap: 16,
-} satisfies CSSProperties;
-
-const toolbarStyle = {
   display: "flex",
-  flexWrap: "wrap",
+  flexDirection: "column" as const,
   gap: 16,
-  alignItems: "flex-end",
-  justifyContent: "space-between",
-  padding: "14px 16px",
-  borderBottom: `1px solid ${theme.border}`,
-} satisfies CSSProperties;
+};
 
-const searchPanelStyle = {
+const kpiGridStyle = {
   display: "grid",
-  gap: 12,
-  flex: "1 1 420px",
-  minWidth: 0,
-} satisfies CSSProperties;
-
-const searchFormStyle = {
-  display: "flex",
-  flexWrap: "wrap",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 10,
-  alignItems: "flex-end",
-} satisfies CSSProperties;
+};
 
-const searchInputStyle = {
-  width: "100%",
-  minWidth: 220,
-  boxSizing: "border-box" as const,
-  borderRadius: 7,
-  border: `1px solid ${theme.border}`,
-  background: theme.bgRaised,
-  color: theme.text,
-  fontFamily: theme.fontFamily,
-  fontSize: 12.5,
-  padding: "8px 10px",
-  outline: "none",
-} satisfies CSSProperties;
-
-const scopeRowStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  alignItems: "center",
-} satisfies CSSProperties;
-
-const scopeLabelStyle = {
-  fontSize: 11.5,
-  fontWeight: 600,
-  color: theme.textMuted,
-  textTransform: "uppercase" as const,
-  letterSpacing: 0.4,
-} satisfies CSSProperties;
-
-const snapshotPanelStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  alignItems: "center",
-  justifyContent: "flex-end",
-} satisfies CSSProperties;
-
-const snapshotMetaStyle = {
-  fontSize: 11.5,
-  color: theme.textMuted,
-  lineHeight: 1.45,
-} satisfies CSSProperties;
-
-const registryMetaStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  alignItems: "center",
-  padding: "10px 16px",
-  borderBottom: `1px solid ${theme.border}`,
-  background: theme.surfaceLo,
-} satisfies CSSProperties;
-
-const registryMetaTextStyle = {
-  fontSize: 11.5,
-  color: theme.textMuted,
-} satisfies CSSProperties;
-
-const codeStyle = {
-  fontFamily: theme.monoFamily,
-  fontSize: 11,
-  color: theme.textDim,
-} satisfies CSSProperties;
-
-const keyCellStyle = {
+const splitGridStyle = {
   display: "grid",
-  gap: 5,
-  minWidth: 0,
-  whiteSpace: "normal" as const,
-} satisfies CSSProperties;
+  gridTemplateColumns: "minmax(0, 1.8fr) minmax(260px, 0.9fr)",
+  gap: 16,
+  alignItems: "start",
+};
 
-const keyTextStyle = {
-  display: "inline-flex",
-  width: "fit-content",
-  padding: "2px 7px",
-  borderRadius: 6,
-  background: theme.surfaceLo,
-  border: `1px solid ${theme.border}`,
-  color: theme.text,
-  fontFamily: theme.monoFamily,
-  fontSize: 11.5,
-  lineHeight: 1.35,
-} satisfies CSSProperties;
+const tableColumns: CanvasTableColumn<FlagTableRow>[] = [
+  { h: "KEY", k: "keyCell", w: 320, mono: true },
+  { h: "SCOPE", k: "scopeCell", w: 120 },
+  { h: "STATE", k: "stateCell", w: 180 },
+  { h: "UPDATED BY", k: "updatedByCell", w: 180 },
+  { h: "AT", k: "updatedAt", w: 160, mono: true },
+  { h: "DESCRIPTION", k: "description" },
+  { h: "ACTIONS", k: "actionsCell", w: 220 },
+];
 
-const secondaryTextStyle = {
-  fontSize: 11.5,
-  color: theme.textMuted,
-  lineHeight: 1.45,
-  whiteSpace: "normal" as const,
-} satisfies CSSProperties;
-
-const scopeCellStyle = {
-  display: "grid",
-  gap: 5,
-  minWidth: 0,
-  whiteSpace: "normal" as const,
-} satisfies CSSProperties;
-
-const stateCellStyle = {
-  display: "grid",
-  gap: 6,
-  minWidth: 0,
-  whiteSpace: "normal" as const,
-} satisfies CSSProperties;
-
-const pillRowStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-  alignItems: "center",
-} satisfies CSSProperties;
-
-const updatedByCellStyle = {
-  display: "grid",
-  gap: 5,
-  minWidth: 0,
-  whiteSpace: "normal" as const,
-} satisfies CSSProperties;
-
-const timeCellStyle = {
-  display: "grid",
-  gap: 5,
-  minWidth: 0,
-  whiteSpace: "normal" as const,
-} satisfies CSSProperties;
-
-const boundaryPanelStyle = {
-  display: "grid",
-  gap: 6,
-  padding: "14px 16px",
-  borderTop: `1px solid ${theme.border}`,
-  background: theme.surfaceLo,
-} satisfies CSSProperties;
-
-const boundaryTitleStyle = {
-  fontSize: 12,
-  fontWeight: 700,
-  color: theme.text,
-  textTransform: "uppercase" as const,
-  letterSpacing: 0.4,
-} satisfies CSSProperties;
-
-const emptyStateStyle = {
-  padding: "28px 24px 32px",
-  display: "grid",
-  gap: 14,
-  justifyItems: "center",
-  textAlign: "center" as const,
-} satisfies CSSProperties;
-
-const emptyIconStyle = {
-  width: 52,
-  height: 52,
-  borderRadius: 16,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  border: `1px solid ${theme.border}`,
-  background: theme.surfaceLo,
-} satisfies CSSProperties;
-
-const emptyBodyStyle = {
-  display: "grid",
-  gap: 6,
-  maxWidth: 540,
-} satisfies CSSProperties;
-
-const emptyTitleStyle = {
-  fontSize: 16,
-  fontWeight: 700,
-  color: theme.text,
-} satisfies CSSProperties;
-
-const emptyMessageStyle = {
-  fontSize: 12.5,
-  lineHeight: 1.55,
-  color: theme.textMuted,
-} satisfies CSSProperties;
-
-const emptyActionsStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  justifyContent: "center",
-} satisfies CSSProperties;
-
-function buttonStyle(
-  variant: "primary" | "secondary" | "ghost" = "secondary",
-  disabled = false,
-): CSSProperties {
-  const styles =
-    variant === "primary"
-      ? {
-          background: theme.accent,
-          color: "#ffffff",
-          border: theme.accent,
-        }
-      : variant === "ghost"
-        ? {
-            background: "transparent",
-            color: theme.textMuted,
-            border: "transparent",
-          }
-        : {
-            background: theme.surface,
-            color: theme.text,
-            border: theme.border,
-          };
-
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    height: 32,
-    padding: "0 12px",
-    borderRadius: 7,
-    border: `1px solid ${styles.border}`,
-    background: styles.background,
-    color: styles.color,
-    fontFamily: theme.fontFamily,
-    fontSize: 12,
-    fontWeight: 500,
-    textDecoration: "none",
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.55 : 1,
-    whiteSpace: "nowrap",
-  };
-}
-
-function filterChipStyle(active: boolean): CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "5px 10px",
-    borderRadius: 999,
-    border: `1px solid ${active ? theme.accent : theme.border}`,
-    background: active ? theme.accentBg : theme.surface,
-    color: active ? theme.accentHi : theme.textMuted,
-    fontSize: 11.5,
-    fontWeight: active ? 700 : 500,
-    textDecoration: "none",
-    whiteSpace: "nowrap",
-  };
-}
-
-function inlineLinkStyle(tone: CanvasTone = "accent"): CSSProperties {
-  const colorMap: Record<CanvasTone, string> = {
-    neutral: theme.textMuted,
-    info: theme.info,
-    success: theme.success,
-    warn: theme.warn,
-    danger: theme.danger,
-    accent: theme.accent,
-  };
-
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 4,
-    color: colorMap[tone],
-    textDecoration: "none",
-    fontSize: 11.5,
-    fontWeight: 600,
-    whiteSpace: "nowrap",
-  };
-}
-
-function copy(locale: Locale, en: string, zh: string) {
-  return locale === "zh" ? zh : en;
-}
-
-function firstParam(value: string | string[] | undefined) {
+function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function resolveFilters(
-  searchParams?: Record<string, string | string[] | undefined>,
-): FeatureFlagFilters {
-  const rawScope = firstParam(searchParams?.scope);
-  const scope: FeatureFlagScopeFilter =
-    rawScope === "global" || rawScope === "tenant" ? rawScope : "all";
+function isEmptyReason(value: string | undefined): value is EmptyReason {
+  return (
+    value !== undefined &&
+    EMPTY_REASON_VALUES.includes(value as (typeof EMPTY_REASON_VALUES)[number])
+  );
+}
 
-  return {
-    q: (firstParam(searchParams?.q) ?? "").trim(),
-    scope,
-  };
+function resolveScope(value: string | undefined): ScopeFilter {
+  return value === "global" || value === "tenant" ? value : "all";
 }
 
 function buildPageHref(
-  filters: FeatureFlagFilters,
-  overrides: Partial<FeatureFlagFilters> = {},
-  extras?: Record<string, string>,
+  query: string,
+  scope: ScopeFilter,
+  emptyReason?: EmptyReason,
 ) {
-  const next = { ...filters, ...overrides };
   const params = new URLSearchParams();
-
-  if (next.q) {
-    params.set("q", next.q);
-  }
-  if (next.scope !== "all") {
-    params.set("scope", next.scope);
-  }
-  Object.entries(extras ?? {}).forEach(([key, value]) => {
-    if (value) {
-      params.set(key, value);
-    }
-  });
-
-  const query = params.toString();
-  return query ? `/feature-flags?${query}` : "/feature-flags";
+  if (query) params.set("q", query);
+  if (scope !== "all") params.set("scope", scope);
+  if (emptyReason) params.set("emptyReason", emptyReason);
+  const serialized = params.toString();
+  return serialized ? `/feature-flags?${serialized}` : "/feature-flags";
 }
 
-function formatDateTime(locale: Locale, value: string | null | undefined) {
-  if (!value) {
-    return "—";
+function buildRefreshHref(
+  query: string,
+  scope: ScopeFilter,
+  emptyReason?: EmptyReason,
+) {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (scope !== "all") params.set("scope", scope);
+  if (emptyReason) params.set("emptyReason", emptyReason);
+  params.set("refresh", String(Date.now()));
+  return `/feature-flags?${params.toString()}`;
+}
+
+function fallbackRefreshMetadata(): UiRefreshMetadata {
+  return {
+    generatedAt: new Date().toISOString(),
+    staleAfterMs: 0,
+    dataFreshness: "unknown",
+    source: "static",
+  };
+}
+
+function normalizeAvailableActions(
+  availableActions: ResourceActionDescriptor[] | null | undefined,
+): ResourceActionDescriptor[] {
+  return Array.isArray(availableActions) ? availableActions : [];
+}
+
+function findHistoryAction(
+  availableActions: ResourceActionDescriptor[],
+): ResourceActionDescriptor | null {
+  return (
+    availableActions.find(
+      (action) => action.action === "view_change_history",
+    ) ?? null
+  );
+}
+
+function normalizeFeatureFlags(
+  payload: unknown,
+  locale: Locale,
+): NormalizedFlagsPayload {
+  const maybePayload =
+    payload && typeof payload === "object"
+      ? (payload as OpsFeatureFlagSummaryLike)
+      : ({} as OpsFeatureFlagSummaryLike);
+  const flags = Array.isArray(maybePayload.flags) ? maybePayload.flags : [];
+  const grouped = new Map<string, FeatureFlagRecordLike[]>();
+
+  for (const flag of flags) {
+    const key = typeof flag.key === "string" ? flag.key : "";
+    if (!key) continue;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.push(flag);
+    } else {
+      grouped.set(key, [flag]);
+    }
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "—";
+  const normalizedFlags: NormalizedFlag[] = [];
+
+  for (const [key, records] of grouped.entries()) {
+    const globalRecord =
+      records.find((record) => !record.tenantId && record.scope !== "tenant") ??
+      records[0];
+    if (!globalRecord) continue;
+    const tenantRecords = records.filter(
+      (record) => record.tenantId || record.scope === "tenant",
+    );
+    const latestRecord = [...records]
+      .filter((record) => record.updatedAt)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    const enabledValues = new Set(
+      records
+        .map((record) =>
+          typeof record.enabled === "boolean" ? String(record.enabled) : null,
+        )
+        .filter((value): value is string => value !== null),
+    );
+    const hasPartial =
+      (typeof globalRecord.currentValue === "string" &&
+        globalRecord.currentValue.toLowerCase().includes("partial")) ||
+      enabledValues.size > 1;
+    const state: FlagState = hasPartial
+      ? "partial"
+      : globalRecord.enabled
+        ? "enabled"
+        : "disabled";
+    const currentValue =
+      typeof globalRecord.currentValue === "string" &&
+      globalRecord.currentValue.trim().length > 0
+        ? globalRecord.currentValue
+        : state;
+    const scope: FlagScope =
+      globalRecord.scope ?? (tenantRecords.length > 0 ? "tenant" : "global");
+
+    normalizedFlags.push({
+      key,
+      description:
+        featureFlagDescription(locale, globalRecord) ||
+        t("common.dash", locale),
+      scope,
+      state,
+      currentValue,
+      lastChangedAt: latestRecord?.updatedAt ?? null,
+      lastChangedBy:
+        latestRecord?.lastChangedBy ??
+        latestRecord?.updatedBy ??
+        latestRecord?.changedBy ??
+        null,
+      availableActions: normalizeAvailableActions(
+        globalRecord.availableActions,
+      ),
+      historyLink: globalRecord.historyLink ?? null,
+      tenantIds: tenantRecords
+        .map((record) => record.tenantId)
+        .filter((value): value is string => Boolean(value)),
+    } satisfies NormalizedFlag);
   }
 
-  return `${new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+  normalizedFlags.sort((left, right) => left.key.localeCompare(right.key));
+
+  return {
+    flags: normalizedFlags,
+    notes: Array.isArray(maybePayload.notes) ? maybePayload.notes : [],
+    refresh: maybePayload.refresh ?? fallbackRefreshMetadata(),
+    refreshTier: maybePayload.refreshTier ?? REFRESH_TIER,
+    ...(maybePayload.emptyState ? { emptyState: maybePayload.emptyState } : {}),
+  };
+}
+
+function getCrossAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
+  switch (targetApp) {
+    case "platform-admin":
+      return (
+        process.env.PLATFORM_ADMIN_ORIGIN?.trim() ??
+        process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN?.trim() ??
+        ""
+      );
+    case "tenant-console":
+      return (
+        process.env.TENANT_CONSOLE_ORIGIN?.trim() ??
+        process.env.NEXT_PUBLIC_TENANT_CONSOLE_ORIGIN?.trim() ??
+        ""
+      );
+    case "ops-console":
+    default:
+      return (
+        process.env.OPS_CONSOLE_ORIGIN?.trim() ??
+        process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN?.trim() ??
+        ""
+      );
+  }
+}
+
+function resolveCrossAppHref(link: CrossAppResourceLink | null): string | null {
+  if (!link) return null;
+  if (/^https?:\/\//.test(link.route)) return link.route;
+  const origin = getCrossAppOrigin(link.targetApp);
+  if (!origin) return null;
+  return new URL(link.route, `${origin.replace(/\/$/, "")}/`).toString();
+}
+
+function resolvePlatformAdminFlagsHref(flagKey?: string): string | null {
+  const route = flagKey
+    ? `/feature-flags?flag=${encodeURIComponent(flagKey)}`
+    : "/feature-flags";
+  return (
+    resolveCrossAppHref({
+      targetApp: "platform-admin",
+      route,
+      resourceType: "feature_flag",
+      resourceId: flagKey ?? "feature_flags",
+      openMode: "new_tab",
+      label: "Platform Admin",
+    }) ?? route
+  );
+}
+
+function featureFlagDescription(locale: Locale, flag: FeatureFlagRecordLike) {
+  if (locale !== "zh") return flag.description ?? "—";
+
+  const descriptions: Record<string, string> = {
+    "driver-app.earnings": "啟用司機 App 收益讀模型",
+    "driver-app.incidents": "啟用司機 App 事故回報",
+    "driver-app.shift": "啟用司機 App 班次與出勤追蹤",
+    "driver-app.tasks": "啟用司機 App 任務生命週期",
+    "ops-console.callcenter": "啟用營運後台客服中心工作階段檢視",
+    "ops-console.complaint": "啟用營運後台客訴案件管理",
+    "ops-console.dispatch": "啟用營運後台派車調度板",
+    "ops-console.reports": "啟用營運後台報表任務管理",
+    "phase1.read-models": "啟用 Phase 1 讀模型介面",
+    "phase1.smoke-paths": "啟用 Phase 1 smoke test 端點",
+    "tenant-portal.billing": "啟用租戶入口帳務檢視",
+    "tenant-portal.booking": "啟用租戶入口訂車管理",
+    "tenant-portal.reports": "啟用租戶入口報表任務提交",
+    "tenant-portal.webhooks": "啟用租戶入口 Webhook 管理",
+  };
+
+  return descriptions[flag.key] || flag.description || "—";
+}
+
+function formatDateTime(value: string | null, locale: Locale) {
+  if (!value) return t("common.dash", locale);
+  return new Date(value).toLocaleString(locale === "zh" ? "zh-TW" : "en-US", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
     timeZone: "UTC",
-  })
-    .format(date)
-    .replace(",", "")} UTC`;
-}
-
-function dataFreshnessTone(
-  freshness: FeatureFlagVisibilityListResponse["refresh"]["dataFreshness"],
-): CanvasTone {
-  switch (freshness) {
-    case "fresh":
-      return "success";
-    case "stale":
-      return "warn";
-    case "degraded":
-      return "danger";
-    default:
-      return "info";
-  }
-}
-
-function searchActionLabel(locale: Locale) {
-  return copy(locale, "Search", "搜尋");
-}
-
-function viewHistoryLabel(locale: Locale) {
-  return copy(locale, "View history", "檢視變更紀錄");
-}
-
-function platformAdminLabel(locale: Locale) {
-  return copy(
-    locale,
-    "Open Platform Admin /feature-flags",
-    "前往 Platform Admin /feature-flags",
-  );
-}
-
-function clearFiltersLabel(locale: Locale) {
-  return copy(locale, "Clear filters", "清除篩選");
-}
-
-function normalizeAppBaseUrl(value: string | undefined, fallback: string) {
-  const resolved = (value ?? fallback).trim();
-  return resolved.replace(/\/+$/, "");
-}
-
-function appBaseUrl(targetApp: CrossAppResourceLink["targetApp"]) {
-  switch (targetApp) {
-    case "platform-admin":
-      return normalizeAppBaseUrl(
-        process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ??
-          process.env.PLATFORM_ADMIN_URL,
-        "http://localhost:3002",
-      );
-    case "tenant-console":
-      return normalizeAppBaseUrl(
-        process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ??
-          process.env.TENANT_CONSOLE_URL,
-        "http://localhost:3004",
-      );
-    case "ops-console":
-    default:
-      return normalizeAppBaseUrl(
-        process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? process.env.OPS_CONSOLE_URL,
-        "http://localhost:3003",
-      );
-  }
-}
-
-function resolveCrossAppHref(link: CrossAppResourceLink) {
-  if (/^https?:\/\//i.test(link.route)) {
-    return link.route;
-  }
-
-  return new URL(link.route, `${appBaseUrl(link.targetApp)}/`).toString();
-}
-
-function shouldOpenInNewTab(link: CrossAppResourceLink) {
-  return link.openMode === "new_tab" || link.targetApp !== "ops-console";
-}
-
-function defaultOwnerAppLink(locale: Locale): CrossAppResourceLink {
-  return {
-    targetApp: "platform-admin",
-    route: "/feature-flags",
-    resourceType: "feature_flag_registry",
-    resourceId: "platform-defaults",
-    openMode: "new_tab",
-    label: platformAdminLabel(locale),
-  };
-}
-
-function normalizeFeatureFlagsEmptyState(
-  emptyState: EmptyStateEnvelope | null | undefined,
-): OpsFeatureFlagEmptyState | undefined {
-  if (!emptyState) {
-    return undefined;
-  }
-
-  const reason: OpsFeatureFlagEmptyReason = (() => {
-    switch (emptyState.reason) {
-      case "no_data":
-      case "not_provisioned":
-      case "fetch_failed":
-      case "permission_denied":
-      case "external_unavailable":
-      case "filtered_empty":
-        return emptyState.reason;
-      case "driver_not_eligible":
-        // Driver-only empty state is outside the ops packet surface; collapse
-        // it into an existing management-app treatment instead of adding a
-        // seventh visual branch on this page.
-        return "permission_denied";
-    }
-  })();
-
-  return {
-    ...emptyState,
-    reason,
-  };
-}
-
-function normalizeResponse(
-  response: FeatureFlagVisibilityListResponse,
-  locale: Locale,
-): FeatureFlagVisibilityListResponse {
-  const ownerAppLink = response.ownerAppLink ?? defaultOwnerAppLink(locale);
-  const normalizedEmptyState = normalizeFeatureFlagsEmptyState(
-    response.emptyState,
-  );
-
-  return {
-    items: (response.items ?? []).map((item) => ({
-      ...item,
-      description: item.description || "—",
-      scope: item.scope === "tenant" ? "tenant" : "global",
-      rolloutState: item.rolloutState === "partial" ? "partial" : "uniform",
-      availableActions: item.availableActions ?? [],
-      ownerLink: item.ownerLink ?? ownerAppLink,
-      historyLink: item.historyLink ?? null,
-    })),
-    refresh: response.refresh ?? {
-      generatedAt: new Date().toISOString(),
-      staleAfterMs: 0,
-      dataFreshness: "unknown",
-      source: "static",
-    },
-    availableActions: response.availableActions ?? [],
-    ...(normalizedEmptyState ? { emptyState: normalizedEmptyState } : {}),
-    ...(ownerAppLink ? { ownerAppLink } : {}),
-  };
-}
-
-async function loadFeatureFlags(locale: Locale) {
-  const client = await getServerOpsClient();
-
-  try {
-    const response = await client.getOpsFeatureFlags();
-    return {
-      response: normalizeResponse(response, locale),
-    };
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : copy(locale, "Unknown error", "未知錯誤");
-
-    return {
-      response: normalizeResponse(
-        {
-          items: [],
-          refresh: {
-            generatedAt: new Date().toISOString(),
-            staleAfterMs: 0,
-            dataFreshness: "unknown",
-            source: "static",
-          },
-          emptyState: {
-            reason: "fetch_failed",
-            messageCode: message,
-          },
-          availableActions: [],
-          ownerAppLink: defaultOwnerAppLink(locale),
-        },
-        locale,
-      ),
-    };
-  }
-}
-
-function filterItems(
-  items: FeatureFlagVisibilityRecord[],
-  filters: FeatureFlagFilters,
-) {
-  return items.filter((item) => {
-    if (filters.scope !== "all" && item.scope !== filters.scope) {
-      return false;
-    }
-
-    if (!filters.q) {
-      return true;
-    }
-
-    return item.key.toLowerCase().includes(filters.q.toLowerCase());
   });
 }
 
-function sortItems(items: FeatureFlagVisibilityRecord[]) {
-  return [...items].sort((left, right) => {
-    const keyCompare = left.key.localeCompare(right.key);
-    if (keyCompare !== 0) {
-      return keyCompare;
-    }
-
-    if (left.scope !== right.scope) {
-      return left.scope === "global" ? -1 : 1;
-    }
-
-    return (left.tenantLabel ?? left.tenantId ?? "").localeCompare(
-      right.tenantLabel ?? right.tenantId ?? "",
-    );
-  });
+function refreshTone(
+  freshness: UiRefreshMetadata["dataFreshness"],
+): Exclude<CanvasTone, "accent"> {
+  if (freshness === "fresh") return "success";
+  if (freshness === "stale") return "warn";
+  if (freshness === "degraded") return "danger";
+  return "neutral";
 }
 
-function actionTooltip(
-  locale: Locale,
-  descriptor: ResourceActionDescriptor | undefined,
+function stateTone(state: FlagState): Exclude<CanvasTone, "accent"> {
+  if (state === "enabled") return "success";
+  if (state === "partial") return "warn";
+  return "neutral";
+}
+
+function actionTone(
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+): Exclude<CanvasTone, "accent"> {
+  if (riskLevel === "high") return "danger";
+  if (riskLevel === "medium") return "warn";
+  return "neutral";
+}
+
+function mapErrorToEmptyReason(error: string): EmptyReason {
+  const message = error.toLowerCase();
+  if (message.includes("403") || message.includes("forbidden")) {
+    return "permission_denied";
+  }
+  if (
+    message.includes("adapter") ||
+    message.includes("upstream") ||
+    message.includes("503") ||
+    message.includes("gateway")
+  ) {
+    return "external_unavailable";
+  }
+  return "fetch_failed";
+}
+
+function formatActionLabel(locale: Locale, action: string) {
+  const key = `flags.action.${action}`;
+  const translated = t(key, locale);
+  if (translated !== key) return translated;
+  return action
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatDisabledReason(locale: Locale, reasonCode: string) {
+  const key = `flags.disabledReason.${reasonCode}`;
+  const translated = t(key, locale);
+  if (translated !== key) return translated;
+  return reasonCode.replaceAll("_", " ");
+}
+
+function renderStack(
+  primary: ReactNode,
+  secondary?: ReactNode,
+  tertiary?: ReactNode,
 ) {
-  if (!descriptor?.disabledReasonCode) {
-    return undefined;
-  }
-
-  return formatOpsCodeLabel(locale, descriptor.disabledReasonCode);
-}
-
-function findAction(
-  actions: ResourceActionDescriptor[],
-  candidates: string[],
-): ResourceActionDescriptor | undefined {
-  return actions.find((action) => candidates.includes(action.action));
-}
-
-function isSearchAction(action: ResourceActionDescriptor) {
-  const normalizedAction = action.action.toLowerCase();
   return (
-    normalizedAction === "search" ||
-    normalizedAction === "search_by_key" ||
-    normalizedAction === "filter"
-  );
-}
-
-function searchAction(actions: ResourceActionDescriptor[]) {
-  return findAction(actions, ["search", "search_by_key", "filter"]);
-}
-
-function ownerAppAction(actions: ResourceActionDescriptor[]) {
-  return findAction(actions, [
-    "open_owner_app",
-    "view_owner_app",
-    "open_platform_admin",
-    "manage_feature_flags",
-  ]);
-}
-
-function historyAction(record: FeatureFlagVisibilityRecord) {
-  return findAction(record.availableActions, [
-    "view_change_history",
-    "view_history",
-    "audit_history",
-  ]);
-}
-
-function refreshAction(actions: ResourceActionDescriptor[]) {
-  return findAction(actions, [
-    "refresh",
-    "manual_refresh",
-    "retry",
-    "retry_fetch",
-  ]);
-}
-
-function externalAnchorProps(link: CrossAppResourceLink) {
-  return shouldOpenInNewTab(link)
-    ? {
-        target: "_blank",
-        rel: "noreferrer",
-      }
-    : {};
-}
-
-function renderHistoryLink(
-  record: FeatureFlagVisibilityRecord,
-  locale: Locale,
-) {
-  const descriptor = historyAction(record);
-  if (!descriptor) {
-    return (
-      <span style={{ ...secondaryTextStyle, color: theme.textDim }}>
-        {copy(locale, "History not exposed", "尚未提供歷史紀錄")}
-      </span>
-    );
-  }
-
-  if (!descriptor.enabled) {
-    return (
-      <span
-        style={{ ...secondaryTextStyle, color: theme.textDim }}
-        title={actionTooltip(locale, descriptor)}
-      >
-        {copy(locale, "History unavailable", "歷史紀錄不可用")}
-      </span>
-    );
-  }
-
-  if (!record.historyLink) {
-    return (
-      <span style={{ ...secondaryTextStyle, color: theme.textDim }}>
-        {copy(locale, "History link unavailable", "未提供歷史紀錄連結")}
-      </span>
-    );
-  }
-
-  const link = record.historyLink;
-  return (
-    <a
-      href={resolveCrossAppHref(link)}
-      style={inlineLinkStyle("accent")}
-      {...externalAnchorProps(link)}
+    <div
+      style={{
+        display: "grid",
+        gap: 4,
+        whiteSpace: "normal",
+      }}
     >
-      <span>{link.label || viewHistoryLabel(locale)}</span>
-      {shouldOpenInNewTab(link) ? <CanvasIcon name="ext" size={11} /> : null}
-    </a>
-  );
-}
-
-function currentValueSummary(
-  record: FeatureFlagVisibilityRecord,
-  locale: Locale,
-) {
-  return (
-    <div style={stateCellStyle}>
-      <div style={pillRowStyle}>
-        <Pill theme={theme} tone={record.enabled ? "success" : "neutral"} dot>
-          {record.enabled
-            ? t("flags.state.enabled", locale)
-            : t("flags.state.disabled", locale)}
-        </Pill>
-      </div>
-      <span style={secondaryTextStyle}>
-        {record.enabled
-          ? copy(
-              locale,
-              "Current scope resolves to enabled.",
-              "目前此範圍解析為 enabled。",
-            )
-          : copy(
-              locale,
-              "Current scope resolves to disabled.",
-              "目前此範圍解析為 disabled。",
-            )}
-      </span>
-    </div>
-  );
-}
-
-function stateSummary(record: FeatureFlagVisibilityRecord, locale: Locale) {
-  return (
-    <div style={stateCellStyle}>
-      <div style={pillRowStyle}>
-        {record.rolloutState === "partial" ? (
-          <Pill theme={theme} tone="warn">
-            {t("flags.midRollout", locale)}
-          </Pill>
-        ) : (
-          <Pill theme={theme} tone="info">
-            {copy(locale, "Uniform", "一致")}
-          </Pill>
-        )}
-      </div>
-      {record.rolloutSummary ? (
-        <span style={secondaryTextStyle}>{record.rolloutSummary}</span>
-      ) : record.rolloutState === "partial" ? (
-        <span style={secondaryTextStyle}>
-          {t("flags.partialStateHelp", locale)}
-        </span>
-      ) : (
-        <span style={secondaryTextStyle}>
-          {copy(
-            locale,
-            "No tenant-visible divergence in this snapshot.",
-            "目前快照中沒有 tenant 可見差異。",
-          )}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function rowForRecord(
-  record: FeatureFlagVisibilityRecord,
-  locale: Locale,
-): FeatureFlagTableRow {
-  return {
-    rowKey: `${record.key}:${record.scope}:${record.tenantId ?? "global"}`,
-    keyCell: (
-      <div style={keyCellStyle}>
-        <span style={keyTextStyle}>{record.key}</span>
-        <span style={secondaryTextStyle}>{record.description}</span>
-      </div>
-    ),
-    scopeCell: (
-      <div style={scopeCellStyle}>
-        <div style={pillRowStyle}>
-          <Pill
-            theme={theme}
-            tone={record.scope === "tenant" ? "warn" : "info"}
-          >
-            {t(
-              record.scope === "tenant"
-                ? "flags.scope.tenant"
-                : "flags.scope.global",
-              locale,
-            )}
-          </Pill>
-          {record.rolloutState === "partial" ? (
-            <Pill theme={theme} tone="warn">
-              {t("flags.state.partial", locale)}
-            </Pill>
-          ) : null}
+      <div>{primary}</div>
+      {secondary ? (
+        <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+          {secondary}
         </div>
-        {record.scope === "tenant" ? (
-          <span style={secondaryTextStyle}>
-            {record.tenantLabel ?? record.tenantId ?? "—"}
-          </span>
-        ) : (
-          <span style={secondaryTextStyle}>
-            {copy(
-              locale,
-              "Platform default visible to ops scopes",
-              "ops 可見的 platform default",
-            )}
-          </span>
-        )}
-      </div>
-    ),
-    currentValueCell: currentValueSummary(record, locale),
-    stateCell: stateSummary(record, locale),
-    updatedByCell: (
-      <div style={updatedByCellStyle}>
-        <span style={{ fontSize: 12.5, color: theme.text }}>
-          {record.lastChangedBy || "—"}
-        </span>
-        {record.ownerLink ? (
-          <a
-            href={resolveCrossAppHref(record.ownerLink)}
-            style={inlineLinkStyle("info")}
-            {...externalAnchorProps(record.ownerLink)}
-          >
-            <span>{record.ownerLink.label}</span>
-            {shouldOpenInNewTab(record.ownerLink) ? (
-              <CanvasIcon name="ext" size={11} />
-            ) : null}
-          </a>
-        ) : (
-          <span style={secondaryTextStyle}>
-            {copy(locale, "Read-only mirror", "唯讀鏡像")}
-          </span>
-        )}
-      </div>
-    ),
-    atCell: (
-      <div style={timeCellStyle}>
-        <span style={codeStyle}>
-          {formatDateTime(locale, record.lastChangedAt)}
-        </span>
-        {renderHistoryLink(record, locale)}
-      </div>
-    ),
-  };
-}
-
-function bannerForFreshness(
-  locale: Locale,
-  refresh: FeatureFlagVisibilityListResponse["refresh"],
-) {
-  if (refresh.dataFreshness === "fresh") {
-    return null;
-  }
-
-  const title =
-    refresh.dataFreshness === "degraded"
-      ? copy(locale, "Flag snapshot degraded", "旗標快照已降級")
-      : refresh.dataFreshness === "stale"
-        ? copy(locale, "Showing a stale snapshot", "目前顯示的是過期快照")
-        : copy(locale, "Snapshot freshness unknown", "快照新鮮度未知");
-
-  const body = copy(
-    locale,
-    `Generated ${formatDateTime(locale, refresh.generatedAt)} from ${formatOpsCodeLabel(
-      locale,
-      refresh.source,
-    )}. Use manual refresh before treating a missing feature as a bug.`,
-    `此快照於 ${formatDateTime(locale, refresh.generatedAt)} 自 ${formatOpsCodeLabel(
-      locale,
-      refresh.source,
-    )} 產生。若要判斷功能缺口是否真為 bug，請先手動 refresh。`,
-  );
-
-  return (
-    <Banner
-      theme={theme}
-      tone={refresh.dataFreshness === "degraded" ? "danger" : "warn"}
-      icon={refresh.dataFreshness === "degraded" ? "warn" : "clock"}
-      title={title}
-      body={body}
-    />
-  );
-}
-
-function resolveEmptyState(
-  response: FeatureFlagVisibilityListResponse,
-  visibleItems: FeatureFlagVisibilityRecord[],
-  filters: FeatureFlagFilters,
-): OpsFeatureFlagEmptyState | null {
-  if (visibleItems.length > 0) {
-    return null;
-  }
-
-  const normalizedEmptyState = normalizeFeatureFlagsEmptyState(
-    response.emptyState,
-  );
-
-  if (response.items.length === 0) {
-    return (
-      normalizedEmptyState ?? {
-        reason: "no_data",
-        messageCode: "flags.empty",
-      }
-    );
-  }
-
-  if (filters.q || filters.scope !== "all") {
-    return {
-      reason: "filtered_empty",
-      messageCode: "flags.empty.filtered",
-    };
-  }
-
-  return (
-    normalizedEmptyState ?? {
-      reason: "no_data",
-      messageCode: "flags.empty",
-    }
-  );
-}
-
-function emptyStateCopy(
-  locale: Locale,
-  state: OpsFeatureFlagEmptyState,
-): {
-  tone: CanvasTone;
-  icon: "check" | "flags" | "warn" | "x" | "filter" | "clock";
-  title: string;
-  body: string;
-} {
-  const translatedMessage =
-    state.messageCode && t(state.messageCode, locale) !== state.messageCode
-      ? t(state.messageCode, locale)
-      : null;
-
-  switch (state.reason) {
-    case "not_provisioned":
-      return {
-        tone: "info",
-        icon: "flags",
-        title: copy(
-          locale,
-          "Feature visibility is not provisioned",
-          "功能旗標可見性尚未啟用",
-        ),
-        body:
-          translatedMessage ??
-          copy(
-            locale,
-            "This scope does not have a flag feed yet. Use the write-authority surface to confirm whether provisioning is still pending.",
-            "目前這個範圍尚未提供旗標 feed。請到 write-authority surface 確認是否仍在 provisioning 中。",
-          ),
-      };
-    case "fetch_failed":
-      return {
-        tone: "danger",
-        icon: "x",
-        title: copy(
-          locale,
-          "Unable to load the flag registry",
-          "無法載入旗標名冊",
-        ),
-        body:
-          translatedMessage ??
-          copy(
-            locale,
-            "The backend did not return a usable snapshot. Retry manual refresh before assuming a feature was removed.",
-            "後端沒有回傳可用快照。請先手動 refresh，再判斷功能是否真的被移除。",
-          ),
-      };
-    case "permission_denied":
-      return {
-        tone: "warn",
-        icon: "warn",
-        title: copy(
-          locale,
-          "You do not have scope to inspect these flags",
-          "你目前沒有權限檢視這些旗標",
-        ),
-        body:
-          translatedMessage ??
-          copy(
-            locale,
-            "The API recognized your session but refused this view. Switch role or use the owner app if you need a broader audit trail.",
-            "API 已辨識目前 session，但拒絕這個檢視。若需要更完整的稽核視角，請切換角色或改到 owner app。",
-          ),
-      };
-    case "external_unavailable":
-      return {
-        tone: "warn",
-        icon: "clock",
-        title: copy(
-          locale,
-          "Upstream flag source is unavailable",
-          "上游旗標來源暫時不可用",
-        ),
-        body:
-          translatedMessage ??
-          copy(
-            locale,
-            "The read model depends on an external system that is currently degraded. Treat this as a supply-side visibility issue, not a feature verdict.",
-            "此讀模型依賴的外部系統目前降級。請把它視為可見性問題，而不是功能結論。",
-          ),
-      };
-    case "filtered_empty":
-      return {
-        tone: "info",
-        icon: "filter",
-        title: copy(
-          locale,
-          "No flags match the current filters",
-          "目前篩選條件下沒有符合的旗標",
-        ),
-        body:
-          translatedMessage ??
-          copy(
-            locale,
-            "Broaden the key search or switch scope back to all visible flags.",
-            "放寬 key 搜尋條件，或把 scope 切回全部可見旗標。",
-          ),
-      };
-    case "no_data":
-    default:
-      return {
-        tone: "success",
-        icon: "check",
-        title: copy(
-          locale,
-          "No visible flags in this scope",
-          "這個範圍目前沒有可見旗標",
-        ),
-        body:
-          translatedMessage ??
-          copy(
-            locale,
-            "This can be a legitimate empty state. Ops should distinguish this from provisioning or backend failure before escalating.",
-            "這可能是合法空狀態。升級處理前，請先區分這是否為 provisioning 或 backend failure。",
-          ),
-      };
-  }
-}
-
-function actionLabel(locale: Locale, action: ResourceActionDescriptor) {
-  const normalizedAction = action.action.toLowerCase();
-  if (
-    normalizedAction === "open_owner_app" ||
-    normalizedAction === "view_owner_app" ||
-    normalizedAction === "open_platform_admin" ||
-    normalizedAction === "manage_feature_flags"
-  ) {
-    return platformAdminLabel(locale);
-  }
-  if (
-    normalizedAction === "refresh" ||
-    normalizedAction === "manual_refresh" ||
-    normalizedAction === "retry" ||
-    normalizedAction === "retry_fetch"
-  ) {
-    return t("common.refresh", locale);
-  }
-  if (
-    normalizedAction === "clear_filters" ||
-    normalizedAction === "reset_filters" ||
-    normalizedAction === "clear_search" ||
-    normalizedAction === "reset_search"
-  ) {
-    return clearFiltersLabel(locale);
-  }
-  if (action.action === "search" || action.action === "search_by_key") {
-    return searchActionLabel(locale);
-  }
-  if (
-    action.action === "view_change_history" ||
-    action.action === "view_history"
-  ) {
-    return viewHistoryLabel(locale);
-  }
-  return formatOpsCodeLabel(locale, action.action);
-}
-
-type ResolvedActionTarget = {
-  href: string;
-  link?: CrossAppResourceLink;
-};
-
-function resolveActionTarget(
-  action: ResourceActionDescriptor,
-  filters: FeatureFlagFilters,
-  ownerAppLink: CrossAppResourceLink,
-): ResolvedActionTarget | null {
-  if (isSearchAction(action)) {
-    return {
-      href: `${buildPageHref(filters)}#feature-flag-search`,
-    };
-  }
-
-  const normalizedAction = action.action.toLowerCase();
-  if (
-    normalizedAction === "clear_filters" ||
-    normalizedAction === "reset_filters" ||
-    normalizedAction === "clear_search" ||
-    normalizedAction === "reset_search"
-  ) {
-    return {
-      href: "/feature-flags#feature-flag-search",
-    };
-  }
-
-  if (
-    normalizedAction === "refresh" ||
-    normalizedAction === "manual_refresh" ||
-    normalizedAction === "retry" ||
-    normalizedAction === "retry_fetch"
-  ) {
-    return {
-      href: buildPageHref(filters, {}, { refresh: String(Date.now()) }),
-    };
-  }
-
-  if (
-    normalizedAction === "open_owner_app" ||
-    normalizedAction === "view_owner_app" ||
-    normalizedAction === "open_platform_admin" ||
-    normalizedAction === "manage_feature_flags" ||
-    normalizedAction.includes("owner_app") ||
-    normalizedAction.includes("platform_admin")
-  ) {
-    return {
-      href: resolveCrossAppHref(ownerAppLink),
-      link: ownerAppLink,
-    };
-  }
-
-  return null;
-}
-
-function actionDisplayLabel(
-  locale: Locale,
-  action: ResourceActionDescriptor,
-  target?: ResolvedActionTarget | null,
-) {
-  if (
-    target?.link &&
-    ownerAppAction([action]) &&
-    target.link.label.trim().length > 0
-  ) {
-    return target.link.label;
-  }
-
-  return actionLabel(locale, action);
-}
-
-function renderResolvedAction(
-  locale: Locale,
-  action: ResourceActionDescriptor,
-  filters: FeatureFlagFilters,
-  ownerAppLink: CrossAppResourceLink,
-  variant: "primary" | "secondary" | "ghost" = "secondary",
-) {
-  const target = resolveActionTarget(action, filters, ownerAppLink);
-  const label = actionDisplayLabel(locale, action, target);
-
-  if (target && action.enabled) {
-    return (
-      <a
-        href={target.href}
-        style={buttonStyle(variant)}
-        title={actionTooltip(locale, action)}
-        {...(target.link ? externalAnchorProps(target.link) : {})}
-      >
-        <span>{label}</span>
-        {target.link && shouldOpenInNewTab(target.link) ? (
-          <CanvasIcon name="ext" size={12} />
-        ) : null}
-      </a>
-    );
-  }
-
-  return (
-    <span
-      style={buttonStyle(variant, !action.enabled)}
-      title={actionTooltip(locale, action)}
-    >
-      {label}
-    </span>
-  );
-}
-
-function renderEmptyState(
-  locale: Locale,
-  state: OpsFeatureFlagEmptyState,
-  filters: FeatureFlagFilters,
-  ownerAppLink: CrossAppResourceLink,
-) {
-  const copyBlock = emptyStateCopy(locale, state);
-  const nextActionTarget = state.nextAction
-    ? resolveActionTarget(state.nextAction, filters, ownerAppLink)
-    : null;
-  const showResetButton =
-    state.reason === "filtered_empty" &&
-    nextActionTarget?.href !== "/feature-flags#feature-flag-search";
-
-  return (
-    <div style={emptyStateStyle}>
-      <div
-        style={{
-          ...emptyIconStyle,
-          color:
-            copyBlock.tone === "danger"
-              ? theme.danger
-              : copyBlock.tone === "warn"
-                ? theme.warn
-                : copyBlock.tone === "success"
-                  ? theme.success
-                  : theme.info,
-        }}
-      >
-        <CanvasIcon name={copyBlock.icon} size={24} />
-      </div>
-      <div style={emptyBodyStyle}>
-        <div style={emptyTitleStyle}>{copyBlock.title}</div>
-        <div style={emptyMessageStyle}>{copyBlock.body}</div>
-      </div>
-      <div style={emptyActionsStyle}>
-        {showResetButton ? (
-          <a href="/feature-flags" style={buttonStyle("secondary")}>
-            {clearFiltersLabel(locale)}
-          </a>
-        ) : null}
-        {state.nextAction
-          ? renderResolvedAction(
-              locale,
-              state.nextAction,
-              filters,
-              ownerAppLink,
-            )
-          : null}
-      </div>
-      {filters.q || filters.scope !== "all" ? (
-        <span style={secondaryTextStyle}>
-          {copy(
-            locale,
-            `Current filters: ${filters.q || "—"} / ${filters.scope}`,
-            `目前篩選：${filters.q || "—"} / ${filters.scope}`,
-          )}
-        </span>
+      ) : null}
+      {tertiary ? (
+        <div style={{ color: theme.textDim, fontSize: 11 }}>{tertiary}</div>
       ) : null}
     </div>
   );
 }
 
+function ActionLink({
+  href,
+  children,
+  target,
+  tone = "neutral",
+}: {
+  href: string;
+  children: ReactNode;
+  target?: "_blank";
+  tone?: CanvasTone;
+}) {
+  const palette =
+    tone === "danger"
+      ? { fg: theme.danger, bg: theme.dangerBg, bd: theme.dangerBorder }
+      : tone === "warn"
+        ? { fg: theme.warn, bg: theme.warnBg, bd: theme.warnBorder }
+        : tone === "accent"
+          ? { fg: "#ffffff", bg: theme.accent, bd: theme.accent }
+          : { fg: theme.text, bg: theme.surface, bd: theme.border };
+
+  return (
+    <Link
+      href={href}
+      target={target}
+      rel={target === "_blank" ? "noreferrer" : undefined}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        minHeight: 28,
+        padding: "0 10px",
+        borderRadius: 7,
+        border: `1px solid ${palette.bd}`,
+        background: palette.bg,
+        color: palette.fg,
+        fontSize: 12,
+        fontWeight: 500,
+        textDecoration: "none",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function ScopeLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        minHeight: 28,
+        padding: "0 10px",
+        borderRadius: 999,
+        border: `1px solid ${active ? theme.accent : theme.border}`,
+        background: active ? theme.accentBg : theme.surface,
+        color: active ? theme.accent : theme.textMuted,
+        fontSize: 12,
+        fontWeight: active ? 600 : 500,
+        textDecoration: "none",
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function buildEmptyState(
+  locale: Locale,
+  reason: EmptyReason,
+  query: string,
+  scope: ScopeFilter,
+): {
+  icon: EmptyStateIconName;
+  tone: Exclude<CanvasTone, "accent">;
+  label: string;
+  title: string;
+  body: string;
+  actionLabel: string;
+  actionHref: string | null;
+  actionTarget?: "_blank";
+} {
+  switch (reason) {
+    case "not_provisioned":
+      return {
+        icon: "flags",
+        tone: "warn",
+        label: "NOT PROVISIONED",
+        title: t("flags.emptyState.notProvisioned.title", locale),
+        body: t("flags.emptyState.notProvisioned.body", locale),
+        actionLabel: t("flags.platformAdminLink", locale),
+        actionHref: resolvePlatformAdminFlagsHref(),
+        actionTarget: "_blank",
+      };
+    case "permission_denied":
+      return {
+        icon: "audit",
+        tone: "danger",
+        label: "PERMISSION DENIED",
+        title: t("flags.emptyState.permissionDenied.title", locale),
+        body: t("flags.emptyState.permissionDenied.body", locale),
+        actionLabel: t("common.refresh", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+    case "external_unavailable":
+      return {
+        icon: "reports",
+        tone: "warn",
+        label: "EXTERNAL UNAVAILABLE",
+        title: t("flags.emptyState.externalUnavailable.title", locale),
+        body: t("flags.emptyState.externalUnavailable.body", locale),
+        actionLabel: t("common.tryAgain", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+    case "driver_not_eligible":
+      return {
+        icon: "warn",
+        tone: "warn",
+        label: "DRIVER NOT ELIGIBLE",
+        title: t("flags.emptyState.driverNotEligible.title", locale),
+        body: t("flags.emptyState.driverNotEligible.body", locale),
+        actionLabel: t("common.refresh", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+    case "filtered_empty":
+      return {
+        icon: "search",
+        tone: "neutral",
+        label: "FILTERED EMPTY",
+        title: t("flags.emptyState.filteredEmpty.title", locale),
+        body: t("flags.emptyState.filteredEmpty.body", locale),
+        actionLabel: t("flags.clearFilters", locale),
+        actionHref: "/feature-flags",
+      };
+    case "fetch_failed":
+      return {
+        icon: "warn",
+        tone: "danger",
+        label: "FETCH FAILED",
+        title: t("flags.emptyState.fetchFailed.title", locale),
+        body: t("flags.emptyState.fetchFailed.body", locale),
+        actionLabel: t("common.tryAgain", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+    case "no_data":
+    default:
+      return {
+        icon: "flags",
+        tone: "neutral",
+        label: "NO DATA",
+        title: t("flags.emptyState.noData.title", locale),
+        body: t("flags.emptyState.noData.body", locale),
+        actionLabel: t("common.refresh", locale),
+        actionHref: buildRefreshHref(query, scope),
+      };
+  }
+}
+
+function EmptyStateCard({
+  locale,
+  reason,
+  query,
+  scope,
+  messageCode,
+}: {
+  locale: Locale;
+  reason: EmptyReason;
+  query: string;
+  scope: ScopeFilter;
+  messageCode?: string;
+}) {
+  const emptyState = buildEmptyState(locale, reason, query, scope);
+
+  return (
+    <Card
+      theme={theme}
+      padding={18}
+      style={{
+        background: theme.surfaceLo,
+        borderColor:
+          emptyState.tone === "danger"
+            ? theme.dangerBorder
+            : emptyState.tone === "warn"
+              ? theme.warnBorder
+              : theme.border,
+      }}
+    >
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          gridTemplateColumns: "auto minmax(0, 1fr)",
+          alignItems: "start",
+        }}
+      >
+        <div
+          style={{
+            width: 42,
+            height: 42,
+            borderRadius: 12,
+            display: "grid",
+            placeItems: "center",
+            background:
+              emptyState.tone === "danger"
+                ? theme.dangerBg
+                : emptyState.tone === "warn"
+                  ? theme.warnBg
+                  : theme.neutralBg,
+            border: `1px solid ${
+              emptyState.tone === "danger"
+                ? theme.dangerBorder
+                : emptyState.tone === "warn"
+                  ? theme.warnBorder
+                  : theme.neutralBorder
+            }`,
+            color:
+              emptyState.tone === "danger"
+                ? theme.danger
+                : emptyState.tone === "warn"
+                  ? theme.warn
+                  : theme.textMuted,
+          }}
+        >
+          <CanvasIcon name={emptyState.icon} size={18} stroke={1.7} />
+        </div>
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <Pill theme={theme} tone={emptyState.tone}>
+              {emptyState.label}
+            </Pill>
+            <Pill theme={theme} tone="neutral">
+              {reason}
+            </Pill>
+            {messageCode ? (
+              <Pill theme={theme} tone="neutral">
+                {messageCode}
+              </Pill>
+            ) : null}
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <strong style={{ color: theme.text, fontSize: 16 }}>
+              {emptyState.title}
+            </strong>
+            <span
+              style={{
+                color: theme.textMuted,
+                lineHeight: 1.5,
+                fontSize: 12.5,
+              }}
+            >
+              {emptyState.body}
+            </span>
+          </div>
+          <div>
+            {emptyState.actionHref ? (
+              <ActionLink
+                href={emptyState.actionHref}
+                tone={
+                  emptyState.tone === "neutral" ? "accent" : emptyState.tone
+                }
+                {...(emptyState.actionTarget
+                  ? { target: emptyState.actionTarget }
+                  : {})}
+              >
+                {emptyState.actionLabel}
+              </ActionLink>
+            ) : (
+              <div style={{ display: "grid", gap: 6 }}>
+                <Pill theme={theme} tone="warn">
+                  {emptyState.actionLabel}
+                </Pill>
+                <span style={{ color: theme.textDim, fontSize: 11 }}>
+                  {t("flags.platformAdminLinkUnavailable", locale)}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function buildFlagTableRows(
+  flags: NormalizedFlag[],
+  locale: Locale,
+): FlagTableRow[] {
+  return flags.map((flag) => {
+    const historyAction = findHistoryAction(flag.availableActions);
+    const historyHref = historyAction
+      ? (resolveCrossAppHref(flag.historyLink) ??
+        resolvePlatformAdminFlagsHref(flag.key))
+      : null;
+    const hasEnabledAction = flag.availableActions.some((action) => {
+      if (action.action !== "view_change_history") {
+        return action.enabled;
+      }
+      return action.enabled && Boolean(historyHref);
+    });
+
+    return {
+      key: flag.key,
+      keyCell: renderStack(
+        <span style={{ color: theme.text, fontFamily: theme.monoFamily }}>
+          {flag.key}
+        </span>,
+        flag.state === "partial"
+          ? t("flags.midRollout", locale)
+          : flag.tenantIds.length > 0
+            ? t("flags.tenantOverrideCount", locale, {
+                count: flag.tenantIds.length,
+              })
+            : t("flags.opsReadOnly", locale),
+      ),
+      scopeCell: (
+        <Pill theme={theme} tone={flag.scope === "tenant" ? "warn" : "info"}>
+          {t(`flags.scope.${flag.scope}`, locale)}
+        </Pill>
+      ),
+      stateCell: renderStack(
+        <Pill theme={theme} tone={stateTone(flag.state)} dot>
+          {t(`flags.state.${flag.state}`, locale)}
+        </Pill>,
+        flag.currentValue !== flag.state ? flag.currentValue : undefined,
+        flag.state === "partial"
+          ? t("flags.partialStateHelp", locale)
+          : undefined,
+      ),
+      updatedByCell: renderStack(
+        flag.lastChangedBy ?? t("common.dash", locale),
+        historyAction && historyHref
+          ? t("flags.crossAppHint", locale)
+          : undefined,
+      ),
+      updatedAt: formatDateTime(flag.lastChangedAt, locale),
+      description: flag.description,
+      actionsCell: (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+          }}
+        >
+          {flag.availableActions.length === 0 ? (
+            <Pill theme={theme} tone="neutral">
+              {t("flags.readOnly", locale)}
+            </Pill>
+          ) : null}
+          {flag.availableActions.map((action) =>
+            action.enabled && historyHref ? (
+              <ActionLink
+                key={`${flag.key}-${action.action}`}
+                href={historyHref}
+                tone="accent"
+                {...(flag.historyLink?.openMode === "new_tab"
+                  ? { target: "_blank" as const }
+                  : {})}
+              >
+                {formatActionLabel(locale, action.action)}
+              </ActionLink>
+            ) : (
+              <div
+                key={`${flag.key}-${action.action}`}
+                style={{ display: "grid", gap: 4 }}
+              >
+                <Pill theme={theme} tone={actionTone(action.riskLevel)}>
+                  {formatActionLabel(locale, action.action)}
+                </Pill>
+                {action.disabledReasonCode || !historyHref ? (
+                  <span style={{ color: theme.textDim, fontSize: 11 }}>
+                    {action.disabledReasonCode
+                      ? formatDisabledReason(locale, action.disabledReasonCode)
+                      : t("flags.disabledReason.history_link_missing", locale)}
+                  </span>
+                ) : null}
+              </div>
+            ),
+          )}
+          {flag.availableActions.length > 0 && !hasEnabledAction ? (
+            <Pill theme={theme} tone="neutral">
+              {t("flags.readOnly", locale)}
+            </Pill>
+          ) : null}
+        </div>
+      ),
+      _selected: flag.state === "partial",
+    };
+  });
+}
+
 export default async function FeatureFlagsPage({
   searchParams,
 }: FeatureFlagsPageProps) {
-  const [locale, resolvedSearchParams] = await Promise.all([
+  const resolvedSearchParams = await (searchParams ??
+    Promise.resolve({} as Record<string, string | string[] | undefined>));
+  const query = firstParam(resolvedSearchParams.q)?.trim() ?? "";
+  const scope = resolveScope(firstParam(resolvedSearchParams.scope));
+  const emptyReasonOverrideParam = firstParam(resolvedSearchParams.emptyReason);
+  const emptyReasonOverride = isEmptyReason(emptyReasonOverrideParam)
+    ? emptyReasonOverrideParam
+    : undefined;
+
+  const [client, locale] = await Promise.all([
+    getServerOpsClient(),
     getServerLocale(),
-    searchParams ?? Promise.resolve({}),
   ]);
 
-  const filters = resolveFilters(resolvedSearchParams);
-  const { response } = await loadFeatureFlags(locale);
-  const ownerAppLink = response.ownerAppLink ?? defaultOwnerAppLink(locale);
-  const visibleItems = sortItems(filterItems(response.items, filters));
-  const emptyState = resolveEmptyState(response, visibleItems, filters);
-  const searchDescriptor = searchAction(response.availableActions);
-  const ownerDescriptor = ownerAppAction(response.availableActions);
-  const refreshDescriptor = refreshAction(response.availableActions);
+  let payload: NormalizedFlagsPayload = {
+    flags: [],
+    notes: [],
+    refresh: fallbackRefreshMetadata(),
+    refreshTier: REFRESH_TIER,
+  };
+  let errorMessage: string | null = null;
 
-  const visibleEnabledCount = visibleItems.filter(
-    (item) => item.enabled,
-  ).length;
-  const visibleDisabledCount = visibleItems.length - visibleEnabledCount;
-  const partialCount = visibleItems.filter(
-    (item) => item.rolloutState === "partial",
-  ).length;
-  const tenantScopedCount = visibleItems.filter(
-    (item) => item.scope === "tenant",
-  ).length;
+  try {
+    const response = await client.getOpsFeatureFlags();
+    payload = normalizeFeatureFlags(response, locale);
+  } catch (error) {
+    errorMessage =
+      error instanceof Error ? error.message : t("common.unknown", locale);
+    payload = {
+      flags: [],
+      notes: [],
+      refresh: fallbackRefreshMetadata(),
+      refreshTier: REFRESH_TIER,
+      emptyState: {
+        reason: mapErrorToEmptyReason(errorMessage),
+        messageCode: "feature_flags.fetch_failed",
+      },
+    };
+  }
 
-  const rows = visibleItems.map((record) => rowForRecord(record, locale));
-  const columns: CanvasTableColumn<FeatureFlagTableRow>[] = [
-    {
-      h: t("flags.col.key", locale).toUpperCase(),
-      w: 340,
-      r: (row) => row.keyCell as ReactNode,
-    },
-    {
-      h: t("flags.col.scope", locale),
-      w: 180,
-      r: (row) => row.scopeCell as ReactNode,
-    },
-    {
-      h: t("flags.col.currentValue", locale),
-      w: 180,
-      r: (row) => row.currentValueCell as ReactNode,
-    },
-    {
-      h: t("flags.col.state", locale),
-      w: 210,
-      r: (row) => row.stateCell as ReactNode,
-    },
-    {
-      h: t("flags.col.updatedBy", locale),
-      w: 240,
-      r: (row) => row.updatedByCell as ReactNode,
-    },
-    {
-      h: t("flags.col.updatedAt", locale),
-      w: 220,
-      r: (row) => row.atCell as ReactNode,
-    },
-  ];
+  const filteredFlags = payload.flags.filter((flag) => {
+    const matchesScope = scope === "all" ? true : flag.scope === scope;
+    const matchesQuery = query
+      ? flag.key.toLowerCase().includes(query.toLowerCase())
+      : true;
+    return matchesScope && matchesQuery;
+  });
+
+  const effectiveEmptyReason =
+    emptyReasonOverride ??
+    (filteredFlags.length === 0
+      ? payload.flags.length === 0
+        ? (payload.emptyState?.reason ?? "no_data")
+        : "filtered_empty"
+      : null);
+
+  const visibleFlags =
+    effectiveEmptyReason === null ? filteredFlags : ([] as NormalizedFlag[]);
+  const enabledCount = payload.flags.filter(
+    (flag) => flag.state === "enabled",
+  ).length;
+  const partialCount = payload.flags.filter(
+    (flag) => flag.state === "partial",
+  ).length;
+  const tenantScopedCount = payload.flags.filter(
+    (flag) => flag.scope === "tenant",
+  ).length;
+  const refreshHref = buildRefreshHref(query, scope, emptyReasonOverride);
+  const platformAdminFlagsHref = resolvePlatformAdminFlagsHref();
+  const rows = buildFlagTableRows(visibleFlags, locale);
 
   return (
     <>
       <PageHeader
         theme={theme}
-        title={t("flags.title", locale)}
+        title={
+          locale === "zh" ? "功能旗標 · read only" : "Feature Flags · read only"
+        }
         subtitle={t("flags.subtitleReadOnly", locale)}
         actions={
-          ownerDescriptor
-            ? renderResolvedAction(
-                locale,
-                ownerDescriptor,
-                filters,
-                ownerAppLink,
-                "primary",
-              )
-            : null
+          <>
+            <ActionLink href={refreshHref}>
+              {t("common.refresh", locale)}
+            </ActionLink>
+            {platformAdminFlagsHref ? (
+              <ActionLink
+                href={platformAdminFlagsHref}
+                target="_blank"
+                tone="accent"
+              >
+                {t("flags.platformAdminLink", locale)}
+              </ActionLink>
+            ) : (
+              <Pill theme={theme} tone="warn">
+                {t("flags.platformAdminLinkUnavailable", locale)}
+              </Pill>
+            )}
+          </>
         }
       />
 
       <div style={pageBodyStyle}>
-        {bannerForFreshness(locale, response.refresh)}
+        {errorMessage ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            title={t("common.somethingWrong", locale)}
+            body={errorMessage}
+          />
+        ) : null}
 
-        <Card theme={theme} padding={0}>
-          <div style={toolbarStyle}>
-            <div style={searchPanelStyle}>
-              {searchDescriptor ? (
-                <form
-                  action="/feature-flags"
-                  method="get"
-                  style={searchFormStyle}
+        {payload.refresh.dataFreshness !== "fresh" ? (
+          <Banner
+            theme={theme}
+            tone={
+              payload.refresh.dataFreshness === "degraded" ? "danger" : "warn"
+            }
+            title={t("flags.staleBanner.title", locale)}
+            body={t("flags.staleBanner.body", locale, {
+              freshness: t(
+                `flags.freshness.${payload.refresh.dataFreshness}`,
+                locale,
+              ),
+              generatedAt: formatDateTime(payload.refresh.generatedAt, locale),
+            })}
+            actions={
+              <ActionLink href={refreshHref} tone="accent">
+                {t("common.refresh", locale)}
+              </ActionLink>
+            }
+          />
+        ) : null}
+
+        <div style={kpiGridStyle}>
+          <KPI
+            theme={theme}
+            label={locale === "zh" ? "可見旗標" : "Visible flags"}
+            value={payload.flags.length}
+            sub={locale === "zh" ? "目前快照總數" : "Current snapshot total"}
+          />
+          <KPI
+            theme={theme}
+            label={locale === "zh" ? "已啟用" : "Enabled"}
+            value={enabledCount}
+            sub={locale === "zh" ? "營運可見 enabled" : "Operationally enabled"}
+          />
+          <KPI
+            theme={theme}
+            label={locale === "zh" ? "進行中 rollout" : "Mid-rollout"}
+            value={partialCount}
+            sub={locale === "zh" ? "跨租戶值不一致" : "Tenant values diverge"}
+          />
+          <KPI
+            theme={theme}
+            label={locale === "zh" ? "租戶層級" : "Tenant-scoped"}
+            value={tenantScopedCount}
+            sub={locale === "zh" ? "有 override 足跡" : "Overrides are present"}
+          />
+        </div>
+
+        <div style={splitGridStyle}>
+          <Card
+            theme={theme}
+            title={t("flags.registryTitle", locale)}
+            subtitle={t("flags.registrySubtitle", locale)}
+            padding={18}
+          >
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <ScopeLink
+                  href={buildPageHref(query, "all", emptyReasonOverride)}
+                  active={scope === "all"}
                 >
-                  {filters.scope !== "all" ? (
-                    <input type="hidden" name="scope" value={filters.scope} />
-                  ) : null}
-                  <div style={{ flex: "1 1 260px", minWidth: 0 }}>
-                    <Field
-                      theme={theme}
-                      label={t("flags.searchPlaceholder", locale)}
-                      hint={copy(
-                        locale,
-                        "Low-risk local filter. Use exact prefixes like dispatch., forwarder., partner.",
-                        "低風險本地篩選。可直接用 dispatch.、forwarder.、partner. 等 prefix。",
-                      )}
-                    >
-                      <input
-                        id="feature-flag-search"
-                        name="q"
-                        defaultValue={filters.q}
-                        placeholder={t("flags.searchPlaceholder", locale)}
-                        aria-label={t("flags.searchPlaceholder", locale)}
-                        style={searchInputStyle}
-                      />
-                    </Field>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={!searchDescriptor.enabled}
-                    title={actionTooltip(locale, searchDescriptor)}
-                    style={buttonStyle("secondary", !searchDescriptor.enabled)}
-                  >
-                    {searchActionLabel(locale)}
-                  </button>
-                  {(filters.q || filters.scope !== "all") && (
-                    <a href="/feature-flags" style={buttonStyle("ghost")}>
-                      {clearFiltersLabel(locale)}
-                    </a>
-                  )}
-                </form>
-              ) : (
-                <div style={searchFormStyle}>
-                  <div style={{ flex: "1 1 260px", minWidth: 0 }}>
-                    <Field
-                      theme={theme}
-                      label={t("flags.searchPlaceholder", locale)}
-                      hint={copy(
-                        locale,
-                        "Search is not available for this snapshot. Scope filters remain visible for context only.",
-                        "這個快照目前不提供搜尋操作；scope 篩選會保留作為閱讀輔助。",
-                      )}
-                    >
-                      <input
-                        id="feature-flag-search"
-                        value={filters.q}
-                        placeholder={t("flags.searchPlaceholder", locale)}
-                        aria-label={t("flags.searchPlaceholder", locale)}
-                        style={searchInputStyle}
-                        disabled
-                        readOnly
-                      />
-                    </Field>
-                  </div>
-                  {(filters.q || filters.scope !== "all") && (
-                    <a href="/feature-flags" style={buttonStyle("ghost")}>
-                      {clearFiltersLabel(locale)}
-                    </a>
-                  )}
-                </div>
-              )}
+                  {t("flags.scope.all", locale)}
+                </ScopeLink>
+                <ScopeLink
+                  href={buildPageHref(query, "global", emptyReasonOverride)}
+                  active={scope === "global"}
+                >
+                  {t("flags.scope.global", locale)}
+                </ScopeLink>
+                <ScopeLink
+                  href={buildPageHref(query, "tenant", emptyReasonOverride)}
+                  active={scope === "tenant"}
+                >
+                  {t("flags.scope.tenant", locale)}
+                </ScopeLink>
+              </div>
 
-              <div style={scopeRowStyle}>
-                <span style={scopeLabelStyle}>
-                  {t("flags.col.scope", locale)}
-                </span>
-                {(["all", "global", "tenant"] as const).map((scope) => (
-                  <a
-                    key={scope}
-                    href={buildPageHref(filters, { scope })}
-                    style={filterChipStyle(scope === filters.scope)}
-                  >
-                    {t(
-                      scope === "all"
-                        ? "flags.scope.all"
-                        : scope === "global"
-                          ? "flags.scope.global"
-                          : "flags.scope.tenant",
-                      locale,
-                    )}
-                  </a>
-                ))}
+              <form
+                action="/feature-flags"
+                method="get"
+                style={{
+                  display: "grid",
+                  gap: 10,
+                  gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                }}
+              >
+                <input type="hidden" name="scope" value={scope} />
+                <input
+                  name="q"
+                  defaultValue={query}
+                  placeholder={t("flags.searchPlaceholder", locale)}
+                  style={{
+                    minHeight: 34,
+                    borderRadius: 8,
+                    border: `1px solid ${theme.border}`,
+                    background: theme.surface,
+                    color: theme.text,
+                    padding: "0 12px",
+                    fontSize: 12.5,
+                    fontFamily: theme.fontFamily,
+                  }}
+                />
+                <button
+                  type="submit"
+                  style={{
+                    minHeight: 34,
+                    padding: "0 12px",
+                    borderRadius: 8,
+                    border: `1px solid ${theme.accent}`,
+                    background: theme.accentBg,
+                    color: theme.accent,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: theme.fontFamily,
+                    cursor: "pointer",
+                  }}
+                >
+                  {t("common.search", locale)}
+                </button>
+                <ActionLink href="/feature-flags">
+                  {t("flags.clearFilters", locale)}
+                </ActionLink>
+              </form>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
+                <Pill theme={theme} tone="accent">
+                  {t(`flags.refreshTier.${payload.refreshTier}`, locale)}
+                </Pill>
+                <Pill
+                  theme={theme}
+                  tone={refreshTone(payload.refresh.dataFreshness)}
+                  dot
+                >
+                  {t(
+                    `flags.freshness.${payload.refresh.dataFreshness}`,
+                    locale,
+                  )}
+                </Pill>
+                <Pill theme={theme} tone="neutral">
+                  {payload.refresh.source}
+                </Pill>
+                <Pill theme={theme} tone="neutral">
+                  {formatDateTime(payload.refresh.generatedAt, locale)}
+                </Pill>
               </div>
             </div>
+          </Card>
 
-            <div style={snapshotPanelStyle}>
-              <Pill theme={theme} tone="info">
-                {t("flags.refreshTier.manual", locale)}
-              </Pill>
-              <Pill
-                theme={theme}
-                tone={dataFreshnessTone(response.refresh.dataFreshness)}
+          <Card
+            theme={theme}
+            title={locale === "zh" ? "治理邊界" : "Governance boundary"}
+            subtitle={
+              locale === "zh"
+                ? "ops 只做 read-only 可見性與交叉 app 深連結。"
+                : "Ops stays read-only and links to the owner app for governance."
+            }
+            padding={18}
+          >
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <Pill theme={theme} tone="neutral">
+                  GET /api/ops/feature-flags
+                </Pill>
+                <Pill theme={theme} tone="neutral">
+                  availableActions
+                </Pill>
+                <Pill theme={theme} tone="neutral">
+                  EmptyReason x6
+                </Pill>
+              </div>
+              <div
+                style={{
+                  color: theme.textMuted,
+                  fontSize: 12.5,
+                  lineHeight: 1.55,
+                }}
               >
-                {t(`flags.freshness.${response.refresh.dataFreshness}`, locale)}
-              </Pill>
-              <span style={snapshotMetaStyle}>
-                {t("flags.staleBanner.body", locale, {
-                  freshness: t(
-                    `flags.freshness.${response.refresh.dataFreshness}`,
-                    locale,
-                  ),
-                  generatedAt: formatDateTime(
-                    locale,
-                    response.refresh.generatedAt,
-                  ),
-                })}
-              </span>
-              {refreshDescriptor
-                ? renderResolvedAction(
-                    locale,
-                    refreshDescriptor,
-                    filters,
-                    ownerAppLink,
-                  )
-                : null}
+                {t("flags.registryFooterV2", locale)}
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gap: 6,
+                  color: theme.textDim,
+                  fontSize: 11.5,
+                  lineHeight: 1.45,
+                }}
+              >
+                <div>{t("flags.boundary.readOnly", locale)}</div>
+                <div>{t("flags.boundary.deepLink", locale)}</div>
+              </div>
+              {payload.notes.length > 0 ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {payload.notes.map((note) => (
+                    <div
+                      key={note}
+                      style={{
+                        color: theme.textDim,
+                        fontSize: 11.5,
+                        borderTop: `1px solid ${theme.border}`,
+                        paddingTop: 8,
+                      }}
+                    >
+                      {note}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
-          </div>
+          </Card>
+        </div>
 
-          <div style={registryMetaStyle}>
-            <span style={registryMetaTextStyle}>
-              {t("flags.registrySummaryV2", locale, {
-                total: response.items.length,
-                enabled: visibleEnabledCount,
-                partial: partialCount,
-                tenant: tenantScopedCount,
-              })}
-            </span>
-            <Pill theme={theme} tone="success">
-              {t("flags.state.enabled", locale)} · {visibleEnabledCount}
-            </Pill>
-            <Pill theme={theme} tone="neutral">
-              {t("flags.state.disabled", locale)} · {visibleDisabledCount}
-            </Pill>
-            <Pill theme={theme} tone="warn">
-              {t("flags.midRollout", locale)} · {partialCount}
-            </Pill>
-            <span style={codeStyle}>GET /api/ops/feature-flags · T6</span>
-          </div>
-
-          {emptyState ? (
-            renderEmptyState(locale, emptyState, filters, ownerAppLink)
-          ) : (
-            <Table theme={theme} columns={columns} rows={rows} />
-          )}
-          <div style={boundaryPanelStyle}>
-            <div style={boundaryTitleStyle}>
-              {t("flags.registryTitle", locale)}
-            </div>
-            <span style={secondaryTextStyle}>
-              {t("flags.registrySubtitle", locale)}
-            </span>
-            <span style={secondaryTextStyle}>
-              {t("flags.registryFooterV2", locale)}
-            </span>
-            <span style={secondaryTextStyle}>
-              {t("flags.boundary.readOnly", locale)}
-            </span>
-            <span style={secondaryTextStyle}>
-              {t("flags.boundary.deepLink", locale)}
-            </span>
-          </div>
-        </Card>
+        {effectiveEmptyReason ? (
+          <EmptyStateCard
+            locale={locale}
+            reason={effectiveEmptyReason}
+            query={query}
+            scope={scope}
+            {...(payload.emptyState?.messageCode
+              ? { messageCode: payload.emptyState.messageCode }
+              : {})}
+          />
+        ) : (
+          <Card
+            theme={theme}
+            title={
+              locale === "zh"
+                ? "Operational flag registry"
+                : "Operational flag registry"
+            }
+            subtitle={t("flags.registrySummaryV2", locale, {
+              total: payload.flags.length,
+              enabled: enabledCount,
+              partial: partialCount,
+              tenant: tenantScopedCount,
+            })}
+            padding={0}
+          >
+            <Table theme={theme} columns={tableColumns} rows={rows} />
+          </Card>
+        )}
       </div>
     </>
   );

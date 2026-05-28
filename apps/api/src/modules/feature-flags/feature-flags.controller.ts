@@ -11,7 +11,7 @@ import {
 import { FeatureFlagsService } from "./feature-flags.service";
 import type {
   FeatureFlagSummary,
-  FeatureFlagVisibilityListResponse,
+  OpsFeatureFlagSummary,
 } from "@drts/contracts";
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { ApiRequestError } from "../../common/api-envelope";
@@ -100,8 +100,8 @@ export class OpsFeatureFlagsController {
     @Headers("x-request-id") requestId?: string,
     @Headers("x-tenant-id") tenantId?: string,
   ) {
-    const response: FeatureFlagVisibilityListResponse =
+    const summary: OpsFeatureFlagSummary =
       await this.service.getOpsSummary(tenantId);
-    return toApiSuccessEnvelope(response, requestId);
+    return toApiSuccessEnvelope(summary, requestId);
   }
 }

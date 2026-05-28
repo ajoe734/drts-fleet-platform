@@ -302,65 +302,6 @@ export interface SearchResultRecord {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Q-X16 — FeatureFlagVisibilityListResponse
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Visibility scope for a feature flag in actor-filtered read-only surfaces
- * (ops / tenant / driver). Platform-admin remains the write-authority
- * surface and may additionally expose tenant override controls.
- */
-export type FeatureFlagVisibilityScope = "global" | "tenant";
-
-/**
- * Rollout state for a single flag row. `partial` means the flag is not
- * uniform across every visible scope yet (for example, tenant overrides
- * diverge from the platform default) and the UI must render that state
- * distinctly instead of flattening it to a simple boolean.
- */
-export type FeatureFlagRolloutState = "uniform" | "partial";
-
-/**
- * Actor-filtered feature flag row for read-only visibility screens.
- *
- * Consumed by:
- *   - ops-console `/feature-flags`
- *   - tenant-console `/feature-flags`
- *   - future driver-app feature-visibility diagnostics if exposed
- */
-export interface FeatureFlagVisibilityRecord {
-  key: string;
-  description: string;
-  enabled: boolean;
-  scope: FeatureFlagVisibilityScope;
-  tenantId?: string | null;
-  tenantLabel?: string | null;
-  rolloutState: FeatureFlagRolloutState;
-  rolloutSummary?: string | null;
-  lastChangedAt: string;
-  lastChangedBy: string;
-  availableActions: ResourceActionDescriptor[];
-  historyLink?: CrossAppResourceLink | null;
-  ownerLink?: CrossAppResourceLink | null;
-}
-
-/**
- * List envelope for actor-filtered feature flag visibility endpoints per
- * Q-X16 (`GET /api/ops|tenant|driver/feature-flags`).
- *
- * `availableActions` covers page-level affordances such as search or
- * opening the write-authority surface; row-level actions live on each
- * `FeatureFlagVisibilityRecord.availableActions`.
- */
-export interface FeatureFlagVisibilityListResponse {
-  items: FeatureFlagVisibilityRecord[];
-  refresh: UiRefreshMetadata;
-  emptyState?: EmptyStateEnvelope;
-  availableActions: ResourceActionDescriptor[];
-  ownerAppLink?: CrossAppResourceLink | null;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Q-DRV04 — DriverOpsInstruction
 // ─────────────────────────────────────────────────────────────────────────────
 

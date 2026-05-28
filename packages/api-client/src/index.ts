@@ -85,8 +85,8 @@ import type {
   EvidenceRetentionPolicyRecord,
   EvidenceSubjectGovernanceRecord,
   FeatureFlag,
+  OpsFeatureFlagSummary,
   FeatureFlagSummary,
-  FeatureFlagVisibilityListResponse,
   FilingPackageAccepted,
   FilingPackageDetailRecord,
   FilingPackageListRecord,
@@ -452,10 +452,8 @@ export class ApiClient {
     return this.get<FeatureFlagSummary>(path);
   }
 
-  async getOpsFeatureFlags(): Promise<FeatureFlagVisibilityListResponse> {
-    return this.get<FeatureFlagVisibilityListResponse>(
-      "/api/ops/feature-flags",
-    );
+  async getOpsFeatureFlags(): Promise<OpsFeatureFlagSummary> {
+    return this.get<OpsFeatureFlagSummary>("/api/ops/feature-flags");
   }
 
   async getFeatureFlag(key: string): Promise<FeatureFlag> {
