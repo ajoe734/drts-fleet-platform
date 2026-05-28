@@ -17,6 +17,7 @@ import {
 } from "@drts/ui-web";
 import {
   EMPTY_REASON_META,
+  NOTIFICATION_EMPTY_REASONS,
   type ChannelAvailability,
   type NotificationChannel,
   type NotificationMatrixRow,
@@ -98,6 +99,7 @@ type DeepLink = {
 
 export function NotificationPreferencesEditor({
   initialRows,
+  visibleEventTypes,
   availability,
   action,
   refreshMetadata,
@@ -106,6 +108,7 @@ export function NotificationPreferencesEditor({
   activeEmptyReason,
 }: {
   initialRows: NotificationMatrixRow[];
+  visibleEventTypes?: string[];
   availability: ChannelAvailability;
   action: ResourceActionDescriptor;
   refreshMetadata: UiRefreshMetadata;
@@ -151,6 +154,11 @@ export function NotificationPreferencesEditor({
   }
 
   const currentSubscriptions = flattenRows(rows);
+  const visibleRowSet = new Set(
+    visibleEventTypes ?? rows.map((row) => row.eventType),
+  );
+  const renderedRows = rows.filter((row) => visibleRowSet.has(row.eventType));
+  const stateTreatment = getEmptyStateTreatment(activeEmptyReason);
 
   return (
     <form action={formAction} style={{ display: "grid", gap: 16 }}>
@@ -174,6 +182,16 @@ export function NotificationPreferencesEditor({
         />
       ) : null}
 
+      {!action.enabled ? (
+        <CanvasBanner
+          theme={th}
+          tone="warn"
+          icon="warn"
+          title="Update action disabled by availableActions"
+          body={`目前只允許檢視矩陣；descriptor 回傳 disabledReasonCode=${action.disabledReasonCode ?? "permission_denied"}。`}
+        />
+      ) : null}
+
       <CanvasCard theme={th} padding={0}>
         <div style={gridStyle}>
           <div style={headerCellStyle}>Event / default audience</div>
@@ -182,15 +200,34 @@ export function NotificationPreferencesEditor({
           <div style={{ ...headerCellStyle, textAlign: "center" }}>
             Ops console
           </div>
-          {rows.map((row) => (
-            <Row
-              key={row.eventType}
-              row={row}
-              action={action}
-              availability={availability}
-              onToggle={toggle}
-            />
-          ))}
+          {renderedRows.length > 0 ? (
+            renderedRows.map((row) => (
+              <Row
+                key={row.eventType}
+                row={row}
+                action={action}
+                availability={availability}
+                onToggle={toggle}
+              />
+            ))
+          ) : (
+            <div
+              style={{
+                gridColumn: "1 / -1",
+                padding: 24,
+                display: "grid",
+                gap: 8,
+                color: th.textMuted,
+              }}
+            >
+              <strong style={{ color: th.text, fontSize: 13 }}>
+                沒有符合目前條件的事件列
+              </strong>
+              <span style={{ fontSize: 12.5 }}>
+                這個 treatment 對應 `filtered_empty`，矩陣不假造空白資料。
+              </span>
+            </div>
+          )}
         </div>
       </CanvasCard>
 
@@ -249,6 +286,39 @@ export function NotificationPreferencesEditor({
           {isPending ? "儲存中…" : "儲存設定"}
         </button>
       </div>
+
+      <CanvasCard
+        theme={th}
+        title="State treatment"
+        subtitle="Active reason changes the explanatory copy and next-step posture instead of only flipping a badge."
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) auto",
+            gap: 12,
+            alignItems: "center",
+          }}
+        >
+          <div style={{ display: "grid", gap: 6 }}>
+            <CanvasPill theme={th} tone={stateTreatment.tone}>
+              {stateTreatment.reason}
+            </CanvasPill>
+            <strong style={{ fontSize: 13 }}>{stateTreatment.title}</strong>
+            <span style={{ color: th.textMuted, fontSize: 12.5 }}>
+              {stateTreatment.body}
+            </span>
+          </div>
+          <Link
+            href={stateTreatment.href}
+            target={stateTreatment.newTab ? "_blank" : undefined}
+            rel={stateTreatment.newTab ? "noreferrer noopener" : undefined}
+            style={{ color: th.accent, fontSize: 12, fontWeight: 700 }}
+          >
+            {stateTreatment.label}
+          </Link>
+        </div>
+      </CanvasCard>
 
       <CanvasCard
         theme={th}
@@ -339,16 +409,7 @@ export function NotificationPreferencesEditor({
         subtitle="Q-X15 six-state coverage is implemented explicitly so each reason has its own visual copy and CTA posture."
       >
         <div style={emptyCoverageGridStyle}>
-          {(
-            [
-              "no_data",
-              "not_provisioned",
-              "fetch_failed",
-              "permission_denied",
-              "external_unavailable",
-              "filtered_empty",
-            ] satisfies EmptyReason[]
-          ).map((reason) => (
+          {NOTIFICATION_EMPTY_REASONS.map((reason) => (
             <div
               key={reason}
               style={{
@@ -472,4 +533,90 @@ function Row({
       })}
     </>
   );
+}
+
+function getEmptyStateTreatment(activeEmptyReason?: EmptyReason | null) {
+  switch (activeEmptyReason) {
+    case "not_provisioned":
+      return {
+        reason: activeEmptyReason,
+        title: "Webhook channel still needs provisioning",
+        body: "矩陣會保留 email / ops_console，但 webhook 欄位以 not_provisioned 呈現，避免 tenant 誤以為可直接啟用。",
+        label: "Open webhook setup",
+        href: "/webhooks",
+        newTab: false,
+        tone: "warn" as const,
+      };
+    case "fetch_failed":
+      return {
+        reason: activeEmptyReason,
+        title: "Snapshot degraded",
+        body: "偏好設定或治理快照讀取失敗時，只顯示診斷與 refresh metadata，不假造 last known good 以外的權限真相。",
+        label: "Open audit trail",
+        href: "/audit?resourceType=tenant_notifications",
+        newTab: false,
+        tone: "danger" as const,
+      };
+    case "permission_denied":
+      return {
+        reason: activeEmptyReason,
+        title: "Read-only authority",
+        body: "使用者仍可檢視每個 event 的預設受眾與 channel 佈建狀態，但無法提交 write action。",
+        label: "Review current settings",
+        href: "/settings",
+        newTab: false,
+        tone: "warn" as const,
+      };
+    case "external_unavailable":
+      return {
+        reason: activeEmptyReason,
+        title: "External investigation required",
+        body: "當外部交付鏈路不穩定時，tenant UI 只提供 cross-app trace，不在本頁假裝擁有 downstream health truth。",
+        label: "Open ops investigation",
+        href: deepLinkHref("ops-console"),
+        newTab: true,
+        tone: "warn" as const,
+      };
+    case "filtered_empty":
+      return {
+        reason: activeEmptyReason,
+        title: "No rows matched the current filter",
+        body: "這不是 no_data；只是目前條件下沒有符合事件。重置 query 後應回到完整矩陣。",
+        label: "Reset filter preview",
+        href: "/notifications",
+        newTab: false,
+        tone: "info" as const,
+      };
+    case "no_data":
+      return {
+        reason: activeEmptyReason,
+        title: "Baseline defaults only",
+        body: "當 tenant 還沒有任何 override，本頁直接顯示 integration governance baseline，避免空頁誤導成未設定。",
+        label: "Review webhook posture",
+        href: "/webhooks",
+        newTab: false,
+        tone: "neutral" as const,
+      };
+    default:
+      return {
+        reason: "active_matrix",
+        title: "Matrix is editable from the current snapshot",
+        body: "這個狀態代表頁面正在呈現可操作或可閱讀的主矩陣，並搭配 refresh tier、audit receipt 與 cross-app links。",
+        label: "View tenant audit",
+        href: "/audit?resourceType=tenant_notifications",
+        newTab: false,
+        tone: "success" as const,
+      };
+  }
+}
+
+function deepLinkHref(targetApp: string) {
+  if (targetApp === "ops-console") {
+    return (
+      (process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003") +
+      "/audit?resourceType=tenant_notifications"
+    );
+  }
+
+  return "/audit?resourceType=tenant_notifications";
 }

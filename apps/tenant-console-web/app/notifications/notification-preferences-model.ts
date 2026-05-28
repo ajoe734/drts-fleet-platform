@@ -12,6 +12,15 @@ export const NOTIFICATION_CHANNELS = [
   "ops_console",
 ] as const satisfies readonly TenantNotificationSubscription["channel"][];
 
+export const NOTIFICATION_EMPTY_REASONS = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "filtered_empty",
+] as const satisfies readonly EmptyReason[];
+
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
 export const NOTIFICATION_EVENTS = [
@@ -113,6 +122,10 @@ export type ChannelAvailability = Record<
   }
 >;
 
+export type NotificationPageActionSource = {
+  availableActions?: ResourceActionDescriptor[];
+};
+
 export function getNotificationAction(
   canUpdate: boolean,
 ): ResourceActionDescriptor {
@@ -124,12 +137,23 @@ export function getNotificationAction(
   };
 }
 
+export function resolveNotificationAction(
+  source: NotificationPageActionSource | null | undefined,
+  canUpdateFallback: boolean,
+) {
+  const embedded = source?.availableActions?.find(
+    (action) => action.action === "update_subscription",
+  );
+
+  return embedded ?? getNotificationAction(canUpdateFallback);
+}
+
 export function createRefreshMetadata(
-  nowIso: string,
+  generatedAt: string,
   freshness: UiRefreshMetadata["dataFreshness"],
 ): UiRefreshMetadata {
   return {
-    generatedAt: nowIso,
+    generatedAt,
     staleAfterMs: 30_000,
     dataFreshness: freshness,
     source: freshness === "degraded" ? "cache" : "live",
@@ -193,6 +217,30 @@ export function countCustomSubscriptions(
       baselineMap.get(`${subscription.eventType}:${subscription.channel}`) !==
       subscription.enabled,
   ).length;
+}
+
+export function deriveEmptyReason({
+  requestedReason,
+  hasFetchError,
+  action,
+  hasWebhookChannel,
+  hasFilteredRows,
+  usesBaselineDefaults,
+}: {
+  requestedReason?: EmptyReason | null;
+  hasFetchError: boolean;
+  action: ResourceActionDescriptor;
+  hasWebhookChannel: boolean;
+  hasFilteredRows: boolean;
+  usesBaselineDefaults: boolean;
+}): EmptyReason | null {
+  if (requestedReason) return requestedReason;
+  if (hasFetchError) return "fetch_failed";
+  if (!action.enabled) return "permission_denied";
+  if (!hasFilteredRows) return "filtered_empty";
+  if (!hasWebhookChannel) return "not_provisioned";
+  if (usesBaselineDefaults) return "no_data";
+  return null;
 }
 
 export function buildNotificationLinks(tenantId: string): Array<

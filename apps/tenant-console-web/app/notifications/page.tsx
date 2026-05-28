@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import type {
   EmptyReason,
   IdentityContext,
+  ResourceActionDescriptor,
   TenantIntegrationGovernancePackage,
   TenantNotificationPreferences,
   TenantWebhookEndpoint,
@@ -23,8 +24,10 @@ import {
   buildNotificationLinks,
   countCustomSubscriptions,
   createRefreshMetadata,
+  deriveEmptyReason,
   EMPTY_REASON_META,
-  getNotificationAction,
+  NOTIFICATION_EMPTY_REASONS,
+  resolveNotificationAction,
 } from "./notification-preferences-model";
 
 export const dynamic = "force-dynamic";
@@ -50,20 +53,23 @@ const kpiGridStyle: CSSProperties = {
 
 type NotificationsPageData = {
   identity: IdentityContext | null;
-  preferences: TenantNotificationPreferences | null;
+  preferences: NotificationPreferencesRecord | null;
   governance: TenantIntegrationGovernancePackage | null;
   webhooks: TenantWebhookEndpoint[];
   errors: string[];
   generatedAt: string;
 };
 
+type NotificationPreferencesRecord = TenantNotificationPreferences & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
 async function loadNotificationsPageData(): Promise<NotificationsPageData> {
   const client = getTenantClient();
-  const generatedAt = new Date().toISOString();
   const [identityResult, preferencesResult, governanceResult, webhooksResult] =
     await Promise.allSettled([
       client.getIdentityContext() as Promise<IdentityContext>,
-      client.getNotificationPreferences() as Promise<TenantNotificationPreferences>,
+      client.getNotificationPreferences() as Promise<NotificationPreferencesRecord>,
       client.getTenantIntegrationGovernancePackage() as Promise<TenantIntegrationGovernancePackage>,
       client.listWebhooks() as Promise<TenantWebhookEndpoint[]>,
     ]);
@@ -92,7 +98,14 @@ async function loadNotificationsPageData(): Promise<NotificationsPageData> {
       governanceResult.status === "fulfilled" ? governanceResult.value : null,
     webhooks: webhooksResult.status === "fulfilled" ? webhooksResult.value : [],
     errors,
-    generatedAt,
+    generatedAt:
+      (preferencesResult.status === "fulfilled"
+        ? preferencesResult.value.updatedAt
+        : null) ??
+      (governanceResult.status === "fulfilled"
+        ? governanceResult.value.generatedAt
+        : null) ??
+      new Date().toISOString(),
   };
 }
 
@@ -103,21 +116,31 @@ export default async function NotificationsPage({
 }) {
   const data = await loadNotificationsPageData();
   const params = (await searchParams) ?? {};
-  const activeEmptyReason = parseEmptyReason(params.empty);
+  const requestedEmptyReason = parseEmptyReason(params.empty);
+  const query = getSingleParam(params.q)?.trim().toLowerCase() ?? "";
   const tenantId =
     data.identity?.tenantId ?? data.preferences?.tenantId ?? "tenant-demo-001";
   const canUpdate =
     data.identity?.actorType === "tenant_admin" ||
-    data.identity?.roles.includes("tc_admin") ||
-    data.identity?.roles.includes("tc_integration_mgr") ||
+    data.identity?.roles?.includes("tc_admin") ||
+    data.identity?.roles?.includes("tc_integration_mgr") ||
     false;
-  const action = getNotificationAction(canUpdate);
+  const action = resolveNotificationAction(data.preferences, canUpdate);
   const baselineSubscriptions =
     data.governance?.baselineNotificationSubscriptions ?? [];
-  const currentSubscriptions = data.preferences?.subscriptions.length
-    ? data.preferences.subscriptions
+  const hasExplicitPreferences =
+    (data.preferences?.subscriptions.length ?? 0) > 0;
+  const currentSubscriptions = hasExplicitPreferences
+    ? (data.preferences?.subscriptions ?? [])
     : baselineSubscriptions;
   const matrixRows = buildMatrixRows(currentSubscriptions);
+  const filteredRows = matrixRows.filter((row) =>
+    query.length === 0
+      ? true
+      : `${row.eventType} ${row.description} ${row.defaultAudience}`
+          .toLowerCase()
+          .includes(query),
+  );
   const refreshMetadata = createRefreshMetadata(
     data.generatedAt,
     data.errors.length > 0 ? "degraded" : "fresh",
@@ -146,6 +169,15 @@ export default async function NotificationsPage({
       detail: "供 ops/dispatch 追蹤 tenant 相關事件，不等於 tenant inbox。",
     },
   };
+  const activeEmptyReason = deriveEmptyReason({
+    requestedReason: requestedEmptyReason,
+    hasFetchError: data.errors.length > 0,
+    action,
+    hasWebhookChannel: availability.webhook.ready,
+    hasFilteredRows: filteredRows.length > 0,
+    usesBaselineDefaults:
+      !hasExplicitPreferences && baselineSubscriptions.length > 0,
+  });
   const deepLinks = buildNotificationLinks(tenantId);
 
   return (
@@ -171,7 +203,9 @@ export default async function NotificationsPage({
               webhook setup
             </Link>
             <Link
-              href="/integration-governance"
+              href={deepLinks[1]?.href ?? "/audit"}
+              target="_blank"
+              rel="noreferrer noopener"
               style={{
                 color: "#fff",
                 border: `1px solid ${th.accent}`,
@@ -182,7 +216,7 @@ export default async function NotificationsPage({
                 fontWeight: 700,
               }}
             >
-              integration posture
+              delivery trace
             </Link>
           </div>
         }
@@ -249,6 +283,76 @@ export default async function NotificationsPage({
           />
         </section>
 
+        <CanvasCard
+          theme={th}
+          title="Current state"
+          subtitle="Spec-driven state treatment for defaults, permission, provisioning, fetch health, and filter empties."
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(220px, 0.8fr) minmax(0, 1.2fr)",
+              gap: 16,
+            }}
+          >
+            <div style={{ display: "grid", gap: 8 }}>
+              <CanvasPill
+                theme={th}
+                tone={
+                  activeEmptyReason
+                    ? EMPTY_REASON_META[activeEmptyReason]?.tone === "neutral"
+                      ? "info"
+                      : (EMPTY_REASON_META[activeEmptyReason]?.tone ?? "info")
+                    : customCount > 0
+                      ? "accent"
+                      : "success"
+                }
+              >
+                {activeEmptyReason ??
+                  (customCount > 0 ? "custom_configuration" : "all_defaults")}
+              </CanvasPill>
+              <strong style={{ fontSize: 14 }}>
+                {activeEmptyReason
+                  ? EMPTY_REASON_META[activeEmptyReason]?.title
+                  : customCount > 0
+                    ? "Custom configuration active"
+                    : "All defaults from governance baseline"}
+              </strong>
+              <span style={{ color: th.textMuted, fontSize: 12.5 }}>
+                {activeEmptyReason
+                  ? EMPTY_REASON_META[activeEmptyReason]?.body
+                  : customCount > 0
+                    ? `${customCount} 個 route 已偏離 baseline，儲存時會產生 tenant_notifications audit receipt。`
+                    : "目前沒有 tenant-specific override；矩陣直接反映 integration governance baseline。"}
+              </span>
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <CanvasPill theme={th} tone="neutral">
+                  query: {query || "none"}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="neutral">
+                  rows: {filteredRows.length}/{matrixRows.length}
+                </CanvasPill>
+                <CanvasPill
+                  theme={th}
+                  tone={action.enabled ? "success" : "warn"}
+                >
+                  {action.enabled
+                    ? "availableActions.update_subscription"
+                    : `disabled:${action.disabledReasonCode ?? "permission_denied"}`}
+                </CanvasPill>
+              </div>
+              <span style={{ color: th.textDim, fontSize: 12 }}>
+                Entry follows packet §5.8: sidebar and `/integration-governance`
+                adjacency. This page keeps the nearby webhook setup and audit
+                investigation links visible even when the upstream route is
+                owned by another task.
+              </span>
+            </div>
+          </div>
+        </CanvasCard>
+
         <div
           style={{
             display: "grid",
@@ -263,6 +367,7 @@ export default async function NotificationsPage({
           >
             <NotificationPreferencesEditor
               initialRows={matrixRows}
+              visibleEventTypes={filteredRows.map((row) => row.eventType)}
               availability={availability}
               action={action}
               refreshMetadata={refreshMetadata}
@@ -289,6 +394,11 @@ export default async function NotificationsPage({
                   {
                     k: "updatedAt",
                     v: data.preferences?.updatedAt ?? "baseline defaults",
+                    mono: true,
+                  },
+                  {
+                    k: "generatedAt",
+                    v: refreshMetadata.generatedAt,
                     mono: true,
                   },
                   {
@@ -336,17 +446,10 @@ export default async function NotificationsPage({
 function parseEmptyReason(
   value: string | string[] | undefined,
 ): EmptyReason | null {
-  const raw = Array.isArray(value) ? value[0] : value;
-  if (
-    raw === "no_data" ||
-    raw === "not_provisioned" ||
-    raw === "fetch_failed" ||
-    raw === "permission_denied" ||
-    raw === "external_unavailable" ||
-    raw === "filtered_empty"
-  ) {
-    return raw;
-  }
+  const raw = getSingleParam(value);
+  return NOTIFICATION_EMPTY_REASONS.find((reason) => reason === raw) ?? null;
+}
 
-  return null;
+function getSingleParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
