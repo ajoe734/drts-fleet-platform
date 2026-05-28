@@ -1,23 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
+import { Redirect, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
-import { Redirect } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import type { EmptyReason, ResourceActionDescriptor } from "@drts/contracts";
+import type {
+  EmptyReason,
+  RefreshTier,
+  ResourceActionDescriptor,
+} from "@drts/contracts";
+import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
 import {
-  ActionButton,
-  AppScreen,
-  ErrorBanner,
-  FormField,
-  StatusChip,
-  tokens,
-} from "@/components/ui";
+  Banner,
+  Btn,
+  Card,
+  Pill,
+  Shell,
+  driverCanvasTheme,
+} from "@/components/canvas-primitives";
 import {
   getDriverIdentityIssue,
   hasDriverDevOverride,
@@ -25,97 +30,50 @@ import {
   isDriverIdentityProvisioned,
   registerDriverDevice,
 } from "@/lib/api-client";
-import { driverActivationSteps } from "@/lib/strings";
+import { driverActivationSteps, driverStrings } from "@/lib/strings";
 
-type OnboardingTone = "warning" | "danger" | "info";
+type ProvisioningActionId =
+  | "register_device"
+  | "refresh_provisioning"
+  | "reinitialize_identity";
 
-type OnboardingEmptyState = {
-  reason: EmptyReason;
+type ActionModel = ResourceActionDescriptor & {
+  id: ProvisioningActionId;
   title: string;
-  body: string;
+  description: string;
   iconName: keyof typeof Ionicons.glyphMap;
-  tone: OnboardingTone;
 };
 
-type StatusStripItem = {
+type OnboardingStateSpec = {
+  reason: EmptyReason;
+  tone: Exclude<CanvasTone, "neutral">;
+  title: string;
+  body: string;
+  badge: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+};
+
+type StatusTile = {
   label: string;
   value: string;
   detail: string;
-  variant: "success" | "warning" | "danger" | "info";
+  tone: CanvasTone;
 };
+
+const THEME = driverCanvasTheme;
+const REFRESH_TIER: RefreshTier = "manual";
 
 const DEFAULT_TEST_REGISTRATION_CODE =
   process.env.EXPO_PUBLIC_DRIVER_TEST_REGISTRATION_CODE ?? "driver-demo-001";
 const DEFAULT_TEST_DEVICE_LABEL =
   process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "Driver Pixel 01";
 
-function BrandTile() {
-  return (
-    <View style={styles.brandTile}>
-      <Text style={styles.brandTileLabel}>D</Text>
-    </View>
-  );
-}
+function toErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
 
-function LoadingState({ label }: { label: string }) {
-  return (
-    <AppScreen scrollable={false}>
-      <View style={styles.loadingState}>
-        <BrandTile />
-        <View style={styles.loadingPanel}>
-          <ActivityIndicator color={tokens.colors.primary} size="large" />
-          <Text style={styles.loadingLabel}>{label}</Text>
-        </View>
-      </View>
-    </AppScreen>
-  );
-}
-
-function StepTimeline() {
-  return (
-    <View style={styles.stepList}>
-      {driverActivationSteps.map((step, index) => {
-        const isLast = index === driverActivationSteps.length - 1;
-        const isActive = step.state === "active";
-        return (
-          <View key={step.title} style={styles.stepRow}>
-            <View style={styles.stepIndicatorColumn}>
-              <View
-                style={[
-                  styles.stepIndicator,
-                  isActive
-                    ? styles.stepIndicatorActive
-                    : styles.stepIndicatorPending,
-                ]}
-              >
-                <Text
-                  style={
-                    isActive
-                      ? styles.stepIndicatorTextActive
-                      : styles.stepIndicatorTextPending
-                  }
-                >
-                  {index + 1}
-                </Text>
-              </View>
-              {isLast ? null : <View style={styles.stepConnector} />}
-            </View>
-            <View style={styles.stepBody}>
-              <Text
-                style={[
-                  styles.stepTitle,
-                  isActive ? null : styles.stepTitlePending,
-                ]}
-              >
-                {step.title}
-              </Text>
-              <Text style={styles.stepDescription}>{step.description}</Text>
-            </View>
-          </View>
-        );
-      })}
-    </View>
-  );
+  return fallback;
 }
 
 function humanizeCode(value: string) {
@@ -134,7 +92,8 @@ function classifyProvisioningReason(
     normalized.includes("停權") ||
     normalized.includes("退役") ||
     normalized.includes("permission") ||
-    normalized.includes("證件")
+    normalized.includes("證件") ||
+    normalized.includes("revoke")
   ) {
     return "permission_denied";
   }
@@ -146,12 +105,18 @@ function classifyProvisioningReason(
   if (
     normalized.includes("platform") ||
     normalized.includes("服務") ||
-    normalized.includes("連線")
+    normalized.includes("連線") ||
+    normalized.includes("adapter")
   ) {
     return "external_unavailable";
   }
 
-  if (normalized.includes("載入") || normalized.includes("同步")) {
+  if (
+    normalized.includes("載入") ||
+    normalized.includes("同步") ||
+    normalized.includes("network") ||
+    normalized.includes("timeout")
+  ) {
     return "fetch_failed";
   }
 
@@ -162,179 +127,306 @@ function classifyProvisioningReason(
   return "not_provisioned";
 }
 
-function buildEmptyState(
+function buildStateSpec(
   reason: EmptyReason,
   issue: string | null,
-): OnboardingEmptyState {
+): OnboardingStateSpec {
   switch (reason) {
     case "permission_denied":
       return {
         reason,
-        title: "司機身份受限",
+        tone: "danger",
+        title: "司機身份受限，裝置保持 blocked",
         body:
           issue ??
-          "目前的司機身份無法在此裝置啟用，請由營運端確認證件、停權或裝置退役狀態。",
+          "此裝置無法綁定目前身份。請由平台管理端確認停權、證件或退役狀態。",
+        badge: "identity blocked",
         iconName: "ban-outline",
-        tone: "danger",
       };
     case "fetch_failed":
       return {
         reason,
-        title: "初始化尚未完成",
-        body: issue ?? "裝置狀態暫時無法同步，請重新檢查配置連線。",
+        tone: "warn",
+        title: "初始化失敗，尚未拿到配置快照",
+        body:
+          issue ??
+          "裝置暫時無法同步身份與配置資料。請先重試同步，再決定是否重新綁定。",
+        badge: "snapshot missing",
         iconName: "cloud-offline-outline",
-        tone: "warning",
       };
     case "external_unavailable":
       return {
         reason,
-        title: "平台服務暫時不可用",
+        tone: "warn",
+        title: "外部平台暫時不可用",
         body:
-          issue ?? "外部平台或設定服務無法連線，啟用流程會暫時停在等待狀態。",
-        iconName: "globe-outline",
-        tone: "danger",
+          issue ??
+          "平台或 adapter 降級，註冊可以完成，但工作台能力會維持受限直到同步恢復。",
+        badge: "adapter degraded",
+        iconName: "radio-outline",
       };
     case "driver_not_eligible":
       return {
         reason,
-        title: "目前不符合啟用資格",
+        tone: "danger",
+        title: "目前不符合接單資格",
         body:
           issue ??
-          "司機資格或服務桶尚未就緒，完成處理前此裝置仍會維持 blocked。",
+          "司機尚未進入可接單 bucket，裝置會持續保持 blocked，直到資格條件恢復。",
+        badge: "eligibility blocked",
         iconName: "shield-outline",
-        tone: "warning",
       };
     case "no_data":
       return {
         reason,
-        title: "已完成註冊，正在進入工作台",
-        body: "裝置資料已寫入，正在等待身份與工作台狀態完成同步。",
+        tone: "success",
+        title: "裝置已註冊，正在載入工作台",
+        body: "裝置綁定已寫入，下一步是完成身份同步後進入 workspace cockpit。",
+        badge: "ready handoff",
         iconName: "checkmark-circle-outline",
-        tone: "info",
       };
     case "not_provisioned":
     default:
       return {
         reason: "not_provisioned",
-        title: "尚未進入工作台",
-        body: "未啟用裝置會阻擋所有工作頁與 tab bar。請使用車隊發放的註冊代碼完成綁定。",
+        tone: "accent",
+        title: "新裝置尚未啟用，工作頁全部鎖定",
+        body: "未綁定裝置不顯示 tab bar，也不允許進入工作台。請用車隊發放的註冊碼完成啟用。",
+        badge: "tab lock active",
         iconName: "lock-closed-outline",
-        tone: "warning",
       };
   }
 }
 
-function EmptyStateCard({ state }: { state: OnboardingEmptyState }) {
-  const palette =
-    state.tone === "danger"
-      ? {
-          icon: tokens.colors.danger,
-          background: tokens.colors.dangerBg,
-        }
-      : state.tone === "info"
-        ? {
-            icon: tokens.colors.brand,
-            background: tokens.colors.brandBg,
-          }
-        : {
-            icon: tokens.colors.warning,
-            background: tokens.colors.warningBg,
-          };
-
+function LoadingState({ label }: { label: string }) {
   return (
-    <View style={styles.emptyStateCard}>
-      <View
-        style={[
-          styles.emptyStateIconWrap,
-          { backgroundColor: palette.background },
-        ]}
-      >
-        <Ionicons color={palette.icon} name={state.iconName} size={18} />
+    <Shell
+      theme={THEME}
+      contentContainerStyle={styles.loadingShellContent}
+      footer={null}
+    >
+      <View style={styles.loadingState}>
+        <View style={styles.loadingMark}>
+          <Text style={styles.loadingMarkLabel}>D</Text>
+        </View>
+        <ActivityIndicator color={THEME.accent} size="large" />
+        <Text style={styles.loadingLabel}>{label}</Text>
       </View>
-      <View style={styles.emptyStateBody}>
-        <Text style={styles.emptyStateTitle}>{state.title}</Text>
-        <Text style={styles.emptyStateDescription}>{state.body}</Text>
-      </View>
-      <Text style={styles.emptyStateMeta}>{state.reason}</Text>
-    </View>
+    </Shell>
   );
 }
 
-function StatusStrip({ items }: { items: ReadonlyArray<StatusStripItem> }) {
+function SectionEyebrow({ children }: { children: string }) {
+  return <Text style={styles.sectionEyebrow}>{children}</Text>;
+}
+
+function StatusStrip({ items }: { items: ReadonlyArray<StatusTile> }) {
   return (
     <View style={styles.statusStrip}>
       {items.map((item) => (
-        <View key={item.label} style={styles.statusTile}>
-          <View style={styles.statusTileHeader}>
-            <Text style={styles.statusTileLabel}>{item.label}</Text>
-            <StatusChip label={item.value} variant={item.variant} />
+        <View
+          key={item.label}
+          style={[
+            styles.statusTile,
+            {
+              backgroundColor: THEME.surface,
+              borderColor: THEME.border,
+            },
+          ]}
+        >
+          <View style={styles.statusTileTop}>
+            <Text style={styles.statusLabel}>{item.label}</Text>
+            <Pill theme={THEME} tone={item.tone}>
+              {item.value}
+            </Pill>
           </View>
-          <Text style={styles.statusTileDetail}>{item.detail}</Text>
+          <Text style={styles.statusDetail}>{item.detail}</Text>
         </View>
       ))}
     </View>
   );
 }
 
-function AvailableActionsCard({
-  actions,
-  onPrimaryPress,
+function StepTimeline({ currentReason }: { currentReason: EmptyReason }) {
+  return (
+    <Card
+      theme={THEME}
+      title="啟用流程"
+      subtitle="Activation, identity, platform"
+    >
+      <View style={styles.stepList}>
+        {driverActivationSteps.map((step, index) => {
+          const done = currentReason === "no_data" && index === 0;
+          const active = currentReason !== "no_data" && index === 0;
+          const tone: CanvasTone = done
+            ? "success"
+            : active
+              ? "accent"
+              : "neutral";
+
+          return (
+            <View key={step.title} style={styles.stepRow}>
+              <View
+                style={[
+                  styles.stepDot,
+                  {
+                    backgroundColor:
+                      tone === "success"
+                        ? THEME.successBg
+                        : tone === "accent"
+                          ? THEME.accentBg
+                          : THEME.neutralBg,
+                    borderColor:
+                      tone === "success"
+                        ? THEME.successBorder
+                        : tone === "accent"
+                          ? THEME.accentBorder
+                          : THEME.neutralBorder,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.stepDotLabel,
+                    {
+                      color:
+                        tone === "success"
+                          ? THEME.success
+                          : tone === "accent"
+                            ? THEME.accent
+                            : THEME.textMuted,
+                    },
+                  ]}
+                >
+                  {done ? "✓" : index + 1}
+                </Text>
+              </View>
+              <View style={styles.stepCopy}>
+                <Text style={styles.stepTitle}>{step.title}</Text>
+                <Text style={styles.stepDescription}>{step.description}</Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </Card>
+  );
+}
+
+function ProvisioningInput({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  helpText,
+  autoCapitalize,
+  editable = true,
+  mono = false,
 }: {
-  actions: ReadonlyArray<ResourceActionDescriptor>;
-  onPrimaryPress: () => void;
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  helpText: string;
+  autoCapitalize?: "none" | "sentences" | "words" | "characters";
+  editable?: boolean;
+  mono?: boolean;
 }) {
   return (
-    <View style={styles.actionsCard}>
-      <View style={styles.actionsHeader}>
-        <Text style={styles.actionsEyebrow}>Available actions</Text>
-        <Text style={styles.actionsTitle}>依合約權限顯示</Text>
-      </View>
-      {actions.map((action) => {
-        const disabledLabel = action.disabledReasonCode
-          ? humanizeCode(action.disabledReasonCode)
-          : null;
-        return (
-          <View key={action.action} style={styles.actionRow}>
-            <View style={styles.actionRowIcon}>
-              <Ionicons
-                color={
-                  action.enabled ? tokens.colors.brand : tokens.colors.textMuted
-                }
-                name="shield-checkmark-outline"
-                size={16}
-              />
-            </View>
-            <View style={styles.actionRowBody}>
-              <View style={styles.actionRowTitle}>
-                <Text style={styles.actionLabel}>
-                  {humanizeCode(action.action)}
-                </Text>
-                <StatusChip
-                  label={action.enabled ? "可執行" : "受限"}
-                  variant={action.enabled ? "success" : "warning"}
-                />
-              </View>
-              <Text style={styles.actionDescription}>
-                medium risk confirmation · primary CTA only
-              </Text>
-              {disabledLabel ? (
-                <Text style={styles.actionReason}>{disabledLabel}</Text>
-              ) : null}
-            </View>
-          </View>
-        );
-      })}
-      <ActionButton
-        disabled={!actions.some((action) => action.enabled)}
-        icon="shield-checkmark-outline"
-        onPress={onPrimaryPress}
-        title="註冊此裝置"
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      <TextInput
+        autoCapitalize={autoCapitalize}
+        editable={editable}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={THEME.textMuted}
+        style={[styles.input, mono ? styles.inputMono : null]}
+        value={value}
       />
+      <Text style={styles.inputHelp}>{helpText}</Text>
     </View>
   );
 }
 
+function StateBanner({ spec }: { spec: OnboardingStateSpec }) {
+  return (
+    <Banner
+      theme={THEME}
+      tone={spec.tone}
+      icon={<Ionicons color={THEME.text} name={spec.iconName} size={18} />}
+      title={spec.title}
+      body={spec.body}
+      actions={
+        <Pill theme={THEME} tone={spec.tone}>
+          {spec.badge}
+        </Pill>
+      }
+    />
+  );
+}
+
+function AvailableActionsCard({
+  actions,
+}: {
+  actions: ReadonlyArray<ActionModel>;
+}) {
+  return (
+    <Card
+      theme={THEME}
+      title="Available actions"
+      subtitle="Only what the current resource contract allows"
+    >
+      <View style={styles.actionList}>
+        {actions.map((action) => {
+          const reason = action.disabledReasonCode
+            ? humanizeCode(action.disabledReasonCode)
+            : null;
+          const tone: CanvasTone = action.enabled ? "success" : "warn";
+
+          return (
+            <View
+              key={action.id}
+              style={[
+                styles.actionRow,
+                {
+                  backgroundColor: THEME.surfaceLo,
+                  borderColor: THEME.border,
+                },
+              ]}
+            >
+              <View style={styles.actionIconWrap}>
+                <Ionicons
+                  color={action.enabled ? THEME.accent : THEME.textMuted}
+                  name={action.iconName}
+                  size={16}
+                />
+              </View>
+              <View style={styles.actionCopy}>
+                <View style={styles.actionHeadline}>
+                  <Text style={styles.actionTitle}>{action.title}</Text>
+                  <Pill theme={THEME} tone={tone}>
+                    {action.enabled ? "enabled" : "disabled"}
+                  </Pill>
+                </View>
+                <Text style={styles.actionDescription}>
+                  {action.description}
+                </Text>
+                <Text style={styles.actionMeta}>
+                  risk {action.riskLevel}
+                  {reason ? ` · ${reason}` : ""}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </Card>
+  );
+}
+
 export default function OnboardingScreen() {
+  const router = useRouter();
   const [ready, setReady] = useState(false);
   const [registrationCode, setRegistrationCode] = useState(
     DEFAULT_TEST_REGISTRATION_CODE,
@@ -342,6 +434,7 @@ export default function OnboardingScreen() {
   const [deviceLabel, setDeviceLabel] = useState(DEFAULT_TEST_DEVICE_LABEL);
   const [submitting, setSubmitting] = useState(false);
   const [registered, setRegistered] = useState(false);
+  const [justRegistered, setJustRegistered] = useState(false);
   const [provisioningError, setProvisioningError] = useState<string | null>(
     null,
   );
@@ -353,15 +446,11 @@ export default function OnboardingScreen() {
     setReady(false);
     initializeDriverIdentity()
       .catch((error: unknown) => {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setProvisioningError(
+            toErrorMessage(error, "裝置初始化失敗，請稍後再試。"),
+          );
         }
-
-        setProvisioningError(
-          error instanceof Error
-            ? error.message
-            : "裝置初始化失敗，請稍後再試。",
-        );
       })
       .finally(() => {
         if (!cancelled) {
@@ -374,51 +463,116 @@ export default function OnboardingScreen() {
     };
   }, [refreshSeed]);
 
+  useEffect(() => {
+    if (!justRegistered || !isDriverIdentityProvisioned()) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      router.replace("/");
+    }, 900);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [justRegistered, refreshSeed, router]);
+
   const identityIssue = getDriverIdentityIssue();
   const provisioned = ready && isDriverIdentityProvisioned();
-
   const activeIssue = provisioningError ?? identityIssue;
   const emptyReason = useMemo(
     () => classifyProvisioningReason(activeIssue, registered),
     [activeIssue, registered],
   );
-  const emptyState = useMemo(
-    () => buildEmptyState(emptyReason, activeIssue),
+  const stateSpec = useMemo(
+    () => buildStateSpec(emptyReason, activeIssue),
     [activeIssue, emptyReason],
   );
 
-  const statusStripItems = useMemo<ReadonlyArray<StatusStripItem>>(
+  const statusTiles = useMemo<ReadonlyArray<StatusTile>>(
     () => [
       {
-        label: "裝置",
-        value: registered ? "已註冊" : "待啟用",
+        label: "Device",
+        value: registered ? "registered" : "blocked",
         detail: registered
-          ? "註冊碼已送出，等待身份同步完成。"
-          : "新裝置必須先寫入 fleet registration code。",
-        variant: registered ? "success" : "warning",
+          ? "registration code 已提交，等待 identity snapshot 完成。"
+          : "未註冊裝置不能進入任何工作頁或 tab bar。",
+        tone: registered ? "success" : "warn",
       },
       {
-        label: "身份",
-        value: activeIssue ? "需處理" : "待驗證",
+        label: "Identity",
+        value:
+          emptyReason === "permission_denied" ||
+          emptyReason === "driver_not_eligible"
+            ? "attention"
+            : activeIssue
+              ? "sync issue"
+              : "pending",
         detail: activeIssue
           ? activeIssue
-          : "完成註冊後會綁定司機身份，才能進入工作頁。",
-        variant: activeIssue ? "danger" : "info",
+          : "完成綁定後才會拿到司機身份與功能能力快照。",
+        tone:
+          emptyReason === "permission_denied" ||
+          emptyReason === "driver_not_eligible"
+            ? "danger"
+            : activeIssue
+              ? "warn"
+              : "info",
       },
       {
-        label: "平台",
-        value: "Blocked",
-        detail: "未配置狀態不提供 cross-app deep link，也不允許進入工作 tab。",
-        variant: "warning",
+        label: "Platform",
+        value:
+          emptyReason === "external_unavailable"
+            ? "degraded"
+            : provisioned
+              ? "handoff"
+              : "locked",
+        detail:
+          emptyReason === "external_unavailable"
+            ? "外部平台同步異常，需由控制台處理恢復。"
+            : "onboarding 未完成前不提供 cross-app work tabs。",
+        tone:
+          emptyReason === "external_unavailable"
+            ? "warn"
+            : provisioned
+              ? "success"
+              : "accent",
       },
     ],
-    [activeIssue, registered],
+    [activeIssue, emptyReason, provisioned, registered],
   );
 
-  const availableActions = useMemo<ReadonlyArray<ResourceActionDescriptor>>(
-    () => [
+  const handleRefresh = () => {
+    setProvisioningError(null);
+    setRegistered(false);
+    setJustRegistered(false);
+    setRefreshSeed((current) => current + 1);
+  };
+
+  const handleReinitializeIdentity = async () => {
+    setProvisioningError(null);
+    setReady(false);
+    try {
+      await initializeDriverIdentity();
+    } catch (error: unknown) {
+      setProvisioningError(
+        toErrorMessage(error, "身份重新初始化失敗，請稍後再試。"),
+      );
+    } finally {
+      setReady(true);
+      setRefreshSeed((current) => current + 1);
+    }
+  };
+
+  const availableActions = useMemo<ReadonlyArray<ActionModel>>(() => {
+    const actions: ActionModel[] = [
       {
+        id: "register_device",
         action: "register_device",
+        title: "註冊此裝置",
+        description:
+          "寫入 fleet registration code，建立 device-bound session。",
+        iconName: "key-outline",
         enabled:
           registrationCode.trim().length > 0 &&
           !submitting &&
@@ -436,36 +590,70 @@ export default function OnboardingScreen() {
                   : undefined,
         riskLevel: "medium",
       },
-    ],
-    [emptyReason, registrationCode, submitting],
+      {
+        id: "refresh_provisioning",
+        action: "refresh_provisioning",
+        title: "重新檢查連線",
+        description: "手動 refresh 目前的 identity 與 provisioning snapshot。",
+        iconName: "refresh-outline",
+        enabled: !submitting,
+        riskLevel: "low",
+      },
+    ];
+
+    if (emptyReason !== "not_provisioned") {
+      actions.push({
+        id: "reinitialize_identity",
+        action: "reinitialize_identity",
+        title: "重新初始化身份",
+        description: "重新載入 refresh session 與身份能力快照。",
+        iconName: "sync-outline",
+        enabled: !submitting,
+        riskLevel: "medium",
+      });
+    }
+
+    return actions;
+  }, [emptyReason, registrationCode, submitting]);
+
+  const primaryAction = availableActions.find(
+    (action) => action.id === "register_device",
   );
 
-  const handleRefresh = () => {
-    setProvisioningError(null);
-    setRegistered(false);
-    setRefreshSeed((current) => current + 1);
-  };
-
   const handleRegister = async () => {
-    if (!availableActions[0]?.enabled) {
+    if (!primaryAction?.enabled) {
       return;
     }
 
     setSubmitting(true);
     setProvisioningError(null);
+    setJustRegistered(false);
 
     try {
       await registerDriverDevice(registrationCode.trim(), deviceLabel.trim());
       setRegistered(true);
       await initializeDriverIdentity();
+      setJustRegistered(true);
       setRefreshSeed((current) => current + 1);
     } catch (error: unknown) {
       setRegistered(false);
-      setProvisioningError(
-        error instanceof Error ? error.message : "裝置配置失敗，請稍後再試。",
-      );
+      setProvisioningError(toErrorMessage(error, "裝置配置失敗，請稍後再試。"));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleAction = (action: ActionModel) => {
+    switch (action.id) {
+      case "register_device":
+        void handleRegister();
+        return;
+      case "refresh_provisioning":
+        handleRefresh();
+        return;
+      case "reinitialize_identity":
+        void handleReinitializeIdentity();
+        return;
     }
   };
 
@@ -473,384 +661,361 @@ export default function OnboardingScreen() {
     return <LoadingState label="正在檢查裝置配置…" />;
   }
 
-  if (provisioned) {
+  if (provisioned && !justRegistered) {
     return <Redirect href="/" />;
   }
 
   return (
-    <AppScreen contentContainerStyle={styles.content}>
-      <View style={styles.heroCard}>
-        <View pointerEvents="none" style={styles.heroGlow} />
-        <BrandTile />
-        <Text style={styles.heroTitle}>裝置啟用</Text>
-        <Text style={styles.heroMeta}>
-          device provisioning · refresh tier manual
-        </Text>
-        <Text style={styles.heroLead}>
-          連線車隊管理系統，啟用後此裝置可接收派單與平台訂單。
-        </Text>
-        {hasDriverDevOverride() ? (
-          <View style={styles.devOverrideTag}>
-            <StatusChip label="開發覆寫" variant="info" />
+    <Shell
+      theme={THEME}
+      footer={
+        <View style={styles.footerBar}>
+          <Text style={styles.footerNotice}>
+            {driverStrings.onboarding.provisioningWarning}
+          </Text>
+          <View style={styles.footerActions}>
+            <Btn
+              theme={THEME}
+              icon={
+                <Ionicons
+                  color={THEME.textMuted}
+                  name="refresh-outline"
+                  size={14}
+                />
+              }
+              onPress={handleRefresh}
+              variant="secondary"
+            >
+              重新檢查
+            </Btn>
+            <Btn
+              theme={THEME}
+              disabled={!primaryAction?.enabled}
+              icon={<Ionicons color="#FFFFFF" name="key-outline" size={14} />}
+              onPress={() => void handleRegister()}
+              variant="primary"
+            >
+              {submitting ? "配置中…" : driverStrings.onboarding.registerDevice}
+            </Btn>
           </View>
-        ) : null}
+        </View>
+      }
+    >
+      <View style={styles.heroCard}>
+        <SectionEyebrow>Spec §5.2 · device provisioning</SectionEyebrow>
+        <View style={styles.heroTitleRow}>
+          <Text style={styles.heroTitle}>{driverStrings.onboarding.title}</Text>
+          <Pill theme={THEME} tone={hasDriverDevOverride() ? "info" : "accent"}>
+            {hasDriverDevOverride() ? "dev override" : "tab lock"}
+          </Pill>
+        </View>
+        <Text style={styles.heroLead}>
+          {driverStrings.onboarding.description}
+        </Text>
+        <Text style={styles.heroMeta}>
+          activation flow first · workspace cockpit later · refresh tier{" "}
+          {REFRESH_TIER}
+        </Text>
+        <Text style={styles.heroMetaMuted}>
+          unlocks /, /jobs, /trip, /platform-presence, /settings, /shift,
+          /earnings
+        </Text>
       </View>
 
-      <View style={styles.panel}>
-        <StepTimeline />
-      </View>
+      {provisioningError ? (
+        <Banner
+          theme={THEME}
+          tone="danger"
+          icon={
+            <Ionicons
+              color={THEME.text}
+              name="alert-circle-outline"
+              size={18}
+            />
+          }
+          title="註冊或同步失敗"
+          body={provisioningError}
+        />
+      ) : null}
 
-      <StatusStrip items={statusStripItems} />
+      {justRegistered && provisioned ? (
+        <Banner
+          theme={THEME}
+          tone="success"
+          icon={<ActivityIndicator color={THEME.text} size="small" />}
+          title="已完成註冊，正在切換到工作台"
+          body="brief transition to ready state，接著會導向 workspace cockpit。"
+        />
+      ) : null}
 
-      <EmptyStateCard state={emptyState} />
+      <StatusStrip items={statusTiles} />
+      <StateBanner spec={stateSpec} />
+      <StepTimeline currentReason={emptyReason} />
 
-      <View style={styles.formCard}>
-        {provisioningError ? <ErrorBanner message={provisioningError} /> : null}
-        <FormField
+      <Card theme={THEME} title="必要資料" subtitle="Required form fields">
+        <ProvisioningInput
           autoCapitalize="none"
-          autoCorrect={false}
           editable={!submitting}
           helpText="車隊發放的 device registration code。"
-          label="註冊代碼"
+          label={driverStrings.onboarding.registrationCodeLabel}
+          mono
           onChangeText={setRegistrationCode}
-          placeholder="請輸入註冊代碼"
-          style={styles.monoInput}
+          placeholder={driverStrings.onboarding.registrationCodePlaceholder}
           value={registrationCode}
         />
-        <FormField
+        <ProvisioningInput
           editable={!submitting}
           helpText="選填，方便平台與營運端辨識此裝置。"
-          label="裝置名稱"
+          label={driverStrings.onboarding.deviceNameLabel}
           onChangeText={setDeviceLabel}
-          placeholder="例如：Driver Pixel 01"
+          placeholder={driverStrings.onboarding.deviceNamePlaceholder}
           value={deviceLabel}
         />
+      </Card>
+
+      <AvailableActionsCard actions={availableActions} />
+      <View style={styles.inlineActionWrap}>
+        {availableActions
+          .filter((action) => action.id !== "register_device")
+          .map((action) => (
+            <Btn
+              key={`run-${action.id}`}
+              theme={THEME}
+              disabled={!action.enabled}
+              icon={
+                <Ionicons
+                  color={action.enabled ? THEME.text : THEME.textMuted}
+                  name={action.iconName}
+                  size={14}
+                />
+              }
+              onPress={() => handleAction(action)}
+              variant="secondary"
+            >
+              {action.title}
+            </Btn>
+          ))}
       </View>
-
-      <AvailableActionsCard
-        actions={availableActions}
-        onPrimaryPress={() => {
-          void handleRegister();
-        }}
-      />
-
-      <View style={styles.footerNotice}>
-        <Ionicons
-          color={tokens.colors.warning}
-          name="lock-closed-outline"
-          size={14}
-        />
-        <Text style={styles.footerNoticeText}>
-          未啟用裝置無法接收派單。請使用車隊發放的代碼，避免使用個人帳號註冊。
-        </Text>
-      </View>
-
-      <Pressable
-        accessibilityRole="button"
-        onPress={handleRefresh}
-        style={({ pressed }) => [
-          styles.refreshLink,
-          pressed ? styles.refreshLinkPressed : null,
-        ]}
-      >
-        <Ionicons
-          color={tokens.colors.textMuted}
-          name="refresh-outline"
-          size={14}
-        />
-        <Text style={styles.refreshLinkText}>重新檢查裝置狀態</Text>
-      </Pressable>
-    </AppScreen>
+    </Shell>
   );
 }
 
 const styles = StyleSheet.create({
+  loadingShellContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
   loadingState: {
-    flex: 1,
     alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: tokens.spacing[24],
+    gap: 18,
+    paddingHorizontal: 24,
+    paddingVertical: 48,
   },
-  loadingPanel: {
-    marginTop: tokens.spacing[20],
-    alignItems: "center",
-    gap: tokens.spacing[12],
-  },
-  loadingLabel: {
-    ...tokens.type.body,
-    color: tokens.colors.textMuted,
-  },
-  content: {
-    paddingBottom: tokens.spacing[32],
-    gap: tokens.spacing[16],
-  },
-  heroCard: {
-    position: "relative",
-    overflow: "hidden",
-    borderRadius: tokens.radius.xl,
-    padding: tokens.spacing.xxl,
-    backgroundColor: tokens.colors.surface,
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
-    gap: tokens.spacing.md,
-  },
-  heroGlow: {
-    position: "absolute",
-    top: -36,
-    right: -24,
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: `${tokens.colors.brand}15`,
-  },
-  brandTile: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: tokens.colors.brand,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  brandTileLabel: {
-    ...tokens.type.title,
-    color: tokens.colors.textInverse,
-    fontWeight: "700",
-  },
-  heroTitle: {
-    ...tokens.type.display,
-    color: tokens.colors.text,
-  },
-  heroMeta: {
-    ...tokens.type.small,
-    color: tokens.colors.textMuted,
-    textTransform: "uppercase",
-  },
-  heroLead: {
-    ...tokens.type.body,
-    color: tokens.colors.textMuted,
-    lineHeight: 22,
-  },
-  devOverrideTag: {
-    marginTop: tokens.spacing.sm,
-    alignSelf: "flex-start",
-  },
-  panel: {
-    borderRadius: tokens.radius.xl,
-    padding: tokens.spacing.xl,
-    backgroundColor: tokens.colors.surface,
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
-  },
-  stepList: {
-    gap: tokens.spacing[12],
-  },
-  stepRow: {
-    flexDirection: "row",
-    gap: tokens.spacing.lg,
-  },
-  stepIndicatorColumn: {
-    alignItems: "center",
-  },
-  stepIndicator: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1.5,
-  },
-  stepIndicatorActive: {
-    backgroundColor: tokens.colors.brand,
-    borderColor: tokens.colors.brand,
-  },
-  stepIndicatorPending: {
-    backgroundColor: tokens.colors.surfaceLo,
-    borderColor: tokens.colors.border,
-  },
-  stepIndicatorTextActive: {
-    ...tokens.type.label,
-    color: tokens.colors.textInverse,
-  },
-  stepIndicatorTextPending: {
-    ...tokens.type.label,
-    color: tokens.colors.textMuted,
-  },
-  stepConnector: {
-    marginTop: 4,
-    flex: 1,
-    width: 2,
-    backgroundColor: tokens.colors.border,
-  },
-  stepBody: {
-    flex: 1,
-    paddingTop: 3,
-  },
-  stepTitle: {
-    ...tokens.type.label,
-    color: tokens.colors.text,
-  },
-  stepTitlePending: {
-    color: tokens.colors.textMuted,
-  },
-  stepDescription: {
-    ...tokens.type.small,
-    color: tokens.colors.textMuted,
-    marginTop: 2,
-  },
-  statusStrip: {
-    gap: tokens.spacing.md,
-  },
-  statusTile: {
-    borderRadius: tokens.radius[18],
-    padding: tokens.spacing[16],
-    backgroundColor: tokens.colors.surface,
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
-    gap: tokens.spacing.md,
-  },
-  statusTileHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: tokens.spacing[12],
-  },
-  statusTileLabel: {
-    ...tokens.type.small,
-    color: tokens.colors.textMuted,
-    textTransform: "uppercase",
-  },
-  statusTileDetail: {
-    ...tokens.type.body,
-    color: tokens.colors.text,
-    lineHeight: 20,
-  },
-  emptyStateCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: tokens.spacing.lg,
-    borderRadius: tokens.radius.xl,
-    padding: tokens.spacing.xl,
-    backgroundColor: tokens.colors.surface,
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
-  },
-  emptyStateIconWrap: {
-    width: 36,
-    height: 36,
+  loadingMark: {
+    width: 52,
+    height: 52,
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: THEME.accentBg,
+    borderWidth: 1,
+    borderColor: THEME.accentBorder,
   },
-  emptyStateBody: {
-    flex: 1,
-    gap: tokens.spacing[4],
+  loadingMarkLabel: {
+    color: THEME.accentHi,
+    fontSize: 24,
+    fontWeight: "700",
   },
-  emptyStateTitle: {
-    ...tokens.type.sectionTitle,
-    color: tokens.colors.text,
+  loadingLabel: {
+    color: THEME.textMuted,
+    fontSize: 15,
   },
-  emptyStateDescription: {
-    ...tokens.type.body,
-    color: tokens.colors.textMuted,
-    lineHeight: 21,
+  heroCard: {
+    gap: 10,
+    paddingBottom: 4,
   },
-  emptyStateMeta: {
-    ...tokens.type.micro,
-    color: tokens.colors.textMuted,
+  sectionEyebrow: {
+    color: THEME.accent,
+    fontSize: 11,
+    letterSpacing: 0.8,
     textTransform: "uppercase",
   },
-  formCard: {
-    borderRadius: tokens.radius.xl,
-    padding: tokens.spacing.xl,
-    backgroundColor: tokens.colors.surface,
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
-  },
-  monoInput: {
-    fontFamily: tokens.type.code.fontFamily,
-  },
-  actionsCard: {
-    borderRadius: tokens.radius.xl,
-    padding: tokens.spacing.xl,
-    backgroundColor: tokens.colors.surface,
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
-    gap: tokens.spacing[16],
-  },
-  actionsHeader: {
-    gap: tokens.spacing[4],
-  },
-  actionsEyebrow: {
-    ...tokens.type.small,
-    color: tokens.colors.textMuted,
-    textTransform: "uppercase",
-  },
-  actionsTitle: {
-    ...tokens.type.sectionTitle,
-    color: tokens.colors.text,
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: tokens.spacing[12],
-  },
-  actionRowIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: tokens.colors.brandBg,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionRowBody: {
-    flex: 1,
-    gap: tokens.spacing[4],
-  },
-  actionRowTitle: {
+  heroTitleRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: tokens.spacing[12],
+    gap: 12,
   },
-  actionLabel: {
-    ...tokens.type.label,
-    color: tokens.colors.text,
-  },
-  actionDescription: {
-    ...tokens.type.small,
-    color: tokens.colors.textMuted,
-  },
-  actionReason: {
-    ...tokens.type.small,
-    color: tokens.colors.warning,
-  },
-  footerNotice: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: tokens.spacing[8],
-    borderRadius: tokens.radius.lg,
-    padding: tokens.spacing.lg,
-    backgroundColor: tokens.colors.warningBg,
-    borderWidth: 1,
-    borderColor: `${tokens.colors.warning}35`,
-  },
-  footerNoticeText: {
+  heroTitle: {
     flex: 1,
-    ...tokens.type.small,
-    color: tokens.colors.warning,
+    color: THEME.text,
+    fontSize: 28,
+    fontWeight: "700",
+  },
+  heroLead: {
+    color: THEME.textMuted,
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  heroMeta: {
+    color: THEME.textMuted,
+    fontSize: 12,
+    textTransform: "uppercase",
+  },
+  heroMetaMuted: {
+    color: THEME.textMuted,
+    fontSize: 11,
+    fontFamily: THEME.monoFamily,
+    lineHeight: 16,
+  },
+  statusStrip: {
+    gap: 10,
+  },
+  statusTile: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    gap: 10,
+  },
+  statusTileTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+  statusLabel: {
+    color: THEME.textMuted,
+    fontSize: 11,
+    textTransform: "uppercase",
+  },
+  statusDetail: {
+    color: THEME.text,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  stepList: {
+    gap: 14,
+  },
+  stepRow: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  stepDot: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  stepDotLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  stepCopy: {
+    flex: 1,
+    gap: 2,
+    paddingTop: 3,
+  },
+  stepTitle: {
+    color: THEME.text,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  stepDescription: {
+    color: THEME.textMuted,
+    fontSize: 12,
     lineHeight: 18,
   },
-  refreshLink: {
-    alignSelf: "center",
+  inputGroup: {
+    gap: 8,
+    marginBottom: 16,
+  },
+  inputLabel: {
+    color: THEME.text,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  input: {
+    minHeight: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    backgroundColor: THEME.surfaceLo,
+    color: THEME.text,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+  },
+  inputMono: {
+    fontFamily: THEME.monoFamily,
+  },
+  inputHelp: {
+    color: THEME.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  actionList: {
+    gap: 10,
+  },
+  actionRow: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
     flexDirection: "row",
+    gap: 12,
+  },
+  actionIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: "center",
-    gap: tokens.spacing.sm,
-    paddingVertical: tokens.spacing[8],
+    justifyContent: "center",
+    backgroundColor: THEME.neutralBg,
   },
-  refreshLinkPressed: {
-    opacity: 0.7,
+  actionCopy: {
+    flex: 1,
+    gap: 4,
   },
-  refreshLinkText: {
-    ...tokens.type.small,
-    color: tokens.colors.textMuted,
+  actionHeadline: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+  actionTitle: {
+    flex: 1,
+    color: THEME.text,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  actionDescription: {
+    color: THEME.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  actionMeta: {
+    color: THEME.textMuted,
+    fontSize: 11,
+    fontFamily: THEME.monoFamily,
+  },
+  inlineActionWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  footerBar: {
+    gap: 10,
+  },
+  footerNotice: {
+    color: THEME.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  footerActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
   },
 });
