@@ -250,6 +250,9 @@ export default async function HomePage() {
             </p>
           )}
           <div className="link-row">
+            <Link className="text-link" href="/billing">
+              Open billing overview
+            </Link>
             <Link className="text-link" href="/api-keys">
               Review API keys
             </Link>
