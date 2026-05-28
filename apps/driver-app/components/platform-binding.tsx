@@ -160,7 +160,10 @@ export function PlatformBinding({
           setBusyPlatform(platformCode);
           try {
             const client = getDriverClient();
-            await client.setPlatformOffline({ platformCode });
+            await client.unbindPlatformAccount({
+              platformCode,
+              reason: "driver_requested_unbind",
+            });
             await loadPresences({ silent: true });
           } catch (unbindError) {
             Alert.alert("無法解除綁定", toErrorMessage(unbindError));

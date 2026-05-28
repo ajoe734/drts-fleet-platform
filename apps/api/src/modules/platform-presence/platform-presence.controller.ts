@@ -12,6 +12,7 @@ import type {
   PlatformPresenceSummary,
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
+  UnbindPlatformAccountCommand,
 } from "@drts/contracts";
 import {
   ApiRequestError,
@@ -73,6 +74,7 @@ export class PlatformPresenceController {
     const rec = await this.service.setOnline(
       driverId,
       body.platformCode,
+      body.accountId ?? null,
       body.tokenExpiresAt ?? null,
     );
     return toApiSuccessEnvelope(rec, requestId);
@@ -88,7 +90,29 @@ export class PlatformPresenceController {
   ) {
     const driverId = this.resolveDriverId(identity, requestedDriverId);
 
-    const rec = await this.service.setOffline(driverId, body.platformCode);
+    const rec = await this.service.setOffline(
+      driverId,
+      body.platformCode,
+      body.reason ?? null,
+    );
+    return toApiSuccessEnvelope(rec, requestId);
+  }
+
+  @Post("unbind")
+  @RequireRealms("driver", "platform", "ops")
+  async unbind(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() body: UnbindPlatformAccountCommand,
+    @Query("driverId") requestedDriverId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity, requestedDriverId);
+
+    const rec = await this.service.unbind(
+      driverId,
+      body.platformCode,
+      body.reason,
+    );
     return toApiSuccessEnvelope(rec, requestId);
   }
 }

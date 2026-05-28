@@ -2962,6 +2962,7 @@ export interface PublicInfoVersionRecord {
 
 // platform presence contracts
 export * from "./platform-presence";
+export type { UnbindPlatformAccountCommand } from "./platform-presence";
 // platform earnings contracts
 export * from "./platform-earnings";
 

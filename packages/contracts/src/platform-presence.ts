@@ -1,8 +1,15 @@
 import type { PlatformCode } from "./platform-codes";
+import type { ResourceActionDescriptor } from "./ui-runtime";
 
 export type PlatformPresenceStatus = "online" | "offline";
 
 export type PlatformEligibility = "eligible" | "ineligible" | "pending";
+
+export type PlatformAuthMechanism =
+  | "external_browser_oauth"
+  | "native_app_deeplink"
+  | "manual_credential"
+  | "ops_managed";
 
 export interface PlatformPresenceRecord {
   driverId: string;
@@ -14,6 +21,10 @@ export interface PlatformPresenceRecord {
   reauthRequired: boolean;
   lastOnlineAt: string | null;
   lastOfflineAt: string | null;
+  availableActions?: ResourceActionDescriptor[];
+  authMechanism?: PlatformAuthMechanism | null;
+  driverSelfServiceBinding?: boolean;
+  autoAcceptAllowed?: boolean;
   updatedAt: string;
 }
 
@@ -39,9 +50,16 @@ export interface PlatformPresenceSummary {
 
 export interface SetPlatformOnlineCommand {
   platformCode: PlatformCode;
+  accountId?: string | null;
   tokenExpiresAt?: string | null;
 }
 
 export interface SetPlatformOfflineCommand {
   platformCode: PlatformCode;
+  reason?: string | null;
+}
+
+export interface UnbindPlatformAccountCommand {
+  platformCode: PlatformCode;
+  reason: string;
 }

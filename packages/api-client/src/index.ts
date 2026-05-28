@@ -158,6 +158,7 @@ import type {
   SetPlatformTenantRolloutStageCommand,
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
+  UnbindPlatformAccountCommand,
   PlatformAdapter,
   UpdatePlatformAdapterCommand,
   SettlementMatrixRecord,
@@ -1226,6 +1227,21 @@ export class ApiClient {
     const url = query
       ? `/api/platform-presence/offline?${query}`
       : "/api/platform-presence/offline";
+    return this.post<PlatformPresenceRecord>(url, {
+      body: command,
+    });
+  }
+
+  async unbindPlatformAccount(
+    command: UnbindPlatformAccountCommand,
+    filters?: { driverId?: string },
+  ): Promise<PlatformPresenceRecord> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/platform-presence/unbind?${query}`
+      : "/api/platform-presence/unbind";
     return this.post<PlatformPresenceRecord>(url, {
       body: command,
     });

@@ -2,9 +2,11 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import { DatabaseService } from "../../common/db";
 import type {
   PlatformEligibility,
+  PlatformAuthMechanism,
   PlatformCode,
   PlatformPresenceRecord,
   PlatformPresenceStatus,
+  ResourceActionDescriptor,
 } from "@drts/contracts";
 
 interface PresenceRow {
@@ -20,6 +22,13 @@ interface PresenceRow {
   updated_at: Date | string;
   record: unknown;
 }
+
+type StoredPresenceExtras = {
+  availableActions?: ResourceActionDescriptor[];
+  authMechanism?: PlatformAuthMechanism | null;
+  driverSelfServiceBinding?: boolean;
+  autoAcceptAllowed?: boolean;
+};
 
 @Injectable()
 export class PlatformPresenceRepository {
@@ -113,6 +122,10 @@ export class PlatformPresenceRepository {
         : v instanceof Date
           ? v.toISOString()
           : new Date(v).toISOString();
+    const stored =
+      row.record && typeof row.record === "object"
+        ? (row.record as StoredPresenceExtras)
+        : null;
 
     return {
       driverId: row.driver_id,
@@ -124,6 +137,10 @@ export class PlatformPresenceRepository {
       reauthRequired: row.reauth_required,
       lastOnlineAt: toIso(row.last_online_at),
       lastOfflineAt: toIso(row.last_offline_at),
+      availableActions: stored?.availableActions,
+      authMechanism: stored?.authMechanism ?? null,
+      driverSelfServiceBinding: stored?.driverSelfServiceBinding,
+      autoAcceptAllowed: stored?.autoAcceptAllowed,
       updatedAt: toIso(row.updated_at)!,
     };
   }

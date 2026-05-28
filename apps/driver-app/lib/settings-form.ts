@@ -8,7 +8,6 @@ import type {
 export interface SettingsFormValues {
   language: string;
   notificationsEnabled: boolean;
-  autoAcceptEnabled: boolean;
   maxAcceptRadius: string;
 }
 
@@ -34,7 +33,6 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const DEFAULT_SETTINGS_VALUES: SettingsFormValues = {
   language: "zh-TW",
   notificationsEnabled: true,
-  autoAcceptEnabled: false,
   maxAcceptRadius: "",
 };
 
@@ -53,7 +51,6 @@ export function settingsValuesFromRecord(
   return {
     language: record.language ?? "zh-TW",
     notificationsEnabled: record.notificationsEnabled ?? true,
-    autoAcceptEnabled: record.autoAcceptEnabled ?? false,
     maxAcceptRadius:
       record.maxAcceptRadius != null ? String(record.maxAcceptRadius) : "",
   };
@@ -79,7 +76,6 @@ export function settingsValuesEqual(
   return (
     a.language.trim() === b.language.trim() &&
     a.notificationsEnabled === b.notificationsEnabled &&
-    a.autoAcceptEnabled === b.autoAcceptEnabled &&
     a.maxAcceptRadius.trim() === b.maxAcceptRadius.trim()
   );
 }
@@ -171,7 +167,6 @@ export function buildSettingsCommand(
   return {
     language: values.language.trim(),
     notificationsEnabled: values.notificationsEnabled,
-    autoAcceptEnabled: values.autoAcceptEnabled,
     maxAcceptRadius: radius ? Number(radius) : null,
   };
 }
