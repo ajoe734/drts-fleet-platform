@@ -1,13 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { ActionReceipt, AuditLogRecord } from "@drts/contracts";
+import type {
+  ActionReceipt,
+  AuditLogRecord,
+  TenantNotificationSubscription,
+} from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
-import {
-  NOTIFICATION_CHANNELS,
-  NOTIFICATION_EVENTS,
-  getNotificationFieldName,
-} from "./notification-preferences-model";
 
 export type SaveNotificationState = {
   ok: boolean;
@@ -20,16 +19,20 @@ export async function saveNotificationPreferences(
   formData: FormData,
 ): Promise<SaveNotificationState> {
   const client = getTenantClient();
+  const subscriptions = Array.from(formData.entries())
+    .filter(([key]) => key.startsWith("sub__"))
+    .flatMap(([key, value]) => {
+      const [, eventType, channel] = key.split("__");
+      if (!eventType || !isNotificationChannel(channel)) {
+        return [];
+      }
 
-  const subscriptions = NOTIFICATION_EVENTS.flatMap((event) =>
-    NOTIFICATION_CHANNELS.map((channel) => ({
-      eventType: event.eventType,
-      channel,
-      enabled:
-        formData.get(getNotificationFieldName(event.eventType, channel)) ===
-        "1",
-    })),
-  );
+      return {
+        eventType,
+        channel,
+        enabled: value === "1",
+      };
+    });
 
   try {
     await client.updateNotifications({ subscriptions });
@@ -60,7 +63,8 @@ function buildReceipt(audits: AuditLogRecord[]): ActionReceipt | null {
     .filter(
       (audit) =>
         audit.resourceType === "tenant_notifications" &&
-        audit.actionName === "update_notification_subscription",
+        (audit.actionName === "update_notification_preferences" ||
+          audit.actionName === "update_notification_subscription"),
     )
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
 
@@ -76,4 +80,10 @@ function buildReceipt(audits: AuditLogRecord[]): ActionReceipt | null {
     status: "completed",
     message: "Notification preference update recorded.",
   };
+}
+
+function isNotificationChannel(
+  value: string,
+): value is TenantNotificationSubscription["channel"] {
+  return value === "email" || value === "webhook" || value === "ops_console";
 }

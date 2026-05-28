@@ -94,7 +94,7 @@ type DeepLink = {
   label: string;
   description: string;
   openMode: "same_tab" | "new_tab";
-  targetApp: string;
+  targetApp: "ops-console" | "platform-admin" | "tenant-console";
 };
 
 export function NotificationPreferencesEditor({
@@ -158,7 +158,7 @@ export function NotificationPreferencesEditor({
     visibleEventTypes ?? rows.map((row) => row.eventType),
   );
   const renderedRows = rows.filter((row) => visibleRowSet.has(row.eventType));
-  const stateTreatment = getEmptyStateTreatment(activeEmptyReason);
+  const stateTreatment = getEmptyStateTreatment(activeEmptyReason, deepLinks);
 
   return (
     <form action={formAction} style={{ display: "grid", gap: 16 }}>
@@ -535,16 +535,41 @@ function Row({
   );
 }
 
-function getEmptyStateTreatment(activeEmptyReason?: EmptyReason | null) {
+function getEmptyStateTreatment(
+  activeEmptyReason: EmptyReason | null | undefined,
+  deepLinks: DeepLink[],
+) {
+  const webhookSetupLink = deepLinks.find(
+    (link) => link.href === "/webhooks",
+  ) ?? {
+    href: "/webhooks",
+    label: "Open webhook setup",
+    openMode: "same_tab" as const,
+  };
+  const opsInvestigationLink = deepLinks.find(
+    (link) => link.targetApp === "ops-console",
+  ) ?? {
+    href: "/audit?resourceType=tenant_notifications",
+    label: "Open ops investigation",
+    openMode: "new_tab" as const,
+  };
+  const auditTraceLink = deepLinks.find(
+    (link) => link.targetApp === "platform-admin",
+  ) ?? {
+    href: "/audit?resourceType=tenant_notifications",
+    label: "Open audit trace",
+    openMode: "new_tab" as const,
+  };
+
   switch (activeEmptyReason) {
     case "not_provisioned":
       return {
         reason: activeEmptyReason,
         title: "Webhook channel still needs provisioning",
         body: "矩陣會保留 email / ops_console，但 webhook 欄位以 not_provisioned 呈現，避免 tenant 誤以為可直接啟用。",
-        label: "Open webhook setup",
-        href: "/webhooks",
-        newTab: false,
+        label: webhookSetupLink.label,
+        href: webhookSetupLink.href,
+        newTab: webhookSetupLink.openMode === "new_tab",
         tone: "warn" as const,
       };
     case "fetch_failed":
@@ -552,9 +577,9 @@ function getEmptyStateTreatment(activeEmptyReason?: EmptyReason | null) {
         reason: activeEmptyReason,
         title: "Snapshot degraded",
         body: "偏好設定或治理快照讀取失敗時，只顯示診斷與 refresh metadata，不假造 last known good 以外的權限真相。",
-        label: "Open audit trail",
-        href: "/audit?resourceType=tenant_notifications",
-        newTab: false,
+        label: auditTraceLink.label,
+        href: auditTraceLink.href,
+        newTab: auditTraceLink.openMode === "new_tab",
         tone: "danger" as const,
       };
     case "permission_denied":
@@ -572,9 +597,9 @@ function getEmptyStateTreatment(activeEmptyReason?: EmptyReason | null) {
         reason: activeEmptyReason,
         title: "External investigation required",
         body: "當外部交付鏈路不穩定時，tenant UI 只提供 cross-app trace，不在本頁假裝擁有 downstream health truth。",
-        label: "Open ops investigation",
-        href: deepLinkHref("ops-console"),
-        newTab: true,
+        label: opsInvestigationLink.label,
+        href: opsInvestigationLink.href,
+        newTab: opsInvestigationLink.openMode === "new_tab",
         tone: "warn" as const,
       };
     case "filtered_empty":
@@ -592,9 +617,9 @@ function getEmptyStateTreatment(activeEmptyReason?: EmptyReason | null) {
         reason: activeEmptyReason,
         title: "Baseline defaults only",
         body: "當 tenant 還沒有任何 override，本頁直接顯示 integration governance baseline，避免空頁誤導成未設定。",
-        label: "Review webhook posture",
-        href: "/webhooks",
-        newTab: false,
+        label: webhookSetupLink.label,
+        href: webhookSetupLink.href,
+        newTab: webhookSetupLink.openMode === "new_tab",
         tone: "neutral" as const,
       };
     default:
@@ -602,21 +627,10 @@ function getEmptyStateTreatment(activeEmptyReason?: EmptyReason | null) {
         reason: "active_matrix",
         title: "Matrix is editable from the current snapshot",
         body: "這個狀態代表頁面正在呈現可操作或可閱讀的主矩陣，並搭配 refresh tier、audit receipt 與 cross-app links。",
-        label: "View tenant audit",
-        href: "/audit?resourceType=tenant_notifications",
-        newTab: false,
+        label: auditTraceLink.label,
+        href: auditTraceLink.href,
+        newTab: auditTraceLink.openMode === "new_tab",
         tone: "success" as const,
       };
   }
-}
-
-function deepLinkHref(targetApp: string) {
-  if (targetApp === "ops-console") {
-    return (
-      (process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003") +
-      "/audit?resourceType=tenant_notifications"
-    );
-  }
-
-  return "/audit?resourceType=tenant_notifications";
 }

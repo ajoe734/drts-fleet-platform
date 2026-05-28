@@ -149,6 +149,9 @@ export default async function NotificationsPage({
     currentSubscriptions,
     baselineSubscriptions,
   );
+  const enabledRoutes = currentSubscriptions.filter(
+    (subscription) => subscription.enabled,
+  ).length;
   const availability = {
     email: {
       ready: true,
@@ -169,6 +172,9 @@ export default async function NotificationsPage({
       detail: "供 ops/dispatch 追蹤 tenant 相關事件，不等於 tenant inbox。",
     },
   };
+  const readyChannels = Object.values(availability).filter(
+    (item) => item.ready,
+  ).length;
   const activeEmptyReason = deriveEmptyReason({
     requestedReason: requestedEmptyReason,
     hasFetchError: data.errors.length > 0,
@@ -260,17 +266,12 @@ export default async function NotificationsPage({
             label="custom overrides"
             value={String(customCount)}
             sub="vs governance baseline"
-            hint={`${currentSubscriptions.filter((item) => item.enabled).length} enabled routes`}
+            hint={`${enabledRoutes} enabled routes`}
           />
           <CanvasKPI
             theme={th}
             label="channels ready"
-            value={`${
-              Object.values(availability).filter(
-                (item: (typeof availability)[keyof typeof availability]) =>
-                  item.ready,
-              ).length
-            }/3`}
+            value={`${readyChannels}/3`}
             sub="email / webhook / ops_console"
             hint={availability.webhook.label}
           />

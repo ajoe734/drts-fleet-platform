@@ -23,7 +23,7 @@ export const NOTIFICATION_EMPTY_REASONS = [
 
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
-export const NOTIFICATION_EVENTS = [
+const NOTIFICATION_EVENT_META = [
   {
     eventType: "booking.created",
     description: "新訂單建立後立即發出",
@@ -59,7 +59,7 @@ export const NOTIFICATION_EVENTS = [
     description: "配額用量 > 80%",
     defaultAudience: "tenant admin, finance owner",
   },
-];
+] as const;
 
 export const EMPTY_REASON_META: Record<
   EmptyReason,
@@ -176,17 +176,31 @@ export function buildMatrixRows(
       subscription.enabled,
     ]),
   );
+  const knownEvents = new Map(
+    NOTIFICATION_EVENT_META.map((event) => [event.eventType, event]),
+  );
+  const eventTypes = [
+    ...new Set([
+      ...NOTIFICATION_EVENT_META.map((event) => event.eventType),
+      ...subscriptions.map((subscription) => subscription.eventType),
+    ]),
+  ];
 
-  return NOTIFICATION_EVENTS.map((event) => ({
-    eventType: event.eventType,
-    description: event.description,
-    defaultAudience: event.defaultAudience,
-    channels: {
-      email: byKey.get(`${event.eventType}:email`) ?? false,
-      webhook: byKey.get(`${event.eventType}:webhook`) ?? false,
-      ops_console: byKey.get(`${event.eventType}:ops_console`) ?? false,
-    },
-  }));
+  return eventTypes.map((eventType) => {
+    const event = knownEvents.get(eventType);
+    return {
+      eventType,
+      description:
+        event?.description ?? "依目前 tenant contract 回傳的事件類型顯示。",
+      defaultAudience:
+        event?.defaultAudience ?? "see delivery governance / downstream owner",
+      channels: {
+        email: byKey.get(`${eventType}:email`) ?? false,
+        webhook: byKey.get(`${eventType}:webhook`) ?? false,
+        ops_console: byKey.get(`${eventType}:ops_console`) ?? false,
+      },
+    };
+  });
 }
 
 export function flattenRows(
