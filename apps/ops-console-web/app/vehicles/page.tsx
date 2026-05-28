@@ -1,3 +1,5 @@
+import Link from "next/link";
+import type { CSSProperties } from "react";
 import type { VehicleRegistryRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
@@ -26,6 +28,12 @@ function lifecycleTone(status: string) {
   }
   return "warning" as const;
 }
+
+const detailLinkStyle: CSSProperties = {
+  color: "#1d4ed8",
+  fontWeight: 600,
+  textDecoration: "none",
+};
 
 export default async function VehiclesPage() {
   const [client, locale] = await Promise.all([
@@ -106,7 +114,14 @@ export default async function VehiclesPage() {
             <Tr key={vehicle.vehicleId}>
               <Td density="compact">
                 <DataCellStack
-                  primary={<strong>{vehicle.vehicleId}</strong>}
+                  primary={
+                    <Link
+                      href={`/vehicles/${encodeURIComponent(vehicle.vehicleId)}`}
+                      style={detailLinkStyle}
+                    >
+                      {vehicle.vehicleId}
+                    </Link>
+                  }
                   secondary={vehicle.plateNo}
                   tertiary={vehicle.supportedServiceBuckets.join(" · ")}
                 />
