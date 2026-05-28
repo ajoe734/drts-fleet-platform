@@ -698,9 +698,16 @@ export default async function BillingPage({
     emptyParam ?? null,
     data.errors.length > 0,
   );
+  const canReadBillingContent = emptyReason !== "permission_denied";
+  const billingProfile = canReadBillingContent ? data.billingProfile : null;
+  const invoices = canReadBillingContent ? data.invoices : [];
+  const quotaSummary =
+    canReadBillingContent && emptyReason !== "permission_denied"
+      ? data.quotaSummary
+      : null;
   const snapshot = getBillingSnapshot(
-    emptyReason === "not_provisioned" ? null : data.billingProfile,
-    emptyReason === "no_data" ? [] : data.invoices,
+    emptyReason === "not_provisioned" ? null : billingProfile,
+    emptyReason === "no_data" ? [] : invoices,
     stateParam ?? null,
   );
   const emptyState = emptyReason ? EMPTY_REASON_META[emptyReason] : null;
@@ -708,11 +715,9 @@ export default async function BillingPage({
   const sortedInvoices =
     emptyReason === "no_data" || emptyReason === "filtered_empty"
       ? []
-      : [...data.invoices].sort((left, right) =>
+      : [...invoices].sort((left, right) =>
           right.periodEnd.localeCompare(left.periodEnd),
         );
-  const quotaSummary =
-    emptyReason === "permission_denied" ? null : data.quotaSummary;
   const latestInvoice = sortedInvoices[0] ?? null;
   const currentPeriodInvoices = latestInvoice
     ? sortedInvoices.filter(
@@ -732,7 +737,7 @@ export default async function BillingPage({
     .slice(0, 6)
     .map((invoice) => ({ ...invoice }));
   const refreshSummary = "T5 tenant slow · 30s cadence · generated via ISR";
-  const paymentMethodLabel = data.billingProfile ? "月結發票 · NET 30" : "—";
+  const paymentMethodLabel = billingProfile ? "月結發票 · NET 30" : "—";
   const billingCurrency =
     latestInvoice?.amount.currency ?? quotaSummary?.limit.currency ?? "TWD";
   const nextCloseLabel = latestInvoice?.periodEnd
@@ -932,20 +937,20 @@ export default async function BillingPage({
               <div style={detailItemStyle}>
                 <span style={detailLabelStyle}>發票抬頭</span>
                 <span style={detailValueStyle}>
-                  {data.billingProfile?.invoiceTitle ?? "未設定抬頭"}
+                  {billingProfile?.invoiceTitle ?? "未設定抬頭"}
                 </span>
               </div>
               <div style={detailItemStyle}>
                 <span style={detailLabelStyle}>統一編號</span>
                 <span style={detailValueStyle}>
-                  {data.billingProfile?.taxId ?? "未設定統編"}
+                  {billingProfile?.taxId ?? "未設定統編"}
                 </span>
               </div>
               <div style={detailItemStyle}>
                 <span style={detailLabelStyle}>計費聯絡人</span>
                 <span style={detailValueStyle}>
-                  {data.billingProfile
-                    ? `${data.billingProfile.contactName ?? "未指派"} · ${data.billingProfile.email}`
+                  {billingProfile
+                    ? `${billingProfile.contactName ?? "未指派"} · ${billingProfile.email}`
                     : "尚未設定"}
                 </span>
               </div>
@@ -956,7 +961,7 @@ export default async function BillingPage({
               <div style={detailItemStyle}>
                 <span style={detailLabelStyle}>billing address</span>
                 <span style={detailValueStyle}>
-                  {data.billingProfile?.address ?? "未設定地址"}
+                  {billingProfile?.address ?? "未設定地址"}
                 </span>
               </div>
               <div style={detailItemStyle}>
@@ -1171,7 +1176,7 @@ export default async function BillingPage({
               <div style={detailItemStyle}>
                 <span style={detailLabelStyle}>Last profile update</span>
                 <span style={detailValueStyle}>
-                  {formatDateInput(data.billingProfile?.updatedAt) ?? "—"}
+                  {formatDateInput(billingProfile?.updatedAt) ?? "—"}
                 </span>
               </div>
               <div style={detailItemStyle}>
