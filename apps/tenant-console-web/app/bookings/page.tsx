@@ -86,15 +86,6 @@ const ACTION_PRIORITY = [
   "cancel",
 ];
 const TENANT_BOOKINGS_REFRESH_TIER: RefreshTier = "slow";
-const REFRESH_TIER_POLL_INTERVAL_MS: Record<RefreshTier, number> = {
-  urgent: 5_000,
-  fast: 3_000,
-  dispatch: 5_000,
-  medium: 15_000,
-  medium_slow: 30_000,
-  slow: 30_000,
-  manual: 0,
-};
 const REFRESH_TIER_COPY: Record<RefreshTier, string> = {
   urgent: "Urgent",
   fast: "T2 Fast",
@@ -121,6 +112,11 @@ type EmptyStateDescriptor = {
 
 type ActionBindingContext = {
   bookingId?: string;
+};
+
+type ActionPresentation = {
+  href: string | null;
+  requiresDetailSurface: boolean;
 };
 
 type TabFilterPreset = {
@@ -437,32 +433,53 @@ function opensBookingWorkSurface(descriptor: ResourceActionDescriptor) {
 function getActionHref(
   descriptor: ResourceActionDescriptor,
   context?: ActionBindingContext,
-) {
+): ActionPresentation {
   if (isCreateBookingAction(descriptor)) {
-    return "/bookings/new";
+    return {
+      href: "/bookings/new",
+      requiresDetailSurface: false,
+    };
   }
 
   if (
     normalizeActionToken(descriptor.action) === "open_integration_governance"
   ) {
-    return "/integration-governance";
+    return {
+      href: "/integration-governance",
+      requiresDetailSurface: false,
+    };
   }
 
   if (normalizeActionToken(descriptor.action) === "reset_filters") {
-    return "/bookings";
+    return {
+      href: "/bookings",
+      requiresDetailSurface: false,
+    };
+  }
+
+  if (context?.bookingId && opensBookingWorkSurface(descriptor)) {
+    return {
+      href: `/bookings/${context.bookingId}`,
+      requiresDetailSurface: false,
+    };
   }
 
   if (
     context?.bookingId &&
-    (opensBookingWorkSurface(descriptor) ||
-      ["update", "update_booking", "cancel", "cancel_booking"].includes(
-        normalizeActionToken(descriptor.action),
-      ))
+    ["update", "update_booking", "cancel", "cancel_booking"].includes(
+      normalizeActionToken(descriptor.action),
+    )
   ) {
-    return `/bookings/${context.bookingId}`;
+    return {
+      href: null,
+      requiresDetailSurface: true,
+    };
   }
 
-  return null;
+  return {
+    href: null,
+    requiresDetailSurface: false,
+  };
 }
 
 function getPrimaryBookingHref(booking: TenantBookingListRecord) {
@@ -472,14 +489,15 @@ function getPrimaryBookingHref(booking: TenantBookingListRecord) {
       Boolean(
         getActionHref(descriptor, {
           bookingId: booking.bookingId,
-        }),
-      ),
+        }).href,
+      ) &&
+      opensBookingWorkSurface(descriptor),
   );
 
   return primaryAction
     ? getActionHref(primaryAction, {
         bookingId: booking.bookingId,
-      })
+      }).href
     : null;
 }
 
@@ -701,9 +719,7 @@ export default async function TenantBookingsPage({
     (booking) =>
       Array.isArray(booking.crossAppLinks) && booking.crossAppLinks.length > 0,
   );
-  const refreshPollIntervalMs =
-    refreshMetadata?.staleAfterMs ??
-    REFRESH_TIER_POLL_INTERVAL_MS[TENANT_BOOKINGS_REFRESH_TIER];
+  const refreshPollIntervalMs = refreshMetadata?.staleAfterMs ?? 0;
   const liveCount = bookings.filter((booking) =>
     LIVE_ORDER_STATUSES.has(booking.orderStatus),
   ).length;
@@ -736,10 +752,10 @@ export default async function TenantBookingsPage({
           {headerActions.map((descriptor) => {
             const href = getActionHref(descriptor);
 
-            return href && descriptor.enabled ? (
+            return href.href && descriptor.enabled ? (
               <Link
                 className="action-button action-button-primary"
-                href={href}
+                href={href.href}
                 key={descriptor.action}
               >
                 {getActionLabel(descriptor.action)}
@@ -1041,9 +1057,9 @@ export default async function TenantBookingsPage({
                       listEnvelope.emptyState.nextAction,
                     );
 
-                    return href &&
+                    return href.href &&
                       listEnvelope.emptyState.nextAction.enabled ? (
-                      <Link className="bookings-action-pill" href={href}>
+                      <Link className="bookings-action-pill" href={href.href}>
                         {getActionLabel(
                           listEnvelope.emptyState.nextAction.action,
                         )}
@@ -1247,18 +1263,28 @@ export default async function TenantBookingsPage({
                           <div className="row-actions">
                             {rowActions.length > 0 ? (
                               rowActions.map((descriptor) => {
-                                const href = getActionHref(descriptor, {
+                                const presentation = getActionHref(descriptor, {
                                   bookingId: booking.bookingId,
                                 });
 
-                                return descriptor.enabled && href ? (
+                                return descriptor.enabled &&
+                                  presentation.href ? (
                                   <Link
                                     className="bookings-action-pill"
-                                    href={href}
+                                    href={presentation.href}
                                     key={descriptor.action}
                                   >
                                     {getActionLabel(descriptor.action)}
                                   </Link>
+                                ) : descriptor.enabled &&
+                                  presentation.requiresDetailSurface ? (
+                                  <span
+                                    className="bookings-action-pill"
+                                    key={descriptor.action}
+                                    title="此動作依 contract 可用，但需進入 booking detail 執行。"
+                                  >
+                                    {getActionLabel(descriptor.action)}
+                                  </span>
                                 ) : (
                                   <span
                                     className="bookings-action-pill is-disabled"
