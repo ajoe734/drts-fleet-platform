@@ -121,6 +121,29 @@ function getRefreshSourceLabel(refresh: UiRefreshMetadata) {
   }
 }
 
+function getRefreshTierLabel(
+  refreshTier: DriverEarningsDashboard["refreshTier"],
+) {
+  switch (refreshTier) {
+    case "manual":
+      return "Manual refresh";
+    case "slow":
+      return "Slow cadence";
+    case "medium_slow":
+      return "Medium-slow cadence";
+    case "medium":
+      return "Medium cadence";
+    case "dispatch":
+      return "Dispatch cadence";
+    case "fast":
+      return "Fast cadence";
+    case "urgent":
+      return "Urgent cadence";
+    default:
+      return refreshTier;
+  }
+}
+
 function getActionLabel(action: ResourceActionDescriptor | null | undefined) {
   switch (action?.action) {
     case "refresh_earnings":
@@ -178,6 +201,26 @@ function getEmptyReasonTone(reason: EmptyReason) {
       return "warn" as const;
     default:
       return "info" as const;
+  }
+}
+
+function getEmptyReasonLabel(reason: EmptyReason) {
+  switch (reason) {
+    case "not_provisioned":
+      return "裝置身份未完成";
+    case "permission_denied":
+      return "權限或旗標限制";
+    case "fetch_failed":
+      return "同步失敗";
+    case "external_unavailable":
+      return "外部帳務延遲";
+    case "driver_not_eligible":
+      return "資格未完成";
+    case "filtered_empty":
+      return "目前切片無資料";
+    case "no_data":
+    default:
+      return "尚無收益資料";
   }
 }
 
@@ -484,6 +527,69 @@ function EarningsTopBar({ onBack }: { onBack: () => void }) {
   );
 }
 
+function MetricTile({
+  label,
+  value,
+  tone = "text",
+}: {
+  label: string;
+  value: string;
+  tone?: "text" | "warn" | "danger";
+}) {
+  const color =
+    tone === "warn"
+      ? THEME.warn
+      : tone === "danger"
+        ? THEME.danger
+        : THEME.text;
+
+  return (
+    <View
+      style={[
+        styles.metricTile,
+        { backgroundColor: THEME.surfaceLo, borderColor: THEME.border },
+      ]}
+    >
+      <Text
+        style={[
+          styles.metricTileLabel,
+          { color: THEME.textDim, fontFamily: THEME.fontFamily },
+        ]}
+      >
+        {label}
+      </Text>
+      <Text
+        style={[
+          styles.metricTileValue,
+          { color, fontFamily: THEME.monoFamily },
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function ActionTag({
+  action,
+  onPress,
+}: {
+  action: ResourceActionDescriptor;
+  onPress: () => void;
+}) {
+  return (
+    <Btn
+      theme={THEME}
+      variant={action.enabled ? "secondary" : "ghost"}
+      size="xs"
+      disabled={!action.enabled}
+      onPress={onPress}
+    >
+      {getActionLabel(action)}
+    </Btn>
+  );
+}
+
 export default function EarningsScreen() {
   const router = useRouter();
   const [period, setPeriod] = useState<DriverEarningsPeriod>("today");
@@ -569,12 +675,12 @@ export default function EarningsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (!isProvisioned || featureEnabled === false || dashboard === null) {
+      if (!isProvisioned || featureEnabled === false) {
         return undefined;
       }
       void loadDashboard(period, true);
       return undefined;
-    }, [dashboard, featureEnabled, isProvisioned, loadDashboard, period]),
+    }, [featureEnabled, isProvisioned, loadDashboard, period]),
   );
 
   const onRefresh = async () => {
@@ -683,6 +789,7 @@ export default function EarningsScreen() {
   const refreshTone =
     dashboard !== null ? getRefreshTone(dashboard.refresh) : "neutral";
   const emptyAction = dashboard?.emptyState?.nextAction ?? null;
+  const dashboardActions = dashboard?.availableActions ?? [];
   const reconciliationAction = dashboard?.reconciliationIssue
     ? findAction(
         dashboard.reconciliationIssue.availableActions,
@@ -839,8 +946,8 @@ export default function EarningsScreen() {
           <Banner
             theme={THEME}
             tone={emptyContent.tone}
-            title="EmptyReason"
-            body={emptyReason}
+            title={getEmptyReasonLabel(emptyReason)}
+            body={`EmptyReason · ${emptyReason}`}
           />
         </Card>
         {hasRefreshEnvelope ? (
@@ -856,33 +963,44 @@ export default function EarningsScreen() {
             </Pill>
           </View>
         ) : null}
-        {emptyAction ? (
-          <Btn
-            theme={THEME}
-            variant="primary"
-            size="sm"
-            disabled={!emptyAction.enabled}
-            onPress={() => {
-              if (emptyReason === "not_provisioned") {
-                router.push("/settings");
-                return;
-              }
-              void runDashboardAction(emptyAction);
-            }}
-          >
-            {emptyContent.actionLabel}
-          </Btn>
-        ) : null}
-        {showSettingsAction ? (
-          <Btn
-            theme={THEME}
-            variant="primary"
-            size="sm"
-            onPress={() => router.push("/settings")}
-          >
-            {emptyContent.actionLabel}
-          </Btn>
-        ) : null}
+        <View style={styles.emptyActionRow}>
+          {emptyAction ? (
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              disabled={!emptyAction.enabled}
+              onPress={() => {
+                if (emptyReason === "not_provisioned") {
+                  router.push("/settings");
+                  return;
+                }
+                void runDashboardAction(emptyAction);
+              }}
+            >
+              {emptyContent.actionLabel}
+            </Btn>
+          ) : null}
+          {showSettingsAction ? (
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              onPress={() => router.push("/settings")}
+            >
+              {emptyContent.actionLabel}
+            </Btn>
+          ) : null}
+          {dashboardActions
+            .filter((action) => action.action !== "refresh_earnings")
+            .map((action) => (
+              <ActionTag
+                key={`${emptyReason}-${action.action}`}
+                action={action}
+                onPress={() => void runDashboardAction(action)}
+              />
+            ))}
+        </View>
       </Shell>
     );
   }
@@ -963,6 +1081,34 @@ export default function EarningsScreen() {
         </View>
 
         <Card theme={THEME} style={styles.summaryCard}>
+          <View style={styles.summaryMetaBand}>
+            <View style={styles.summaryMetaBandCopy}>
+              <Text
+                style={[
+                  styles.summaryBandEyebrow,
+                  { color: THEME.textDim, fontFamily: THEME.fontFamily },
+                ]}
+              >
+                refresh / authority / payout
+              </Text>
+              <Text
+                style={[
+                  styles.summaryBandTitle,
+                  { color: THEME.text, fontFamily: THEME.fontFamily },
+                ]}
+              >
+                收益摘要以淨額優先，待撥款與參考帳務分開標示
+              </Text>
+            </View>
+            <View style={styles.summaryMetaBandTags}>
+              <Pill theme={THEME} tone={refreshTone}>
+                {refreshStatus}
+              </Pill>
+              <Pill theme={THEME} tone="warn">
+                {getRefreshTierLabel(dashboard.refreshTier)}
+              </Pill>
+            </View>
+          </View>
           <View style={styles.summaryHeaderRow}>
             <View style={styles.summaryHeaderCopy}>
               <Text
@@ -1016,21 +1162,19 @@ export default function EarningsScreen() {
             </View>
           </View>
           <View style={styles.summaryMetaRow}>
-            <Pill theme={THEME} tone={refreshTone}>
-              {refreshStatus}
+            <Pill theme={THEME} tone="neutral">
+              source · {getRefreshSourceLabel(dashboard.refresh)}
             </Pill>
-            <Pill theme={THEME} tone="warn">
-              refresh tier · {dashboard.refreshTier}
+            <Pill theme={THEME} tone="neutral">
+              period · {dashboard.period}
             </Pill>
           </View>
-          <View
-            style={[styles.summaryMetricsRow, { borderTopColor: THEME.border }]}
-          >
-            <SummaryMetric
+          <View style={styles.metricGrid}>
+            <MetricTile
               label="毛收"
               value={formatAmountNumber(dashboard.summary.grossAmount)}
             />
-            <SummaryMetric
+            <MetricTile
               label="平台抽成"
               value={formatSignedAmountNumber({
                 ...dashboard.summary.serviceFeeAmount,
@@ -1040,12 +1184,12 @@ export default function EarningsScreen() {
               })}
               tone="danger"
             />
-            <SummaryMetric
+            <MetricTile
               label="待入帳"
               value={formatAmountNumber(dashboard.summary.pendingPayoutAmount)}
               tone="warn"
             />
-            <SummaryMetric
+            <MetricTile
               label="平台數"
               value={`${dashboard.summary.platformCount}`}
             />
@@ -1058,6 +1202,23 @@ export default function EarningsScreen() {
           >
             net first · pending payout distinct · authority labeled
           </Text>
+          <View
+            style={[
+              styles.summaryActionRow,
+              {
+                borderTopColor: THEME.border,
+                backgroundColor: THEME.surfaceLo,
+              },
+            ]}
+          >
+            {dashboardActions.map((action) => (
+              <ActionTag
+                key={`dashboard-${action.action}`}
+                action={action}
+                onPress={() => void runDashboardAction(action)}
+              />
+            ))}
+          </View>
         </Card>
 
         {dashboard.notes?.length ? (
@@ -1256,16 +1417,11 @@ export default function EarningsScreen() {
                     {item.availableActions.length > 0 ? (
                       <View style={styles.breakdownActionRow}>
                         {item.availableActions.map((action) => (
-                          <Btn
+                          <ActionTag
                             key={action.action}
-                            theme={THEME}
-                            variant="ghost"
-                            size="xs"
-                            disabled={!action.enabled}
                             onPress={() => void runDashboardAction(action)}
-                          >
-                            {getActionLabel(action)}
-                          </Btn>
+                            action={action}
+                          />
                         ))}
                       </View>
                     ) : null}
@@ -1364,7 +1520,7 @@ export default function EarningsScreen() {
             </View>
             <Btn
               theme={THEME}
-              variant="secondary"
+              variant="primary"
               size="sm"
               disabled={!reconciliationAction?.enabled}
               onPress={() =>
@@ -1531,44 +1687,6 @@ export default function EarningsScreen() {
   );
 }
 
-function SummaryMetric({
-  label,
-  value,
-  tone = "text",
-}: {
-  label: string;
-  value: string;
-  tone?: "text" | "warn" | "danger";
-}) {
-  const color =
-    tone === "warn"
-      ? THEME.warn
-      : tone === "danger"
-        ? THEME.danger
-        : THEME.text;
-
-  return (
-    <View style={styles.summaryMetric}>
-      <Text
-        style={[
-          styles.summaryMetricLabel,
-          { color: THEME.textMuted, fontFamily: THEME.fontFamily },
-        ]}
-      >
-        {label}
-      </Text>
-      <Text
-        style={[
-          styles.summaryMetricValue,
-          { color, fontFamily: THEME.monoFamily },
-        ]}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   screenContent: {
     gap: 14,
@@ -1600,6 +1718,11 @@ const styles = StyleSheet.create({
   periodRow: {
     flexDirection: "row",
     gap: 6,
+    padding: 4,
+    borderRadius: 14,
+    backgroundColor: "#0E1620",
+    borderWidth: 1,
+    borderColor: "#233242",
   },
   periodButton: {
     flex: 1,
@@ -1616,6 +1739,30 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     gap: 12,
+  },
+  summaryMetaBand: {
+    gap: 10,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#233242",
+  },
+  summaryMetaBandCopy: {
+    gap: 4,
+  },
+  summaryBandEyebrow: {
+    fontSize: 10.5,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  summaryBandTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  summaryMetaBandTags: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
   },
   emptyMetaRow: {
     flexDirection: "row",
@@ -1662,28 +1809,42 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: "wrap",
   },
+  metricGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  metricTile: {
+    width: "47%",
+    minHeight: 72,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  metricTileLabel: {
+    fontSize: 10.5,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  metricTileValue: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
   summaryFootnote: {
     fontSize: 10.5,
     lineHeight: 15,
   },
-  summaryMetricsRow: {
+  summaryActionRow: {
     flexDirection: "row",
-    gap: 12,
-    paddingTop: 14,
-    borderTopWidth: 1,
+    gap: 8,
     flexWrap: "wrap",
-  },
-  summaryMetric: {
-    minWidth: "22%",
-    flexGrow: 1,
-    gap: 2,
-  },
-  summaryMetricLabel: {
-    fontSize: 9.5,
-  },
-  summaryMetricValue: {
-    fontSize: 15,
-    fontWeight: "700",
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingBottom: 2,
   },
   notesCard: {
     gap: 10,
@@ -1803,6 +1964,11 @@ const styles = StyleSheet.create({
   },
   emptyStateCard: {
     gap: 12,
+  },
+  emptyActionRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
   },
   emptyStateCardInfo: {
     borderWidth: 1,
