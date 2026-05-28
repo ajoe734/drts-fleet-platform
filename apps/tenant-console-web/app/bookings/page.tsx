@@ -5,23 +5,16 @@ import type {
   ApiListData,
   ApiSuccessEnvelope,
   BookingRecord,
-  BusinessDispatchSubtype,
   CrossAppResourceLink,
   EmptyReason,
-  Phase1ServiceBucket,
   RefreshTier,
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "@drts/contracts";
-import {
-  BUSINESS_DISPATCH_SUBTYPES,
-  OWNED_ORDER_STATUSES,
-  PHASE1_SERVICE_BUCKETS,
-} from "@drts/contracts";
+import { OWNED_ORDER_STATUSES, PHASE1_SERVICE_BUCKETS } from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasCard,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -38,7 +31,7 @@ import {
   toggleStatus,
 } from "@/lib/booking-list";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
-import { formatDateTime, formatMoney } from "@/lib/formatters";
+import { formatDateTime } from "@/lib/formatters";
 import {
   getBookingSourceVisibility,
   getSourceToneClassName,
@@ -63,22 +56,14 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const kpiGridStyle: CSSProperties = {
+const filterFormStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-};
-
-const contentGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.65fr) minmax(300px, 0.95fr)",
-  gap: 16,
-  alignItems: "start",
+  gap: 14,
 };
 
 const filterGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
 };
 
@@ -104,20 +89,15 @@ const inputStyle: CSSProperties = {
   fontFamily: theme.fontFamily,
 };
 
-const summaryListStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
-};
-
-const summaryRowStyle: CSSProperties = {
-  display: "grid",
-  gap: 4,
-};
-
 const actionRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
+};
+
+const compactActionRowStyle: CSSProperties = {
+  ...actionRowStyle,
+  marginTop: 6,
 };
 
 const actionLinkStyle = (variant: "primary" | "secondary" = "secondary") =>
@@ -125,7 +105,7 @@ const actionLinkStyle = (variant: "primary" | "secondary" = "secondary") =>
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 28,
+    minHeight: 30,
     padding: "0 10px",
     borderRadius: 8,
     border: `1px solid ${variant === "primary" ? theme.accent : theme.border}`,
@@ -149,6 +129,14 @@ const disabledActionStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+const headerChipStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  textDecoration: "none",
+  color: theme.text,
+};
+
 const primaryTextStyle: CSSProperties = {
   color: theme.text,
   fontWeight: 600,
@@ -158,6 +146,12 @@ const secondaryTextStyle: CSSProperties = {
   color: theme.textMuted,
   fontSize: 11.5,
   lineHeight: 1.45,
+};
+
+const inlineMetaStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
 };
 
 type SearchParamValue = string | string[] | undefined;
@@ -178,13 +172,11 @@ type BookingListRecord = BookingRecord & {
 
 type BookingRow = Record<string, unknown> & {
   bookingCell: ReactNode;
-  passengerCell: ReactNode;
-  scheduleCell: ReactNode;
+  typeCell: ReactNode;
   routeCell: ReactNode;
-  statusCell: ReactNode;
-  fulfillmentCell: ReactNode;
-  fareCell: ReactNode;
-  actionCell: ReactNode;
+  windowCell: ReactNode;
+  passengerCell: ReactNode;
+  stateCell: ReactNode;
   _selected?: boolean;
 };
 
@@ -230,7 +222,7 @@ function formatMinutes(minutes: number) {
 function formatRelativeDuration(value: string | null | undefined) {
   const parsed = parseDate(value);
   if (!parsed) {
-    return "Not available";
+    return "Unknown";
   }
 
   const diffMs = Date.now() - parsed.getTime();
@@ -245,8 +237,7 @@ function formatRelativeDuration(value: string | null | undefined) {
     return `${diffHours}h old`;
   }
 
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d old`;
+  return `${Math.floor(diffHours / 24)}d old`;
 }
 
 function formatRemainingWindow(value: string | null | undefined) {
@@ -257,9 +248,11 @@ function formatRemainingWindow(value: string | null | undefined) {
 
   const diffMs = parsed.getTime() - Date.now();
   const diffMinutes = Math.round(diffMs / 60000);
+
   if (diffMinutes <= 0) {
     return "Closed";
   }
+
   if (diffMinutes < 60) {
     return `${formatMinutes(diffMinutes)} left`;
   }
@@ -269,24 +262,12 @@ function formatRemainingWindow(value: string | null | undefined) {
   return `${diffHours}h ${remainderMinutes}m left`;
 }
 
-function getCanvasToneFromSource(
-  tone: ReturnType<typeof getBookingSourceVisibility>["tone"],
-): CanvasTone {
-  switch (tone) {
-    case "owned":
-      return "success";
-    case "external":
-    default:
-      return "warn";
-  }
-}
-
 function getStatusTone(status: BookingRecord["orderStatus"]): CanvasTone {
   switch (status) {
     case "completed":
       return "success";
     case "cancelled":
-      return "neutral";
+      return "danger";
     case "dispatch_failed":
     case "dispatch_timeout":
     case "exception_hold":
@@ -308,7 +289,7 @@ function getApprovalTone(
       return "warn";
     case "blocked":
     case "rejected":
-      return "warn";
+      return "danger";
     default:
       return "neutral";
   }
@@ -340,13 +321,13 @@ function getActionLabel(action: string) {
     case "cancel_booking":
       return "Cancel";
     case "create_booking":
-      return "Create booking";
+      return "New";
     case "open_ops_approval":
-      return "Ops approvals";
+      return "Ops approval";
     case "open_ops_dispatch":
       return "Ops dispatch";
     case "open_integration_governance":
-      return "Open integration";
+      return "Integration governance";
     case "reset_filters":
       return "Clear filters";
     default:
@@ -356,7 +337,6 @@ function getActionLabel(action: string) {
 
 function buildCrossAppHref(link: CrossAppResourceLink) {
   const origin = link.targetApp === "ops-console" ? OPS_CONSOLE_ORIGIN : "";
-
   return origin ? `${origin}${link.route}` : link.route;
 }
 
@@ -478,7 +458,7 @@ function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
       label: "SLA at risk",
       tone: "warn",
       detail:
-        "Dispatch recovery is needed before the booking misses its service target.",
+        "Dispatch recovery is required to protect this reservation window.",
     };
   }
 
@@ -490,7 +470,6 @@ function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
   const minutesUntilStart = Math.round(
     (reservationStart.getTime() - Date.now()) / 60000,
   );
-
   if (
     minutesUntilStart > 0 &&
     minutesUntilStart <= 45 &&
@@ -535,27 +514,23 @@ function getActionHref(action: string, booking: BookingListRecord) {
   }
 }
 
-function getSubtypeLabel(subtype: BusinessDispatchSubtype | "all") {
+function getSubtypeLabel(subtype: BookingRecord["businessDispatchSubtype"]) {
   switch (subtype) {
     case "credit_card_airport_transfer":
       return "Airport transfer";
     case "enterprise_dispatch":
       return "Enterprise dispatch";
-    case "all":
     default:
-      return "All subtypes";
+      return subtype;
   }
 }
 
-function getServiceBucketLabel(bucket: Phase1ServiceBucket | "all") {
+function getServiceBucketLabel(bucket: BookingRecord["serviceBucket"]) {
   switch (bucket) {
     case "business_dispatch":
       return "Business dispatch";
-    case "standard_taxi":
-      return "Standard taxi";
-    case "all":
     default:
-      return "All buckets";
+      return bucket;
   }
 }
 
@@ -588,6 +563,7 @@ function getEmptyStateContent(
 ): {
   title: string;
   description: string;
+  tone: "info" | "warn";
   nextAction?: {
     descriptor: ResourceActionDescriptor;
     href: string;
@@ -598,7 +574,8 @@ function getEmptyStateContent(
       return {
         title: "Tenant setup is not provisioned yet",
         description:
-          "Bookings cannot load until tenant governance and downstream integrations are configured for this workspace.",
+          "Bookings stay unavailable until tenant governance and downstream integrations finish setup for this workspace.",
+        tone: "info",
         nextAction: {
           descriptor: {
             action: "open_integration_governance",
@@ -612,25 +589,29 @@ function getEmptyStateContent(
       return {
         title: "You do not have permission to see bookings",
         description:
-          "This tenant role can open the console shell but the booking ledger is not readable for the current actor context.",
+          "The current tenant actor can enter the shell, but booking ledger access is not granted for this role context.",
+        tone: "warn",
       };
     case "external_unavailable":
       return {
         title: "Booking data is temporarily unavailable",
         description:
-          "An upstream dependency did not respond in time. Tenant operators should retry, then escalate through ops if the stale window persists.",
+          "An upstream dependency did not respond in time. Retry this page, then escalate through ops if the stale window persists.",
+        tone: "warn",
       };
     case "fetch_failed":
       return {
         title: "The booking list failed to load",
         description:
-          "The page could not retrieve a valid tenant booking snapshot. Retry the page and check service health if this repeats.",
+          "The page could not retrieve a valid tenant booking snapshot. Retry the page and review service health if the failure repeats.",
+        tone: "warn",
       };
     case "filtered_empty":
       return {
         title: "No bookings match these filters",
         description:
-          "Try widening the reservation window, clearing status chips, or moving back to all service subtypes.",
+          "Try widening the reservation date range, clearing status chips, or moving back to all service buckets.",
+        tone: "info",
         nextAction: {
           descriptor: {
             action: "reset_filters",
@@ -645,7 +626,8 @@ function getEmptyStateContent(
       return {
         title: "No bookings exist for this tenant yet",
         description:
-          "This looks like a brand-new tenant workspace. Create the first booking or wait for external booking ingestion to publish data here.",
+          "This looks like a brand-new tenant workspace. Create the first booking or wait for upstream booking intake to populate this ledger.",
+        tone: "info",
         nextAction: {
           descriptor: {
             action: "create_booking",
@@ -705,10 +687,9 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
     const envelope = (await response.json()) as ApiSuccessEnvelope<
       ApiListData<BookingRecord>
     >;
-    const items = envelope.data.items.map(toBookingListRecord);
 
     return {
-      bookings: items,
+      bookings: envelope.data.items.map(toBookingListRecord),
       pageInfo: envelope.data.pageInfo,
       refresh: {
         generatedAt: envelope.meta.timestamp,
@@ -762,11 +743,12 @@ function renderActionLink({
   );
 }
 
-function renderBookingActions(booking: BookingListRecord) {
+function renderBookingActionLinks(booking: BookingListRecord) {
   return (
-    <div style={actionRowStyle}>
+    <div style={compactActionRowStyle}>
       {booking.availableActions.map((action) => {
         const label = getActionLabel(action.action);
+
         if (!action.enabled) {
           return (
             <span
@@ -810,34 +792,38 @@ function renderBookingActions(booking: BookingListRecord) {
 
 function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
   return bookings.map((booking) => {
-    const source = getBookingSourceVisibility(booking);
     const editWindow = formatRemainingWindow(booking.editableUntil);
+    const source = getBookingSourceVisibility(booking);
     const sourceToneClassName = getSourceToneClassName(source.tone);
 
     return {
       bookingCell: (
         <div style={{ display: "grid", gap: 4 }}>
-          <Link
-            href={`/bookings/${booking.bookingId}`}
-            style={primaryTextStyle}
-          >
-            {booking.bookingId}
+          <Link href={`/bookings/${booking.bookingId}`} style={headerChipStyle}>
+            <span style={primaryTextStyle}>{booking.bookingId}</span>
           </Link>
-          <span style={secondaryTextStyle}>
-            {booking.orderId} · {booking.serviceBucket} ·{" "}
+          <span style={secondaryTextStyle}>{booking.orderId}</span>
+          {renderBookingActionLinks(booking)}
+        </div>
+      ),
+      typeCell: (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={primaryTextStyle}>
             {getSubtypeLabel(booking.businessDispatchSubtype)}
           </span>
-        </div>
-      ),
-      passengerCell: (
-        <div style={{ display: "grid", gap: 4 }}>
-          <span style={primaryTextStyle}>{booking.passenger.name}</span>
           <span style={secondaryTextStyle}>
-            {booking.passenger.phone} · {booking.costCenter ?? "No cost center"}
+            {getServiceBucketLabel(booking.serviceBucket)}
           </span>
+          <span className={sourceToneClassName}>{source.badge}</span>
         </div>
       ),
-      scheduleCell: (
+      routeCell: (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={primaryTextStyle}>{booking.pickup.address}</span>
+          <span style={secondaryTextStyle}>↓ {booking.dropoff.address}</span>
+        </div>
+      ),
+      windowCell: (
         <div style={{ display: "grid", gap: 6 }}>
           <span style={primaryTextStyle}>
             {formatDateTime(booking.reservationWindowStart)}
@@ -845,7 +831,7 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
           <span style={secondaryTextStyle}>
             to {formatDateTime(booking.reservationWindowEnd)}
           </span>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <div style={inlineMetaStyle}>
             <CanvasPill theme={theme} tone="neutral">
               Age {formatRelativeDuration(booking.createdAt)}
             </CanvasPill>
@@ -863,15 +849,18 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
           </div>
         </div>
       ),
-      routeCell: (
+      passengerCell: (
         <div style={{ display: "grid", gap: 4 }}>
-          <span style={primaryTextStyle}>{booking.pickup.address}</span>
-          <span style={secondaryTextStyle}>{booking.dropoff.address}</span>
+          <span style={primaryTextStyle}>{booking.passenger.name}</span>
+          <span style={secondaryTextStyle}>{booking.passenger.phone}</span>
+          <span style={secondaryTextStyle}>
+            {booking.costCenter ?? "No cost center"}
+          </span>
         </div>
       ),
-      statusCell: (
+      stateCell: (
         <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <div style={inlineMetaStyle}>
             <CanvasPill
               theme={theme}
               tone={getStatusTone(booking.orderStatus)}
@@ -885,64 +874,76 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
             >
               approval {booking.approvalState}
             </CanvasPill>
-          </div>
-          <span style={secondaryTextStyle}>Booking {booking.status}</span>
-          {booking.slaStatus ? (
-            <span style={secondaryTextStyle}>{booking.slaStatus.detail}</span>
-          ) : (
-            <span style={secondaryTextStyle}>SLA not published</span>
-          )}
-        </div>
-      ),
-      fulfillmentCell: (
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            <CanvasPill
-              theme={theme}
-              tone={getCanvasToneFromSource(source.tone)}
-            >
-              {source.badge}
-            </CanvasPill>
             {booking.slaStatus ? (
               <CanvasPill theme={theme} tone={booking.slaStatus.tone}>
                 {booking.slaStatus.label}
               </CanvasPill>
             ) : null}
           </div>
-          <span className={sourceToneClassName}>{source.summary}</span>
-          <span style={secondaryTextStyle}>{source.detail}</span>
+          <span style={secondaryTextStyle}>{booking.status}</span>
+          {booking.slaStatus ? (
+            <span style={secondaryTextStyle}>{booking.slaStatus.detail}</span>
+          ) : (
+            <span style={secondaryTextStyle}>No SLA warning is published.</span>
+          )}
         </div>
       ),
-      fareCell: (
-        <div style={{ display: "grid", gap: 4 }}>
-          <span style={primaryTextStyle}>
-            {formatMoney(booking.quotedFare)}
-          </span>
-          <span style={secondaryTextStyle}>
-            {booking.bookingType} · {booking.approvalRequestIds.length} approval
-            ref(s)
-          </span>
-        </div>
-      ),
-      actionCell: renderBookingActions(booking),
       _selected:
         booking.approvalState === "pending" ||
+        booking.approvalState === "blocked" ||
         booking.orderStatus === "dispatch_failed" ||
         booking.orderStatus === "dispatch_timeout" ||
-        booking.orderStatus === "exception_hold",
+        booking.orderStatus === "exception_hold" ||
+        booking.orderStatus === "redispatch_required",
     };
   });
 }
 
-function getSubtypeCounts(bookings: BookingListRecord[]) {
-  return bookings.reduce(
-    (summary, booking) => {
-      summary[booking.businessDispatchSubtype] =
-        (summary[booking.businessDispatchSubtype] ?? 0) + 1;
-      return summary;
-    },
-    {} as Partial<Record<BusinessDispatchSubtype, number>>,
-  );
+function getPageDeepLinks(bookings: BookingListRecord[]) {
+  const links = new Map<string, CrossAppResourceLink>();
+
+  for (const booking of bookings) {
+    for (const link of booking.crossAppLinks) {
+      links.set(`${link.resourceType}:${link.resourceId}`, link);
+    }
+  }
+
+  return [...links.values()];
+}
+
+function getHeaderTabs(bookings: BookingListRecord[]) {
+  const liveCount = bookings.filter((booking) =>
+    isActionableStatus(booking.orderStatus),
+  ).length;
+  const reserveCount = bookings.filter((booking) => {
+    const reservationStart = parseDate(booking.reservationWindowStart);
+    return Boolean(reservationStart && reservationStart.getTime() > Date.now());
+  }).length;
+  const approvalCount = bookings.filter(
+    (booking) => booking.approvalState === "pending",
+  ).length;
+  const completedCount = bookings.filter(
+    (booking) => booking.orderStatus === "completed",
+  ).length;
+  const cancelledCount = bookings.filter(
+    (booking) => booking.orderStatus === "cancelled",
+  ).length;
+
+  const tabs = [
+    { id: "all", label: "全部", badge: String(bookings.length) },
+    { id: "live", label: "進行中", badge: String(liveCount) },
+    { id: "reserve", label: "預約", badge: String(reserveCount) },
+    { id: "approval", label: "待審批", badge: String(approvalCount) },
+    { id: "done", label: "已完成", badge: String(completedCount) },
+    { id: "cancel", label: "取消", badge: String(cancelledCount) },
+  ];
+
+  return tabs.map((tab) => (
+    <span key={tab.id}>
+      {tab.label}
+      {tab.badge ? ` ${tab.badge}` : ""}
+    </span>
+  ));
 }
 
 export default async function BookingsPage({
@@ -956,132 +957,35 @@ export default async function BookingsPage({
     first(resolvedSearchParams.emptyReason),
   );
   const data = await loadBookingsPageData();
-  const baseResult = applyBookingListQuery(data.bookings, query);
-  const statusCounts = applyBookingListQuery(data.bookings, {
-    ...query,
-    statuses: [],
-    page: 1,
-  }).statusCounts;
-  const subtypeCountScope = applyBookingListQuery(data.bookings, {
-    ...query,
-    subtype: "all",
-    page: 1,
-    pageSize: Math.max(1, data.bookings.length),
-  }).items;
-  const subtypeCounts = getSubtypeCounts(subtypeCountScope);
-  const serviceBucketCounts = PHASE1_SERVICE_BUCKETS.reduce(
-    (summary, bucket) => {
-      summary[bucket] = data.bookings.filter(
-        (booking) => booking.serviceBucket === bucket,
-      ).length;
-      return summary;
-    },
-    {} as Record<Phase1ServiceBucket, number>,
-  );
-
-  const activeCount = data.bookings.filter((booking) =>
-    isActionableStatus(booking.orderStatus),
-  ).length;
-  const approvalRequiredCount = data.bookings.filter(
-    (booking) => booking.approvalState === "pending",
-  ).length;
-  const attentionCount = data.bookings.filter(
-    (booking) =>
-      booking.orderStatus === "dispatch_failed" ||
-      booking.orderStatus === "dispatch_timeout" ||
-      booking.orderStatus === "exception_hold" ||
-      booking.orderStatus === "no_supply",
-  ).length;
-  const forwardedCount = data.bookings.filter(
-    (booking) =>
-      getBookingSourceVisibility(booking).domain === "forwarded_authority",
-  ).length;
-
+  const result = applyBookingListQuery(data.bookings, query);
   const computedEmptyReason: BookingEmptyReason | null =
     forcedEmptyReason ??
     data.emptyReason ??
-    (baseResult.items.length > 0
+    (result.items.length > 0
       ? null
       : hasActiveBookingFilters(query)
         ? "filtered_empty"
         : "no_data");
 
-  const rows =
-    computedEmptyReason === null ? buildBookingRows(baseResult.items) : [];
   const queryString = buildBookingListQueryString(query);
+  const rows =
+    computedEmptyReason === null ? buildBookingRows(result.items) : [];
   const emptyState =
     computedEmptyReason !== null
       ? getEmptyStateContent(computedEmptyReason, queryString)
       : null;
-
-  const pageActions: {
-    descriptor: ResourceActionDescriptor;
-    href: string;
-  }[] = [
-    {
-      descriptor: {
-        action: "create_booking",
-        enabled: true,
-        riskLevel: "medium",
-      },
-      href: "/bookings/new",
-    },
-  ];
-
-  if (computedEmptyReason === "not_provisioned") {
-    pageActions.push({
-      descriptor: {
-        action: "open_integration_governance",
-        enabled: true,
-        riskLevel: "medium",
-      },
-      href: "/integration-governance",
-    });
-  }
-
-  const pageDeepLinks: CrossAppResourceLink[] = [];
-  if (approvalRequiredCount > 0) {
-    pageDeepLinks.push({
-      targetApp: "ops-console",
-      route: `/approval-requests?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}&status=pending`,
-      resourceType: "tenant_booking_approval_queue",
-      resourceId: DEMO_TENANT_ID,
-      openMode: "new_tab",
-      label: "Open ops approval queue",
-    });
-  }
-  if (attentionCount > 0 || forwardedCount > 0) {
-    pageDeepLinks.push({
-      targetApp: "ops-console",
-      route: "/dispatch",
-      resourceType: "dispatch_queue",
-      resourceId: DEMO_TENANT_ID,
-      openMode: "new_tab",
-      label: "Open ops dispatch board",
-    });
-  }
-
-  const headerTabs = [
-    { id: "all", label: "All", badge: String(baseResult.total) },
-    { id: "live", label: "Live", badge: String(activeCount) },
-    { id: "approval", label: "Approval", badge: String(approvalRequiredCount) },
-    { id: "attention", label: "Attention", badge: String(attentionCount) },
-  ].map((tab) => (
-    <span key={tab.id}>
-      {tab.label} {tab.badge}
-    </span>
-  ));
+  const pageDeepLinks =
+    computedEmptyReason === null ? getPageDeepLinks(result.items) : [];
+  const headerTabs = getHeaderTabs(data.bookings);
   const activeHeaderTab = headerTabs[0];
 
   const columns: CanvasTableColumn<BookingRow>[] = [
-    { h: "BOOKING", k: "bookingCell", w: 170 },
-    { h: "PASSENGER", k: "passengerCell", w: 150 },
-    { h: "WINDOW / AGE", k: "scheduleCell", w: 220 },
-    { h: "ROUTE", k: "routeCell", w: 240 },
-    { h: "STATUS", k: "statusCell", w: 170 },
-    { h: "FULFILLMENT", k: "fulfillmentCell", w: 170 },
-    { h: "FARE", k: "fareCell", w: 140 },
-    { h: "ACTIONS", k: "actionCell", w: 220 },
+    { h: "BK", k: "bookingCell", w: 180 },
+    { h: "TYPE", k: "typeCell", w: 150 },
+    { h: "PICKUP → DROP", k: "routeCell", w: 300 },
+    { h: "WIN", k: "windowCell", w: 240 },
+    { h: "PASS.", k: "passengerCell", w: 140 },
+    { h: "STATE", k: "stateCell", w: 220 },
   ];
 
   return (
@@ -1089,21 +993,25 @@ export default async function BookingsPage({
       <CanvasPageHeader
         theme={theme}
         title="訂單"
-        subtitle="本月所有預約，含進行中、待審批與已完成訂單。"
+        subtitle="本月所有預約 · 含進行中與已完成"
         tabs={headerTabs}
         activeTab={activeHeaderTab}
         actions={
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {pageActions.map(({ descriptor, href }) =>
-              renderActionLink({
-                href,
-                label: getActionLabel(descriptor.action),
-                variant:
-                  descriptor.action === "create_booking"
-                    ? "primary"
-                    : "secondary",
-              }),
-            )}
+          <div style={actionRowStyle}>
+            <Link href="#booking-filters" style={actionLinkStyle("secondary")}>
+              Filter
+            </Link>
+            <span
+              style={disabledActionStyle}
+              title="Export is not available yet"
+            >
+              Export
+            </span>
+            {renderActionLink({
+              href: "/bookings/new",
+              label: "New",
+              variant: "primary",
+            })}
             <RefreshTierControl
               metadata={data.refresh}
               tier={BOOKING_REFRESH_TIER}
@@ -1123,43 +1031,14 @@ export default async function BookingsPage({
           />
         ) : null}
 
-        <div style={kpiGridStyle}>
-          <CanvasKPI
-            theme={theme}
-            label="Visible"
-            value={new Intl.NumberFormat("en").format(baseResult.total)}
-            sub={queryString ? "after filters" : "tenant snapshot"}
-          />
-          <CanvasKPI
-            theme={theme}
-            label="Active"
-            value={new Intl.NumberFormat("en").format(activeCount)}
-            sub="open workflow"
-          />
-          <CanvasKPI
-            theme={theme}
-            label="Approval"
-            value={new Intl.NumberFormat("en").format(approvalRequiredCount)}
-            sub="needs tenant or ops review"
-          />
-          <CanvasKPI
-            theme={theme}
-            label="Attention"
-            value={new Intl.NumberFormat("en").format(attentionCount)}
-            sub={
-              forwardedCount > 0
-                ? `${forwardedCount} forwarded authority`
-                : "no dispatch exception"
-            }
-          />
-        </div>
-
         <CanvasCard
           theme={theme}
           title="Filters"
-          subtitle="Search by booking or passenger, then narrow by canonical status, subtype, and reservation window."
+          subtitle="Search by booking, order, or passenger, then narrow by status, service bucket, and reservation date range."
         >
-          <form action="/bookings" style={{ display: "grid", gap: 14 }}>
+          <form action="/bookings" id="booking-filters" style={filterFormStyle}>
+            <input name="dateField" type="hidden" value={query.dateField} />
+
             <div style={filterGridStyle}>
               <label style={fieldLabelStyle}>
                 Search
@@ -1183,32 +1062,6 @@ export default async function BookingsPage({
                       {getServiceBucketLabel(bucket)}
                     </option>
                   ))}
-                </select>
-              </label>
-              <label style={fieldLabelStyle}>
-                Service subtype
-                <select
-                  defaultValue={query.subtype}
-                  name="subtype"
-                  style={inputStyle}
-                >
-                  <option value="all">All subtypes</option>
-                  {BUSINESS_DISPATCH_SUBTYPES.map((subtype) => (
-                    <option key={subtype} value={subtype}>
-                      {getSubtypeLabel(subtype)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={fieldLabelStyle}>
-                Date field
-                <select
-                  defaultValue={query.dateField}
-                  name="dateField"
-                  style={inputStyle}
-                >
-                  <option value="reservationStart">Reservation start</option>
-                  <option value="createdAt">Created at</option>
                 </select>
               </label>
               <label style={fieldLabelStyle}>
@@ -1243,16 +1096,8 @@ export default async function BookingsPage({
               </label>
             </div>
 
-            {query.statuses.length > 0 ? (
-              <input
-                name="status"
-                type="hidden"
-                value={query.statuses.join(",")}
-              />
-            ) : null}
-
             <div style={{ display: "grid", gap: 10 }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div style={inlineMetaStyle}>
                 {OWNED_ORDER_STATUSES.map((status) => {
                   const nextStatuses = toggleStatus(query.statuses, status);
                   const href = `/bookings?${buildBookingListQueryString(query, {
@@ -1260,85 +1105,38 @@ export default async function BookingsPage({
                     page: 1,
                   })}`;
                   const isActive = query.statuses.includes(status);
+
                   return (
                     <Link
                       href={href}
                       key={status}
-                      style={{
-                        textDecoration: "none",
-                        opacity: isActive ? 1 : 0.94,
-                      }}
+                      style={{ textDecoration: "none" }}
                     >
                       <CanvasPill
                         theme={theme}
                         tone={isActive ? "accent" : "neutral"}
                       >
-                        {status} · {statusCounts[status] ?? 0}
+                        {status}
                       </CanvasPill>
                     </Link>
                   );
                 })}
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                <Link href="/bookings" style={{ textDecoration: "none" }}>
-                  <CanvasPill
-                    theme={theme}
-                    tone={query.serviceBucket === "all" ? "accent" : "neutral"}
-                  >
-                    All buckets · {data.bookings.length}
-                  </CanvasPill>
-                </Link>
-                {PHASE1_SERVICE_BUCKETS.map((bucket) => (
-                  <Link
-                    href={`/bookings?${buildBookingListQueryString(query, {
-                      serviceBucket: bucket,
-                      page: 1,
-                    })}`}
-                    key={bucket}
-                    style={{ textDecoration: "none" }}
-                  >
-                    <CanvasPill
-                      theme={theme}
-                      tone={
-                        query.serviceBucket === bucket ? "accent" : "neutral"
-                      }
-                    >
-                      {getServiceBucketLabel(bucket)} ·{" "}
-                      {serviceBucketCounts[bucket] ?? 0}
-                    </CanvasPill>
-                  </Link>
-                ))}
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                <Link href="/bookings" style={{ textDecoration: "none" }}>
-                  <CanvasPill
-                    theme={theme}
-                    tone={query.subtype === "all" ? "accent" : "neutral"}
-                  >
-                    All subtypes · {data.bookings.length}
-                  </CanvasPill>
-                </Link>
-                {BUSINESS_DISPATCH_SUBTYPES.map((subtype) => (
-                  <Link
-                    href={`/bookings?${buildBookingListQueryString(query, {
-                      subtype,
-                      page: 1,
-                    })}`}
-                    key={subtype}
-                    style={{ textDecoration: "none" }}
-                  >
-                    <CanvasPill
-                      theme={theme}
-                      tone={query.subtype === subtype ? "accent" : "neutral"}
-                    >
-                      {getSubtypeLabel(subtype)} · {subtypeCounts[subtype] ?? 0}
-                    </CanvasPill>
-                  </Link>
-                ))}
-              </div>
+
+              {pageDeepLinks.length > 0 ? (
+                <div style={inlineMetaStyle}>
+                  {pageDeepLinks.map((link) =>
+                    renderActionLink({
+                      href: buildCrossAppHref(link),
+                      label: link.label,
+                      external: link.openMode === "new_tab",
+                    }),
+                  )}
+                </div>
+              ) : null}
             </div>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={actionRowStyle}>
               <button type="submit" style={actionLinkStyle("primary")}>
                 Apply filters
               </button>
@@ -1349,174 +1147,81 @@ export default async function BookingsPage({
           </form>
         </CanvasCard>
 
-        <div style={contentGridStyle}>
-          <CanvasCard
-            theme={theme}
-            title={`Bookings · ${baseResult.items.length} shown / ${baseResult.total} matched`}
-            subtitle={`Page ${baseResult.page} of ${baseResult.totalPages} · snapshot ${formatDateTime(
-              data.refresh.generatedAt,
-            )}`}
-            padding={0}
-          >
-            {computedEmptyReason === null ? (
-              <div style={{ display: "grid", gap: 0 }}>
-                <CanvasTable<BookingRow>
-                  theme={theme}
-                  columns={columns}
-                  rows={rows}
-                />
-                <div
-                  style={{
-                    padding: "12px 14px",
-                    borderTop: `1px solid ${theme.border}`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span style={secondaryTextStyle}>
-                    Page {baseResult.page} of {baseResult.totalPages} · API page{" "}
-                    {data.pageInfo.page} snapshot size {data.pageInfo.pageSize}
-                  </span>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {baseResult.page > 1
-                      ? renderActionLink({
-                          href: `/bookings?${buildBookingListQueryString(
-                            query,
-                            {
-                              page: baseResult.page - 1,
-                            },
-                          )}`,
-                          label: "Previous",
-                        })
-                      : null}
-                    {baseResult.page < baseResult.totalPages
-                      ? renderActionLink({
-                          href: `/bookings?${buildBookingListQueryString(
-                            query,
-                            {
-                              page: baseResult.page + 1,
-                            },
-                          )}`,
-                          label: "Next",
-                        })
-                      : null}
-                  </div>
+        <CanvasCard
+          theme={theme}
+          title={`Bookings · ${result.items.length} shown / ${result.total} matched`}
+          subtitle={`Page ${result.page} of ${result.totalPages} · snapshot ${formatDateTime(
+            data.refresh.generatedAt,
+          )}`}
+          padding={0}
+        >
+          {computedEmptyReason === null ? (
+            <div style={{ display: "grid" }}>
+              <CanvasTable<BookingRow>
+                theme={theme}
+                columns={columns}
+                rows={rows}
+              />
+              <div
+                style={{
+                  padding: "12px 14px",
+                  borderTop: `1px solid ${theme.border}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span style={secondaryTextStyle}>
+                  API page {data.pageInfo.page} · snapshot size{" "}
+                  {data.pageInfo.pageSize} · total {data.pageInfo.totalItems}
+                </span>
+                <div style={actionRowStyle}>
+                  {result.page > 1
+                    ? renderActionLink({
+                        href: `/bookings?${buildBookingListQueryString(query, {
+                          page: result.page - 1,
+                        })}`,
+                        label: "Previous",
+                      })
+                    : null}
+                  {result.page < result.totalPages
+                    ? renderActionLink({
+                        href: `/bookings?${buildBookingListQueryString(query, {
+                          page: result.page + 1,
+                        })}`,
+                        label: "Next",
+                      })
+                    : null}
                 </div>
               </div>
-            ) : (
-              <div style={{ padding: 18, display: "grid", gap: 14 }}>
-                <CanvasBanner
-                  theme={theme}
-                  tone={
-                    computedEmptyReason === "permission_denied" ||
-                    computedEmptyReason === "fetch_failed"
-                      ? "warn"
-                      : "info"
-                  }
-                  icon="warn"
-                  title={emptyState?.title}
-                  body={emptyState?.description}
-                />
-                {emptyState?.nextAction
-                  ? renderActionLink({
-                      href: emptyState.nextAction.href,
-                      label: getActionLabel(
-                        emptyState.nextAction.descriptor.action,
-                      ),
-                      variant:
-                        emptyState.nextAction.descriptor.action ===
-                        "create_booking"
-                          ? "primary"
-                          : "secondary",
-                    })
-                  : null}
-              </div>
-            )}
-          </CanvasCard>
-
-          <div style={{ display: "grid", gap: 16 }}>
-            <CanvasCard
-              theme={theme}
-              title="Attention lane"
-              subtitle="Approval-required bookings are highlighted, while forwarded or exception states get explicit ops handoff links."
-            >
-              <div style={summaryListStyle}>
-                <div style={summaryRowStyle}>
-                  <strong style={primaryTextStyle}>
-                    Approval-required bookings
-                  </strong>
-                  <span style={secondaryTextStyle}>
-                    {approvalRequiredCount > 0
-                      ? `${approvalRequiredCount} booking(s) are waiting for approval action.`
-                      : "No pending approval bookings in this snapshot."}
-                  </span>
-                </div>
-                <div style={summaryRowStyle}>
-                  <strong style={primaryTextStyle}>Dispatch attention</strong>
-                  <span style={secondaryTextStyle}>
-                    {attentionCount > 0
-                      ? `${attentionCount} booking(s) are in dispatch recovery or SLA-risk states.`
-                      : "No dispatch exceptions are currently visible."}
-                  </span>
-                </div>
-                <div style={summaryRowStyle}>
-                  <strong style={primaryTextStyle}>Forwarded authority</strong>
-                  <span style={secondaryTextStyle}>
-                    {forwardedCount > 0
-                      ? `${forwardedCount} booking(s) remain adapter- or platform-authoritative.`
-                      : "All visible bookings stay in the tenant-operated lane."}
-                  </span>
-                </div>
-              </div>
-            </CanvasCard>
-
-            <CanvasCard
-              theme={theme}
-              title="Cross-app deep links"
-              subtitle="Phase 1 keeps tenant and ops as separate apps, so ops handoffs open in a new tab."
-            >
-              {pageDeepLinks.length > 0 ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {pageDeepLinks.map((link) =>
-                    renderActionLink({
-                      href: buildCrossAppHref(link),
-                      label: link.label,
-                      external: link.openMode === "new_tab",
-                    }),
-                  )}
-                </div>
-              ) : (
-                <span style={secondaryTextStyle}>
-                  No cross-app escalation is needed for the current booking set.
-                </span>
-              )}
-            </CanvasCard>
-
-            <CanvasCard
-              theme={theme}
-              title="List contract"
-              subtitle="Bookings consume UI-runtime semantics even before backend list envelopes publish them directly."
-            >
-              <div style={summaryListStyle}>
-                <span style={secondaryTextStyle}>
-                  Refresh tier is wired to T5 / 30s via shared `RefreshTier`.
-                </span>
-                <span style={secondaryTextStyle}>
-                  Empty states distinguish `no_data`, `not_provisioned`,
-                  `filtered_empty`, `permission_denied`, `external_unavailable`,
-                  and `fetch_failed`.
-                </span>
-                <span style={secondaryTextStyle}>
-                  Row CTAs are rendered from `availableActions`, and ops
-                  handoffs are typed as `CrossAppResourceLink`.
-                </span>
-              </div>
-            </CanvasCard>
-          </div>
-        </div>
+            </div>
+          ) : (
+            <div style={{ padding: 18, display: "grid", gap: 14 }}>
+              <CanvasBanner
+                theme={theme}
+                tone={emptyState?.tone ?? "info"}
+                icon="warn"
+                title={emptyState?.title}
+                body={emptyState?.description}
+              />
+              {emptyState?.nextAction
+                ? renderActionLink({
+                    href: emptyState.nextAction.href,
+                    label: getActionLabel(
+                      emptyState.nextAction.descriptor.action,
+                    ),
+                    variant:
+                      emptyState.nextAction.descriptor.action ===
+                      "create_booking"
+                        ? "primary"
+                        : "secondary",
+                  })
+                : null}
+            </div>
+          )}
+        </CanvasCard>
       </div>
     </div>
   );
