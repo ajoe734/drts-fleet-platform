@@ -5,7 +5,6 @@
   "type": "module",
   "exports": {
     ".": "./src/index.tsx",
-    "./partner-booking": "./src/partner-booking-funnel.tsx",
     "./client": "./src/client.tsx",
     "./canvas-primitives": "./src/canvas-primitives/index.tsx",
     "./canvas-tokens": "./src/canvas-tokens.ts"

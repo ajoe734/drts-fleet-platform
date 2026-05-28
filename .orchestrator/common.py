@@ -12,7 +12,7 @@ import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 ORCHESTRATOR_DIR = ROOT / ".orchestrator"
@@ -187,45 +187,6 @@ def config_path(config: dict[str, Any], key: str, default: str | None = None) ->
     return path
 
 
-def canonical_workspace_root(config: dict[str, Any]) -> Path:
-    """Return the workspace that owns canonical machine-truth files."""
-    return config_path(config, "status_file").parents[0]
-
-
-def delivery_workspace_root(config: dict[str, Any], metadata: dict[str, Any] | None = None) -> Path:
-    """Return the cwd a worker should use for repository edits.
-
-    Execution and coordination dispatch may run in isolated git worktrees,
-    while fallback delivery continues to use the canonical workspace.
-    """
-    raw = (metadata or {}).get("workspace_root")
-    if raw:
-        return Path(str(raw)).expanduser().resolve()
-    return canonical_workspace_root(config)
-
-
-def apply_orchestrator_runtime_env(
-    env: dict[str, str],
-    config: dict[str, Any],
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, str]:
-    """Stamp env vars that keep status writes pointed at machine truth."""
-    canonical_root = canonical_workspace_root(config)
-    workspace_root = delivery_workspace_root(config, metadata)
-    env.update(
-        {
-            "ORCH_STATUS_ROOT": str(canonical_root),
-            "AI_STATUS_ROOT": str(canonical_root),
-            "ORCH_CANONICAL_ROOT": str(canonical_root),
-            "ORCH_WORKSPACE_ROOT": str(workspace_root),
-        }
-    )
-    task_branch = str((metadata or {}).get("task_branch") or "").strip()
-    if task_branch:
-        env["ORCH_TASK_BRANCH"] = task_branch
-    return env
-
-
 def run_command(
     command: list[str],
     *,
@@ -245,28 +206,7 @@ def run_command(
     )
 
 
-def _cli_search_roots(extra_roots: Iterable[str | Path] | None = None) -> list[Path]:
-    roots: list[Path] = []
-    seen: set[str] = set()
-    if extra_roots is None:
-        values: list[str | Path] = []
-    elif isinstance(extra_roots, (str, Path)):
-        values = [extra_roots]
-    else:
-        values = list(extra_roots)
-    for value in [*values, ROOT]:
-        path = Path(os.path.expandvars(os.path.expanduser(str(value))))
-        if not path.is_absolute():
-            path = ROOT / path
-        key = str(path)
-        if key in seen:
-            continue
-        seen.add(key)
-        roots.append(path)
-    return roots
-
-
-def command_exists(name: str, *, search_roots: Iterable[str | Path] | None = None) -> str | None:
+def command_exists(name: str) -> str | None:
     candidate = str(name or "").strip()
     if not candidate:
         return None
@@ -278,14 +218,10 @@ def command_exists(name: str, *, search_roots: Iterable[str | Path] | None = Non
     resolved = shutil.which(candidate)
     if resolved:
         return resolved
-    local_candidates = []
-    for root in _cli_search_roots(search_roots):
-        local_candidates.extend(
-            [
-                root / ".orchestrator" / "bin" / "node_modules" / ".bin" / candidate,
-                root / ".orchestrator" / "bin" / candidate,
-            ]
-        )
+    local_candidates = [
+        ROOT / ".orchestrator" / "bin" / "node_modules" / ".bin" / candidate,
+        ROOT / ".orchestrator" / "bin" / candidate,
+    ]
     for path in local_candidates:
         if path.is_file() and os.access(path, os.X_OK):
             return str(path)

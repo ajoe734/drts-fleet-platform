@@ -7,10 +7,8 @@ from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, Deli
 from adapters.file_inbox import FileInboxAdapter
 from common import (
     agent_config_for,
-    apply_orchestrator_runtime_env,
     command_exists,
     config_path,
-    delivery_workspace_root,
     load_json,
     new_runtime_id,
     runtime_log_path,
@@ -61,7 +59,7 @@ def _gemini_provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict, 
 
 
 def _gemini_include_directories(config: dict, gemini_settings: dict) -> list[str]:
-    repo_root = Path(str(gemini_settings.get("workspace_root") or config_path(config, "status_file").parents[0]))
+    repo_root = config_path(config, "status_file").parents[0]
     include_setting = gemini_settings.get("include_directories")
     directories: list[str] = []
     if include_setting is True:
@@ -133,11 +131,6 @@ def _gemini_policy_paths(config: dict, gemini_settings: dict) -> list[str]:
     return paths
 
 
-def _gemini_cli_path(config: dict, gemini_settings: dict) -> str | None:
-    workspace_root = config_path(config, "status_file").parents[0]
-    return command_exists(gemini_settings.get("cli") or "gemini", search_roots=[workspace_root])
-
-
 def _gemini_selected_auth_type(runtime: dict | None = None, env: dict[str, str] | None = None) -> str | None:
     if _truthy_env("GOOGLE_GENAI_USE_GCA", env):
         return "oauth-personal"
@@ -178,7 +171,7 @@ class GeminiAdapter(BaseAdapter):
 
     def capability(self, agent_id: str) -> DeliveryCapability:
         provider_key, _, gemini_settings = _gemini_provider_for_agent(self.config, agent_id)
-        cli = _gemini_cli_path(self.config, gemini_settings)
+        cli = command_exists(gemini_settings.get("cli") or "gemini")
         env = _gemini_runtime_env(gemini_settings)
         auth_ready = _gemini_auth_ready(gemini_settings, env)
         supported = bool(cli and auth_ready)
@@ -232,31 +225,7 @@ class GeminiAdapter(BaseAdapter):
         provider_key, provider, gemini_settings = _gemini_provider_for_agent(self.config, request.agent_id)
         gemini_settings = provider.get("gemini", {})
         approval = provider.get("approval", {})
-        cli = _gemini_cli_path(self.config, gemini_settings)
-        if not cli:
-            notes = "Gemini CLI was available during capability probing but is no longer resolvable before dispatch."
-            fallback = FileInboxAdapter(config=self.config, provider_capabilities=self.provider_capabilities)
-            result = fallback.deliver(request)
-            result.adapter = self.name
-            result.mode = "file_inbox"
-            result.notes = f"{result.notes}. {notes}"
-            result.error = notes
-            return DeliveryResult(
-                ok=result.ok,
-                adapter=result.adapter,
-                mode=result.mode,
-                target=result.target,
-                auto_delivered=result.auto_delivered,
-                manual_confirmation_required=result.manual_confirmation_required,
-                error=result.error,
-                notes=result.notes,
-                command=result.command,
-                log_path=result.log_path,
-                payload_path=result.payload_path,
-                pid=result.pid,
-                run_id=result.run_id,
-                metadata=result.metadata,
-            )
+        cli = gemini_settings.get("cli") or "gemini"
         output_format = str(gemini_settings.get("output_format") or "json").strip() or "json"
         command = [cli, "--prompt", request.message, "--output-format", output_format]
         model = str(request.metadata.get("model_preference") or gemini_settings.get("model") or "").strip()
@@ -272,19 +241,15 @@ class GeminiAdapter(BaseAdapter):
             command.extend(["--allowed-tools", ",".join(allowed_tools)])
         for policy_path in _gemini_policy_paths(self.config, gemini_settings):
             command.extend(["--policy", policy_path])
-        workspace_root = delivery_workspace_root(self.config, request.metadata)
-        runtime_include_settings = dict(gemini_settings)
-        runtime_include_settings["workspace_root"] = str(workspace_root)
-        for directory in _gemini_include_directories(self.config, runtime_include_settings):
+        for directory in _gemini_include_directories(self.config, gemini_settings):
             command.extend(["--include-directories", directory])
 
         run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
         env = _gemini_runtime_env(gemini_settings, ensure_dirs=True)
-        apply_orchestrator_runtime_env(env, self.config, request.metadata)
         process, _ = spawn_background_process(
             command,
-            cwd=workspace_root,
+            cwd=config_path(self.config, "status_file").parents[0],
             log_path=log_path,
             env=env,
         )

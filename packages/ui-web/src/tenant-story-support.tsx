@@ -20,7 +20,6 @@ export const tenantSections: ManagementSidebarSection[] = [
     items: [
       { href: "/passengers", label: "Passengers" },
       { href: "/addresses", label: "Addresses" },
-      { href: "/cost-centers", label: "Cost Centers" },
     ],
   },
   {
@@ -43,7 +42,6 @@ export const tenantSections: ManagementSidebarSection[] = [
     key: "governance",
     title: "Governance",
     items: [
-      { href: "/rules", label: "Rules" },
       { href: "/audit", label: "Audit" },
       { href: "/users", label: "Users" },
       { href: "/settings", label: "Settings" },

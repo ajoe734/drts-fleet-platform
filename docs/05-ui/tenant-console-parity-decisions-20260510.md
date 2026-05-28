@@ -1,38 +1,13 @@
 # Tenant Console Parity Decisions — 2026-05-10
 
-## 2026-05-18 Machine-Truth Refresh
-
-The 2026-05-14 reopen note below remains the historical record of how the
-late-Wave-3 contract set first unblocked the parity-fill surfaces. Current
-canonical machine truth adds three follow-on clarifications:
-
-- `TEN-UI-RD-010` (`TN_NewBooking`) now closes out on commit `12616aa`
-  (`origin/codex/ten-ui-rd-010`). The final `review_approved` event for the
-  reviewed implementation branch was posted by Codex at
-  2026-05-18T15:18:15Z against `origin/codex2/ten-ui-rd-010` (`0232a1b`);
-  the owner closeout branch preserves that approved payload.
-- `TEN-UI-RD-013` (`TN_CostCenter`) did **not** receive a replacement parent
-  implementation commit on 2026-05-18. Instead, a control-plane repair
-  restored the original shipped tuple: commit `921c456` on
-  `codex/be-cc-001-fu-seed`, reviewer Claude2 approval at
-  2026-05-14T03:16:30Z, and the same read-only scope boundary.
-- `TEN-UI-RD-014` (`TN_Rules`) now closes out on commit `41bdce1`
-  (`origin/codex/ten-ui-rd-014`). The final `review_approved` event was
-  posted by Codex2 at 2026-05-18T15:30:26Z, and the reviewed implementation
-  payload remains commit `412116b` on the same branch.
-
-The refreshed Wave 3 closeout packet that binds each shipped surface to its
-reviewer, approval time, commit, canvas anchor, and parity story is
-`docs/05-ui/tenant-console-redesign-closeout-20260514.md`.
-
 ## 2026-05-14 Wave 3 Closeout Update
 
 All three previously-blocked parity-fill tasks have reopened and shipped now
 that the late-Wave-3 backend contract set (`BE-CC-001`, `BE-RULE-001`,
 `BE-QUOTA-001`, `BE-APR-001`) is canonical:
 
-- `TEN-UI-RD-010` (`TN_NewBooking`) — **first reopened shipment** on commit
-  `6e0c9fd` (`origin/codex/be-cc-001-fu-seed`). Reviewer Codex2 approved at
+- `TEN-UI-RD-010` (`TN_NewBooking`) — **shipped** on commit `6e0c9fd`
+  (`origin/codex/be-cc-001-fu-seed`). Reviewer Codex2 approved at
   2026-05-14T04:07:00Z. The § below is retained as-is; status updated from
   `blocked` to `shipped`.
 - `TEN-UI-RD-013` (`TN_CostCenter`) — **shipped** as a read-only directory
@@ -40,10 +15,10 @@ that the late-Wave-3 backend contract set (`BE-CC-001`, `BE-RULE-001`,
   Claude2 approved at 2026-05-14T03:16:30Z. The § below is retained as the
   historical record of the blocker that BE-CC-001 then unblocked; current
   status is `shipped`.
-- `TEN-UI-RD-014` (`TN_Rules`) — **first reopened shipment** on commit
-  `f0e8265` (`origin/codex2/ten-ui-rd-014-closeout`). Reviewer Codex approved
-  at 2026-05-14T04:21:35Z. The § below is retained as the historical record
-  of the blocker that BE-RULE-001 / BE-QUOTA-001 / BE-APR-001 then unblocked;
+- `TEN-UI-RD-014` (`TN_Rules`) — **shipped** on commit `f0e8265`
+  (`origin/codex2/ten-ui-rd-014-closeout`). Reviewer Codex approved at
+  2026-05-14T04:21:35Z. The § below is retained as the historical record of
+  the blocker that BE-RULE-001 / BE-QUOTA-001 / BE-APR-001 then unblocked;
   current status is `shipped`.
 
 The Wave 3 tenant-console closeout packet that binds each shipped surface to

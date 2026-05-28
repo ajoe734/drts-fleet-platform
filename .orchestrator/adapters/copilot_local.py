@@ -7,9 +7,8 @@ from pathlib import Path
 from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, DeliveryResult
 from adapters.file_inbox import FileInboxAdapter
 from common import (
-    apply_orchestrator_runtime_env,
     command_exists,
-    delivery_workspace_root,
+    config_path,
     new_runtime_id,
     run_command,
     runtime_log_path,
@@ -97,7 +96,6 @@ class CopilotLocalAdapter(BaseAdapter):
 
         provider = self.config.get("providers", {}).get("copilot", {})
         local = provider.get("local", {})
-        workspace_root = delivery_workspace_root(self.config, request.metadata)
         command = [local.get("cli") or cli]
         if local.get("autopilot", True):
             command.append("--autopilot")
@@ -108,7 +106,7 @@ class CopilotLocalAdapter(BaseAdapter):
         if local.get("allow_all_tools", False):
             command.append("--allow-all-tools")
         if local.get("add_workspace_dir", True):
-            command.extend(["--add-dir", str(workspace_root)])
+            command.extend(["--add-dir", str(config_path(self.config, "status_file").parents[0])])
         if local.get("no_ask_user", True):
             command.append("--no-ask-user")
         for tool in local.get("allow_tools", []) or []:
@@ -136,10 +134,9 @@ class CopilotLocalAdapter(BaseAdapter):
                 "ORCH_PROVIDER": "copilot",
             }
         )
-        apply_orchestrator_runtime_env(env, self.config, request.metadata)
         process, _ = spawn_background_process(
             command,
-            cwd=workspace_root,
+            cwd=config_path(self.config, "status_file").parents[0],
             log_path=log_path,
             env=env,
         )

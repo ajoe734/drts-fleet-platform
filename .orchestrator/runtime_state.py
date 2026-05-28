@@ -168,7 +168,7 @@ def prune_worker_records(state: dict[str, Any], tasks_by_id: dict[str, str] | No
             keep[run_id] = worker
             continue
         # Drop terminal workers once the queue event is settled, or the task itself is already terminal.
-        if status in {"failed", "completed", "interrupted", "superseded", "reassigned"}:
+        if status in {"failed", "completed", "superseded", "reassigned"}:
             continue
         keep[run_id] = worker
     state["workers"] = keep

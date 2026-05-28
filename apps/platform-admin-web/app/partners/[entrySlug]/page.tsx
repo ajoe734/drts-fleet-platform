@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
@@ -22,10 +21,7 @@ import type {
 } from "@drts/contracts";
 import {
   CalloutBanner,
-  DataViewCard,
   DetailMetadataGrid,
-  FilterPill,
-  FilterPillRow,
   KpiCard,
   KpiRow,
   PageHeader,
@@ -34,29 +30,6 @@ import {
   WorkflowSplitLayout,
   type DetailListItem,
 } from "@drts/ui-web";
-
-const anchorSectionStyle = {
-  display: "grid",
-  gap: 12,
-  scrollMarginTop: 96,
-} satisfies React.CSSProperties;
-
-function heroGridStyle(isCompact: boolean) {
-  return {
-    display: "grid",
-    gridTemplateColumns: isCompact
-      ? "minmax(0, 1fr)"
-      : "minmax(0, 1.35fr) minmax(280px, 1fr)",
-    gap: 16,
-    alignItems: "start",
-  } satisfies React.CSSProperties;
-}
-
-const statusSummaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-} satisfies React.CSSProperties;
 
 export default function PartnerDetailPage() {
   const params = useParams<{ entrySlug: string }>();
@@ -80,19 +53,6 @@ export default function PartnerDetailPage() {
   const [revokingCredentialId, setRevokingCredentialId] = useState<
     string | null
   >(null);
-  const [isCompactViewport, setIsCompactViewport] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-
-    const mediaQuery = window.matchMedia("(max-width: 960px)");
-    const syncViewport = () => setIsCompactViewport(mediaQuery.matches);
-    syncViewport();
-    mediaQuery.addEventListener("change", syncViewport);
-    return () => mediaQuery.removeEventListener("change", syncViewport);
-  }, []);
 
   const copy =
     locale === "en"
@@ -129,22 +89,6 @@ export default function PartnerDetailPage() {
           auditTitle: "Audit lineage",
           auditSubtitle:
             "Creation, update, revoke, and credential activity must remain visible for platform review.",
-          navigationTitle: "Entry sections",
-          navigationSubtitle:
-            "Use anchored sections to keep overview, auth, eligibility, routing, readiness, credentials, and audit posture in the same review lane.",
-          snapshotTitle: "Promotion posture",
-          snapshotSubtitle:
-            "Keep readiness, entry routing, and credential coverage visible before enabling partner-facing traffic.",
-          nav: {
-            overview: "Overview",
-            auth: "Auth",
-            eligibility: "Eligibility",
-            routing: "Routing",
-            readiness: "Readiness",
-            lifecycle: "Lifecycle",
-            credentials: "Credentials",
-            audit: "Audit",
-          },
           notFound: "Partner entry not found.",
           save: "Save entry",
           preview: "Preview route",
@@ -182,22 +126,6 @@ export default function PartnerDetailPage() {
           auditTitle: "Audit 脈絡",
           auditSubtitle:
             "建立、更新、撤銷與 credential 活動都必須保留給平台稽核檢視。",
-          navigationTitle: "Entry 區段",
-          navigationSubtitle:
-            "用 anchored sections 把 overview、auth、eligibility、routing、readiness、credentials 與 audit posture 放在同一條治理路徑裡檢視。",
-          snapshotTitle: "Promotion posture",
-          snapshotSubtitle:
-            "在啟用 partner-facing 流量前，先把 readiness、entry routing 與 credential coverage 放在同一屏檢視。",
-          nav: {
-            overview: "Overview",
-            auth: "Auth",
-            eligibility: "Eligibility",
-            routing: "Routing",
-            readiness: "Readiness",
-            lifecycle: "Lifecycle",
-            credentials: "Credentials",
-            audit: "Audit",
-          },
           notFound: "找不到此 partner entry。",
           save: "儲存 entry",
           preview: "預覽路由",
@@ -327,19 +255,16 @@ export default function PartnerDetailPage() {
     [client, entry, loadEntry],
   );
 
-  const activeCredentialCount = useMemo(
-    () => credentials.filter((credential) => !credential.revokedAt).length,
-    [credentials],
-  );
-
   const readinessItems = useMemo(
     () =>
       entry
         ? buildPartnerReadinessItems(entry, t, {
-            activeCredentialCount,
+            activeCredentialCount: credentials.filter(
+              (credential) => !credential.revokedAt,
+            ).length,
           })
         : [],
-    [activeCredentialCount, entry, t],
+    [credentials, entry, t],
   );
 
   const detailItems = useMemo<DetailListItem[]>(() => {
@@ -396,6 +321,10 @@ export default function PartnerDetailPage() {
       return [];
     }
 
+    const activeCredentialCount = credentials.filter(
+      (credential) => !credential.revokedAt,
+    ).length;
+
     return [
       {
         id: "auth-mode",
@@ -439,7 +368,7 @@ export default function PartnerDetailPage() {
             : "success",
       },
     ];
-  }, [activeCredentialCount, entry, locale]);
+  }, [credentials, entry, locale]);
 
   const eligibilityItems = useMemo<DetailListItem[]>(() => {
     if (!entry) {
@@ -540,64 +469,11 @@ export default function PartnerDetailPage() {
       ? `https://${entry.entryHost}${entry.entryPath}`
       : (entry?.entryPath ?? entry?.entryHost ?? null);
 
-  const snapshotItems = useMemo<DetailListItem[]>(() => {
-    if (!entry) {
-      return [];
-    }
-
-    return [
-      {
-        id: "updated-at",
-        label: locale === "en" ? "Last updated" : "最近更新",
-        value: formatDateTime(entry.updatedAt),
-      },
-      {
-        id: "credential-coverage",
-        label: locale === "en" ? "Credential coverage" : "憑證覆蓋",
-        value:
-          entry.authMode === "partner_api_key"
-            ? `${activeCredentialCount} active`
-            : locale === "en"
-              ? "Not required"
-              : "不需要",
-        hint:
-          credentials.length > activeCredentialCount
-            ? locale === "en"
-              ? `${credentials.length} issued total`
-              : `共核發 ${credentials.length} 筆`
-            : undefined,
-      },
-      {
-        id: "support-contact",
-        label: locale === "en" ? "Support contact" : "支援窗口",
-        value: entry.brandingMetadata?.supportEmail ?? "—",
-        hint: entry.brandingMetadata?.supportPhone ?? undefined,
-      },
-      {
-        id: "entry-route",
-        label: locale === "en" ? "Entry route" : "入口路由",
-        value: credentialPreviewUrl ?? "—",
-      },
-    ];
-  }, [
-    activeCredentialCount,
-    credentialPreviewUrl,
-    credentials.length,
-    entry,
-    locale,
-  ]);
-
-  const readinessReadyCount = readinessItems.filter(
-    (item) => item.ready,
-  ).length;
-  const readinessMissingCount = readinessItems.length - readinessReadyCount;
   const readinessComplete =
     readinessItems.length > 0 && readinessItems.every((item) => item.ready);
-  const readinessFilterCountProps =
-    readinessMissingCount > 0 ? { count: readinessMissingCount } : {};
 
   if (loading) {
-    return <div style={emptyStateStyle}>{t("partners.loading")}</div>;
+    return <div className="admin-empty">{t("partners.loading")}</div>;
   }
 
   if (!entry) {
@@ -608,10 +484,7 @@ export default function PartnerDetailPage() {
           title={copy.title}
           subtitle={copy.subtitle}
           actions={
-            <Link
-              href="/partners"
-              style={actionButtonStyle({ tone: "secondary" })}
-            >
+            <Link href="/partners" className="admin-btn admin-btn--secondary">
               {copy.back}
             </Link>
           }
@@ -654,15 +527,12 @@ export default function PartnerDetailPage() {
         ]}
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Link
-              href="/partners"
-              style={actionButtonStyle({ tone: "secondary" })}
-            >
+            <Link href="/partners" className="admin-btn admin-btn--secondary">
               {copy.back}
             </Link>
             <button
               type="button"
-              style={actionButtonStyle({ tone: "secondary" })}
+              className="admin-btn admin-btn--secondary"
               onClick={() => void loadEntry()}
             >
               {t("common.refresh")}
@@ -683,6 +553,20 @@ export default function PartnerDetailPage() {
         />
       ) : null}
 
+      {!readinessComplete ? (
+        <CalloutBanner
+          tone={entry.status === "active" ? "danger" : "warning"}
+          title={copy.readinessTitle}
+          description={copy.readinessBlocked}
+        />
+      ) : (
+        <CalloutBanner
+          tone="success"
+          title={copy.readinessTitle}
+          description={copy.readinessReady}
+        />
+      )}
+
       <KpiRow minWidth="220px">
         <KpiCard
           label={locale === "en" ? "Lifecycle" : "生命週期"}
@@ -692,9 +576,9 @@ export default function PartnerDetailPage() {
         />
         <KpiCard
           label={locale === "en" ? "Readiness checks" : "Readiness 檢查"}
-          value={`${readinessReadyCount}/${readinessItems.length}`}
+          value={`${readinessItems.filter((item) => item.ready).length}/${readinessItems.length}`}
           detail={
-            readinessComplete
+            readinessItems.every((item) => item.ready)
               ? locale === "en"
                 ? "All checks passed"
                 : "全部檢查通過"
@@ -702,11 +586,13 @@ export default function PartnerDetailPage() {
                 ? "Some dependencies are still missing"
                 : "仍有依賴尚未補齊"
           }
-          tone={readinessComplete ? "success" : "warning"}
+          tone={
+            readinessItems.every((item) => item.ready) ? "success" : "warning"
+          }
         />
         <KpiCard
-          label={locale === "en" ? "Active credentials" : "有效憑證"}
-          value={activeCredentialCount}
+          label={locale === "en" ? "Issued credentials" : "已核發憑證"}
+          value={credentials.length}
           detail={
             credentials[0]?.lastUsedAt
               ? `${locale === "en" ? "Last used" : "最後使用"} ${formatDateTime(
@@ -720,76 +606,115 @@ export default function PartnerDetailPage() {
         />
       </KpiRow>
 
-      <WorkflowPanel
-        title={copy.navigationTitle}
-        description={copy.navigationSubtitle}
-      >
-        <FilterPillRow>
-          <a href="#overview" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.overview} tone="neutral" active />
-          </a>
-          <a href="#auth" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.auth} tone="info" />
-          </a>
-          <a href="#eligibility" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.eligibility} tone="neutral" />
-          </a>
-          <a href="#routing" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.routing} tone="platform" />
-          </a>
-          <a href="#readiness" style={{ textDecoration: "none" }}>
-            <FilterPill
-              label={copy.nav.readiness}
-              tone={readinessComplete ? "success" : "warning"}
-              {...readinessFilterCountProps}
-            />
-          </a>
-          <a href="#lifecycle" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.lifecycle} tone="warning" />
-          </a>
-          <a href="#credentials" style={{ textDecoration: "none" }}>
-            <FilterPill
-              label={copy.nav.credentials}
-              tone="info"
-              count={activeCredentialCount}
-            />
-          </a>
-          <a href="#audit" style={{ textDecoration: "none" }}>
-            <FilterPill label={copy.nav.audit} tone="neutral" />
-          </a>
-        </FilterPillRow>
-      </WorkflowPanel>
+      <WorkflowSplitLayout
+        main={
+          <>
+            <WorkflowPanel
+              title={copy.overviewTitle}
+              description={copy.overviewSubtitle}
+            >
+              <DetailMetadataGrid items={detailItems} minColumnWidth="220px" />
+            </WorkflowPanel>
 
-      <div id="overview" style={anchorSectionStyle}>
-        <div style={heroGridStyle(isCompactViewport)}>
-          <DataViewCard
-            title={copy.overviewTitle}
-            subtitle={copy.overviewSubtitle}
-            tone="platform"
-          >
-            <DetailMetadataGrid items={detailItems} minColumnWidth="220px" />
-          </DataViewCard>
-          <DataViewCard
-            title={copy.snapshotTitle}
-            subtitle={copy.snapshotSubtitle}
-            tone={readinessComplete ? "platform" : "warning"}
-            actions={
-              credentialPreviewUrl ? (
-                <a
-                  href={credentialPreviewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{
-                    ...actionButtonStyle({ tone: "secondary", size: "sm" }),
-                    width: "fit-content",
+            <WorkflowPanel
+              title={copy.authTitle}
+              description={copy.authSubtitle}
+            >
+              <DetailMetadataGrid items={authItems} minColumnWidth="220px" />
+            </WorkflowPanel>
+
+            <WorkflowPanel
+              title={copy.eligibilityTitle}
+              description={copy.eligibilitySubtitle}
+            >
+              <DetailMetadataGrid
+                items={eligibilityItems}
+                minColumnWidth="220px"
+              />
+            </WorkflowPanel>
+
+            <form onSubmit={handleSave}>
+              <WorkflowPanel
+                title={copy.routingTitle}
+                description={copy.routingSubtitle}
+              >
+                <EntryForm
+                  form={editForm}
+                  setForm={(value) => {
+                    setEditForm((current) => {
+                      if (!current) {
+                        return current;
+                      }
+                      return typeof value === "function"
+                        ? value(current)
+                        : value;
+                    });
                   }}
+                  t={t}
+                  lockSlug
+                />
+                <button
+                  type="submit"
+                  className="admin-btn admin-btn--primary"
+                  disabled={saving || !editForm.displayName.trim()}
                 >
-                  {copy.preview}
-                </a>
-              ) : undefined
-            }
-          >
-            <div style={{ display: "grid", gap: 12 }}>
+                  {saving ? t("common.saving") : copy.save}
+                </button>
+              </WorkflowPanel>
+            </form>
+          </>
+        }
+        side={
+          <>
+            <WorkflowPanel
+              title={copy.readinessTitle}
+              description={copy.readinessSubtitle}
+            >
+              <div style={{ display: "grid", gap: 8 }}>
+                {readinessItems.map((item) => (
+                  <div
+                    key={item.label}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      alignItems: "center",
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      border: "1px solid #e2e8f0",
+                      background: "#f8fafc",
+                    }}
+                  >
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <strong style={{ fontSize: 13, color: "#0f172a" }}>
+                        {item.label}
+                      </strong>
+                      <span style={{ fontSize: 12, color: "#64748b" }}>
+                        {item.value}
+                      </span>
+                    </div>
+                    <StatusChip
+                      label={
+                        item.ready ? t("partners.ready") : t("partners.missing")
+                      }
+                      tone={item.ready ? "success" : "warning"}
+                    />
+                  </div>
+                ))}
+              </div>
+            </WorkflowPanel>
+
+            <WorkflowPanel
+              title={copy.auditTitle}
+              description={copy.auditSubtitle}
+            >
+              <DetailMetadataGrid items={auditItems} minColumnWidth="220px" />
+            </WorkflowPanel>
+
+            <WorkflowPanel
+              title={copy.lifecycleTitle}
+              description={copy.lifecycleSubtitle}
+            >
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <StatusChip
                   label={formatPlatformCodeLabel(locale, entry.status)}
@@ -801,332 +726,148 @@ export default function PartnerDetailPage() {
                 />
                 <StatusChip
                   label={formatPlatformCodeLabel(locale, entry.eligibilityMode)}
-                  tone="neutral"
+                  tone="info"
                 />
               </div>
-              <div style={statusSummaryGridStyle}>
-                <CalloutBanner
-                  tone={
-                    readinessComplete
-                      ? "success"
-                      : entry.status === "active"
-                        ? "danger"
-                        : "warning"
-                  }
-                  title={
-                    readinessComplete
-                      ? locale === "en"
-                        ? "Promotion clear"
-                        : "可推進上線"
-                      : locale === "en"
-                        ? "Readiness gaps remain"
-                        : "仍有 readiness 缺口"
-                  }
-                  description={
-                    readinessComplete
-                      ? copy.readinessReady
-                      : copy.readinessBlocked
-                  }
-                />
-                <CalloutBanner
-                  tone={
-                    entry.authMode !== "partner_api_key" ||
-                    activeCredentialCount > 0
-                      ? "info"
-                      : "warning"
-                  }
-                  title={locale === "en" ? "Credential posture" : "憑證姿態"}
-                  description={
-                    entry.authMode === "partner_api_key"
-                      ? activeCredentialCount > 0
-                        ? locale === "en"
-                          ? `${activeCredentialCount} active credential(s) can gate ingress traffic.`
-                          : `${activeCredentialCount} 筆有效憑證可作為 ingress traffic gate。`
-                        : locale === "en"
-                          ? "Partner API key mode is active, but no usable ingress credential is available."
-                          : "partner API key 模式已啟用，但目前沒有可用的 ingress credential。"
-                      : locale === "en"
-                        ? "This entry does not require partner-managed ingress credentials."
-                        : "此 entry 不需要 partner-managed ingress credential。"
-                  }
-                />
-              </div>
-              <DetailMetadataGrid
-                columns={1}
-                minColumnWidth="100%"
-                items={snapshotItems}
-              />
-            </div>
-          </DataViewCard>
-        </div>
-      </div>
-
-      <WorkflowSplitLayout
-        main={
-          <>
-            <div id="auth" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.authTitle}
-                description={copy.authSubtitle}
-              >
-                <DetailMetadataGrid items={authItems} minColumnWidth="220px" />
-              </WorkflowPanel>
-            </div>
-
-            <div id="eligibility" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.eligibilityTitle}
-                description={copy.eligibilitySubtitle}
-              >
-                <DetailMetadataGrid
-                  items={eligibilityItems}
-                  minColumnWidth="220px"
-                />
-              </WorkflowPanel>
-            </div>
-
-            <div id="routing" style={anchorSectionStyle}>
-              <form onSubmit={handleSave}>
-                <WorkflowPanel
-                  title={copy.routingTitle}
-                  description={copy.routingSubtitle}
+              {credentialPreviewUrl ? (
+                <a
+                  href={credentialPreviewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="admin-btn admin-btn--secondary admin-btn--sm"
+                  style={{ textDecoration: "none", width: "fit-content" }}
                 >
-                  <EntryForm
-                    form={editForm}
-                    setForm={(value) => {
-                      setEditForm((current) => {
-                        if (!current) {
-                          return current;
-                        }
-                        return typeof value === "function"
-                          ? value(current)
-                          : value;
-                      });
-                    }}
-                    t={t}
-                    lockSlug
-                  />
+                  {copy.preview}
+                </a>
+              ) : null}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {entry.status === "active" ? (
                   <button
-                    type="submit"
-                    style={actionButtonStyle({ tone: "primary" })}
-                    disabled={saving || !editForm.displayName.trim()}
+                    type="button"
+                    className="admin-btn admin-btn--secondary"
+                    disabled={changingStatus === "inactive"}
+                    onClick={() => void setEntryStatus("inactive")}
                   >
-                    {saving ? t("common.saving") : copy.save}
+                    {t("partners.deactivate")}
                   </button>
-                </WorkflowPanel>
-              </form>
-            </div>
-          </>
-        }
-        side={
-          <>
-            <div id="readiness" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.readinessTitle}
-                description={copy.readinessSubtitle}
+                ) : entry.status === "inactive" ? (
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn--secondary"
+                    disabled={changingStatus === "active"}
+                    onClick={() => void setEntryStatus("active")}
+                  >
+                    {t("partners.activate")}
+                  </button>
+                ) : null}
+                {entry.status !== "revoked" ? (
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn--secondary"
+                    disabled={changingStatus === "revoked"}
+                    onClick={() => void setEntryStatus("revoked")}
+                  >
+                    {t("partners.revoke")}
+                  </button>
+                ) : null}
+              </div>
+            </WorkflowPanel>
+
+            <WorkflowPanel
+              title={copy.credentialsTitle}
+              description={copy.credentialsSubtitle}
+            >
+              <button
+                type="button"
+                className="admin-btn admin-btn--secondary admin-btn--sm"
+                disabled={issuingCredential || entry.status === "revoked"}
+                onClick={() => void issueCredential()}
               >
-                <div style={{ display: "grid", gap: 8 }}>
-                  {readinessItems.map((item) => (
+                {issuingCredential
+                  ? t("partners.rotatingCredential")
+                  : t("partners.rotateCredential")}
+              </button>
+
+              {issuedCredential ? (
+                <CalloutBanner
+                  tone="info"
+                  title={t("partners.plaintextCredential")}
+                  description={issuedCredential.plaintextKey}
+                />
+              ) : null}
+
+              {credentials.length > 0 ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {credentials.map((credential) => (
                     <div
-                      key={item.label}
+                      key={credential.keyId}
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        alignItems: "center",
-                        padding: "10px 12px",
-                        borderRadius: 12,
+                        display: "grid",
+                        gap: 6,
+                        padding: "12px 14px",
+                        borderRadius: 14,
                         border: "1px solid #e2e8f0",
                         background: "#f8fafc",
                       }}
                     >
-                      <div style={{ display: "grid", gap: 4 }}>
-                        <strong style={{ fontSize: 13, color: "#0f172a" }}>
-                          {item.label}
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <strong style={{ fontSize: 13.5, color: "#0f172a" }}>
+                          {credential.keyPrefix}
+                          {credential.maskedSuffix}
                         </strong>
-                        <span style={{ fontSize: 12, color: "#64748b" }}>
-                          {item.value}
-                        </span>
+                        <StatusChip
+                          label={
+                            credential.revokedAt
+                              ? t("partners.credentialStatus.revoked")
+                              : t("partners.credentialStatus.active")
+                          }
+                          tone={credential.revokedAt ? "danger" : "success"}
+                        />
                       </div>
-                      <StatusChip
-                        label={
-                          item.ready
-                            ? t("partners.ready")
-                            : t("partners.missing")
-                        }
-                        tone={item.ready ? "success" : "warning"}
-                      />
+                      <div style={{ fontSize: 12.5, color: "#64748b" }}>
+                        {t("partners.credentialMeta.createdAt")}:{" "}
+                        {formatDateTime(credential.createdAt)}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: "#64748b" }}>
+                        {t("partners.credentialMeta.lastUsedAt")}:{" "}
+                        {credential.lastUsedAt
+                          ? formatDateTime(credential.lastUsedAt)
+                          : "—"}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: "#64748b" }}>
+                        {t("partners.credentialMeta.source")}:{" "}
+                        {credential.source}
+                      </div>
+                      {!credential.revokedAt ? (
+                        <button
+                          type="button"
+                          className="admin-btn admin-btn--secondary admin-btn--sm"
+                          disabled={revokingCredentialId === credential.keyId}
+                          onClick={() =>
+                            void revokeCredential(credential.keyId)
+                          }
+                        >
+                          {revokingCredentialId === credential.keyId
+                            ? t("partners.revokingCredential")
+                            : t("partners.revokeCredential")}
+                        </button>
+                      ) : null}
                     </div>
                   ))}
                 </div>
-              </WorkflowPanel>
-            </div>
-
-            <div id="lifecycle" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.lifecycleTitle}
-                description={copy.lifecycleSubtitle}
-              >
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <StatusChip
-                    label={formatPlatformCodeLabel(locale, entry.status)}
-                    tone={partnerStatusTone(entry.status)}
-                  />
-                  <StatusChip
-                    label={formatPlatformCodeLabel(locale, entry.authMode)}
-                    tone="info"
-                  />
-                  <StatusChip
-                    label={formatPlatformCodeLabel(
-                      locale,
-                      entry.eligibilityMode,
-                    )}
-                    tone="info"
-                  />
+              ) : (
+                <div style={{ color: "#64748b", fontSize: 13 }}>
+                  {t("partners.emptyCredentials")}
                 </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {entry.status === "active" ? (
-                    <button
-                      type="button"
-                      style={actionButtonStyle({ tone: "secondary" })}
-                      disabled={changingStatus === "inactive"}
-                      onClick={() => void setEntryStatus("inactive")}
-                    >
-                      {t("partners.deactivate")}
-                    </button>
-                  ) : entry.status === "inactive" ? (
-                    <button
-                      type="button"
-                      style={actionButtonStyle({ tone: "secondary" })}
-                      disabled={changingStatus === "active"}
-                      onClick={() => void setEntryStatus("active")}
-                    >
-                      {t("partners.activate")}
-                    </button>
-                  ) : null}
-                  {entry.status !== "revoked" ? (
-                    <button
-                      type="button"
-                      style={actionButtonStyle({ tone: "secondary" })}
-                      disabled={changingStatus === "revoked"}
-                      onClick={() => void setEntryStatus("revoked")}
-                    >
-                      {t("partners.revoke")}
-                    </button>
-                  ) : null}
-                </div>
-              </WorkflowPanel>
-            </div>
-
-            <div id="credentials" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.credentialsTitle}
-                description={copy.credentialsSubtitle}
-              >
-                <button
-                  type="button"
-                  style={actionButtonStyle({ tone: "secondary", size: "sm" })}
-                  disabled={issuingCredential || entry.status === "revoked"}
-                  onClick={() => void issueCredential()}
-                >
-                  {issuingCredential
-                    ? t("partners.rotatingCredential")
-                    : t("partners.rotateCredential")}
-                </button>
-
-                {issuedCredential ? (
-                  <CalloutBanner
-                    tone="info"
-                    title={t("partners.plaintextCredential")}
-                    description={issuedCredential.plaintextKey}
-                  />
-                ) : null}
-
-                {credentials.length > 0 ? (
-                  <div style={{ display: "grid", gap: 10 }}>
-                    {credentials.map((credential) => (
-                      <div
-                        key={credential.keyId}
-                        style={{
-                          display: "grid",
-                          gap: 6,
-                          padding: "12px 14px",
-                          borderRadius: 14,
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 8,
-                            alignItems: "center",
-                          }}
-                        >
-                          <strong style={{ fontSize: 13.5, color: "#0f172a" }}>
-                            {credential.keyPrefix}
-                            {credential.maskedSuffix}
-                          </strong>
-                          <StatusChip
-                            label={
-                              credential.revokedAt
-                                ? t("partners.credentialStatus.revoked")
-                                : t("partners.credentialStatus.active")
-                            }
-                            tone={credential.revokedAt ? "danger" : "success"}
-                          />
-                        </div>
-                        <div style={{ fontSize: 12.5, color: "#64748b" }}>
-                          {t("partners.credentialMeta.createdAt")}:{" "}
-                          {formatDateTime(credential.createdAt)}
-                        </div>
-                        <div style={{ fontSize: 12.5, color: "#64748b" }}>
-                          {t("partners.credentialMeta.lastUsedAt")}:{" "}
-                          {credential.lastUsedAt
-                            ? formatDateTime(credential.lastUsedAt)
-                            : "—"}
-                        </div>
-                        <div style={{ fontSize: 12.5, color: "#64748b" }}>
-                          {t("partners.credentialMeta.source")}:{" "}
-                          {credential.source}
-                        </div>
-                        {!credential.revokedAt ? (
-                          <button
-                            type="button"
-                            style={actionButtonStyle({
-                              tone: "secondary",
-                              size: "sm",
-                            })}
-                            disabled={revokingCredentialId === credential.keyId}
-                            onClick={() =>
-                              void revokeCredential(credential.keyId)
-                            }
-                          >
-                            {revokingCredentialId === credential.keyId
-                              ? t("partners.revokingCredential")
-                              : t("partners.revokeCredential")}
-                          </button>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ color: "#64748b", fontSize: 13 }}>
-                    {t("partners.emptyCredentials")}
-                  </div>
-                )}
-              </WorkflowPanel>
-            </div>
-
-            <div id="audit" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.auditTitle}
-                description={copy.auditSubtitle}
-              >
-                <DetailMetadataGrid items={auditItems} minColumnWidth="220px" />
-              </WorkflowPanel>
-            </div>
+              )}
+            </WorkflowPanel>
           </>
         }
       />

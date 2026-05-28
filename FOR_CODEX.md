@@ -17,13 +17,6 @@ Before doing anything:
 9. read `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/01_decision_tables.md`
 10. treat generated views as derived from machine-readable state
 
-Delivery gate for all modes:
-
-- this rule applies even in direct/manual chat sessions, not only supervisor dispatch
-- if you touch a fragile surface from `docs/ops/branch-strategy.md` §11.1 or make a multi-file design-intent change, do not end the session with working-tree-only changes; create a task-scoped anchor/closeout commit first
-- unrelated dirty files are not a valid excuse to skip the commit; stage only task-owned files or move to a clean branch/worktree
-- if a safe commit/push is not possible, explicitly report blocked/progress and why; do not present the work as complete
-
 Working rules:
 
 - current mode is `discussion_planning`

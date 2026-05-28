@@ -72,21 +72,13 @@ future task proves all of the following:
 
 ### 3. Production cutover gate
 
-Live production switching requires a separate cutover task or runbook. That
-later task is not considered fully approved until both of the following happen:
-
-1. the governance reviewer approves the cutover record itself
-2. the supervisor-controlled machine-truth closeout records the task-scoped
-   commit/push evidence for the promoted surface
-
-That later task must also record:
+Live production switching requires a separate cutover task or runbook with
+supervisor and governance sign-off. That later task must record:
 
 1. the specific partner entries being migrated
 2. the old route or host that remains valid for rollback
 3. the monitoring and support path for the migrated entry
 4. the production promotion timestamp and rollback decision record
-5. the commit hash, commit subject, push remote, and push branch used for the
-   machine-truth closeout
 
 `PBK-UI-005` resolves topology, transition length, and retirement strategy. It
 does not authorize production promotion by itself.

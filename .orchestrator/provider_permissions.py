@@ -484,10 +484,6 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     config = config or load_config()
     from adapters import build_adapter
 
-    try:
-        cli_search_roots = [config_path(config, "status_file").parents[0]]
-    except KeyError:
-        cli_search_roots = [ROOT]
     code_cli = _code_cli_info()
     workspace_settings = _workspace_settings()
     claude_path, claude_version = _find_extension("anthropic.claude-code")
@@ -505,11 +501,11 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     desired_workspace = desired_workspace_settings(config)
     desired_claude = desired_claude_local_settings(config, current=claude_local)
     desired_gemini = desired_gemini_settings(config)
-    codex_binary = command_exists("codex", search_roots=cli_search_roots)
-    gemini_binary = command_exists("gemini", search_roots=cli_search_roots)
-    qwen_binary = command_exists("qwen", search_roots=cli_search_roots)
-    claude_binary = command_exists("claude", search_roots=cli_search_roots)
-    copilot_binary = command_exists("copilot", search_roots=cli_search_roots)
+    codex_binary = command_exists("codex")
+    gemini_binary = command_exists("gemini")
+    qwen_binary = command_exists("qwen")
+    claude_binary = command_exists("claude")
+    copilot_binary = command_exists("copilot")
     gh_binary = command_exists("gh")
     gh_version = _gh_version(gh_binary)
     gh_auth_ready = _gh_auth_ready(gh_binary)
@@ -845,7 +841,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
         if provider_key == "claude" or provider_cfg.get("delivery_mode") != "claude_cli":
             continue
         runtime = provider_cfg.get("runtime", {})
-        runtime_cli = command_exists(runtime.get("cli") or "claude", search_roots=cli_search_roots)
+        runtime_cli = command_exists(runtime.get("cli") or "claude")
         runtime_env = os.environ.copy()
         runtime_overrides = runtime_env_overrides(runtime)
         runtime_env.update(runtime_overrides)
@@ -891,7 +887,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
         if provider_key == "gemini" or provider_cfg.get("delivery_mode") != "gemini":
             continue
         gemini_runtime = provider_cfg.get("gemini", {})
-        runtime_cli = command_exists(gemini_runtime.get("cli") or "gemini", search_roots=cli_search_roots)
+        runtime_cli = command_exists(gemini_runtime.get("cli") or "gemini")
         runtime_env = os.environ.copy()
         runtime_overrides = runtime_env_overrides(gemini_runtime)
         runtime_env.update(runtime_overrides)
@@ -907,7 +903,6 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
         paths.update(
             {
                 "extension": str(gemini_path) if gemini_path else None,
-                "binary": runtime_cli,
                 "cli_settings": str(settings_path),
                 "oauth_creds": str(oauth_creds_path) if oauth_creds_path.exists() else None,
                 "resolved_home": runtime_overrides.get("HOME"),

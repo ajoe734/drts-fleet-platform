@@ -7,27 +7,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
-import {
-  actionButtonStyle,
-  emptyStateStyle,
-  linkStyle,
-  mergeStyles,
-  pageHeaderStyle,
-  pageHeaderSubtitleStyle,
-  pageHeaderTitleStyle,
-  statusBadgeStyle,
-  surfaceCardStyle,
-  tableCardStyle,
-  tableCellStyle,
-  tableEmptyStateStyle,
-  tableHeadCellStyle,
-  tableStyle,
-  toggleButtonStyle,
-  toggleGroupStyle,
-  toolbarStyle,
-  inputStyle,
-  monoTextStyle,
-} from "@/components/platform-ui";
 import { useTranslation } from "@/lib/i18n";
 import {
   formatPlatformCodeLabel,
@@ -85,14 +64,14 @@ function shortHash(value: string | null | undefined) {
   return `${value.slice(0, 12)}...`;
 }
 
-function publicInfoStatusTone(status: PublicInfoVersionRecord["status"]) {
+function publicInfoStatusBadge(status: PublicInfoVersionRecord["status"]) {
   if (status === "published") {
-    return "success" as const;
+    return "admin-badge--success";
   }
   if (status === "retired") {
-    return "neutral" as const;
+    return "admin-badge--neutral";
   }
-  return "warning" as const;
+  return "admin-badge--warning";
 }
 
 export default function SwitchboardPage() {
@@ -159,37 +138,6 @@ export default function SwitchboardPage() {
     () => publicInfo.filter((version) => version.status === "draft"),
     [publicInfo],
   );
-  const livePublicInfoVersion = publishedVersions[0] ?? null;
-  const livePlacardVersion =
-    placards.find((placard) => placard.publishedAt != null) ??
-    placards[0] ??
-    null;
-  const switchboardWorkflowCopy =
-    locale === "en"
-      ? {
-          governanceTitle: "Versioning governance",
-          governanceNote:
-            "Public-info disclosure versions and placard artifacts remain linked so publication history, rider disclosure, and physical placard issuance can be audited together.",
-          liveVersion: "Live disclosure",
-          livePlacard: "Current placard",
-          history: "History framing",
-          historyNote:
-            "Drafts can be edited or deleted until publication. Published versions stay immutable and feed downstream placard lineage.",
-          noLiveVersion: "No published public info version yet.",
-          noLivePlacard: "No placard artifact generated yet.",
-        }
-      : {
-          governanceTitle: "版本治理",
-          governanceNote:
-            "公開資訊版本與立牌成品維持可追溯連結，讓發布歷史、乘客揭露與實體立牌發放可以一起被稽核。",
-          liveVersion: "目前生效揭露",
-          livePlacard: "現行立牌",
-          history: "歷史框架",
-          historyNote:
-            "草稿在發布前可編輯或刪除；一旦發布即保持不可變，並成為後續立牌沿革來源。",
-          noLiveVersion: "目前尚無已發布公開資訊版本。",
-          noLivePlacard: "目前尚未產生立牌成品。",
-        };
 
   useEffect(() => {
     const preferredVersion = getPreferredPlacardSourceVersion(publicInfo);
@@ -309,21 +257,20 @@ export default function SwitchboardPage() {
   }
 
   if (loading) {
-    return <div style={emptyStateStyle}>{t("switchboard.loading")}</div>;
+    return <div className="admin-empty">{t("switchboard.loading")}</div>;
   }
 
   return (
     <div>
-      <div style={pageHeaderStyle}>
-        <h1 style={pageHeaderTitleStyle}>{t("switchboard.title")}</h1>
-        <p style={pageHeaderSubtitleStyle}>{t("switchboard.subtitle")}</p>
+      <div className="admin-page-header">
+        <h1>{t("switchboard.title")}</h1>
+        <p>{t("switchboard.subtitle")}</p>
       </div>
 
       {error && (
         <div
-          style={mergeStyles(surfaceCardStyle, {
-            borderColor: "rgba(239,68,68,0.3)",
-          })}
+          className="admin-card"
+          style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
           <p style={{ color: "#dc2626", margin: 0 }}>
             {getPlatformLabel(locale, "error")}: {error}
@@ -364,7 +311,7 @@ export default function SwitchboardPage() {
             note: t("switchboard.placardsTiedToLiveNote"),
           },
         ].map((card) => (
-          <div key={card.label} style={surfaceCardStyle}>
+          <div key={card.label} className="admin-card">
             <p style={{ margin: "0 0 8px", fontSize: 13, color: "#6b7280" }}>
               {card.label}
             </p>
@@ -376,92 +323,16 @@ export default function SwitchboardPage() {
         ))}
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div
-          style={mergeStyles(surfaceCardStyle, {
-            marginBottom: 0,
-            background: "rgba(15,118,110,0.04)",
-          })}
-        >
-          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
-            {switchboardWorkflowCopy.governanceTitle}
-          </p>
-          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
-            {switchboardWorkflowCopy.governanceNote}
-          </p>
-        </div>
-        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
-          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
-            {switchboardWorkflowCopy.liveVersion}
-          </p>
-          {livePublicInfoVersion ? (
-            <>
-              <strong style={{ display: "block", fontSize: 20 }}>
-                {livePublicInfoVersion.title}
-              </strong>
-              <small style={{ color: "#6b7280" }}>
-                {livePublicInfoVersion.versionId} ·{" "}
-                {formatDateTime(livePublicInfoVersion.publishedAt ?? "")}
-              </small>
-            </>
-          ) : (
-            <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-              {switchboardWorkflowCopy.noLiveVersion}
-            </p>
-          )}
-        </div>
-        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
-          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
-            {switchboardWorkflowCopy.livePlacard}
-          </p>
-          {livePlacardVersion ? (
-            <>
-              <strong style={{ display: "block", fontSize: 20 }}>
-                {livePlacardVersion.versionCode}
-              </strong>
-              <small style={{ color: "#6b7280" }}>
-                {livePlacardVersion.templateName} ·{" "}
-                {formatDateTime(
-                  livePlacardVersion.publishedAt ??
-                    livePlacardVersion.createdAt,
-                )}
-              </small>
-            </>
-          ) : (
-            <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-              {switchboardWorkflowCopy.noLivePlacard}
-            </p>
-          )}
-        </div>
-        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
-          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
-            {switchboardWorkflowCopy.history}
-          </p>
-          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
-            {switchboardWorkflowCopy.historyNote}
-          </p>
-        </div>
-      </div>
-
-      <div style={toolbarStyle}>
-        <div style={toggleGroupStyle}>
+      <div className="admin-toolbar">
+        <div className="admin-toggle-group">
           <button
-            type="button"
-            style={toggleButtonStyle(activeTab === "public-info")}
+            className={`admin-toggle-btn ${activeTab === "public-info" ? "active" : ""}`}
             onClick={() => setActiveTab("public-info")}
           >
             {t("switchboard.tab.publicInfo")} ({publicInfo.length})
           </button>
           <button
-            type="button"
-            style={toggleButtonStyle(activeTab === "placards")}
+            className={`admin-toggle-btn ${activeTab === "placards" ? "active" : ""}`}
             onClick={() => setActiveTab("placards")}
           >
             {t("switchboard.tab.placards")} ({placards.length})
@@ -469,8 +340,7 @@ export default function SwitchboardPage() {
         </div>
         {activeTab === "public-info" ? (
           <button
-            type="button"
-            style={actionButtonStyle({ tone: "primary" })}
+            className="admin-btn admin-btn--primary"
             onClick={() => setShowPublicInfoForm((current) => !current)}
           >
             {showPublicInfoForm
@@ -479,8 +349,7 @@ export default function SwitchboardPage() {
           </button>
         ) : (
           <button
-            type="button"
-            style={actionButtonStyle({ tone: "primary" })}
+            className="admin-btn admin-btn--primary"
             onClick={() => setShowPlacardForm((current) => !current)}
             disabled={publicInfo.length === 0}
           >
@@ -489,13 +358,13 @@ export default function SwitchboardPage() {
               : t("switchboard.generatePlacardVersion")}
           </button>
         )}
-        <button type="button" style={actionButtonStyle()} onClick={loadData}>
+        <button className="admin-btn admin-btn--secondary" onClick={loadData}>
           {t("common.refresh")}
         </button>
       </div>
 
       {activeTab === "public-info" && showPublicInfoForm && (
-        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 16 })}>
+        <div className="admin-card" style={{ marginBottom: 16 }}>
           <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
             {t("switchboard.newPublicInfoVersion")}
           </h3>
@@ -628,7 +497,7 @@ export default function SwitchboardPage() {
             </div>
             <div style={actionsStyle}>
               <button
-                style={actionButtonStyle({ tone: "primary" })}
+                className="admin-btn admin-btn--primary"
                 type="submit"
                 disabled={creatingPublicInfo}
               >
@@ -642,7 +511,7 @@ export default function SwitchboardPage() {
       )}
 
       {activeTab === "placards" && showPlacardForm && (
-        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 16 })}>
+        <div className="admin-card" style={{ marginBottom: 16 }}>
           <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
             {t("switchboard.generatePlacardVersion")}
           </h3>
@@ -730,7 +599,7 @@ export default function SwitchboardPage() {
             )}
             <div style={actionsStyle}>
               <button
-                style={actionButtonStyle({ tone: "primary" })}
+                className="admin-btn admin-btn--primary"
                 type="submit"
                 disabled={
                   creatingPlacard ||
@@ -748,42 +617,32 @@ export default function SwitchboardPage() {
         </div>
       )}
 
-      <div style={tableCardStyle}>
+      <div className="admin-card" style={{ overflowX: "auto" }}>
         {activeTab === "public-info" ? (
           publicInfo.length === 0 ? (
-            <p style={tableEmptyStateStyle}>{t("switchboard.noPublicInfo")}</p>
+            <p className="admin-empty">{t("switchboard.noPublicInfo")}</p>
           ) : (
-            <table style={tableStyle}>
+            <table className="admin-table">
               <thead>
                 <tr>
-                  <th style={tableHeadCellStyle}>
-                    {t("switchboard.col.version")}
-                  </th>
-                  <th style={tableHeadCellStyle}>
-                    {t("switchboard.col.phones")}
-                  </th>
-                  <th style={tableHeadCellStyle}>
-                    {t("switchboard.col.fare")}
-                  </th>
-                  <th style={tableHeadCellStyle}>
-                    {t("switchboard.col.lifecycle")}
-                  </th>
-                  <th style={tableHeadCellStyle}>
-                    {t("switchboard.col.actions")}
-                  </th>
+                  <th>{t("switchboard.col.version")}</th>
+                  <th>{t("switchboard.col.phones")}</th>
+                  <th>{t("switchboard.col.fare")}</th>
+                  <th>{t("switchboard.col.lifecycle")}</th>
+                  <th>{t("switchboard.col.actions")}</th>
                 </tr>
               </thead>
               <tbody>
                 {publicInfo.map((version) => (
                   <tr key={version.versionId}>
-                    <td style={tableCellStyle}>
+                    <td>
                       <div style={cellTitleStyle}>{version.title}</div>
                       <div style={monoSubcopyStyle}>{version.versionId}</div>
                       <div style={subcopyStyle}>
                         {formatDateTime(version.createdAt)}
                       </div>
                     </td>
-                    <td style={tableCellStyle}>
+                    <td>
                       <div>
                         {getPlatformLabel(locale, "call")}:{" "}
                         {version.callPhone ?? "—"}
@@ -793,7 +652,7 @@ export default function SwitchboardPage() {
                         {version.complaintPhone ?? "—"}
                       </div>
                     </td>
-                    <td style={tableCellStyle}>
+                    <td>
                       <div>
                         {version.callRateText ?? t("switchboard.noRateText")}
                       </div>
@@ -802,11 +661,9 @@ export default function SwitchboardPage() {
                         {version.paymentMethodText ?? "—"}
                       </div>
                     </td>
-                    <td style={tableCellStyle}>
+                    <td>
                       <span
-                        style={statusBadgeStyle(
-                          publicInfoStatusTone(version.status),
-                        )}
+                        className={`admin-badge ${publicInfoStatusBadge(version.status)}`}
                       >
                         {formatPlatformCodeLabel(locale, version.status)}
                       </span>
@@ -820,11 +677,11 @@ export default function SwitchboardPage() {
                         {version.publishedBy ?? "—"}
                       </div>
                     </td>
-                    <td style={tableCellStyle}>
+                    <td>
                       {version.status === "draft" ? (
                         <div style={actionsStyle}>
                           <button
-                            style={actionButtonStyle({ tone: "primary" })}
+                            className="admin-btn admin-btn--primary"
                             onClick={() =>
                               void handlePublish(version.versionId)
                             }
@@ -838,7 +695,7 @@ export default function SwitchboardPage() {
                               : t("switchboard.publishDraft")}
                           </button>
                           <button
-                            style={actionButtonStyle()}
+                            className="admin-btn admin-btn--secondary"
                             onClick={() =>
                               void handleDeleteDraft(version.versionId)
                             }
@@ -864,27 +721,17 @@ export default function SwitchboardPage() {
             </table>
           )
         ) : placards.length === 0 ? (
-          <p style={tableEmptyStateStyle}>{t("switchboard.noPlacards")}</p>
+          <p className="admin-empty">{t("switchboard.noPlacards")}</p>
         ) : (
-          <table style={tableStyle}>
+          <table className="admin-table">
             <thead>
               <tr>
-                <th style={tableHeadCellStyle}>
-                  {t("switchboard.col.placardId")}
-                </th>
-                <th style={tableHeadCellStyle}>
-                  {t("switchboard.col.sourceVersion")}
-                </th>
-                <th style={tableHeadCellStyle}>
-                  {t("switchboard.col.template")}
-                </th>
-                <th style={tableHeadCellStyle}>
-                  {t("switchboard.col.artifact")}
-                </th>
-                <th style={tableHeadCellStyle}>{t("fleet.col.status")}</th>
-                <th style={tableHeadCellStyle}>
-                  {t("switchboard.col.actions")}
-                </th>
+                <th>{t("switchboard.col.placardId")}</th>
+                <th>{t("switchboard.col.sourceVersion")}</th>
+                <th>{t("switchboard.col.template")}</th>
+                <th>{t("switchboard.col.artifact")}</th>
+                <th>{t("fleet.col.status")}</th>
+                <th>{t("switchboard.col.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -893,7 +740,7 @@ export default function SwitchboardPage() {
                   publicInfoById[placard.publicInfoVersionId];
                 return (
                   <tr key={placard.placardVersionId}>
-                    <td style={tableCellStyle}>
+                    <td>
                       <div style={cellTitleStyle}>{placard.versionCode}</div>
                       <div style={monoSubcopyStyle}>
                         {placard.placardVersionId}
@@ -902,7 +749,7 @@ export default function SwitchboardPage() {
                         {formatDateTime(placard.createdAt)}
                       </div>
                     </td>
-                    <td style={tableCellStyle}>
+                    <td>
                       <div>
                         {sourceVersion?.title ?? placard.publicInfoVersionId}
                       </div>
@@ -913,8 +760,8 @@ export default function SwitchboardPage() {
                         )}
                       </div>
                     </td>
-                    <td style={tableCellStyle}>{placard.templateName}</td>
-                    <td style={tableCellStyle}>
+                    <td>{placard.templateName}</td>
+                    <td>
                       <div style={monoSubcopyStyle}>
                         {placard.artifactFileId ??
                           getPlatformLabel(locale, "pendingArtifactId")}
@@ -924,7 +771,7 @@ export default function SwitchboardPage() {
                       </div>
                       {placard.artifactDownloadUrl ? (
                         <a
-                          style={linkStyle}
+                          className="admin-link"
                           href={placard.artifactDownloadUrl}
                           rel="noreferrer"
                           target="_blank"
@@ -938,11 +785,13 @@ export default function SwitchboardPage() {
                         {formatDateTime(placard.artifactExpiresAt ?? "")}
                       </div>
                     </td>
-                    <td style={tableCellStyle}>
+                    <td>
                       <span
-                        style={statusBadgeStyle(
-                          placard.publishedAt ? "success" : "warning",
-                        )}
+                        className={`admin-badge ${
+                          placard.publishedAt
+                            ? "admin-badge--success"
+                            : "admin-badge--warning"
+                        }`}
                       >
                         {formatPlatformCodeLabel(
                           locale,
@@ -953,10 +802,10 @@ export default function SwitchboardPage() {
                         {formatDateTime(placard.publishedAt ?? "")}
                       </div>
                     </td>
-                    <td style={tableCellStyle}>
+                    <td>
                       {!placard.publishedAt ? (
                         <button
-                          style={actionButtonStyle({ tone: "primary" })}
+                          className="admin-btn admin-btn--primary"
                           onClick={() =>
                             void handlePublishPlacard(placard.placardVersionId)
                           }
@@ -998,6 +847,14 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 500,
 };
 
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(148,163,184,0.45)",
+  background: "#fff",
+};
+
 const actionsStyle: React.CSSProperties = {
   display: "flex",
   gap: 12,
@@ -1015,5 +872,5 @@ const subcopyStyle: React.CSSProperties = {
 
 const monoSubcopyStyle: React.CSSProperties = {
   ...subcopyStyle,
-  ...monoTextStyle,
+  fontFamily: "monospace",
 };

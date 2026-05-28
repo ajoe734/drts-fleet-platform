@@ -46,15 +46,6 @@ This means:
 - `done` in the dashboard means only the currently recorded backlog is done
 - if more work is known to be required, it must be added to the task board immediately instead of explained only in prose
 
-## 0.6 Delivery Compliance Gate For All Sessions
-
-These rules apply in supervisor-managed execution, direct Codex/Claude/etc chat sessions, and any ad hoc repo work. They are not limited to supervisor wakeups.
-
-- If you touch a fragile surface from `docs/ops/branch-strategy.md` §11.1, or make a multi-file design-intent change, do not leave the work only in the working tree at end of turn.
-- Before yielding, switching tasks, or describing the work as complete, create a task-scoped anchor commit or closeout commit, whichever matches the current lifecycle state.
-- Existing unrelated dirty files are not a valid reason to skip the commit. Stage only task-owned files, or move the task to a clean branch/worktree and continue.
-- If a safe task-scoped commit or normal non-force push is not possible, explicitly record and report a blocker/progress state. Do not describe the work as complete.
-
 ## 1. Canonical Read Order
 
 Read these layers in order before starting work.

@@ -8,9 +8,7 @@ from adapters.base import DeliveryCapability, DeliveryRequest, DeliveryResult
 from adapters.claude_code import ClaudeCodeAdapter
 from common import (
     agent_config_for,
-    apply_orchestrator_runtime_env,
     config_path,
-    delivery_workspace_root,
     new_runtime_id,
     runtime_log_path,
     shell_quote,
@@ -38,11 +36,6 @@ def _claude_runtime_env(runtime: dict, *, ensure_dirs: bool = False) -> dict[str
     return env
 
 
-def _claude_cli_path(config: dict, runtime: dict) -> str | None:
-    workspace_root = config_path(config, "status_file").parents[0]
-    return command_exists(runtime.get("cli") or "claude", search_roots=[workspace_root])
-
-
 def _claude_auth_ready(cli: str | None, env: dict[str, str] | None = None) -> bool:
     if not cli:
         return False
@@ -62,7 +55,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
     def capability(self, agent_id: str) -> DeliveryCapability:
         provider_key, provider = _claude_provider_for_agent(self.config, agent_id)
         runtime = provider.get("runtime", {})
-        cli = _claude_cli_path(self.config, runtime)
+        cli = command_exists(runtime.get("cli") or "claude")
         auth_env = _claude_runtime_env(runtime)
         if cli and _claude_auth_ready(cli, env=auth_env):
             notes = "Uses non-interactive Claude CLI sessions with the local approval broker hooks."
@@ -96,7 +89,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
     def deliver(self, request: DeliveryRequest) -> DeliveryResult:
         provider_key, provider = _claude_provider_for_agent(self.config, request.agent_id)
         runtime = provider.get("runtime", {})
-        cli = _claude_cli_path(self.config, runtime)
+        cli = command_exists(runtime.get("cli") or "claude")
         env = _claude_runtime_env(runtime, ensure_dirs=True)
         auth_ready = _claude_auth_ready(cli, env=env)
         if not cli or not auth_ready:
@@ -111,7 +104,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
 
         output_format = runtime.get("output_format", "stream-json")
         command = [
-            cli,
+            runtime.get("cli") or cli,
             "-p",
             request.message,
             "--output-format",
@@ -134,7 +127,6 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
 
         run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
-        workspace_root = delivery_workspace_root(self.config, request.metadata)
         env.update(
             {
                 "ORCH_RUN_ID": run_id,
@@ -145,10 +137,9 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
                 "ORCH_TARGET_FILES": "\n".join(request.target_files),
             }
         )
-        apply_orchestrator_runtime_env(env, self.config, request.metadata)
         process, _ = spawn_background_process(
             command,
-            cwd=workspace_root,
+            cwd=config_path(self.config, "status_file").parents[0],
             log_path=log_path,
             env=env,
         )

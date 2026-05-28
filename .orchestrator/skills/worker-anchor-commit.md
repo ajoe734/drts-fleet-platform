@@ -24,15 +24,7 @@ Working tree is **not** a staging area for design intent. Stash is **not** an al
 
 1. Confirm current branch matches `<lane>/<task-id-kebab>`. If not:
    ```bash
-   git fetch origin
-   existing=$(git worktree list --porcelain | awk 'BEGIN{p=""} /^worktree /{p=substr($0,10)} /^branch refs\/heads\/<lane>\/<task-id-kebab>$/{print p; exit}')
-   if [ -n "$existing" ]; then
-     cd "$existing"
-   elif git show-ref --verify --quiet refs/heads/<lane>/<task-id-kebab>; then
-     git switch <lane>/<task-id-kebab>
-   else
-     git switch -c <lane>/<task-id-kebab> origin/dev
-   fi
+   git switch -c <lane>/<task-id-kebab> origin/dev
    ```
    In v4 the single integration trunk is `dev` for backend, frontend, and docs. `branch_routing.route_task(...)` returns `base_branch="dev"` for all current track rules.
 2. Run `git status --short` and confirm the listed files belong to this task. If files from another task are present, stop and report a blocker — do not sweep unrelated edits into the anchor.
@@ -82,7 +74,6 @@ If any answer is yes and current branch is not `<lane>/<task-id-kebab>`, stop an
 ## Canonical anchor example
 
 ```bash
-git fetch origin
 git switch -c claude/ops-git-workflow-004 origin/dev
 # edit docs/ops/branch-strategy.md
 git status --short
