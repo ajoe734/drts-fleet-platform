@@ -658,34 +658,44 @@ function buildAvailableActions({
   selectedTenantId: string;
   selectedTenantOverride: FeatureFlagOverrideRecord | null;
 }): ResourceActionDescriptor[] {
+  const withDisabledReason = (
+    descriptor: ResourceActionDescriptor,
+    disabledReasonCode?: string,
+  ): ResourceActionDescriptor =>
+    disabledReasonCode ? { ...descriptor, disabledReasonCode } : descriptor;
+
   return [
-    {
-      action: "toggle_global",
-      enabled: Boolean(global),
-      disabledReasonCode: global ? undefined : "global_default_missing",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "add_tenant_override",
-      enabled: Boolean(selectedTenantId),
-      disabledReasonCode: selectedTenantId
-        ? undefined
-        : "select_tenant_scope_first",
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "remove_tenant_override",
-      enabled: Boolean(selectedTenantOverride),
-      disabledReasonCode: !selectedTenantId
+    withDisabledReason(
+      {
+        action: "toggle_global",
+        enabled: Boolean(global),
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      global ? undefined : "global_default_missing",
+    ),
+    withDisabledReason(
+      {
+        action: "add_tenant_override",
+        enabled: Boolean(selectedTenantId),
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      selectedTenantId ? undefined : "select_tenant_scope_first",
+    ),
+    withDisabledReason(
+      {
+        action: "remove_tenant_override",
+        enabled: Boolean(selectedTenantOverride),
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      !selectedTenantId
         ? "select_tenant_scope_first"
         : !selectedTenantOverride
           ? "no_override_for_selected_scope"
           : undefined,
-      requiresReason: true,
-      riskLevel: "high",
-    },
+    ),
     {
       action: "view_change_history",
       enabled: true,
@@ -1813,13 +1823,18 @@ export default function FeatureFlagsPage() {
             null,
         });
       } else if (pendingAction.kind === "add_tenant_override") {
+        const overrideCommand =
+          pendingAction.description.trim().length > 0
+            ? {
+                enabled: pendingAction.enabled,
+                description: pendingAction.description.trim(),
+              }
+            : { enabled: pendingAction.enabled };
+
         await client.upsertFeatureFlagTenantOverride(
           pendingAction.row.key,
           pendingAction.tenantId,
-          {
-            enabled: pendingAction.enabled,
-            description: pendingAction.description.trim() || undefined,
-          },
+          overrideCommand,
         );
 
         const targetTenant =
