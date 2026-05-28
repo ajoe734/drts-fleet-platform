@@ -564,7 +564,6 @@ export default async function TenantBookingsPage({
   const emptyReason: TenantEmptyReason | null =
     emptyReasonOverride ??
     (listEnvelope?.emptyState?.reason as TenantEmptyReason | undefined) ??
-    undefined ??
     (bookingsSettled.status === "rejected"
       ? getEmptyReasonFromError(bookingsSettled.reason)
       : result.total === 0
