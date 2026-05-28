@@ -52,6 +52,18 @@ type CrossLink = {
   openInNewTab: boolean;
 };
 
+type ActionableAuditLogRecord = AuditLogRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type ActionableEvidenceLegalHoldRecord = EvidenceLegalHoldRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type ActionableEvidenceDeletionExceptionRecord = EvidenceDeletionExceptionRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
 type ActionModalState =
   | { action: "grant_legal_hold"; record: AuditLogRecord }
   | { action: "lift_legal_hold"; hold: EvidenceLegalHoldRecord }
@@ -154,6 +166,16 @@ const actionRowStyle = {
   gap: 8,
   flexWrap: "wrap",
   alignItems: "center",
+} satisfies CSSProperties;
+
+const sidebarStackStyle = {
+  display: "grid",
+  gap: 16,
+} satisfies CSSProperties;
+
+const clusterListStyle = {
+  display: "grid",
+  gap: 10,
 } satisfies CSSProperties;
 
 const overlayStyle = {
@@ -319,15 +341,98 @@ function inferCrossLink(record: AuditLogRecord, locale: string): CrossLink | nul
   return null;
 }
 
+function fallbackAuditActions(
+  selectedRecord: AuditLogRecord | null,
+  governance: {
+    hold: EvidenceLegalHoldRecord | null;
+    deletionException: EvidenceDeletionExceptionRecord | null;
+  },
+): ResourceActionDescriptor[] {
+  return [
+    {
+      action: "refresh",
+      enabled: true,
+      riskLevel: "low",
+    },
+    {
+      action: "grant_legal_hold",
+      enabled: Boolean(selectedRecord) && !governance.hold,
+      disabledReasonCode: !selectedRecord
+        ? "select_audit_record"
+        : governance.hold
+          ? "already_on_hold"
+          : undefined,
+      requiresReason: true,
+      riskLevel: "high",
+    },
+    {
+      action: "lift_legal_hold",
+      enabled: Boolean(governance.hold),
+      disabledReasonCode: governance.hold ? undefined : "no_active_hold",
+      requiresReason: true,
+      riskLevel: "high",
+    },
+    {
+      action: "grant_deletion_exception",
+      enabled: Boolean(selectedRecord) && !governance.deletionException,
+      disabledReasonCode: !selectedRecord
+        ? "select_audit_record"
+        : governance.deletionException
+          ? "already_has_exception"
+          : undefined,
+      requiresReason: true,
+      riskLevel: "high",
+    },
+    {
+      action: "revoke_deletion_exception",
+      enabled: Boolean(governance.deletionException),
+      disabledReasonCode: governance.deletionException
+        ? undefined
+        : "no_active_exception",
+      requiresReason: true,
+      riskLevel: "high",
+    },
+  ];
+}
+
+function fallbackHoldActions(
+  hold: EvidenceLegalHoldRecord,
+): ResourceActionDescriptor[] {
+  return [
+    {
+      action: "lift_legal_hold",
+      enabled: hold.status === "active",
+      disabledReasonCode: hold.status === "active" ? undefined : "hold_not_active",
+      requiresReason: true,
+      riskLevel: "high",
+    },
+  ];
+}
+
+function fallbackExceptionActions(
+  exception: EvidenceDeletionExceptionRecord,
+): ResourceActionDescriptor[] {
+  return [
+    {
+      action: "revoke_deletion_exception",
+      enabled: exception.status === "active",
+      disabledReasonCode:
+        exception.status === "active" ? undefined : "exception_not_active",
+      requiresReason: true,
+      riskLevel: "high",
+    },
+  ];
+}
+
 export default function AuditPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const searchParams = useSearchParams();
-  const [records, setRecords] = useState<AuditLogRecord[]>([]);
+  const [records, setRecords] = useState<ActionableAuditLogRecord[]>([]);
   const [policies, setPolicies] = useState<EvidenceRetentionPolicyRecord[]>([]);
-  const [legalHolds, setLegalHolds] = useState<EvidenceLegalHoldRecord[]>([]);
+  const [legalHolds, setLegalHolds] = useState<ActionableEvidenceLegalHoldRecord[]>([]);
   const [deletionExceptions, setDeletionExceptions] = useState<
-    EvidenceDeletionExceptionRecord[]
+    ActionableEvidenceDeletionExceptionRecord[]
   >([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -466,52 +571,12 @@ export default function AuditPage() {
   }, [activeDeletionExceptions, activeLegalHolds, selectedRecord]);
 
   const availableActions = useMemo<ResourceActionDescriptor[]>(() => {
-    return [
-      {
-        action: "refresh",
-        enabled: true,
-        riskLevel: "low",
-      },
-      {
-        action: "grant_legal_hold",
-        enabled: Boolean(selectedRecord) && !selectedGovernance.hold,
-        disabledReasonCode: !selectedRecord
-          ? "select_audit_record"
-          : selectedGovernance.hold
-            ? "already_on_hold"
-            : undefined,
-        requiresReason: true,
-        riskLevel: "high",
-      },
-      {
-        action: "lift_legal_hold",
-        enabled: Boolean(selectedGovernance.hold),
-        disabledReasonCode: selectedGovernance.hold ? undefined : "no_active_hold",
-        requiresReason: true,
-        riskLevel: "high",
-      },
-      {
-        action: "grant_deletion_exception",
-        enabled: Boolean(selectedRecord) && !selectedGovernance.deletionException,
-        disabledReasonCode: !selectedRecord
-          ? "select_audit_record"
-          : selectedGovernance.deletionException
-            ? "already_has_exception"
-            : undefined,
-        requiresReason: true,
-        riskLevel: "high",
-      },
-      {
-        action: "revoke_deletion_exception",
-        enabled: Boolean(selectedGovernance.deletionException),
-        disabledReasonCode: selectedGovernance.deletionException
-          ? undefined
-          : "no_active_exception",
-        requiresReason: true,
-        riskLevel: "high",
-      },
-    ];
-  }, [selectedGovernance.deletionException, selectedGovernance.hold, selectedRecord]);
+    const resourceActions = selectedRecord?.availableActions;
+    if (resourceActions && resourceActions.length > 0) {
+      return resourceActions;
+    }
+    return fallbackAuditActions(selectedRecord, selectedGovernance);
+  }, [selectedGovernance, selectedRecord]);
 
   const emptyReason = useMemo<EmptyReason>(() => {
     const errorText = error?.toLowerCase() ?? "";
@@ -556,6 +621,47 @@ export default function AuditPage() {
       window.location.assign(link.href);
     }
   }, []);
+
+  const handleAction = useCallback(
+    (
+      descriptor: ResourceActionDescriptor,
+      context?: {
+        record?: AuditLogRecord | null;
+        hold?: EvidenceLegalHoldRecord | null;
+        deletionException?: EvidenceDeletionExceptionRecord | null;
+      },
+    ) => {
+      if (descriptor.action === "refresh") {
+        void loadData();
+        return;
+      }
+      if (descriptor.action === "grant_legal_hold" && context?.record) {
+        setModal({ action: "grant_legal_hold", record: context.record });
+        return;
+      }
+      if (descriptor.action === "lift_legal_hold" && context?.hold) {
+        setModal({ action: "lift_legal_hold", hold: context.hold });
+        return;
+      }
+      if (descriptor.action === "grant_deletion_exception" && context?.record) {
+        setModal({
+          action: "grant_deletion_exception",
+          record: context.record,
+        });
+        return;
+      }
+      if (
+        descriptor.action === "revoke_deletion_exception" &&
+        context?.deletionException
+      ) {
+        setModal({
+          action: "revoke_deletion_exception",
+          exception: context.deletionException,
+        });
+      }
+    },
+    [loadData],
+  );
 
   const submitModal = useCallback(async () => {
     if (!modal) return;
@@ -898,39 +1004,13 @@ export default function AuditPage() {
                       key={action.action}
                       locale={locale}
                       descriptor={action}
-                      onClick={() => {
-                        if (action.action === "refresh") {
-                          void loadData();
-                          return;
-                        }
-                        if (action.action === "grant_legal_hold" && selectedRecord) {
-                          setModal({ action: "grant_legal_hold", record: selectedRecord });
-                          return;
-                        }
-                        if (action.action === "lift_legal_hold" && selectedGovernance.hold) {
-                          setModal({ action: "lift_legal_hold", hold: selectedGovernance.hold });
-                          return;
-                        }
-                        if (
-                          action.action === "grant_deletion_exception" &&
-                          selectedRecord
-                        ) {
-                          setModal({
-                            action: "grant_deletion_exception",
-                            record: selectedRecord,
-                          });
-                          return;
-                        }
-                        if (
-                          action.action === "revoke_deletion_exception" &&
-                          selectedGovernance.deletionException
-                        ) {
-                          setModal({
-                            action: "revoke_deletion_exception",
-                            exception: selectedGovernance.deletionException,
-                          });
-                        }
-                      }}
+                      onClick={() =>
+                        handleAction(action, {
+                          record: selectedRecord,
+                          hold: selectedGovernance.hold,
+                          deletionException: selectedGovernance.deletionException,
+                        })
+                      }
                     />
                   ))}
                 </div>
@@ -1033,21 +1113,37 @@ export default function AuditPage() {
                                 </div>
                               </td>
                               <td style={tdStyle}>
-                                <div style={pillRowStyle}>
+                                <div style={{ display: "grid", gap: 8 }}>
+                                  <div style={pillRowStyle}>
+                                    {hold ? (
+                                      <CanvasPill theme={theme} tone="warn">
+                                        {text(locale, "Legal hold", "Legal hold")}
+                                      </CanvasPill>
+                                    ) : null}
+                                    {deletionException ? (
+                                      <CanvasPill theme={theme} tone="danger">
+                                        {text(locale, "Deletion exception", "刪除例外")}
+                                      </CanvasPill>
+                                    ) : null}
+                                    {!hold && !deletionException ? (
+                                      <CanvasPill theme={theme} tone="neutral">
+                                        {text(locale, "Standard retention", "標準保存")}
+                                      </CanvasPill>
+                                    ) : null}
+                                  </div>
                                   {hold ? (
-                                    <CanvasPill theme={theme} tone="warn">
-                                      {text(locale, "Legal hold", "Legal hold")}
-                                    </CanvasPill>
+                                    <div style={subTextStyle}>
+                                      {text(locale, "Owner", "Owner")}: {hold.placedByActorId}
+                                    </div>
                                   ) : null}
                                   {deletionException ? (
-                                    <CanvasPill theme={theme} tone="danger">
-                                      {text(locale, "Deletion exception", "刪除例外")}
-                                    </CanvasPill>
-                                  ) : null}
-                                  {!hold && !deletionException ? (
-                                    <CanvasPill theme={theme} tone="neutral">
-                                      {text(locale, "Standard retention", "標準保存")}
-                                    </CanvasPill>
+                                    <div style={subTextStyle}>
+                                      {text(locale, "Reason", "原因")}:{" "}
+                                      {formatPlatformCodeLabel(
+                                        locale,
+                                        deletionException.reasonCode,
+                                      )}
+                                    </div>
                                   ) : null}
                                 </div>
                               </td>
@@ -1104,118 +1200,170 @@ export default function AuditPage() {
             </div>
           </CanvasCard>
 
-          <CanvasCard theme={theme}>
-            <div style={{ display: "grid", gap: 14 }}>
-              <div>
-                <div style={{ fontWeight: 700 }}>
-                  {text(locale, "Selected evidence", "已選證據")}
-                </div>
-                <div style={subTextStyle}>
-                  {text(
-                    locale,
-                    "Cross-app drill-in and high-risk actions are driven from the selected record's availableActions.",
-                    "跨 app 深連結與高風險動作由所選記錄的 availableActions 驅動。",
-                  )}
-                </div>
-              </div>
-              {!selectedRecord ? (
-                <EmptyStateCard
-                  locale={locale}
-                  reason="filtered_empty"
-                  nextAction={{ action: "refresh", enabled: true, riskLevel: "low" }}
-                  onAction={() => void loadData()}
-                />
-              ) : (
-                <>
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <MetadataRow
-                      label={text(locale, "Audit ID", "Audit ID")}
-                      value={selectedRecord.auditId}
-                      mono
-                    />
-                    <MetadataRow
-                      label={text(locale, "Request ID", "Request ID")}
-                      value={selectedRecord.requestId}
-                      mono
-                    />
-                    <MetadataRow
-                      label={text(locale, "Tenant", "租戶")}
-                      value={selectedRecord.tenantId ?? "—"}
-                      mono
-                    />
-                    <MetadataRow
-                      label={text(locale, "Actor", "操作者")}
-                      value={`${formatPlatformCodeLabel(locale, selectedRecord.actorType)} · ${selectedRecord.actorId ?? "system"}`}
-                    />
-                    <MetadataRow
-                      label={text(locale, "Resource", "資源")}
-                      value={`${selectedRecord.resourceType}${selectedRecord.resourceId ? ` · ${selectedRecord.resourceId}` : ""}`}
-                    />
-                    <MetadataRow
-                      label={text(locale, "Evidence family", "證據家族")}
-                      value={formatPlatformCodeLabel(locale, mapRecordFamily(selectedRecord))}
-                    />
+          <div style={sidebarStackStyle}>
+            <CanvasCard theme={theme}>
+              <div style={{ display: "grid", gap: 14 }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>
+                    {text(locale, "Selected evidence", "已選證據")}
                   </div>
+                  <div style={subTextStyle}>
+                    {text(
+                      locale,
+                      "Cross-app drill-in and high-risk actions are driven from the selected record's availableActions.",
+                      "跨 app 深連結與高風險動作由所選記錄的 availableActions 驅動。",
+                    )}
+                  </div>
+                </div>
+                {!selectedRecord ? (
+                  <EmptyStateCard
+                    locale={locale}
+                    reason="filtered_empty"
+                    nextAction={{ action: "refresh", enabled: true, riskLevel: "low" }}
+                    onAction={() => void loadData()}
+                  />
+                ) : (
+                  <>
+                    <div style={{ display: "grid", gap: 10 }}>
+                      <MetadataRow
+                        label={text(locale, "Audit ID", "Audit ID")}
+                        value={selectedRecord.auditId}
+                        mono
+                      />
+                      <MetadataRow
+                        label={text(locale, "Request ID", "Request ID")}
+                        value={selectedRecord.requestId}
+                        mono
+                      />
+                      <MetadataRow
+                        label={text(locale, "Tenant", "租戶")}
+                        value={selectedRecord.tenantId ?? "—"}
+                        mono
+                      />
+                      <MetadataRow
+                        label={text(locale, "Actor", "操作者")}
+                        value={`${formatPlatformCodeLabel(locale, selectedRecord.actorType)} · ${selectedRecord.actorId ?? "system"}`}
+                      />
+                      <MetadataRow
+                        label={text(locale, "Resource", "資源")}
+                        value={`${selectedRecord.resourceType}${selectedRecord.resourceId ? ` · ${selectedRecord.resourceId}` : ""}`}
+                      />
+                      <MetadataRow
+                        label={text(locale, "Evidence family", "證據家族")}
+                        value={formatPlatformCodeLabel(locale, mapRecordFamily(selectedRecord))}
+                      />
+                    </div>
 
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <GovernanceDetailCard
-                      locale={locale}
-                      title={text(locale, "Legal hold", "Legal hold")}
-                      tone={selectedGovernance.hold ? "warn" : "neutral"}
-                      lines={
-                        selectedGovernance.hold
-                          ? [
-                              `${text(locale, "Owner", "Owner")}: ${selectedGovernance.hold.placedByActorId}`,
-                              `${text(locale, "Case", "案件")}: ${selectedGovernance.hold.caseNumber}`,
-                              `${text(locale, "Placed at", "建立時間")}: ${formatDateTime(selectedGovernance.hold.placedAt)}`,
-                            ]
-                          : [text(locale, "No active hold on this subject.", "此主體沒有有效 hold。")]
-                      }
-                    />
-                    <GovernanceDetailCard
-                      locale={locale}
-                      title={text(locale, "Deletion exception", "刪除例外")}
-                      tone={selectedGovernance.deletionException ? "danger" : "neutral"}
-                      lines={
-                        selectedGovernance.deletionException
-                          ? [
-                              `${text(locale, "Reviewer", "Reviewer")}: ${selectedGovernance.deletionException.reviewerActorId}`,
-                              `${text(locale, "Reason", "原因")}: ${formatPlatformCodeLabel(locale, selectedGovernance.deletionException.reasonCode)}`,
-                              `${text(locale, "Expires", "到期")}: ${formatDateTime(selectedGovernance.deletionException.expiresAt)}`,
-                            ]
-                          : [
-                              text(
-                                locale,
-                                "No active deletion exception on this subject.",
-                                "此主體沒有有效刪除例外。",
-                              ),
-                            ]
-                      }
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-          </CanvasCard>
+                    <div style={{ display: "grid", gap: 10 }}>
+                      <GovernanceDetailCard
+                        locale={locale}
+                        title={text(locale, "Legal hold", "Legal hold")}
+                        tone={selectedGovernance.hold ? "warn" : "neutral"}
+                        lines={
+                          selectedGovernance.hold
+                            ? [
+                                `${text(locale, "Owner", "Owner")}: ${selectedGovernance.hold.placedByActorId}`,
+                                `${text(locale, "Case", "案件")}: ${selectedGovernance.hold.caseNumber}`,
+                                `${text(locale, "Placed at", "建立時間")}: ${formatDateTime(selectedGovernance.hold.placedAt)}`,
+                              ]
+                            : [text(locale, "No active hold on this subject.", "此主體沒有有效 hold。")]
+                        }
+                      />
+                      <GovernanceDetailCard
+                        locale={locale}
+                        title={text(locale, "Deletion exception", "刪除例外")}
+                        tone={selectedGovernance.deletionException ? "danger" : "neutral"}
+                        lines={
+                          selectedGovernance.deletionException
+                            ? [
+                                `${text(locale, "Reviewer", "Reviewer")}: ${selectedGovernance.deletionException.reviewerActorId}`,
+                                `${text(locale, "Reason", "原因")}: ${formatPlatformCodeLabel(locale, selectedGovernance.deletionException.reasonCode)}`,
+                                `${text(locale, "Expires", "到期")}: ${formatDateTime(selectedGovernance.deletionException.expiresAt)}`,
+                              ]
+                            : [
+                                text(
+                                  locale,
+                                  "No active deletion exception on this subject.",
+                                  "此主體沒有有效刪除例外。",
+                                ),
+                              ]
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            </CanvasCard>
+
+            <GovernanceClusterCard
+              locale={locale}
+              title={text(locale, "Active legal holds", "有效 legal hold")}
+              tone="warn"
+              emptyReason={emptyReason}
+              items={activeLegalHolds.slice(0, 4).map((hold) => ({
+                id: hold.holdId,
+                headline: hold.subjectId,
+                eyebrow: formatPlatformCodeLabel(locale, hold.family),
+                lines: [
+                  `${text(locale, "Owner", "Owner")}: ${hold.placedByActorId}`,
+                  `${text(locale, "Case", "案件")}: ${hold.caseNumber}`,
+                  `${text(locale, "Placed", "建立")}: ${formatDateTime(hold.placedAt)}`,
+                ],
+              }))}
+            />
+
+            <GovernanceClusterCard
+              locale={locale}
+              title={text(locale, "Deletion exceptions", "刪除例外")}
+              tone="danger"
+              emptyReason={emptyReason}
+              items={activeDeletionExceptions.slice(0, 4).map((exception) => ({
+                id: exception.exceptionId,
+                headline: exception.subjectId,
+                eyebrow: formatPlatformCodeLabel(locale, exception.family),
+                lines: [
+                  `${text(locale, "Reviewer", "Reviewer")}: ${exception.reviewerActorId}`,
+                  `${text(locale, "Reason", "原因")}: ${formatPlatformCodeLabel(locale, exception.reasonCode)}`,
+                  `${text(locale, "Expires", "到期")}: ${formatDateTime(exception.expiresAt)}`,
+                ],
+              }))}
+            />
+          </div>
         </div>
       ) : null}
 
       {activeTab === "policies" ? (
-        <PolicyTable policies={policies} locale={locale} />
+        <PolicyTable policies={policies} locale={locale} emptyReason={emptyReason} />
       ) : null}
       {activeTab === "holds" ? (
         <HoldTable
           holds={activeLegalHolds}
           locale={locale}
-          onRelease={(hold) => setModal({ action: "lift_legal_hold", hold })}
+          emptyReason={emptyReason}
+          onRelease={(hold) =>
+            handleAction(
+              hold.availableActions?.find(
+                (action) => action.action === "lift_legal_hold",
+              ) ??
+                fallbackHoldActions(hold)[0],
+              { hold },
+            )
+          }
         />
       ) : null}
       {activeTab === "exceptions" ? (
         <ExceptionTable
           exceptions={activeDeletionExceptions}
           locale={locale}
+          emptyReason={emptyReason}
           onResolve={(exception) =>
-            setModal({ action: "revoke_deletion_exception", exception })
+            handleAction(
+              exception.availableActions?.find(
+                (action) => action.action === "revoke_deletion_exception",
+              ) ??
+                fallbackExceptionActions(exception)[0],
+              { deletionException: exception },
+            )
           }
         />
       ) : null}
@@ -1465,6 +1613,11 @@ function ActionButton({
       theme={theme}
       onClick={onClick}
       disabled={!descriptor.enabled}
+      title={
+        descriptor.disabledReasonCode
+          ? `${descriptor.action}: ${descriptor.disabledReasonCode}`
+          : descriptor.riskLevel
+      }
     >
       {labelMap[descriptor.action] ?? descriptor.action}
     </CanvasBtn>
@@ -1476,11 +1629,13 @@ function EmptyStateCard({
   reason,
   nextAction,
   onAction,
+  compact = false,
 }: {
   locale: string;
   reason: EmptyReason;
   nextAction?: ResourceActionDescriptor;
   onAction: () => void;
+  compact?: boolean;
 }) {
   const copy: Record<
     EmptyReason,
@@ -1541,14 +1696,19 @@ function EmptyStateCard({
   };
   const content = copy[reason];
   return (
-    <div style={emptyStateStyle}>
+    <div
+      style={{
+        ...emptyStateStyle,
+        padding: compact ? 16 : emptyStateStyle.padding,
+      }}
+    >
       <CanvasPill theme={theme} tone={toneForEmpty(reason)}>
         {reason}
       </CanvasPill>
-      <div style={{ fontSize: 18, fontWeight: 700 }}>{content.title}</div>
+      <div style={{ fontSize: compact ? 16 : 18, fontWeight: 700 }}>{content.title}</div>
       <div style={subTextStyle}>{content.body}</div>
       {nextAction?.action === "refresh" ? (
-        <CanvasBtn theme={theme} onClick={onAction}>
+        <CanvasBtn theme={theme} onClick={onAction} disabled={compact}>
           {text(locale, "Refresh now", "立即刷新")}
         </CanvasBtn>
       ) : nextAction ? (
@@ -1674,12 +1834,79 @@ function PayloadCard({
   );
 }
 
+function GovernanceClusterCard({
+  locale,
+  title,
+  tone,
+  items,
+  emptyReason,
+}: {
+  locale: string;
+  title: string;
+  tone: "warn" | "danger";
+  items: Array<{
+    id: string;
+    headline: string;
+    eyebrow: string;
+    lines: string[];
+  }>;
+  emptyReason: EmptyReason;
+}) {
+  return (
+    <CanvasCard theme={theme}>
+      <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ fontWeight: 700 }}>{title}</div>
+          <CanvasPill theme={theme} tone={tone}>
+            {items.length}
+          </CanvasPill>
+        </div>
+        {items.length === 0 ? (
+          <EmptyStateCard
+            locale={locale}
+            reason={emptyReason === "filtered_empty" ? "no_data" : emptyReason}
+            nextAction={{ action: "refresh", enabled: true, riskLevel: "low" }}
+            onAction={() => undefined}
+            compact
+          />
+        ) : (
+          <div style={clusterListStyle}>
+            {items.map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 14,
+                  padding: 12,
+                  background: theme.surface,
+                  display: "grid",
+                  gap: 6,
+                }}
+              >
+                <div style={subTextStyle}>{item.eyebrow}</div>
+                <div style={{ ...monoStyle, fontWeight: 700 }}>{item.headline}</div>
+                {item.lines.map((line) => (
+                  <div key={line} style={subTextStyle}>
+                    {line}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </CanvasCard>
+  );
+}
+
 function PolicyTable({
   policies,
   locale,
+  emptyReason,
 }: {
   policies: EvidenceRetentionPolicyRecord[];
   locale: string;
+  emptyReason: EmptyReason;
 }) {
   return (
     <CanvasCard theme={theme}>
@@ -1696,53 +1923,62 @@ function PolicyTable({
             )}
           </div>
         </div>
-        <div style={tableWrapStyle}>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={thStyle}>{text(locale, "Family", "家族")}</th>
-                <th style={thStyle}>{text(locale, "Authority", "權威模組")}</th>
-                <th style={thStyle}>{text(locale, "Retention", "保存期")}</th>
-                <th style={thStyle}>{text(locale, "Download", "下載")}</th>
-                <th style={thStyle}>{text(locale, "Legal hold", "Legal hold")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {policies.map((policy) => (
-                <tr key={policy.family}>
-                  <td style={tdStyle}>
-                    <div style={{ fontWeight: 700 }}>
-                      {formatPlatformCodeLabel(locale, policy.family)}
-                    </div>
-                    <div style={subTextStyle}>{policy.description}</div>
-                  </td>
-                  <td style={tdStyle}>
-                    {formatPlatformCodeLabel(locale, policy.authorityModule)}
-                  </td>
-                  <td style={tdStyle}>
-                    {policy.hotRetentionDays}d /{" "}
-                    {policy.archiveRetentionDays ? `${policy.archiveRetentionDays}d` : "—"}
-                  </td>
-                  <td style={tdStyle}>
-                    {policy.downloadControl?.mode === "signed_url"
-                      ? text(locale, "Signed URL", "簽名網址")
-                      : text(locale, "No direct download", "不提供直接下載")}
-                  </td>
-                  <td style={tdStyle}>
-                    <CanvasPill
-                      theme={theme}
-                      tone={policy.legalHold.supported ? "warn" : "neutral"}
-                    >
-                      {policy.legalHold.supported
-                        ? text(locale, "Supported", "支援")
-                        : text(locale, "Not supported", "不支援")}
-                    </CanvasPill>
-                  </td>
+        {policies.length === 0 ? (
+          <EmptyStateCard
+            locale={locale}
+            reason={emptyReason === "filtered_empty" ? "no_data" : emptyReason}
+            nextAction={{ action: "refresh", enabled: true, riskLevel: "low" }}
+            onAction={() => undefined}
+          />
+        ) : (
+          <div style={tableWrapStyle}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>{text(locale, "Family", "家族")}</th>
+                  <th style={thStyle}>{text(locale, "Authority", "權威模組")}</th>
+                  <th style={thStyle}>{text(locale, "Retention", "保存期")}</th>
+                  <th style={thStyle}>{text(locale, "Download", "下載")}</th>
+                  <th style={thStyle}>{text(locale, "Legal hold", "Legal hold")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {policies.map((policy) => (
+                  <tr key={policy.family}>
+                    <td style={tdStyle}>
+                      <div style={{ fontWeight: 700 }}>
+                        {formatPlatformCodeLabel(locale, policy.family)}
+                      </div>
+                      <div style={subTextStyle}>{policy.description}</div>
+                    </td>
+                    <td style={tdStyle}>
+                      {formatPlatformCodeLabel(locale, policy.authorityModule)}
+                    </td>
+                    <td style={tdStyle}>
+                      {policy.hotRetentionDays}d /{" "}
+                      {policy.archiveRetentionDays ? `${policy.archiveRetentionDays}d` : "—"}
+                    </td>
+                    <td style={tdStyle}>
+                      {policy.downloadControl?.mode === "signed_url"
+                        ? text(locale, "Signed URL", "簽名網址")
+                        : text(locale, "No direct download", "不提供直接下載")}
+                    </td>
+                    <td style={tdStyle}>
+                      <CanvasPill
+                        theme={theme}
+                        tone={policy.legalHold.supported ? "warn" : "neutral"}
+                      >
+                        {policy.legalHold.supported
+                          ? text(locale, "Supported", "支援")
+                          : text(locale, "Not supported", "不支援")}
+                      </CanvasPill>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </CanvasCard>
   );
@@ -1751,10 +1987,12 @@ function PolicyTable({
 function HoldTable({
   holds,
   locale,
+  emptyReason,
   onRelease,
 }: {
-  holds: EvidenceLegalHoldRecord[];
+  holds: ActionableEvidenceLegalHoldRecord[];
   locale: string;
+  emptyReason: EmptyReason;
   onRelease: (hold: EvidenceLegalHoldRecord) => void;
 }) {
   return (
@@ -1772,36 +2010,53 @@ function HoldTable({
             )}
           </div>
         </div>
-        <div style={tableWrapStyle}>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={thStyle}>{text(locale, "Family", "家族")}</th>
-                <th style={thStyle}>{text(locale, "Subject", "主體")}</th>
-                <th style={thStyle}>{text(locale, "Owner", "Owner")}</th>
-                <th style={thStyle}>{text(locale, "Case", "案件")}</th>
-                <th style={thStyle}>{text(locale, "Placed", "建立")}</th>
-                <th style={thStyle}>{text(locale, "Action", "動作")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {holds.map((hold) => (
-                <tr key={hold.holdId}>
-                  <td style={tdStyle}>{formatPlatformCodeLabel(locale, hold.family)}</td>
-                  <td style={{ ...tdStyle, ...monoStyle }}>{hold.subjectId}</td>
-                  <td style={{ ...tdStyle, ...monoStyle }}>{hold.placedByActorId}</td>
-                  <td style={tdStyle}>{hold.caseNumber}</td>
-                  <td style={tdStyle}>{formatDateTime(hold.placedAt)}</td>
-                  <td style={tdStyle}>
-                    <CanvasBtn theme={theme} onClick={() => onRelease(hold)}>
-                      {text(locale, "Lift legal hold", "解除 legal hold")}
-                    </CanvasBtn>
-                  </td>
+        {holds.length === 0 ? (
+          <EmptyStateCard
+            locale={locale}
+            reason={emptyReason === "filtered_empty" ? "no_data" : emptyReason}
+            nextAction={{ action: "refresh", enabled: true, riskLevel: "low" }}
+            onAction={() => undefined}
+          />
+        ) : (
+          <div style={tableWrapStyle}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>{text(locale, "Family", "家族")}</th>
+                  <th style={thStyle}>{text(locale, "Subject", "主體")}</th>
+                  <th style={thStyle}>{text(locale, "Owner", "Owner")}</th>
+                  <th style={thStyle}>{text(locale, "Case", "案件")}</th>
+                  <th style={thStyle}>{text(locale, "Placed", "建立")}</th>
+                  <th style={thStyle}>{text(locale, "Action", "動作")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {holds.map((hold) => {
+                  const rowAction =
+                    hold.availableActions?.find(
+                      (action) => action.action === "lift_legal_hold",
+                    ) ?? fallbackHoldActions(hold)[0];
+                  return (
+                    <tr key={hold.holdId}>
+                      <td style={tdStyle}>{formatPlatformCodeLabel(locale, hold.family)}</td>
+                      <td style={{ ...tdStyle, ...monoStyle }}>{hold.subjectId}</td>
+                      <td style={{ ...tdStyle, ...monoStyle }}>{hold.placedByActorId}</td>
+                      <td style={tdStyle}>{hold.caseNumber}</td>
+                      <td style={tdStyle}>{formatDateTime(hold.placedAt)}</td>
+                      <td style={tdStyle}>
+                        <ActionButton
+                          locale={locale}
+                          descriptor={rowAction}
+                          onClick={() => onRelease(hold)}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </CanvasCard>
   );
@@ -1810,10 +2065,12 @@ function HoldTable({
 function ExceptionTable({
   exceptions,
   locale,
+  emptyReason,
   onResolve,
 }: {
-  exceptions: EvidenceDeletionExceptionRecord[];
+  exceptions: ActionableEvidenceDeletionExceptionRecord[];
   locale: string;
+  emptyReason: EmptyReason;
   onResolve: (exception: EvidenceDeletionExceptionRecord) => void;
 }) {
   return (
@@ -1831,42 +2088,59 @@ function ExceptionTable({
             )}
           </div>
         </div>
-        <div style={tableWrapStyle}>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={thStyle}>{text(locale, "Family", "家族")}</th>
-                <th style={thStyle}>{text(locale, "Subject", "主體")}</th>
-                <th style={thStyle}>{text(locale, "Reason", "原因")}</th>
-                <th style={thStyle}>{text(locale, "Reviewer", "Reviewer")}</th>
-                <th style={thStyle}>{text(locale, "Expires", "到期")}</th>
-                <th style={thStyle}>{text(locale, "Action", "動作")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {exceptions.map((exception) => (
-                <tr key={exception.exceptionId}>
-                  <td style={tdStyle}>
-                    {formatPlatformCodeLabel(locale, exception.family)}
-                  </td>
-                  <td style={{ ...tdStyle, ...monoStyle }}>{exception.subjectId}</td>
-                  <td style={tdStyle}>
-                    {formatPlatformCodeLabel(locale, exception.reasonCode)}
-                  </td>
-                  <td style={{ ...tdStyle, ...monoStyle }}>
-                    {exception.reviewerActorId}
-                  </td>
-                  <td style={tdStyle}>{formatDateTime(exception.expiresAt)}</td>
-                  <td style={tdStyle}>
-                    <CanvasBtn theme={theme} onClick={() => onResolve(exception)}>
-                      {text(locale, "Revoke exception", "撤銷例外")}
-                    </CanvasBtn>
-                  </td>
+        {exceptions.length === 0 ? (
+          <EmptyStateCard
+            locale={locale}
+            reason={emptyReason === "filtered_empty" ? "no_data" : emptyReason}
+            nextAction={{ action: "refresh", enabled: true, riskLevel: "low" }}
+            onAction={() => undefined}
+          />
+        ) : (
+          <div style={tableWrapStyle}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>{text(locale, "Family", "家族")}</th>
+                  <th style={thStyle}>{text(locale, "Subject", "主體")}</th>
+                  <th style={thStyle}>{text(locale, "Reason", "原因")}</th>
+                  <th style={thStyle}>{text(locale, "Reviewer", "Reviewer")}</th>
+                  <th style={thStyle}>{text(locale, "Expires", "到期")}</th>
+                  <th style={thStyle}>{text(locale, "Action", "動作")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {exceptions.map((exception) => {
+                  const rowAction =
+                    exception.availableActions?.find(
+                      (action) => action.action === "revoke_deletion_exception",
+                    ) ?? fallbackExceptionActions(exception)[0];
+                  return (
+                    <tr key={exception.exceptionId}>
+                      <td style={tdStyle}>
+                        {formatPlatformCodeLabel(locale, exception.family)}
+                      </td>
+                      <td style={{ ...tdStyle, ...monoStyle }}>{exception.subjectId}</td>
+                      <td style={tdStyle}>
+                        {formatPlatformCodeLabel(locale, exception.reasonCode)}
+                      </td>
+                      <td style={{ ...tdStyle, ...monoStyle }}>
+                        {exception.reviewerActorId}
+                      </td>
+                      <td style={tdStyle}>{formatDateTime(exception.expiresAt)}</td>
+                      <td style={tdStyle}>
+                        <ActionButton
+                          locale={locale}
+                          descriptor={rowAction}
+                          onClick={() => onResolve(exception)}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </CanvasCard>
   );
