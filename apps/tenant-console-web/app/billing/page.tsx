@@ -15,6 +15,9 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
+  CanvasTable,
+  type CanvasTableColumn,
+  type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
@@ -34,56 +37,62 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const heroGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.35fr) minmax(280px, 0.65fr)",
-  gap: 16,
-};
-
 const kpiGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
 };
 
-const contentGridStyle: CSSProperties = {
+const primaryGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.1fr) minmax(320px, 0.9fr)",
+  gridTemplateColumns: "minmax(320px, 0.95fr) minmax(0, 1.45fr)",
   gap: 16,
 };
 
-const stackStyle: CSSProperties = {
+const secondaryGridStyle: CSSProperties = {
   display: "grid",
-  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: 16,
+};
+
+const detailStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
 };
 
 const detailGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 12,
+  gap: 10,
 };
 
 const detailItemStyle: CSSProperties = {
   display: "grid",
   gap: 4,
-  padding: "10px 12px",
+  padding: "12px 14px",
   border: `1px solid ${th.border}`,
-  borderRadius: 12,
+  borderRadius: 14,
   background: th.surfaceLo,
 };
 
-const labelStyle: CSSProperties = {
+const detailLabelStyle: CSSProperties = {
   color: th.textMuted,
   fontSize: 11,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
 };
 
-const valueStyle: CSSProperties = {
+const detailValueStyle: CSSProperties = {
   color: th.text,
   fontSize: 13,
   fontWeight: 600,
   lineHeight: 1.45,
+};
+
+const noteStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 12,
+  lineHeight: 1.6,
 };
 
 const actionListStyle: CSSProperties = {
@@ -104,7 +113,24 @@ const actionLinkStyle: CSSProperties = {
 
 const mutedActionStyle: CSSProperties = {
   ...actionLinkStyle,
-  opacity: 0.56,
+  opacity: 0.58,
+};
+
+const stateChipGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 10,
+};
+
+const stateChipStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  padding: "10px 12px",
+  borderRadius: 12,
+  border: `1px solid ${th.border}`,
+  background: th.surface,
+  textDecoration: "none",
+  color: th.text,
 };
 
 const inlineRowStyle: CSSProperties = {
@@ -114,24 +140,23 @@ const inlineRowStyle: CSSProperties = {
   alignItems: "center",
 };
 
-const listStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
-};
-
-const invoiceRowStyle: CSSProperties = {
-  display: "grid",
-  gap: 8,
-  padding: "12px 14px",
-  borderRadius: 14,
-  border: `1px solid ${th.border}`,
-  background: th.surface,
-};
-
-const linkStyle: CSSProperties = {
+const tableLinkStyle: CSSProperties = {
   color: th.accent,
-  textDecoration: "none",
   fontWeight: 600,
+  textDecoration: "none",
+};
+
+const tablePrimaryStyle: CSSProperties = {
+  color: th.accent,
+  fontWeight: 600,
+  fontFamily: th.monoFamily,
+};
+
+const emptyPanelStyle: CSSProperties = {
+  padding: 24,
+  color: th.textMuted,
+  fontSize: 12.5,
+  textAlign: "center",
 };
 
 type BillingPageData = {
@@ -155,6 +180,8 @@ type BillingEmptyState = {
   nextAction?: ResourceActionDescriptor;
 };
 
+type InvoiceSummaryRow = TenantInvoiceRecord & Record<string, unknown>;
+
 const EMPTY_REASON_SEQUENCE: EmptyReason[] = [
   "not_provisioned",
   "no_data",
@@ -167,7 +194,7 @@ const EMPTY_REASON_SEQUENCE: EmptyReason[] = [
 const EMPTY_REASON_META: Record<EmptyReason, BillingEmptyState> = {
   not_provisioned: {
     title: "租戶尚未完成帳務配置",
-    body: "尚未建立 billing profile，因此 overview 只顯示啟用前引導與後續動作。",
+    body: "尚未建立 billing profile，因此 overview 應保留導引與 next action，而不是假裝已經有結帳資料。",
     tone: "info",
     nextAction: {
       action: "billing.profile.create",
@@ -182,12 +209,12 @@ const EMPTY_REASON_META: Record<EmptyReason, BillingEmptyState> = {
   },
   filtered_empty: {
     title: "目前篩選條件下沒有結果",
-    body: "Overview 資料仍存在，但目前條件沒有命中 invoice summary 或 usage 切片。",
+    body: "Overview 本身仍可讀，但當前條件沒有命中 invoice summary 或 usage 切片。",
     tone: "info",
   },
   fetch_failed: {
     title: "帳務資料抓取失敗",
-    body: "API 已回錯，畫面保留 refresh tier 與 next action，而不是假裝沒有資料。",
+    body: "API 已回錯，畫面保留 refresh tier 與 next action，而不是把錯誤偽裝成空清單。",
     tone: "warn",
     nextAction: {
       action: "billing.retry",
@@ -202,7 +229,7 @@ const EMPTY_REASON_META: Record<EmptyReason, BillingEmptyState> = {
   },
   permission_denied: {
     title: "目前角色沒有查看帳務內容的權限",
-    body: "依 packet 與 role matrix，頁面保留入口但資料區要明確說明 read scope 不足。",
+    body: "依 packet 與 role matrix，頁面保留入口，但資料區必須明確說明 read scope 不足。",
     tone: "danger",
   },
   driver_not_eligible: {
@@ -227,9 +254,15 @@ const CROSS_APP_LINKS: CrossAppResourceLink[] = [
     resourceType: "tenant",
     resourceId: "tenant-demo-001",
     openMode: "new_tab",
-    label: "在 platform-admin 查看租戶帳務治理",
+    label: "在 Platform Admin 查看租戶帳務治理",
   },
 ];
+
+const CROSS_APP_ORIGINS: Record<CrossAppResourceLink["targetApp"], string> = {
+  "tenant-console": "",
+  "platform-admin": "https://admin.drts.io",
+  "ops-console": "https://ops.drts.io",
+};
 
 async function loadBillingPageData(): Promise<BillingPageData> {
   const client = getTenantClient();
@@ -269,13 +302,13 @@ function formatMoney(value: MoneyAmount | null | undefined) {
   if (!value) return "—";
   const amount = value.amountMinor / 100;
   const prefix = value.currency === "TWD" ? "NT$" : value.currency;
-  return `${prefix} ${new Intl.NumberFormat("zh-Hant", {
+  return `${prefix} ${new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(amount)}`;
 }
 
 function formatCount(value: number | null | undefined) {
-  return new Intl.NumberFormat("zh-Hant").format(value ?? 0);
+  return new Intl.NumberFormat("en-US").format(value ?? 0);
 }
 
 function formatPeriodLabel(invoice: TenantInvoiceRecord | null) {
@@ -401,7 +434,6 @@ function mapActionLink(action: ResourceActionDescriptor) {
 function getSnapshotTone(status: BillingSnapshot["status"]) {
   switch (status) {
     case "past_due":
-      return "down" as const;
     case "suspended":
       return "down" as const;
     case "not_provisioned":
@@ -426,17 +458,17 @@ function getSnapshotLabel(status: BillingSnapshot["status"]) {
   }
 }
 
-function getSnapshotPillTone(status: BillingSnapshot["status"]) {
+function getSnapshotPillTone(status: BillingSnapshot["status"]): CanvasTone {
   switch (status) {
     case "past_due":
-      return "warn" as const;
+      return "warn";
     case "suspended":
-      return "danger" as const;
+      return "danger";
     case "not_provisioned":
-      return "neutral" as const;
+      return "neutral";
     case "active":
     default:
-      return "success" as const;
+      return "success";
   }
 }
 
@@ -448,6 +480,111 @@ function getEmptyReason(searchValue: string | null, hasErrors: boolean) {
     return searchValue as EmptyReason;
   }
   return hasErrors ? "fetch_failed" : null;
+}
+
+function getInvoiceStatusMeta(invoice: TenantInvoiceRecord) {
+  if (isPastDue(invoice)) {
+    return { label: "overdue", tone: "warn" as CanvasTone };
+  }
+
+  switch (invoice.status) {
+    case "paid":
+      return { label: "paid", tone: "success" as CanvasTone };
+    case "issued":
+      return { label: "issued", tone: "info" as CanvasTone };
+    case "draft":
+    default:
+      return { label: "draft", tone: "neutral" as CanvasTone };
+  }
+}
+
+function getInvoiceDueDate(invoice: TenantInvoiceRecord) {
+  if (invoice.status === "draft") {
+    return "—";
+  }
+  const basis = new Date(invoice.updatedAt || invoice.createdAt);
+  if (Number.isNaN(basis.getTime())) {
+    return "—";
+  }
+  basis.setDate(basis.getDate() + 30);
+  return formatDateInput(basis.toISOString()) ?? "—";
+}
+
+function getAverageTripAmount(invoices: TenantInvoiceRecord[]) {
+  const totalTrips = invoices.reduce(
+    (count, invoice) => count + invoice.lines.length,
+    0,
+  );
+  if (totalTrips === 0) {
+    return null;
+  }
+
+  const totalAmountMinor = invoices.reduce(
+    (sum, invoice) => sum + invoice.amount.amountMinor,
+    0,
+  );
+  const currency = invoices[0]?.amount.currency ?? "TWD";
+
+  return {
+    amountMinor: Math.floor(totalAmountMinor / totalTrips / 100) * 100,
+    currency,
+  } satisfies MoneyAmount;
+}
+
+function getQuotaSummaryLabel(summary: TenantQuotaSummary | null) {
+  if (!summary) return "quota unavailable";
+
+  if (summary.limit.bookingCountLimit !== null) {
+    const used = summary.usage.confirmedBookingCount;
+    const limit = summary.limit.bookingCountLimit;
+    const ratio = limit > 0 ? Math.round((used / limit) * 100) : 0;
+    return `${ratio}% of ${formatCount(limit)} quota`;
+  }
+
+  if (summary.limit.amountMinorLimit !== null) {
+    return `${summary.usage.remainingPercent ?? "—"}% remaining`;
+  }
+
+  return "unlimited plan";
+}
+
+function getPlanQuotaValue(summary: TenantQuotaSummary | null) {
+  if (!summary) return "—";
+
+  if (summary.limit.bookingCountLimit !== null) {
+    return `${formatCount(summary.limit.bookingCountLimit)} 趟 / 月`;
+  }
+
+  if (summary.limit.amountMinorLimit !== null) {
+    return formatMoney({
+      amountMinor: summary.limit.amountMinorLimit,
+      currency: summary.limit.currency,
+    });
+  }
+
+  return "無上限";
+}
+
+function getUsageRemainingValue(summary: TenantQuotaSummary | null) {
+  if (!summary) return "—";
+
+  if (summary.usage.bookingCountRemaining !== null) {
+    return `${formatCount(summary.usage.bookingCountRemaining)} 趟剩餘`;
+  }
+
+  if (summary.usage.amountMinorRemaining !== null) {
+    return formatMoney({
+      amountMinor: summary.usage.amountMinorRemaining,
+      currency: summary.limit.currency,
+    });
+  }
+
+  return "無上限";
+}
+
+function resolveCrossAppHref(link: CrossAppResourceLink) {
+  const origin = CROSS_APP_ORIGINS[link.targetApp] ?? "";
+  return `${origin}${link.route}`;
 }
 
 export default async function BillingPage({
@@ -463,6 +600,7 @@ export default async function BillingPage({
   const stateParam = Array.isArray(resolvedSearchParams.state)
     ? resolvedSearchParams.state[0]
     : resolvedSearchParams.state;
+
   const emptyReason = getEmptyReason(
     emptyParam ?? null,
     data.errors.length > 0,
@@ -472,24 +610,88 @@ export default async function BillingPage({
     emptyReason === "no_data" ? [] : data.invoices,
     stateParam ?? null,
   );
+  const emptyState = emptyReason ? EMPTY_REASON_META[emptyReason] : null;
   const availableActions = buildAvailableActions(snapshot, emptyReason);
-  const recentInvoices =
+  const sortedInvoices =
     emptyReason === "no_data" || emptyReason === "filtered_empty"
       ? []
-      : [...data.invoices]
-          .sort((left, right) => right.periodEnd.localeCompare(left.periodEnd))
-          .slice(0, 3);
+      : [...data.invoices].sort((left, right) =>
+          right.periodEnd.localeCompare(left.periodEnd),
+        );
   const quotaSummary =
     emptyReason === "permission_denied" ? null : data.quotaSummary;
-  const emptyState = emptyReason ? EMPTY_REASON_META[emptyReason] : null;
-  const refreshSummary = `T5 tenant slow · 30s cadence · generated via ISR`;
+  const latestInvoice = sortedInvoices[0] ?? null;
+  const currentPeriodInvoices = latestInvoice
+    ? sortedInvoices.filter(
+        (invoice) =>
+          invoice.periodStart.slice(0, 7) ===
+          latestInvoice.periodStart.slice(0, 7),
+      )
+    : [];
+  const currentPeriodTripCount = currentPeriodInvoices.reduce(
+    (count, invoice) => count + invoice.lines.length,
+    0,
+  );
+  const averageTripAmount = getAverageTripAmount(
+    currentPeriodInvoices.length > 0 ? currentPeriodInvoices : sortedInvoices,
+  );
+  const invoiceRows: InvoiceSummaryRow[] = sortedInvoices
+    .slice(0, 6)
+    .map((invoice) => ({ ...invoice }));
+  const refreshSummary = "T5 tenant slow · 30s cadence · generated via ISR";
+  const paymentMethodLabel = data.billingProfile ? "invoice (NET 30)" : "—";
+  const billingCurrency =
+    latestInvoice?.amount.currency ?? quotaSummary?.limit.currency ?? "TWD";
+  const nextCloseLabel = latestInvoice?.periodEnd
+    ? `${latestInvoice.periodEnd} 23:59`
+    : "—";
+
+  const invoiceColumns: CanvasTableColumn<InvoiceSummaryRow>[] = [
+    {
+      h: "INVOICE",
+      w: 200,
+      mono: true,
+      r: (row) => <span style={tablePrimaryStyle}>{row.invoiceId}</span>,
+    },
+    {
+      h: "PERIOD",
+      w: 110,
+      mono: true,
+      r: (row) => row.periodStart.slice(0, 7),
+    },
+    {
+      h: "AMOUNT",
+      w: 150,
+      mono: true,
+      align: "right",
+      r: (row) => formatMoney(row.amount),
+    },
+    {
+      h: "STATUS",
+      w: 110,
+      r: (row) => {
+        const statusMeta = getInvoiceStatusMeta(row);
+        return (
+          <CanvasPill theme={th} tone={statusMeta.tone} dot>
+            {statusMeta.label}
+          </CanvasPill>
+        );
+      },
+    },
+    {
+      h: "DUE",
+      w: 120,
+      mono: true,
+      r: (row) => getInvoiceDueDate(row),
+    },
+  ];
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
         title="帳務概覽"
-        subtitle="Billing overview · profile · current period snapshot · invoice handoff"
+        subtitle="billing profile · 當期使用 · 近期 invoice"
       />
 
       <div style={pageBodyStyle}>
@@ -516,48 +718,36 @@ export default async function BillingPage({
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Current period"
-            value={snapshot.periodLabel}
+            label="本月累計"
+            value={formatMoney(snapshot.accruedAmount)}
             deltaTone={getSnapshotTone(snapshot.status)}
             delta={getSnapshotLabel(snapshot.status)}
+            sub={`period · ${snapshot.periodLabel}`}
           />
           <CanvasKPI
             theme={th}
-            label="Accrued amount"
-            value={formatMoney(snapshot.accruedAmount)}
-            deltaTone="neutral"
-            delta="billing snapshot"
-          />
-          <CanvasKPI
-            theme={th}
-            label="Projected close"
+            label="預估 close"
             value={formatMoney(snapshot.projectedClose)}
-            deltaTone="neutral"
-            delta="current ledger projection"
+            sub={nextCloseLabel}
           />
           <CanvasKPI
             theme={th}
-            label="Usage remaining"
-            value={
-              quotaSummary?.usage.remainingPercent !== null &&
-              quotaSummary?.usage.remainingPercent !== undefined
-                ? `${quotaSummary.usage.remainingPercent}%`
-                : "—"
-            }
-            deltaTone={
-              (quotaSummary?.usage.remainingPercent ?? 100) <= 15
-                ? "down"
-                : "up"
-            }
-            delta={quotaSummary?.periodKey ?? "quota unavailable"}
+            label="本月趟次"
+            value={formatCount(currentPeriodTripCount)}
+            sub={getQuotaSummaryLabel(quotaSummary)}
+          />
+          <CanvasKPI
+            theme={th}
+            label="平均單筆"
+            value={formatMoney(averageTripAmount)}
+            sub={billingCurrency}
           />
         </div>
 
-        <div style={heroGridStyle}>
+        <div style={primaryGridStyle}>
           <CanvasCard
             theme={th}
             title="Billing profile"
-            subtitle="payment method proxy · billing contact · billing address"
             actions={
               <CanvasPill
                 theme={th}
@@ -568,31 +758,111 @@ export default async function BillingPage({
               </CanvasPill>
             }
           >
-            <div style={detailGridStyle}>
+            <div style={detailStackStyle}>
               <div style={detailItemStyle}>
-                <span style={labelStyle}>Invoice title</span>
-                <span style={valueStyle}>
-                  {data.billingProfile?.invoiceTitle ?? "尚未設定"}
+                <span style={detailLabelStyle}>統一編號</span>
+                <span style={detailValueStyle}>
+                  {data.billingProfile?.taxId ?? "未設定統編"}
                 </span>
               </div>
               <div style={detailItemStyle}>
-                <span style={labelStyle}>Billing contact</span>
-                <span style={valueStyle}>
+                <span style={detailLabelStyle}>計費聯絡人</span>
+                <span style={detailValueStyle}>
                   {data.billingProfile
                     ? `${data.billingProfile.contactName ?? "未指派"} · ${data.billingProfile.email}`
                     : "尚未設定"}
                 </span>
               </div>
               <div style={detailItemStyle}>
-                <span style={labelStyle}>Billing address</span>
-                <span style={valueStyle}>
+                <span style={detailLabelStyle}>付款方式</span>
+                <span style={detailValueStyle}>{paymentMethodLabel}</span>
+              </div>
+              <div style={detailItemStyle}>
+                <span style={detailLabelStyle}>billing address</span>
+                <span style={detailValueStyle}>
                   {data.billingProfile?.address ?? "未設定地址"}
                 </span>
               </div>
               <div style={detailItemStyle}>
-                <span style={labelStyle}>Tax ID</span>
-                <span style={valueStyle}>
-                  {data.billingProfile?.taxId ?? "未設定統編"}
+                <span style={detailLabelStyle}>幣別</span>
+                <span style={detailValueStyle}>{billingCurrency}</span>
+              </div>
+              <div style={detailItemStyle}>
+                <span style={detailLabelStyle}>next close</span>
+                <span style={detailValueStyle}>{nextCloseLabel}</span>
+              </div>
+            </div>
+          </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="近 6 期 invoice"
+            subtitle="summary rows deep-link to `/invoices` detail surface"
+          >
+            {invoiceRows.length > 0 ? (
+              <div style={detailStackStyle}>
+                <CanvasTable<InvoiceSummaryRow>
+                  theme={th}
+                  rows={invoiceRows}
+                  columns={invoiceColumns}
+                />
+                <div style={inlineRowStyle}>
+                  <Link href="/invoices" style={tableLinkStyle}>
+                    前往發票
+                  </Link>
+                  {latestInvoice?.artifactUrl ? (
+                    <a
+                      href={latestInvoice.artifactUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={tableLinkStyle}
+                    >
+                      下載當期 artifact
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div style={emptyPanelStyle}>
+                {emptyReason === "filtered_empty"
+                  ? "目前切片沒有命中 recent invoice summary。"
+                  : emptyReason === "permission_denied"
+                    ? "目前角色沒有 invoice summary 讀取權限。"
+                    : "尚未產生 recent invoice summary。"}
+              </div>
+            )}
+          </CanvasCard>
+        </div>
+
+        <div style={secondaryGridStyle}>
+          <CanvasCard
+            theme={th}
+            title="Current period snapshot"
+            subtitle="quota / usage relative to plan"
+          >
+            <div style={detailGridStyle}>
+              <div style={detailItemStyle}>
+                <span style={detailLabelStyle}>Refresh tier</span>
+                <span style={detailValueStyle}>{refreshSummary}</span>
+              </div>
+              <div style={detailItemStyle}>
+                <span style={detailLabelStyle}>Plan quota</span>
+                <span style={detailValueStyle}>
+                  {getPlanQuotaValue(quotaSummary)}
+                </span>
+              </div>
+              <div style={detailItemStyle}>
+                <span style={detailLabelStyle}>Confirmed usage</span>
+                <span style={detailValueStyle}>
+                  {quotaSummary
+                    ? `${formatCount(quotaSummary.usage.confirmedBookingCount)} 趟`
+                    : "—"}
+                </span>
+              </div>
+              <div style={detailItemStyle}>
+                <span style={detailLabelStyle}>Usage remaining</span>
+                <span style={detailValueStyle}>
+                  {getUsageRemainingValue(quotaSummary)}
                 </span>
               </div>
             </div>
@@ -610,7 +880,7 @@ export default async function BillingPage({
                   return (
                     <div key={action.action} style={mutedActionStyle}>
                       <strong>{target.label}</strong>
-                      <span style={{ color: th.textMuted, fontSize: 12 }}>
+                      <span style={noteStyle}>
                         {action.disabledReasonCode ?? "disabled"}
                       </span>
                     </div>
@@ -624,9 +894,7 @@ export default async function BillingPage({
                     style={actionLinkStyle}
                   >
                     <strong>{target.label}</strong>
-                    <span style={{ color: th.textMuted, fontSize: 12 }}>
-                      {target.description}
-                    </span>
+                    <span style={noteStyle}>{target.description}</span>
                   </Link>
                 );
               })}
@@ -639,212 +907,104 @@ export default async function BillingPage({
                     return (
                       <Link href={target.href} style={actionLinkStyle}>
                         <strong>{target.label}</strong>
-                        <span style={{ color: th.textMuted, fontSize: 12 }}>
-                          {target.description}
-                        </span>
+                        <span style={noteStyle}>{target.description}</span>
                       </Link>
                     );
                   })()
                 : null}
             </div>
           </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="Cross-app deep links"
+            subtitle="Q-X03 targets stay explicit and open in a new tab when leaving tenant-console"
+          >
+            <div style={actionListStyle}>
+              {CROSS_APP_LINKS.map((link) => (
+                <a
+                  key={`${link.targetApp}:${link.route}`}
+                  href={resolveCrossAppHref(link)}
+                  target={link.openMode === "new_tab" ? "_blank" : undefined}
+                  rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
+                  style={actionLinkStyle}
+                >
+                  <strong>{link.label}</strong>
+                  <span style={noteStyle}>
+                    {link.targetApp} ·{" "}
+                    {link.openMode === "new_tab" ? "new tab" : "same tab"}
+                  </span>
+                </a>
+              ))}
+            </div>
+          </CanvasCard>
         </div>
 
-        <div style={contentGridStyle}>
-          <div style={stackStyle}>
-            <CanvasCard
-              theme={th}
-              title="Current period snapshot"
-              subtitle="quota / usage relative to plan · recent invoice bridge"
-            >
-              <div style={detailGridStyle}>
-                <div style={detailItemStyle}>
-                  <span style={labelStyle}>Refresh tier</span>
-                  <span style={valueStyle}>{refreshSummary}</span>
-                </div>
-                <div style={detailItemStyle}>
-                  <span style={labelStyle}>Plan quota</span>
-                  <span style={valueStyle}>
-                    {quotaSummary?.limit.bookingCountLimit !== null
-                      ? `${formatCount(quotaSummary?.limit.bookingCountLimit)} 趟 / 月`
-                      : quotaSummary?.limit.amountMinorLimit !== null
-                        ? formatMoney({
-                            amountMinor: quotaSummary.limit.amountMinorLimit,
-                            currency: quotaSummary.limit.currency,
-                          })
-                        : "無上限"}
-                  </span>
-                </div>
-                <div style={detailItemStyle}>
-                  <span style={labelStyle}>Confirmed usage</span>
-                  <span style={valueStyle}>
-                    {quotaSummary
-                      ? `${formatCount(quotaSummary.usage.confirmedBookingCount)} 趟`
-                      : "—"}
-                  </span>
-                </div>
-                <div style={detailItemStyle}>
-                  <span style={labelStyle}>Reserved in flight</span>
-                  <span style={valueStyle}>
-                    {quotaSummary
-                      ? `${formatCount(quotaSummary.usage.pendingReservedBookingCount)} 趟`
-                      : "—"}
-                  </span>
-                </div>
-              </div>
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title="Recent invoices"
-              subtitle="summary rows deep-link to `/invoices` detail surface"
-            >
-              <div style={listStyle}>
-                {recentInvoices.length > 0 ? (
-                  recentInvoices.map((invoice) => (
-                    <div key={invoice.invoiceId} style={invoiceRowStyle}>
-                      <div style={inlineRowStyle}>
-                        <strong>{invoice.invoiceId}</strong>
-                        <CanvasPill
-                          theme={th}
-                          tone={
-                            invoice.status === "paid"
-                              ? "success"
-                              : invoice.status === "issued"
-                                ? "info"
-                                : "neutral"
-                          }
-                          dot
-                        >
-                          {invoice.status}
-                        </CanvasPill>
-                      </div>
-                      <span style={{ color: th.textMuted, fontSize: 12 }}>
-                        {formatPeriodLabel(invoice)} ·{" "}
-                        {formatMoney(invoice.amount)}
-                      </span>
-                      <div style={inlineRowStyle}>
-                        <Link
-                          href={`/invoices?period=${invoice.periodStart.slice(0, 7)}`}
-                          style={linkStyle}
-                        >
-                          Open in invoices
-                        </Link>
-                        {invoice.artifactUrl ? (
-                          <a
-                            href={invoice.artifactUrl}
-                            style={linkStyle}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Signed artifact
-                          </a>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div style={detailItemStyle}>
-                    <span style={labelStyle}>Invoice summary</span>
-                    <span style={valueStyle}>
-                      {emptyReason === "filtered_empty"
-                        ? "目前切片沒有對帳單命中"
-                        : "尚未產生 recent invoice summary"}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </CanvasCard>
-          </div>
-
-          <div style={stackStyle}>
-            <CanvasCard
-              theme={th}
-              title="Cross-app deep links"
-              subtitle="Q-X03 targets stay explicit and open in a new tab when leaving tenant-console"
-            >
-              <div style={actionListStyle}>
-                {CROSS_APP_LINKS.map((link) => (
-                  <a
-                    key={`${link.targetApp}:${link.route}`}
-                    href={link.route}
-                    target={link.openMode === "new_tab" ? "_blank" : undefined}
-                    rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
-                    style={actionLinkStyle}
-                  >
-                    <strong>{link.label}</strong>
-                    <span style={{ color: th.textMuted, fontSize: 12 }}>
-                      {link.targetApp} ·{" "}
-                      {link.openMode === "new_tab" ? "new tab" : "same tab"}
-                    </span>
-                  </a>
-                ))}
-              </div>
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title="State coverage"
-              subtitle="Six EmptyReason states plus billing lifecycle variants stay testable"
-            >
-              <div style={actionListStyle}>
+        <div style={secondaryGridStyle}>
+          <CanvasCard
+            theme={th}
+            title="State coverage"
+            subtitle="Six EmptyReason states plus billing lifecycle variants stay testable"
+          >
+            <div style={detailStackStyle}>
+              <div style={stateChipGridStyle}>
                 {EMPTY_REASON_SEQUENCE.map((reason) => (
                   <Link
                     key={reason}
                     href={`/billing?empty=${reason}`}
                     style={
-                      emptyReason === reason
-                        ? actionLinkStyle
-                        : mutedActionStyle
+                      emptyReason === reason ? stateChipStyle : mutedActionStyle
                     }
                   >
                     <strong>{reason}</strong>
-                    <span style={{ color: th.textMuted, fontSize: 12 }}>
+                    <span style={noteStyle}>
                       {EMPTY_REASON_META[reason]!.title}
                     </span>
                   </Link>
                 ))}
-                <div style={inlineRowStyle}>
-                  <Link href="/billing?state=past_due" style={linkStyle}>
-                    Simulate past-due
-                  </Link>
-                  <Link href="/billing?state=suspended" style={linkStyle}>
-                    Simulate suspended
-                  </Link>
-                  <Link href="/billing" style={linkStyle}>
-                    Active snapshot
-                  </Link>
-                </div>
               </div>
-            </CanvasCard>
+              <div style={inlineRowStyle}>
+                <Link href="/billing?state=past_due" style={tableLinkStyle}>
+                  Simulate past-due
+                </Link>
+                <Link href="/billing?state=suspended" style={tableLinkStyle}>
+                  Simulate suspended
+                </Link>
+                <Link href="/billing" style={tableLinkStyle}>
+                  Active snapshot
+                </Link>
+              </div>
+            </div>
+          </CanvasCard>
 
-            <CanvasCard
-              theme={th}
-              title="Authority notes"
-              subtitle="overview follows packet behavior while keeping contract-safe data"
-            >
+          <CanvasCard
+            theme={th}
+            title="Authority notes"
+            subtitle="packet behaviour with contract-safe fallbacks"
+          >
+            <div style={detailStackStyle}>
               <div style={detailItemStyle}>
-                <span style={labelStyle}>Last profile update</span>
-                <span style={valueStyle}>
+                <span style={detailLabelStyle}>Last profile update</span>
+                <span style={detailValueStyle}>
                   {formatDateInput(data.billingProfile?.updatedAt) ?? "—"}
                 </span>
               </div>
               <div style={detailItemStyle}>
-                <span style={labelStyle}>Quota refreshed</span>
-                <span style={valueStyle}>
+                <span style={detailLabelStyle}>Quota refreshed</span>
+                <span style={detailValueStyle}>
                   {formatDateInput(quotaSummary?.refreshedAt) ?? "—"}
                 </span>
               </div>
               <div style={detailItemStyle}>
-                <span style={labelStyle}>Contract note</span>
-                <span style={valueStyle}>
-                  Current shared contract exposes draft / issued / paid only, so
-                  past-due is derived from aging issued invoices instead of a
-                  distinct backend enum.
+                <span style={detailLabelStyle}>Contract note</span>
+                <span style={detailValueStyle}>
+                  Shared contract today exposes profile, invoice, and quota data
+                  only, so payment method and invoice due date use the canvas
+                  NET 30 convention instead of a dedicated backend field.
                 </span>
               </div>
-            </CanvasCard>
-          </div>
+            </div>
+          </CanvasCard>
         </div>
       </div>
     </div>
