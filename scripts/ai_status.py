@@ -1928,6 +1928,60 @@ def command_prompt(state: dict[str, Any], _args: list[str]) -> None:
     print(build_onboarding_prompt(state))
 
 
+def command_show(state: dict[str, Any], args: list[str]) -> None:
+    """Print ONE task as JSON. Cheap alternative to ``Read ai-status.json``
+    (which is ~2 MB and burns ~500K input tokens every time a worker reads
+    it). Usage: ``show <TASK-ID>``."""
+    if not args:
+        raise SystemExit("Usage: show <task-id>")
+    task_id = args[0].strip()
+    for task in state.get("tasks", []) or []:
+        if str(task.get("id") or "").strip() == task_id:
+            print(json.dumps(task, ensure_ascii=False, indent=2))
+            return
+    raise SystemExit(f"Task not found: {task_id}")
+
+
+def command_list(state: dict[str, Any], args: list[str]) -> None:
+    """Print compact one-line-per-task summary (id, status, owner, reviewer,
+    last_update). Filterable by --status / --owner / --reviewer / --phase to
+    keep output small. Usage:
+
+      list                              # all tasks
+      list --status in_progress         # only tasks in this status
+      list --owner Codex2 --status todo # combine filters
+    """
+    filters = {}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--") and i + 1 < len(args):
+            filters[a[2:]] = args[i + 1].strip()
+            i += 2
+        else:
+            i += 1
+    tasks = state.get("tasks", []) or []
+    rows = []
+    for t in tasks:
+        if not isinstance(t, dict):
+            continue
+        if any(str(t.get(k) or "") != v for k, v in filters.items()):
+            continue
+        rows.append(t)
+    for t in rows:
+        print(
+            "{id:<32s} {status:<16s} owner={owner:<10s} reviewer={reviewer:<10s} {last}".format(
+                id=str(t.get("id") or "")[:32],
+                status=str(t.get("status") or "")[:16],
+                owner=str(t.get("owner") or "-")[:10],
+                reviewer=str(t.get("reviewer") or "-")[:10],
+                last=str(t.get("last_update") or "")[:19],
+            )
+        )
+    if not rows:
+        print("(no matches)")
+
+
 def command_audit(state: dict[str, Any], args: list[str]) -> None:
     audit_name = args[0].strip().lower() if args else "doc-sync"
     if audit_name != "doc-sync":
@@ -1946,6 +2000,8 @@ def main(argv: list[str]) -> int:
     read_only_commands = {
         "audit": command_audit,
         "prompt": command_prompt,
+        "show": command_show,
+        "list": command_list,
     }
 
     commands = {
