@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
 import type {
   CrossAppResourceLink,
   EmptyReason,
@@ -16,27 +17,27 @@ import type {
 } from "@drts/contracts";
 
 const REFRESH_INTERVAL_MS = 30_000;
-type SupportedEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
-
-const EMPTY_REASON_PARAM_VALUES: SupportedEmptyReason[] = [
-  "no_data",
-  "not_provisioned",
-  "fetch_failed",
-  "permission_denied",
-  "external_unavailable",
-  "filtered_empty",
-];
+const TAB_PARAM_VALUES = ["notices", "maint", "history"] as const;
 const NOTICE_FORM_SEVERITIES: PlatformNoticeSeverity[] = [
   "info",
   "warning",
   "critical",
   "maintenance",
 ];
+const EMPTY_REASON_PARAM_VALUES = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "filtered_empty",
+] as const;
 
-type NoticeTab = "notices" | "maint" | "history";
+type NoticeTab = (typeof TAB_PARAM_VALUES)[number];
 type Audience = "all" | "tenants" | "ops" | "drivers";
-type HistoryFilter = "all" | "delivered" | "delivering" | "pending";
 type NoticeFilter = "all" | "active" | "scheduled" | "resolved";
+type HistoryFilter = "all" | "delivered" | "delivering" | "pending";
+type SupportedEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
 
 type NoticeRecord = PlatformNoticeRecord & {
   availableActions?: ResourceActionDescriptor[];
@@ -68,10 +69,11 @@ function getCopy(locale: string) {
     ? {
         title: "公告與維護",
         subtitle:
-          "高風險公告會跨 app 廣播到 ops / tenant / driver；Maintenance Mode 與 Broadcast History 共用同一路由。",
+          "critical / maintenance severity 會跨 app 推送 banner 到 ops、tenant、driver；Maintenance Mode 與 Broadcast History 共用同一路由。",
         refreshTier: "Refresh tier T4",
         refreshDetail: "每 30 秒自動刷新，保留手動刷新。",
         lastRefresh: "最後刷新",
+        currentPolicy: "目前策略",
         tabs: {
           notices: "Notices",
           maint: "Maintenance Mode",
@@ -79,9 +81,25 @@ function getCopy(locale: string) {
         },
         createNotice: "建立公告",
         closeComposer: "收起編輯器",
-        createPanelTitle: "新公告與 cross-app banner",
-        createPanelHint:
-          "critical / maintenance 屬高風險操作，需填原因，並會向下游 app 發送 banner。",
+        refresh: "刷新",
+        noticeSummary: "公告概況",
+        activeNoticeCount: "進行中公告",
+        scheduledNoticeCount: "待發布公告",
+        inflightBroadcastCount: "傳播中 broadcast",
+        noticesTableTitle: "Notices",
+        noticesTableHint:
+          "title、body、severity、audience、status、updated time 依 spec 呈現。",
+        historyTableTitle: "Broadcast history",
+        historyTableHint: "唯讀顯示跨 app 投遞結果與 deep links。",
+        maintenanceTitle: "Maintenance mode",
+        maintenanceHint:
+          "啟用後會暫停 dispatch、partner ingress 與 webhook delivery；請先發佈 maintenance severity notice。",
+        maintenancePreviewTitle: "當前 maintenance notice 預覽",
+        maintenancePreviewBody:
+          "下游 app 會收到相同標題、原因與受影響服務摘要的 cross-app banner。",
+        permissionsTitle: "Authority",
+        permissionsBody:
+          "行為按鈕與風險標示由 availableActions 驅動，不在前端硬編角色矩陣。",
         titleField: "標題",
         bodyField: "內容",
         severityField: "嚴重程度",
@@ -91,64 +109,58 @@ function getCopy(locale: string) {
         scheduleEndField: "預定結束",
         publish: "發布公告",
         publishing: "發布中...",
-        noticesCardTitle: "公告清單",
-        statusFilter: "狀態篩選",
-        maintenanceTitle: "維護模式狀態",
-        maintenanceHint:
-          "啟用後會停止 dispatch、partner ingress 與 webhook delivery；應先建立 maintenance severity 公告。",
-        maintenancePreviewTitle: "跨 app banner 預覽",
-        maintenancePreviewBody:
-          "下游體驗會看到相同的標題、原因與受影響服務摘要。",
-        historyTitle: "Broadcast history",
-        historyFilter: "投遞狀態",
-        targets: "目標對象",
-        delivery: "投遞結果",
-        links: "Cross-app deep links",
-        openLink: "開啟",
-        refresh: "刷新",
         saveMaintenance: "保存維護設定",
         savingMaintenance: "保存中...",
-        resolve: "Resolve",
-        affectedServices: "受影響服務",
+        statusFilter: "狀態篩選",
+        historyFilter: "投遞狀態",
         currentState: "目前狀態",
         updatedAt: "更新時間",
         createdAt: "建立時間",
-        updatedBy: "更新者",
         createdBy: "建立者",
+        updatedBy: "更新者",
         changeReason: "變更原因",
-        reasonRequired: "critical / maintenance 公告需填原因。",
-        maintenanceRequiredReason: "設定或清除 maintenance mode 必須填原因。",
+        scheduledWindow: "Scheduled Window",
+        affectedServices: "受影響服務",
+        affectedApps: "Cross-app deep links",
+        noticeId: "NOTICE",
+        noticeTitle: "標題",
+        noticeBody: "內容",
+        severity: "SEV",
+        audience: "對象",
+        status: "STATUS",
+        updated: "更新",
+        delivery: "DELIVERY",
+        targets: "TARGETS",
+        broadcastAt: "BROADCAST AT",
+        links: "LINKS",
+        actions: "ACTIONS",
+        resolve: "Resolve",
         enabled: "Enabled",
         disabled: "Disabled",
         activeBanner: "MAINTENANCE ACTIVE",
         maintenanceOn: "維護模式開啟",
         maintenanceOff: "維護模式關閉",
-        scheduledWindow: "Scheduled Window",
-        noWindow: "未設定時間窗",
-        noticeSummary: "公告概況",
-        activeNoticeCount: "進行中公告",
-        scheduledNoticeCount: "待發布公告",
-        inflightBroadcastCount: "傳播中 broadcast",
-        currentPolicy: "目前策略",
-        affectedApps: "影響 app",
-        permissionsTitle: "Authority",
-        permissionsBody:
-          "按鈕與風險級別由 availableActions 驅動，不寫死角色矩陣。",
-        historyEmpty: "尚無可顯示的廣播紀錄。",
-        noticeEmptyHint: "可加上 `?emptyReason=` 驗證六種空狀態。",
-        audiencesLabel: "受眾",
-        statusLabel: "狀態",
-        riskLabel: "風險",
-        noLinks: "無 deep link",
-        loading: "載入中",
-        newTab: "新分頁",
-        actionUnavailable: "目前不可執行",
-        clearAction: "Clear maintenance mode",
         setAction: "Set maintenance mode",
+        clearAction: "Clear maintenance mode",
+        noWindow: "未設定時間窗",
+        noLinks: "無 deep link",
+        noReason: "無原因",
+        reasonRequired: "critical / maintenance 公告需填原因。",
+        maintenanceRequiredReason: "設定或清除 maintenance mode 必須填原因。",
+        loading: "載入中",
+        actionUnavailable: "目前不可執行",
+        newTab: "新分頁",
         deliveryPending: "等待傳播",
         deliveryPropagating: "傳播中",
         deliveryDone: "已完成傳播",
-        audience: {
+        createPanelTitle: "新公告與 cross-app banner",
+        createPanelHint:
+          "critical / maintenance 屬高風險操作，必須填原因，並會向下游 app 推送 banner。",
+        noticeEmptyHint: "可加上 `?emptyReason=` 驗證六種空狀態。",
+        allFilter: "全部",
+        noDataFallback: "尚無資料",
+        openLink: "開啟",
+        audienceLabel: {
           all: "全部",
           tenants: "租戶",
           ops: "營運",
@@ -175,11 +187,12 @@ function getCopy(locale: string) {
     : {
         title: "Notices & Maintenance",
         subtitle:
-          "High-risk notices broadcast cross-app banners to ops, tenant, and driver experiences; Maintenance Mode and Broadcast History share the same route.",
+          "Critical and maintenance severity notices push cross-app banners to ops, tenant, and driver experiences. Maintenance Mode and Broadcast History share this route.",
         refreshTier: "Refresh tier T4",
         refreshDetail:
           "Auto refresh every 30s with manual refresh kept visible.",
         lastRefresh: "Last refresh",
+        currentPolicy: "Current policy",
         tabs: {
           notices: "Notices",
           maint: "Maintenance Mode",
@@ -187,9 +200,26 @@ function getCopy(locale: string) {
         },
         createNotice: "Create notice",
         closeComposer: "Close composer",
-        createPanelTitle: "New notice and cross-app banner",
-        createPanelHint:
-          "Critical and maintenance notices are high-risk, require a reason, and push banners downstream.",
+        refresh: "Refresh",
+        noticeSummary: "Notice summary",
+        activeNoticeCount: "Active notices",
+        scheduledNoticeCount: "Scheduled notices",
+        inflightBroadcastCount: "Broadcasts in flight",
+        noticesTableTitle: "Notices",
+        noticesTableHint:
+          "List title, body, severity, audience, status, and updated time per spec.",
+        historyTableTitle: "Broadcast history",
+        historyTableHint:
+          "Read-only cross-app delivery results with deep-link follow-through.",
+        maintenanceTitle: "Maintenance mode",
+        maintenanceHint:
+          "When enabled, dispatch, partner ingress, and webhook delivery pause. Publish a maintenance severity notice first.",
+        maintenancePreviewTitle: "Current maintenance notice preview",
+        maintenancePreviewBody:
+          "Downstream apps receive the same title, reason, and affected-service summary in the banner.",
+        permissionsTitle: "Authority",
+        permissionsBody:
+          "Action buttons and risk labels are driven by availableActions, not a hard-coded role matrix.",
         titleField: "Title",
         bodyField: "Body",
         severityField: "Severity",
@@ -199,65 +229,59 @@ function getCopy(locale: string) {
         scheduleEndField: "Scheduled end",
         publish: "Publish notice",
         publishing: "Publishing...",
-        noticesCardTitle: "Notice queue",
-        statusFilter: "Status filter",
-        maintenanceTitle: "Maintenance mode state",
-        maintenanceHint:
-          "When enabled, dispatch, partner ingress, and webhook delivery pause. Publish a maintenance severity notice first.",
-        maintenancePreviewTitle: "Cross-app banner preview",
-        maintenancePreviewBody:
-          "Downstream experiences will see the same title, reason, and affected-service summary.",
-        historyTitle: "Broadcast history",
-        historyFilter: "Delivery filter",
-        targets: "Targets",
-        delivery: "Delivery",
-        links: "Cross-app deep links",
-        openLink: "Open",
-        refresh: "Refresh",
         saveMaintenance: "Save maintenance settings",
         savingMaintenance: "Saving...",
-        resolve: "Resolve",
-        affectedServices: "Affected services",
+        statusFilter: "Status filter",
+        historyFilter: "Delivery filter",
         currentState: "Current state",
         updatedAt: "Updated",
         createdAt: "Created",
-        updatedBy: "Updated by",
         createdBy: "Created by",
+        updatedBy: "Updated by",
         changeReason: "Change reason",
-        reasonRequired: "Critical and maintenance notices require a reason.",
-        maintenanceRequiredReason:
-          "Setting or clearing maintenance mode requires a reason.",
+        scheduledWindow: "Scheduled window",
+        affectedServices: "Affected services",
+        affectedApps: "Cross-app deep links",
+        noticeId: "NOTICE",
+        noticeTitle: "Title",
+        noticeBody: "Body",
+        severity: "SEV",
+        audience: "AUDIENCE",
+        status: "STATUS",
+        updated: "UPDATED",
+        delivery: "DELIVERY",
+        targets: "TARGETS",
+        broadcastAt: "BROADCAST AT",
+        links: "LINKS",
+        actions: "ACTIONS",
+        resolve: "Resolve",
         enabled: "Enabled",
         disabled: "Disabled",
         activeBanner: "MAINTENANCE ACTIVE",
         maintenanceOn: "Maintenance mode ON",
         maintenanceOff: "Maintenance mode OFF",
-        scheduledWindow: "Scheduled Window",
-        noWindow: "No scheduled window",
-        noticeSummary: "Notice summary",
-        activeNoticeCount: "Active notices",
-        scheduledNoticeCount: "Scheduled notices",
-        inflightBroadcastCount: "Broadcasts in flight",
-        currentPolicy: "Current policy",
-        affectedApps: "Affected apps",
-        permissionsTitle: "Authority",
-        permissionsBody:
-          "Buttons and risk levels are driven by availableActions, not hard-coded role matrices.",
-        historyEmpty: "No broadcast history to show yet.",
-        noticeEmptyHint: "Use `?emptyReason=` to verify all six empty states.",
-        audiencesLabel: "Audience",
-        statusLabel: "Status",
-        riskLabel: "Risk",
-        noLinks: "No deep links",
-        loading: "Loading",
-        newTab: "New tab",
-        actionUnavailable: "Unavailable right now",
-        clearAction: "Clear maintenance mode",
         setAction: "Set maintenance mode",
+        clearAction: "Clear maintenance mode",
+        noWindow: "No scheduled window",
+        noLinks: "No deep links",
+        noReason: "No reason",
+        reasonRequired: "Critical and maintenance notices require a reason.",
+        maintenanceRequiredReason:
+          "Setting or clearing maintenance mode requires a reason.",
+        loading: "Loading",
+        actionUnavailable: "Unavailable right now",
+        newTab: "New tab",
         deliveryPending: "Pending broadcast",
         deliveryPropagating: "Broadcast propagating",
         deliveryDone: "Broadcast delivered",
-        audience: {
+        createPanelTitle: "New notice and cross-app banner",
+        createPanelHint:
+          "Critical and maintenance notices are high-risk, require a reason, and push banners downstream.",
+        noticeEmptyHint: "Use `?emptyReason=` to verify all six empty states.",
+        allFilter: "All",
+        noDataFallback: "No data",
+        openLink: "Open",
+        audienceLabel: {
           all: "All",
           tenants: "Tenants",
           ops: "Ops",
@@ -292,12 +316,9 @@ function getCopy(locale: string) {
       };
 }
 
-function normalizeNoticesResponse(raw: NoticesResponse): {
-  items: NoticeRecord[];
-  emptyState?: EmptyStateEnvelope;
-} {
+function normalizeNoticesResponse(raw: NoticesResponse) {
   if (Array.isArray(raw)) {
-    return { items: raw };
+    return { items: raw, emptyState: undefined };
   }
   return {
     items: raw?.items ?? [],
@@ -305,12 +326,9 @@ function normalizeNoticesResponse(raw: NoticesResponse): {
   };
 }
 
-function normalizeMaintenanceResponse(raw: MaintenanceResponse): {
-  item: MaintenanceRecord | null;
-  emptyState?: EmptyStateEnvelope;
-} {
+function normalizeMaintenanceResponse(raw: MaintenanceResponse) {
   if (raw && "enabled" in raw) {
-    return { item: raw as MaintenanceRecord };
+    return { item: raw as MaintenanceRecord, emptyState: undefined };
   }
   return {
     item: raw?.item ?? null,
@@ -318,50 +336,13 @@ function normalizeMaintenanceResponse(raw: MaintenanceResponse): {
   };
 }
 
-function normalizeNoticeActions(
-  notice: NoticeRecord,
-): ResourceActionDescriptor[] {
-  if (notice.availableActions?.length) {
-    return notice.availableActions;
+function getRequestedTab(value: string | null): NoticeTab | null {
+  if (!value) {
+    return null;
   }
-  return notice.status === "resolved"
-    ? [
-        {
-          action: "view_broadcast_history",
-          enabled: true,
-          riskLevel: "low",
-        },
-      ]
-    : [
-        {
-          action: "resolve_notice",
-          enabled: true,
-          riskLevel: "medium",
-        },
-        {
-          action: "view_broadcast_history",
-          enabled: true,
-          riskLevel: "low",
-        },
-      ];
-}
-
-function normalizeMaintenanceActions(
-  maintenance: MaintenanceRecord | null,
-): ResourceActionDescriptor[] {
-  if (maintenance?.availableActions?.length) {
-    return maintenance.availableActions;
-  }
-  return [
-    {
-      action: maintenance?.enabled
-        ? "clear_maintenance_mode"
-        : "set_maintenance_mode",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-  ];
+  return TAB_PARAM_VALUES.includes(value as NoticeTab)
+    ? (value as NoticeTab)
+    : null;
 }
 
 function getRequestedEmptyReason(
@@ -373,6 +354,28 @@ function getRequestedEmptyReason(
   return EMPTY_REASON_PARAM_VALUES.includes(value as SupportedEmptyReason)
     ? (value as SupportedEmptyReason)
     : null;
+}
+
+function normalizeSupportedEmptyReason(
+  reason: EmptyReason | null | undefined,
+  fallback: SupportedEmptyReason,
+): SupportedEmptyReason {
+  if (!reason || reason === "driver_not_eligible") {
+    return fallback;
+  }
+  return reason;
+}
+
+function normalizeNoticeActions(
+  notice: NoticeRecord,
+): ResourceActionDescriptor[] {
+  return notice.availableActions ?? [];
+}
+
+function normalizeMaintenanceActions(
+  maintenance: MaintenanceRecord | null,
+): ResourceActionDescriptor[] {
+  return maintenance?.availableActions ?? [];
 }
 
 function getSeverityTone(severity: PlatformNoticeSeverity) {
@@ -395,9 +398,6 @@ function getStatusTone(status: string) {
   if (status === "pending") {
     return "admin-badge--info";
   }
-  if (status === "critical" || status === "maintenance") {
-    return "admin-badge--danger";
-  }
   return "admin-badge--neutral";
 }
 
@@ -409,6 +409,17 @@ function getRiskTone(riskLevel: ResourceActionDescriptor["riskLevel"]) {
     return "admin-badge--warning";
   }
   return "admin-badge--info";
+}
+
+function formatWindow(
+  start?: string | null,
+  end?: string | null,
+  fallback?: string,
+) {
+  if (!start && !end) {
+    return fallback ?? "—";
+  }
+  return `${start ? formatDateTime(start) : "—"} -> ${end ? formatDateTime(end) : "—"}`;
 }
 
 function getCrossAppHref(link: CrossAppResourceLink): string {
@@ -424,58 +435,90 @@ function getCrossAppHref(link: CrossAppResourceLink): string {
   return `${base.replace(/\/$/, "")}${link.route.startsWith("/") ? "" : "/"}${link.route}`;
 }
 
-function getAudienceLabel(
-  audienceMap: ReturnType<typeof getCopy>["audience"],
-  audience: Audience,
+function getActionLabel(
+  locale: string,
+  action: ResourceActionDescriptor["action"],
 ) {
-  return audienceMap[audience];
+  const labels: Record<string, { en: string; zh: string }> = {
+    resolve_notice: { en: "Resolve notice", zh: "結束公告" },
+    view_broadcast_history: {
+      en: "View broadcast history",
+      zh: "查看廣播歷史",
+    },
+    set_maintenance_mode: { en: "Set maintenance mode", zh: "啟用維護模式" },
+    clear_maintenance_mode: {
+      en: "Clear maintenance mode",
+      zh: "解除維護模式",
+    },
+  };
+  return labels[action]?.[locale === "zh" ? "zh" : "en"] ?? action;
 }
 
-function normalizeSupportedEmptyReason(
-  reason: EmptyReason | null | undefined,
-  fallback: SupportedEmptyReason,
-): SupportedEmptyReason {
-  if (!reason || reason === "driver_not_eligible") {
-    return fallback;
-  }
-  return reason;
-}
-
-function formatWindow(
-  start?: string | null,
-  end?: string | null,
-  fallback?: string,
+function getDeliveryLabel(
+  copy: ReturnType<typeof getCopy>,
+  state: "pending" | "delivering" | "delivered" | undefined,
 ) {
-  if (!start && !end) {
-    return fallback ?? "—";
+  if (state === "delivered") {
+    return copy.deliveryDone;
   }
-  return `${start ? formatDateTime(start) : "—"} -> ${end ? formatDateTime(end) : "—"}`;
+  if (state === "delivering") {
+    return copy.deliveryPropagating;
+  }
+  if (state === "pending") {
+    return copy.deliveryPending;
+  }
+  return "—";
 }
 
-function renderActionBadge(action: ResourceActionDescriptor, label: string) {
+function MetricCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | string;
+  tone: string;
+}) {
   return (
     <div
+      className="admin-card"
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        flexWrap: "wrap",
+        marginBottom: 0,
+        background: `linear-gradient(180deg, ${tone}, rgba(255,255,255,0.96))`,
+        borderColor: "rgba(15, 23, 42, 0.07)",
       }}
     >
+      <div style={metaLabelStyle}>{label}</div>
+      <div style={{ fontSize: 32, fontWeight: 800, marginTop: 8 }}>{value}</div>
+    </div>
+  );
+}
+
+function ActionMeta({
+  locale,
+  action,
+  label,
+}: {
+  locale: Locale;
+  action: ResourceActionDescriptor;
+  label?: string;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
       <span className={`admin-badge ${getRiskTone(action.riskLevel)}`}>
-        {label}
+        {label ?? getActionLabel(locale, action.action)}
       </span>
       <span className="admin-badge admin-badge--neutral">
-        {action.riskLevel}
+        {formatPlatformCodeLabel(locale, action.riskLevel)}
       </span>
       {action.requiresReason ? (
         <span className="admin-badge admin-badge--neutral">
-          reason required
+          {locale === "zh" ? "需填原因" : "Reason required"}
         </span>
       ) : null}
       {!action.enabled && action.disabledReasonCode ? (
         <span className="admin-badge admin-badge--neutral">
-          {action.disabledReasonCode}
+          {formatPlatformCodeLabel(locale, action.disabledReasonCode)}
         </span>
       ) : null}
     </div>
@@ -488,7 +531,7 @@ function EmptyStateCard({
   messageCode,
   nextAction,
 }: {
-  locale: string;
+  locale: Locale;
   reason: SupportedEmptyReason;
   messageCode?: string;
   nextAction?: ResourceActionDescriptor;
@@ -498,54 +541,50 @@ function EmptyStateCard({
     SupportedEmptyReason,
     [string, string]
   >;
-  const emptyEntry = emptyMap[reason] ?? emptyMap.no_data ?? ["", ""];
-  const title = emptyEntry[0];
-  const body = emptyEntry[1];
+  const fallbackEntry = emptyMap.no_data ?? [copy.noDataFallback, ""];
+  const [title, body] = emptyMap[reason] ?? fallbackEntry;
   const styleMap: Record<
     SupportedEmptyReason,
-    {
-      accent: string;
-      glow: string;
-      glyph: string;
-    }
+    { accent: string; glow: string; glyph: string }
   > = {
-    no_data: { accent: "#0f766e", glow: "rgba(15,118,110,0.15)", glyph: "00" },
+    no_data: { accent: "#0f766e", glow: "rgba(15,118,110,0.12)", glyph: "00" },
     not_provisioned: {
       accent: "#4338ca",
-      glow: "rgba(67,56,202,0.14)",
+      glow: "rgba(67,56,202,0.12)",
       glyph: "01",
     },
     fetch_failed: {
       accent: "#b91c1c",
-      glow: "rgba(185,28,28,0.15)",
+      glow: "rgba(185,28,28,0.12)",
       glyph: "02",
     },
     permission_denied: {
-      accent: "#7c2d12",
-      glow: "rgba(124,45,18,0.15)",
+      accent: "#9a3412",
+      glow: "rgba(154,52,18,0.12)",
       glyph: "03",
     },
     external_unavailable: {
       accent: "#334155",
-      glow: "rgba(51,65,85,0.15)",
+      glow: "rgba(51,65,85,0.12)",
       glyph: "04",
     },
     filtered_empty: {
       accent: "#0369a1",
-      glow: "rgba(3,105,161,0.15)",
+      glow: "rgba(3,105,161,0.12)",
       glyph: "05",
     },
   };
-  const style = styleMap[reason]!;
+  const style = styleMap[reason] ?? styleMap.no_data;
 
   return (
     <div
       className="admin-card"
       style={{
+        marginBottom: 0,
         padding: 0,
         overflow: "hidden",
         borderColor: style.glow,
-        background: `linear-gradient(140deg, ${style.glow}, rgba(255,255,255,0.96) 36%)`,
+        background: `linear-gradient(140deg, ${style.glow}, rgba(255,255,255,0.97) 42%)`,
       }}
     >
       <div
@@ -598,7 +637,7 @@ function EmptyStateCard({
             </p>
           ) : null}
           {nextAction ? (
-            <div>{renderActionBadge(nextAction, nextAction.action)}</div>
+            <ActionMeta locale={locale} action={nextAction} />
           ) : null}
         </div>
       </div>
@@ -608,26 +647,31 @@ function EmptyStateCard({
 
 export default function NoticesPage() {
   const client = usePlatformAdminClient();
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { locale } = useTranslation();
   const copy = getCopy(locale);
-  const [notices, setNotices] = useState<NoticeRecord[]>([]);
-  const [maintenance, setMaintenance] = useState<MaintenanceRecord | null>(
-    null,
-  );
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<NoticeTab>("notices");
   const [noticeFilter, setNoticeFilter] = useState<NoticeFilter>("all");
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [showCreate, setShowCreate] = useState(false);
-  const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [savingMaintenance, setSavingMaintenance] = useState(false);
+
+  const [notices, setNotices] = useState<NoticeRecord[]>([]);
+  const [maintenance, setMaintenance] = useState<MaintenanceRecord | null>(
+    null,
+  );
   const [noticesEmptyState, setNoticesEmptyState] =
     useState<EmptyStateEnvelope | null>(null);
   const [maintenanceEmptyState, setMaintenanceEmptyState] =
     useState<EmptyStateEnvelope | null>(null);
+
   const [formTitle, setFormTitle] = useState("");
   const [formBody, setFormBody] = useState("");
   const [formSeverity, setFormSeverity] =
@@ -640,6 +684,10 @@ export default function NoticesPage() {
   const [maintScheduledStart, setMaintScheduledStart] = useState("");
   const [maintScheduledEnd, setMaintScheduledEnd] = useState("");
 
+  const requestedEmptyReason = getRequestedEmptyReason(
+    searchParams.get("emptyReason"),
+  );
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -650,6 +698,7 @@ export default function NoticesPage() {
       ]);
       const noticeData = normalizeNoticesResponse(noticeRaw);
       const maintenanceData = normalizeMaintenanceResponse(maintenanceRaw);
+
       setNotices(noticeData.items);
       setNoticesEmptyState(noticeData.emptyState ?? null);
       setMaintenance(maintenanceData.item);
@@ -675,11 +724,50 @@ export default function NoticesPage() {
   }, [loadData]);
 
   useEffect(() => {
+    const nextTab = getRequestedTab(searchParams.get("tab"));
+    if (nextTab && nextTab !== activeTab) {
+      setActiveTab(nextTab);
+    }
+  }, [activeTab, searchParams]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       void loadData();
     }, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadData]);
+
+  const activeNotices = notices.filter((notice) =>
+    noticeFilter === "all" ? true : notice.status === noticeFilter,
+  );
+  const historyRows = notices.filter(
+    (notice) => notice.deliverySummary || notice.severity !== "info",
+  );
+  const filteredHistoryRows = historyRows.filter((notice) => {
+    const state = notice.deliverySummary?.state ?? "pending";
+    return historyFilter === "all" ? true : state === historyFilter;
+  });
+  const activeNoticeCount = notices.filter(
+    (notice) => notice.status === "active",
+  ).length;
+  const scheduledNoticeCount = notices.filter(
+    (notice) => notice.status === "scheduled",
+  ).length;
+  const inflightBroadcastCount = notices.filter((notice) => {
+    const state = notice.deliverySummary?.state;
+    return state === "pending" || state === "delivering";
+  }).length;
+  const maintenanceAction = normalizeMaintenanceActions(maintenance)[0];
+
+  const updateTab = useCallback(
+    (nextTab: NoticeTab) => {
+      setActiveTab(nextTab);
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("tab", nextTab);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   async function handleCreateNotice(event: React.FormEvent) {
     event.preventDefault();
@@ -736,8 +824,7 @@ export default function NoticesPage() {
   }
 
   async function handleSaveMaintenance() {
-    const action = normalizeMaintenanceActions(maintenance)[0];
-    if (action?.requiresReason && !maintReason.trim()) {
+    if (maintenanceAction?.requiresReason && !maintReason.trim()) {
       setError(copy.maintenanceRequiredReason);
       return;
     }
@@ -763,39 +850,12 @@ export default function NoticesPage() {
     }
   }
 
-  const requestedEmptyReason = getRequestedEmptyReason(
-    searchParams.get("emptyReason"),
-  );
-  const activeNotices = notices.filter((notice) =>
-    noticeFilter === "all" ? true : notice.status === noticeFilter,
-  );
-  const historyRows = notices.filter(
-    (notice) => notice.deliverySummary || notice.severity !== "info",
-  );
-  const filteredHistoryRows = historyRows.filter((notice) => {
-    const state = notice.deliverySummary?.state ?? "pending";
-    return historyFilter === "all" ? true : state === historyFilter;
-  });
-  const activeNoticeCount = notices.filter(
-    (notice) => notice.status === "active",
-  ).length;
-  const scheduledNoticeCount = notices.filter(
-    (notice) => notice.status === "scheduled",
-  ).length;
-  const inflightBroadcastCount = notices.filter((notice) => {
-    const state = notice.deliverySummary?.state;
-    return state === "pending" || state === "delivering";
-  }).length;
-  const maintenanceActions = normalizeMaintenanceActions(maintenance);
-  const maintenanceAction = maintenanceActions[0];
-  const maintenanceLinks = maintenance?.crossAppLinks ?? [];
-
-  function renderNoticeLinks(links?: CrossAppResourceLink[]) {
+  function renderLinkSet(links?: CrossAppResourceLink[]) {
     if (!links?.length) {
       return <span style={{ color: "#64748b" }}>{copy.noLinks}</span>;
     }
     return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {links.map((link) => (
           <a
             key={`${link.targetApp}-${link.route}`}
@@ -827,229 +887,34 @@ export default function NoticesPage() {
     );
   }
 
-  function renderSummaryCards() {
-    const cards = [
-      {
-        label: copy.activeNoticeCount,
-        value: activeNoticeCount,
-        tone: "rgba(15,118,110,0.12)",
-      },
-      {
-        label: copy.scheduledNoticeCount,
-        value: scheduledNoticeCount,
-        tone: "rgba(245,158,11,0.12)",
-      },
-      {
-        label: copy.inflightBroadcastCount,
-        value: inflightBroadcastCount,
-        tone: "rgba(30,64,175,0.12)",
-      },
-    ];
-
-    return (
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 14,
-        }}
-      >
-        {cards.map((card) => (
-          <div
-            key={card.label}
-            className="admin-card"
-            style={{
-              marginBottom: 0,
-              background: `linear-gradient(180deg, ${card.tone}, rgba(255,255,255,0.96))`,
-              borderColor: "rgba(15, 23, 42, 0.06)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                letterSpacing: "0.06em",
-                color: "#64748b",
-              }}
-            >
-              {card.label}
-            </div>
-            <div style={{ fontSize: 32, fontWeight: 800, marginTop: 8 }}>
-              {card.value}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  function renderNoticeRow(notice: NoticeRecord) {
+  function renderNoticeActions(notice: NoticeRecord) {
     const actions = normalizeNoticeActions(notice);
-    const deliveryState = notice.deliverySummary?.state;
+    if (!actions.length) {
+      return <span style={{ color: "#64748b" }}>{copy.noDataFallback}</span>;
+    }
 
     return (
-      <article
-        key={notice.noticeId}
-        className="admin-card"
-        style={{
-          marginBottom: 0,
-          padding: 24,
-          borderColor: "rgba(15, 23, 42, 0.08)",
-          background:
-            notice.severity === "maintenance"
-              ? "linear-gradient(180deg, rgba(127,29,29,0.10), rgba(255,255,255,0.96) 44%)"
-              : notice.severity === "critical"
-                ? "linear-gradient(180deg, rgba(239,68,68,0.10), rgba(255,255,255,0.96) 44%)"
-                : "rgba(255,255,255,0.94)",
-        }}
-      >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.4fr) minmax(300px, 0.9fr)",
-            gap: 22,
-          }}
-        >
-          <div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                flexWrap: "wrap",
-                marginBottom: 10,
-              }}
-            >
-              <span
-                className={`admin-badge ${getSeverityTone(notice.severity)}`}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {actions.map((action) => {
+          if (action.action === "resolve_notice") {
+            return (
+              <button
+                key={action.action}
+                type="button"
+                className="admin-btn admin-btn--secondary admin-btn--sm"
+                disabled={!action.enabled}
+                title={action.disabledReasonCode ?? copy.actionUnavailable}
+                onClick={() => void handleResolveNotice(notice.noticeId)}
               >
-                {formatPlatformCodeLabel(locale, notice.severity)}
-              </span>
-              <span className={`admin-badge ${getStatusTone(notice.status)}`}>
-                {formatPlatformCodeLabel(locale, notice.status)}
-              </span>
-              <span className="admin-badge admin-badge--neutral">
-                {copy.audiencesLabel}:{" "}
-                {getAudienceLabel(
-                  copy.audience,
-                  notice.targetAudience as Audience,
-                )}
-              </span>
-              {deliveryState ? (
-                <span className={`admin-badge ${getStatusTone(deliveryState)}`}>
-                  {deliveryState}
-                </span>
-              ) : null}
-            </div>
-            <h3 style={{ margin: "0 0 10px", fontSize: 22 }}>{notice.title}</h3>
-            <p
-              style={{ margin: "0 0 14px", color: "#334155", lineHeight: 1.7 }}
-            >
-              {notice.body}
-            </p>
-            <div style={metaGridStyle}>
-              <div>
-                <div style={metaLabelStyle}>{copy.createdAt}</div>
-                <div style={monoTextStyle}>
-                  {formatDateTime(notice.createdAt)}
-                </div>
-              </div>
-              <div>
-                <div style={metaLabelStyle}>{copy.updatedAt}</div>
-                <div style={monoTextStyle}>
-                  {formatDateTime(notice.updatedAt)}
-                </div>
-              </div>
-              <div>
-                <div style={metaLabelStyle}>{copy.createdBy}</div>
-                <div>{notice.createdBy || "—"}</div>
-              </div>
-              <div>
-                <div style={metaLabelStyle}>{copy.changeReason}</div>
-                <div>{notice.changeReason || "—"}</div>
-              </div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              borderRadius: 18,
-              padding: 18,
-              border: "1px solid rgba(15, 23, 42, 0.08)",
-              background: "rgba(248,250,252,0.92)",
-            }}
-          >
-            <div style={{ marginBottom: 14 }}>
-              <div style={metaLabelStyle}>{copy.delivery}</div>
-              <div style={{ fontSize: 15, fontWeight: 700, marginTop: 8 }}>
-                {notice.deliverySummary
-                  ? `${notice.deliverySummary.deliveredCount} / ${notice.deliverySummary.totalCount}`
-                  : "—"}
-              </div>
-              <div style={{ color: "#64748b", marginTop: 4 }}>
-                {notice.deliverySummary?.state === "delivered"
-                  ? copy.deliveryDone
-                  : notice.deliverySummary?.state === "delivering"
-                    ? copy.deliveryPropagating
-                    : notice.deliverySummary?.state === "pending"
-                      ? copy.deliveryPending
-                      : "—"}
-              </div>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={metaLabelStyle}>{copy.targets}</div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  flexWrap: "wrap",
-                  marginTop: 8,
-                }}
-              >
-                {(notice.deliverySummary?.targets ?? []).length ? (
-                  (notice.deliverySummary?.targets ?? []).map(
-                    (target: string) => (
-                      <span
-                        key={target}
-                        className="admin-badge admin-badge--neutral"
-                        style={{ textTransform: "none" }}
-                      >
-                        {target}
-                      </span>
-                    ),
-                  )
-                ) : (
-                  <span style={{ color: "#64748b" }}>—</span>
-                )}
-              </div>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={metaLabelStyle}>{copy.links}</div>
-              <div style={{ marginTop: 8 }}>
-                {renderNoticeLinks(notice.crossAppLinks)}
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {actions.map((action) => {
-                if (action.action !== "resolve_notice") {
-                  return renderActionBadge(action, action.action);
-                }
-                return (
-                  <button
-                    key={action.action}
-                    type="button"
-                    className="admin-btn admin-btn--secondary"
-                    disabled={!action.enabled}
-                    title={action.disabledReasonCode ?? copy.actionUnavailable}
-                    onClick={() => void handleResolveNotice(notice.noticeId)}
-                  >
-                    {copy.resolve}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </article>
+                {copy.resolve}
+              </button>
+            );
+          }
+          return (
+            <ActionMeta key={action.action} locale={locale} action={action} />
+          );
+        })}
+      </div>
     );
   }
 
@@ -1061,35 +926,24 @@ export default function NoticesPage() {
       return renderEmptyState("fetch_failed");
     }
     if (activeNotices.length === 0) {
-      const reason = normalizeSupportedEmptyReason(
-        noticesEmptyState?.reason,
-        notices.length === 0 ? "no_data" : "filtered_empty",
+      const fallback = notices.length === 0 ? "no_data" : "filtered_empty";
+      return renderEmptyState(
+        normalizeSupportedEmptyReason(noticesEmptyState?.reason, fallback),
+        noticesEmptyState,
       );
-      return renderEmptyState(reason, noticesEmptyState);
     }
 
     return (
-      <div style={{ display: "grid", gap: 16 }}>
-        <div
-          className="admin-card"
-          style={{
-            marginBottom: 0,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 16,
-            flexWrap: "wrap",
-            background:
-              "linear-gradient(180deg, rgba(15,118,110,0.06), rgba(255,255,255,0.96))",
-          }}
-        >
+      <div
+        className="admin-card"
+        style={{ marginBottom: 0, overflowX: "auto" }}
+      >
+        <div style={sectionHeaderStyle}>
           <div>
             <div style={{ fontSize: 22, fontWeight: 800 }}>
-              {copy.noticesCardTitle}
+              {copy.noticesTableTitle}
             </div>
-            <p style={{ margin: "6px 0 0", color: "#64748b" }}>
-              {copy.noticeEmptyHint}
-            </p>
+            <p style={sectionHintStyle}>{copy.noticesTableHint}</p>
           </div>
           <label style={{ ...fieldGroupStyle, minWidth: 180 }}>
             <span style={fieldLabelStyle}>{copy.statusFilter}</span>
@@ -1100,16 +954,82 @@ export default function NoticesPage() {
               }
               style={fieldStyle}
             >
-              <option value="all">all</option>
+              <option value="all">{copy.allFilter}</option>
               <option value="active">active</option>
               <option value="scheduled">scheduled</option>
               <option value="resolved">resolved</option>
             </select>
           </label>
         </div>
-        <div style={{ display: "grid", gap: 16 }}>
-          {activeNotices.map(renderNoticeRow)}
-        </div>
+        <table className="admin-table" style={{ minWidth: 1180 }}>
+          <thead>
+            <tr>
+              <th>{copy.noticeId}</th>
+              <th>{copy.noticeTitle}</th>
+              <th>{copy.noticeBody}</th>
+              <th>{copy.severity}</th>
+              <th>{copy.audience}</th>
+              <th>{copy.status}</th>
+              <th>{copy.updated}</th>
+              <th>{copy.links}</th>
+              <th>{copy.actions}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activeNotices.map((notice) => (
+              <tr key={notice.noticeId}>
+                <td style={monoTextStyle}>{notice.noticeId}</td>
+                <td>
+                  <div style={{ fontWeight: 700 }}>{notice.title}</div>
+                  {notice.changeReason ? (
+                    <div style={{ color: "#64748b", marginTop: 4 }}>
+                      {copy.changeReason}: {notice.changeReason}
+                    </div>
+                  ) : null}
+                </td>
+                <td style={{ maxWidth: 280 }}>
+                  <div style={clampedBodyStyle}>{notice.body}</div>
+                  <div style={{ color: "#64748b", marginTop: 6 }}>
+                    {copy.createdAt}: {formatDateTime(notice.createdAt)}
+                  </div>
+                </td>
+                <td>
+                  <span
+                    className={`admin-badge ${getSeverityTone(notice.severity)}`}
+                  >
+                    {formatPlatformCodeLabel(locale, notice.severity)}
+                  </span>
+                </td>
+                <td>
+                  <span className="admin-badge admin-badge--neutral">
+                    {copy.audienceLabel[notice.targetAudience as Audience]}
+                  </span>
+                </td>
+                <td>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <span
+                      className={`admin-badge ${getStatusTone(notice.status)}`}
+                    >
+                      {formatPlatformCodeLabel(locale, notice.status)}
+                    </span>
+                    {notice.deliverySummary?.state ? (
+                      <span
+                        className={`admin-badge ${getStatusTone(notice.deliverySummary.state)}`}
+                      >
+                        {getDeliveryLabel(copy, notice.deliverySummary.state)}
+                      </span>
+                    ) : null}
+                  </div>
+                </td>
+                <td style={monoTextStyle}>
+                  {formatDateTime(notice.updatedAt)}
+                </td>
+                <td>{renderLinkSet(notice.crossAppLinks)}</td>
+                <td>{renderNoticeActions(notice)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
   }
@@ -1135,59 +1055,50 @@ export default function NoticesPage() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0, 1.35fr) minmax(280px, 0.95fr)",
+          gridTemplateColumns: "minmax(0, 1.4fr) minmax(300px, 1fr)",
           gap: 16,
         }}
       >
-        <div style={{ display: "grid", gap: 16 }}>
+        <div className="admin-card" style={{ marginBottom: 0 }}>
+          <div style={sectionHeaderStyle}>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>
+                {copy.maintenanceTitle}
+              </div>
+              <p style={sectionHintStyle}>{copy.maintenanceHint}</p>
+            </div>
+            <span
+              className={`admin-badge ${getStatusTone(
+                maintenance.enabled ? "enabled" : "disabled",
+              )}`}
+            >
+              {maintenance.enabled ? copy.enabled : copy.disabled}
+            </span>
+          </div>
+
           <div
-            className="admin-card"
             style={{
-              marginBottom: 0,
-              background: maintenance.enabled
-                ? "linear-gradient(160deg, rgba(127,29,29,0.96), rgba(239,68,68,0.86))"
-                : "linear-gradient(160deg, rgba(15,23,42,0.96), rgba(51,65,85,0.86))",
-              color: "#fff",
-              borderColor: "transparent",
+              padding: 14,
+              border: "1px solid rgba(15,23,42,0.08)",
+              borderRadius: 12,
+              background: "rgba(248,250,252,0.92)",
+              marginBottom: 16,
             }}
           >
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                alignItems: "flex-start",
+                alignItems: "center",
                 gap: 16,
+                marginBottom: 8,
               }}
             >
-              <div>
-                <div
-                  style={{
-                    display: "inline-flex",
-                    padding: "5px 10px",
-                    borderRadius: 999,
-                    background: "rgba(255,255,255,0.16)",
-                    marginBottom: 12,
-                    fontSize: 12,
-                    fontWeight: 700,
-                  }}
-                >
-                  {maintenance.enabled ? copy.activeBanner : copy.currentPolicy}
-                </div>
-                <h3 style={{ margin: "0 0 8px", fontSize: 24 }}>
-                  {maintenance.enabled
-                    ? copy.maintenanceOn
-                    : copy.maintenanceOff}
-                </h3>
-                <p
-                  style={{
-                    margin: 0,
-                    maxWidth: 540,
-                    color: "rgba(255,255,255,0.88)",
-                  }}
-                >
-                  {copy.maintenanceHint}
-                </p>
-              </div>
+              <span style={{ fontWeight: 700 }}>
+                {locale === "zh"
+                  ? "全平台維護模式"
+                  : "Platform-wide maintenance mode"}
+              </span>
               <label className="admin-switch">
                 <input
                   type="checkbox"
@@ -1197,147 +1108,134 @@ export default function NoticesPage() {
                 <span className="admin-switch-slider" />
               </label>
             </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-                gap: 14,
-                marginTop: 18,
-              }}
-            >
-              <div>
-                <div style={darkMetaLabelStyle}>{copy.currentState}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, marginTop: 6 }}>
-                  {maintenance.enabled ? copy.enabled : copy.disabled}
-                </div>
-              </div>
-              <div>
-                <div style={darkMetaLabelStyle}>{copy.scheduledWindow}</div>
-                <div style={{ marginTop: 6 }}>
-                  {formatWindow(
-                    maintenance.scheduledStart,
-                    maintenance.scheduledEnd,
-                    copy.noWindow,
+            <div style={{ color: "#64748b", lineHeight: 1.6 }}>
+              {copy.maintenanceHint}
+            </div>
+          </div>
+
+          <div style={maintenanceGridStyle}>
+            <label style={fieldGroupStyle}>
+              <span style={fieldLabelStyle}>{copy.reasonField}</span>
+              <input
+                value={maintReason}
+                onChange={(event) => setMaintReason(event.target.value)}
+                style={fieldStyle}
+                placeholder={copy.reasonField}
+              />
+            </label>
+            <label style={fieldGroupStyle}>
+              <span style={fieldLabelStyle}>{copy.scheduleStartField}</span>
+              <input
+                value={maintScheduledStart}
+                onChange={(event) => setMaintScheduledStart(event.target.value)}
+                style={fieldStyle}
+                placeholder="2026-05-27T02:00:00Z"
+              />
+            </label>
+            <label style={fieldGroupStyle}>
+              <span style={fieldLabelStyle}>{copy.scheduleEndField}</span>
+              <input
+                value={maintScheduledEnd}
+                onChange={(event) => setMaintScheduledEnd(event.target.value)}
+                style={fieldStyle}
+                placeholder="2026-05-27T04:00:00Z"
+              />
+            </label>
+            <div style={fieldGroupStyle}>
+              <span style={fieldLabelStyle}>{copy.affectedServices}</span>
+              <div style={fieldBoxStyle}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {(maintenance.affectedServices ?? []).length ? (
+                    (maintenance.affectedServices ?? []).map(
+                      (service: string) => (
+                        <span
+                          key={service}
+                          className="admin-badge admin-badge--neutral"
+                          style={{ textTransform: "none" }}
+                        >
+                          {service}
+                        </span>
+                      ),
+                    )
+                  ) : (
+                    <span style={{ color: "#64748b" }}>—</span>
                   )}
-                </div>
-              </div>
-              <div>
-                <div style={darkMetaLabelStyle}>{copy.updatedAt}</div>
-                <div style={{ marginTop: 6 }}>
-                  {formatDateTime(maintenance.updatedAt)}
-                </div>
-              </div>
-              <div>
-                <div style={darkMetaLabelStyle}>{copy.updatedBy}</div>
-                <div style={{ marginTop: 6 }}>
-                  {maintenance.updatedBy || "—"}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="admin-card" style={{ marginBottom: 0 }}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                gap: 14,
-              }}
-            >
-              <label style={fieldGroupStyle}>
-                <span style={fieldLabelStyle}>{copy.reasonField}</span>
-                <input
-                  value={maintReason}
-                  onChange={(event) => setMaintReason(event.target.value)}
-                  style={fieldStyle}
-                  placeholder={copy.reasonField}
-                />
-              </label>
-              <label style={fieldGroupStyle}>
-                <span style={fieldLabelStyle}>{copy.affectedServices}</span>
-                <div style={fieldBoxStyle}>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {(maintenance.affectedServices ?? []).length ? (
-                      (maintenance.affectedServices ?? []).map(
-                        (service: string) => (
-                          <span
-                            key={service}
-                            className="admin-badge admin-badge--neutral"
-                            style={{ textTransform: "none" }}
-                          >
-                            {service}
-                          </span>
-                        ),
-                      )
-                    ) : (
-                      <span style={{ color: "#64748b" }}>—</span>
-                    )}
-                  </div>
-                </div>
-              </label>
-              <label style={fieldGroupStyle}>
-                <span style={fieldLabelStyle}>{copy.scheduleStartField}</span>
-                <input
-                  value={maintScheduledStart}
-                  onChange={(event) =>
-                    setMaintScheduledStart(event.target.value)
-                  }
-                  style={fieldStyle}
-                  placeholder="2026-05-27T02:00:00Z"
-                />
-              </label>
-              <label style={fieldGroupStyle}>
-                <span style={fieldLabelStyle}>{copy.scheduleEndField}</span>
-                <input
-                  value={maintScheduledEnd}
-                  onChange={(event) => setMaintScheduledEnd(event.target.value)}
-                  style={fieldStyle}
-                  placeholder="2026-05-27T04:00:00Z"
-                />
-              </label>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 16,
-                flexWrap: "wrap",
-                marginTop: 18,
-              }}
-            >
-              <div style={{ display: "grid", gap: 8 }}>
-                <div style={{ fontWeight: 700 }}>{copy.permissionsTitle}</div>
-                <div style={{ color: "#64748b", maxWidth: 520 }}>
-                  {copy.permissionsBody}
-                </div>
-                {maintenanceAction
-                  ? renderActionBadge(
-                      maintenanceAction,
-                      maintenanceAction.action === "clear_maintenance_mode"
-                        ? copy.clearAction
-                        : copy.setAction,
-                    )
-                  : null}
+          <div style={maintenanceMetaRowStyle}>
+            <div style={fieldBoxStyle}>
+              <div style={metaLabelStyle}>{copy.currentState}</div>
+              <div style={{ marginTop: 6, fontWeight: 700 }}>
+                {maintenance.enabled ? copy.maintenanceOn : copy.maintenanceOff}
               </div>
-              <button
-                type="button"
-                className="admin-btn admin-btn--primary"
-                disabled={savingMaintenance || !maintenanceAction?.enabled}
-                title={maintenanceAction?.disabledReasonCode ?? undefined}
-                onClick={() => void handleSaveMaintenance()}
-              >
-                {savingMaintenance
-                  ? copy.savingMaintenance
-                  : copy.saveMaintenance}
-              </button>
             </div>
+            <div style={fieldBoxStyle}>
+              <div style={metaLabelStyle}>{copy.scheduledWindow}</div>
+              <div style={{ marginTop: 6 }}>
+                {formatWindow(
+                  maintenance.scheduledStart,
+                  maintenance.scheduledEnd,
+                  copy.noWindow,
+                )}
+              </div>
+            </div>
+            <div style={fieldBoxStyle}>
+              <div style={metaLabelStyle}>{copy.updatedAt}</div>
+              <div style={{ marginTop: 6 }}>
+                {formatDateTime(maintenance.updatedAt)}
+              </div>
+            </div>
+            <div style={fieldBoxStyle}>
+              <div style={metaLabelStyle}>{copy.updatedBy}</div>
+              <div style={{ marginTop: 6 }}>{maintenance.updatedBy || "—"}</div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 16,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 700 }}>{copy.permissionsTitle}</div>
+              <div style={{ color: "#64748b", maxWidth: 520 }}>
+                {copy.permissionsBody}
+              </div>
+              {maintenanceAction ? (
+                <ActionMeta
+                  locale={locale}
+                  action={maintenanceAction}
+                  label={
+                    maintenanceAction.action === "clear_maintenance_mode"
+                      ? copy.clearAction
+                      : copy.setAction
+                  }
+                />
+              ) : null}
+            </div>
+            <button
+              type="button"
+              className="admin-btn admin-btn--primary"
+              disabled={savingMaintenance || !maintenanceAction?.enabled}
+              title={maintenanceAction?.disabledReasonCode ?? undefined}
+              onClick={() => void handleSaveMaintenance()}
+            >
+              {savingMaintenance
+                ? copy.savingMaintenance
+                : copy.saveMaintenance}
+            </button>
           </div>
         </div>
 
         <div style={{ display: "grid", gap: 16 }}>
           <div className="admin-card" style={{ marginBottom: 0 }}>
-            <h3 style={{ margin: "0 0 14px", fontSize: 18 }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 18 }}>
               {copy.maintenancePreviewTitle}
             </h3>
             <div
@@ -1362,11 +1260,15 @@ export default function NoticesPage() {
               >
                 {copy.activeBanner}
               </div>
-              <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>
+              <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 8 }}>
                 {maintReason || maintenance.reason || copy.maintenanceOn}
               </div>
               <p
-                style={{ margin: "0 0 14px", color: "rgba(255,255,255,0.88)" }}
+                style={{
+                  margin: "0 0 12px",
+                  color: "rgba(255,255,255,0.86)",
+                  lineHeight: 1.7,
+                }}
               >
                 {copy.maintenancePreviewBody}
               </p>
@@ -1392,7 +1294,7 @@ export default function NoticesPage() {
             <div style={{ marginBottom: 10, fontWeight: 700 }}>
               {copy.affectedApps}
             </div>
-            {renderNoticeLinks(maintenanceLinks)}
+            {renderLinkSet(maintenance.crossAppLinks)}
           </div>
         </div>
       </div>
@@ -1407,33 +1309,30 @@ export default function NoticesPage() {
       return renderEmptyState("fetch_failed");
     }
     if (filteredHistoryRows.length === 0) {
-      const reason = normalizeSupportedEmptyReason(
-        historyRows.length === 0 ? noticesEmptyState?.reason : "filtered_empty",
-        historyRows.length === 0 ? "not_provisioned" : "filtered_empty",
+      const fallback =
+        historyRows.length === 0 ? "not_provisioned" : "filtered_empty";
+      return renderEmptyState(
+        normalizeSupportedEmptyReason(
+          historyRows.length === 0
+            ? noticesEmptyState?.reason
+            : "filtered_empty",
+          fallback,
+        ),
+        noticesEmptyState,
       );
-      return renderEmptyState(reason, noticesEmptyState);
     }
 
     return (
-      <div style={{ display: "grid", gap: 16 }}>
-        <div
-          className="admin-card"
-          style={{
-            marginBottom: 0,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 16,
-            flexWrap: "wrap",
-          }}
-        >
+      <div
+        className="admin-card"
+        style={{ marginBottom: 0, overflowX: "auto" }}
+      >
+        <div style={sectionHeaderStyle}>
           <div>
             <div style={{ fontSize: 22, fontWeight: 800 }}>
-              {copy.historyTitle}
+              {copy.historyTableTitle}
             </div>
-            <p style={{ margin: "6px 0 0", color: "#64748b" }}>
-              {copy.historyEmpty}
-            </p>
+            <p style={sectionHintStyle}>{copy.historyTableHint}</p>
           </div>
           <label style={{ ...fieldGroupStyle, minWidth: 180 }}>
             <span style={fieldLabelStyle}>{copy.historyFilter}</span>
@@ -1444,92 +1343,44 @@ export default function NoticesPage() {
               }
               style={fieldStyle}
             >
-              <option value="all">all</option>
+              <option value="all">{copy.allFilter}</option>
               <option value="delivered">delivered</option>
               <option value="delivering">delivering</option>
               <option value="pending">pending</option>
             </select>
           </label>
         </div>
-
-        <div style={{ display: "grid", gap: 16 }}>
-          {filteredHistoryRows.map((notice) => (
-            <div
-              key={`${notice.noticeId}-history`}
-              className="admin-card"
-              style={{ marginBottom: 0, display: "grid", gap: 16 }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: 16,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      flexWrap: "wrap",
-                      alignItems: "center",
-                      marginBottom: 10,
-                    }}
+        <table className="admin-table" style={{ minWidth: 1120 }}>
+          <thead>
+            <tr>
+              <th>{copy.noticeId}</th>
+              <th>{copy.noticeTitle}</th>
+              <th>{copy.severity}</th>
+              <th>{copy.targets}</th>
+              <th>{copy.delivery}</th>
+              <th>{copy.broadcastAt}</th>
+              <th>{copy.links}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredHistoryRows.map((notice) => (
+              <tr key={`${notice.noticeId}-history`}>
+                <td style={monoTextStyle}>{notice.noticeId}</td>
+                <td>
+                  <div style={{ fontWeight: 700 }}>{notice.title}</div>
+                  <div style={{ color: "#64748b", marginTop: 4 }}>
+                    {notice.body}
+                  </div>
+                </td>
+                <td>
+                  <span
+                    className={`admin-badge ${getSeverityTone(notice.severity)}`}
                   >
-                    <span
-                      className={`admin-badge ${getSeverityTone(notice.severity)}`}
-                    >
-                      {formatPlatformCodeLabel(locale, notice.severity)}
-                    </span>
-                    <span
-                      className={`admin-badge ${getStatusTone(
-                        notice.deliverySummary?.state ?? "pending",
-                      )}`}
-                    >
-                      {notice.deliverySummary?.state ?? "pending"}
-                    </span>
-                  </div>
-                  <h3 style={{ margin: "0 0 6px", fontSize: 20 }}>
-                    {notice.title}
-                  </h3>
-                  <div style={{ color: "#64748b" }}>{notice.noticeId}</div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={metaLabelStyle}>{copy.updatedAt}</div>
-                  <div style={monoTextStyle}>
-                    {formatDateTime(
-                      notice.deliverySummary?.broadcastAt ?? notice.updatedAt,
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                  gap: 12,
-                }}
-              >
-                <div style={historyMetricCardStyle}>
-                  <div style={metaLabelStyle}>{copy.delivery}</div>
-                  <div style={{ fontSize: 24, fontWeight: 800, marginTop: 8 }}>
-                    {notice.deliverySummary?.deliveredCount ?? 0} /{" "}
-                    {notice.deliverySummary?.totalCount ?? 0}
-                  </div>
-                </div>
-                <div style={historyMetricCardStyle}>
-                  <div style={metaLabelStyle}>{copy.targets}</div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      flexWrap: "wrap",
-                      marginTop: 8,
-                    }}
-                  >
+                    {formatPlatformCodeLabel(locale, notice.severity)}
+                  </span>
+                </td>
+                <td>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {(notice.deliverySummary?.targets ?? []).map(
                       (target: string) => (
                         <span
@@ -1542,17 +1393,32 @@ export default function NoticesPage() {
                       ),
                     )}
                   </div>
-                </div>
-                <div style={historyMetricCardStyle}>
-                  <div style={metaLabelStyle}>{copy.links}</div>
-                  <div style={{ marginTop: 8 }}>
-                    {renderNoticeLinks(notice.crossAppLinks)}
+                </td>
+                <td>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <span
+                      className={`admin-badge ${getStatusTone(
+                        notice.deliverySummary?.state ?? "pending",
+                      )}`}
+                    >
+                      {getDeliveryLabel(copy, notice.deliverySummary?.state)}
+                    </span>
+                    <span style={{ color: "#64748b" }}>
+                      {notice.deliverySummary?.deliveredCount ?? 0} /{" "}
+                      {notice.deliverySummary?.totalCount ?? 0}
+                    </span>
                   </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+                </td>
+                <td style={monoTextStyle}>
+                  {formatDateTime(
+                    notice.deliverySummary?.broadcastAt ?? notice.updatedAt,
+                  )}
+                </td>
+                <td>{renderLinkSet(notice.crossAppLinks)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
   }
@@ -1617,7 +1483,29 @@ export default function NoticesPage() {
               marginTop: 22,
             }}
           >
-            {renderSummaryCards()}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 14,
+              }}
+            >
+              <MetricCard
+                label={copy.activeNoticeCount}
+                value={activeNoticeCount}
+                tone="rgba(15,118,110,0.12)"
+              />
+              <MetricCard
+                label={copy.scheduledNoticeCount}
+                value={scheduledNoticeCount}
+                tone="rgba(245,158,11,0.12)"
+              />
+              <MetricCard
+                label={copy.inflightBroadcastCount}
+                value={inflightBroadcastCount}
+                tone="rgba(30,64,175,0.12)"
+              />
+            </div>
             <div
               style={{
                 borderRadius: 18,
@@ -1664,7 +1552,7 @@ export default function NoticesPage() {
             marginBottom: 0,
             borderColor: "rgba(127,29,29,0.14)",
             background:
-              "linear-gradient(135deg, rgba(127,29,29,0.96), rgba(239,68,68,0.88))",
+              "linear-gradient(135deg, rgba(127,29,29,0.96), rgba(220,38,38,0.84))",
             color: "#fff",
           }}
         >
@@ -1726,12 +1614,12 @@ export default function NoticesPage() {
             padding: 6,
           }}
         >
-          {(["notices", "maint", "history"] as NoticeTab[]).map((tab) => (
+          {TAB_PARAM_VALUES.map((tab) => (
             <button
               key={tab}
               type="button"
               className="admin-btn"
-              onClick={() => setActiveTab(tab)}
+              onClick={() => updateTab(tab)}
               style={{
                 background:
                   activeTab === tab
@@ -1808,10 +1696,10 @@ export default function NoticesPage() {
                   }
                   style={fieldStyle}
                 >
-                  <option value="all">{copy.audience.all}</option>
-                  <option value="tenants">{copy.audience.tenants}</option>
-                  <option value="ops">{copy.audience.ops}</option>
-                  <option value="drivers">{copy.audience.drivers}</option>
+                  <option value="all">{copy.audienceLabel.all}</option>
+                  <option value="tenants">{copy.audienceLabel.tenants}</option>
+                  <option value="ops">{copy.audienceLabel.ops}</option>
+                  <option value="drivers">{copy.audienceLabel.drivers}</option>
                 </select>
               </label>
               <label style={{ ...fieldGroupStyle, gridColumn: "1 / -1" }}>
@@ -1907,8 +1795,7 @@ export default function NoticesPage() {
                 className="admin-badge"
                 style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}
               >
-                {copy.audienceField}:{" "}
-                {getAudienceLabel(copy.audience, formAudience)}
+                {copy.audienceField}: {copy.audienceLabel[formAudience]}
               </span>
               {formScheduledAt ? (
                 <span
@@ -1949,7 +1836,7 @@ const fieldLabelStyle: React.CSSProperties = {
 
 const fieldStyle: React.CSSProperties = {
   width: "100%",
-  border: "1px solid rgba(148, 163, 184, 0.35)",
+  border: "1px solid rgba(148,163,184,0.35)",
   borderRadius: 12,
   padding: "11px 12px",
   fontSize: 14,
@@ -1959,7 +1846,7 @@ const fieldStyle: React.CSSProperties = {
 
 const fieldBoxStyle: React.CSSProperties = {
   minHeight: 48,
-  border: "1px solid rgba(148, 163, 184, 0.35)",
+  border: "1px solid rgba(148,163,184,0.35)",
   borderRadius: 12,
   padding: "10px 12px",
   background: "rgba(255,255,255,0.92)",
@@ -1972,32 +1859,50 @@ const formGridStyle: React.CSSProperties = {
   marginBottom: 18,
 };
 
-const metaGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 12,
-};
-
 const metaLabelStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
+  fontSize: 12,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
   color: "#64748b",
 };
 
-const darkMetaLabelStyle: React.CSSProperties = {
-  ...metaLabelStyle,
-  color: "rgba(255,255,255,0.6)",
-};
-
 const monoTextStyle: React.CSSProperties = {
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  fontFamily: '"JetBrains Mono", "SFMono-Regular", monospace',
+  fontSize: 12,
 };
 
-const historyMetricCardStyle: React.CSSProperties = {
-  borderRadius: 16,
-  padding: 16,
-  background: "rgba(248,250,252,0.92)",
-  border: "1px solid rgba(15,23,42,0.06)",
+const sectionHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-end",
+  gap: 16,
+  flexWrap: "wrap",
+  marginBottom: 16,
+};
+
+const sectionHintStyle: React.CSSProperties = {
+  margin: "6px 0 0",
+  color: "#64748b",
+};
+
+const clampedBodyStyle: React.CSSProperties = {
+  display: "-webkit-box",
+  WebkitLineClamp: 3,
+  WebkitBoxOrient: "vertical",
+  overflow: "hidden",
+  lineHeight: 1.6,
+};
+
+const maintenanceGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 14,
+  marginBottom: 16,
+};
+
+const maintenanceMetaRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 14,
+  marginBottom: 16,
 };

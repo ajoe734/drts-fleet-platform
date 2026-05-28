@@ -90,6 +90,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   mixed: { en: "Mixed", zh: "混合" },
   missing: { en: "Missing", zh: "缺漏" },
   manual_hold: { en: "Manual Hold", zh: "人工停派" },
+  maintenance: { en: "Maintenance", zh: "維護" },
   operator: { en: "Operator", zh: "營運人員" },
   ops: { en: "Ops", zh: "營運" },
   ops_user: { en: "Ops User", zh: "營運使用者" },

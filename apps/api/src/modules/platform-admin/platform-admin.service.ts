@@ -4,6 +4,7 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  CrossAppResourceLink,
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
@@ -16,6 +17,7 @@ import type {
   PlatformPricingRuleRecord,
   PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
+  ResourceActionDescriptor,
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
   SetPlatformMaintenanceModeCommand,
@@ -99,16 +101,45 @@ const PLATFORM_ADMIN_USERS_SEED: PlatformAdminUserRecord[] = [
 const PLATFORM_NOTICES_SEED: PlatformNoticeRecord[] = [
   {
     noticeId: "notice-demo-001",
-    title: "Scheduled Maintenance Window",
-    body: "Platform will undergo maintenance from 02:00–04:00 on 2026-04-20. Brief service interruptions expected.",
-    severity: "warning",
+    title: "Planned maintenance window · dispatch pause",
+    body: "Platform maintenance is scheduled for 2026-05-15 02:00–04:00 UTC. Dispatch, partner ingress, and webhook delivery will pause during the window.",
+    severity: "maintenance",
     status: "scheduled",
     targetAudience: "all",
-    scheduledAt: "2026-04-20T02:00:00.000Z",
+    scheduledAt: "2026-05-15T02:00:00.000Z",
     resolvedAt: null,
     createdBy: "pa-admin-001",
-    createdAt: "2026-04-15T00:00:00.000Z",
-    updatedAt: "2026-04-15T00:00:00.000Z",
+    createdAt: "2026-05-12T06:00:00.000Z",
+    updatedAt: "2026-05-12T06:00:00.000Z",
+    changeReason: "Planned infra patching",
+  },
+  {
+    noticeId: "notice-demo-002",
+    title: "Webhook delivery lag for selected tenants",
+    body: "Cross-app banners remain available, but webhook retries are currently delayed for tenant integrations in APAC.",
+    severity: "critical",
+    status: "active",
+    targetAudience: "ops",
+    scheduledAt: null,
+    resolvedAt: null,
+    createdBy: "pa-operator-001",
+    createdAt: "2026-05-23T01:10:00.000Z",
+    updatedAt: "2026-05-23T01:18:00.000Z",
+    changeReason: "Escalated after health checks failed",
+  },
+  {
+    noticeId: "notice-demo-003",
+    title: "Partner sandbox sync restored",
+    body: "The partner sandbox backlog has cleared and downstream queues are back to expected latency.",
+    severity: "info",
+    status: "resolved",
+    targetAudience: "tenants",
+    scheduledAt: null,
+    resolvedAt: "2026-05-20T05:45:00.000Z",
+    createdBy: "pa-operator-001",
+    createdAt: "2026-05-20T03:10:00.000Z",
+    updatedAt: "2026-05-20T05:45:00.000Z",
+    changeReason: null,
   },
 ];
 
@@ -167,10 +198,12 @@ export class PlatformAdminService implements OnModuleInit {
   private maintenanceMode: PlatformMaintenanceModeRecord = {
     enabled: false,
     reason: null,
-    scheduledStart: null,
-    scheduledEnd: null,
-    updatedBy: null,
-    updatedAt: new Date().toISOString(),
+    scheduledStart: "2026-05-15T02:00:00.000Z",
+    scheduledEnd: "2026-05-15T04:00:00.000Z",
+    updatedBy: "pa-admin-001",
+    updatedAt: "2026-05-12T06:00:00.000Z",
+    lastEnabledAt: "2026-04-12T09:00:00.000Z",
+    affectedServices: ["dispatch", "partner ingress", "webhook delivery"],
   };
 
   private pricingRules: PlatformPricingRuleRecord[] =
@@ -662,8 +695,126 @@ export class PlatformAdminService implements OnModuleInit {
 
   // ── Platform Notices ──────────────────────────────────────────────────────
 
+  private buildNoticeActions(
+    notice: PlatformNoticeRecord,
+  ): ResourceActionDescriptor[] {
+    const actions: ResourceActionDescriptor[] = [
+      {
+        action: "view_broadcast_history",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
+
+    if (notice.status !== "resolved") {
+      actions.unshift({
+        action: "resolve_notice",
+        enabled: true,
+        riskLevel: "medium",
+      });
+    }
+
+    return actions;
+  }
+
+  private buildNoticeCrossAppLinks(
+    noticeId: string,
+    audience: PlatformNoticeRecord["targetAudience"],
+  ): CrossAppResourceLink[] {
+    const links: CrossAppResourceLink[] = [
+      {
+        targetApp: "ops-console",
+        route: `/audit?resourceType=platform_notice&resourceId=${noticeId}`,
+        resourceType: "platform_notice",
+        resourceId: noticeId,
+        openMode: "new_tab",
+        label: "Open ops audit view",
+      },
+    ];
+
+    if (audience === "all" || audience === "tenants") {
+      links.push({
+        targetApp: "tenant-console",
+        route: `/notifications?noticeId=${noticeId}`,
+        resourceType: "platform_notice",
+        resourceId: noticeId,
+        openMode: "new_tab",
+        label: "Open tenant banner preview",
+      });
+    }
+
+    return links;
+  }
+
+  private decorateNotice(notice: PlatformNoticeRecord): PlatformNoticeRecord {
+    const targets =
+      notice.targetAudience === "all"
+        ? (["ops", "tenant", "driver"] as const)
+        : notice.targetAudience === "tenants"
+          ? (["tenant"] as const)
+          : notice.targetAudience === "drivers"
+            ? (["driver"] as const)
+            : (["ops"] as const);
+
+    return {
+      ...notice,
+      availableActions: this.buildNoticeActions(notice),
+      deliverySummary: {
+        state:
+          notice.status === "active"
+            ? "delivering"
+            : notice.status === "resolved"
+              ? "delivered"
+              : "pending",
+        deliveredCount: notice.status === "scheduled" ? 0 : targets.length,
+        totalCount: targets.length,
+        targets: [...targets],
+        broadcastAt:
+          notice.status === "scheduled" ? notice.scheduledAt : notice.updatedAt,
+      },
+      crossAppLinks: this.buildNoticeCrossAppLinks(
+        notice.noticeId,
+        notice.targetAudience,
+      ),
+    };
+  }
+
+  private decorateMaintenanceMode(): PlatformMaintenanceModeRecord {
+    return {
+      ...this.maintenanceMode,
+      availableActions: [
+        {
+          action: this.maintenanceMode.enabled
+            ? "clear_maintenance_mode"
+            : "set_maintenance_mode",
+          enabled: true,
+          requiresReason: true,
+          riskLevel: "high",
+        },
+      ],
+      crossAppLinks: [
+        {
+          targetApp: "ops-console",
+          route: "/health",
+          resourceType: "platform_maintenance_mode",
+          resourceId: "global",
+          openMode: "new_tab",
+          label: "Open ops health board",
+        },
+        {
+          targetApp: "tenant-console",
+          route: "/notifications",
+          resourceType: "platform_maintenance_mode",
+          resourceId: "global",
+          openMode: "new_tab",
+          label: "Open tenant banner inbox",
+        },
+      ],
+    };
+  }
+
   listPlatformNotices(): PlatformNoticeRecord[] {
-    return this.platformNotices.map((n) => ({ ...n }));
+    return this.platformNotices.map((n) => this.decorateNotice(n));
   }
 
   createPlatformNotice(
@@ -672,6 +823,9 @@ export class PlatformAdminService implements OnModuleInit {
   ): PlatformNoticeRecord {
     this.assertNonBlank(command.title, "title");
     this.assertNonBlank(command.body, "body");
+    if (command.severity === "critical" || command.severity === "maintenance") {
+      this.assertNonBlank(command.reason ?? "", "reason");
+    }
     const now = new Date().toISOString();
     const notice: PlatformNoticeRecord = {
       noticeId: `notice_${randomUUID()}`,
@@ -685,6 +839,7 @@ export class PlatformAdminService implements OnModuleInit {
       createdBy: null,
       createdAt: now,
       updatedAt: now,
+      changeReason: command.reason ?? null,
     };
     this.platformNotices.unshift({ ...notice });
     this.recordAudit(
@@ -700,7 +855,7 @@ export class PlatformAdminService implements OnModuleInit {
       },
       requestId,
     );
-    return { ...notice };
+    return this.decorateNotice(notice);
   }
 
   resolveNotice(noticeId: string, requestId?: string): PlatformNoticeRecord {
@@ -729,13 +884,13 @@ export class PlatformAdminService implements OnModuleInit {
       },
       requestId,
     );
-    return { ...notice };
+    return this.decorateNotice(notice);
   }
 
   // ── Maintenance Mode ──────────────────────────────────────────────────────
 
   getMaintenanceMode(): PlatformMaintenanceModeRecord {
-    return { ...this.maintenanceMode };
+    return this.decorateMaintenanceMode();
   }
 
   setMaintenanceMode(
@@ -743,6 +898,7 @@ export class PlatformAdminService implements OnModuleInit {
     requestId?: string,
   ): PlatformMaintenanceModeRecord {
     const now = new Date().toISOString();
+    this.assertNonBlank(command.reason ?? "", "reason");
     this.maintenanceMode = {
       enabled: command.enabled,
       reason: command.reason ?? null,
@@ -750,6 +906,13 @@ export class PlatformAdminService implements OnModuleInit {
       scheduledEnd: command.scheduledEnd ?? null,
       updatedBy: null,
       updatedAt: now,
+      lastEnabledAt: command.enabled
+        ? now
+        : (this.maintenanceMode.lastEnabledAt ?? now),
+      affectedServices:
+        command.enabled || command.scheduledStart || command.scheduledEnd
+          ? ["dispatch", "partner ingress", "webhook delivery"]
+          : (this.maintenanceMode.affectedServices ?? []),
     };
     this.recordAudit(
       {
@@ -769,7 +932,7 @@ export class PlatformAdminService implements OnModuleInit {
       },
       requestId,
     );
-    return { ...this.maintenanceMode };
+    return this.decorateMaintenanceMode();
   }
 
   // ── Platform Pricing Rules ────────────────────────────────────────────────
