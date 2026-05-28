@@ -282,6 +282,8 @@ def classify_command(shell_command: str) -> str:
         return "allow"
     if _is_safe_workspace_mkdir_command(shell_command):
         return "allow"
+    if _is_canonical_root_pnpm_install_command(shell_command):
+        return "defer"
     normalized = _normalize_shell_command(shell_command)
     for pattern in DENY_BASH_PATTERNS:
         if pattern.search(normalized):
@@ -421,6 +423,35 @@ def _command_segments(shell_command: str) -> list[str]:
     return [segment.strip() for segment in command.split("&&") if segment.strip()]
 
 
+def _resolve_workspace_path(base: Path, raw_path: str) -> Path:
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        return candidate.resolve(strict=False)
+    return (base / candidate).resolve(strict=False)
+
+
+def _command_tokens_and_cwd(shell_command: str) -> tuple[list[str], Path]:
+    command = _normalize_shell_command(shell_command)
+    if not command:
+        return [], ROOT
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return [], ROOT
+    cwd = ROOT
+    if "&&" in tokens:
+        amp_index = tokens.index("&&")
+        if amp_index == 2 and tokens[0] == "cd":
+            cd_target = Path(tokens[1])
+            if _paths_within_workspace([cd_target]):
+                cwd = _resolve_workspace_path(ROOT, tokens[1])
+                tokens = tokens[amp_index + 1 :]
+    index = 0
+    while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
+        index += 1
+    return tokens[index:], cwd
+
+
 def _primary_shell_fragment(segment: str) -> str:
     return segment.split("|", 1)[0].strip()
 
@@ -443,6 +474,37 @@ def _pnpm_command_index(tokens: list[str]) -> int:
             continue
         break
     return index
+
+
+def _is_canonical_root_pnpm_install_command(shell_command: str) -> bool:
+    tokens, cwd = _command_tokens_and_cwd(shell_command)
+    if not tokens or tokens[0] != "pnpm":
+        return False
+
+    effective_cwd = cwd
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"--dir", "-C"} and index + 1 < len(tokens):
+            effective_cwd = _resolve_workspace_path(cwd, tokens[index + 1])
+            index += 2
+            continue
+        if token.startswith("--dir="):
+            effective_cwd = _resolve_workspace_path(cwd, token.split("=", 1)[1])
+            index += 1
+            continue
+        if token.startswith("-C="):
+            effective_cwd = _resolve_workspace_path(cwd, token.split("=", 1)[1])
+            index += 1
+            continue
+        if token in PNPM_STANDALONE_FLAGS or token.startswith("-"):
+            index += 1
+            continue
+        break
+
+    if index >= len(tokens) or tokens[index] not in {"install", "i"}:
+        return False
+    return effective_cwd == ROOT.resolve(strict=False)
 
 
 def _extract_package_specs(tokens: list[str], start_index: int) -> list[str]:
