@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type {
+  CrossAppResourceLink,
   EmptyReason,
   ResourceActionDescriptor,
   TenantPassengerQualityIssue,
@@ -100,6 +101,12 @@ const subtleTextStyle: CSSProperties = {
   fontSize: 11.5,
 };
 
+const helperTextStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 12,
+  lineHeight: 1.5,
+};
+
 const tabLinkStyle: CSSProperties = {
   color: "inherit",
   textDecoration: "none",
@@ -185,9 +192,7 @@ type RuntimePassengerRecord = TenantPassengerRecord & {
   availableActions?: ResourceActionDescriptor[];
   editableUntil?: string | null;
   readOnlyReasonCode?: string | null;
-  metadata: Record<string, unknown> & {
-    availableActions?: ResourceActionDescriptor[];
-  };
+  metadata: PassengerMetadata;
 };
 
 type PassengerRow = RuntimePassengerRecord &
@@ -227,6 +232,21 @@ type EmptyStateView = {
 type PassengerTabDefinition = {
   key: PassengerTabKey;
   label: string;
+};
+
+type PassengerMetadata = Record<string, unknown> & {
+  auditLink?: CrossAppResourceLink | null;
+  availableActions?: ResourceActionDescriptor[];
+  consentVersion?: string | null;
+  crossAppLinks?: CrossAppResourceLink[];
+  refreshMetadata?: UiRefreshMetadata;
+};
+
+type PassengerDeepLink = {
+  href: string;
+  label: string;
+  newTab: boolean;
+  tone: CanvasTone;
 };
 
 const PASSENGER_TABS: PassengerTabDefinition[] = [
@@ -457,6 +477,22 @@ function getDisabledReasonLabel(code: string | undefined) {
   }
 }
 
+function isCrossAppResourceLink(value: unknown): value is CrossAppResourceLink {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.targetApp === "string" &&
+    typeof candidate.route === "string" &&
+    typeof candidate.resourceType === "string" &&
+    typeof candidate.resourceId === "string" &&
+    typeof candidate.openMode === "string" &&
+    typeof candidate.label === "string"
+  );
+}
+
 function inferDefaultPassengerActions(
   passenger: TenantPassengerRecord,
 ): ResourceActionDescriptor[] {
@@ -517,6 +553,22 @@ function getPassengerActions(
 }
 
 function getPageActions(passengers: RuntimePassengerRecord[]) {
+  const pageActionSource = passengers
+    .map((passenger) => passenger.metadata?.availableActions)
+    .find(
+      (actions): actions is ResourceActionDescriptor[] =>
+        Array.isArray(actions) && actions.every(isActionDescriptor),
+    );
+
+  if (pageActionSource) {
+    const createActions = pageActionSource.filter(
+      (action) => action.action === "create",
+    );
+    if (createActions.length > 0) {
+      return createActions;
+    }
+  }
+
   const source = passengers[0];
   if (!source) {
     return [
@@ -768,8 +820,8 @@ function getActionLabel(action: string) {
 }
 
 function renderEmptyState(reason: PassengerEmptyReason) {
-  const fallbackView = EMPTY_STATE_VIEWS.fetch_failed;
-  const view = EMPTY_STATE_VIEWS[reason] ?? fallbackView;
+  const view: EmptyStateView =
+    EMPTY_STATE_VIEWS[reason] ?? EMPTY_STATE_VIEWS.fetch_failed!;
 
   return (
     <div style={emptyStateWrapStyle}>
@@ -859,10 +911,130 @@ function getRefreshSummary(
   )} · ${refreshMetadata.source}`;
 }
 
+function getRefreshTierLabel(refreshMetadata: UiRefreshMetadata | null) {
+  if (!refreshMetadata) {
+    return "T5 · 30s fallback";
+  }
+
+  switch (refreshMetadata.source) {
+    case "live":
+      return "T5 · live snapshot";
+    case "cache":
+      return "T5 · cached snapshot";
+    case "sandbox":
+      return "T5 · sandbox snapshot";
+    case "static":
+    default:
+      return "T5 · static snapshot";
+  }
+}
+
+function getRefreshBannerCopy(refreshMetadata: UiRefreshMetadata | null) {
+  if (!refreshMetadata || refreshMetadata.dataFreshness === "fresh") {
+    return null;
+  }
+
+  switch (refreshMetadata.dataFreshness) {
+    case "stale":
+      return {
+        tone: "warn" as const,
+        title: "Passenger directory snapshot 已過新鮮期",
+        body: `目前顯示的是 ${formatUpdated(refreshMetadata.generatedAt)} 產生的 ${refreshMetadata.source} snapshot；重新整理可拉回最新 T5 read model。`,
+      };
+    case "degraded":
+      return {
+        tone: "danger" as const,
+        title: "Passenger directory 正處於 degraded refresh",
+        body: `資料來源回報 degraded；目前以 ${refreshMetadata.source} snapshot 提供列表，請先避免依賴此頁進行時效敏感判斷。`,
+      };
+    case "unknown":
+    default:
+      return {
+        tone: "info" as const,
+        title: "Passenger directory refresh 狀態未知",
+        body: "後端未提供可判定的新鮮度，頁面保留 T5 tier 與手動 refresh 供使用者重新取樣。",
+      };
+  }
+}
+
 function getRecordActions(passenger: RuntimePassengerRecord) {
   return getPassengerActions(passenger).filter(
     (action) => action.action !== "create",
   );
+}
+
+function getTargetAppLabel(targetApp: CrossAppResourceLink["targetApp"]) {
+  switch (targetApp) {
+    case "ops-console":
+      return "Ops Console";
+    case "platform-admin":
+      return "Platform Admin";
+    case "tenant-console":
+    default:
+      return "Tenant Console";
+  }
+}
+
+function toPassengerDeepLinks(
+  passenger: RuntimePassengerRecord,
+  refreshHref: string,
+): PassengerDeepLink[] {
+  const deepLinks: PassengerDeepLink[] = [
+    {
+      href: `/bookings/new?passengerId=${encodeURIComponent(passenger.passengerId)}`,
+      label: "前往新建預訂",
+      newTab: false,
+      tone: "accent",
+    },
+    {
+      href: `/audit?resourceType=tenant_passenger&resourceId=${encodeURIComponent(passenger.passengerId)}`,
+      label: "查看本租戶稽核",
+      newTab: false,
+      tone: "info",
+    },
+    {
+      href: refreshHref,
+      label: "重新整理目錄",
+      newTab: false,
+      tone: "neutral",
+    },
+  ];
+
+  const metadataLinks = [
+    passenger.metadata?.auditLink,
+    ...(passenger.metadata?.crossAppLinks ?? []),
+  ].filter((link): link is CrossAppResourceLink =>
+    isCrossAppResourceLink(link),
+  );
+
+  for (const link of metadataLinks) {
+    deepLinks.push({
+      href: link.route,
+      label: `${link.label} · ${getTargetAppLabel(link.targetApp)}`,
+      newTab: link.openMode === "new_tab",
+      tone: link.targetApp === "tenant-console" ? "info" : "accent",
+    });
+  }
+
+  return deepLinks.filter(
+    (link, index, source) =>
+      source.findIndex(
+        (candidate) =>
+          candidate.href === link.href && candidate.label === link.label,
+      ) === index,
+  );
+}
+
+function getQualityIssueLabel(issue: TenantPassengerQualityIssue) {
+  switch (issue) {
+    case "duplicate_employee_no":
+      return "duplicate employee no";
+    case "missing_contact":
+      return "missing contact";
+    case "missing_employee_no":
+    default:
+      return "missing employee no";
+  }
 }
 
 export default async function PassengersPage({
@@ -923,6 +1095,8 @@ export default async function PassengersPage({
   const refreshHref = buildPassengersHref(selectedTab, filters);
   const refreshTone = getRefreshTone(refreshMetadata, errors);
   const refreshSummary = getRefreshSummary(refreshMetadata, fetchedAt);
+  const refreshTierLabel = getRefreshTierLabel(refreshMetadata);
+  const refreshBanner = getRefreshBannerCopy(refreshMetadata);
 
   const columns: CanvasTableColumn<PassengerRow>[] = [
     {
@@ -1010,14 +1184,21 @@ export default async function PassengersPage({
     },
   ];
 
-  const selectedQualityIssues = selectedPassenger?.qualityIssues ?? [];
+  const selectedQualityIssues: TenantPassengerQualityIssue[] =
+    selectedPassenger?.qualityIssues ?? [];
   const selectedDepartment = selectedPassenger?.departmentName ?? "—";
   const selectedEditableUntil = selectedPassenger?.editableUntil ?? null;
+  const selectedConsentVersion =
+    selectedPassenger?.metadata?.consentVersion ?? null;
+  const selectedReadOnlyReason = selectedPassenger?.readOnlyReasonCode ?? null;
   const selectedPassengerDuplicate = selectedPassenger
     ? duplicateNames.has(
         selectedPassenger.fullName.trim().toLocaleLowerCase("zh-Hant"),
       )
     : false;
+  const selectedDeepLinks = selectedPassenger
+    ? toPassengerDeepLinks(selectedPassenger, refreshHref)
+    : [];
 
   return (
     <div>
@@ -1060,6 +1241,16 @@ export default async function PassengersPage({
           />
         ) : null}
 
+        {refreshBanner ? (
+          <CanvasBanner
+            theme={th}
+            tone={refreshBanner.tone}
+            icon="warn"
+            title={refreshBanner.title}
+            body={refreshBanner.body}
+          />
+        ) : null}
+
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
@@ -1077,7 +1268,7 @@ export default async function PassengersPage({
             theme={th}
             label="Refresh"
             value="T5"
-            sub={refreshSummary}
+            sub={`${refreshTierLabel} · ${refreshSummary}`}
           />
           <CanvasKPI
             theme={th}
@@ -1149,7 +1340,7 @@ export default async function PassengersPage({
                   justifyContent: "space-between",
                 }}
               >
-                <span>T5 / 30s</span>
+                <span>{refreshTierLabel}</span>
                 <CanvasPill theme={th} tone={refreshTone}>
                   {refreshMetadata?.dataFreshness ?? "fallback"}
                 </CanvasPill>
@@ -1242,8 +1433,16 @@ export default async function PassengersPage({
                     },
                     {
                       k: "editableUntil",
-                      v: selectedEditableUntil ?? "—",
+                      v: formatUpdated(selectedEditableUntil),
                       mono: true,
+                    },
+                    {
+                      k: "consentVersion",
+                      v: selectedConsentVersion ?? "—",
+                    },
+                    {
+                      k: "readOnlyReason",
+                      v: selectedReadOnlyReason ?? "—",
                     },
                     {
                       k: "updatedAt",
@@ -1277,21 +1476,21 @@ export default async function PassengersPage({
                     Deep links
                   </div>
                   <div style={actionsWrapStyle}>
-                    <Link
-                      href={`/bookings/new?passengerId=${encodeURIComponent(selectedPassenger.passengerId)}`}
-                      style={linkButtonStyle}
-                    >
-                      前往新建預訂
-                    </Link>
-                    <Link
-                      href={`/audit?resourceType=tenant_passenger&resourceId=${encodeURIComponent(selectedPassenger.passengerId)}`}
-                      style={linkButtonStyle}
-                    >
-                      查看稽核
-                    </Link>
-                    <Link href={refreshHref} style={linkButtonStyle}>
-                      重新整理目錄
-                    </Link>
+                    {selectedDeepLinks.map((link) => (
+                      <Link
+                        key={`${link.href}:${link.label}`}
+                        href={link.href}
+                        style={linkButtonStyle}
+                        target={link.newTab ? "_blank" : undefined}
+                        rel={link.newTab ? "noreferrer" : undefined}
+                      >
+                        {link.label}
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={helperTextStyle}>
+                    Cross-app deep links follow Q-X03 and open in a new tab when
+                    the target lives in Ops Console or Platform Admin.
                   </div>
                 </div>
 
@@ -1307,7 +1506,7 @@ export default async function PassengersPage({
                           theme={th}
                           tone={getQualityIssueTone(issue)}
                         >
-                          {issue}
+                          {getQualityIssueLabel(issue)}
                         </CanvasPill>
                       ))}
                     </div>
