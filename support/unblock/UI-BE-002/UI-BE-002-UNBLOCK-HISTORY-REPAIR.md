@@ -5,8 +5,8 @@
 - Task: `UI-BE-002-UNBLOCK-HISTORY-REPAIR`
 - Parent: `UI-BE-002`
 - Owner: `Codex`
-- Reviewer: `Claude`
-- Audit timestamp: `2026-05-27T23:28:51Z`
+- Reviewer: `Claude2`
+- Audit timestamp: `2026-05-28T09:21:11Z`
 
 ## Diagnosis
 
@@ -39,8 +39,9 @@ machine-truth transition, not from missing `/api/health` code.
    steps (`99ef485e250c7caafe55ed00500c27490984f6d0`, then
    `6702d28c68f15ed234456e4d420733e7d9891934`), and PR `#304`
    (`codex/ui-be-002-unblock-history-repair`) now carries the final refreshed
-   artifact in two commits (`affbc19bdcc745e89bf634ace7e289645fc8f19e`, then
-   `d735b06a663a583ed2e4002cb6022bba69d3466d`). Earlier handoff/review text
+   artifact in three commits (`affbc19bdcc745e89bf634ace7e289645fc8f19e`,
+   `d735b06a663a583ed2e4002cb6022bba69d3466d`, then
+   `06e5a3af468267561127d2000fd779742b5237b9`). Earlier handoff/review text
    therefore referenced both a nonexistent SHA
    (`99ef485eeb98567475f595c234b8d02155d06e77`) and a stale real SHA
    (`99ef485e250c7caafe55ed00500c27490984f6d0`), but the current owner rail no
@@ -62,11 +63,12 @@ machine-truth transition, not from missing `/api/health` code.
   with `git rev-list --left-right --count origin/dev...gemini2/ui-be-002`
   returning `7 13`
 - current owner rail for this helper task:
-  `origin/codex/ui-be-002-unblock-history-repair @ d735b06a663a583ed2e4002cb6022bba69d3466d`
+  `origin/codex/ui-be-002-unblock-history-repair @ 06e5a3af468267561127d2000fd779742b5237b9`
   with open PR `#304` (`codex/ui-be-002-unblock-history-repair -> dev`)
-  containing two commits:
+  containing three commits:
   - `affbc19bdcc745e89bf634ace7e289645fc8f19e`
   - `d735b06a663a583ed2e4002cb6022bba69d3466d`
+  - `06e5a3af468267561127d2000fd779742b5237b9`
 - interim owner rail from the earlier reassignment:
   `origin/codex2/ui-be-002-unblock-history-repair @ 6702d28c68f15ed234456e4d420733e7d9891934`
   with open PR `#305` (`codex2/ui-be-002-unblock-history-repair -> dev`)
@@ -109,13 +111,12 @@ machine-truth transition, not from missing `/api/health` code.
   - `commit_hash = 1c32aa1d545929a11b4916c067e86b11a253f598`
   - `push_branch = codex2/ui-be-002`
 - canonical `ai-status.json` at audit timestamp
-  `2026-05-27T23:28:51Z` shows helper task
+  `2026-05-28T09:21:11Z` shows helper task
   `UI-BE-002-UNBLOCK-HISTORY-REPAIR` as:
   - owner `Codex`
-  - reviewer `Claude`
-  - status `in_progress`
-  - next step: inspect branch/worktree contamination and prepare
-    non-destructive repair path
+  - reviewer `Claude2`
+  - status `review_approved`
+  - next step: owner closeout on the approved owner rail at `06e5a3af`
 - `/home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl` records:
   - `2026-05-26T12:56:49Z` parent reopen onto clean rail
   - `2026-05-26T12:59:06Z` parent re-handoff on
@@ -128,8 +129,11 @@ machine-truth transition, not from missing `/api/health` code.
     still described PR `#305` as a single-commit `99ef485e...` rail and still
     described the parent as `review` instead of `done`
   - `2026-05-27T23:25:15Z` chairman reassignment from `Codex2` back to
-    `Codex`, preserving reviewer `Claude`
+    `Codex`, initially preserving reviewer `Claude`
   - `2026-05-27T23:28:51Z` owner `start` on the current audit pass
+  - `2026-05-28T03:13:36Z` chairman reassignment from reviewer `Claude` to
+    `Claude2`
+  - `2026-05-28T09:21:11Z` reviewer `Claude2` approved the refreshed artifact
 
 ## Exact Contamination
 
@@ -171,9 +175,10 @@ Do not force-push, rebase, or rename any existing shared branch.
    only on the current owner rail `codex/ui-be-002-unblock-history-repair`,
    carrying forward the parent's final `done` state and both helper PR audit
    trails.
-6. Handoff this refreshed helper task for review. No further parent-task
-   mutation is required because `UI-BE-002` already has closeout evidence
-   recorded in canonical machine truth and no remaining parent next step.
+6. After reviewer approval, close out this helper task on the current owner
+   rail. No further parent-task mutation is required because `UI-BE-002`
+   already has closeout evidence recorded in canonical machine truth and no
+   remaining parent next step.
 
 ## Current Unblocked Result
 
@@ -181,8 +186,8 @@ Do not force-push, rebase, or rename any existing shared branch.
   `origin/codex2/ui-be-002 @ 1c32aa1d545929a11b4916c067e86b11a253f598`.
 - Parent task next step: none; canonical `ai-status.json` already records the
   final closeout evidence on `origin/codex2/ui-be-002`.
-- The only remaining helper-task next step is reviewer confirmation that this
-  artifact now matches the final remote/PR/machine-truth audit state.
+- The only remaining helper-task next step is owner closeout using the
+  reviewer-approved owner rail.
 
 ## Why This Is Safe
 
