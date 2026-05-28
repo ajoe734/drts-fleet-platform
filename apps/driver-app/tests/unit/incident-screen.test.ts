@@ -124,6 +124,8 @@ describe("IncidentScreen", () => {
       await flushEffects();
     });
 
+    expect(findLongPressButton(renderer).props.delayLongPress).toBe(2000);
+
     const detailField = renderer.root.findByType("FormField");
     await act(async () => {
       detailField.props.onChangeText("乘客情緒激動，需立即支援");

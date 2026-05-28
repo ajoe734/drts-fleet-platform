@@ -66,56 +66,7 @@ type EmptyStateConfig = {
 const SOS_SITUATIONS = driverIncidentSituations;
 type SosSituationId = (typeof SOS_SITUATIONS)[number]["id"];
 
-const INCIDENT_REFRESH_TIER: RefreshTier = "manual";
-const SOS_HOLD_DURATION_MS = 2_000;
-const HOLD_PROGRESS_INTERVAL_MS = 50;
-const SUPPORTED_EMPTY_REASONS: readonly EmptyReason[] = [
-  "no_data",
-  "not_provisioned",
-  "fetch_failed",
-  "permission_denied",
-  "external_unavailable",
-  "driver_not_eligible",
-  "filtered_empty",
-];
-
-const EMPTY_STATE_COPY: Record<EmptyReason, EmptyStateConfig> = {
-  no_data: {
-    title: "目前沒有 SOS 情境資料",
-    description: "找不到可帶入的行程脈絡，仍可返回行程或稍後重試。",
-    icon: "search-outline",
-  },
-  not_provisioned: {
-    title: "此裝置尚未啟用 SOS",
-    description: "請先完成司機裝置啟用與功能下發，再建立安全事件。",
-    icon: "construct-outline",
-  },
-  fetch_failed: {
-    title: "SOS 情境載入失敗",
-    description: "目前無法取得最新任務情境，請手動重整後再送出。",
-    icon: "cloud-offline-outline",
-  },
-  permission_denied: {
-    title: "目前沒有 SOS 權限",
-    description: "您的帳號暫時沒有建立安全事件的權限，請聯絡派車台。",
-    icon: "lock-closed-outline",
-  },
-  external_unavailable: {
-    title: "外部平台資訊暫時無法讀取",
-    description: "可先返回行程；若已發生安全事件，請直接聯絡派車台。",
-    icon: "alert-circle-outline",
-  },
-  driver_not_eligible: {
-    title: "目前狀態不可送出 SOS",
-    description: "您的司機資格或班次狀態尚未達到送出條件，請先處理前置限制。",
-    icon: "ban-outline",
-  },
-  filtered_empty: {
-    title: "目前篩選下沒有可用情境",
-    description: "請清除目前條件或返回工作台後重新開啟 SOS。",
-    icon: "filter-outline",
-  },
-};
+const SOS_LONG_PRESS_DELAY_MS = 2000;
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -887,15 +838,13 @@ export default function IncidentScreen() {
             title={driverStrings.incident.sections.review}
             subtitle="功能行為以 high-risk action 規格為準。"
           >
-            <View style={styles.actionPolicyRow}>
-              <StatusChip
-                label={`刷新層級：${refreshTierLabel}`}
-                variant="brand"
-              />
-              <StatusChip
-                label={`可用操作：${availableActions.length}`}
-                variant="default"
-              />
+            <Text style={styles.confirmationBody}>
+              長按底部按鈕約 2
+              秒後，系統仍會再要求一次確認；若情況已排除，可按取消返回行程。
+            </Text>
+            <View style={styles.confirmationChipRow}>
+              <StatusChip label="兩階段確認" variant="danger" />
+              <StatusChip label="可返回行程" variant="default" />
             </View>
             <Text style={styles.confirmationBody}>
               這個頁面就是 SOS 的保護確認層。請長按底部按鈕滿 2
@@ -913,7 +862,11 @@ export default function IncidentScreen() {
 
       <BottomActionBar
         style={styles.actionBar}
-        notice={holdHintVisible ? holdNotice : "SOS 需長按 2 秒才會送出。"}
+        notice={
+          longPressHintVisible
+            ? "請長按右側按鈕約 2 秒，接著再於確認視窗送出 SOS。"
+            : "SOS 送出前仍會再確認一次，避免誤觸。"
+        }
       >
         <ActionButton
           title={getActionLabel(cancelAction.action)}
