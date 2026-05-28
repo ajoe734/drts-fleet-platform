@@ -7,6 +7,7 @@ import type {
   EmptyReason,
   ResourceActionDescriptor,
   TenantIntegrationGovernancePackage,
+  TenantIntegrationReadinessSummary,
   TenantWebhookEndpoint,
   TenantWebhookEndpointStatus,
   UiRefreshMetadata,
@@ -271,6 +272,14 @@ type EndpointRow = Record<string, unknown> & {
   lastActivity: string;
 };
 
+type ActionableEndpoint = TenantWebhookEndpoint & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type ActionableDeliveryRecord = WebhookDeliveryRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
 type DeliveryRow = Record<string, unknown> & {
   deliveryId: string;
   webhookId: string;
@@ -294,9 +303,10 @@ type EmptyStateModel = {
 };
 
 type WebhooksPageData = {
-  endpoints: TenantWebhookEndpoint[];
-  deliveries: WebhookDeliveryRecord[];
+  endpoints: ActionableEndpoint[];
+  deliveries: ActionableDeliveryRecord[];
   governance: TenantIntegrationGovernancePackage | null;
+  readiness: TenantIntegrationReadinessSummary | null;
   errors: string[];
   refresh: UiRefreshMetadata;
 };
@@ -491,8 +501,12 @@ function getCrossAppFailureLink(
 }
 
 function getEndpointActions(
-  endpoint: TenantWebhookEndpoint,
+  endpoint: ActionableEndpoint,
 ): ResourceActionDescriptor[] {
+  if (endpoint.availableActions && endpoint.availableActions.length > 0) {
+    return endpoint.availableActions;
+  }
+
   return [
     {
       action: "view_delivery_log",
@@ -527,25 +541,58 @@ function getEndpointActions(
     {
       action: "retry_failed_delivery",
       enabled: false,
-      disabledReasonCode: "backend_retry_not_exposed",
+      disabledReasonCode: "engine_auto_retry_only",
       riskLevel: "medium",
     },
   ];
 }
 
-function getPageActions(engineActive: boolean): ResourceActionDescriptor[] {
+function getPageActions(
+  engineActive: boolean,
+  endpoints: ActionableEndpoint[],
+  readiness: TenantIntegrationReadinessSummary | null,
+): ResourceActionDescriptor[] {
+  const uniqueActions = new Map<string, ResourceActionDescriptor>();
+  const webhookReadiness =
+    readiness?.items.find((item) => item.subSystem === "webhooks") ?? null;
+  const fallbackCreateAction: ResourceActionDescriptor =
+    webhookReadiness?.nextAction ?? {
+      action: "create_endpoint",
+      enabled: engineActive,
+      disabledReasonCode: engineActive ? undefined : "engine_not_provisioned",
+      riskLevel: "medium",
+    };
+
+  for (const endpoint of endpoints) {
+    for (const descriptor of endpoint.availableActions ?? []) {
+      if (!uniqueActions.has(descriptor.action)) {
+        uniqueActions.set(descriptor.action, descriptor);
+      }
+    }
+  }
+
+  if (uniqueActions.size > 0) {
+    if (!uniqueActions.has("payload_schema")) {
+      uniqueActions.set("payload_schema", {
+        action: "payload_schema",
+        enabled: true,
+        riskLevel: "low",
+      });
+    }
+    if (!uniqueActions.has("create_endpoint")) {
+      uniqueActions.set("create_endpoint", fallbackCreateAction);
+    }
+
+    return Array.from(uniqueActions.values());
+  }
+
   return [
     {
       action: "payload_schema",
       enabled: true,
       riskLevel: "low",
     },
-    {
-      action: "create_endpoint",
-      enabled: engineActive,
-      disabledReasonCode: engineActive ? undefined : "engine_not_provisioned",
-      riskLevel: "medium",
-    },
+    fallbackCreateAction,
   ];
 }
 
@@ -664,8 +711,8 @@ function getRefreshMetadata(
 }
 
 function buildEndpointRows(
-  endpoints: TenantWebhookEndpoint[],
-  deliveries: WebhookDeliveryRecord[],
+  endpoints: ActionableEndpoint[],
+  deliveries: ActionableDeliveryRecord[],
 ): EndpointRow[] {
   return endpoints.map((endpoint) => ({
     webhookId: endpoint.webhookId,
@@ -687,8 +734,8 @@ function buildEndpointRows(
 }
 
 function buildDeliveryRows(
-  deliveries: WebhookDeliveryRecord[],
-  endpoints: TenantWebhookEndpoint[],
+  deliveries: ActionableDeliveryRecord[],
+  endpoints: ActionableEndpoint[],
 ): DeliveryRow[] {
   const endpointMap = new Map(
     endpoints.map((endpoint) => [endpoint.webhookId, endpoint.url]),
@@ -889,26 +936,35 @@ async function rotateWebhookSecret(formData: FormData) {
 async function loadWebhooksPageData(): Promise<WebhooksPageData> {
   const client = getTenantClient();
 
-  const [endpointsResult, deliveriesResult, governanceResult] =
+  const [endpointsResult, deliveriesResult, governanceResult, readinessResult] =
     await Promise.allSettled([
       client.listWebhooks() as Promise<TenantWebhookEndpoint[]>,
       client.get<{ items: WebhookDeliveryRecord[] }>(
         "/api/tenant/webhooks/deliveries",
       ) as Promise<{ items: WebhookDeliveryRecord[] }>,
       client.getTenantIntegrationGovernancePackage() as Promise<TenantIntegrationGovernancePackage>,
+      client.get<TenantIntegrationReadinessSummary>(
+        "/api/tenant/integration-governance/readiness",
+      ) as Promise<TenantIntegrationReadinessSummary>,
     ]);
 
   const errors: string[] = [];
   const endpoints =
     endpointsResult.status === "fulfilled"
-      ? [...endpointsResult.value].sort(compareEndpoints)
+      ? [...(endpointsResult.value as ActionableEndpoint[])].sort(
+          compareEndpoints,
+        )
       : [];
   const deliveries =
     deliveriesResult.status === "fulfilled"
-      ? [...deliveriesResult.value.items].sort(compareDeliveries)
+      ? [...(deliveriesResult.value.items as ActionableDeliveryRecord[])].sort(
+          compareDeliveries,
+        )
       : [];
   const governance =
     governanceResult.status === "fulfilled" ? governanceResult.value : null;
+  const readiness =
+    readinessResult.status === "fulfilled" ? readinessResult.value : null;
 
   if (endpointsResult.status === "rejected") {
     errors.push(`端點清單: ${toErrorMessage(endpointsResult.reason)}`);
@@ -919,11 +975,18 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
   if (governanceResult.status === "rejected") {
     errors.push(`整合治理: ${toErrorMessage(governanceResult.reason)}`);
   }
+  if (
+    readinessResult.status === "rejected" &&
+    !String(toErrorMessage(readinessResult.reason)).includes("404")
+  ) {
+    errors.push(`整合就緒度: ${toErrorMessage(readinessResult.reason)}`);
+  }
 
   return {
     endpoints,
     deliveries,
     governance,
+    readiness,
     errors,
     refresh: getRefreshMetadata(
       endpoints,
@@ -995,6 +1058,21 @@ function renderEmptyStateActions(model: EmptyStateModel) {
   );
 }
 
+function getRetryCapability(
+  deliveries: ActionableDeliveryRecord[],
+  endpointActions: ResourceActionDescriptor[],
+) {
+  return (
+    deliveries
+      .flatMap((delivery) => delivery.availableActions ?? [])
+      .find((descriptor) => descriptor.action === "retry_failed_delivery") ??
+    endpointActions.find(
+      (descriptor) => descriptor.action === "retry_failed_delivery",
+    ) ??
+    null
+  );
+}
+
 export default async function WebhooksPage({
   searchParams,
 }: {
@@ -1033,6 +1111,15 @@ export default async function WebhooksPage({
     ? `Endpoint ${selectedWebhookId} delivery log`
     : "近 24h 全部 webhook deliveries";
   const platformFailureLink = getCrossAppFailureLink(selectedWebhookId);
+  const webhookReadiness =
+    data.readiness?.items.find((item) => item.subSystem === "webhooks") ?? null;
+  const selectedEndpointActions = selectedEndpoint
+    ? getEndpointActions(selectedEndpoint)
+    : [];
+  const retryCapability = getRetryCapability(
+    selectedDeliveries,
+    selectedEndpointActions,
+  );
 
   let emptyReason: EmptyReason | null = null;
   const requestedEmptyReason = resolvedSearchParams.emptyReason;
@@ -1050,6 +1137,13 @@ export default async function WebhooksPage({
     emptyReasonWhitelist.includes(requestedEmptyReason as EmptyReason)
   ) {
     emptyReason = requestedEmptyReason as EmptyReason;
+  } else if (webhookReadiness?.status === "not_provisioned") {
+    emptyReason = "not_provisioned";
+  } else if (
+    webhookReadiness?.status === "blocked" &&
+    endpointRows.length === 0
+  ) {
+    emptyReason = "external_unavailable";
   } else if (data.errors.length > 0 && endpointRows.length === 0) {
     emptyReason = "fetch_failed";
   } else if (endpointRows.length === 0) {
@@ -1059,7 +1153,19 @@ export default async function WebhooksPage({
   }
 
   const engineActive = emptyReason !== "not_provisioned";
-  const allPageActions = getPageActions(engineActive);
+  const allPageActions = getPageActions(
+    engineActive,
+    data.endpoints,
+    data.readiness,
+  );
+  const payloadSchemaAction =
+    allPageActions.find(
+      (descriptor) => descriptor.action === "payload_schema",
+    ) ?? null;
+  const createEndpointAction =
+    allPageActions.find(
+      (descriptor) => descriptor.action === "create_endpoint",
+    ) ?? null;
   const emptyModel = emptyReason ? getEmptyStateModel(emptyReason) : null;
   const refreshAge = Math.max(
     0,
@@ -1195,23 +1301,27 @@ export default async function WebhooksPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="Webhook"
+        title="Webhooks"
         subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — 後端 engine 狀態直接決定畫面"
-        tabs={["Endpoints", "Deliveries", "Replay"]}
+        tabs={["Endpoints", "Deliveries"]}
         activeTab="Endpoints"
         actions={
           <>
-            {renderActionDescriptor(
-              allPageActions[0],
-              "/integration-governance",
-              "payload schema",
-            )}
-            {renderActionDescriptor(
-              allPageActions[1],
-              "/webhooks?create=true",
-              "新增端點",
-              "primary",
-            )}
+            {payloadSchemaAction
+              ? renderActionDescriptor(
+                  payloadSchemaAction,
+                  "/integration-governance",
+                  "payload schema",
+                )
+              : null}
+            {createEndpointAction
+              ? renderActionDescriptor(
+                  createEndpointAction,
+                  "/webhooks?create=true",
+                  "新增端點",
+                  "primary",
+                )
+              : null}
           </>
         }
       />
@@ -1266,6 +1376,17 @@ export default async function WebhooksPage({
         ) : null}
 
         <div style={metaGridStyle}>
+          <div style={metaCardStyle}>
+            <span style={metaLabelStyle}>Engine Readiness</span>
+            <span style={metaValueStyle}>
+              {webhookReadiness?.status ?? "unknown"}
+            </span>
+            <span style={helperTextStyle}>
+              {webhookReadiness?.detail ??
+                "未提供 readiness detail；目前以 live webhook data 顯示。"}
+            </span>
+          </div>
+
           <div style={metaCardStyle}>
             <span style={metaLabelStyle}>Refresh Tier</span>
             <span style={metaValueStyle}>{REFRESH_TIER_LABEL}</span>
@@ -1422,62 +1543,90 @@ export default async function WebhooksPage({
                       />
                     ) : null}
 
+                    {retryCapability ? (
+                      <div style={helperTextStyle}>
+                        retry capability:{" "}
+                        {retryCapability.enabled
+                          ? "backend 標記可重試；tenant UI 仍以 delivery log 與 queue health 為主。"
+                          : (retryCapability.disabledReasonCode ??
+                            "engine_auto_retry_only")}
+                      </div>
+                    ) : null}
+
                     <div style={actionRowStyle}>
-                      {getEndpointActions(selectedEndpoint).map(
-                        (descriptor) => {
-                          if (descriptor.action === "view_delivery_log") {
-                            return renderActionDescriptor(
-                              descriptor,
-                              `/webhooks?webhookId=${encodeURIComponent(selectedEndpoint.webhookId)}#delivery-log`,
-                              "View delivery log",
-                            );
-                          }
+                      {selectedEndpointActions.map((descriptor) => {
+                        if (descriptor.action === "view_delivery_log") {
+                          return renderActionDescriptor(
+                            descriptor,
+                            `/webhooks?webhookId=${encodeURIComponent(selectedEndpoint.webhookId)}#delivery-log`,
+                            "View delivery log",
+                          );
+                        }
 
-                          if (descriptor.action === "update_endpoint") {
-                            return renderActionDescriptor(
-                              descriptor,
-                              `/webhooks?edit=${encodeURIComponent(selectedEndpoint.webhookId)}`,
-                              "Update endpoint",
-                            );
-                          }
+                        if (descriptor.action === "update_endpoint") {
+                          return renderActionDescriptor(
+                            descriptor,
+                            `/webhooks?edit=${encodeURIComponent(selectedEndpoint.webhookId)}`,
+                            "Update endpoint",
+                          );
+                        }
 
-                          if (descriptor.action === "disable_endpoint") {
-                            return renderActionDescriptor(
-                              descriptor,
-                              "#danger-zone",
-                              "Disable",
-                              "danger",
-                            );
-                          }
+                        if (descriptor.action === "disable_endpoint") {
+                          return renderActionDescriptor(
+                            descriptor,
+                            "#danger-zone",
+                            "Disable",
+                            "danger",
+                          );
+                        }
 
-                          if (descriptor.action === "delete_endpoint") {
-                            return renderActionDescriptor(
-                              descriptor,
-                              "#danger-zone",
-                              "Delete",
-                              "danger",
-                            );
-                          }
+                        if (descriptor.action === "delete_endpoint") {
+                          return renderActionDescriptor(
+                            descriptor,
+                            "#danger-zone",
+                            "Delete",
+                            "danger",
+                          );
+                        }
 
-                          if (descriptor.action === "rotate_secret") {
-                            return renderActionDescriptor(
-                              descriptor,
-                              `/webhooks?edit=${encodeURIComponent(selectedEndpoint.webhookId)}#rotate-secret`,
-                              "Rotate secret",
-                            );
-                          }
+                        if (descriptor.action === "rotate_secret") {
+                          return renderActionDescriptor(
+                            descriptor,
+                            `/webhooks?edit=${encodeURIComponent(selectedEndpoint.webhookId)}#rotate-secret`,
+                            "Rotate secret",
+                          );
+                        }
 
+                        if (descriptor.action === "retry_failed_delivery") {
                           return (
                             <span
                               key={descriptor.action}
-                              style={disabledActionStyle}
-                              title={descriptor.disabledReasonCode}
+                              style={
+                                retryCapability?.enabled
+                                  ? actionLinkStyle
+                                  : disabledActionStyle
+                              }
+                              title={
+                                retryCapability?.enabled
+                                  ? "目前 tenant UI 沒有獨立 manual retry command；請改看 delivery log 與 queue health。"
+                                  : retryCapability?.disabledReasonCode
+                              }
                             >
                               Retry failed delivery
                             </span>
                           );
-                        },
-                      )}
+                        }
+
+                        return (
+                          <span
+                            key={descriptor.action}
+                            style={disabledActionStyle}
+                            title={descriptor.disabledReasonCode}
+                          >
+                            Retry failed delivery
+                          </span>
+                        );
+                      })}
                     </div>
 
                     <Link
@@ -1683,12 +1832,16 @@ export default async function WebhooksPage({
                     description="建立第一個 endpoint 後，這裡才會出現 update / rotate / disable / delete controls。"
                     tone="tenant"
                     density="compact"
-                    actions={renderActionDescriptor(
-                      allPageActions[1],
-                      "/webhooks?create=true",
-                      "新增端點",
-                      "primary",
-                    )}
+                    actions={
+                      createEndpointAction
+                        ? renderActionDescriptor(
+                            createEndpointAction,
+                            "/webhooks?create=true",
+                            "新增端點",
+                            "primary",
+                          )
+                        : null
+                    }
                   />
                 )}
               </CanvasCard>
