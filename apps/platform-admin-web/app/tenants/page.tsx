@@ -29,6 +29,7 @@ import type {
   EmptyReason,
   EmptyStateEnvelope,
   PlatformAdminTenantRecord,
+  RefreshTier,
   PlatformTenantIntegrationMode,
   PlatformTenantModule,
   PlatformAdminUserRecord,
@@ -46,7 +47,6 @@ import {
   CanvasDL,
   CanvasField,
   CanvasIcon,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -93,6 +93,7 @@ type EmptyStateDescriptor = {
   icon: "health" | "warn" | "search" | "tenants";
 };
 
+const REFRESH_TIER: RefreshTier = "medium_slow";
 const REFRESH_INTERVAL_MS = 30_000;
 
 const th = buildCanvasTheme({
@@ -119,10 +120,11 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const statsGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
+const summaryRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
 };
 
 const filterPanelStyle: CSSProperties = {
@@ -348,8 +350,7 @@ const ownerLinkStyle: CSSProperties = {
 };
 
 const rowActionWrapStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
+  display: "grid",
   gap: 6,
 };
 
@@ -394,6 +395,12 @@ const rowActionStyle = (tone: CanvasTone, disabled: boolean): CSSProperties => {
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.45 : 1,
   };
+};
+
+const deepLinkWrapStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
 };
 
 function toneFromRiskLevel(
@@ -649,6 +656,50 @@ function actionMatches(action: string, ...candidates: string[]) {
   return candidates.some((candidate) => action === candidate);
 }
 
+function isCreateTenantAction(action: ResourceActionDescriptor) {
+  return actionMatches(action.action, "create_tenant", "createPlatformTenant");
+}
+
+function isRefreshAction(action: ResourceActionDescriptor) {
+  return actionMatches(action.action, "refresh", "reload", "refetch");
+}
+
+function resolveActionLabel(
+  labels: Record<string, string>,
+  action: ResourceActionDescriptor,
+) {
+  return labels[action.action] ?? action.action;
+}
+
+function resolveCrossAppLabel(
+  locale: string,
+  labels: Record<string, string>,
+  link: CrossAppResourceLink,
+) {
+  if (labels[link.label]) {
+    return labels[link.label];
+  }
+
+  if (link.targetApp === "ops-console") {
+    return (
+      labels.open_ops_console ??
+      (locale === "en" ? "Open ops view" : "開啟 ops 視圖")
+    );
+  }
+
+  return locale === "en" ? `Open ${link.targetApp}` : `開啟 ${link.targetApp}`;
+}
+
+function describeRefreshTier(locale: string, tier: RefreshTier) {
+  if (tier === "medium_slow") {
+    return locale === "en"
+      ? "Refresh tier T4 · 30s"
+      : "Refresh tier T4 · 30 秒";
+  }
+
+  return locale === "en" ? `Refresh tier ${tier}` : `Refresh tier ${tier}`;
+}
+
 function lastActivityAt(tenant: TenantListItem) {
   return (
     tenant.lastActivityAt ?? tenant.rollout.lastPromotedAt ?? tenant.updatedAt
@@ -723,7 +774,9 @@ export default function TenantsPage() {
           searchPlaceholder: "Search tenant name or code",
           filterTitleStage: "Rollout stage",
           filterTitleStatus: "Tenant status",
-          refreshTier: "Refresh tier T4 · 30s",
+          refreshTier: describeRefreshTier(locale, REFRESH_TIER),
+          freshnessAt: "Snapshot",
+          readyGate: "Ready gate",
           searchSummary: (count: number) => `${count} visible tenant(s)`,
           requestLabel: "Request",
           table: {
@@ -835,7 +888,9 @@ export default function TenantsPage() {
           searchPlaceholder: "搜尋租戶名稱或代碼",
           filterTitleStage: "Rollout stage",
           filterTitleStatus: "Tenant status",
-          refreshTier: "Refresh tier T4 · 30 秒",
+          refreshTier: describeRefreshTier(locale, REFRESH_TIER),
+          freshnessAt: "快照時間",
+          readyGate: "Ready gate",
           searchSummary: (count: number) => `目前顯示 ${count} 筆租戶`,
           requestLabel: "請求",
           table: {
@@ -1167,9 +1222,25 @@ export default function TenantsPage() {
 
   const pageActions = loadState?.availableActions ?? fallbackPageActions();
   const canCreateTenant = pageActions.some(
-    (action) =>
-      actionMatches(action.action, "create_tenant", "createPlatformTenant") &&
-      action.enabled,
+    (action) => isCreateTenantAction(action) && action.enabled,
+  );
+
+  const handlePageAction = useCallback(
+    async (action: ResourceActionDescriptor) => {
+      if (!action.enabled) {
+        return;
+      }
+
+      if (isCreateTenantAction(action)) {
+        setShowCreate(true);
+        return;
+      }
+
+      if (isRefreshAction(action)) {
+        await loadTenants({ silent: true });
+      }
+    },
+    [loadTenants],
   );
 
   const handleCreate = async (event: React.FormEvent) => {
@@ -1429,18 +1500,23 @@ export default function TenantsPage() {
             tenant.availableActions && tenant.availableActions.length > 0
               ? tenant.availableActions
               : fallbackRowActions(tenant);
-          const opsLink = resolveTenantLinks(tenant)[0];
+          const resourceLinks = resolveTenantLinks(tenant);
 
           return (
             <div style={rowActionWrapStyle}>
-              <Link
-                href={buildCrossAppHref(opsLink)}
-                target="_blank"
-                rel="noreferrer"
-                style={rowActionStyle("accent", false)}
-              >
-                {copy.links.ops}
-              </Link>
+              <div style={deepLinkWrapStyle}>
+                {resourceLinks.map((link) => (
+                  <Link
+                    key={`${link.targetApp}:${link.resourceId}:${link.route}`}
+                    href={buildCrossAppHref(link)}
+                    target={link.openMode === "new_tab" ? "_blank" : undefined}
+                    rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
+                    style={rowActionStyle("accent", false)}
+                  >
+                    {resolveCrossAppLabel(locale, copy.actionLabels, link)}
+                  </Link>
+                ))}
+              </div>
               {actions.map((action: ResourceActionDescriptor) => (
                 <button
                   key={action.action}
@@ -1453,9 +1529,7 @@ export default function TenantsPage() {
                     !action.enabled,
                   )}
                 >
-                  {copy.actionLabels[
-                    action.action as keyof typeof copy.actionLabels
-                  ] ?? action.action}
+                  {resolveActionLabel(copy.actionLabels, action)}
                 </button>
               ))}
             </div>
@@ -1466,7 +1540,6 @@ export default function TenantsPage() {
     [
       copy.actionLabels,
       copy.links.detail,
-      copy.links.ops,
       copy.owners.cutover,
       copy.owners.rollback,
       copy.table.actions,
@@ -1541,29 +1614,64 @@ export default function TenantsPage() {
       />
 
       <div style={pageBodyStyle}>
-        <div style={statsGridStyle}>
-          <CanvasKPI
+        <div style={summaryRowStyle}>
+          {(
+            [
+              ["all", copy.filters.stage.all, stageCounts.all, "accent"],
+              [
+                "sandbox",
+                copy.filters.stage.sandbox,
+                stageCounts.sandbox,
+                "warn",
+              ],
+              ["pilot", copy.filters.stage.pilot, stageCounts.pilot, "neutral"],
+              [
+                "production",
+                copy.filters.stage.production,
+                stageCounts.production,
+                "success",
+              ],
+            ] as const
+          ).map(([value, label, count, tone]) => (
+            <button
+              key={`summary-stage-${value}`}
+              type="button"
+              onClick={() => setStageFilter(value)}
+              style={filterButtonStyle}
+            >
+              <CanvasPill
+                theme={th}
+                tone={stageFilter === value ? tone : "neutral"}
+                dot={value !== "all"}
+              >
+                {label} {formatLocaleNumber(locale, count)}
+              </CanvasPill>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setStatusFilter("rollback_hold")}
+            style={filterButtonStyle}
+          >
+            <CanvasPill
+              theme={th}
+              tone={statusFilter === "rollback_hold" ? "danger" : "neutral"}
+              dot
+            >
+              {copy.filters.status.rollback_hold}{" "}
+              {formatLocaleNumber(locale, rollbackHoldTenants.length)}
+            </CanvasPill>
+          </button>
+          <span style={{ flex: 1 }} />
+          <CanvasPill theme={th} tone="neutral">
+            {copy.refreshTier}
+          </CanvasPill>
+          <CanvasPill
             theme={th}
-            label={copy.table.tenant}
-            value={formatLocaleNumber(locale, tenants.length)}
-          />
-          <CanvasKPI
-            theme={th}
-            label="Ready gates"
-            value={formatLocaleNumber(locale, readyGateCount)}
-          />
-          <CanvasKPI
-            theme={th}
-            label="Rollback hold"
-            value={formatLocaleNumber(locale, rollbackHoldTenants.length)}
-            delta={rollbackHoldTenants.length > 0 ? "attention" : undefined}
-            deltaTone={rollbackHoldTenants.length > 0 ? "down" : "neutral"}
-          />
-          <CanvasKPI
-            theme={th}
-            label="Production"
-            value={formatLocaleNumber(locale, stageCounts.production)}
-          />
+            tone={readyGateCount > 0 ? "accent" : "neutral"}
+          >
+            {copy.readyGate} {formatLocaleNumber(locale, readyGateCount)}
+          </CanvasPill>
         </div>
 
         <div style={filterPanelStyle}>
@@ -1579,9 +1687,6 @@ export default function TenantsPage() {
                 />
               </div>
             </div>
-            <CanvasPill theme={th} tone="neutral">
-              {copy.refreshTier}
-            </CanvasPill>
             {freshness ? (
               <CanvasPill
                 theme={th}
@@ -1671,7 +1776,7 @@ export default function TenantsPage() {
               </CanvasPill>
               {freshness ? (
                 <CanvasPill theme={th} tone="neutral">
-                  {formatDateTime(freshness.generatedAt)}
+                  {copy.freshnessAt} · {formatDateTime(freshness.generatedAt)}
                 </CanvasPill>
               ) : null}
             </div>
@@ -2237,6 +2342,23 @@ export default function TenantsPage() {
                 {emptyDescriptor.title}
               </div>
               <div style={{ maxWidth: 460 }}>{emptyDescriptor.body}</div>
+              {loadState?.empty?.nextAction ? (
+                <CanvasBtn
+                  theme={th}
+                  variant={
+                    loadState.empty.nextAction.enabled ? "primary" : "secondary"
+                  }
+                  onClick={() =>
+                    void handlePageAction(loadState.empty.nextAction!)
+                  }
+                  disabled={!loadState.empty.nextAction.enabled}
+                >
+                  {resolveActionLabel(
+                    copy.actionLabels,
+                    loadState.empty.nextAction,
+                  )}
+                </CanvasBtn>
+              ) : null}
               {canCreateTenant && emptyDescriptor.reason === "no_data" ? (
                 <CanvasBtn
                   theme={th}
