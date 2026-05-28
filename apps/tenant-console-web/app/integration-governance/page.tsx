@@ -77,6 +77,12 @@ const mutedCopyStyle: CSSProperties = {
   lineHeight: 1.55,
 };
 
+const chipWrapStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
 const cardFooterStyle: CSSProperties = {
   marginTop: 10,
   display: "flex",
@@ -106,6 +112,11 @@ const subsystemOrder: TenantIntegrationReadinessItem["subSystem"][] = [
   "partner_entries",
 ];
 
+type QuickActionDisplay = ResourceActionDescriptor & {
+  href: string;
+  source: string;
+};
+
 const subSystemMeta: Record<
   TenantIntegrationReadinessItem["subSystem"],
   {
@@ -113,6 +124,7 @@ const subSystemMeta: Record<
     code: string;
     href: string;
     description: string;
+    signals: string[];
     emptyReason?: EmptyReason;
   }
 > = {
@@ -120,19 +132,23 @@ const subSystemMeta: Record<
     label: "API keys",
     code: "api_keys",
     href: "/api-keys",
-    description: "Active keys, expiry exposure, and scope coverage.",
+    description: "Active keys, expiring keys, and missing scope coverage.",
+    signals: ["active keys", "expiring", "missing scopes"],
   },
   webhooks: {
     label: "Webhooks",
     code: "webhooks",
     href: "/webhooks",
-    description: "Endpoint health, delivery posture, and engine availability.",
+    description:
+      "Endpoint count, delivery failure rate, and engine availability.",
+    signals: ["active endpoints", "failure rate", "engine availability"],
   },
   notifications: {
     label: "Notifications routing",
     code: "notifications",
     href: "/settings#notifications",
     description: "Configured channels for inbox, email, and webhook routing.",
+    signals: ["ops console", "email", "webhook"],
   },
   sla: {
     label: "SLA profile",
@@ -140,18 +156,21 @@ const subSystemMeta: Record<
     href: "/settings#sla",
     description:
       "Wait, arrival, and completion thresholds published to the tenant.",
+    signals: ["wait threshold", "arrival threshold", "completion threshold"],
   },
   reports: {
     label: "Reports availability",
     code: "reports",
     href: "/reports",
-    description: "Runnable jobs and artifact lane readiness.",
+    description: "Runnable jobs and report artifact availability.",
+    signals: ["jobs runnable", "artifacts available", "manual refresh"],
   },
   modules: {
     label: "Module enablement",
     code: "modules",
     href: "/settings",
     description: "Feature posture and module visibility for this tenant.",
+    signals: ["tenant flags", "module visibility", "enablement posture"],
   },
   partner_entries: {
     label: "Partner entries",
@@ -159,6 +178,7 @@ const subSystemMeta: Record<
     href: "/partner",
     description:
       "Partner-facing ingress posture when tenant-linked entries exist.",
+    signals: ["tenant-linked entries", "partner ingress", "handoff required"],
     emptyReason: "not_provisioned",
   },
 };
@@ -408,33 +428,33 @@ function formatDateTime(value: string) {
 }
 
 function dedupeActions(items: TenantIntegrationReadinessItem[]) {
-  const seen = new Set<string>();
-  const actions: Array<
-    TenantIntegrationReadinessItem["nextAction"] & {
-      href: string;
-      source: string;
-    }
-  > = [];
+  const actions = new Map<string, QuickActionDisplay>();
 
   for (const item of items) {
-    if (
-      !item.nextAction ||
-      !item.nextAction.enabled ||
-      seen.has(item.nextAction.action)
-    ) {
+    if (!item.nextAction) {
       continue;
     }
 
-    seen.add(item.nextAction.action);
     const meta = getSubSystemMeta(item.subSystem);
-    actions.push({
+    const existing = actions.get(item.nextAction.action);
+    const candidate = {
       ...item.nextAction,
       href: getActionHref(item.nextAction.action, meta.href),
       source: meta.label,
-    });
+    };
+
+    if (!existing || (!existing.enabled && candidate.enabled)) {
+      actions.set(item.nextAction.action, candidate);
+    }
   }
 
-  return actions;
+  return [...actions.values()].sort((left, right) => {
+    if (left.enabled !== right.enabled) {
+      return left.enabled ? -1 : 1;
+    }
+
+    return left.action.localeCompare(right.action, "en");
+  });
 }
 
 function buildDisplayItems(items: TenantIntegrationReadinessItem[]) {
@@ -457,6 +477,74 @@ function buildDisplayItems(items: TenantIntegrationReadinessItem[]) {
           : "The aggregated payload did not return this subsystem. Verify upstream readiness evidence.",
     } satisfies TenantIntegrationReadinessItem;
   });
+}
+
+function getStateVariant(items: TenantIntegrationReadinessItem[]) {
+  if (items.every((item) => item.status === "ready")) {
+    return {
+      label: "Fully ready",
+      tone: "success" as CanvasTone,
+      body: "All seven integration lanes report green from the aggregated snapshot.",
+    };
+  }
+
+  if (items.every((item) => item.status === "not_provisioned")) {
+    return {
+      label: "First-time setup",
+      tone: "warn" as CanvasTone,
+      body: "The tenant is present, but every tracked lane still requires first-time setup.",
+    };
+  }
+
+  return {
+    label: "Partial readiness",
+    tone: "info" as CanvasTone,
+    body: "Some subsystems remain yellow or red, so follow-up actions stay visible.",
+  };
+}
+
+function buildCrossAppLinks(
+  tenantId: string,
+  items: TenantIntegrationReadinessItem[],
+) {
+  const links: CrossAppResourceLink[] = [
+    {
+      targetApp: "platform-admin",
+      route: `/tenant-governance?tenantId=${encodeURIComponent(tenantId)}`,
+      resourceType: "tenant",
+      resourceId: tenantId,
+      openMode: "new_tab",
+      label: "Open tenant governance in Platform Admin",
+    },
+  ];
+
+  const webhookItem = items.find((item) => item.subSystem === "webhooks");
+  if (webhookItem && webhookItem.status !== "ready") {
+    links.push({
+      targetApp: "ops-console",
+      route: `/audit?tenantId=${encodeURIComponent(tenantId)}&module=webhooks`,
+      resourceType: "tenant_audit",
+      resourceId: tenantId,
+      openMode: "new_tab",
+      label: "Open webhook-linked audit lane in Ops Console",
+    });
+  }
+
+  const partnerItem = items.find(
+    (item) => item.subSystem === "partner_entries",
+  );
+  if (partnerItem && partnerItem.status !== "ready") {
+    links.push({
+      targetApp: "platform-admin",
+      route: `/partners?tenantId=${encodeURIComponent(tenantId)}`,
+      resourceType: "tenant_partner_entry",
+      resourceId: tenantId,
+      openMode: "new_tab",
+      label: "Inspect partner entry ownership in Platform Admin",
+    });
+  }
+
+  return links;
 }
 
 function EmptyReasonCard({
@@ -575,27 +663,11 @@ export default async function IntegrationGovernancePage({
   const items = buildDisplayItems(summary?.items ?? []);
   const readyCount = items.filter((item) => item.status === "ready").length;
   const gapCount = items.filter((item) => item.status !== "ready").length;
-  const enabledActions = dedupeActions(items);
-  const crossAppLinks: CrossAppResourceLink[] = summary
-    ? [
-        {
-          targetApp: "platform-admin",
-          route: `/tenant-governance?tenantId=${encodeURIComponent(summary.tenantId)}`,
-          resourceType: "tenant",
-          resourceId: summary.tenantId,
-          openMode: "new_tab",
-          label: "Open tenant governance in Platform Admin",
-        },
-        {
-          targetApp: "ops-console",
-          route: `/audit?tenantId=${encodeURIComponent(summary.tenantId)}&module=webhooks`,
-          resourceType: "tenant_audit",
-          resourceId: summary.tenantId,
-          openMode: "new_tab",
-          label: "Open webhook-linked audit lane in Ops Console",
-        },
-      ]
+  const quickActions = dedupeActions(items);
+  const crossAppLinks = summary
+    ? buildCrossAppLinks(summary.tenantId, items)
     : [];
+  const stateVariant = getStateVariant(items);
   const selectedEmptyReason =
     previewEmptyReason ??
     (summary || data.errors.length === 0 ? null : "fetch_failed");
@@ -643,10 +715,12 @@ export default async function IntegrationGovernancePage({
           <CanvasKPI
             theme={th}
             label="Next actions"
-            value={enabledActions.length}
-            delta={enabledActions.length > 0 ? "availableActions" : "none"}
-            deltaTone={enabledActions.length > 0 ? "neutral" : "up"}
-            sub="Authority-driven drill targets"
+            value={quickActions.length}
+            delta={quickActions.length > 0 ? "availableActions" : "none"}
+            deltaTone={
+              quickActions.some((action) => action.enabled) ? "neutral" : "up"
+            }
+            sub="Authority-driven CTA inventory"
           />
           <CanvasKPI
             theme={th}
@@ -818,10 +892,28 @@ export default async function IntegrationGovernancePage({
                       exposes follow-up CTAs when the backend returns an action
                       descriptor.
                     </p>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <CanvasPill theme={th} tone={stateVariant.tone} dot>
+                        {stateVariant.label}
+                      </CanvasPill>
+                      <CanvasPill theme={th} tone="neutral">
+                        7 subsystem lanes
+                      </CanvasPill>
+                    </div>
+                    <p style={{ marginTop: 8, ...mutedCopyStyle }}>
+                      {stateVariant.body}
+                    </p>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {enabledActions.length > 0 ? (
-                      enabledActions.slice(0, 4).map((action) => (
+                    {quickActions.length > 0 ? (
+                      quickActions.slice(0, 4).map((action) => (
                         <div
                           key={action.action}
                           style={{ display: "grid", gap: 4 }}
@@ -908,6 +1000,23 @@ export default async function IntegrationGovernancePage({
                             {item.detail ?? meta.description}
                           </p>
 
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <div style={{ fontSize: 10.5, color: th.textDim }}>
+                              Must-show signals
+                            </div>
+                            <div style={chipWrapStyle}>
+                              {meta.signals.map((signal) => (
+                                <CanvasPill
+                                  key={signal}
+                                  theme={th}
+                                  tone="neutral"
+                                >
+                                  {signal}
+                                </CanvasPill>
+                              ))}
+                            </div>
+                          </div>
+
                           <div style={cardFooterStyle}>
                             <Link href={meta.href} style={linkStyle()}>
                               Open module
@@ -923,7 +1032,21 @@ export default async function IntegrationGovernancePage({
 
                           {!action?.enabled ? (
                             <div style={{ fontSize: 10.5, color: th.textDim }}>
-                              {getActionAssistiveCopy(action)}
+                              {action ? getActionAssistiveCopy(action) : null}
+                            </div>
+                          ) : null}
+
+                          {summary && item.subSystem === "partner_entries" ? (
+                            <div style={{ fontSize: 10.5, color: th.textDim }}>
+                              Cross-app handoff remains in Platform Admin when
+                              partner ownership investigation is required.
+                            </div>
+                          ) : null}
+
+                          {summary && item.subSystem === "webhooks" ? (
+                            <div style={{ fontSize: 10.5, color: th.textDim }}>
+                              Delivery investigation can deep-link into Ops
+                              Console audit when webhook posture is not green.
                             </div>
                           ) : null}
                         </div>
