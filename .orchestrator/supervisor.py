@@ -7,6 +7,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import socket
 import random
 import re
 import shlex
@@ -225,6 +226,37 @@ def write_status_with_prune(status_path, status: dict[str, Any], *, keep_handoff
     """
     prune_done_handoffs(status, keep=keep_handoffs)
     write_json(status_path, status)
+
+
+def _sd_notify(message: str) -> None:
+    """Send a state message to systemd via the sd_notify protocol.
+
+    Used to deliver periodic WATCHDOG=1 heartbeats so a non-zero
+    WatchdogSec in the unit file accurately detects a hung tick loop
+    (instead of killing a healthy supervisor every interval — the
+    failure mode that produced OPS-SUPERVISOR-WATCHDOG-OFF-001 #313).
+
+    No-op when NOTIFY_SOCKET is unset (the supervisor is not running
+    under systemd, e.g., interactive smoke tests or --once invocations).
+    All socket / OS errors are swallowed so heartbeat delivery cannot
+    take the supervisor down.
+    """
+    sock_path = os.environ.get("NOTIFY_SOCKET")
+    if not sock_path:
+        return
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            # systemd encodes abstract namespace sockets with a leading '@';
+            # the kernel expects a leading NUL byte for those.
+            if sock_path.startswith("@"):
+                sock_path = "\0" + sock_path[1:]
+            sock.connect(sock_path)
+            sock.sendall(message.encode("utf-8"))
+        finally:
+            sock.close()
+    except OSError:
+        return
 
 
 def supervisor_pid_path(config: dict[str, Any]) -> Path:
@@ -7908,6 +7940,7 @@ def run_once(
             heartbeat_at=heartbeat_at,
         )
 
+    _sd_notify("WATCHDOG=1")
     state = load_runtime_state(config)
     previous_heartbeat = state.get("supervisor", {}).get("last_heartbeat_at")
     stamp_supervisor_state(state)

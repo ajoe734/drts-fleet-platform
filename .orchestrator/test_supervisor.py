@@ -6717,5 +6717,51 @@ class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
         self.assertIn("reconcile_status_from_git_failed", types)
 
 
+
+
+class SdNotifyTests(unittest.TestCase):
+    """OPS-SUPERVISOR-SD-NOTIFY-001: _sd_notify must (a) no-op when
+    NOTIFY_SOCKET is unset (covers interactive / --once usage), (b) deliver
+    a WATCHDOG=1 datagram to the AF_UNIX socket systemd hands us when set,
+    (c) swallow all OS errors (heartbeat must never take the supervisor
+    down)."""
+
+    def test_noop_when_notify_socket_unset(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("NOTIFY_SOCKET", None)
+            with mock.patch.object(supervisor.socket, "socket") as sk:
+                supervisor._sd_notify("WATCHDOG=1")
+            sk.assert_not_called()
+
+    def test_sends_datagram_when_notify_socket_set(self) -> None:
+        fake_sock = mock.MagicMock()
+        with mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "/run/systemd/notify"}):
+            with mock.patch.object(supervisor.socket, "socket", return_value=fake_sock):
+                supervisor._sd_notify("WATCHDOG=1")
+        fake_sock.connect.assert_called_once_with("/run/systemd/notify")
+        fake_sock.sendall.assert_called_once_with(b"WATCHDOG=1")
+        fake_sock.close.assert_called_once()
+
+    def test_abstract_namespace_socket_path_translated(self) -> None:
+        # systemd uses @-prefix for abstract namespace; kernel wants \0-prefix.
+        fake_sock = mock.MagicMock()
+        with mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "@some-abstract"}):
+            with mock.patch.object(supervisor.socket, "socket", return_value=fake_sock):
+                supervisor._sd_notify("READY=1")
+        fake_sock.connect.assert_called_once_with("\0some-abstract")
+        fake_sock.sendall.assert_called_once_with(b"READY=1")
+
+    def test_oserror_during_send_is_swallowed(self) -> None:
+        # If the systemd socket disappears mid-supervisor (or perms drop),
+        # _sd_notify must NOT raise — heartbeat is best-effort.
+        fake_sock = mock.MagicMock()
+        fake_sock.sendall.side_effect = OSError("broken pipe")
+        with mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "/run/systemd/notify"}):
+            with mock.patch.object(supervisor.socket, "socket", return_value=fake_sock):
+                # MUST NOT raise.
+                supervisor._sd_notify("WATCHDOG=1")
+        fake_sock.close.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
