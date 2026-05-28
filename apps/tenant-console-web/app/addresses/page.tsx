@@ -5,6 +5,7 @@ import type {
   CrossAppResourceLink,
   EmptyReason,
   ResourceActionDescriptor,
+  RefreshTier,
   TenantAddressExportViewRecord,
   TenantAddressQualityIssue,
   TenantAddressRecord,
@@ -24,7 +25,12 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { API_URL, getTenantClient } from "@/lib/api-client";
+import {
+  API_URL,
+  DEMO_ACTOR_ID,
+  DEMO_TENANT_ID,
+  getTenantClient,
+} from "@/lib/api-client";
 
 export const dynamic = "force-dynamic";
 
@@ -224,12 +230,27 @@ type AddressRow = TenantAddressRecord &
     availableActions: ResourceActionDescriptor[];
   };
 
+type AddressListRecord = TenantAddressRecord & {
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type AddressListEnvelope = {
+  items: AddressListRecord[];
+  refreshMetadata?: UiRefreshMetadata;
+  emptyState?: {
+    reason: EmptyReason;
+    nextAction?: ResourceActionDescriptor;
+  };
+};
+
 type AddressesPageData = {
-  addresses: TenantAddressRecord[];
+  addresses: AddressListRecord[];
   passengers: TenantPassengerRecord[];
   exportRows: TenantAddressExportViewRecord[];
   errors: string[];
   refreshMetadata: UiRefreshMetadata;
+  emptyReason: EmptyReason | null;
+  emptyNextAction?: ResourceActionDescriptor;
 };
 
 type EmptyStateDefinition = {
@@ -276,6 +297,21 @@ const EMPTY_STATE_DEFINITIONS: Record<EmptyReason, EmptyStateDefinition> = {
   },
 };
 
+const ADDRESS_REFRESH_TIER: RefreshTier = "slow";
+
+const REFRESH_TIER_CONFIG: Record<
+  RefreshTier,
+  { badge: string; cadenceLabel: string; staleAfterMs: number }
+> = {
+  urgent: { badge: "T1", cadenceLabel: "5s", staleAfterMs: 5_000 },
+  fast: { badge: "T2", cadenceLabel: "3s", staleAfterMs: 3_000 },
+  dispatch: { badge: "T3", cadenceLabel: "5s", staleAfterMs: 5_000 },
+  medium: { badge: "T4", cadenceLabel: "15s", staleAfterMs: 15_000 },
+  medium_slow: { badge: "T5", cadenceLabel: "30s", staleAfterMs: 30_000 },
+  slow: { badge: "T5", cadenceLabel: "30s", staleAfterMs: 30_000 },
+  manual: { badge: "T6", cadenceLabel: "manual", staleAfterMs: 0 },
+};
+
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
 }
@@ -314,16 +350,17 @@ async function loadAddressesPageData(): Promise<AddressesPageData> {
   const client = getTenantClient();
   const errors: string[] = [];
   const generatedAt = new Date().toISOString();
+  const refreshConfig = REFRESH_TIER_CONFIG[ADDRESS_REFRESH_TIER];
 
   const [addressesResult, passengersResult, exportResult] = await Promise.allSettled([
-    client.listAddresses() as Promise<TenantAddressRecord[]>,
+    fetchTenantAddressEnvelope(),
     client.listPassengers() as Promise<TenantPassengerRecord[]>,
     client.listAddressExportView() as Promise<TenantAddressExportViewRecord[]>,
   ]);
 
   const addresses =
     addressesResult.status === "fulfilled"
-      ? [...addressesResult.value].sort(compareAddresses)
+      ? [...addressesResult.value.items].sort(compareAddresses)
       : [];
   const passengers =
     passengersResult.status === "fulfilled" ? passengersResult.value : [];
@@ -344,12 +381,63 @@ async function loadAddressesPageData(): Promise<AddressesPageData> {
     passengers,
     exportRows,
     errors,
-    refreshMetadata: {
-      generatedAt,
-      staleAfterMs: 30_000,
-      dataFreshness: errors.length > 0 ? "degraded" : "fresh",
-      source: "live",
+    refreshMetadata:
+      addressesResult.status === "fulfilled"
+        ? addressesResult.value.refreshMetadata ?? {
+            generatedAt,
+            staleAfterMs: refreshConfig.staleAfterMs,
+            dataFreshness: errors.length > 0 ? "degraded" : "fresh",
+            source: "live",
+          }
+        : {
+            generatedAt,
+            staleAfterMs: refreshConfig.staleAfterMs,
+            dataFreshness: errors.length > 0 ? "degraded" : "fresh",
+            source: "live",
+          },
+    emptyReason:
+      addressesResult.status === "fulfilled"
+        ? addressesResult.value.emptyState?.reason ?? null
+        : null,
+    emptyNextAction:
+      addressesResult.status === "fulfilled"
+        ? addressesResult.value.emptyState?.nextAction
+        : undefined,
+  };
+}
+
+async function fetchTenantAddressEnvelope(): Promise<AddressListEnvelope> {
+  const response = await fetch(`${API_URL}/api/tenant/addresses`, {
+    headers: {
+      "X-Tenant-Id": DEMO_TENANT_ID,
+      "X-Actor-Id": DEMO_ACTOR_ID,
     },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} when loading tenant addresses`);
+  }
+
+  const payload = (await response.json()) as
+    | { data?: Partial<AddressListEnvelope> & { items?: AddressListRecord[] } }
+    | { items?: AddressListRecord[] };
+
+  const data =
+    "data" in payload && payload.data && typeof payload.data === "object"
+      ? payload.data
+      : payload;
+
+  return {
+    items: Array.isArray(data.items) ? data.items : [],
+    refreshMetadata:
+      data.refreshMetadata && typeof data.refreshMetadata === "object"
+        ? data.refreshMetadata
+        : undefined,
+    emptyState:
+      data.emptyState && typeof data.emptyState === "object"
+        ? data.emptyState
+        : undefined,
   };
 }
 
@@ -397,8 +485,14 @@ function buildRowActions(address: TenantAddressRecord): ResourceActionDescriptor
   return actions;
 }
 
+function resolveAddressActions(address: AddressListRecord) {
+  return address.availableActions && address.availableActions.length > 0
+    ? address.availableActions
+    : buildRowActions(address);
+}
+
 function toAddressRow(
-  address: TenantAddressRecord,
+  address: AddressListRecord,
   passengerMap: Map<string, TenantPassengerRecord>,
   selectedId: string | null,
 ): AddressRow {
@@ -415,7 +509,7 @@ function toAddressRow(
     stateTone: address.activeFlag ? "success" : "neutral",
     qualityTone: getQualityTone(address.qualityIssues),
     qualityLabel: getQualityLabel(address.qualityIssues),
-    availableActions: buildRowActions(address),
+    availableActions: resolveAddressActions(address),
   };
 }
 
@@ -696,7 +790,7 @@ export default async function AddressesPage({
   });
 
   const emptyReason = deriveEmptyReason(
-    resolvedSearchParams.emptyReason,
+    resolvedSearchParams.emptyReason ?? pageData.emptyReason ?? undefined,
     pageData.errors,
     pageData.addresses.length,
     filteredAddresses.length,
@@ -864,7 +958,7 @@ export default async function AddressesPage({
   ];
 
   const selectedLinks = selectedAddress ? buildCrossAppLinks(selectedAddress) : [];
-  const selectedActions = selectedAddress ? buildRowActions(selectedAddress) : [];
+  const selectedActions = selectedAddress ? resolveAddressActions(selectedAddress) : [];
   const lifecycleAction =
     selectedActions.find((action) =>
       action.action === (selectedAddress?.activeFlag ? "soft_deactivate" : "reactivate"),
@@ -875,7 +969,7 @@ export default async function AddressesPage({
       <CanvasPageHeader
         theme={th}
         title="地址簿"
-        subtitle="Address book · 常用地點 / owner passenger / tag / lifecycle action · refresh tier T5"
+        subtitle="常用地點 · tag · 啟用狀態 · 軟停用 only (Q-TEN06)"
         actions={
           <>
             {exportDescriptor.enabled ? (
@@ -919,7 +1013,9 @@ export default async function AddressesPage({
             tone={getRefreshTierTone(pageData.refreshMetadata.dataFreshness)}
             dot
           >
-            T5 · 30s · {pageData.refreshMetadata.dataFreshness}
+            {REFRESH_TIER_CONFIG[ADDRESS_REFRESH_TIER].badge} ·{" "}
+            {REFRESH_TIER_CONFIG[ADDRESS_REFRESH_TIER].cadenceLabel} ·{" "}
+            {pageData.refreshMetadata.dataFreshness}
           </CanvasPill>
           <CanvasPill theme={th} tone="neutral">
             generated {formatDateTime(pageData.refreshMetadata.generatedAt)}
@@ -1027,11 +1123,12 @@ export default async function AddressesPage({
                 <EmptyStatePanel
                   reason={emptyReason}
                   nextAction={
-                    emptyReason === "no_data" || emptyReason === "not_provisioned"
+                    pageData.emptyNextAction ??
+                    (emptyReason === "no_data" || emptyReason === "not_provisioned"
                       ? createDescriptor
                       : emptyReason === "filtered_empty"
                         ? { action: "create", enabled: true, riskLevel: "low" }
-                        : undefined
+                        : undefined)
                   }
                 />
               ) : (
