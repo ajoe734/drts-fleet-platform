@@ -1495,23 +1495,52 @@ export default function FleetPage() {
     [locale, renderActionButtons],
   );
 
-  const activeColumns = {
-    vehicles: vehicleColumns,
-    drivers: driverColumns,
-    contracts: contractColumns,
-    device_binding: bindingColumns,
-    exclusivity: exclusivityColumns,
-    offboarding: offboardingColumns,
-  }[activeTab];
-
-  const activeRows = {
-    vehicles,
-    drivers,
-    contracts,
-    device_binding: activeBindings,
-    exclusivity: exclusivities,
-    offboarding: offboardingVehicles,
-  }[activeTab];
+  const renderActiveTable = () => {
+    switch (activeTab) {
+      case "vehicles":
+        return (
+          <CanvasTable theme={theme} columns={vehicleColumns} rows={vehicles} />
+        );
+      case "drivers":
+        return (
+          <CanvasTable theme={theme} columns={driverColumns} rows={drivers} />
+        );
+      case "contracts":
+        return (
+          <CanvasTable
+            theme={theme}
+            columns={contractColumns}
+            rows={contracts}
+          />
+        );
+      case "device_binding":
+        return (
+          <CanvasTable
+            theme={theme}
+            columns={bindingColumns}
+            rows={activeBindings}
+          />
+        );
+      case "exclusivity":
+        return (
+          <CanvasTable
+            theme={theme}
+            columns={exclusivityColumns}
+            rows={exclusivities}
+          />
+        );
+      case "offboarding":
+        return (
+          <CanvasTable
+            theme={theme}
+            columns={offboardingColumns}
+            rows={offboardingVehicles}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
   const tabs = TAB_ORDER.map((tab) => (
     <button
@@ -1794,11 +1823,7 @@ export default function FleetPage() {
                   </div>
                 </div>
               ) : (
-                <CanvasTable
-                  theme={theme}
-                  columns={activeColumns}
-                  rows={activeRows}
-                />
+                renderActiveTable()
               )}
             </CanvasCard>
           </div>
