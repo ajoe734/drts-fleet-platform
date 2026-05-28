@@ -305,7 +305,7 @@ function getQueueCopy(locale: Locale) {
       breadcrumbParent: "Pricing & Settlement",
       pageTitle: "Reimbursement batches",
       pageSubtitle:
-        "draft → pending_approval → approved → exported → paid → reconciled",
+        "draft → pending_approval → approved → exported → paid → reconciled (Q-ADM12 6-state queue)",
       searchPlaceholder: "Search batches, scopes, reconciliation links...",
       queueTitle: "Batch queue",
       queueSubtitle: (shown: number, total: number) =>
@@ -321,6 +321,7 @@ function getQueueCopy(locale: Locale) {
       tabDone: "Done",
       fieldScope: "Scope",
       fieldPeriod: "Period",
+      allPeriods: "All periods",
       fieldState: "State",
       fieldActor: "Actor ID",
       fieldReason: "Reason",
@@ -481,9 +482,9 @@ function getQueueCopy(locale: Locale) {
 
   return {
     breadcrumbParent: "計價與結算",
-    pageTitle: "代墊批次",
+    pageTitle: "代墊批次 · Reimbursement batches",
     pageSubtitle:
-      "draft → pending_approval → approved → exported → paid → reconciled",
+      "draft → pending_approval → approved → exported → paid → reconciled (Q-ADM12 六狀態)",
     searchPlaceholder: "搜尋批次、scope、對帳連結...",
     queueTitle: "批次佇列",
     queueSubtitle: (shown: number, total: number) =>
@@ -499,6 +500,7 @@ function getQueueCopy(locale: Locale) {
     tabDone: "已完成",
     fieldScope: "Scope",
     fieldPeriod: "期間",
+    allPeriods: "全部期間",
     fieldState: "狀態",
     fieldActor: "操作人 ID",
     fieldReason: "原因",
@@ -588,7 +590,7 @@ function getQueueCopy(locale: Locale) {
     },
     viewAudit: "查看 audit",
     linkedReconciliation: "關聯對帳",
-    externalLinks: "跨系統連結",
+    externalLinks: "跨系統 deep links",
     noValue: "—",
     loading: "載入代墊批次中...",
     noRowsAfterLoad: "目前沒有可顯示的批次。",
@@ -923,83 +925,6 @@ function normalizeActionDescriptor(
   };
 }
 
-function fallbackActions(
-  row: Pick<QueueRow, "batchId" | "status" | "artifactLink" | "statementId">,
-  copy: QueueCopy,
-): QueueAction[] {
-  const actions: QueueAction[] = [];
-
-  if (row.status === "pending_approval") {
-    actions.push({
-      kind: "approve",
-      descriptor: {
-        action: "approveReimbursementBatch",
-        enabled: !!row.statementId,
-        requiresReason: true,
-        riskLevel: "high",
-        ...(row.statementId ? {} : { disabledReasonCode: "missing_statement" }),
-      },
-      label: copy.actionApprove,
-      endpoint: conventionalEndpoint(row.batchId, "approve").endpoint,
-      method: "POST",
-    });
-  }
-
-  if (
-    row.status === "approved" ||
-    row.status === "exported" ||
-    row.status === "paid" ||
-    row.status === "reconciled"
-  ) {
-    actions.push({
-      kind: "export_artifact",
-      descriptor: {
-        action: "exportBatchArtifact",
-        enabled: true,
-        riskLevel: "low",
-      },
-      label: copy.actionExport,
-      href: row.artifactLink ?? undefined,
-      endpoint: row.artifactLink
-        ? undefined
-        : conventionalEndpoint(row.batchId, "export_artifact").endpoint,
-      method: row.artifactLink ? "GET" : "GET",
-      openMode: "new_tab",
-    });
-  }
-
-  if (row.status === "exported") {
-    actions.push({
-      kind: "mark_paid",
-      descriptor: {
-        action: "markReimbursementPaid",
-        enabled: true,
-        requiresReason: true,
-        riskLevel: "high",
-      },
-      label: copy.actionMarkPaid,
-      endpoint: conventionalEndpoint(row.batchId, "mark_paid").endpoint,
-      method: "POST",
-    });
-  }
-
-  if (row.status === "paid") {
-    actions.push({
-      kind: "mark_reconciled",
-      descriptor: {
-        action: "markReconciled",
-        enabled: true,
-        riskLevel: "medium",
-      },
-      label: copy.actionMarkReconciled,
-      endpoint: conventionalEndpoint(row.batchId, "mark_reconciled").endpoint,
-      method: "POST",
-    });
-  }
-
-  return actions;
-}
-
 function parseCrossAppLinks(record: Record<string, unknown>) {
   const raw =
     record.crossAppLinks ??
@@ -1072,12 +997,6 @@ function normalizeQueueRow(rawValue: unknown, copy: QueueCopy): QueueRow {
     ? record.availableActions
     : undefined;
 
-  const rowBase = {
-    batchId,
-    status,
-    artifactLink,
-    statementId,
-  };
   const actions = Array.isArray(rawActionList)
     ? rawActionList
         .map((value) =>
@@ -1086,7 +1005,7 @@ function normalizeQueueRow(rawValue: unknown, copy: QueueCopy): QueueRow {
         .sort(
           (left, right) => ACTION_ORDER[left.kind] - ACTION_ORDER[right.kind],
         )
-    : fallbackActions(rowBase, copy);
+    : [];
 
   return {
     batchId,
@@ -1113,9 +1032,7 @@ function normalizeQueueRow(rawValue: unknown, copy: QueueCopy): QueueRow {
       : null,
     crossAppLinks: parseCrossAppLinks(record),
     actions,
-    readOnly: Array.isArray(rawActionList)
-      ? rawActionList.length === 0
-      : actions.length === 0,
+    readOnly: actions.length === 0,
     raw: record,
   };
 }
@@ -1397,46 +1314,49 @@ function buildFreshnessLabel(
 function buildNav(
   locale: Locale,
   paymentsBadge: string | undefined,
+  reimbursementsBadge: string | undefined,
 ): CanvasShellNavItem[] {
   const labels =
     locale === "en"
       ? {
-          home: "Home",
-          health: "Health & Alerts",
+          home: "Platform Home · Home",
+          health: "Platform Health · Health",
           tenantGroup: "Tenant Governance",
           tenants: "Tenants",
-          partners: "Partners",
+          partners: "Partner Entries",
           users: "Users",
-          fleetGroup: "Fleet & Compliance",
-          fleet: "Fleet & Devices",
-          switchboard: "Switchboard",
-          pricingGroup: "Pricing & Settlement",
+          fleetGroup: "People & Fleet",
+          fleet: "Fleet & Compliance",
+          switchboard: "Public Info & Placards",
+          pricingGroup: "Platform & Commerce",
           pricing: "Pricing",
           payments: "Payments",
-          platformGroup: "Platform Layer",
+          reimburse: "Reimbursements",
+          platformGroup: "Platform Ops & Risk",
           notices: "Notices",
-          audit: "Audit Trail",
+          audit: "Audit",
           flags: "Feature Flags",
           adapters: "Adapter Registry",
         }
       : {
-          home: "工作首頁",
-          health: "平台健康",
-          tenantGroup: "租戶治理",
-          tenants: "租戶",
-          partners: "合作夥伴",
-          users: "平台人員",
-          fleetGroup: "車隊與合規",
-          fleet: "車隊與設備",
-          switchboard: "法定資訊與牌貼",
-          pricingGroup: "計價與結算",
-          pricing: "計價",
-          payments: "結算治理",
-          platformGroup: "平台層",
-          notices: "公告與維護",
-          audit: "稽核軌跡",
-          flags: "功能旗標",
-          adapters: "介接登錄",
+          home: "平台首頁 · Home",
+          health: "平台健康 · Health",
+          tenantGroup: "租戶治理 · Tenant Governance",
+          tenants: "租戶 · Tenants",
+          partners: "合作夥伴 · Partner Entries",
+          users: "平台人員 · Users",
+          fleetGroup: "人員與車隊 · People & Fleet",
+          fleet: "車隊與法遵 · Fleet & Compliance",
+          switchboard: "公開資訊 · Public Info & Placards",
+          pricingGroup: "平台與商務 · Platform & Commerce",
+          pricing: "費率治理 · Pricing",
+          payments: "結算與帳務 · Payments",
+          reimburse: "代墊批次 · Reimbursements",
+          platformGroup: "平台維運 · Platform Ops & Risk",
+          notices: "公告與維護 · Notices",
+          audit: "稽核與證據 · Audit",
+          flags: "功能旗標 · Feature Flags",
+          adapters: "平台 Adapter · Registry",
         };
 
   return [
@@ -1478,7 +1398,15 @@ function buildNav(
       icon: "payments",
       badge: paymentsBadge,
       badgeTone: paymentsBadge ? "danger" : "neutral",
-      matchPaths: ["/payments", "/payments/reimbursements"],
+      matchPaths: ["/payments"],
+    },
+    {
+      key: "reimburse",
+      href: "/payments/reimbursements",
+      label: labels.reimburse,
+      icon: "reimburse",
+      badge: reimbursementsBadge,
+      badgeTone: reimbursementsBadge ? "accent" : "neutral",
     },
     { divider: labels.platformGroup },
     {
@@ -1826,7 +1754,10 @@ export default function ReimbursementQueuePage() {
 
   const shellNav = buildNav(
     pageLocale,
-    pendingRows.length > 0 ? String(pendingRows.length) : undefined,
+    overdueExportedRows.length > 0
+      ? String(overdueExportedRows.length)
+      : undefined,
+    rows.length > 0 ? String(rows.length) : undefined,
   );
 
   const tabNodes = [
@@ -1904,18 +1835,23 @@ export default function ReimbursementQueuePage() {
               copy.scopeKinds.unknown}
           </span>
           {row.crossAppLinks.length > 0 ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {row.crossAppLinks.slice(0, 2).map((link) => (
-                <a
-                  key={`${row.batchId}-${link.resourceId}-${link.route}`}
-                  href={link.route}
-                  target={link.openMode === "new_tab" ? "_blank" : undefined}
-                  rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
-                  style={linkStyle(theme)}
-                >
-                  {link.label}
-                </a>
-              ))}
+            <div style={{ display: "grid", gap: 4 }}>
+              <span style={{ color: theme.textDim, fontSize: 11 }}>
+                {copy.externalLinks}
+              </span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {row.crossAppLinks.map((link) => (
+                  <a
+                    key={`${row.batchId}-${link.resourceId}-${link.route}`}
+                    href={link.route}
+                    target={link.openMode === "new_tab" ? "_blank" : undefined}
+                    rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
+                    style={linkStyle(theme)}
+                  >
+                    {link.label}
+                  </a>
+                ))}
+              </div>
             </div>
           ) : null}
         </div>
@@ -2175,7 +2111,7 @@ export default function ReimbursementQueuePage() {
       <CanvasShell
         theme={theme}
         nav={shellNav}
-        active="payments"
+        active="reimburse"
         currentPath="/payments/reimbursements"
         brandLabel={t("app.name")}
         brandSubLabel={t("app.sub")}
@@ -2358,7 +2294,7 @@ export default function ReimbursementQueuePage() {
                     onChange={(event) => setPeriodFilter(event.target.value)}
                     style={nativeControlStyle(theme)}
                   >
-                    <option value="all">{copy.scopeKinds.all}</option>
+                    <option value="all">{copy.allPeriods}</option>
                     {periodOptions
                       .filter((value): value is string => value !== "all")
                       .map((value) => (
