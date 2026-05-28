@@ -24,7 +24,14 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import {
+  API_URL,
+  DEMO_ACTOR_ID,
+  DEMO_TENANT_ID,
+  OPS_CONSOLE_URL,
+  PLATFORM_ADMIN_URL,
+  TENANT_CONSOLE_URL,
+} from "@/lib/api-client";
 
 export const dynamic = "force-dynamic";
 
@@ -384,12 +391,6 @@ function getFallbackPageActions(): ResourceActionDescriptor[] {
       enabled: true,
       riskLevel: "medium",
     },
-    {
-      action: "import_passenger_csv",
-      enabled: false,
-      disabledReasonCode: "passenger_csv_import_not_published",
-      riskLevel: "low",
-    },
   ];
 }
 
@@ -603,8 +604,6 @@ function describeActionLabel(action: string) {
   switch (action) {
     case "create_passenger":
       return "新增";
-    case "import_passenger_csv":
-      return "CSV 匯入";
     case "edit_passenger":
     case "update_passenger":
       return "編輯";
@@ -624,8 +623,6 @@ function describeActionLabel(action: string) {
 
 function formatDisabledReason(code?: string) {
   switch (code) {
-    case "passenger_csv_import_not_published":
-      return "CSV 匯入 command 尚未對 tenant console 發布";
     case "passenger_deactivation_requires_reason":
       return "停用必須填寫原因";
     default:
@@ -761,6 +758,27 @@ function collectSupportLinks(
   return Array.from(linkMap.values());
 }
 
+function getAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
+  switch (targetApp) {
+    case "ops-console":
+      return OPS_CONSOLE_URL;
+    case "platform-admin":
+      return PLATFORM_ADMIN_URL;
+    case "tenant-console":
+      return TENANT_CONSOLE_URL;
+    default:
+      return TENANT_CONSOLE_URL;
+  }
+}
+
+function resolveCrossAppHref(link: CrossAppResourceLink) {
+  try {
+    return new URL(link.route, getAppOrigin(link.targetApp)).toString();
+  } catch {
+    return link.route;
+  }
+}
+
 function resolveEmptyState(params: {
   hasErrors: boolean;
   rowsLength: number;
@@ -803,12 +821,7 @@ function renderActionButton(link: PassengerActionLink) {
   const variant = link.variant ?? "secondary";
   const danger = link.danger ?? false;
   const disabled = link.disabled ?? false;
-  const icon =
-    link.label === "CSV 匯入"
-      ? "ext"
-      : variant === "primary"
-        ? "plus"
-        : undefined;
+  const icon = variant === "primary" ? "plus" : undefined;
   const button = (
     <CanvasBtn
       theme={th}
@@ -1035,7 +1048,13 @@ export default async function PassengersPage({
     backendEmptyState,
   });
 
-  const baseParams = buildSearchParams(selectedTab, selectedStatus);
+  const baseParams = buildSearchParams(
+    selectedTab,
+    selectedStatus,
+    searchQuery,
+    selectedDepartment,
+    previewEmptyReason,
+  );
   const clearFiltersHref = "/passengers";
   const refreshHref = baseParams.toString()
     ? `/passengers?${baseParams.toString()}`
@@ -1374,7 +1393,7 @@ export default async function PassengersPage({
                   {allSupportLinks.map((link) => (
                     <Link
                       key={`${link.targetApp}-${link.resourceId}-${link.route}`}
-                      href={link.route}
+                      href={resolveCrossAppHref(link)}
                       target={
                         link.openMode === "new_tab" ? "_blank" : undefined
                       }
@@ -1429,6 +1448,9 @@ export default async function PassengersPage({
 function buildSearchParams(
   selectedTab: PassengerTabKey,
   selectedStatus: PassengerStatusFilter,
+  searchQuery?: string,
+  selectedDepartment?: string,
+  previewEmptyReason?: string,
 ) {
   const params = new URLSearchParams();
   if (selectedTab !== "all") {
@@ -1436,6 +1458,15 @@ function buildSearchParams(
   }
   if (selectedStatus !== "all") {
     params.set("status", selectedStatus);
+  }
+  if (searchQuery) {
+    params.set("q", searchQuery);
+  }
+  if (selectedDepartment) {
+    params.set("department", selectedDepartment);
+  }
+  if (previewEmptyReason) {
+    params.set("emptyReason", previewEmptyReason);
   }
   return params;
 }
