@@ -134,6 +134,33 @@ export class FeatureFlagRepository {
     }
   }
 
+  async removeTenantOverride(
+    key: string,
+    tenantId: string,
+  ): Promise<FeatureFlag | undefined> {
+    if (!this.isEnabled()) {
+      return undefined;
+    }
+
+    try {
+      const result = await this.databaseService!.query<FeatureFlagRow>(
+        `DELETE FROM admin.feature_flags
+         WHERE flag_key = $1 AND tenant_id = $2
+         RETURNING flag_key, enabled, description, tenant_id, updated_at`,
+        [key, tenantId],
+      );
+
+      if (result.rows.length === 0) return undefined;
+      const row = result.rows[0]!;
+      return this.mapRow(row);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to remove tenant override for ${key}/${tenantId}: ${error}`,
+      );
+      return undefined;
+    }
+  }
+
   private mapRow(row: FeatureFlagRow): FeatureFlag {
     const updatedAt =
       row.updated_at instanceof Date

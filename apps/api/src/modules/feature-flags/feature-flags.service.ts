@@ -252,4 +252,21 @@ export class FeatureFlagsService {
     this.inMemoryFlags.set(this.inMemoryOverrideKey(key, tenantId), updated);
     return updated;
   }
+
+  async removeTenantOverride(
+    key: string,
+    tenantId: string,
+  ): Promise<FeatureFlag | undefined> {
+    if (this.getDb()) {
+      return this.featureFlagRepository!.removeTenantOverride(key, tenantId);
+    }
+
+    const overrideKey = this.inMemoryOverrideKey(key, tenantId);
+    const existing = this.inMemoryFlags.get(overrideKey);
+    if (!existing) {
+      return undefined;
+    }
+    this.inMemoryFlags.delete(overrideKey);
+    return existing;
+  }
 }

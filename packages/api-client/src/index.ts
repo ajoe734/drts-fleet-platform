@@ -86,6 +86,7 @@ import type {
   EvidenceSubjectGovernanceRecord,
   FeatureFlag,
   FeatureFlagSummary,
+  FeatureFlagTenantOverrideCommand,
   FilingPackageAccepted,
   FilingPackageDetailRecord,
   FilingPackageListRecord,
@@ -408,12 +409,17 @@ export class ApiClient {
     tenantId?: string;
   }): Promise<FeatureFlagSummary> {
     const searchParams = new URLSearchParams();
+    const headers: Record<string, string> = {};
     if (query?.tenantId) {
       searchParams.set("tenantId", query.tenantId);
+      headers["X-Tenant-Id"] = query.tenantId;
     }
     const qs = searchParams.toString();
     const path = qs ? `/api/admin/flags?${qs}` : "/api/admin/flags";
-    return this.get<FeatureFlagSummary>(path);
+    return this.get<FeatureFlagSummary>(
+      path,
+      Object.keys(headers).length > 0 ? { headers } : undefined,
+    );
   }
 
   async getFeatureFlag(key: string): Promise<FeatureFlag> {
@@ -424,6 +430,30 @@ export class ApiClient {
     return this.patch<FeatureFlag>(`/api/admin/flags/${key}`, {
       body: { enabled },
     });
+  }
+
+  async upsertFeatureFlagTenantOverride(
+    key: string,
+    tenantId: string,
+    command: FeatureFlagTenantOverrideCommand,
+  ): Promise<FeatureFlag> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("tenantId", tenantId);
+    return this.post<FeatureFlag>(
+      `/api/admin/flags/${key}/tenant-overrides?${searchParams.toString()}`,
+      { body: command },
+    );
+  }
+
+  async removeFeatureFlagTenantOverride(
+    key: string,
+    tenantId: string,
+  ): Promise<FeatureFlag> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("tenantId", tenantId);
+    return this.delete<FeatureFlag>(
+      `/api/admin/flags/${key}/tenant-overrides?${searchParams.toString()}`,
+    );
   }
 
   async isFeatureEnabled(key: string): Promise<boolean> {

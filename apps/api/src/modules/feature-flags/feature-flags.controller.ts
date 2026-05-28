@@ -1,11 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
-  Headers,
   Query,
 } from "@nestjs/common";
 import { FeatureFlagsService } from "./feature-flags.service";
@@ -75,6 +76,23 @@ export class FeatureFlagsController {
       body.description,
     );
     return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Delete("flags/:key/tenant-overrides")
+  async removeTenantOverride(
+    @Param("key") key: string,
+    @Query("tenantId") tenantId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!tenantId) {
+      throw new ApiRequestError(
+        400,
+        "bad_request",
+        "tenantId query parameter is required",
+      );
+    }
+    const removed = await this.service.removeTenantOverride(key, tenantId);
+    return toApiSuccessEnvelope(removed, requestId);
   }
 
   @Get("flags/:key/enabled")
