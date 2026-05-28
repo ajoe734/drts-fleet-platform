@@ -158,14 +158,38 @@ const EMPTY_REASON_ORDER: EmptyReason[] = [
 
 const emptyReasonPreviewOptions = new Set<string>(EMPTY_REASON_ORDER);
 
-const crossAppBaseUrls: Record<CrossAppResourceLink["targetApp"], string> = {
-  "tenant-console":
-    process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3004",
-  "platform-admin":
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002",
-  "ops-console":
-    process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003",
-};
+function normalizeBaseUrl(value: string | undefined, fallback: string) {
+  const normalized = value?.trim();
+  return (normalized && normalized.length > 0 ? normalized : fallback).replace(
+    /\/+$/,
+    "",
+  );
+}
+
+function getCrossAppBaseUrl(targetApp: CrossAppResourceLink["targetApp"]) {
+  switch (targetApp) {
+    case "tenant-console":
+      return normalizeBaseUrl(
+        process.env.DRTS_TENANT_CONSOLE_URL ??
+          process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL,
+        "http://localhost:3004",
+      );
+    case "platform-admin":
+      return normalizeBaseUrl(
+        process.env.DRTS_PLATFORM_ADMIN_URL ??
+          process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL,
+        "http://localhost:3002",
+      );
+    case "ops-console":
+      return normalizeBaseUrl(
+        process.env.DRTS_OPS_CONSOLE_URL ??
+          process.env.NEXT_PUBLIC_OPS_CONSOLE_URL,
+        "http://localhost:3003",
+      );
+    default:
+      return "";
+  }
+}
 
 function classifyBillingError(error: unknown): BillingLoadErrorReason {
   if (error instanceof Error && /^API error (401|403):/.test(error.message)) {
@@ -885,7 +909,7 @@ function ActionLink({ action }: { action: BillingAction }) {
 }
 
 function CrossAppLinkCard({ link }: { link: CrossAppResourceLink }) {
-  const href = `${crossAppBaseUrls[link.targetApp]}${link.route}`;
+  const href = `${getCrossAppBaseUrl(link.targetApp)}${link.route}`;
 
   return (
     <CanvasCard theme={th} style={linkCardStyle}>
