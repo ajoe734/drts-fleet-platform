@@ -87,7 +87,8 @@ const filterCardStyle: CSSProperties = {
 
 const filterRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.25fr) minmax(180px, 220px) auto",
+  gridTemplateColumns:
+    "minmax(0, 1.2fr) minmax(160px, 220px) minmax(140px, 180px) auto",
   gap: 10,
   alignItems: "end",
 };
@@ -206,14 +207,40 @@ const linkItemStyle: CSSProperties = {
 };
 
 type PassengerTabKey = "all" | "employee" | "visitor" | "disabled";
+type PassengerStatusFilter = "all" | "active" | "inactive";
+type PassengerEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
 
 type PassengerActionLink = {
   key: string;
   label: string;
   href: string | undefined;
   disabled: boolean | undefined;
+  disabledReasonCode?: string;
   variant: "primary" | "secondary" | "ghost" | undefined;
   danger: boolean | undefined;
+  target?: "_blank";
+  rel?: "noreferrer noopener";
+};
+
+const infoStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const reasonPanelStyle: CSSProperties = {
+  borderRadius: 12,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  padding: 14,
+  display: "grid",
+  gap: 10,
+};
+
+const reasonMetaStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  justifyContent: "center",
 };
 
 type PassengerRowRecord = TenantPassengerRecord & {
@@ -336,7 +363,7 @@ function normalizeActions(
   return actions && actions.length > 0 ? actions : fallback;
 }
 
-function normalizeEmptyReason(reason?: string | null): EmptyReason {
+function normalizeEmptyReason(reason?: string | null): PassengerEmptyReason {
   switch (reason) {
     case "no_data":
     case "not_provisioned":
@@ -526,6 +553,18 @@ function getSelectedTab(rawTab: string | undefined): PassengerTabKey {
   return matched?.key ?? "all";
 }
 
+function getSelectedStatus(
+  rawStatus: string | undefined,
+): PassengerStatusFilter {
+  switch (rawStatus) {
+    case "active":
+    case "inactive":
+      return rawStatus;
+    default:
+      return "all";
+  }
+}
+
 function getSearchParam(
   value: string | string[] | undefined,
 ): string | undefined {
@@ -625,6 +664,7 @@ function buildPageActionLinks(
         ? "/passengers?action=create"
         : undefined,
     disabled: !action.enabled,
+    disabledReasonCode: action.disabledReasonCode,
     variant: action.action === "create_passenger" ? "primary" : "secondary",
     danger: undefined,
   }));
@@ -652,6 +692,7 @@ function buildRowActionLinks(row: PassengerRowRecord): PassengerActionLink[] {
               ? `/passengers?action=edit&passengerId=${encodeURIComponent(row.passengerId)}`
               : undefined,
       disabled: !action.enabled,
+      disabledReasonCode: action.disabledReasonCode,
       danger: isDeactivate,
       variant:
         action.action === "create_booking"
@@ -685,19 +726,39 @@ function dedupeActionLinks(links: PassengerActionLink[]) {
   });
 }
 
-function buildFilteredHref(
-  params: URLSearchParams,
-  key: string,
-  value?: string | null,
+function matchesStatusFilter(
+  passenger: TenantPassengerRecord,
+  statusFilter: PassengerStatusFilter,
 ) {
-  const next = new URLSearchParams(params.toString());
-  if (value && value.length > 0) {
-    next.set(key, value);
-  } else {
-    next.delete(key);
-  }
-  const query = next.toString();
-  return query ? `/passengers?${query}` : "/passengers";
+  if (statusFilter === "all") return true;
+  return statusFilter === "active"
+    ? passenger.activeFlag
+    : !passenger.activeFlag;
+}
+
+function collectSupportLinks(
+  pageLinks: CrossAppResourceLink[],
+  passengers: PassengerRowRecord[],
+) {
+  const linkMap = new Map<string, CrossAppResourceLink>();
+
+  [
+    ...pageLinks,
+    ...passengers.flatMap((passenger) => passenger.supportLinks ?? []),
+  ].forEach((link) => {
+    const key = [
+      link.targetApp,
+      link.route,
+      link.resourceType,
+      link.resourceId,
+      link.openMode,
+    ].join("::");
+    if (!linkMap.has(key)) {
+      linkMap.set(key, link);
+    }
+  });
+
+  return Array.from(linkMap.values());
 }
 
 function resolveEmptyState(params: {
@@ -762,11 +823,26 @@ function renderActionButton(link: PassengerActionLink) {
   );
 
   if (!link.href || disabled) {
-    return <span key={link.key}>{button}</span>;
+    return (
+      <span
+        key={link.key}
+        title={
+          disabled ? (formatDisabledReason(link.disabledReasonCode) ?? "") : ""
+        }
+      >
+        {button}
+      </span>
+    );
   }
 
   return (
-    <Link key={link.key} href={link.href} style={{ textDecoration: "none" }}>
+    <Link
+      key={link.key}
+      href={link.href}
+      target={link.target}
+      rel={link.rel}
+      style={{ textDecoration: "none" }}
+    >
       {button}
     </Link>
   );
@@ -775,8 +851,11 @@ function renderActionButton(link: PassengerActionLink) {
 function renderEmptyState(
   emptyState: NonNullable<PassengerDirectoryResponse["emptyState"]>,
   activeFiltersHref: string,
+  refreshHref: string,
 ) {
-  const reason = normalizeEmptyReason(emptyState.reason);
+  const reason = normalizeEmptyReason(
+    emptyState.reason,
+  ) as PassengerEmptyReason;
   const nextAction =
     emptyState.nextAction ??
     (reason === "no_data"
@@ -787,65 +866,100 @@ function renderEmptyState(
         }
       : undefined);
 
-  const content = {
+  const content: Record<
+    PassengerEmptyReason,
+    {
+      title: string;
+      body: string;
+      tone: CanvasTone;
+      badge: string;
+      meta: string[];
+    }
+  > = {
     no_data: {
       title: "尚未建立任何乘客資料",
       body: "Passenger directory 目前為空。建立第一筆常用乘客後，/bookings/new 才能直接預填並重用名單。",
       tone: "info" as const,
+      badge: "EMPTY DIRECTORY",
+      meta: ["建立首筆 passenger", "之後可從 /bookings/new 預填"],
     },
     not_provisioned: {
       title: "租戶乘客名錄尚未啟用",
       body: "這個 tenant 尚未完成 passenger directory provisioning。請先完成租戶設定，避免用假資料填充列表。",
       tone: "warn" as const,
+      badge: "PROVISIONING REQUIRED",
+      meta: ["顯示 setup 阻塞", "不能假裝是空資料"],
     },
     fetch_failed: {
       title: "乘客資料暫時無法載入",
       body: "後端未提供可用 snapshot。此時要顯示錯誤狀態，而不是假裝沒有資料。",
       tone: "danger" as const,
+      badge: "FETCH FAILED",
+      meta: ["保留錯誤訊號", "允許使用者手動 refresh"],
     },
     permission_denied: {
       title: "目前角色沒有乘客目錄權限",
       body: "availableActions 與列表都被後端拒絕時，UI 必須明確顯示 permission_denied。",
       tone: "warn" as const,
+      badge: "PERMISSION DENIED",
+      meta: ["不要渲染假 CTA", "需要改由權限流程處理"],
     },
     external_unavailable: {
       title: "外部依賴暫時不可用",
       body: "名錄資料受外部系統影響時，要顯示 external_unavailable，而不是 generic fetch error。",
       tone: "warn" as const,
+      badge: "EXTERNAL UNAVAILABLE",
+      meta: ["等待上游恢復", "資料可能稍後自動回來"],
     },
     filtered_empty: {
       title: "目前篩選條件沒有符合的乘客",
       body: "放寬 active/inactive、department 或搜尋字詞後再試一次。",
       tone: "info" as const,
+      badge: "FILTERED EMPTY",
+      meta: ["先清除 filters", "再回到完整 passenger list"],
     },
-  } satisfies Record<
-    EmptyReason,
-    {
-      title: string;
-      body: string;
-      tone: CanvasTone;
-    }
-  >;
-  const emptyContent = content[reason];
+  };
+  const emptyContent = content[reason]!;
 
   return (
     <div style={emptyStateStyle}>
-      <CanvasPill theme={th} tone={emptyContent.tone}>
-        {reason}
-      </CanvasPill>
-      <div style={emptyTitleStyle}>{emptyContent.title}</div>
-      <div style={emptyBodyStyle}>{emptyContent.body}</div>
-      <div style={emptyActionsStyle}>
-        {nextAction
-          ? renderActionButton(buildPageActionLinks([nextAction])[0]!)
-          : null}
-        {reason === "filtered_empty" ? (
-          <Link href={activeFiltersHref} style={{ textDecoration: "none" }}>
-            <CanvasBtn theme={th} size="sm" variant="secondary">
-              清除篩選
-            </CanvasBtn>
-          </Link>
-        ) : null}
+      <div style={reasonPanelStyle}>
+        <div style={reasonMetaStyle}>
+          <CanvasPill theme={th} tone={emptyContent.tone}>
+            {reason}
+          </CanvasPill>
+          <CanvasPill theme={th} tone="neutral">
+            {emptyContent.badge}
+          </CanvasPill>
+        </div>
+        <div style={emptyTitleStyle}>{emptyContent.title}</div>
+        <div style={emptyBodyStyle}>{emptyContent.body}</div>
+        <div style={reasonMetaStyle}>
+          {emptyContent.meta.map((item: string) => (
+            <CanvasPill key={item} theme={th} tone="neutral">
+              {item}
+            </CanvasPill>
+          ))}
+        </div>
+        <div style={emptyActionsStyle}>
+          {nextAction
+            ? renderActionButton(buildPageActionLinks([nextAction])[0]!)
+            : null}
+          {reason === "filtered_empty" ? (
+            <Link href={activeFiltersHref} style={{ textDecoration: "none" }}>
+              <CanvasBtn theme={th} size="sm" variant="secondary">
+                清除篩選
+              </CanvasBtn>
+            </Link>
+          ) : null}
+          {reason === "fetch_failed" || reason === "external_unavailable" ? (
+            <Link href={refreshHref} style={{ textDecoration: "none" }}>
+              <CanvasBtn theme={th} size="sm" variant="secondary">
+                重新整理
+              </CanvasBtn>
+            </Link>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -858,6 +972,9 @@ export default async function PassengersPage({
 }) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const selectedTab = getSelectedTab(getSearchParam(resolvedSearchParams.tab));
+  const selectedStatus = getSelectedStatus(
+    getSearchParam(resolvedSearchParams.status),
+  );
   const searchQuery = getSearchParam(resolvedSearchParams.q)?.trim() ?? "";
   const selectedDepartment =
     getSearchParam(resolvedSearchParams.department)?.trim() ?? "";
@@ -884,6 +1001,7 @@ export default async function PassengersPage({
 
   const rows = passengers
     .filter((passenger) => matchesTab(passenger, selectedTab))
+    .filter((passenger) => matchesStatusFilter(passenger, selectedStatus))
     .filter((passenger) =>
       selectedDepartment
         ? passenger.departmentName?.trim() === selectedDepartment
@@ -908,18 +1026,26 @@ export default async function PassengersPage({
     rowsLength: rows.length,
     passengerCount: passengers.length,
     activeFilters: Boolean(
-      searchQuery || selectedDepartment || selectedTab !== "all",
+      searchQuery ||
+      selectedDepartment ||
+      selectedTab !== "all" ||
+      selectedStatus !== "all",
     ),
     previewReason: previewEmptyReason,
     backendEmptyState,
   });
 
-  const clearFiltersHref = buildFilteredHref(
-    buildSearchParams(selectedTab),
-    "q",
-    null,
-  );
+  const baseParams = buildSearchParams(selectedTab, selectedStatus);
+  const clearFiltersHref = "/passengers";
+  const refreshHref = baseParams.toString()
+    ? `/passengers?${baseParams.toString()}`
+    : "/passengers";
   const pageActionLinks = buildPageActionLinks(pageActions);
+  const allSupportLinks = collectSupportLinks(supportLinks, passengers);
+  const disabledActionLinks = [
+    ...pageActionLinks,
+    ...rows.flatMap(buildRowActionLinks),
+  ].filter((link) => link.disabled);
 
   const columns: CanvasTableColumn<PassengerRow>[] = [
     {
@@ -989,7 +1115,7 @@ export default async function PassengersPage({
       <CanvasPageHeader
         theme={th}
         title="乘客通訊錄"
-        subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本"
+        subtitle="員工 · 訪客 · 啟用狀態 · 軟停用 only (Q-TEN06)"
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={<>{pageActionLinks.map((link) => renderActionButton(link))}</>}
@@ -1067,6 +1193,19 @@ export default async function PassengersPage({
               </select>
             </label>
 
+            <label style={fieldStackStyle}>
+              <span style={subtleMonoStyle}>STATUS</span>
+              <select
+                name="status"
+                defaultValue={selectedStatus}
+                style={selectStyle}
+              >
+                <option value="all">全部狀態</option>
+                <option value="active">僅啟用</option>
+                <option value="inactive">僅停用</option>
+              </select>
+            </label>
+
             <div style={{ display: "flex", gap: 8 }}>
               {selectedTab !== "all" ? (
                 <input type="hidden" name="tab" value={selectedTab} />
@@ -1085,7 +1224,7 @@ export default async function PassengersPage({
           <div style={helperRowStyle}>
             <div style={chipRowStyle}>
               <CanvasPill theme={th} tone="info">
-                refresh {refresh.dataFreshness}
+                refresh tier T5
               </CanvasPill>
               <CanvasPill theme={th} tone="neutral">
                 generated {formatRefreshTime(refresh.generatedAt)}
@@ -1096,17 +1235,34 @@ export default async function PassengersPage({
               <CanvasPill theme={th} tone="neutral">
                 source {refresh.source}
               </CanvasPill>
+              <CanvasPill
+                theme={th}
+                tone={refresh.dataFreshness === "fresh" ? "success" : "warn"}
+              >
+                {refresh.dataFreshness}
+              </CanvasPill>
             </div>
-            <span style={subtleMonoStyle}>
-              active / inactive、department、name / employee no / mobile
-            </span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={subtleMonoStyle}>
+                active / inactive、department、name / employee no / mobile
+              </span>
+              <Link href={refreshHref} style={{ textDecoration: "none" }}>
+                <CanvasBtn theme={th} variant="secondary" size="sm">
+                  Refresh
+                </CanvasBtn>
+              </Link>
+            </div>
           </div>
         </CanvasCard>
 
         <div style={contentGridStyle}>
           <CanvasCard theme={th} padding={0} style={cardStyle}>
             {filteredEmptyState ? (
-              renderEmptyState(filteredEmptyState, clearFiltersHref)
+              renderEmptyState(
+                filteredEmptyState,
+                clearFiltersHref,
+                refreshHref,
+              )
             ) : (
               <CanvasTable<PassengerRow>
                 theme={th}
@@ -1164,6 +1320,27 @@ export default async function PassengersPage({
 
             <CanvasCard
               theme={th}
+              title="Sitemap"
+              subtitle="entry / exits per packet §5.5"
+            >
+              <div style={infoStackStyle}>
+                <Link href="/" style={linkItemStyle}>
+                  <span>Tenant dashboard</span>
+                  <span style={subtleMonoStyle}>entry</span>
+                </Link>
+                <Link href="/bookings/new" style={linkItemStyle}>
+                  <span>New booking with prefill</span>
+                  <span style={subtleMonoStyle}>exit</span>
+                </Link>
+                <Link href="/addresses" style={linkItemStyle}>
+                  <span>Address book</span>
+                  <span style={subtleMonoStyle}>adjacent</span>
+                </Link>
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
               title="Duplicate-name warning"
               subtitle="backend-detected or local fallback grouping"
             >
@@ -1190,11 +1367,11 @@ export default async function PassengersPage({
             <CanvasCard
               theme={th}
               title="Deep links"
-              subtitle="cross-app links open in new tab"
+              subtitle="cross-app and support links"
             >
-              {supportLinks.length > 0 ? (
+              {allSupportLinks.length > 0 ? (
                 <div style={linkListStyle}>
-                  {supportLinks.map((link) => (
+                  {allSupportLinks.map((link) => (
                     <Link
                       key={`${link.targetApp}-${link.resourceId}-${link.route}`}
                       href={link.route}
@@ -1221,29 +1398,24 @@ export default async function PassengersPage({
               )}
             </CanvasCard>
 
-            {pageActionLinks.some((link) => link.disabled) ? (
+            {disabledActionLinks.length > 0 ? (
               <CanvasCard
                 theme={th}
                 title="Disabled actions"
                 subtitle="descriptor reasons"
               >
                 <div style={warningListStyle}>
-                  {pageActionLinks
-                    .filter((link) => link.disabled)
-                    .map((link) => (
-                      <div key={link.key} style={warningItemStyle}>
-                        <div style={{ color: th.text, fontWeight: 600 }}>
-                          {link.label}
-                        </div>
-                        <div style={emptyBodyStyle}>
-                          {formatDisabledReason(
-                            pageActions.find(
-                              (action) => action.action === link.key,
-                            )?.disabledReasonCode,
-                          ) ?? "action currently disabled"}
-                        </div>
+                  {disabledActionLinks.map((link, index) => (
+                    <div key={`${link.key}-${index}`} style={warningItemStyle}>
+                      <div style={{ color: th.text, fontWeight: 600 }}>
+                        {link.label}
                       </div>
-                    ))}
+                      <div style={emptyBodyStyle}>
+                        {formatDisabledReason(link.disabledReasonCode) ??
+                          "action currently disabled"}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </CanvasCard>
             ) : null}
@@ -1254,10 +1426,16 @@ export default async function PassengersPage({
   );
 }
 
-function buildSearchParams(selectedTab: PassengerTabKey) {
+function buildSearchParams(
+  selectedTab: PassengerTabKey,
+  selectedStatus: PassengerStatusFilter,
+) {
   const params = new URLSearchParams();
   if (selectedTab !== "all") {
     params.set("tab", selectedTab);
+  }
+  if (selectedStatus !== "all") {
+    params.set("status", selectedStatus);
   }
   return params;
 }
