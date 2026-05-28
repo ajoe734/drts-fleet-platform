@@ -71,9 +71,11 @@ const helperStyle: CSSProperties = {
 function ChannelToggle({
   eventType,
   state,
+  readOnly,
 }: {
   eventType: string;
   state: ChannelState;
+  readOnly: boolean;
 }) {
   if (!state.provisioned) {
     return (
@@ -101,6 +103,7 @@ function ChannelToggle({
         defaultChecked={state.enabled}
         style={checkboxStyle}
         aria-label={`${eventType} ${state.channel}`}
+        disabled={readOnly}
       />
     </label>
   );
@@ -125,10 +128,12 @@ export function NotificationMatrixForm({
   rows,
   saveAction,
   action,
+  readOnly,
 }: {
   rows: NotificationMatrixRow[];
   saveAction: ResourceActionDescriptor;
   action: (formData: FormData) => Promise<void>;
+  readOnly: boolean;
 }) {
   const columns: CanvasTableColumn<NotificationMatrixRow>[] = [
     {
@@ -150,14 +155,22 @@ export function NotificationMatrixForm({
       h: "EMAIL",
       w: 120,
       r: (row) => (
-        <ChannelToggle eventType={row.eventType} state={row.channels.email} />
+        <ChannelToggle
+          eventType={row.eventType}
+          state={row.channels.email}
+          readOnly={readOnly}
+        />
       ),
     },
     {
       h: "WEBHOOK",
       w: 140,
       r: (row) => (
-        <ChannelToggle eventType={row.eventType} state={row.channels.webhook} />
+        <ChannelToggle
+          eventType={row.eventType}
+          state={row.channels.webhook}
+          readOnly={readOnly}
+        />
       ),
     },
     {
@@ -167,6 +180,7 @@ export function NotificationMatrixForm({
         <ChannelToggle
           eventType={row.eventType}
           state={row.channels.ops_console}
+          readOnly={readOnly}
         />
       ),
     },
@@ -174,6 +188,14 @@ export function NotificationMatrixForm({
 
   return (
     <form action={action}>
+      {rows.map((row) => (
+        <input
+          key={row.eventType}
+          type="hidden"
+          name="notification_event_type"
+          value={row.eventType}
+        />
+      ))}
       <CanvasCard theme={th} padding={0}>
         <CanvasTable theme={th} columns={columns} rows={rows} />
       </CanvasCard>

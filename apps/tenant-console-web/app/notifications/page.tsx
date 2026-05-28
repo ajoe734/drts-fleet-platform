@@ -494,6 +494,8 @@ export default async function NotificationsPage({
     runtimePreferences?.refresh?.generatedAt ??
     runtimePreferences?.generatedAt ??
     data.governance?.generatedAt;
+  const matrixReadOnly =
+    !saveAction.enabled || derivedEmptyReason === "permission_denied";
   const shouldRenderEmptyBody =
     rows.length === 0 &&
     derivedEmptyReason !== null &&
@@ -620,6 +622,7 @@ export default async function NotificationsPage({
               rows={rows}
               saveAction={saveAction}
               action={updateNotificationPreferencesAction}
+              readOnly={matrixReadOnly}
             />
           )}
         </CanvasCard>
