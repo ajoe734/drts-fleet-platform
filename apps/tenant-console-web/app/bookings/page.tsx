@@ -85,7 +85,7 @@ const ACTION_PRIORITY = [
   "cancel_booking",
   "cancel",
 ];
-const REFRESH_TIER: RefreshTier = "slow";
+const TENANT_BOOKINGS_REFRESH_TIER: RefreshTier = "slow";
 const REFRESH_TIER_POLL_INTERVAL_MS: Record<RefreshTier, number> = {
   urgent: 5_000,
   fast: 3_000,
@@ -94,6 +94,15 @@ const REFRESH_TIER_POLL_INTERVAL_MS: Record<RefreshTier, number> = {
   medium_slow: 30_000,
   slow: 30_000,
   manual: 0,
+};
+const REFRESH_TIER_COPY: Record<RefreshTier, string> = {
+  urgent: "Urgent",
+  fast: "T2 Fast",
+  dispatch: "T3 Dispatch",
+  medium: "T4 Medium",
+  medium_slow: "T5 Tenant slow",
+  slow: "T5 Tenant slow",
+  manual: "T6 Manual",
 };
 
 type SearchParamValue = string | string[] | undefined;
@@ -529,12 +538,14 @@ function getRefreshTone(refresh: UiRefreshMetadata | null) {
 }
 
 function getRefreshCopy(refresh: UiRefreshMetadata | null) {
+  const tierCopy = REFRESH_TIER_COPY[TENANT_BOOKINGS_REFRESH_TIER];
+
   if (!refresh) {
-    return "T5 Tenant slow · 等待後端 refresh metadata";
+    return `${tierCopy} · 等待後端 refresh metadata`;
   }
 
   return [
-    "T5 Tenant slow",
+    tierCopy,
     REFRESH_FRESHNESS_COPY[refresh.dataFreshness],
     `快照 ${formatDateTime(refresh.generatedAt)}`,
     REFRESH_SOURCE_COPY[refresh.source],
@@ -692,7 +703,7 @@ export default async function TenantBookingsPage({
   );
   const refreshPollIntervalMs =
     refreshMetadata?.staleAfterMs ??
-    REFRESH_TIER_POLL_INTERVAL_MS[REFRESH_TIER];
+    REFRESH_TIER_POLL_INTERVAL_MS[TENANT_BOOKINGS_REFRESH_TIER];
   const liveCount = bookings.filter((booking) =>
     LIVE_ORDER_STATUSES.has(booking.orderStatus),
   ).length;
