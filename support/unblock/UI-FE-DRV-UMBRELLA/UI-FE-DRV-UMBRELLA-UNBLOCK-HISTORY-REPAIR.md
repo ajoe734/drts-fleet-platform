@@ -64,8 +64,8 @@ contamination, not by missing child-task delivery.
     - `incident.tsx` blob `985961f2...`
     - `incident-screen.test.ts` blob `d20edc0d...`
   - `codex2/ui-fe-drv-sos`
-    - `incident.tsx` blob `a3bfad2b...`
-    - `incident-screen.test.ts` blob `33ec239f...`
+    - `incident.tsx` blob `5c17d5f9...`
+    - `incident-screen.test.ts` blob `5c20b7bb...`
   - `codex/ui-fe-drv-umbrella`
     - `incident.tsx` blob `4b1b2bb3...`
     - `incident-screen.test.ts` blob `61daa28a...`
