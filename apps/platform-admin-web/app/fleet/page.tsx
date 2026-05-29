@@ -176,6 +176,12 @@ const actionRowStyle: CSSProperties = {
   gap: 6,
 };
 
+// Wrapper for a disabled CTA so its disabledReasonCode tooltip is hoverable
+// (a native disabled <button> swallows its own title and pointer events).
+const inlineBlockStyle: CSSProperties = {
+  display: "inline-flex",
+};
+
 const tabRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
@@ -1011,7 +1017,11 @@ export default function FleetPage() {
                         ? context.exclusivity.vehicleId
                         : context.vehicle.vehicleId;
           const busy = busyAction === `${descriptor.action}:${keyBase}`;
-          return (
+          const disabledTooltip =
+            !descriptor.enabled && descriptor.disabledReasonCode
+              ? formatPlatformCodeLabel(locale, descriptor.disabledReasonCode)
+              : undefined;
+          const button = (
             <CanvasBtn
               key={`${descriptor.action}-${index}`}
               theme={theme}
@@ -1029,6 +1039,21 @@ export default function FleetPage() {
                   : "處理中..."
                 : actionLabel(locale, descriptor.action)}
             </CanvasBtn>
+          );
+          // A native `<button disabled>` suppresses its own title tooltip and
+          // never fires onClick, so the disabledReasonCode must be surfaced via
+          // a wrapping element that still receives hover (ui-runtime Q-X13:
+          // "show the affordance disabled with a tooltip explaining why").
+          return disabledTooltip ? (
+            <span
+              key={`${descriptor.action}-${index}`}
+              title={disabledTooltip}
+              style={inlineBlockStyle}
+            >
+              {button}
+            </span>
+          ) : (
+            button
           );
         })}
       </div>
