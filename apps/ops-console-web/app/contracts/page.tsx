@@ -5,80 +5,267 @@ import type {
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { t } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 import {
-  DataCellStack,
-  DataTable,
-  DataViewCard,
-  PageHeader,
-  StatusChip,
-  Td,
-  Tr,
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasShell as Shell,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasShellNavItem,
+  type CanvasTableColumn,
+  type CanvasTone,
 } from "@drts/ui-web";
 
-function contractStatusTone(status: string) {
-  if (status === "active") return "success" as const;
-  if (status === "terminated" || status === "expired") return "danger" as const;
-  if (status === "pending" || status === "draft") return "warning" as const;
-  return "neutral" as const;
+type ContractKind = "fleet_lease" | "partner_program" | "forwarder";
+type DisplayContractStatus = VehicleContractRecord["status"] | "expiring";
+
+type ContractRow = Record<string, unknown> & {
+  contractId: string;
+  counterparty: string;
+  kind: ContractKind;
+  termLabel: string;
+  revenueShare: string;
+  displayStatus: DisplayContractStatus;
+};
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
+
+const KIND_PRIORITY: Record<ContractKind, number> = {
+  fleet_lease: 0,
+  partner_program: 1,
+  forwarder: 2,
+};
+
+const pageStackStyle = {
+  minHeight: "100%",
+  display: "flex",
+  flexDirection: "column" as const,
+};
+
+const pageBodyStyle = {
+  padding: 24,
+  display: "grid",
+  gap: 16,
+};
+
+const emptyStateStyle = {
+  margin: 0,
+  padding: 24,
+  color: theme.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.55,
+};
+
+function buildShellNav(locale: Locale): CanvasShellNavItem[] {
+  return [
+    {
+      divider: locale === "en" ? "Workspaces" : "工作面",
+    },
+    {
+      key: "dashboard",
+      href: "/dashboard",
+      icon: "dashboard",
+      label: t("nav.dashboard", locale),
+    },
+    {
+      divider: locale === "en" ? "Live Ops" : "即時派遣",
+    },
+    {
+      key: "dispatch",
+      href: "/dispatch",
+      icon: "dispatch",
+      label: t("nav.dispatch", locale),
+      matchPaths: ["/dispatch"],
+    },
+    {
+      key: "callcenter",
+      href: "/callcenter",
+      icon: "callcenter",
+      label: t("nav.callcenter", locale),
+    },
+    {
+      divider: locale === "en" ? "Casework" : "案件處理",
+    },
+    {
+      key: "complaints",
+      href: "/complaints",
+      icon: "complaints",
+      label: t("nav.complaints", locale),
+    },
+    {
+      key: "incidents",
+      href: "/incidents",
+      icon: "incidents",
+      label: t("nav.incidents", locale),
+      matchPaths: ["/incidents"],
+    },
+    {
+      divider: locale === "en" ? "Monitoring" : "營運監控",
+    },
+    {
+      key: "reports",
+      href: "/reports",
+      icon: "reports",
+      label: t("nav.reports", locale),
+    },
+    {
+      key: "revenue",
+      href: "/revenue",
+      icon: "revenue",
+      label: t("nav.revenue", locale),
+    },
+    {
+      key: "attendance",
+      href: "/attendance",
+      icon: "attendance",
+      label: t("nav.attendance", locale),
+    },
+    {
+      divider: locale === "en" ? "Registry" : "主資料",
+    },
+    {
+      key: "drivers",
+      href: "/drivers",
+      icon: "fleet",
+      label: t("nav.drivers", locale),
+    },
+    {
+      key: "vehicles",
+      href: "/vehicles",
+      icon: "vehicles",
+      label: t("nav.vehicles", locale),
+    },
+    {
+      key: "contracts",
+      href: "/contracts",
+      icon: "contracts",
+      label: t("nav.contracts", locale),
+      matchPaths: ["/contracts"],
+    },
+    {
+      key: "feature-flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: t("nav.featureFlags", locale),
+    },
+  ];
 }
 
-function eligibilityStatusTone(
-  status: PartnerEligibilityReviewQueueItem["verificationStatus"],
+function formatDate(value: string | null | undefined, locale: Locale) {
+  if (!value) {
+    return t("common.dash", locale);
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return t("common.dash", locale);
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+function formatTerm(
+  startAt: string | null | undefined,
+  endAt: string | null | undefined,
+  locale: Locale,
 ) {
-  if (status === "manual_review") return "warning" as const;
-  if (status === "ineligible") return "danger" as const;
-  return "neutral" as const;
+  const endLabel =
+    endAt && endAt.trim().length > 0
+      ? formatDate(endAt, locale)
+      : locale === "en"
+        ? "ongoing"
+        : "持續中";
+  return `${formatDate(startAt, locale)} → ${endLabel}`;
 }
 
-function formatRequestedBy(
-  item: PartnerEligibilityReviewQueueItem,
-  locale: "en" | "zh",
-) {
-  if (!item.manualFallback.required) {
-    return t("contracts.reviewRequestedBy.none", locale);
+function isExpiringSoon(endAt: string) {
+  const end = Date.parse(endAt);
+  if (!Number.isFinite(end)) {
+    return false;
   }
 
-  if (item.manualFallback.requestedBy === "system:auto_fallback") {
-    return t("contracts.reviewRequestedBy.system:auto_fallback", locale);
-  }
-
-  return item.manualFallback.requestedBy ?? t("common.dash", locale);
+  const daysRemaining = (end - Date.now()) / (1000 * 60 * 60 * 24);
+  return daysRemaining >= 0 && daysRemaining <= 60;
 }
 
-function formatContext(
-  item: PartnerEligibilityReviewQueueItem,
-  locale: "en" | "zh",
-) {
-  const parts: string[] = [];
-  if (item.requestHints.cardLast4) {
-    parts.push(
-      t("contracts.reviewContext.cardLast4", locale, {
-        value: item.requestHints.cardLast4,
-      }),
-    );
+function inferContractKind(contract: VehicleContractRecord): ContractKind {
+  const source = [
+    contract.contractType,
+    contract.partnerType,
+    contract.partnerId,
+    contract.serviceScope,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (source.includes("forwarder") || source.includes("external")) {
+    return "forwarder";
   }
-  if (item.requestHints.flightNo) {
-    parts.push(
-      t("contracts.reviewContext.flightNo", locale, {
-        value: item.requestHints.flightNo,
-      }),
-    );
+
+  if (
+    source.includes("partner") ||
+    source.includes("airport") ||
+    source.includes("program") ||
+    source.includes("bank") ||
+    source.includes("sponsor")
+  ) {
+    return "partner_program";
   }
-  return parts.join(" · ") || t("contracts.reviewContext.none", locale);
+
+  return "fleet_lease";
 }
 
-function formatDateTime(value: string | null, locale: "en" | "zh") {
-  if (!value) return t("common.dash", locale);
-  return new Date(value).toLocaleString(locale === "zh" ? "zh-TW" : "en-US", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "UTC",
-  });
+function revenueShareLabel(kind: ContractKind) {
+  if (kind === "forwarder") return "85/15";
+  if (kind === "partner_program") return "sponsor settle";
+  return "70/30";
+}
+
+function contractStatusTone(status: DisplayContractStatus): CanvasTone {
+  if (status === "active") return "success";
+  if (status === "expiring") return "warn";
+  return "neutral";
+}
+
+function buildContractRows(
+  contracts: VehicleContractRecord[],
+  partnerNameLookup: Map<string, string>,
+  locale: Locale,
+): ContractRow[] {
+  return contracts
+    .map<ContractRow>((contract) => {
+      const displayStatus = (
+        contract.status === "active" && isExpiringSoon(contract.endAt)
+          ? "expiring"
+          : contract.status
+      ) as DisplayContractStatus;
+
+      return {
+        contractId: contract.contractId,
+        counterparty:
+          partnerNameLookup.get(contract.partnerId) ?? contract.partnerId,
+        kind: inferContractKind(contract),
+        termLabel: formatTerm(contract.startAt, contract.endAt, locale),
+        revenueShare: revenueShareLabel(inferContractKind(contract)),
+        displayStatus,
+      };
+    })
+    .sort((left, right) => {
+      const kindOrder = KIND_PRIORITY[left.kind] - KIND_PRIORITY[right.kind];
+      if (kindOrder !== 0) {
+        return kindOrder;
+      }
+      return left.contractId.localeCompare(right.contractId);
+    });
 }
 
 export default async function ContractsPage() {
@@ -86,6 +273,7 @@ export default async function ContractsPage() {
     getServerOpsClient(),
     getServerLocale(),
   ]);
+
   let contracts: VehicleContractRecord[] = [];
   let partnerEntries: PartnerChannelEntryRecord[] = [];
   let reviewQueue: PartnerEligibilityReviewQueueItem[] = [];
@@ -97,216 +285,139 @@ export default async function ContractsPage() {
       client.listPartnerEntries(),
       client.listPartnerEligibilityReviewQueue(),
     ]);
-  } catch (e) {
-    error = e instanceof Error ? e.message : t("common.unknown", locale);
+  } catch (cause) {
+    error =
+      cause instanceof Error ? cause.message : t("common.unknown", locale);
   }
-  const partnerNameBySlug = new Map(
-    partnerEntries.map((entry) => [entry.entrySlug, entry.displayName]),
-  );
-  const activeContracts = contracts.filter(
-    (contract) => contract.status === "active",
-  ).length;
-  const draftContracts = contracts.filter(
-    (contract) => contract.status === "draft",
-  ).length;
-  const manualReviewCount = reviewQueue.filter(
-    (item) => item.verificationStatus === "manual_review",
-  ).length;
+
+  const partnerNameLookup = new Map<string, string>();
+  for (const entry of partnerEntries) {
+    if (!partnerNameLookup.has(entry.partnerId)) {
+      partnerNameLookup.set(entry.partnerId, entry.displayName);
+    }
+    if (!partnerNameLookup.has(entry.entrySlug)) {
+      partnerNameLookup.set(entry.entrySlug, entry.displayName);
+    }
+  }
+
+  const contractRows = buildContractRows(contracts, partnerNameLookup, locale);
+  const columns: CanvasTableColumn<ContractRow>[] = [
+    {
+      h: "CONTRACT",
+      k: "contractId",
+      w: 110,
+      mono: true,
+    },
+    {
+      h: "COUNTERPARTY",
+      k: "counterparty",
+      w: 220,
+    },
+    {
+      h: "KIND",
+      k: "kind",
+      w: 130,
+      mono: true,
+    },
+    {
+      h: "TERM",
+      k: "termLabel",
+      w: 200,
+      mono: true,
+    },
+    {
+      h: "REVENUE SHARE",
+      k: "revenueShare",
+      w: 140,
+      mono: true,
+    },
+    {
+      h: "STATUS",
+      w: 110,
+      r: (row) => (
+        <Pill theme={theme} tone={contractStatusTone(row.displayStatus)} dot>
+          {row.displayStatus}
+        </Pill>
+      ),
+    },
+  ];
 
   return (
-    <>
-      <PageHeader
-        title={t("contracts.title", locale)}
-        subtitle={t("contracts.subtitle", locale, { count: contracts.length })}
-      />
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 40,
+        background: theme.bg,
+      }}
+    >
+      <Shell
+        theme={theme}
+        nav={buildShellNav(locale)}
+        active="contracts"
+        currentPath="/contracts"
+        breadcrumb={[
+          locale === "en" ? "Registry" : "主資料",
+          t("nav.contracts", locale),
+        ]}
+        searchPlaceholder={
+          locale === "en"
+            ? "Search contracts, counterparties, reviews..."
+            : "搜尋合約、合作方、審核單..."
+        }
+        brandLabel={t("app.name", locale)}
+        brandSubLabel={t("app.sub", locale)}
+        env={locale === "en" ? "staging" : "測試"}
+        versionLabel="OC"
+        avatarLabel="OC"
+      >
+        <div style={pageStackStyle}>
+          <PageHeader
+            theme={theme}
+            title={t("nav.contracts", locale)}
+            subtitle={
+              locale === "en"
+                ? "Fleet contracts · partner relation · revenue share"
+                : "車隊合約 · partner relation · revenue share"
+            }
+            actions={
+              <Btn theme={theme} variant="primary" icon="plus">
+                {locale === "en" ? "Create contract" : "建立合約"}
+              </Btn>
+            }
+          />
 
-      {error && (
-        <div
-          style={{
-            background: "#fee2e2",
-            border: "1px solid #fca5a5",
-            borderRadius: "8px",
-            padding: "12px 16px",
-            color: "#b91c1c",
-            fontSize: "13.5px",
-            marginBottom: "20px",
-          }}
-        >
-          {error}
+          <div style={pageBodyStyle}>
+            {error ? (
+              <Banner
+                theme={theme}
+                tone="danger"
+                title={t("common.error", locale)}
+                body={error}
+              />
+            ) : null}
+
+            {!error && reviewQueue.length > 0 ? (
+              <Banner
+                theme={theme}
+                tone="warn"
+                title={t("contracts.reviewTitle", locale)}
+                body={t("contracts.reviewAlert", locale, {
+                  count: reviewQueue.length,
+                })}
+              />
+            ) : null}
+
+            <Card theme={theme} padding={contractRows.length > 0 ? 0 : 24}>
+              {contractRows.length > 0 ? (
+                <Table theme={theme} columns={columns} rows={contractRows} />
+              ) : (
+                <p style={emptyStateStyle}>{t("contracts.empty", locale)}</p>
+              )}
+            </Card>
+          </div>
         </div>
-      )}
-
-      <div style={{ display: "grid", gap: "1rem" }}>
-        <DataViewCard
-          title={t("contracts.reviewTitle", locale)}
-          subtitle={t("contracts.reviewSubtitle", locale, {
-            count: reviewQueue.length,
-          })}
-          tone="warning"
-          density="compact"
-          summary={t("contracts.reviewRegistrySummary", locale, {
-            total: reviewQueue.length,
-            manual: manualReviewCount,
-          })}
-        >
-          <DataTable
-            density="compact"
-            tone="warning"
-            columns={[
-              {
-                label: t("contracts.reviewCol.partnerEntry", locale),
-                width: "220px",
-              },
-              {
-                label: t("contracts.reviewCol.reason", locale),
-                width: "220px",
-              },
-              {
-                label: t("contracts.reviewCol.status", locale),
-                width: "130px",
-              },
-              {
-                label: t("contracts.reviewCol.attempts", locale),
-                width: "130px",
-              },
-              {
-                label: t("contracts.reviewCol.requestedAt", locale),
-                width: "190px",
-              },
-              { label: t("contracts.reviewCol.requestContext", locale) },
-            ]}
-            empty={t("contracts.reviewEmpty", locale)}
-          >
-            {reviewQueue.map((item) => (
-              <Tr key={item.eligibilityVerificationId}>
-                <Td density="compact">
-                  <DataCellStack
-                    primary={
-                      <strong>
-                        {partnerNameBySlug.get(item.partnerEntrySlug) ??
-                          item.partnerEntrySlug}
-                      </strong>
-                    }
-                    secondary={item.partnerEntrySlug}
-                  />
-                </Td>
-                <Td density="compact">
-                  <DataCellStack
-                    primary={formatOpsCodeLabel(
-                      locale,
-                      item.verificationReasonCode,
-                    )}
-                    secondary={
-                      item.manualFallback.reasonCode ??
-                      item.latestAttemptReasonCode ??
-                      t("common.dash", locale)
-                    }
-                  />
-                </Td>
-                <Td density="compact">
-                  <StatusChip
-                    tone={eligibilityStatusTone(item.verificationStatus)}
-                    authorityLabel={locale === "zh" ? "判定" : "decision"}
-                    label={t(
-                      `contracts.reviewStatus.${item.verificationStatus}`,
-                      locale,
-                    )}
-                  />
-                </Td>
-                <Td density="compact">
-                  <DataCellStack
-                    primary={String(item.attemptCount)}
-                    secondary={
-                      item.latestAttemptStatus
-                        ? formatOpsCodeLabel(locale, item.latestAttemptStatus)
-                        : t("common.dash", locale)
-                    }
-                  />
-                </Td>
-                <Td density="compact">
-                  <DataCellStack
-                    primary={formatDateTime(
-                      item.manualFallback.requestedAt,
-                      locale,
-                    )}
-                    secondary={formatRequestedBy(item, locale)}
-                    tertiary={formatDateTime(item.verifiedAt, locale)}
-                  />
-                </Td>
-                <Td density="compact" muted>
-                  {formatContext(item, locale)}
-                </Td>
-              </Tr>
-            ))}
-          </DataTable>
-        </DataViewCard>
-
-        <DataViewCard
-          title={t("contracts.title", locale)}
-          subtitle={t("contracts.subtitle", locale, {
-            count: contracts.length,
-          })}
-          tone="info"
-          density="compact"
-          summary={t("contracts.registrySummary", locale, {
-            active: activeContracts,
-            draft: draftContracts,
-            attention: reviewQueue.length,
-          })}
-        >
-          <DataTable
-            density="compact"
-            tone="info"
-            columns={[
-              { label: t("contracts.col.contractId", locale), width: "220px" },
-              { label: t("contracts.col.vehicle", locale), width: "140px" },
-              { label: t("contracts.col.partner", locale), width: "180px" },
-              { label: t("contracts.col.type", locale), width: "180px" },
-              { label: t("contracts.col.status", locale), width: "140px" },
-            ]}
-            empty={t("contracts.empty", locale)}
-          >
-            {contracts.map((contract) => (
-              <Tr key={contract.contractId}>
-                <Td density="compact">
-                  <DataCellStack
-                    primary={<strong>{contract.contractId}</strong>}
-                    secondary={contract.serviceScope}
-                    tertiary={
-                      contract.operatingAreaId ?? t("common.dash", locale)
-                    }
-                  />
-                </Td>
-                <Td density="compact" mono>
-                  {contract.vehicleId}
-                </Td>
-                <Td density="compact">
-                  <DataCellStack
-                    primary={contract.partnerId}
-                    secondary={formatOpsCodeLabel(locale, contract.partnerType)}
-                  />
-                </Td>
-                <Td density="compact">
-                  <DataCellStack
-                    primary={formatOpsCodeLabel(locale, contract.contractType)}
-                    secondary={formatOpsCodeLabel(
-                      locale,
-                      contract.lifecycleStatus,
-                    )}
-                  />
-                </Td>
-                <Td density="compact">
-                  <StatusChip
-                    tone={contractStatusTone(contract.status)}
-                    authorityLabel={locale === "zh" ? "狀態" : "status"}
-                    label={formatOpsCodeLabel(locale, contract.status)}
-                  />
-                </Td>
-              </Tr>
-            ))}
-          </DataTable>
-        </DataViewCard>
-      </div>
-    </>
+      </Shell>
+    </div>
   );
 }
