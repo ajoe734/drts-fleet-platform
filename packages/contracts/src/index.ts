@@ -4321,6 +4321,57 @@ export interface IncidentTimelineEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Driver matching suppression (Q-OPS09)
+//
+// When an incident is opened against a driver, dispatch matching for that
+// driver is suppressed. Suppression is time-bound: it auto-expires after the
+// default TTL (24h) and is lifted early when the source incident is resolved
+// or closed. Only an ops_manager may extend the window beyond the default cap.
+// ---------------------------------------------------------------------------
+
+export const DRIVER_MATCHING_SUPPRESSION_REASON_CODES = [
+  "incident",
+  "compliance_hold",
+  "manual_ops_hold",
+] as const;
+export type DriverMatchingSuppressionReasonCode =
+  (typeof DRIVER_MATCHING_SUPPRESSION_REASON_CODES)[number];
+
+export const DRIVER_MATCHING_SUPPRESSION_DEFAULT_TTL_HOURS = 24;
+
+/**
+ * Canonical suppression state shape from the Q-OPS09 ruling.
+ */
+export interface DriverMatchingSuppression {
+  active: boolean;
+  reasonCode: DriverMatchingSuppressionReasonCode;
+  sourceIncidentId?: string;
+  expiresAt: string;
+  liftedAt: string | null;
+}
+
+export interface DriverMatchingSuppressionRecord
+  extends DriverMatchingSuppression {
+  suppressionId: string;
+  driverId: string;
+  createdBy: string;
+  extendedBy: string | null;
+  liftReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExtendDriverMatchingSuppressionCommand {
+  /** New absolute expiry timestamp (ISO 8601). Must be later than the current expiry. */
+  expiresAt: string;
+  /** Operator requesting the extension. */
+  requestedBy: string;
+  /** Role of the requesting operator. Only `ops_manager` may extend. */
+  actorRole: string;
+  note?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Maintenance
 // ---------------------------------------------------------------------------
 

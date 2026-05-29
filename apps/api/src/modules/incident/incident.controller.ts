@@ -19,6 +19,7 @@ import type {
 
 import {
   ApiRequestError,
+  toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { ComplaintService } from "../complaint/complaint.service";
@@ -45,7 +46,7 @@ export class IncidentController {
   @Get()
   listIncidents(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      { items: this.incidentService.listIncidents() },
+      toApiListData(this.incidentService.listIncidents()),
       requestId,
     );
   }
@@ -79,7 +80,7 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      { items: this.incidentService.getTimeline(incidentId) },
+      toApiListData(this.incidentService.getTimeline(incidentId)),
       requestId,
     );
   }
@@ -117,9 +118,9 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      {
-        items: this.incidentService.getServiceRecoveryActions(incidentId),
-      },
+      toApiListData(
+        this.incidentService.getServiceRecoveryActions(incidentId),
+      ),
       requestId,
     );
   }

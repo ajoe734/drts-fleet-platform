@@ -16,6 +16,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { DriverMatchingSuppressionService } from "./driver-matching-suppression.service";
 import { IncidentRepository } from "./incident.repository";
 
 const INCIDENT_STATUS_VALUES = [
@@ -76,10 +77,25 @@ export class IncidentService implements OnModuleInit {
   private timelines = new Map<string, IncidentTimelineEntry[]>();
   private recoveryActions = new Map<string, ServiceRecoveryActionRecord[]>();
 
+  private readonly suppressionService: DriverMatchingSuppressionService;
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly incidentRepository?: IncidentRepository,
-  ) {}
+    @Optional()
+    suppressionService?: DriverMatchingSuppressionService,
+  ) {
+    // Suppression is part of the incident lifecycle; fall back to an in-memory
+    // instance when DI does not supply one (e.g. lightweight unit construction).
+    this.suppressionService =
+      suppressionService ??
+      new DriverMatchingSuppressionService(auditNotificationService);
+  }
+
+  /** Exposes the driver matching suppression read-model to the controller. */
+  getDriverMatchingSuppressionService() {
+    return this.suppressionService;
+  }
 
   async onModuleInit() {
     if (!this.incidentRepository) return;
@@ -161,6 +177,20 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
+    // Q-OPS09: opening an incident against a driver suppresses dispatch
+    // matching for that driver (24h default TTL, lifted on resolution).
+    if (command.relatedDriverId) {
+      this.suppressionService.suppressForIncident(
+        {
+          driverId: command.relatedDriverId,
+          incidentId,
+          reasonCode: "incident",
+          actor: command.reportedBy,
+        },
+        requestId,
+      );
+    }
+
     return this.clone(incident);
   }
 
@@ -181,6 +211,7 @@ export class IncidentService implements OnModuleInit {
 
     const updated = { ...incident, updatedAt: new Date().toISOString() };
 
+    let liftSuppression = false;
     if (command.status !== undefined) {
       this.assertValidStatus(command.status);
       updated.status = command.status;
@@ -190,6 +221,14 @@ export class IncidentService implements OnModuleInit {
         `Status changed to ${command.status}.`,
         "ops_user",
       );
+      // Q-OPS09: resolving or closing an incident lifts any driver matching
+      // suppression it created.
+      if (
+        (command.status === "resolved" || command.status === "closed") &&
+        incident.status !== command.status
+      ) {
+        liftSuppression = true;
+      }
     }
 
     if (command.assignedTo !== undefined) {
@@ -264,6 +303,14 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
+
+    if (liftSuppression) {
+      this.suppressionService.liftForIncident(
+        incidentId,
+        { reason: `incident_${updated.status}` },
+        requestId,
+      );
+    }
 
     return this.clone(updated);
   }
