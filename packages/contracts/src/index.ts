@@ -4695,8 +4695,20 @@ export interface UpdatePlatformAdminUserRoleCommand {
   status?: PlatformAdminUserStatus;
 }
 
-export type PlatformNoticeSeverity = "info" | "warning" | "critical";
+export type PlatformNoticeSeverity =
+  | "info"
+  | "warning"
+  | "critical"
+  | "maintenance";
 export type PlatformNoticeStatus = "active" | "resolved" | "scheduled";
+
+export interface PlatformNoticeBroadcastDeliverySummary {
+  state: "pending" | "delivering" | "delivered";
+  deliveredCount: number;
+  totalCount: number;
+  targets: Array<"ops" | "tenant" | "driver">;
+  broadcastAt: string | null;
+}
 
 export interface PlatformNoticeRecord {
   noticeId: string;
@@ -4710,6 +4722,10 @@ export interface PlatformNoticeRecord {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  changeReason?: string | null;
+  availableActions?: ResourceActionDescriptor[];
+  deliverySummary?: PlatformNoticeBroadcastDeliverySummary | null;
+  crossAppLinks?: CrossAppResourceLink[];
 }
 
 export interface CreatePlatformNoticeCommand {
@@ -4718,6 +4734,7 @@ export interface CreatePlatformNoticeCommand {
   severity: PlatformNoticeSeverity;
   targetAudience: "all" | "tenants" | "ops" | "drivers";
   scheduledAt?: string | null;
+  reason?: string | null;
 }
 
 export interface PlatformMaintenanceModeRecord {
@@ -4727,6 +4744,10 @@ export interface PlatformMaintenanceModeRecord {
   scheduledEnd: string | null;
   updatedBy: string | null;
   updatedAt: string;
+  lastEnabledAt?: string | null;
+  affectedServices?: string[];
+  availableActions?: ResourceActionDescriptor[];
+  crossAppLinks?: CrossAppResourceLink[];
 }
 
 export interface SetPlatformMaintenanceModeCommand {
