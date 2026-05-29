@@ -50,6 +50,8 @@ type EmptyStateConfig = {
   body: Record<Locale, string>;
 };
 
+type ActionStyleVariant = "primary" | "secondary" | "ghost";
+
 type SectionLoadResult<T> = {
   data: T;
   error: Error | null;
@@ -212,7 +214,7 @@ function formatIncidentAge(locale: Locale, value: string | null | undefined) {
 
 function actionLinkStyle(
   theme: CanvasTheme,
-  variant: "primary" | "secondary" | "ghost" = "secondary",
+  variant: ActionStyleVariant = "secondary",
   disabled = false,
 ) {
   const base =
@@ -275,6 +277,47 @@ function ActionAffordance({
 
   return (
     <Link href={href} title={title} style={style}>
+      {children}
+    </Link>
+  );
+}
+
+function LinkedAction({
+  href,
+  locale,
+  variant = "secondary",
+  crossApp = false,
+  children,
+}: {
+  href: string;
+  locale: Locale;
+  variant?: ActionStyleVariant;
+  crossApp?: boolean;
+  children: ReactNode;
+}) {
+  const title = crossApp
+    ? locale === "en"
+      ? "Opens in a new tab"
+      : "於新分頁開啟"
+    : undefined;
+
+  if (crossApp) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        style={actionLinkStyle(theme, variant)}
+        title={title}
+      >
+        <CanvasIcon name="ext" size={12} />
+        <span>{children}</span>
+      </a>
+    );
+  }
+
+  return (
+    <Link href={href} style={actionLinkStyle(theme, variant)} title={title}>
       {children}
     </Link>
   );
@@ -788,15 +831,12 @@ export default async function IncidentDetailPage({
     {
       k: locale === "en" ? "Dispatch" : "派遣單",
       v: incident.relatedOrderId ? (
-        <Link
+        <LinkedAction
           href={`/dispatch/${encodeURIComponent(incident.relatedOrderId)}`}
-          style={actionLinkStyle(theme, "secondary")}
+          locale={locale}
         >
-          <CanvasIcon name="ext" size={12} />
-          <span>
-            {getOpsLabel(locale, "order")} {incident.relatedOrderId}
-          </span>
-        </Link>
+          {getOpsLabel(locale, "order")} {incident.relatedOrderId}
+        </LinkedAction>
       ) : (
         "—"
       ),
@@ -804,13 +844,12 @@ export default async function IncidentDetailPage({
     {
       k: locale === "en" ? "Vehicle" : "車輛",
       v: incident.relatedVehicleId ? (
-        <Link
+        <LinkedAction
           href={buildVehicleRegistryLink(incident.relatedVehicleId)}
-          style={actionLinkStyle(theme, "secondary")}
+          locale={locale}
         >
-          <CanvasIcon name="ext" size={12} />
-          <span>{incident.relatedVehicleId}</span>
-        </Link>
+          {incident.relatedVehicleId}
+        </LinkedAction>
       ) : (
         "—"
       ),
@@ -818,13 +857,12 @@ export default async function IncidentDetailPage({
     {
       k: locale === "en" ? "Driver" : "司機",
       v: incident.relatedDriverId ? (
-        <Link
+        <LinkedAction
           href={`/drivers/${encodeURIComponent(incident.relatedDriverId)}`}
-          style={actionLinkStyle(theme, "secondary")}
+          locale={locale}
         >
-          <CanvasIcon name="ext" size={12} />
-          <span>{incident.relatedDriverId}</span>
-        </Link>
+          {incident.relatedDriverId}
+        </LinkedAction>
       ) : (
         "—"
       ),
@@ -832,13 +870,12 @@ export default async function IncidentDetailPage({
     {
       k: locale === "en" ? "Complaint" : "客訴",
       v: incident.relatedComplaintCaseNo ? (
-        <Link
+        <LinkedAction
           href={buildComplaintDetailLink(incident.relatedComplaintCaseNo)}
-          style={actionLinkStyle(theme, "secondary")}
+          locale={locale}
         >
-          <CanvasIcon name="ext" size={12} />
-          <span>{incident.relatedComplaintCaseNo}</span>
-        </Link>
+          {incident.relatedComplaintCaseNo}
+        </LinkedAction>
       ) : (
         "—"
       ),
@@ -846,20 +883,14 @@ export default async function IncidentDetailPage({
     {
       k: locale === "en" ? "Latest audit" : "最新審計",
       v: incidentAuditLogs[0] ? (
-        <a
+        <LinkedAction
           href={buildAuditLink(incidentAuditLogs[0].auditId)}
-          target="_blank"
-          rel="noreferrer"
-          style={actionLinkStyle(theme, "ghost")}
-          title={
-            locale === "en"
-              ? "Opens platform-admin audit in a new tab"
-              : "於新分頁開啟 platform-admin 審計"
-          }
+          locale={locale}
+          variant="ghost"
+          crossApp
         >
-          <CanvasIcon name="ext" size={12} />
-          <span>{incidentAuditLogs[0].auditId}</span>
-        </a>
+          {incidentAuditLogs[0].auditId}
+        </LinkedAction>
       ) : (
         "—"
       ),
@@ -998,16 +1029,35 @@ export default async function IncidentDetailPage({
   const latestAuditHref = incidentAuditLogs[0]
     ? buildAuditLink(incidentAuditLogs[0].auditId)
     : null;
+  const headerTitle = (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 10,
+        flexWrap: "wrap",
+      }}
+    >
+      <span style={{ fontFamily: theme.monoFamily }}>
+        {incident.incidentId}
+      </span>
+      <Pill theme={theme} tone={getSeverityTone(incident.severity)} dot>
+        {formatOpsCodeLabel(locale, incident.severity)}
+      </Pill>
+      <Pill theme={theme} tone={getStatusTone(incident.status)}>
+        {formatOpsCodeLabel(locale, incident.status)}
+      </Pill>
+    </span>
+  );
 
   return (
     <>
       <PageHeader
         theme={theme}
-        title={`${incident.incidentId} · ${incident.title}`}
+        title={headerTitle}
         subtitle={[
+          incident.title,
           formatOpsCodeLabel(locale, incident.category),
-          formatOpsCodeLabel(locale, incident.severity),
-          formatOpsCodeLabel(locale, incident.status),
           formatDateTime(locale, incident.createdAt),
           formatIncidentAge(locale, incident.occurredAt ?? incident.createdAt),
         ].join(" · ")}
@@ -1211,6 +1261,46 @@ export default async function IncidentDetailPage({
               ) : null}
             </Card>
 
+            <Card
+              theme={theme}
+              title={
+                locale === "en" ? "Coordination guardrails" : "協調處置守則"
+              }
+              subtitle={
+                locale === "en"
+                  ? "Decision points called out in packet §5.8 stay visible in the workspace."
+                  : "把 packet §5.8 的關鍵決策點固定顯示在工作區。"
+              }
+            >
+              <ol
+                style={{
+                  margin: 0,
+                  paddingLeft: 18,
+                  display: "grid",
+                  gap: 8,
+                  color: theme.text,
+                  fontSize: 12.5,
+                  lineHeight: 1.6,
+                }}
+              >
+                <li>
+                  {locale === "en"
+                    ? "Escalation target is not a silent owner transfer. Reassignment must be acknowledged."
+                    : "升級對象不等於靜默轉派；交接後必須有 acknowledgment。"}
+                </li>
+                <li>
+                  {locale === "en"
+                    ? "Service recovery, timeline updates, and formal resolution are separate actions and must not be merged."
+                    : "補救行動、timeline 更新與正式結案是不同動作，不能混用。"}
+                </li>
+                <li>
+                  {locale === "en"
+                    ? "Lift suppression only after the linked driver can safely re-enter matching."
+                    : "只有在關聯司機可安全恢復配對時，才可解除 suppression。"}
+                </li>
+              </ol>
+            </Card>
+
             <Card theme={theme} title={t("incidents.timeline", locale)}>
               {timelineItems.length > 0 ? (
                 <Timeline
@@ -1385,46 +1475,52 @@ export default async function IncidentDetailPage({
                   <span>{t("nav.incidents", locale)}</span>
                 </Link>
                 {incident.relatedOrderId ? (
-                  <Link
+                  <LinkedAction
                     href={`/dispatch/${encodeURIComponent(incident.relatedOrderId)}`}
-                    style={actionLinkStyle(theme, "ghost")}
+                    locale={locale}
+                    variant="ghost"
                   >
-                    <CanvasIcon name="ext" size={12} />
-                    <span>
-                      {locale === "en" ? "Open dispatch" : "開啟派遣單"}
-                    </span>
-                  </Link>
+                    {locale === "en" ? "Open dispatch" : "開啟派遣單"}
+                  </LinkedAction>
                 ) : null}
                 {incident.relatedDriverId ? (
-                  <Link
+                  <LinkedAction
                     href={`/drivers/${encodeURIComponent(incident.relatedDriverId)}`}
-                    style={actionLinkStyle(theme, "ghost")}
+                    locale={locale}
+                    variant="ghost"
                   >
-                    <CanvasIcon name="ext" size={12} />
-                    <span>{locale === "en" ? "Open driver" : "開啟司機"}</span>
-                  </Link>
+                    {locale === "en" ? "Open driver" : "開啟司機"}
+                  </LinkedAction>
                 ) : null}
                 {incident.relatedVehicleId ? (
-                  <Link
+                  <LinkedAction
                     href={buildVehicleRegistryLink(incident.relatedVehicleId)}
-                    style={actionLinkStyle(theme, "ghost")}
+                    locale={locale}
+                    variant="ghost"
                   >
-                    <CanvasIcon name="ext" size={12} />
-                    <span>{locale === "en" ? "Open vehicle" : "開啟車輛"}</span>
-                  </Link>
+                    {locale === "en" ? "Open vehicle" : "開啟車輛"}
+                  </LinkedAction>
                 ) : null}
                 {incident.relatedComplaintCaseNo ? (
-                  <Link
+                  <LinkedAction
                     href={buildComplaintDetailLink(
                       incident.relatedComplaintCaseNo,
                     )}
-                    style={actionLinkStyle(theme, "ghost")}
+                    locale={locale}
+                    variant="ghost"
                   >
-                    <CanvasIcon name="ext" size={12} />
-                    <span>
-                      {locale === "en" ? "Open complaint" : "開啟客訴"}
-                    </span>
-                  </Link>
+                    {locale === "en" ? "Open complaint" : "開啟客訴"}
+                  </LinkedAction>
+                ) : null}
+                {latestAuditHref ? (
+                  <LinkedAction
+                    href={latestAuditHref}
+                    locale={locale}
+                    variant="ghost"
+                    crossApp
+                  >
+                    {locale === "en" ? "Open audit trail" : "開啟審計軌跡"}
+                  </LinkedAction>
                 ) : null}
               </div>
             </Card>
