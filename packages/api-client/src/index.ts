@@ -85,6 +85,7 @@ import type {
   EvidenceRetentionPolicyRecord,
   EvidenceSubjectGovernanceRecord,
   FeatureFlag,
+  OpsFeatureFlagSummary,
   FeatureFlagSummary,
   FilingPackageAccepted,
   FilingPackageDetailRecord,
@@ -449,6 +450,10 @@ export class ApiClient {
     const qs = searchParams.toString();
     const path = qs ? `/api/admin/flags?${qs}` : "/api/admin/flags";
     return this.get<FeatureFlagSummary>(path);
+  }
+
+  async getOpsFeatureFlags(): Promise<OpsFeatureFlagSummary> {
+    return this.get<OpsFeatureFlagSummary>("/api/ops/feature-flags");
   }
 
   async getFeatureFlag(key: string): Promise<FeatureFlag> {
