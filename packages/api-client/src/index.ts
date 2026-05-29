@@ -25,6 +25,7 @@ import type {
   ClockInCommand,
   ClockOutCommand,
   CloseCallSessionCommand,
+  ComplaintCaseListWorkspace,
   ComplaintCaseRecord,
   ComplaintExportViewRecord,
   ComplaintTimelineEntry,
@@ -1021,8 +1022,8 @@ export class ApiClient {
 
   // ── Complaint ──
 
-  async listComplaints(): Promise<ComplaintCaseRecord[]> {
-    return this.getList<ComplaintCaseRecord>("/api/complaints");
+  async listComplaints(): Promise<ComplaintCaseListWorkspace> {
+    return this.get<ComplaintCaseListWorkspace>("/api/complaints");
   }
 
   async createComplaint(command: CreateComplaintCaseCommand) {

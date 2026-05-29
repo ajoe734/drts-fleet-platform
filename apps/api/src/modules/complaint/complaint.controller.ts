@@ -46,9 +46,7 @@ export class ComplaintController {
   @Get()
   listComplaintCases(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      {
-        items: this.complaintService.listComplaintCases(),
-      },
+      this.complaintService.listComplaintCases(),
       requestId,
     );
   }
