@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ResourceActionDescriptor } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -1402,6 +1403,7 @@ export interface OpsPendingApprovalRequestRecord extends TenantBookingApprovalRe
   opsSlaAcknowledgedAt: string | null;
   opsSlaAcknowledgedByActorId: string | null;
   opsSlaAcknowledgedByActorType: IdentityContext["actorType"] | null;
+  availableActions: ResourceActionDescriptor[];
 }
 
 export interface ListTenantBookingApprovalRequestsQuery {
