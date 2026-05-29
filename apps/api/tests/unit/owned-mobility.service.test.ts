@@ -416,9 +416,13 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "tenant-demo-001",
     );
 
-    const editable = service.getTenantBooking("tenant-demo-001", booking.bookingId);
+    const editable = service.getTenantBooking(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
     expect(editable.status).toBe("accepted");
     expect(editable.editableUntil).toBe(editable.modifiableUntil);
+    expect(editable.cancelableUntil).toBe(editable.modifiableUntil);
     expect(editable.readOnlyReasonCode).toBeNull();
     expect(editable.availableActions).toEqual([
       {
@@ -435,7 +439,10 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ]);
 
     vi.setSystemTime(new Date("2026-05-13T13:31:00.000Z"));
-    const readOnly = service.getTenantBooking("tenant-demo-001", booking.bookingId);
+    const readOnly = service.getTenantBooking(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
     expect(readOnly.readOnlyReasonCode).toBe("past_editable_until");
     expect(readOnly.availableActions).toContainEqual({
       action: "update",
@@ -444,18 +451,6 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       riskLevel: "medium",
     });
     expect(readOnly.availableActions).toContainEqual({
-      action: "cancel",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    });
-
-    vi.setSystemTime(new Date("2026-05-13T13:46:00.000Z"));
-    const cancelLocked = service.getTenantBooking(
-      "tenant-demo-001",
-      booking.bookingId,
-    );
-    expect(cancelLocked.availableActions).toContainEqual({
       action: "cancel",
       enabled: false,
       disabledReasonCode: "past_cancelable_until",
