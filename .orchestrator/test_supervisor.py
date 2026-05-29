@@ -7196,5 +7196,79 @@ class SdNotifyTests(unittest.TestCase):
         fake_sock.close.assert_called_once()
 
 
+class ProviderReportPreloadTests(unittest.TestCase):
+    # OPS-PROVIDER-REPORT-PRELOAD: caller can pre-load provider_report once per
+    # tick and thread it through first_viable_agent / poll_workers /
+    # maybe_reassign_task_after_worker_failure instead of each of those
+    # reloading it from disk independently.
+
+    def _config(self) -> dict:
+        return {
+            "agents": [
+                {"display_name": "Codex"},
+                {"display_name": "Claude"},
+            ],
+            "provider_report_path": "/dev/null",
+            "supervisor": {},
+            "ready_dispatcher": {},
+        }
+
+    def test_first_viable_agent_uses_passed_provider_report(self) -> None:
+        # When provider_report is passed, load_provider_report MUST NOT be called.
+        sentinel = {"providers": {"Codex": {"auth_ready": True}}}
+        with mock.patch.object(supervisor, "load_provider_report") as mock_load, \
+             mock.patch.object(supervisor, "known_agent_display_names", return_value={"Codex", "Claude"}), \
+             mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False) as mock_paused:
+            result = supervisor.first_viable_agent(
+                self._config(),
+                ["Codex", "Claude"],
+                exclude=set(),
+                state={"workers": {}},
+                provider_report=sentinel,
+            )
+        mock_load.assert_not_called()
+        # is_agent_dispatch_paused must receive the same sentinel.
+        self.assertEqual(mock_paused.call_args.kwargs.get("provider_report"), sentinel)
+        self.assertEqual(result, "Codex")
+
+    def test_first_viable_agent_falls_back_to_load_when_none(self) -> None:
+        # Backwards-compatible: if caller does not pass provider_report and
+        # state is given, the function still loads one itself.
+        loaded = {"providers": {"Codex": {"auth_ready": True}}}
+        with mock.patch.object(supervisor, "load_provider_report", return_value=loaded) as mock_load, \
+             mock.patch.object(supervisor, "known_agent_display_names", return_value={"Codex"}), \
+             mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False) as mock_paused:
+            result = supervisor.first_viable_agent(
+                self._config(),
+                ["Codex"],
+                exclude=set(),
+                state={"workers": {}},
+            )
+        mock_load.assert_called_once()
+        self.assertEqual(mock_paused.call_args.kwargs.get("provider_report"), loaded)
+        self.assertEqual(result, "Codex")
+
+    def test_poll_workers_accepts_provider_report_kwarg(self) -> None:
+        # Verifies the new poll_workers signature accepts an optional 3rd
+        # positional arg and threads it into retry_due_workers without
+        # triggering a second load_provider_report call.
+        config = self._config()
+        state: dict = {"workers": {}, "queue": {"events": {}}}
+        sentinel = {"providers": {}}
+        with mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}), \
+             mock.patch.object(supervisor, "task_index_from_status", return_value={}), \
+             mock.patch.object(supervisor, "load_status", return_value={}), \
+             mock.patch.object(supervisor, "redispatch_candidate_statuses", return_value=set()), \
+             mock.patch.object(supervisor, "ready_dispatch_settings", return_value={"active_worker_statuses": []}), \
+             mock.patch.object(supervisor, "retry_due_workers", return_value=False) as mock_retry, \
+             mock.patch.object(supervisor, "load_provider_report") as mock_load:
+            # MUST NOT raise; signature accepts the 3rd positional arg.
+            supervisor.poll_workers(config, state, sentinel)
+        # When provider_report is given, load_provider_report MUST NOT be called.
+        mock_load.assert_not_called()
+        # retry_due_workers must receive the sentinel that was passed in.
+        self.assertEqual(mock_retry.call_args[0][2], sentinel)
+
+
 if __name__ == "__main__":
     unittest.main()
