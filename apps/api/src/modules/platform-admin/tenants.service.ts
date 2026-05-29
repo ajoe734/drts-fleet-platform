@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   HttpStatus,
   Injectable,
@@ -8,6 +10,8 @@ import {
 
 import type {
   AcknowledgeTenantRoleCommand,
+  ActionReceipt,
+  AdvanceTenantRolloutCommand,
   AuditLogRecord,
   CreatePlatformTenantCommand,
   InviteTenantRoleCommand,
@@ -381,6 +385,10 @@ export class TenantsService implements OnModuleInit {
           command.rollout.lastPromotedAt !== undefined
             ? this.normalizeNullableText(command.rollout.lastPromotedAt)
             : tenant.rollout.lastPromotedAt,
+        lastRollbackAt:
+          command.rollout.lastRollbackAt !== undefined
+            ? this.normalizeNullableText(command.rollout.lastRollbackAt)
+            : tenant.rollout.lastRollbackAt,
         notes:
           command.rollout.notes !== undefined
             ? this.normalizeNullableText(command.rollout.notes)
@@ -523,37 +531,7 @@ export class TenantsService implements OnModuleInit {
 
   setRollbackHold(tenantId: string, requestId?: string): TenantSummary {
     const tenant = this.requireTenant(tenantId);
-    const oldStatus = tenant.status;
-    const now = new Date().toISOString();
-
-    tenant.status = "rollback_hold";
-    tenant.rollout.productionStatus = "blocked";
-    tenant.updatedAt = now;
-
-    this.logger.log(`Tenant ${tenantId} placed in rollback_hold`);
-    this.persistChanges(
-      { platformTenants: [this.cloneTenant(tenant)] },
-      "set tenant rollback hold",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "platform-admin",
-        actionName: "set_tenant_rollback_hold",
-        resourceType: "platform_tenant",
-        resourceId: tenant.id,
-        oldValuesSummary: { status: oldStatus },
-        newValuesSummary: {
-          status: "rollback_hold",
-          productionStatus: "blocked",
-        },
-      },
-      requestId,
-    );
-
-    return this.cloneTenant(tenant);
+    return this.applyRollbackHold(tenant, requestId).tenant;
   }
 
   setRolloutStage(
@@ -643,6 +621,114 @@ export class TenantsService implements OnModuleInit {
       requestId,
     );
     return this.cloneTenant(tenant);
+  }
+
+  advanceRollout(
+    tenantId: string,
+    command: AdvanceTenantRolloutCommand,
+    requestId?: string,
+  ): ActionReceipt {
+    const tenant = this.requireTenant(tenantId);
+    const targetStage = this.normalizeRolloutStage(command.targetStage);
+    const reason = this.normalizeNullableText(command.reason);
+    const evidenceRefs =
+      command.evidenceRefs === undefined
+        ? []
+        : this.normalizeStringList(command.evidenceRefs, "evidenceRefs", true);
+
+    if (targetStage === "rollback_hold") {
+      const result = this.applyRollbackHold(tenant, requestId, {
+        reason,
+        evidenceRefs,
+      });
+      return this.buildActionReceipt(
+        result.auditLog.auditId,
+        tenant.id,
+        `Rollout hold enabled for tenant ${tenant.id}.`,
+      );
+    }
+
+    if (tenant.status === "rollback_hold") {
+      if (targetStage !== tenant.rollout.stage) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "TENANT_ROLLBACK_RESOLUTION_INVALID",
+          `Rollback hold can only resolve back to ${tenant.rollout.stage}.`,
+          {
+            tenantId: tenant.id,
+            targetStage,
+            safeStage: tenant.rollout.stage,
+          },
+        );
+      }
+
+      const now = new Date().toISOString();
+      const oldStatus = tenant.status;
+      tenant.status = "active";
+      tenant.updatedAt = now;
+      const auditLog = this.recordAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "platform-admin",
+          actionName: "resolve_tenant_rollback_hold",
+          resourceType: "platform_tenant",
+          resourceId: tenant.id,
+          oldValuesSummary: {
+            status: oldStatus,
+            targetStage: tenant.rollout.stage,
+          },
+          newValuesSummary: {
+            status: tenant.status,
+            targetStage,
+            reason,
+            evidenceRefs,
+          },
+        },
+        requestId,
+      );
+      this.persistChanges(
+        { platformTenants: [this.cloneTenant(tenant)] },
+        "resolve tenant rollback hold",
+      );
+      return this.buildActionReceipt(
+        auditLog.auditId,
+        tenant.id,
+        `Rollback hold resolved. Tenant returned to ${targetStage}.`,
+      );
+    }
+
+    const updated = this.setRolloutStage(
+      tenantId,
+      {
+        stage: targetStage,
+        notes: reason ?? command.reason ?? null,
+      },
+      requestId,
+    );
+    const auditLog = this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "advance_tenant_rollout",
+        resourceType: "platform_tenant",
+        resourceId: updated.id,
+        newValuesSummary: {
+          stage: targetStage,
+          reason,
+          evidenceRefs,
+        },
+      },
+      requestId,
+    );
+    return this.buildActionReceipt(
+      auditLog.auditId,
+      updated.id,
+      `Tenant rollout advanced to ${targetStage}.`,
+    );
   }
 
   private enforcePromotionGates(
@@ -742,11 +828,12 @@ export class TenantsService implements OnModuleInit {
         pilotStatus: "approved",
         productionStatus: "approved",
         cutoverOwner: "Platform Launch Lead",
-        rollbackOwner: "Platform Operations",
-        rollbackPrepared: true,
-        lastPromotedAt: DEMO_CREATED_AT,
-        notes:
-          "Demo tenant already completed sandbox, pilot, and production promotion.",
+      rollbackOwner: "Platform Operations",
+      rollbackPrepared: true,
+      lastPromotedAt: DEMO_CREATED_AT,
+      lastRollbackAt: null,
+      notes:
+        "Demo tenant already completed sandbox, pilot, and production promotion.",
       },
       createdAt: DEMO_CREATED_AT,
       updatedAt: DEMO_CREATED_AT,
@@ -805,6 +892,7 @@ export class TenantsService implements OnModuleInit {
       rollbackOwner: null,
       rollbackPrepared: false,
       lastPromotedAt: null,
+      lastRollbackAt: null,
       notes:
         "Start in sandbox. Promote only after bootstrap defaults, billing baseline, notifications, and integration package are verified.",
     };
@@ -1058,9 +1146,71 @@ export class TenantsService implements OnModuleInit {
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
   ) {
-    this.auditNotificationService.recordAuditLog({
+    return this.auditNotificationService.recordAuditLog({
       ...input,
       ...(requestId ? { requestId } : {}),
     });
+  }
+
+  private applyRollbackHold(
+    tenant: PlatformAdminTenantRecord,
+    requestId?: string,
+    context?: {
+      reason?: string | null;
+      evidenceRefs?: string[];
+    },
+  ) {
+    const oldStatus = tenant.status;
+    const now = new Date().toISOString();
+
+    tenant.status = "rollback_hold";
+    tenant.rollout.productionStatus = "blocked";
+    tenant.rollout.lastRollbackAt = now;
+    tenant.updatedAt = now;
+
+    this.logger.log(`Tenant ${tenant.id} placed in rollback_hold`);
+    this.persistChanges(
+      { platformTenants: [this.cloneTenant(tenant)] },
+      "set tenant rollback hold",
+    );
+    const auditLog = this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "set_tenant_rollback_hold",
+        resourceType: "platform_tenant",
+        resourceId: tenant.id,
+        oldValuesSummary: { status: oldStatus },
+        newValuesSummary: {
+          status: "rollback_hold",
+          productionStatus: "blocked",
+          reason: context?.reason ?? null,
+          evidenceRefs: context?.evidenceRefs ?? [],
+        },
+      },
+      requestId,
+    );
+
+    return {
+      tenant: this.cloneTenant(tenant),
+      auditLog,
+    };
+  }
+
+  private buildActionReceipt(
+    auditId: string,
+    tenantId: string,
+    message: string,
+  ): ActionReceipt {
+    return {
+      actionId: `tenant-rollout-${randomUUID()}`,
+      auditId,
+      resourceType: "platform_tenant_rollout",
+      resourceId: tenantId,
+      status: "completed",
+      message,
+    };
   }
 }
