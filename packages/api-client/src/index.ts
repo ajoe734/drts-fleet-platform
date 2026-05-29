@@ -70,6 +70,7 @@ import type {
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
   DriverLocationHeartbeatCommand,
+  DriverMatchingSuppression,
   DriverProfileRecord,
   DriverRegistryRecord,
   DriverRejectTaskCommand,
@@ -232,6 +233,9 @@ import type {
   ForwarderReconciliationIssue,
   InviteTenantRoleCommand,
   AcknowledgeTenantRoleCommand,
+  ResourceActionDescriptor,
+  EmptyStateEnvelope,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -252,7 +256,15 @@ export interface RequestOptions {
 
 interface ListEnvelope<T> {
   items: T[];
+  emptyState?: EmptyStateEnvelope | null;
+  refreshMetadata?: UiRefreshMetadata | null;
 }
+
+export type DriverRegistryListItem = DriverRegistryRecord & {
+  phone?: string | null;
+  availableActions?: ResourceActionDescriptor[];
+  matchingSuppression?: DriverMatchingSuppression | null;
+};
 
 function snakeToCamelCase(key: string): string {
   return key.replace(/_([a-z])/g, (_match, letter: string) =>
@@ -2245,6 +2257,13 @@ export class ApiClient {
     return this.getList<DriverRegistryRecord>(
       "/api/regulatory-registry/drivers",
     );
+  }
+
+  async listDriversEnvelope(): Promise<ListEnvelope<DriverRegistryListItem>> {
+    const envelope = await this.getListEnvelope<DriverRegistryListItem>(
+      "/api/regulatory-registry/drivers",
+    );
+    return envelope.data;
   }
 
   async listDriverLocations(): Promise<DriverLocationSnapshot[]> {
