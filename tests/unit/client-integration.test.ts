@@ -643,7 +643,7 @@ describe("W8-001A shared api client list handling", () => {
     const client = new ApiClient({ baseUrl: "http://localhost:3001" });
     const bookings = await client.listTenantBookings();
 
-    expect(bookings).toEqual([
+    expect(bookings.items).toEqual([
       {
         bookingId: "booking-001",
         orderStatus: "created",

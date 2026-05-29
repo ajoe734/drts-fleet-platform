@@ -34,7 +34,7 @@ export default async function BookingListPage({
     typeof rawParams.error === "string" ? rawParams.error : null;
 
   try {
-    bookings = await client.listTenantBookings();
+    bookings = (await client.listTenantBookings()).items;
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }

@@ -1,6 +1,10 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-import type { ResourceActionDescriptor } from "./ui-runtime";
+import type {
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -2352,8 +2356,66 @@ export interface BookingRecord {
   approvalRequestIds: string[];
   complianceGates?: ComplianceGateRecord[];
   orderStatus: OwnedOrderStatus;
+  /**
+   * Q-TEN05 — backend-decided moment after which the booking can no longer
+   * be modified. `null` when there is no time-based editable window (e.g.
+   * completed / cancelled bookings rely on `readOnlyReasonCode`).
+   */
+  editableUntil: string | null;
+  /**
+   * Q-TEN05 — canonical machine-readable reason the booking is read-only,
+   * or `null` when the booking is currently editable. The UI consumes this
+   * instead of deriving from `status` alone.
+   */
+  readOnlyReasonCode: TenantBookingReadOnlyReasonCode | null;
+  /**
+   * Q-TEN05 / Q-X13 — backend-decided action affordances. UI must not
+   * hard-code per-role CTA visibility; a zero-length list means the
+   * booking is effectively read-only for the current actor.
+   */
+  availableActions: ResourceActionDescriptor[];
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Q-TEN05 — canonical machine-readable reasons a booking is read-only.
+ * The UI looks up display copy from this enum rather than parsing
+ * free-form strings.
+ */
+export type TenantBookingReadOnlyReasonCode =
+  | "completed"
+  | "cancelled"
+  | "past_editable_window"
+  | "forwarded_authority";
+
+/**
+ * Q-X13 / Q-X15 / Q-X01 — envelope returned by the
+ * `GET /api/tenant/bookings` list endpoint. Packaging `pageActions`,
+ * `emptyState`, `refreshMetadata`, and tab metadata next to `items`
+ * keeps the UI from inventing its own role→action, freshness, or
+ * empty-state mappings. The contract change ships in the same wave as
+ * the consumer per `ui-runtime.ts` §0.
+ */
+export interface TenantBookingListResponse {
+  items: BookingRecord[];
+  refreshMetadata: UiRefreshMetadata;
+  pageActions: ResourceActionDescriptor[];
+  emptyState: EmptyStateEnvelope | null;
+  forwardedAuthorityPolicy: TenantBookingForwardedAuthorityPolicy;
+}
+
+/**
+ * Q-DRV04 / forwarded_authority — read-only policy descriptor that the
+ * tenant /bookings page renders as a banner so tenant admins understand
+ * which adapter-native states are NOT mirrored as tenant workflow
+ * actions. `forwardedAdapterStates` is a finite enumeration so the UI
+ * can format the list without inventing copy.
+ */
+export interface TenantBookingForwardedAuthorityPolicy {
+  applies: boolean;
+  message: string;
+  forwardedAdapterStates: string[];
 }
 
 export interface DispatchCandidate {

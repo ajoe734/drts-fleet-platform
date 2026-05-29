@@ -207,8 +207,15 @@ export class OwnedMobilityController {
     const bookings = this.ownedMobilityService.listTenantBookings(
       this.requireTenantId(tenantId),
     );
+    const listData = toApiListData(bookings.items, bookings.pagination);
     return toApiSuccessEnvelope(
-      toApiListData(bookings.items, bookings.pagination),
+      {
+        ...listData,
+        refreshMetadata: bookings.refreshMetadata,
+        pageActions: bookings.pageActions,
+        emptyState: bookings.emptyState,
+        forwardedAuthorityPolicy: bookings.forwardedAuthorityPolicy,
+      },
       requestId,
     );
   }
