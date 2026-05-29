@@ -751,9 +751,9 @@ const en = {
   "revenue.subtitle":
     "Revenue analytics — trip income, driver payouts, and settlement status",
   "revenue.period.today": "Today",
+  "revenue.period.yesterday": "Yesterday",
   "revenue.period.7d": "Last 7 days",
   "revenue.period.30d": "Last 30 days",
-  "revenue.period.all": "All time",
   "revenue.bucket.all": "All products",
   "revenue.vehicle.all": "All vehicles",
   "revenue.totalRevenue": "Total Revenue",
@@ -1414,6 +1414,123 @@ const en = {
   "revenue.emptyByVehicle": "No vehicle revenue for this filter.",
   "revenue.emptyPartnerBenefit": "No partner benefit trips for this filter.",
   "revenue.emptySettlement": "No statements generated yet.",
+
+  // ── Revenue (canvas rebuild — packet §5.11) ──
+  "revenue.canvas.title": "Revenue review",
+  "revenue.canvas.subtitle":
+    "Period · service bucket · vehicle · channel mix · settlement matrix — mismatch mutation owned by Platform Admin",
+  "revenue.tab.insight": "Insight",
+  "revenue.tab.channelMix": "Channel mix",
+  "revenue.tab.matrix": "Settlement matrix",
+  "revenue.tab.mismatch": "Mismatch review",
+  "revenue.kpi.billed": "Billed (MTD)",
+  "revenue.kpi.billedSub": "Recognized completed-trip revenue",
+  "revenue.kpi.ownedShare": "Owned share",
+  "revenue.kpi.ownedShareSub": "Owned vs forwarded trip share",
+  "revenue.kpi.forwardedSyncFailed": "Forwarded sync_failed",
+  "revenue.kpi.forwardedSyncFailedSub":
+    "Mirror orders blocked by adapter sync errors",
+  "revenue.kpi.openRecon": "Open reconciliation",
+  "revenue.kpi.openReconSub": "Mutation lives in Platform Admin",
+  "revenue.banner.staleTitle":
+    "Snapshot is {minutes} min old · refreshing in {seconds}s",
+  "revenue.banner.staleBody":
+    "Refresh tier T3 (medium · 15s). Numbers will update on the next poll.",
+  "revenue.banner.readOnlyTitle": "Read-only mirror · Q-OPS14",
+  "revenue.banner.readOnlyBody":
+    "ops_finance_reviewer can open a mismatch drawer, but every mutation must follow the deep link to Platform Admin /payments.",
+  "revenue.channelMix.title": "Channel mix",
+  "revenue.channelMix.subtitle":
+    "Owned trip channels: platform / partner / phone / tenant",
+  "revenue.channelMix.channel.platform": "Platform (owned dispatch)",
+  "revenue.channelMix.channel.partner": "Partner / airport benefit",
+  "revenue.channelMix.channel.phone": "Phone-origin order",
+  "revenue.channelMix.channel.tenant": "Tenant enterprise",
+  "revenue.channelMix.col.channel": "Channel",
+  "revenue.channelMix.col.trips": "Trips",
+  "revenue.channelMix.col.share": "Share",
+  "revenue.channelMix.col.revenue": "Revenue",
+  "revenue.mismatch.title": "Mismatch review (Q-OPS14)",
+  "revenue.mismatch.subtitle":
+    "Forwarded mirrors with sync_failed or manual fallback — drawer is read-only, mutation lives in Platform Admin.",
+  "revenue.mismatch.col.issueId": "Issue / job",
+  "revenue.mismatch.col.mirror": "Mirror / external",
+  "revenue.mismatch.col.platform": "Platform",
+  "revenue.mismatch.col.reason": "Reason",
+  "revenue.mismatch.col.owner": "Finance owner",
+  "revenue.mismatch.col.age": "Age",
+  "revenue.mismatch.col.cta": "Drawer / cross-app",
+  "revenue.mismatch.sort.ownerAge":
+    "Sorted by owner then age (unassigned issues first, oldest within owner).",
+  "revenue.mismatch.age.days": "{days}d",
+  "revenue.mismatch.age.hours": "{hours}h",
+  "revenue.mismatch.age.minutes": "{minutes}m",
+  "revenue.mismatch.age.justNow": "just now",
+  "revenue.mismatch.jobOnly": "job · {jobId}",
+  "revenue.mismatch.openDrawer": "Open mismatch drawer",
+  "revenue.mismatch.escalatePlatformAdmin": "Escalate in Platform Admin",
+  "revenue.mismatch.drawer.eyebrow": "Mismatch · read-only",
+  "revenue.mismatch.drawer.title": "Forwarded reconciliation",
+  "revenue.mismatch.drawer.subtitle":
+    "All mutations and follow-up live in Platform Admin /payments.",
+  "revenue.mismatch.drawer.platform": "Platform",
+  "revenue.mismatch.drawer.mirror": "Mirror order",
+  "revenue.mismatch.drawer.external": "External order",
+  "revenue.mismatch.drawer.reason": "Reason",
+  "revenue.mismatch.drawer.status": "Forwarder status",
+  "revenue.mismatch.drawer.lastError": "Last sync error",
+  "revenue.mismatch.drawer.lastErrorRetryable": "Retryable",
+  "revenue.mismatch.drawer.lastErrorNotRetryable": "Not retryable",
+  "revenue.mismatch.drawer.financeStatus": "Finance issue status",
+  "revenue.mismatch.drawer.financeOwner": "Finance owner",
+  "revenue.mismatch.drawer.financeMissing":
+    "No finance issue has been opened yet for this mismatch.",
+  "revenue.mismatch.drawer.notFound":
+    "No mismatch matches the requested identifier.",
+  "revenue.mismatch.drawer.close": "Close drawer",
+  "revenue.mismatch.drawer.openPlatformAdmin":
+    "Open in Platform Admin /payments (new tab)",
+  "revenue.mismatch.drawer.openPlatformAdminCreate":
+    "Open Platform Admin /payments to file issue (new tab)",
+  "revenue.emptyReason.no_data.title": "No revenue captured for this period",
+  "revenue.emptyReason.no_data.body":
+    "There is no completed-trip revenue for the active filter window. Try widening the period or check that drivers actually ran trips.",
+  "revenue.emptyReason.not_provisioned.title":
+    "Revenue surface not provisioned",
+  "revenue.emptyReason.not_provisioned.body":
+    "The revenue / settlement service is not yet enabled for this tenancy. Coordinate with Platform Admin to provision the channel.",
+  "revenue.emptyReason.fetch_failed.title": "Revenue fetch failed",
+  "revenue.emptyReason.fetch_failed.body":
+    "The backend returned an error while loading revenue records. Retry the page or wait for the next poll cycle.",
+  "revenue.emptyReason.permission_denied.title": "Access denied",
+  "revenue.emptyReason.permission_denied.body":
+    "Your role does not currently have scope to view this surface. Request the ops_finance_reviewer role to proceed.",
+  "revenue.emptyReason.external_unavailable.title":
+    "External platform unavailable",
+  "revenue.emptyReason.external_unavailable.body":
+    "Adapter-dependent records cannot be fetched right now. This is read-only data sourced from the external platform.",
+  "revenue.emptyReason.driver_not_eligible.title":
+    "Not applicable to this role",
+  "revenue.emptyReason.driver_not_eligible.body":
+    "This surface is not addressed to your actor type.",
+  "revenue.emptyReason.filtered_empty.title":
+    "No results for the active filter",
+  "revenue.emptyReason.filtered_empty.body":
+    "The current period / service-bucket / vehicle filter excluded every record. Clear filters to see the full set.",
+  "revenue.action.filterPeriod": "Period",
+  "revenue.action.filterServiceBucket": "Service bucket",
+  "revenue.action.filterVehicle": "Vehicle",
+  "revenue.action.refresh": "Refresh now",
+  "revenue.action.export": "Export",
+  "revenue.action.exportDisabled": "Export not enabled in phase 1",
+  "revenue.action.retry": "Retry",
+  "revenue.action.clearFilters": "Clear filters",
+  "revenue.action.contactPlatform": "Open Platform Admin /payments",
+  "revenue.action.requestAccess": "Request access",
+  "revenue.action.openInPlatformAdmin": "Open in Platform Admin",
+  "revenue.action.openPlatformAdminPayments": "Open Platform Admin /payments",
+  "revenue.action.openMismatchDrawer": "Open mismatch drawer",
+  "revenue.action.escalatePlatformAdmin": "Escalate in Platform Admin",
 
   // ── Driver Earnings ──
   "driverEarnings.title": "Driver Earnings",
@@ -2190,9 +2307,9 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.title": "收益儀表板",
   "revenue.subtitle": "收益分析 — 行程收入、司機應付款與結算狀態",
   "revenue.period.today": "今日",
+  "revenue.period.yesterday": "昨日",
   "revenue.period.7d": "近 7 天",
   "revenue.period.30d": "近 30 天",
-  "revenue.period.all": "所有時間",
   "revenue.bucket.all": "所有產品",
   "revenue.vehicle.all": "所有車輛",
   "revenue.totalRevenue": "總收益",
@@ -2811,6 +2928,115 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.emptyByVehicle": "此篩選條件無車輛收益。",
   "revenue.emptyPartnerBenefit": "此篩選條件下沒有合作福利行程。",
   "revenue.emptySettlement": "尚未生成帳單。",
+
+  // ── Revenue (canvas rebuild — packet §5.11) ──
+  "revenue.canvas.title": "收益審視",
+  "revenue.canvas.subtitle":
+    "期別 · 服務 · 車輛 · channel mix · settlement matrix — mismatch 修改在 Platform Admin 完成",
+  "revenue.tab.insight": "Insight",
+  "revenue.tab.channelMix": "Channel mix",
+  "revenue.tab.matrix": "Settlement matrix",
+  "revenue.tab.mismatch": "Mismatch review",
+  "revenue.kpi.billed": "當期 billed (MTD)",
+  "revenue.kpi.billedSub": "完成行程已確認收入",
+  "revenue.kpi.ownedShare": "自營佔比",
+  "revenue.kpi.ownedShareSub": "自營 vs 轉派行程占比",
+  "revenue.kpi.forwardedSyncFailed": "forwarded sync_failed",
+  "revenue.kpi.forwardedSyncFailedSub": "鏡像訂單因 adapter 同步失敗受阻",
+  "revenue.kpi.openRecon": "未結 reconciliation",
+  "revenue.kpi.openReconSub": "修改於 Platform Admin",
+  "revenue.banner.staleTitle": "資料已 {minutes} 分鐘 · {seconds} 秒後重新整理",
+  "revenue.banner.staleBody":
+    "Refresh tier T3 (medium · 15s)，下一次輪詢會更新數據。",
+  "revenue.banner.readOnlyTitle": "此頁為 read-only mirror · Q-OPS14",
+  "revenue.banner.readOnlyBody":
+    "ops_finance_reviewer 可開啟 mismatch drawer 但 mutation 必須 deep-link 到 Platform Admin /payments 處理。",
+  "revenue.channelMix.title": "Channel mix",
+  "revenue.channelMix.subtitle":
+    "自營行程通道：platform / partner / phone / tenant",
+  "revenue.channelMix.channel.platform": "Platform 自營派遣",
+  "revenue.channelMix.channel.partner": "合作 / 機場福利",
+  "revenue.channelMix.channel.phone": "電話原生訂單",
+  "revenue.channelMix.channel.tenant": "Tenant 企業派遣",
+  "revenue.channelMix.col.channel": "通道",
+  "revenue.channelMix.col.trips": "趟次",
+  "revenue.channelMix.col.share": "占比",
+  "revenue.channelMix.col.revenue": "營收",
+  "revenue.mismatch.title": "Mismatch review (Q-OPS14)",
+  "revenue.mismatch.subtitle":
+    "Forwarded 鏡像 sync_failed / manual fallback — drawer 為唯讀，mutation 在 Platform Admin。",
+  "revenue.mismatch.col.issueId": "問題 / 任務",
+  "revenue.mismatch.col.mirror": "鏡像 / 外部",
+  "revenue.mismatch.col.platform": "平台",
+  "revenue.mismatch.col.reason": "原因",
+  "revenue.mismatch.col.owner": "Finance 處理人",
+  "revenue.mismatch.col.age": "經過時間",
+  "revenue.mismatch.col.cta": "drawer / cross-app",
+  "revenue.mismatch.sort.ownerAge":
+    "排序：依 finance owner 再依 age (未指派優先 · 同 owner 最久未處理優先)",
+  "revenue.mismatch.age.days": "{days} 天",
+  "revenue.mismatch.age.hours": "{hours} 小時",
+  "revenue.mismatch.age.minutes": "{minutes} 分鐘",
+  "revenue.mismatch.age.justNow": "剛剛",
+  "revenue.mismatch.jobOnly": "job · {jobId}",
+  "revenue.mismatch.openDrawer": "開啟 mismatch drawer",
+  "revenue.mismatch.escalatePlatformAdmin": "於 Platform Admin 處理",
+  "revenue.mismatch.drawer.eyebrow": "Mismatch · 唯讀",
+  "revenue.mismatch.drawer.title": "Forwarded reconciliation",
+  "revenue.mismatch.drawer.subtitle":
+    "所有 mutation 與後續處理皆於 Platform Admin /payments 完成。",
+  "revenue.mismatch.drawer.platform": "平台",
+  "revenue.mismatch.drawer.mirror": "鏡像訂單",
+  "revenue.mismatch.drawer.external": "外部訂單",
+  "revenue.mismatch.drawer.reason": "原因",
+  "revenue.mismatch.drawer.status": "Forwarder 狀態",
+  "revenue.mismatch.drawer.lastError": "最後同步錯誤",
+  "revenue.mismatch.drawer.lastErrorRetryable": "可重試",
+  "revenue.mismatch.drawer.lastErrorNotRetryable": "不可重試",
+  "revenue.mismatch.drawer.financeStatus": "Finance issue 狀態",
+  "revenue.mismatch.drawer.financeOwner": "Finance 處理人",
+  "revenue.mismatch.drawer.financeMissing":
+    "尚未為此 mismatch 開立 finance issue。",
+  "revenue.mismatch.drawer.notFound": "查無對應的 mismatch 紀錄。",
+  "revenue.mismatch.drawer.close": "關閉抽屜",
+  "revenue.mismatch.drawer.openPlatformAdmin":
+    "於 Platform Admin /payments 開啟（新分頁）",
+  "revenue.mismatch.drawer.openPlatformAdminCreate":
+    "於 Platform Admin /payments 開立 issue（新分頁）",
+  "revenue.emptyReason.no_data.title": "此期間無收益紀錄",
+  "revenue.emptyReason.no_data.body":
+    "目前篩選的期間內沒有完成行程的收入。試著放寬期間，或確認確實有司機跑單。",
+  "revenue.emptyReason.not_provisioned.title": "收益功能未啟用",
+  "revenue.emptyReason.not_provisioned.body":
+    "此租戶尚未啟用收益 / 結算服務。請聯絡 Platform Admin 開通對應通道。",
+  "revenue.emptyReason.fetch_failed.title": "收益資料載入失敗",
+  "revenue.emptyReason.fetch_failed.body":
+    "後端在載入收益資料時回傳錯誤。重新整理頁面或等下一次輪詢更新。",
+  "revenue.emptyReason.permission_denied.title": "權限不足",
+  "revenue.emptyReason.permission_denied.body":
+    "您的角色目前無權限檢視此頁。請申請 ops_finance_reviewer 角色。",
+  "revenue.emptyReason.external_unavailable.title": "外部平台暫不可用",
+  "revenue.emptyReason.external_unavailable.body":
+    "目前無法取得依賴外部 adapter 的紀錄。這是來自外部平台的唯讀資料。",
+  "revenue.emptyReason.driver_not_eligible.title": "不適用此角色",
+  "revenue.emptyReason.driver_not_eligible.body": "此頁不對應您目前的角色。",
+  "revenue.emptyReason.filtered_empty.title": "目前的篩選沒有資料",
+  "revenue.emptyReason.filtered_empty.body":
+    "目前的期間 / 服務 / 車輛篩選排除了所有紀錄。清除篩選即可看到完整資料。",
+  "revenue.action.filterPeriod": "期別",
+  "revenue.action.filterServiceBucket": "服務",
+  "revenue.action.filterVehicle": "車輛",
+  "revenue.action.refresh": "立即更新",
+  "revenue.action.export": "匯出",
+  "revenue.action.exportDisabled": "Phase 1 暫未啟用匯出",
+  "revenue.action.retry": "重試",
+  "revenue.action.clearFilters": "清除篩選",
+  "revenue.action.contactPlatform": "開啟 Platform Admin /payments",
+  "revenue.action.requestAccess": "申請存取",
+  "revenue.action.openInPlatformAdmin": "在 Platform Admin 開啟",
+  "revenue.action.openPlatformAdminPayments": "開啟 Platform Admin /payments",
+  "revenue.action.openMismatchDrawer": "開啟 mismatch drawer",
+  "revenue.action.escalatePlatformAdmin": "於 Platform Admin 處理",
 
   // ── Driver Earnings ──
   "driverEarnings.title": "司機收益",

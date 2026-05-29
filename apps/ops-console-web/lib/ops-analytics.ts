@@ -16,7 +16,7 @@ type MoneyLike = {
   currency: string;
 } | null;
 
-export type RevenuePeriod = "today" | "7d" | "30d" | "all";
+export type RevenuePeriod = "today" | "yesterday" | "7d" | "30d";
 
 export type RevenueFilters = {
   period: RevenuePeriod;
@@ -97,15 +97,29 @@ function startOfToday(reference = new Date()): Date {
   return copy;
 }
 
-function periodStart(
+function periodBounds(
   period: RevenuePeriod,
   reference = new Date(),
-): Date | null {
-  if (period === "all") return null;
-  const base = startOfToday(reference);
-  const days = period === "today" ? 0 : period === "7d" ? 6 : 29;
-  base.setDate(base.getDate() - days);
-  return base;
+): { startMs: number; endMs: number } {
+  const today = startOfToday(reference);
+  const todayMs = today.getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  switch (period) {
+    case "today":
+      return { startMs: todayMs, endMs: todayMs + dayMs };
+    case "yesterday":
+      return { startMs: todayMs - dayMs, endMs: todayMs };
+    case "7d": {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 6);
+      return { startMs: start.getTime(), endMs: todayMs + dayMs };
+    }
+    case "30d": {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 29);
+      return { startMs: start.getTime(), endMs: todayMs + dayMs };
+    }
+  }
 }
 
 function matchesPeriod(
@@ -114,9 +128,9 @@ function matchesPeriod(
   reference = new Date(),
 ): boolean {
   if (!timestamp) return false;
-  const start = periodStart(period, reference);
-  if (!start) return true;
-  return new Date(timestamp).getTime() >= start.getTime();
+  const { startMs, endMs } = periodBounds(period, reference);
+  const ts = new Date(timestamp).getTime();
+  return ts >= startMs && ts < endMs;
 }
 
 function normalizeRevenueTask(
@@ -254,10 +268,7 @@ export function buildRevenueInsights(
       ) {
         return false;
       }
-      if (
-        filters.period !== "all" &&
-        !matchesPeriod(order.createdAt, filters.period)
-      ) {
+      if (!matchesPeriod(order.createdAt, filters.period)) {
         return false;
       }
       if (filters.vehicleId === "all") {
