@@ -186,7 +186,7 @@ export class IncidentService implements OnModuleInit {
       {
         incidents: [decorated],
         timelines: timelineEntries,
-        suppressions: suppressionWrite ? [suppressionWrite] : undefined,
+        ...(suppressionWrite ? { suppressions: [suppressionWrite] } : {}),
       },
       "create_incident",
     );
@@ -225,7 +225,9 @@ export class IncidentService implements OnModuleInit {
     incidentId: string,
     identity: BootstrapRequestIdentity | null = null,
   ) {
-    return this.cloneIncident(this.decorateIncident(this.require(incidentId), identity));
+    return this.cloneIncident(
+      this.decorateIncident(this.require(incidentId), identity),
+    );
   }
 
   updateIncident(
@@ -366,7 +368,7 @@ export class IncidentService implements OnModuleInit {
       {
         incidents: [decorated],
         timelines: timelineEntries,
-        suppressions: suppressionWrite ? [suppressionWrite] : undefined,
+        ...(suppressionWrite ? { suppressions: [suppressionWrite] } : {}),
       },
       "update_incident",
     );
@@ -465,7 +467,9 @@ export class IncidentService implements OnModuleInit {
 
   getTimeline(incidentId: string) {
     this.require(incidentId);
-    return (this.timelines.get(incidentId) ?? []).map((entry) => ({ ...entry }));
+    return (this.timelines.get(incidentId) ?? []).map((entry) => ({
+      ...entry,
+    }));
   }
 
   createFromDispatchException(
@@ -654,7 +658,10 @@ export class IncidentService implements OnModuleInit {
       );
     }
 
-    const nextExpiry = this.resolveSuppressionExpiry(activeSuppression, command);
+    const nextExpiry = this.resolveSuppressionExpiry(
+      activeSuppression,
+      command,
+    );
     const now = new Date().toISOString();
     const updatedSuppression: DriverMatchingSuppression = {
       ...activeSuppression,
@@ -726,7 +733,9 @@ export class IncidentService implements OnModuleInit {
     }));
   }
 
-  private hydrateSuppressions(suppressions: readonly DriverMatchingSuppression[]) {
+  private hydrateSuppressions(
+    suppressions: readonly DriverMatchingSuppression[],
+  ) {
     for (const suppression of suppressions) {
       if (!suppression.sourceIncidentId) {
         continue;
@@ -737,11 +746,15 @@ export class IncidentService implements OnModuleInit {
       );
       if (!incident?.relatedDriverId) continue;
     }
-    this.incidents = this.incidents.map((incident) => this.decorateIncident(incident));
+    this.incidents = this.incidents.map((incident) =>
+      this.decorateIncident(incident),
+    );
   }
 
   private require(incidentId: string) {
-    const incident = this.incidents.find((candidate) => candidate.incidentId === incidentId);
+    const incident = this.incidents.find(
+      (candidate) => candidate.incidentId === incidentId,
+    );
     if (!incident) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -817,10 +830,16 @@ export class IncidentService implements OnModuleInit {
       serviceRecoveryActions: incident.serviceRecoveryActions.map((action) => ({
         ...action,
       })),
-      availableActions: incident.availableActions?.map((action) => ({ ...action })),
       matchingSuppression: incident.matchingSuppression
         ? { ...incident.matchingSuppression }
         : null,
+      ...(incident.availableActions
+        ? {
+            availableActions: incident.availableActions.map((action) => ({
+              ...action,
+            })),
+          }
+        : {}),
     };
   }
 
@@ -837,7 +856,13 @@ export class IncidentService implements OnModuleInit {
       ...incident,
       serviceRecoveryActions: recoveryActions,
       matchingSuppression: suppression,
-      availableActions: this.buildAvailableActions(suppression, identity),
+      ...(() => {
+        const availableActions = this.buildAvailableActions(
+          suppression,
+          identity,
+        );
+        return availableActions.length > 0 ? { availableActions } : {};
+      })(),
     };
   }
 
@@ -874,9 +899,9 @@ export class IncidentService implements OnModuleInit {
       {
         action: "extend_matching_suppression",
         enabled: isOpsManager,
-        disabledReasonCode: isOpsManager ? undefined : "ops_manager_required",
         requiresReason: true,
         riskLevel: "high",
+        ...(isOpsManager ? {} : { disabledReasonCode: "ops_manager_required" }),
       },
     ];
   }
@@ -969,7 +994,9 @@ export class IncidentService implements OnModuleInit {
     }
 
     const base = Date.parse(suppression.expiresAt);
-    return new Date(base + command.extendByHours * 60 * 60 * 1000).toISOString();
+    return new Date(
+      base + command.extendByHours * 60 * 60 * 1000,
+    ).toISOString();
   }
 
   private requireOpsManager(identity: BootstrapRequestIdentity | null) {
@@ -1024,14 +1051,26 @@ export class IncidentService implements OnModuleInit {
     if (!this.incidentRepository) return;
     void this.incidentRepository
       .persistChanges({
-        incidents: changes.incidents?.map((incident) =>
-          this.cloneIncident(incident),
-        ),
-        timelines: changes.timelines?.map((entry) => ({ ...entry })),
-        suppressions: changes.suppressions?.map((entry) => ({
-          ...entry,
-          suppression: { ...entry.suppression },
-        })),
+        ...(changes.incidents
+          ? {
+              incidents: changes.incidents.map((incident) =>
+                this.cloneIncident(incident),
+              ),
+            }
+          : {}),
+        ...(changes.timelines
+          ? {
+              timelines: changes.timelines.map((entry) => ({ ...entry })),
+            }
+          : {}),
+        ...(changes.suppressions
+          ? {
+              suppressions: changes.suppressions.map((entry) => ({
+                ...entry,
+                suppression: { ...entry.suppression },
+              })),
+            }
+          : {}),
       })
       .catch((error: unknown) => {
         this.incidentRepository!.reportPersistenceFailure(error, context);
