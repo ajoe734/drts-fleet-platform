@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import type { CSSProperties, FormEvent } from "react";
 import { useEffect, useState, useTransition } from "react";
 import type {
   BusinessDispatchSubtype,
@@ -10,7 +11,14 @@ import type {
   TenantCostCenterRecord,
   TenantPassengerRecord,
 } from "@drts/contracts";
-import { SurfaceCard } from "@/components/page-primitives";
+import {
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasField,
+  CanvasPill,
+  buildCanvasTheme,
+} from "@drts/ui-web";
 import {
   buildTenantBookingCreateCommand,
   getDefaultDateTimeLocalValue,
@@ -27,12 +35,193 @@ const BUSINESS_SUBTYPE_OPTIONS: Array<{
 }> = [
   {
     value: "credit_card_airport_transfer",
-    label: "Credit-card airport transfer",
+    label: "機場接送",
   },
-  { value: "enterprise_dispatch", label: "Enterprise dispatch" },
+  { value: "enterprise_dispatch", label: "企業派車" },
 ];
 
 const CURRENCY = "TWD";
+
+const th = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
+
+const layoutStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
+  gap: 16,
+  alignItems: "flex-start",
+};
+
+const responsiveLayoutStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
+const columnStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+  minWidth: 0,
+};
+
+const fieldGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+};
+
+const compactFieldGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const spanAllStyle: CSSProperties = {
+  gridColumn: "1 / -1",
+};
+
+const nativeInputStyle: CSSProperties = {
+  width: "100%",
+  background: th.bgRaised,
+  border: `1px solid ${th.border}`,
+  borderRadius: 7,
+  padding: "8px 10px",
+  fontSize: 12.5,
+  color: th.text,
+  outline: "none",
+  fontFamily: th.fontFamily,
+  boxSizing: "border-box",
+};
+
+const nativeMonoInputStyle: CSSProperties = {
+  ...nativeInputStyle,
+  fontFamily: th.monoFamily,
+  fontSize: 11.5,
+};
+
+const sectionLabelStyle: CSSProperties = {
+  margin: "16px 0 10px",
+  fontSize: 10.5,
+  fontWeight: 600,
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  color: th.textMuted,
+};
+
+const sectionCopyStyle: CSSProperties = {
+  margin: "0 0 12px",
+  fontSize: 12,
+  lineHeight: 1.5,
+  color: th.textMuted,
+};
+
+const advancedDetailsStyle: CSSProperties = {
+  marginTop: 16,
+  borderTop: `1px solid ${th.border}`,
+  paddingTop: 12,
+};
+
+const advancedSummaryStyle: CSSProperties = {
+  cursor: "pointer",
+  fontSize: 11.5,
+  fontWeight: 600,
+  color: th.textMuted,
+  listStyle: "none",
+};
+
+const summaryCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
+const summaryBlockStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const nativeButtonRowStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const pillRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+};
+
+const checklistStyle: CSSProperties = {
+  margin: "8px 0 0",
+  paddingLeft: 18,
+  color: th.text,
+  fontSize: 12,
+  lineHeight: 1.5,
+};
+
+const toggleGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const toggleLabelStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 12,
+  color: th.text,
+};
+
+const toggleInputStyle: CSSProperties = {
+  accentColor: th.accent,
+};
+
+const actionRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  marginTop: 12,
+  flexWrap: "wrap",
+};
+
+const growStyle: CSSProperties = {
+  flex: 1,
+};
+
+const primaryButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  padding: "5px 10px",
+  fontSize: 12,
+  height: 28,
+  fontWeight: 500,
+  background: th.accent,
+  color: "#fff",
+  border: `1px solid ${th.accent}`,
+  borderRadius: 7,
+  lineHeight: 1,
+  fontFamily: th.fontFamily,
+};
+
+const errorStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 7,
+  border: `1px solid ${th.dangerBorder}`,
+  background: th.dangerBg,
+  color: th.danger,
+  fontSize: 12,
+};
+
+const mutedCopyStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  color: th.textMuted,
+  lineHeight: 1.5,
+};
 
 function formatCurrency(amountMinor: number | null | undefined) {
   if (amountMinor == null || Number.isNaN(amountMinor)) {
@@ -62,11 +251,11 @@ function describeSubtype(value: BusinessDispatchSubtype) {
 function describeDirection(value: "" | "pickup" | "dropoff") {
   switch (value) {
     case "pickup":
-      return "Pickup";
+      return "接機";
     case "dropoff":
-      return "Dropoff";
+      return "送機";
     default:
-      return "Not set";
+      return "未指定";
   }
 }
 
@@ -74,15 +263,15 @@ function describeDecision(result: TenantApprovalEvaluationResult | null) {
   const decision = result?.outcome?.decision ?? "allow";
   switch (decision) {
     case "require_approval":
-      return "Approval required";
+      return "需要審批";
     case "block":
-      return "Blocked";
+      return "已阻擋";
     case "warn":
-      return "Warning";
+      return "警示";
     case "manual_review":
-      return "Manual review";
+      return "人工審查";
     default:
-      return "Allowed";
+      return "可送出";
   }
 }
 
@@ -94,6 +283,23 @@ function describeImpactLabel(
     return code ? `Cost center ${code}` : "Cost center";
   }
   return "Tenant";
+}
+
+function getDecisionTone(
+  result: TenantApprovalEvaluationResult | null,
+): "accent" | "danger" | "info" | "neutral" | "success" | "warn" {
+  switch (result?.outcome?.decision) {
+    case "block":
+      return "danger";
+    case "require_approval":
+      return "warn";
+    case "manual_review":
+      return "info";
+    case "warn":
+      return "warn";
+    default:
+      return "accent";
+  }
 }
 
 export function TenantBookingCreateForm({
@@ -165,6 +371,7 @@ export function TenantBookingCreateForm({
     useState<TenantBookingQuotaImpactPreview | null>(null);
   const [approvalEvaluation, setApprovalEvaluation] =
     useState<TenantApprovalEvaluationResult | null>(null);
+
   const estimatedAmountMinor = parseAmountMajor(quotedFare);
   const draft: TenantBookingDraftValues = {
     businessDispatchSubtype,
@@ -329,7 +536,7 @@ export function TenantBookingCreateForm({
     vehiclePreference,
   ]);
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitError(null);
 
@@ -393,576 +600,850 @@ export function TenantBookingCreateForm({
     policyRefreshing ||
     approvalEvaluation?.outcome?.blocked === true ||
     missingRequiredFields;
+  const policyStateTone = policyRefreshing ? "info" : "accent";
 
   return (
-    <form className="booking-create-layout" onSubmit={handleSubmit}>
-      <section className="booking-create-main">
-        <SurfaceCard
-          kicker="Trip"
-          title="Route and service"
-          description="Choose the service bucket, timing, passenger, and address context that the tenant booking command already supports."
-        >
-          <div className="form-grid">
-            <label className="field-stack">
-              <span>Service subtype</span>
-              <select
-                onChange={(event) =>
-                  setBusinessDispatchSubtype(
-                    event.target.value as BusinessDispatchSubtype,
-                  )
-                }
-                value={businessDispatchSubtype}
-              >
-                {BUSINESS_SUBTYPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field-stack">
-              <span>Passenger</span>
-              <select
-                onChange={(event) => setSelectedPassengerId(event.target.value)}
-                value={selectedPassengerId}
-              >
-                <option value="">Manual passenger entry</option>
-                {passengers.map((passenger) => (
-                  <option
-                    key={passenger.passengerId}
-                    value={passenger.passengerId}
+    <form onSubmit={handleSubmit} style={responsiveLayoutStyle}>
+      <div style={layoutStyle}>
+        <div style={columnStyle}>
+          <CanvasCard
+            theme={th}
+            title="行程"
+            subtitle="服務類型、預約時窗、上下車與乘客資訊維持在同一張主卡片。"
+          >
+            <div style={fieldGridStyle}>
+              <div>
+                <CanvasField theme={th} label="服務類型" required>
+                  <select
+                    onChange={(event) =>
+                      setBusinessDispatchSubtype(
+                        event.target.value as BusinessDispatchSubtype,
+                      )
+                    }
+                    style={nativeInputStyle}
+                    value={businessDispatchSubtype}
                   >
-                    {passenger.fullName}
-                    {passenger.employeeNo ? ` · ${passenger.employeeNo}` : ""}
-                  </option>
-                ))}
-              </select>
-              <span className="field-hint">
-                Select a directory passenger for booking-on-behalf, or stay on
-                manual entry.
-              </span>
-            </label>
+                    {BUSINESS_SUBTYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+              </div>
 
-            <label className="field-stack">
-              <span>Reservation start</span>
-              <input
-                onChange={(event) =>
-                  setReservationWindowStart(event.target.value)
-                }
-                required
-                type="datetime-local"
-                value={reservationWindowStart}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Reservation end</span>
-              <input
-                onChange={(event) =>
-                  setReservationWindowEnd(event.target.value)
-                }
-                required
-                type="datetime-local"
-                value={reservationWindowEnd}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Passenger name</span>
-              <input
-                disabled={!!activePassenger}
-                onChange={(event) => setPassengerName(event.target.value)}
-                required
-                type="text"
-                value={passengerName}
-              />
-              <span className="field-hint">
-                {activePassenger
-                  ? "Passenger name stays locked to the selected directory record."
-                  : "Switch to a directory passenger if this booking is on behalf of someone else."}
-              </span>
-            </label>
-
-            <label className="field-stack">
-              <span>Passenger phone</span>
-              <input
-                disabled={passengerPhoneLocked}
-                onChange={(event) => setPassengerPhone(event.target.value)}
-                required
-                type="tel"
-                value={passengerPhone}
-              />
-              <span className="field-hint">
-                {activePassenger
-                  ? passengerPhoneLocked
-                    ? "Passenger phone comes from the selected directory record."
-                    : "This directory passenger has no published phone number; provide one here."
-                  : "Manual passenger entry requires a direct contact phone."}
-              </span>
-            </label>
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Pickup and drop"
-          title="Address-book assisted routing"
-          description="Saved addresses fill the command payload, but the final address text and coordinates remain editable so the page does not invent a separate geocoding workflow."
-        >
-          <div className="form-grid">
-            <label className="field-stack">
-              <span>Saved pickup</span>
-              <select
-                onChange={(event) => setPickupAddressId(event.target.value)}
-                value={pickupAddressId}
-              >
-                <option value="">Manual pickup</option>
-                {addresses.map((address) => (
-                  <option key={address.addressId} value={address.addressId}>
-                    {address.addressName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field-stack">
-              <span>Saved drop-off</span>
-              <select
-                onChange={(event) => setDropoffAddressId(event.target.value)}
-                value={dropoffAddressId}
-              >
-                <option value="">Manual drop-off</option>
-                {addresses.map((address) => (
-                  <option key={address.addressId} value={address.addressId}>
-                    {address.addressName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field-stack booking-field-span">
-              <span>Pickup address</span>
-              <input
-                onChange={(event) => {
-                  setPickupAddressId("");
-                  setPickupAddress(event.target.value);
-                }}
-                required
-                type="text"
-                value={pickupAddress}
-              />
-            </label>
-            <label className="field-stack booking-field-span">
-              <span>Drop-off address</span>
-              <input
-                onChange={(event) => {
-                  setDropoffAddressId("");
-                  setDropoffAddress(event.target.value);
-                }}
-                required
-                type="text"
-                value={dropoffAddress}
-              />
-            </label>
-            <label className="field-stack">
-              <span>Pickup lat</span>
-              <input
-                inputMode="decimal"
-                onChange={(event) => {
-                  setPickupAddressId("");
-                  setPickupLat(event.target.value);
-                }}
-                type="text"
-                value={pickupLat}
-              />
-            </label>
-            <label className="field-stack">
-              <span>Pickup lng</span>
-              <input
-                inputMode="decimal"
-                onChange={(event) => {
-                  setPickupAddressId("");
-                  setPickupLng(event.target.value);
-                }}
-                type="text"
-                value={pickupLng}
-              />
-            </label>
-            <label className="field-stack">
-              <span>Drop-off lat</span>
-              <input
-                inputMode="decimal"
-                onChange={(event) => {
-                  setDropoffAddressId("");
-                  setDropoffLat(event.target.value);
-                }}
-                type="text"
-                value={dropoffLat}
-              />
-            </label>
-            <label className="field-stack">
-              <span>Drop-off lng</span>
-              <input
-                inputMode="decimal"
-                onChange={(event) => {
-                  setDropoffAddressId("");
-                  setDropoffLng(event.target.value);
-                }}
-                type="text"
-                value={dropoffLng}
-              />
-            </label>
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Governance"
-          title="Cost center, finance, and submit metadata"
-          description="This section stays inside the current booking command: canonical cost center, optional finance references, proof requirements, and contact metadata."
-        >
-          <div className="form-grid">
-            {costCenters.length > 0 ? (
-              <label className="field-stack">
-                <span>Cost center</span>
-                <select
-                  onChange={(event) => setCostCenter(event.target.value)}
+              <div>
+                <CanvasField
+                  theme={th}
+                  label="預約 / 即時"
+                  hint="TN 參考稿保留切換位，這裡仍以 reservation window 建立預約叫車。"
                   required
-                  value={costCenter}
                 >
-                  <option value="">Select a cost center</option>
-                  {costCenters.map((center) => (
-                    <option key={center.code} value={center.code}>
-                      {center.code} · {center.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <label className="field-stack">
-                <span>Cost center</span>
-                <input
-                  onChange={(event) => setCostCenter(event.target.value)}
-                  placeholder="Legacy free-text cost center"
-                  type="text"
-                  value={costCenter}
-                />
-                <span className="field-hint">
-                  No active directory rows are published for this tenant.
-                </span>
-              </label>
-            )}
-
-            <label className="field-stack">
-              <span>Estimated spend ({CURRENCY})</span>
-              <input
-                inputMode="decimal"
-                onChange={(event) => setQuotedFare(event.target.value)}
-                placeholder="1580"
-                type="text"
-                value={quotedFare}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Benefit reference</span>
-              <input
-                onChange={(event) => setBenefitReference(event.target.value)}
-                type="text"
-                value={benefitReference}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Vehicle preference</span>
-              <input
-                onChange={(event) => setVehiclePreference(event.target.value)}
-                type="text"
-                value={vehiclePreference}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Direction</span>
-              <select
-                onChange={(event) =>
-                  setDirection(event.target.value as "" | "pickup" | "dropoff")
-                }
-                value={direction}
-              >
-                <option value="">Not set</option>
-                <option value="pickup">Pickup</option>
-                <option value="dropoff">Dropoff</option>
-              </select>
-            </label>
-
-            <label className="field-stack">
-              <span>Flight no.</span>
-              <input
-                onChange={(event) => setFlightNo(event.target.value)}
-                type="text"
-                value={flightNo}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Terminal</span>
-              <input
-                onChange={(event) => setTerminal(event.target.value)}
-                type="text"
-                value={terminal}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Luggage count</span>
-              <input
-                inputMode="numeric"
-                onChange={(event) => setLuggageCount(event.target.value)}
-                type="text"
-                value={luggageCount}
-              />
-            </label>
-
-            <label className="field-stack booking-field-span">
-              <span>Notes</span>
-              <textarea
-                onChange={(event) => setNotes(event.target.value)}
-                rows={3}
-                value={notes}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Booked by name</span>
-              <input
-                onChange={(event) => setBookedByName(event.target.value)}
-                type="text"
-                value={bookedByName}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Booked by email</span>
-              <input
-                onChange={(event) => setBookedByEmail(event.target.value)}
-                type="email"
-                value={bookedByEmail}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Onsite contact</span>
-              <input
-                onChange={(event) => setOnsiteContactName(event.target.value)}
-                type="text"
-                value={onsiteContactName}
-              />
-            </label>
-
-            <label className="field-stack">
-              <span>Onsite phone</span>
-              <input
-                onChange={(event) => setOnsiteContactPhone(event.target.value)}
-                type="tel"
-                value={onsiteContactPhone}
-              />
-            </label>
-          </div>
-
-          <div className="chip-row">
-            <label className="status-chip booking-toggle">
-              <input
-                checked={signoffRequired}
-                onChange={(event) => setSignoffRequired(event.target.checked)}
-                type="checkbox"
-              />
-              Signoff required
-            </label>
-            <label className="status-chip booking-toggle">
-              <input
-                checked={expenseProofRequired}
-                onChange={(event) =>
-                  setExpenseProofRequired(event.target.checked)
-                }
-                type="checkbox"
-              />
-              Expense proof required
-            </label>
-          </div>
-        </SurfaceCard>
-      </section>
-
-      <aside className="booking-create-side">
-        <SurfaceCard
-          kicker="Readiness"
-          title="Policy evaluation"
-          description="Quota preview and approval evaluation are recomputed from the current draft after required booking fields are present."
-        >
-          <dl className="definition-grid">
-            <div>
-              <dt>Decision</dt>
-              <dd>{describeDecision(approvalEvaluation)}</dd>
-            </div>
-            <div>
-              <dt>Service</dt>
-              <dd>{describeSubtype(businessDispatchSubtype)}</dd>
-            </div>
-            <div>
-              <dt>Direction</dt>
-              <dd>{describeDirection(direction)}</dd>
-            </div>
-            <div>
-              <dt>Estimated spend</dt>
-              <dd>{formatCurrency(estimatedAmountMinor)}</dd>
-            </div>
-            <div>
-              <dt>Passenger role</dt>
-              <dd>{activePassenger?.roles?.[0] ?? "Not published"}</dd>
-            </div>
-            <div>
-              <dt>Refresh</dt>
-              <dd>{policyRefreshing ? "Updating…" : "Auto"}</dd>
-            </div>
-          </dl>
-
-          {policyError ? (
-            <div className="form-error" role="alert">
-              {policyError}
-            </div>
-          ) : null}
-
-          {approvalEvaluation?.approvalPlan ? (
-            <div className="detail-stack">
-              <strong>Approval plan</strong>
-              <div className="chip-row">
-                <span className="status-chip">
-                  Mode: {approvalEvaluation.approvalPlan.approvalMode}
-                </span>
-                <span className="status-chip">
-                  Timeout: {approvalEvaluation.approvalPlan.timeoutHours}h
-                </span>
-                <span className="status-chip">
-                  Fallback: {approvalEvaluation.approvalPlan.fallbackPolicy}
-                </span>
+                  <select disabled style={nativeInputStyle} value="預約">
+                    <option value="預約">預約</option>
+                    <option value="即時">即時</option>
+                  </select>
+                </CanvasField>
               </div>
-              <ul className="panel-list">
-                {approvalEvaluation.approvalPlan.approvers.map((approver) => (
-                  <li
-                    key={`${approver.kind}-${approver.userId ?? approver.roleCode ?? approver.costCenterCode ?? "unknown"}`}
-                  >
-                    {approver.displayName ??
-                      approver.userId ??
-                      approver.roleCode ??
-                      approver.costCenterCode ??
-                      approver.kind}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
 
-          {(approvalEvaluation?.warnings?.length ?? 0) > 0 ? (
-            <div className="detail-stack">
-              <strong>Warnings</strong>
-              <ul className="panel-list">
-                {(approvalEvaluation?.warnings ?? []).map((warning) => (
-                  <li key={`${warning.source}-${warning.code}`}>
-                    {warning.message} ({warning.code})
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Quota"
-          title="Impact snapshot"
-          description="The sidebar shows the backend preview response directly instead of inventing a separate forecast model."
-        >
-          {quotaPreview?.impacts?.length ? (
-            <div className="detail-stack">
-              <div className="chip-row">
-                <span className="status-chip">
-                  Period: {quotaPreview.periodKey}
-                </span>
-                <span className="status-chip">
-                  Trigger: {quotaPreview.combinedTriggered}
-                </span>
+              <div style={spanAllStyle}>
+                <CanvasField
+                  theme={th}
+                  label="Pickup 地址"
+                  hint="從地址簿選或自由輸入。"
+                  required
+                >
+                  <input
+                    onChange={(event) => {
+                      setPickupAddressId("");
+                      setPickupAddress(event.target.value);
+                    }}
+                    required
+                    style={nativeInputStyle}
+                    type="text"
+                    value={pickupAddress}
+                  />
+                </CanvasField>
               </div>
-              <ul className="panel-list">
-                {quotaPreview.impacts.map((impact) => (
-                  <li
-                    key={`${impact.scope}-${impact.costCenterCode ?? "tenant"}-${impact.dimension}`}
+
+              <div style={spanAllStyle}>
+                <CanvasField theme={th} label="Drop-off 地址" required>
+                  <input
+                    onChange={(event) => {
+                      setDropoffAddressId("");
+                      setDropoffAddress(event.target.value);
+                    }}
+                    required
+                    style={nativeInputStyle}
+                    type="text"
+                    value={dropoffAddress}
+                  />
+                </CanvasField>
+              </div>
+
+              <div>
+                <CanvasField theme={th} label="出發時間" required>
+                  <input
+                    onChange={(event) =>
+                      setReservationWindowStart(event.target.value)
+                    }
+                    required
+                    style={nativeInputStyle}
+                    type="datetime-local"
+                    value={reservationWindowStart}
+                  />
+                </CanvasField>
+              </div>
+
+              <div>
+                <CanvasField theme={th} label="passenger 數" required>
+                  <input
+                    readOnly
+                    style={nativeMonoInputStyle}
+                    type="text"
+                    value="1"
+                  />
+                </CanvasField>
+              </div>
+
+              <div>
+                <CanvasField
+                  theme={th}
+                  label="行李"
+                  hint="保留 command 欄位，對齊 TN 行程卡的補充資料。"
+                >
+                  <input
+                    inputMode="numeric"
+                    onChange={(event) => setLuggageCount(event.target.value)}
+                    style={nativeInputStyle}
+                    type="text"
+                    value={luggageCount}
+                  />
+                </CanvasField>
+              </div>
+
+              <div>
+                <CanvasField theme={th} label="特殊需求">
+                  <input
+                    onChange={(event) =>
+                      setVehiclePreference(event.target.value)
+                    }
+                    style={nativeInputStyle}
+                    type="text"
+                    value={vehiclePreference}
+                  />
+                </CanvasField>
+              </div>
+
+              <div>
+                <CanvasField theme={th} label="Pickup 常用地址">
+                  <select
+                    onChange={(event) => setPickupAddressId(event.target.value)}
+                    style={nativeInputStyle}
+                    value={pickupAddressId}
                   >
-                    {describeImpactLabel(impact.scope, impact.costCenterCode)} ·{" "}
-                    {impact.dimension} · before{" "}
-                    {impact.remainingBefore ?? "n/a"} /{" "}
-                    {impact.limitValue ?? "n/a"} · after{" "}
-                    {impact.remainingAfter ?? "n/a"} · remaining{" "}
-                    {formatPercent(impact.remainingPercentAfter)} ·{" "}
-                    {impact.triggered}
-                  </li>
-                ))}
-              </ul>
+                    <option value="">手動輸入 pickup</option>
+                    {addresses.map((address) => (
+                      <option key={address.addressId} value={address.addressId}>
+                        {address.addressName}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+              </div>
+
+              <div>
+                <CanvasField theme={th} label="Drop 常用地址">
+                  <select
+                    onChange={(event) =>
+                      setDropoffAddressId(event.target.value)
+                    }
+                    style={nativeInputStyle}
+                    value={dropoffAddressId}
+                  >
+                    <option value="">手動輸入 drop</option>
+                    {addresses.map((address) => (
+                      <option key={address.addressId} value={address.addressId}>
+                        {address.addressName}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+              </div>
+
+              <div>
+                <CanvasField
+                  theme={th}
+                  label="乘客姓名"
+                  hint={
+                    activePassenger
+                      ? "代訂時會鎖定已選通訊錄資料。"
+                      : "未選通訊錄時可直接手動輸入。"
+                  }
+                  required
+                >
+                  <input
+                    disabled={!!activePassenger}
+                    onChange={(event) => setPassengerName(event.target.value)}
+                    required
+                    style={nativeInputStyle}
+                    type="text"
+                    value={passengerName}
+                  />
+                </CanvasField>
+              </div>
+
+              <div>
+                <CanvasField
+                  theme={th}
+                  label="乘客電話"
+                  hint={
+                    activePassenger
+                      ? passengerPhoneLocked
+                        ? "電話沿用通訊錄紀錄。"
+                        : "此通訊錄乘客未提供電話，請在此補上。"
+                      : "手動輸入乘客時需提供聯絡電話。"
+                  }
+                  required
+                >
+                  <input
+                    disabled={passengerPhoneLocked}
+                    onChange={(event) => setPassengerPhone(event.target.value)}
+                    required
+                    style={nativeInputStyle}
+                    type="tel"
+                    value={passengerPhone}
+                  />
+                </CanvasField>
+              </div>
             </div>
-          ) : (
-            <p className="muted-copy">
-              Fill the core booking fields to get quota impact feedback.
+
+            <div style={sectionLabelStyle}>Trip options</div>
+            <p style={sectionCopyStyle}>
+              方向、航班、航廈與座標仍保留在主欄，避免額外拆卡。
             </p>
-          )}
-        </SurfaceCard>
+            <details style={advancedDetailsStyle}>
+              <summary style={advancedSummaryStyle}>進階行程欄位</summary>
+              <p style={sectionCopyStyle}>
+                常用地址、乘客手動資料、window end 與航班資訊保留在同一卡。
+              </p>
+              <div style={compactFieldGridStyle}>
+                <div>
+                  <CanvasField theme={th} label="乘客" required>
+                    <select
+                      onChange={(event) =>
+                        setSelectedPassengerId(event.target.value)
+                      }
+                      style={nativeInputStyle}
+                      value={selectedPassengerId}
+                    >
+                      <option value="">手動輸入乘客</option>
+                      {passengers.map((passenger) => (
+                        <option
+                          key={passenger.passengerId}
+                          value={passenger.passengerId}
+                        >
+                          {passenger.fullName}
+                          {passenger.employeeNo
+                            ? ` · ${passenger.employeeNo}`
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                </div>
 
-        <SurfaceCard
-          kicker="Submit"
-          title="Create the booking"
-          description="Submit is allowed for normal and approval-required outcomes, but blocked outcomes stay disabled until the draft changes."
-        >
-          {submitError ? (
-            <div className="form-error" role="alert">
-              {submitError}
+                <div>
+                  <CanvasField
+                    theme={th}
+                    label="預約結束"
+                    hint="保留 reservation window end 供後端審批與派發判斷。"
+                    required
+                  >
+                    <input
+                      onChange={(event) =>
+                        setReservationWindowEnd(event.target.value)
+                      }
+                      required
+                      style={nativeInputStyle}
+                      type="datetime-local"
+                      value={reservationWindowEnd}
+                    />
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField theme={th} label="Pickup 常用地址">
+                    <select
+                      onChange={(event) =>
+                        setPickupAddressId(event.target.value)
+                      }
+                      style={nativeInputStyle}
+                      value={pickupAddressId}
+                    >
+                      <option value="">手動輸入 pickup</option>
+                      {addresses.map((address) => (
+                        <option
+                          key={address.addressId}
+                          value={address.addressId}
+                        >
+                          {address.addressName}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField theme={th} label="Drop 常用地址">
+                    <select
+                      onChange={(event) =>
+                        setDropoffAddressId(event.target.value)
+                      }
+                      style={nativeInputStyle}
+                      value={dropoffAddressId}
+                    >
+                      <option value="">手動輸入 drop</option>
+                      {addresses.map((address) => (
+                        <option
+                          key={address.addressId}
+                          value={address.addressId}
+                        >
+                          {address.addressName}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField
+                    theme={th}
+                    label="乘客姓名"
+                    hint={
+                      activePassenger
+                        ? "代訂時會鎖定已選通訊錄資料。"
+                        : "未選通訊錄時可直接手動輸入。"
+                    }
+                    required
+                  >
+                    <input
+                      disabled={!!activePassenger}
+                      onChange={(event) => setPassengerName(event.target.value)}
+                      required
+                      style={nativeInputStyle}
+                      type="text"
+                      value={passengerName}
+                    />
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField
+                    theme={th}
+                    label="乘客電話"
+                    hint={
+                      activePassenger
+                        ? passengerPhoneLocked
+                          ? "電話沿用通訊錄紀錄。"
+                          : "此通訊錄乘客未提供電話，請在此補上。"
+                        : "手動輸入乘客時需提供聯絡電話。"
+                    }
+                    required
+                  >
+                    <input
+                      disabled={passengerPhoneLocked}
+                      onChange={(event) =>
+                        setPassengerPhone(event.target.value)
+                      }
+                      required
+                      style={nativeInputStyle}
+                      type="tel"
+                      value={passengerPhone}
+                    />
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField theme={th} label="接機 / 送機">
+                    <select
+                      onChange={(event) =>
+                        setDirection(
+                          event.target.value as "" | "pickup" | "dropoff",
+                        )
+                      }
+                      style={nativeInputStyle}
+                      value={direction}
+                    >
+                      <option value="">未指定</option>
+                      <option value="pickup">接機</option>
+                      <option value="dropoff">送機</option>
+                    </select>
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField theme={th} label="Flight no.">
+                    <input
+                      onChange={(event) => setFlightNo(event.target.value)}
+                      style={nativeInputStyle}
+                      type="text"
+                      value={flightNo}
+                    />
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField theme={th} label="Terminal">
+                    <input
+                      onChange={(event) => setTerminal(event.target.value)}
+                      style={nativeInputStyle}
+                      type="text"
+                      value={terminal}
+                    />
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField theme={th} label="Pickup lat">
+                    <input
+                      inputMode="decimal"
+                      onChange={(event) => {
+                        setPickupAddressId("");
+                        setPickupLat(event.target.value);
+                      }}
+                      style={nativeMonoInputStyle}
+                      type="text"
+                      value={pickupLat}
+                    />
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField theme={th} label="Pickup lng">
+                    <input
+                      inputMode="decimal"
+                      onChange={(event) => {
+                        setPickupAddressId("");
+                        setPickupLng(event.target.value);
+                      }}
+                      style={nativeMonoInputStyle}
+                      type="text"
+                      value={pickupLng}
+                    />
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField theme={th} label="Drop-off lat">
+                    <input
+                      inputMode="decimal"
+                      onChange={(event) => {
+                        setDropoffAddressId("");
+                        setDropoffLat(event.target.value);
+                      }}
+                      style={nativeMonoInputStyle}
+                      type="text"
+                      value={dropoffLat}
+                    />
+                  </CanvasField>
+                </div>
+
+                <div>
+                  <CanvasField theme={th} label="Drop-off lng">
+                    <input
+                      inputMode="decimal"
+                      onChange={(event) => {
+                        setDropoffAddressId("");
+                        setDropoffLng(event.target.value);
+                      }}
+                      style={nativeMonoInputStyle}
+                      type="text"
+                      value={dropoffLng}
+                    />
+                  </CanvasField>
+                </div>
+              </div>
+            </details>
+          </CanvasCard>
+        </div>
+
+        <div style={columnStyle}>
+          <CanvasCard
+            theme={th}
+            title="關聯與審批"
+            subtitle="乘客關聯、成本中心、審批與配額影響集中在同一張側欄卡片。"
+          >
+            <div style={fieldGridStyle}>
+              <div>
+                <CanvasField theme={th} label="passenger" required>
+                  <select
+                    onChange={(event) =>
+                      setSelectedPassengerId(event.target.value)
+                    }
+                    style={nativeInputStyle}
+                    value={selectedPassengerId}
+                  >
+                    <option value="">手動輸入乘客</option>
+                    {passengers.map((passenger) => (
+                      <option
+                        key={passenger.passengerId}
+                        value={passenger.passengerId}
+                      >
+                        {passenger.fullName}
+                        {passenger.employeeNo
+                          ? ` · ${passenger.employeeNo}`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+              </div>
+
+              {costCenters.length > 0 ? (
+                <div>
+                  <CanvasField theme={th} label="cost center" required>
+                    <select
+                      onChange={(event) => setCostCenter(event.target.value)}
+                      required
+                      style={nativeInputStyle}
+                      value={costCenter}
+                    >
+                      <option value="">選擇 cost center</option>
+                      {costCenters.map((center) => (
+                        <option key={center.code} value={center.code}>
+                          {center.code} · {center.name}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                </div>
+              ) : (
+                <div>
+                  <CanvasField
+                    theme={th}
+                    label="cost center"
+                    hint="這個 tenant 目前沒有可用的成本中心目錄資料。"
+                  >
+                    <input
+                      onChange={(event) => setCostCenter(event.target.value)}
+                      placeholder="自由輸入 cost center"
+                      style={nativeInputStyle}
+                      type="text"
+                      value={costCenter}
+                    />
+                  </CanvasField>
+                </div>
+              )}
+
+              <div>
+                <CanvasField theme={th} label="專案碼">
+                  <input
+                    onChange={(event) =>
+                      setBenefitReference(event.target.value)
+                    }
+                    style={nativeMonoInputStyle}
+                    type="text"
+                    value={benefitReference}
+                  />
+                </CanvasField>
+              </div>
+
+              <div>
+                <CanvasField theme={th} label="批註">
+                  <input
+                    onChange={(event) => setNotes(event.target.value)}
+                    style={nativeInputStyle}
+                    type="text"
+                    value={notes}
+                  />
+                </CanvasField>
+              </div>
             </div>
-          ) : draftValidationErrors.length > 0 ? (
-            <div className="form-error" role="alert">
-              {draftValidationErrors[0]}
+
+            <div style={sectionLabelStyle}>審批與配額</div>
+            <div style={summaryCardStyle}>
+              {policyError ? (
+                <div role="alert" style={errorStyle}>
+                  {policyError}
+                </div>
+              ) : null}
+
+              <div style={pillRowStyle}>
+                <CanvasPill
+                  theme={th}
+                  tone={getDecisionTone(approvalEvaluation)}
+                >
+                  {describeDecision(approvalEvaluation)}
+                </CanvasPill>
+                <CanvasPill theme={th} tone={policyStateTone}>
+                  {policyRefreshing ? "自動更新中" : "自動刷新就緒"}
+                </CanvasPill>
+                {costCenter ? (
+                  <CanvasPill theme={th} tone="info">
+                    {costCenter}
+                  </CanvasPill>
+                ) : null}
+              </div>
+
+              <CanvasDL
+                theme={th}
+                cols={1}
+                items={[
+                  {
+                    k: "服務類型",
+                    v: describeSubtype(businessDispatchSubtype) ?? "Not set",
+                  },
+                  {
+                    k: "乘客角色",
+                    v: activePassenger?.roles?.[0] ?? "Not published",
+                  },
+                  {
+                    k: "預估費用",
+                    v: formatCurrency(estimatedAmountMinor),
+                    mono: true,
+                  },
+                  {
+                    k: "配額影響",
+                    v:
+                      quotaPreview?.impacts?.[0] == null
+                        ? "填完核心欄位後顯示"
+                        : `本月剩餘 ${quotaPreview.impacts[0].remainingAfter ?? "n/a"} / ${quotaPreview.impacts[0].limitValue ?? "n/a"}`,
+                  },
+                ]}
+              />
+
+              <details style={advancedDetailsStyle}>
+                <summary style={advancedSummaryStyle}>進階關聯欄位</summary>
+                <p style={sectionCopyStyle}>
+                  預估費用、代訂資料、現場聯絡人與治理開關保留在同一卡。
+                </p>
+                <div style={compactFieldGridStyle}>
+                  <div>
+                    <CanvasField theme={th} label={`預估費用 (${CURRENCY})`}>
+                      <input
+                        inputMode="decimal"
+                        onChange={(event) => setQuotedFare(event.target.value)}
+                        placeholder="1580"
+                        style={nativeInputStyle}
+                        type="text"
+                        value={quotedFare}
+                      />
+                    </CanvasField>
+                  </div>
+
+                  <div>
+                    <CanvasField theme={th} label="代訂人">
+                      <input
+                        onChange={(event) =>
+                          setBookedByName(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                        type="text"
+                        value={bookedByName}
+                      />
+                    </CanvasField>
+                  </div>
+
+                  <div>
+                    <CanvasField theme={th} label="代訂 Email">
+                      <input
+                        onChange={(event) =>
+                          setBookedByEmail(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                        type="email"
+                        value={bookedByEmail}
+                      />
+                    </CanvasField>
+                  </div>
+
+                  <div>
+                    <CanvasField theme={th} label="現場聯絡人">
+                      <input
+                        onChange={(event) =>
+                          setOnsiteContactName(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                        type="text"
+                        value={onsiteContactName}
+                      />
+                    </CanvasField>
+                  </div>
+
+                  <div>
+                    <CanvasField theme={th} label="現場電話">
+                      <input
+                        onChange={(event) =>
+                          setOnsiteContactPhone(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                        type="tel"
+                        value={onsiteContactPhone}
+                      />
+                    </CanvasField>
+                  </div>
+                </div>
+
+                <div style={summaryBlockStyle}>
+                  <div style={sectionLabelStyle}>Extra controls</div>
+                  <div style={toggleGridStyle}>
+                    <label style={toggleLabelStyle}>
+                      <input
+                        checked={signoffRequired}
+                        onChange={(event) =>
+                          setSignoffRequired(event.target.checked)
+                        }
+                        style={toggleInputStyle}
+                        type="checkbox"
+                      />
+                      需要主管簽核
+                    </label>
+                    <label style={toggleLabelStyle}>
+                      <input
+                        checked={expenseProofRequired}
+                        onChange={(event) =>
+                          setExpenseProofRequired(event.target.checked)
+                        }
+                        style={toggleInputStyle}
+                        type="checkbox"
+                      />
+                      需要費用憑證
+                    </label>
+                  </div>
+                </div>
+              </details>
+
+              {approvalEvaluation?.approvalPlan ? (
+                <div style={summaryBlockStyle}>
+                  <div style={sectionLabelStyle}>Approval plan</div>
+                  <div style={pillRowStyle}>
+                    <CanvasPill theme={th} tone="accent">
+                      Mode: {approvalEvaluation.approvalPlan.approvalMode}
+                    </CanvasPill>
+                    <CanvasPill theme={th} tone="info">
+                      Timeout: {approvalEvaluation.approvalPlan.timeoutHours}h
+                    </CanvasPill>
+                    <CanvasPill theme={th} tone="warn">
+                      Fallback: {approvalEvaluation.approvalPlan.fallbackPolicy}
+                    </CanvasPill>
+                  </div>
+                  <ul style={checklistStyle}>
+                    {approvalEvaluation.approvalPlan.approvers.map(
+                      (approver) => (
+                        <li
+                          key={`${approver.kind}-${approver.userId ?? approver.roleCode ?? approver.costCenterCode ?? "unknown"}`}
+                        >
+                          {approver.displayName ??
+                            approver.userId ??
+                            approver.roleCode ??
+                            approver.costCenterCode ??
+                            approver.kind}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </div>
+              ) : (
+                <p style={mutedCopyStyle}>
+                  核心欄位齊備後，這裡會顯示 approval plan。
+                </p>
+              )}
+
+              {quotaPreview?.impacts?.length ? (
+                <CanvasDL
+                  theme={th}
+                  cols={1}
+                  items={quotaPreview.impacts.map((impact) => ({
+                    k: `${describeImpactLabel(impact.scope, impact.costCenterCode)} · ${impact.dimension}`,
+                    v: `before ${impact.remainingBefore ?? "n/a"} / ${impact.limitValue ?? "n/a"} · after ${impact.remainingAfter ?? "n/a"} · remaining ${formatPercent(impact.remainingPercentAfter)} · ${impact.triggered}`,
+                    mono: true,
+                  }))}
+                />
+              ) : (
+                <p style={mutedCopyStyle}>
+                  填完核心欄位後，這裡會顯示配額影響預覽。
+                </p>
+              )}
+
+              <div style={pillRowStyle}>
+                <CanvasPill
+                  theme={th}
+                  tone={getDecisionTone(approvalEvaluation)}
+                >
+                  {describeDecision(approvalEvaluation)}
+                </CanvasPill>
+                {costCenter ? (
+                  <CanvasPill theme={th} tone="accent">
+                    {costCenter}
+                  </CanvasPill>
+                ) : null}
+                <CanvasPill theme={th} tone="info">
+                  {describeDirection(direction)}
+                </CanvasPill>
+              </div>
+
+              {(approvalEvaluation?.warnings?.length ?? 0) > 0 ? (
+                <div style={summaryBlockStyle}>
+                  <div style={sectionLabelStyle}>Warnings</div>
+                  <ul style={checklistStyle}>
+                    {(approvalEvaluation?.warnings ?? []).map((warning) => (
+                      <li key={`${warning.source}-${warning.code}`}>
+                        {warning.message} ({warning.code})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {submitError ? (
+                <div role="alert" style={errorStyle}>
+                  {submitError}
+                </div>
+              ) : draftValidationErrors.length > 0 ? (
+                <div role="alert" style={errorStyle}>
+                  {draftValidationErrors[0]}
+                </div>
+              ) : null}
+
+              <p style={mutedCopyStyle}>
+                這個頁面不提供本地草稿狀態；送出後直接建立 booking
+                或進入審批流程。
+              </p>
+
+              <div style={actionRowStyle}>
+                <div style={nativeButtonRowStyle}>
+                  <CanvasBtn
+                    theme={th}
+                    onClick={() => router.push("/bookings")}
+                  >
+                    取消
+                  </CanvasBtn>
+                  <CanvasBtn theme={th} disabled>
+                    另存草稿
+                  </CanvasBtn>
+                </div>
+                <div style={growStyle} />
+                <button
+                  disabled={submitDisabled}
+                  style={{
+                    ...primaryButtonStyle,
+                    cursor: submitDisabled ? "not-allowed" : "pointer",
+                    opacity: submitDisabled ? 0.55 : 1,
+                  }}
+                  type="submit"
+                >
+                  {submitting || pending
+                    ? "送出中…"
+                    : decision === "require_approval"
+                      ? "送出審批"
+                      : "送出預約"}
+                </button>
+              </div>
             </div>
-          ) : null}
-
-          <div className="chip-row">
-            <span
-              className={
-                decision === "block"
-                  ? "status-chip is-warning"
-                  : "status-chip is-active"
-              }
-            >
-              {describeDecision(approvalEvaluation)}
-            </span>
-            {costCenter ? (
-              <span className="status-chip">{costCenter}</span>
-            ) : null}
-          </div>
-
-          <div className="booking-action-row">
-            <button
-              className="booking-button booking-button-secondary"
-              disabled
-              type="button"
-            >
-              No draft action
-            </button>
-            <button
-              className="booking-button"
-              disabled={submitDisabled}
-              type="submit"
-            >
-              {submitting || pending
-                ? "Submitting…"
-                : decision === "require_approval"
-                  ? "Submit for approval"
-                  : "Create booking"}
-            </button>
-          </div>
-        </SurfaceCard>
-      </aside>
+          </CanvasCard>
+        </div>
+      </div>
     </form>
   );
 }
