@@ -1,13 +1,30 @@
-import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import {
-  PLATFORM_CODE_REGISTRY,
-  type PlatformPresenceRecord,
-  type PlatformPresenceSummary,
-  type ShiftRecord,
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
+import type {
+  PlatformPresenceAdapterStatusRecord,
+  PlatformPresenceRecord,
+  PlatformPresenceSummary,
+  ShiftRecord,
 } from "@drts/contracts";
+import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
+
+import {
+  Banner,
+  Btn,
+  Card,
+  DL,
+  Field,
+  Input,
+  KPI,
+  PageHeader,
+  Pill,
+  Shell,
+  Table,
+  driverCanvasTheme,
+} from "@/components/canvas-primitives";
 import {
   assessPlatformHealth,
   getPlatformHealthSeverity,
@@ -17,24 +34,20 @@ import {
   getDriverId,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
-import {
-  ActionButton,
-  AppScreen,
-  AuthorityBanner,
-  BottomActionBar,
-  EmptyState,
-  ErrorBanner,
-  FormField,
-  IconButton,
-  PageHeader,
-  PlatformBadge,
-  StatusChip,
-  Tokens,
-} from "@/components/ui";
 import { driverStrings } from "@/lib/strings";
 
+const THEME = driverCanvasTheme;
 const ODOMETER_PATTERN = /^\d+$/;
 const EXPECTED_SHIFT_HOURS = 8;
+
+type AvailabilityItem = {
+  record: PlatformPresenceRecord;
+  adapterStatus: PlatformPresenceAdapterStatusRecord | null;
+  displayName: string;
+  owned: boolean;
+  statusLabel: string;
+  tone: CanvasTone;
+};
 
 function getOdometerValidationMessage(value: string): string | null {
   const trimmed = value.trim();
@@ -54,38 +67,6 @@ function getOdometerValidationMessage(value: string): string | null {
   return null;
 }
 
-function formatShiftDateTime(value: string) {
-  return new Date(value).toLocaleString("zh-TW");
-}
-
-function formatCompactDateTime(value: string | null) {
-  if (!value) {
-    return "尚無更新";
-  }
-
-  return new Date(value).toLocaleString("zh-TW", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatClockLabel(value: string) {
-  return new Date(value).toLocaleTimeString("zh-TW", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatOdometer(value: number | null) {
-  if (value == null) {
-    return "未填寫";
-  }
-
-  return `${value.toLocaleString("zh-TW")} km`;
-}
-
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim();
@@ -94,7 +75,76 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function getElapsedMinutes(shift: ShiftRecord, now: number) {
+function formatCompactDateTime(value: string | null | undefined): string {
+  if (!value) {
+    return driverStrings.common.notUpdatedYet;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString("zh-TW", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatClockLabel(value: string | null | undefined): string {
+  if (!value) {
+    return "等待上線";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleTimeString("zh-TW", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatOdometer(value: number | null): string {
+  if (value == null) {
+    return "未填寫";
+  }
+
+  return `${value.toLocaleString("zh-TW")} km`;
+}
+
+function formatDraftOdometer(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "尚未填寫";
+  }
+
+  if (getOdometerValidationMessage(trimmed)) {
+    return trimmed;
+  }
+
+  return formatOdometer(Number(trimmed));
+}
+
+function isSameLocalDay(value: string, now: number): boolean {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return false;
+  }
+
+  const reference = new Date(now);
+  return (
+    parsed.getFullYear() === reference.getFullYear() &&
+    parsed.getMonth() === reference.getMonth() &&
+    parsed.getDate() === reference.getDate()
+  );
+}
+
+function getElapsedMinutes(shift: ShiftRecord, now: number): number {
   if (shift.totalHours != null) {
     return Math.max(0, Math.round(shift.totalHours * 60));
   }
@@ -105,7 +155,7 @@ function getElapsedMinutes(shift: ShiftRecord, now: number) {
   return Math.max(0, Math.floor((end - start) / 60000));
 }
 
-function formatElapsedDuration(shift: ShiftRecord, now: number) {
+function formatElapsedDuration(shift: ShiftRecord, now: number): string {
   const totalMinutes = getElapsedMinutes(shift, now);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -113,7 +163,7 @@ function formatElapsedDuration(shift: ShiftRecord, now: number) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
-function formatElapsedSentence(shift: ShiftRecord, now: number) {
+function formatElapsedSentence(shift: ShiftRecord, now: number): string {
   const totalMinutes = getElapsedMinutes(shift, now);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -127,7 +177,14 @@ function formatElapsedSentence(shift: ShiftRecord, now: number) {
   return parts.join(" ");
 }
 
-function formatExpectedOffTime(shift: ShiftRecord | null) {
+function formatWorkedHoursLabel(hours: number): string {
+  return hours.toLocaleString("zh-TW", {
+    minimumFractionDigits: hours >= 10 ? 0 : 1,
+    maximumFractionDigits: 1,
+  });
+}
+
+function formatExpectedOffTime(shift: ShiftRecord | null): string {
   if (!shift) {
     return "等待上線";
   }
@@ -144,7 +201,7 @@ function formatExpectedOffTime(shift: ShiftRecord | null) {
 
 function getPlatformDisplayName(
   platformCode: PlatformPresenceRecord["platformCode"],
-) {
+): string {
   return PLATFORM_CODE_REGISTRY[platformCode]?.displayName ?? platformCode;
 }
 
@@ -160,91 +217,127 @@ function isOwnedPlatform(platformCode: PlatformPresenceRecord["platformCode"]) {
   );
 }
 
-function getAvailabilityVariant(
+function getAvailabilityTone(
   assessment: ReturnType<typeof assessPlatformHealth>,
-): "success" | "warning" | "danger" | "default" {
+): CanvasTone {
   switch (assessment.statusTone) {
     case "healthy":
       return "success";
     case "warning":
-      return "warning";
+      return "warn";
     case "danger":
       return "danger";
     default:
-      return "default";
+      return "neutral";
   }
 }
 
-function HeroField({
-  label,
-  value,
-  subdued = false,
-}: {
-  label: string;
-  value: string;
-  subdued?: boolean;
-}) {
+function getAdapterStatusLabel(
+  adapterStatus: PlatformPresenceAdapterStatusRecord | null,
+): string {
+  switch (adapterStatus?.status) {
+    case "healthy":
+      return "轉接正常";
+    case "degraded":
+      return "轉接降級";
+    case "down":
+      return "轉接中斷";
+    default:
+      return "尚未同步";
+  }
+}
+
+function getShiftDistanceKm(shift: ShiftRecord): number | null {
+  if (shift.startOdometer == null || shift.endOdometer == null) {
+    return null;
+  }
+
+  const distance = shift.endOdometer - shift.startOdometer;
+  return distance >= 0 ? distance : null;
+}
+
+function formatDistanceValue(distanceKm: number | null): string {
+  if (distanceKm == null) {
+    return "—";
+  }
+
+  return distanceKm.toLocaleString("zh-TW", {
+    maximumFractionDigits: 0,
+  });
+}
+
+function getToneColor(tone: CanvasTone): string {
+  switch (tone) {
+    case "success":
+      return THEME.success;
+    case "warn":
+      return THEME.warn;
+    case "danger":
+      return THEME.danger;
+    case "info":
+      return THEME.info;
+    case "accent":
+      return THEME.accent;
+    case "neutral":
+    default:
+      return THEME.textDim;
+  }
+}
+
+function ShiftHeroStatus({ active }: { active: boolean }) {
   return (
-    <View style={styles.heroField}>
-      <Text style={styles.heroFieldLabel}>{label}</Text>
+    <View style={styles.heroStatusRow}>
+      <View
+        style={[
+          styles.heroStatusDot,
+          {
+            backgroundColor: active ? THEME.success : THEME.textDim,
+          },
+        ]}
+      />
       <Text
         style={[
-          styles.heroFieldValue,
-          subdued ? styles.heroFieldValueSubdued : null,
+          styles.heroStatusText,
+          { color: active ? THEME.success : THEME.textMuted },
         ]}
       >
-        {value}
+        {active ? "上班中" : "待上線"}
       </Text>
     </View>
   );
 }
 
-function SectionCard({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: ReactNode;
-}) {
-  return (
-    <View style={styles.sectionCard}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {subtitle ? (
-          <Text style={styles.sectionSubtitle}>{subtitle}</Text>
-        ) : null}
-      </View>
-      {children}
-    </View>
-  );
-}
-
-function ShiftInfoTile({
+function AvailabilitySummaryRow({
   label,
-  value,
-  tone = "default",
+  detail,
+  tone,
+  last = false,
 }: {
   label: string;
-  value: string;
-  tone?: "default" | "success" | "warning" | "danger";
+  detail: string;
+  tone: CanvasTone;
+  last?: boolean;
 }) {
   return (
     <View
       style={[
-        styles.infoTile,
-        tone === "success"
-          ? styles.infoTileSuccess
-          : tone === "warning"
-            ? styles.infoTileWarning
-            : tone === "danger"
-              ? styles.infoTileDanger
-              : null,
+        styles.availabilitySummaryRow,
+        {
+          borderBottomColor: THEME.border,
+          borderBottomWidth: last ? 0 : 1,
+        },
       ]}
     >
-      <Text style={styles.infoTileLabel}>{label}</Text>
-      <Text style={styles.infoTileValue}>{value}</Text>
+      <View style={styles.availabilitySummaryCopy}>
+        <Text style={styles.availabilitySummaryLabel}>{label}</Text>
+        <Text style={styles.availabilitySummaryDetail}>{detail}</Text>
+      </View>
+      <View
+        style={[
+          styles.availabilitySummaryDot,
+          { backgroundColor: getToneColor(tone) },
+        ]}
+      />
     </View>
   );
 }
@@ -257,6 +350,7 @@ export default function ShiftScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activeShift, setActiveShift] = useState<ShiftRecord | null>(null);
+  const [shiftHistory, setShiftHistory] = useState<ShiftRecord[]>([]);
   const [vehicleId, setVehicleId] = useState("");
   const [location, setLocation] = useState("");
   const [odometer, setOdometer] = useState("");
@@ -283,6 +377,59 @@ export default function ShiftScreen() {
     return () => clearInterval(timer);
   }, [activeShift]);
 
+  const loadShifts = async ({
+    manual = false,
+    showSpinner = false,
+  }: {
+    manual?: boolean;
+    showSpinner?: boolean;
+  } = {}) => {
+    if (!isProvisioned) {
+      setLoading(false);
+      return;
+    }
+
+    if (manual) {
+      setRefreshing(true);
+    }
+    if (showSpinner) {
+      setLoading(true);
+    }
+
+    const client = getDriverClient();
+    const driverId = getDriverId();
+
+    try {
+      const [shifts, platformPresenceResult] = await Promise.all([
+        client.listShifts(driverId),
+        client
+          .getPlatformPresence()
+          .then((summary) => ({ summary, error: null as string | null }))
+          .catch((error: unknown) => ({
+            summary: null,
+            error: getErrorMessage(
+              error,
+              "平台可接單狀態暫時無法同步，請稍後再試。",
+            ),
+          })),
+      ]);
+
+      const active = shifts.find((shift) => shift.status === "active") ?? null;
+
+      setShiftHistory(shifts);
+      setActiveShift(active);
+      setPresenceSummary(platformPresenceResult.summary);
+      setPresenceError(platformPresenceResult.error);
+      setScreenError(null);
+      setNow(Date.now());
+    } catch (error: unknown) {
+      setScreenError(getErrorMessage(error, "班次資料載入失敗，請稍後再試。"));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     if (!isProvisioned) {
       setLoading(false);
@@ -306,64 +453,6 @@ export default function ShiftScreen() {
       });
   }, [isProvisioned]);
 
-  const loadShifts = async ({ manual = false }: { manual?: boolean } = {}) => {
-    if (!isProvisioned) {
-      return;
-    }
-
-    if (manual) {
-      setRefreshing(true);
-    }
-
-    const client = getDriverClient();
-    const driverId = getDriverId();
-    try {
-      const [shifts, platformPresenceResult] = await Promise.all([
-        client.listShifts(driverId),
-        client
-          .getPlatformPresence()
-          .then((summary) => ({ summary, error: null as string | null }))
-          .catch((error: unknown) => ({
-            summary: null,
-            error: getErrorMessage(
-              error,
-              "平台可接單狀態暫時無法同步，請稍後再試。",
-            ),
-          })),
-      ]);
-      const active = shifts.find((shift) => shift.status === "active");
-      setActiveShift(active ?? null);
-      setPresenceSummary(platformPresenceResult.summary);
-      setPresenceError(platformPresenceResult.error);
-      setScreenError(null);
-      setNow(Date.now());
-    } catch (error: unknown) {
-      setScreenError(getErrorMessage(error, "班次資料載入失敗，請稍後再試。"));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  if (!isProvisioned) {
-    return (
-      <AppScreen scrollable={false}>
-        <PageHeader
-          title={driverStrings.shift.title}
-          subtitle="需要完成裝置配置"
-        />
-        <EmptyState
-          title="尚未完成裝置配置"
-          description="完成裝置綁定後，才能查看班表與進行上下線打卡。"
-          icon="lock-closed-outline"
-          actionTitle="前往配置裝置"
-          onAction={() => router.push("/onboarding")}
-          style={styles.fillState}
-        />
-      </AppScreen>
-    );
-  }
-
   const handleClockIn = async () => {
     if (odometerError) {
       Alert.alert("輸入錯誤", odometerError);
@@ -373,22 +462,23 @@ export default function ShiftScreen() {
     const trimmedOdometer = odometer.trim();
     setSubmitting(true);
     setSubmissionError(null);
-    const client = getDriverClient();
-    const driverId = getDriverId();
+
     try {
+      const client = getDriverClient();
+      const driverId = getDriverId();
       const result = await client.clockIn({
         driverId,
         vehicleId: vehicleId.trim() || undefined,
         location: location.trim() || undefined,
         odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
+
       setActiveShift(result);
-      setScreenError(null);
-      setNow(Date.now());
-      Alert.alert("成功", "已完成上線打卡。");
+      await loadShifts();
       setVehicleId("");
       setLocation("");
       setOdometer("");
+      Alert.alert("成功", "已完成上線打卡。");
     } catch (error: unknown) {
       setSubmissionError(getErrorMessage(error, "上線打卡失敗，請稍後再試。"));
     } finally {
@@ -405,19 +495,21 @@ export default function ShiftScreen() {
     const trimmedOdometer = odometer.trim();
     setSubmitting(true);
     setSubmissionError(null);
-    const client = getDriverClient();
-    const driverId = getDriverId();
+
     try {
+      const client = getDriverClient();
+      const driverId = getDriverId();
       await client.clockOut({
         driverId,
         location: location.trim() || undefined,
         odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
+
       setActiveShift(null);
-      setScreenError(null);
-      Alert.alert("成功", "已完成下線打卡。");
+      await loadShifts();
       setLocation("");
       setOdometer("");
+      Alert.alert("成功", "已完成下線打卡。");
     } catch (error: unknown) {
       setSubmissionError(getErrorMessage(error, "下線打卡失敗，請稍後再試。"));
     } finally {
@@ -425,622 +517,722 @@ export default function ShiftScreen() {
     }
   };
 
-  if (loading) {
-    return (
-      <AppScreen scrollable={false}>
-        <PageHeader
-          title={driverStrings.shift.title}
-          subtitle="載入今日打卡記錄"
-        />
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={Tokens.colors.primary} />
-          <Text style={styles.loadingLabel}>載入班次資料中…</Text>
-        </View>
-      </AppScreen>
-    );
-  }
+  const availabilityItems = useMemo<AvailabilityItem[]>(() => {
+    const presences = presenceSummary?.presences ?? [];
+    const adapterStatuses = presenceSummary?.adapterStatuses ?? [];
 
-  if (shiftEnabled === false) {
-    return (
-      <AppScreen scrollable={false}>
-        <PageHeader
-          title={driverStrings.shift.title}
-          subtitle="班次功能未啟用"
-        />
-        <EmptyState
-          title="班表追蹤暫停提供"
-          description="此功能目前未啟用，請稍後再試或先返回工作台。"
-          icon="calendar-outline"
-          actionTitle="返回工作台"
-          onAction={() => router.push("/onboarding")}
-          style={styles.fillState}
-        />
-      </AppScreen>
-    );
-  }
+    return [...presences]
+      .map((record) => {
+        const adapterStatus =
+          adapterStatuses.find(
+            (entry) => entry.platformCode === record.platformCode,
+          ) ?? null;
+        const assessment = assessPlatformHealth(record, adapterStatus);
+        return {
+          record,
+          adapterStatus,
+          displayName: getPlatformDisplayName(record.platformCode),
+          owned: isOwnedPlatform(record.platformCode),
+          statusLabel: assessment.statusLabel,
+          tone: getAvailabilityTone(assessment),
+          severity: getPlatformHealthSeverity(assessment),
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.severity - left.severity ||
+          left.record.platformCode.localeCompare(right.record.platformCode),
+      )
+      .map(
+        ({ record, adapterStatus, displayName, owned, statusLabel, tone }) => ({
+          record,
+          adapterStatus,
+          displayName,
+          owned,
+          statusLabel,
+          tone,
+        }),
+      );
+  }, [presenceSummary]);
 
-  if (screenError && !activeShift && !refreshing) {
-    return (
-      <AppScreen scrollable={false}>
-        <PageHeader
-          title={driverStrings.shift.title}
-          subtitle="班次資料暫時無法載入"
-          rightElement={
-            <IconButton
-              icon="refresh"
-              onPress={() => {
-                setLoading(true);
-                void loadShifts();
-              }}
-              accessibilityLabel="重新整理班次資料"
-            />
-          }
-        />
-        <EmptyState
-          title="班次資料暫時無法載入"
-          description={screenError}
-          icon="alert-circle-outline"
-          actionTitle="重新整理"
-          onAction={() => {
-            setLoading(true);
-            void loadShifts();
-          }}
-          style={styles.fillState}
-        />
-      </AppScreen>
-    );
-  }
-
-  const availabilityItems = [...(presenceSummary?.presences ?? [])]
-    .map((record) => {
-      const adapterStatus =
-        presenceSummary?.adapterStatuses?.find(
-          (item) => item.platformCode === record.platformCode,
-        ) ?? null;
-      const assessment = assessPlatformHealth(record, adapterStatus);
-      return {
-        record,
-        assessment,
-        adapterStatus,
-      };
-    })
-    .sort(
-      (left, right) =>
-        getPlatformHealthSeverity(right.assessment) -
-          getPlatformHealthSeverity(left.assessment) ||
-        left.record.platformCode.localeCompare(right.record.platformCode),
-    );
   const readyPlatforms = availabilityItems.filter(
-    (item) => item.assessment.canReceiveOrders,
+    (item) =>
+      assessPlatformHealth(item.record, item.adapterStatus).canReceiveOrders,
   ).length;
   const onlinePlatforms = availabilityItems.filter(
     (item) => item.record.status === "online",
   ).length;
 
-  return (
-    <View style={styles.screen}>
-      <AppScreen contentContainerStyle={styles.screenContent}>
+  const todayShifts = useMemo(
+    () =>
+      shiftHistory.filter((shift) => isSameLocalDay(shift.clockedInAt, now)),
+    [now, shiftHistory],
+  );
+
+  const completedTodayCount = todayShifts.filter(
+    (shift) => shift.status === "completed",
+  ).length;
+  const totalWorkedHours = todayShifts.reduce((total, shift) => {
+    return total + getElapsedMinutes(shift, now) / 60;
+  }, 0);
+  const totalDistanceKm = todayShifts.reduce<number | null>((total, shift) => {
+    const distance = getShiftDistanceKm(shift);
+    if (distance == null) {
+      return total;
+    }
+    return (total ?? 0) + distance;
+  }, null);
+
+  const heroDetailItems = [
+    {
+      label: "車輛",
+      value: (activeShift?.vehicleId ?? vehicleId.trim()) || "尚未填寫",
+    },
+    {
+      label: activeShift ? "起始里程" : "預填里程",
+      value: activeShift
+        ? formatOdometer(activeShift.startOdometer)
+        : formatDraftOdometer(odometer),
+      mono: true,
+    },
+    {
+      label: activeShift ? "起始位置" : "預填位置",
+      value: (activeShift?.startLocation ?? location.trim()) || "尚未填寫",
+    },
+    {
+      label: "預計下班",
+      value: formatExpectedOffTime(activeShift),
+      mono: true,
+    },
+  ];
+
+  const ownedItems = availabilityItems.filter((item) => item.owned);
+  const externalItems = availabilityItems.filter((item) => !item.owned);
+  const ownedReadyCount = ownedItems.filter(
+    (item) =>
+      assessPlatformHealth(item.record, item.adapterStatus).canReceiveOrders,
+  ).length;
+  const externalReadyCount = externalItems.filter(
+    (item) =>
+      assessPlatformHealth(item.record, item.adapterStatus).canReceiveOrders,
+  ).length;
+  const externalOnlineCount = externalItems.filter(
+    (item) => item.record.status === "online",
+  ).length;
+
+  const availabilityTableRows = availabilityItems.map((item) => ({
+    code: String(item.record.platformCode).toUpperCase(),
+    platform: item.displayName,
+    statusLabel: item.statusLabel,
+    tone: item.tone,
+    sync: formatCompactDateTime(
+      item.adapterStatus?.lastSyncAt ?? item.record.updatedAt,
+    ),
+    adapter: getAdapterStatusLabel(item.adapterStatus),
+    owned: item.owned,
+  }));
+
+  if (!isProvisioned) {
+    return (
+      <Shell theme={THEME} contentContainerStyle={styles.loadingShellContent}>
         <PageHeader
+          theme={THEME}
           title={driverStrings.shift.title}
-          subtitle={activeShift ? "今日打卡記錄" : "準備開始班次"}
-          rightElement={
-            <IconButton
-              icon="refresh"
-              onPress={() => void loadShifts({ manual: true })}
-              disabled={loading || submitting || refreshing}
-              accessibilityLabel="重新整理班次資料"
-            />
+          subtitle="需要完成裝置配置"
+        />
+        <Banner
+          theme={THEME}
+          tone="warn"
+          title="尚未完成裝置配置"
+          body="完成裝置綁定後，才能查看班表與進行上下線打卡。"
+          icon={
+            <Ionicons name="lock-closed-outline" size={16} color={THEME.warn} />
+          }
+          actions={
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              onPress={() => router.push("/onboarding")}
+            >
+              前往配置裝置
+            </Btn>
           }
         />
+      </Shell>
+    );
+  }
 
-        {screenError ? (
-          <ErrorBanner message={`資料同步異常：${screenError}`} />
-        ) : null}
-        {submissionError ? <ErrorBanner message={submissionError} /> : null}
-
-        <View style={styles.heroCard}>
-          <View style={styles.heroStatusRow}>
-            <StatusChip
-              label={activeShift ? "上班中" : "待上線"}
-              variant={activeShift ? "success" : "default"}
-              dot
-            />
-          </View>
-
-          <Text style={styles.heroValue}>
-            {activeShift ? formatElapsedDuration(activeShift, now) : "--:--"}
-          </Text>
-          <Text style={styles.heroSubtitle}>
-            {activeShift
-              ? `已工作 ${formatElapsedSentence(activeShift, now)} · 自 ${formatClockLabel(activeShift.clockedInAt)} 起`
-              : "完成上線打卡後，系統會開始追蹤本班次的出勤與里程資訊。"}
-          </Text>
-
-          <View style={styles.heroGrid}>
-            <HeroField
-              label="車輛"
-              value={(activeShift?.vehicleId ?? vehicleId.trim()) || "尚未填寫"}
-              subdued={!activeShift?.vehicleId && !vehicleId.trim()}
-            />
-            <HeroField
-              label={activeShift ? "起始里程" : "預填里程"}
-              value={
-                activeShift
-                  ? formatOdometer(activeShift.startOdometer)
-                  : odometer.trim()
-                    ? `${Number(odometer).toLocaleString("zh-TW")} km`
-                    : "尚未填寫"
-              }
-              subdued={
-                activeShift
-                  ? activeShift.startOdometer == null
-                  : !odometer.trim()
-              }
-            />
-            <HeroField
-              label={activeShift ? "起始位置" : "預填位置"}
-              value={
-                (activeShift?.startLocation ?? location.trim()) || "尚未填寫"
-              }
-              subdued={!activeShift?.startLocation && !location.trim()}
-            />
-            <HeroField
-              label={activeShift ? "開始時間" : "開始後顯示"}
-              value={
-                activeShift
-                  ? formatShiftDateTime(activeShift.clockedInAt)
-                  : "等待上線打卡"
-              }
-              subdued={!activeShift}
-            />
-            <HeroField
-              label="預計下線"
-              value={formatExpectedOffTime(activeShift)}
-              subdued={!activeShift}
-            />
-          </View>
+  if (loading) {
+    return (
+      <Shell theme={THEME} contentContainerStyle={styles.loadingShellContent}>
+        <PageHeader
+          theme={THEME}
+          title={driverStrings.shift.title}
+          subtitle="載入今日打卡記錄"
+        />
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color={THEME.accent} />
+          <Text style={styles.loadingLabel}>載入班次資料中…</Text>
         </View>
+      </Shell>
+    );
+  }
 
-        <SectionCard
-          title={
-            activeShift
-              ? driverStrings.shift.summaryTitle
-              : driverStrings.shift.readinessTitle
+  if (shiftEnabled === false) {
+    return (
+      <Shell theme={THEME} contentContainerStyle={styles.loadingShellContent}>
+        <PageHeader
+          theme={THEME}
+          title={driverStrings.shift.title}
+          subtitle="班次功能未啟用"
+        />
+        <Banner
+          theme={THEME}
+          tone="warn"
+          title="班表追蹤暫停提供"
+          body="此功能目前未啟用，請稍後再試或先返回工作台。"
+          icon={
+            <Ionicons name="calendar-outline" size={16} color={THEME.warn} />
           }
-          subtitle={
-            activeShift
-              ? "顯示目前班次內可確認的出勤資訊。"
-              : "上線前可先填寫車輛、位置與里程。"
+          actions={
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              onPress={() => router.push("/onboarding")}
+            >
+              返回工作台
+            </Btn>
           }
+        />
+      </Shell>
+    );
+  }
+
+  if (screenError && !activeShift && !refreshing) {
+    return (
+      <Shell theme={THEME} contentContainerStyle={styles.loadingShellContent}>
+        <PageHeader
+          theme={THEME}
+          title={driverStrings.shift.title}
+          subtitle="班次資料暫時無法載入"
+          actions={
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
+              onPress={() => void loadShifts({ showSpinner: true })}
+            >
+              重新整理
+            </Btn>
+          }
+        />
+        <Banner
+          theme={THEME}
+          tone="danger"
+          title="班次資料暫時無法載入"
+          body={screenError}
+          icon={<Ionicons name="alert-circle" size={16} color={THEME.danger} />}
+        />
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell
+      theme={THEME}
+      contentContainerStyle={styles.shellContent}
+      footer={
+        <View
+          style={[
+            styles.footerBar,
+            {
+              backgroundColor: THEME.bgRaised,
+              borderTopColor: THEME.border,
+            },
+          ]}
         >
-          <View style={styles.infoTileRow}>
-            <ShiftInfoTile
-              label={driverStrings.shift.statusLabel}
-              value={activeShift ? "執勤中" : "待上線"}
-              tone={activeShift ? "success" : "default"}
-            />
-            <ShiftInfoTile
-              label="累計工時"
-              value={
-                activeShift
-                  ? formatElapsedSentence(activeShift, now)
-                  : "尚未開始"
-              }
-              tone={activeShift ? "success" : "default"}
-            />
-            <ShiftInfoTile
-              label="可接單平台"
-              value={
-                availabilityItems.length > 0
-                  ? `${readyPlatforms} / ${availabilityItems.length}`
-                  : "尚無資料"
-              }
-              tone={readyPlatforms > 0 ? "warning" : "default"}
-            />
-            <ShiftInfoTile
-              label="預計下線"
-              value={formatExpectedOffTime(activeShift)}
-              tone={activeShift ? "warning" : "default"}
-            />
-          </View>
-        </SectionCard>
+          <Btn
+            theme={THEME}
+            variant={activeShift ? "ghost" : "primary"}
+            size="md"
+            onPress={activeShift ? handleClockOut : handleClockIn}
+            disabled={submitting || hasValidationError}
+            icon={
+              submitting ? (
+                <ActivityIndicator
+                  size="small"
+                  color={activeShift ? THEME.danger : "#FFFFFF"}
+                />
+              ) : (
+                <Ionicons
+                  name={activeShift ? "power-outline" : "play-outline"}
+                  size={15}
+                  color={activeShift ? THEME.danger : "#FFFFFF"}
+                />
+              )
+            }
+            style={[
+              styles.footerAction,
+              activeShift
+                ? {
+                    backgroundColor: "transparent",
+                    borderColor: THEME.danger,
+                  }
+                : null,
+            ]}
+          >
+            {activeShift ? (
+              <Text style={styles.footerDangerLabel}>
+                {driverStrings.shift.punchOut}
+              </Text>
+            ) : (
+              driverStrings.shift.punchIn
+            )}
+          </Btn>
+        </View>
+      }
+    >
+      <PageHeader
+        theme={THEME}
+        title={driverStrings.shift.title}
+        subtitle="今日打卡記錄"
+        actions={
+          <Btn
+            theme={THEME}
+            variant="ghost"
+            size="xs"
+            icon={<Ionicons name="refresh" size={13} color={THEME.textMuted} />}
+            onPress={() => void loadShifts({ manual: true })}
+            disabled={refreshing || submitting}
+          >
+            {refreshing ? "同步中" : "重新整理"}
+          </Btn>
+        }
+      />
 
-        <SectionCard
-          title={activeShift ? "班次更新" : "上線設定"}
-          subtitle={
-            activeShift
-              ? "下線前可補充目前里程與位置。"
-              : "這些欄位皆為選填，不影響班次 guardrails。"
+      {screenError ? (
+        <Banner
+          theme={THEME}
+          tone="warn"
+          title="資料同步異常"
+          body={screenError}
+          icon={
+            <Ionicons name="warning-outline" size={16} color={THEME.warn} />
           }
-        >
-          {activeShift ? (
-            <View>
-              <FormField
-                label="目前里程表（選填）"
-                value={odometer}
-                onChangeText={setOdometer}
-                placeholder="例如 50000"
-                keyboardType="numeric"
-                helpText="若需更新里程，請於下線前填寫。"
-                error={odometerError ?? undefined}
-              />
+        />
+      ) : null}
 
-              <FormField
-                label="目前位置（選填）"
-                value={location}
-                onChangeText={setLocation}
-                placeholder="例如 營運據點 B"
+      {submissionError ? (
+        <Banner
+          theme={THEME}
+          tone="danger"
+          title="打卡操作失敗"
+          body={submissionError}
+          icon={<Ionicons name="alert-circle" size={16} color={THEME.danger} />}
+        />
+      ) : null}
+
+      <Card theme={THEME} style={styles.heroCard} padding={18}>
+        <ShiftHeroStatus active={Boolean(activeShift)} />
+        <Text style={styles.heroClock}>
+          {activeShift ? formatElapsedDuration(activeShift, now) : "--:--"}
+        </Text>
+        <Text style={styles.heroSummary}>
+          {activeShift
+            ? `已工作 ${formatElapsedSentence(activeShift, now)} · 自 ${formatClockLabel(activeShift.clockedInAt)} 起`
+            : "完成上線打卡後，系統會開始追蹤本班次的出勤與里程資訊。"}
+        </Text>
+        <View style={styles.heroDivider} />
+        <DL theme={THEME} cols={2} items={heroDetailItems} monoVal={false} />
+      </Card>
+
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionTitle}>
+          {driverStrings.shift.summaryTitle}
+        </Text>
+        <View style={styles.kpiRow}>
+          <KPI
+            theme={THEME}
+            label="完成班次"
+            value={String(completedTodayCount)}
+            sub={`今日 ${todayShifts.length} 筆打卡`}
+            hint={todayShifts.length > 0 ? "依今日打卡紀錄統計" : "尚未開始"}
+          />
+          <KPI
+            theme={THEME}
+            label="總里程"
+            value={formatDistanceValue(totalDistanceKm)}
+            sub={totalDistanceKm == null ? "待回填" : "km"}
+            hint={
+              activeShift
+                ? "目前班次未下線，總里程可能持續更新"
+                : "僅統計已回填里程"
+            }
+          />
+          <KPI
+            theme={THEME}
+            label="累計工時"
+            value={formatWorkedHoursLabel(totalWorkedHours)}
+            sub="小時"
+            hint={activeShift ? "含目前進行中班次" : "今日班次總計"}
+          />
+        </View>
+      </View>
+
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionTitle}>多平台可用性</Text>
+        <Card theme={THEME} padding={0}>
+          {presenceError ? (
+            <View style={styles.cardSectionPad}>
+              <Banner
+                theme={THEME}
+                tone="warn"
+                title="平台可接單狀態待確認"
+                body={presenceError}
+                icon={
+                  <Ionicons
+                    name="cloud-offline-outline"
+                    size={16}
+                    color={THEME.warn}
+                  />
+                }
               />
             </View>
-          ) : (
-            <View>
-              <FormField
-                label="車輛編號（選填）"
-                value={vehicleId}
-                onChangeText={setVehicleId}
-                placeholder="例如 ABC-1234"
-              />
-
-              <FormField
-                label="位置（選填）"
-                value={location}
-                onChangeText={setLocation}
-                placeholder="例如 營運據點 A"
-              />
-
-              <FormField
-                label="里程表（選填）"
-                value={odometer}
-                onChangeText={setOdometer}
-                placeholder="例如 50000"
-                keyboardType="numeric"
-                helpText="僅接受整數數字，留白則不送出里程資料。"
-                error={odometerError ?? undefined}
-              />
-            </View>
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title="平台可接單狀態"
-          subtitle={
-            availabilityItems.length > 0
-              ? `${onlinePlatforms} 個平台上線中，${readyPlatforms} 個平台目前可接單。`
-              : "沿用既有 platform presence 資料來源，只讀顯示目前可接單狀態。"
-          }
-        >
-          {presenceError ? <ErrorBanner message={presenceError} /> : null}
+          ) : null}
 
           {availabilityItems.length > 0 ? (
-            <View style={styles.availabilityList}>
-              {availabilityItems.map(
-                ({ record, assessment, adapterStatus }) => (
-                  <View
-                    key={record.platformCode}
-                    style={styles.availabilityCard}
-                  >
-                    <View style={styles.availabilityTopRow}>
-                      <View style={styles.availabilityTitleBlock}>
-                        <PlatformBadge
-                          code={record.platformCode}
-                          name={getPlatformDisplayName(record.platformCode)}
-                          forwarded={!isOwnedPlatform(record.platformCode)}
-                          size="sm"
-                        />
-                        <Text style={styles.availabilityTitle}>
-                          {getPlatformDisplayName(record.platformCode)}
-                        </Text>
-                      </View>
-                      <StatusChip
-                        label={assessment.statusLabel}
-                        variant={getAvailabilityVariant(assessment)}
-                      />
-                    </View>
-
-                    <View style={styles.availabilityChipRow}>
-                      <StatusChip
-                        label={record.status === "online" ? "已上線" : "離線"}
-                        variant={
-                          record.status === "online" ? "success" : "default"
-                        }
-                      />
-                      <StatusChip
-                        label={
-                          record.eligibility === "eligible"
-                            ? "資格正常"
-                            : record.eligibility === "pending"
-                              ? "資格審核中"
-                              : "資格受限"
-                        }
-                        variant={
-                          record.eligibility === "eligible"
-                            ? "success"
-                            : record.eligibility === "pending"
-                              ? "warning"
-                              : "danger"
-                        }
-                      />
-                      <StatusChip
-                        label={
-                          adapterStatus?.status === "healthy"
-                            ? "轉接正常"
-                            : adapterStatus?.status === "degraded"
-                              ? "轉接降級"
-                              : adapterStatus?.status === "down"
-                                ? "轉接中斷"
-                                : "尚未同步"
-                        }
-                        variant={
-                          adapterStatus?.status === "healthy"
-                            ? "success"
-                            : adapterStatus?.status === "degraded"
-                              ? "warning"
-                              : adapterStatus?.status === "down"
-                                ? "danger"
-                                : "default"
-                        }
-                      />
-                    </View>
-
-                    <Text style={styles.availabilitySummary}>
-                      {assessment.readinessLabel}
-                    </Text>
-
-                    <View style={styles.availabilityMetaRow}>
-                      <Text style={styles.availabilityMetaText}>
-                        最近同步{" "}
-                        {formatCompactDateTime(
-                          adapterStatus?.lastSyncAt ?? record.updatedAt,
-                        )}
-                      </Text>
-                      <Text style={styles.availabilityMetaDivider}>•</Text>
-                      <Text style={styles.availabilityMetaText}>
-                        帳號 {record.accountId ?? "尚未綁定"}
-                      </Text>
-                    </View>
-                  </View>
-                ),
-              )}
+            <View style={styles.availabilitySummaryList}>
+              <AvailabilitySummaryRow
+                label="自營派單可用"
+                detail={
+                  ownedItems.length > 0
+                    ? ownedReadyCount > 0
+                      ? "班次中可接收派單"
+                      : "自營派單目前未上線"
+                    : "尚未連接自營派單"
+                }
+                tone={
+                  ownedReadyCount > 0
+                    ? "success"
+                    : ownedItems.length > 0
+                      ? "warn"
+                      : "neutral"
+                }
+              />
+              <AvailabilitySummaryRow
+                label="外部平台可用"
+                detail={
+                  externalItems.length > 0
+                    ? `${externalOnlineCount} / ${externalItems.length} 平台目前上線`
+                    : "尚未連接外部平台"
+                }
+                tone={
+                  externalReadyCount > 0
+                    ? "success"
+                    : externalItems.length > 0
+                      ? "warn"
+                      : "neutral"
+                }
+                last
+              />
             </View>
           ) : (
-            <EmptyState
-              title="尚無平台可接單狀態"
-              description="目前沒有可顯示的平台 presence 資料，可前往平台狀態頁確認綁定與上線狀態。"
-              icon="swap-horizontal-outline"
-              actionTitle="查看平台狀態"
-              onAction={() => router.push("/platform-presence")}
-              style={styles.inlineEmptyState}
-            />
+            <View style={styles.cardSectionPad}>
+              <Banner
+                theme={THEME}
+                tone="info"
+                title="尚無平台可接單狀態"
+                body="目前沒有可顯示的平台 presence 資料，可前往平台狀態頁確認綁定與上線狀態。"
+                icon={
+                  <Ionicons
+                    name="swap-horizontal-outline"
+                    size={16}
+                    color={THEME.info}
+                  />
+                }
+                actions={
+                  <Btn
+                    theme={THEME}
+                    variant="secondary"
+                    size="sm"
+                    onPress={() => router.push("/platform-presence")}
+                  >
+                    查看平台狀態
+                  </Btn>
+                }
+              />
+            </View>
           )}
-        </SectionCard>
+        </Card>
+      </View>
 
-        <AuthorityBanner
-          title="班次資料 guardrails"
-          authorityLabel="不變更定位心跳、provisioning 與上下線 API"
-          description="這個畫面只調整呈現方式；資料寫入仍沿用現有班次與出勤流程。"
-          tone="owned"
-          icon="shield-checkmark"
-        />
-      </AppScreen>
+      {!activeShift ? (
+        <Card
+          theme={THEME}
+          title={driverStrings.shift.readinessTitle}
+          subtitle="上線前可先填寫車輛、位置與里程；全部欄位都維持選填。"
+        >
+          <View style={styles.fieldStack}>
+            <Field theme={THEME} label="車輛編號（選填）">
+              <Input
+                theme={THEME}
+                value={vehicleId}
+                ph="例如 AAA-1234"
+                onChangeText={setVehicleId}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+            </Field>
 
-      <BottomActionBar
-        notice={
-          activeShift
-            ? "完成下線打卡前，可先更新里程與位置。"
-            : "上線打卡後才會建立 active shift。"
-        }
-      >
-        {activeShift ? (
-          <ActionButton
-            title={driverStrings.shift.punchOut}
-            onPress={handleClockOut}
-            variant="secondary"
-            loading={submitting}
-            disabled={hasValidationError}
-            style={[styles.bottomAction, styles.bottomDangerAction]}
-            textStyle={styles.bottomDangerText}
+            <Field theme={THEME} label="位置（選填）">
+              <Input
+                theme={THEME}
+                value={location}
+                ph="例如 營運據點 A"
+                onChangeText={setLocation}
+                autoCorrect={false}
+              />
+            </Field>
+
+            <Field
+              theme={THEME}
+              label="里程表（選填）"
+              hint="僅接受整數數字，留白則不送出里程資料。"
+            >
+              <Input
+                theme={THEME}
+                value={odometer}
+                ph="例如 50000"
+                mono
+                suffix="km"
+                onChangeText={setOdometer}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </Field>
+            {odometerError ? (
+              <Text style={styles.fieldError}>{odometerError}</Text>
+            ) : null}
+          </View>
+        </Card>
+      ) : null}
+
+      {!activeShift && availabilityItems.length > 0 ? (
+        <Card
+          theme={THEME}
+          title="平台明細"
+          subtitle={`${onlinePlatforms} 個平台上線中，${readyPlatforms} 個平台目前可接單。`}
+        >
+          <Table
+            theme={THEME}
+            dense
+            rows={availabilityTableRows}
+            columns={[
+              {
+                h: "平台",
+                w: 140,
+                r: (row) => (
+                  <View style={styles.tablePlatformCell}>
+                    <Text
+                      style={[
+                        styles.tablePlatformCode,
+                        { color: row.owned ? THEME.accentHi : THEME.warn },
+                      ]}
+                    >
+                      {row.code}
+                    </Text>
+                    <Text style={styles.tablePlatformName}>{row.platform}</Text>
+                  </View>
+                ),
+              },
+              {
+                h: "狀態",
+                w: 140,
+                r: (row) => (
+                  <View style={styles.tableStatusCell}>
+                    <Pill theme={THEME} tone={row.tone} dot>
+                      {row.statusLabel}
+                    </Pill>
+                    <Text style={styles.tableStatusDetail}>{row.adapter}</Text>
+                  </View>
+                ),
+              },
+              {
+                h: "最近同步",
+                k: "sync",
+                w: 114,
+                mono: true,
+              },
+            ]}
           />
-        ) : (
-          <ActionButton
-            title={driverStrings.shift.punchIn}
-            onPress={handleClockIn}
-            variant="primary"
-            loading={submitting}
-            disabled={hasValidationError}
-            style={styles.bottomAction}
-          />
-        )}
-      </BottomActionBar>
-    </View>
+        </Card>
+      ) : null}
+    </Shell>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: Tokens.colors.appBg,
+  shellContent: {
+    paddingBottom: 28,
+    gap: 14,
   },
-  screenContent: {
-    paddingBottom: Tokens.spacing.xl,
-  },
-  center: {
-    flex: 1,
+  loadingShellContent: {
+    flexGrow: 1,
     justifyContent: "center",
+    gap: 16,
+  },
+  loadingCard: {
+    minHeight: 180,
     alignItems: "center",
-    padding: Tokens.spacing.xl,
+    justifyContent: "center",
+    gap: 12,
   },
   loadingLabel: {
-    marginTop: Tokens.spacing.sm,
-    color: Tokens.colors.textMuted,
-  },
-  fillState: {
-    flex: 1,
-  },
-  inlineEmptyState: {
-    paddingVertical: Tokens.spacing.sm,
+    color: THEME.textMuted,
+    fontFamily: THEME.fontFamily,
+    fontSize: 14,
   },
   heroCard: {
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.xl,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.xl,
-    gap: Tokens.spacing.sm,
-    ...Tokens.shadows.md,
+    borderRadius: 14,
   },
   heroStatusRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
   },
-  heroValue: {
-    fontSize: 32,
-    lineHeight: 36,
+  heroStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  heroStatusText: {
+    fontFamily: THEME.fontFamily,
+    fontSize: 11,
     fontWeight: "700",
-    color: Tokens.colors.textStrong,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  heroClock: {
+    marginTop: 8,
+    color: THEME.text,
+    fontFamily: THEME.monoFamily,
+    fontSize: 32,
+    fontWeight: "700",
     letterSpacing: -1,
-    fontFamily: Tokens.fonts.mono,
+    lineHeight: 36,
   },
-  heroSubtitle: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+  heroSummary: {
+    marginTop: 2,
+    color: THEME.textMuted,
+    fontFamily: THEME.fontFamily,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
-  heroGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Tokens.spacing.md,
-    paddingTop: Tokens.spacing.md,
-    marginTop: Tokens.spacing.xs,
-    borderTopWidth: 1,
-    borderTopColor: Tokens.colors.border,
+  heroDivider: {
+    height: 1,
+    backgroundColor: THEME.border,
+    marginTop: 14,
+    marginBottom: 2,
   },
-  heroField: {
-    width: "47%",
-    gap: 2,
-  },
-  heroFieldLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  heroFieldValue: {
-    ...Tokens.type.bodyStrong,
-    color: Tokens.colors.textStrong,
-  },
-  heroFieldValueSubdued: {
-    color: Tokens.colors.textDim,
-  },
-  sectionCard: {
-    backgroundColor: Tokens.colors.bgRaised,
-    borderRadius: Tokens.radius.xl,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.lg,
-    gap: Tokens.spacing.md,
-  },
-  sectionHeader: {
-    gap: 2,
+  sectionBlock: {
+    gap: 8,
   },
   sectionTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 13,
+    fontWeight: "700",
   },
-  sectionSubtitle: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-  },
-  infoTileRow: {
+  kpiRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Tokens.spacing.sm,
+    gap: 8,
   },
-  infoTile: {
-    width: "47%",
-    minHeight: 90,
-    backgroundColor: Tokens.colors.surfaceLo,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.md,
+  cardSectionPad: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+  },
+  availabilitySummaryList: {
+    paddingHorizontal: 14,
+    paddingTop: 2,
+  },
+  availabilitySummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
   },
-  infoTileLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  infoTileValue: {
-    ...Tokens.type.title,
-    color: Tokens.colors.textStrong,
-  },
-  infoTileSuccess: {
-    backgroundColor: Tokens.colors.successBg,
-    borderColor: `${Tokens.colors.success}22`,
-  },
-  infoTileWarning: {
-    backgroundColor: Tokens.colors.warningBg,
-    borderColor: `${Tokens.colors.warning}22`,
-  },
-  infoTileDanger: {
-    backgroundColor: Tokens.colors.dangerBg,
-    borderColor: `${Tokens.colors.danger}22`,
-  },
-  availabilityList: {
-    gap: Tokens.spacing.sm,
-  },
-  availabilityCard: {
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.md,
-    gap: Tokens.spacing.sm,
-  },
-  availabilityTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: Tokens.spacing.sm,
-  },
-  availabilityTitleBlock: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Tokens.spacing.sm,
+  availabilitySummaryCopy: {
     flex: 1,
+    gap: 3,
   },
-  availabilityTitle: {
-    ...Tokens.type.bodyStrong,
-    color: Tokens.colors.textStrong,
-    flexShrink: 1,
+  availabilitySummaryLabel: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 12.5,
+    fontWeight: "700",
   },
-  availabilityChipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Tokens.spacing.xs,
+  availabilitySummaryDetail: {
+    color: THEME.textMuted,
+    fontFamily: THEME.fontFamily,
+    fontSize: 11.5,
+    lineHeight: 16,
   },
-  availabilitySummary: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+  availabilitySummaryDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    flexShrink: 0,
   },
-  availabilityMetaRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: Tokens.spacing.xs,
+  tablePlatformCell: {
+    gap: 3,
   },
-  availabilityMetaText: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textDim,
+  tablePlatformCode: {
+    fontFamily: THEME.monoFamily,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.4,
   },
-  availabilityMetaDivider: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textDim,
+  tablePlatformName: {
+    color: THEME.text,
+    fontFamily: THEME.fontFamily,
+    fontSize: 11.5,
   },
-  bottomAction: {
-    flex: 1,
+  tableStatusCell: {
+    gap: 6,
   },
-  bottomDangerAction: {
-    backgroundColor: Tokens.colors.surfaceDanger,
-    borderColor: Tokens.colors.danger,
+  tableStatusDetail: {
+    color: THEME.textDim,
+    fontFamily: THEME.fontFamily,
+    fontSize: 10.5,
   },
-  bottomDangerText: {
-    color: Tokens.colors.danger,
+  fieldStack: {
+    gap: 12,
+  },
+  fieldError: {
+    marginTop: -6,
+    color: THEME.danger,
+    fontFamily: THEME.fontFamily,
+    fontSize: 11.5,
+  },
+  footerBar: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+  },
+  footerAction: {
+    minHeight: 46,
+    borderRadius: 10,
+  },
+  footerDangerLabel: {
+    color: THEME.danger,
+    fontFamily: THEME.fontFamily,
+    fontSize: 13,
+    fontWeight: "700",
   },
 });
