@@ -15,6 +15,7 @@ import type {
   UpdateMaintenanceLogCommand,
 } from "./maintenance.types";
 
+import { toActionReceiptEnvelope } from "../../common/action-receipt";
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { MaintenanceService } from "./maintenance.service";
 
@@ -27,8 +28,16 @@ export class MaintenanceController {
     @Body() command: CreateMaintenanceLogCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.maintenanceService.createMaintenanceLog(command, requestId),
+    const result = this.maintenanceService.createMaintenanceLog(
+      command,
+      requestId,
+      { captureAudit: true },
+    );
+    return toActionReceiptEnvelope(
+      {
+        auditLog: result.auditLog,
+        message: "Maintenance log created.",
+      },
       requestId,
     );
   }
@@ -61,12 +70,17 @@ export class MaintenanceController {
     @Body() command: UpdateMaintenanceLogCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.maintenanceService.updateMaintenanceLog(
-        maintenanceId,
-        command,
-        requestId,
-      ),
+    const result = this.maintenanceService.updateMaintenanceLog(
+      maintenanceId,
+      command,
+      requestId,
+      { captureAudit: true },
+    );
+    return toActionReceiptEnvelope(
+      {
+        auditLog: result.auditLog,
+        message: "Maintenance log updated.",
+      },
       requestId,
     );
   }
@@ -85,8 +99,16 @@ export class MaintenanceController {
     @Param("maintenanceId") maintenanceId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.maintenanceService.deleteMaintenanceLog(maintenanceId, requestId),
+    const result = this.maintenanceService.deleteMaintenanceLog(
+      maintenanceId,
+      requestId,
+      { captureAudit: true },
+    );
+    return toActionReceiptEnvelope(
+      {
+        auditLog: result.auditLog,
+        message: "Maintenance log deleted.",
+      },
       requestId,
     );
   }
