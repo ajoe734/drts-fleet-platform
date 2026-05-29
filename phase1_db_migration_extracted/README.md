@@ -15,6 +15,7 @@
   - `V0008__billing_and_settlement.sql`
   - `V0009__admin_reporting_audit_and_integrations.sql`
   - `V0010__views_triggers_and_guardrails.sql`
+  - `V0011__driver_ops_instruction_storage.sql`
 - `seeds/`
   - `S0001__reference_seed.sql`
   - `S0002__demo_operational_seed.sql`
