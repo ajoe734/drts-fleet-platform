@@ -6,6 +6,7 @@ import {
   ScrollView,
   StatusBar,
   ViewStyle,
+  type RefreshControlProps,
 } from "react-native";
 import { Tokens } from "./tokens";
 
@@ -19,7 +20,7 @@ interface AppScreenProps {
    * Optional pull-to-refresh control. Only applies when `scrollable` (the
    * default); used by manual-refresh-tier screens per packet §3.2.
    */
-  refreshControl?: React.ReactElement;
+  refreshControl?: React.ReactElement<RefreshControlProps>;
 }
 
 export const AppScreen: React.FC<AppScreenProps> = ({

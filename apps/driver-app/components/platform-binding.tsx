@@ -121,10 +121,9 @@ export function PlatformBinding({
     }
   };
 
+  // refreshSignal drives the manual refresh tier from the parent screen.
   useEffect(() => {
     void loadPresences({ silent: true });
-    // refreshSignal drives the manual refresh tier from the parent screen.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshSignal]);
 
   const handleSubmitBind = async () => {
@@ -137,7 +136,10 @@ export function PlatformBinding({
       return;
     }
     if (!isPlatformCode(normalizedCode)) {
-      Alert.alert("平台代碼無效", `平台代碼必須是：${SUPPORTED_PLATFORM_HINT}。`);
+      Alert.alert(
+        "平台代碼無效",
+        `平台代碼必須是：${SUPPORTED_PLATFORM_HINT}。`,
+      );
       return;
     }
     const platformCode = normalizedCode;
@@ -241,23 +243,27 @@ export function PlatformBinding({
       );
       return;
     }
-    Alert.alert("重新驗證", `將開啟外部${descriptor.label}以重新驗證「${platformName}」。`, [
-      { text: "取消", style: "cancel" },
-      {
-        text: descriptor.actionLabel,
-        onPress: async () => {
-          try {
-            const supported = await Linking.canOpenURL(url);
-            if (!supported) {
-              throw new Error("此裝置無法開啟該連結");
+    Alert.alert(
+      "重新驗證",
+      `將開啟外部${descriptor.label}以重新驗證「${platformName}」。`,
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: descriptor.actionLabel,
+          onPress: async () => {
+            try {
+              const supported = await Linking.canOpenURL(url);
+              if (!supported) {
+                throw new Error("此裝置無法開啟該連結");
+              }
+              await Linking.openURL(url);
+            } catch (error) {
+              Alert.alert("無法開啟驗證", toErrorMessage(error));
             }
-            await Linking.openURL(url);
-          } catch (error) {
-            Alert.alert("無法開啟驗證", toErrorMessage(error));
-          }
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   const handleOpenUnbind = (record: PlatformPresenceRecord) => {
@@ -288,7 +294,9 @@ export function PlatformBinding({
       record.eligibility === "eligible" &&
       !record.reauthRequired,
   ).length;
-  const attentionCount = sorted.filter((record) => record.reauthRequired).length;
+  const attentionCount = sorted.filter(
+    (record) => record.reauthRequired,
+  ).length;
   const blockedCount = sorted.filter(
     (record) =>
       record.eligibility === "ineligible" ||
@@ -332,7 +340,11 @@ export function PlatformBinding({
       {sorted.length > 0 ? (
         <View style={styles.summaryChips}>
           <StatusChip label={`可接單 ${readyCount}`} variant="success" dot />
-          <StatusChip label={`需處理 ${attentionCount}`} variant="warning" dot />
+          <StatusChip
+            label={`需處理 ${attentionCount}`}
+            variant="warning"
+            dot
+          />
           <StatusChip label={`已阻塞 ${blockedCount}`} variant="danger" dot />
         </View>
       ) : null}
@@ -348,7 +360,9 @@ export function PlatformBinding({
             size={16}
             color={Tokens.colors.primary}
           />
-          <Text style={styles.presenceLinkText}>前往平台健康中心查看即時狀態</Text>
+          <Text style={styles.presenceLinkText}>
+            前往平台健康中心查看即時狀態
+          </Text>
           <Ionicons
             name="chevron-forward"
             size={14}
@@ -420,7 +434,9 @@ export function PlatformBinding({
               label="平台代碼"
               placeholder="請輸入平台代碼"
               value={form.platformCode}
-              onChangeText={(value) => setForm({ ...form, platformCode: value })}
+              onChangeText={(value) =>
+                setForm({ ...form, platformCode: value })
+              }
               autoCapitalize="none"
               autoCorrect={false}
               editable={!submitting}
@@ -539,8 +555,7 @@ function PlatformBindRow({
         </View>
         <View style={styles.bindIdentity}>
           <Text style={styles.bindName}>
-            {name}{" "}
-            <Text style={styles.bindCode}>· {record.platformCode}</Text>
+            {name} <Text style={styles.bindCode}>· {record.platformCode}</Text>
           </Text>
           <Text
             style={[
@@ -572,14 +587,10 @@ function PlatformBindRow({
         <Text
           style={[
             styles.selfServiceTag,
-            selfService
-              ? styles.selfServiceTagOn
-              : styles.selfServiceTagOff,
+            selfService ? styles.selfServiceTagOn : styles.selfServiceTagOff,
           ]}
         >
-          {selfService
-            ? "可自助綁定/解除"
-            : "綁定由派車台管理"}
+          {selfService ? "可自助綁定/解除" : "綁定由派車台管理"}
         </Text>
       </View>
 
@@ -640,9 +651,7 @@ function PlatformBindRow({
           {reauthAction ? (
             <ActionButton
               title={
-                reauthAction.enabled
-                  ? mechDescriptor.actionLabel
-                  : "聯絡派車台"
+                reauthAction.enabled ? mechDescriptor.actionLabel : "聯絡派車台"
               }
               icon={reauthAction.enabled ? "refresh" : "call-outline"}
               variant="secondary"
