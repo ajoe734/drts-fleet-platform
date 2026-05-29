@@ -106,7 +106,6 @@ const EMPTY_REASON_VALUES = [
   "fetch_failed",
   "permission_denied",
   "external_unavailable",
-  "driver_not_eligible",
   "filtered_empty",
 ] as const satisfies readonly EmptyReason[];
 
@@ -117,17 +116,16 @@ const pageBodyStyle = {
   gap: 16,
 };
 
-const kpiGridStyle = {
+const overviewCardStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-  gap: 10,
-};
-
-const splitGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.8fr) minmax(260px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.25fr) minmax(320px, 0.9fr)",
   gap: 16,
   alignItems: "start",
+};
+
+const metaGridStyle = {
+  display: "grid",
+  gap: 12,
 };
 
 const tableColumns: CanvasTableColumn<FlagTableRow>[] = [
@@ -194,16 +192,6 @@ function normalizeAvailableActions(
   availableActions: ResourceActionDescriptor[] | null | undefined,
 ): ResourceActionDescriptor[] {
   return Array.isArray(availableActions) ? availableActions : [];
-}
-
-function findHistoryAction(
-  availableActions: ResourceActionDescriptor[],
-): ResourceActionDescriptor | null {
-  return (
-    availableActions.find(
-      (action) => action.action === "view_change_history",
-    ) ?? null
-  );
 }
 
 function normalizeFeatureFlags(
@@ -439,6 +427,31 @@ function formatDisabledReason(locale: Locale, reasonCode: string) {
   return reasonCode.replaceAll("_", " ");
 }
 
+function resolveFlagActionHref(
+  flag: NormalizedFlag,
+  action: ResourceActionDescriptor,
+): string | null {
+  if (action.action !== "view_change_history") {
+    return null;
+  }
+
+  return (
+    resolveCrossAppHref(flag.historyLink) ??
+    resolvePlatformAdminFlagsHref(flag.key)
+  );
+}
+
+function resolveFlagActionTarget(
+  flag: NormalizedFlag,
+  action: ResourceActionDescriptor,
+): "_blank" | undefined {
+  if (action.action !== "view_change_history") {
+    return undefined;
+  }
+
+  return flag.historyLink?.openMode === "same_tab" ? undefined : "_blank";
+}
+
 function renderStack(
   primary: ReactNode,
   secondary?: ReactNode,
@@ -591,16 +604,6 @@ function buildEmptyState(
         actionLabel: t("common.tryAgain", locale),
         actionHref: buildRefreshHref(query, scope),
       };
-    case "driver_not_eligible":
-      return {
-        icon: "warn",
-        tone: "warn",
-        label: "DRIVER NOT ELIGIBLE",
-        title: t("flags.emptyState.driverNotEligible.title", locale),
-        body: t("flags.emptyState.driverNotEligible.body", locale),
-        actionLabel: t("common.refresh", locale),
-        actionHref: buildRefreshHref(query, scope),
-      };
     case "filtered_empty":
       return {
         icon: "search",
@@ -641,14 +644,23 @@ function EmptyStateCard({
   query,
   scope,
   messageCode,
+  nextAction,
 }: {
   locale: Locale;
   reason: EmptyReason;
   query: string;
   scope: ScopeFilter;
   messageCode?: string;
+  nextAction?: ResourceActionDescriptor;
 }) {
   const emptyState = buildEmptyState(locale, reason, query, scope);
+  const nextActionLabel = nextAction
+    ? formatActionLabel(locale, nextAction.action)
+    : emptyState.actionLabel;
+  const nextActionHref =
+    nextAction?.action === "view_change_history"
+      ? resolvePlatformAdminFlagsHref()
+      : emptyState.actionHref;
 
   return (
     <Card
@@ -731,9 +743,9 @@ function EmptyStateCard({
             </span>
           </div>
           <div>
-            {emptyState.actionHref ? (
+            {nextActionHref ? (
               <ActionLink
-                href={emptyState.actionHref}
+                href={nextActionHref}
                 tone={
                   emptyState.tone === "neutral" ? "accent" : emptyState.tone
                 }
@@ -741,12 +753,12 @@ function EmptyStateCard({
                   ? { target: emptyState.actionTarget }
                   : {})}
               >
-                {emptyState.actionLabel}
+                {nextActionLabel}
               </ActionLink>
             ) : (
               <div style={{ display: "grid", gap: 6 }}>
                 <Pill theme={theme} tone="warn">
-                  {emptyState.actionLabel}
+                  {nextActionLabel}
                 </Pill>
                 <span style={{ color: theme.textDim, fontSize: 11 }}>
                   {t("flags.platformAdminLinkUnavailable", locale)}
@@ -765,17 +777,9 @@ function buildFlagTableRows(
   locale: Locale,
 ): FlagTableRow[] {
   return flags.map((flag) => {
-    const historyAction = findHistoryAction(flag.availableActions);
-    const historyHref = historyAction
-      ? (resolveCrossAppHref(flag.historyLink) ??
-        resolvePlatformAdminFlagsHref(flag.key))
-      : null;
-    const hasEnabledAction = flag.availableActions.some((action) => {
-      if (action.action !== "view_change_history") {
-        return action.enabled;
-      }
-      return action.enabled && Boolean(historyHref);
-    });
+    const hasHistoryLinkAction = flag.availableActions.some(
+      (action) => action.action === "view_change_history",
+    );
 
     return {
       key: flag.key,
@@ -807,9 +811,7 @@ function buildFlagTableRows(
       ),
       updatedByCell: renderStack(
         flag.lastChangedBy ?? t("common.dash", locale),
-        historyAction && historyHref
-          ? t("flags.crossAppHint", locale)
-          : undefined,
+        hasHistoryLinkAction ? t("flags.crossAppHint", locale) : undefined,
       ),
       updatedAt: formatDateTime(flag.lastChangedAt, locale),
       description: flag.description,
@@ -826,15 +828,23 @@ function buildFlagTableRows(
               {t("flags.readOnly", locale)}
             </Pill>
           ) : null}
-          {flag.availableActions.map((action) =>
-            action.enabled && historyHref ? (
+          {flag.availableActions.map((action) => {
+            const href = resolveFlagActionHref(flag, action);
+            const target = resolveFlagActionTarget(flag, action);
+            const disabledReason =
+              action.disabledReasonCode ??
+              (action.enabled && !href
+                ? action.action === "view_change_history"
+                  ? "history_link_missing"
+                  : "read_only_surface"
+                : null);
+
+            return action.enabled && href ? (
               <ActionLink
                 key={`${flag.key}-${action.action}`}
-                href={historyHref}
+                href={href}
                 tone="accent"
-                {...(flag.historyLink?.openMode === "new_tab"
-                  ? { target: "_blank" as const }
-                  : {})}
+                {...(target ? { target } : {})}
               >
                 {formatActionLabel(locale, action.action)}
               </ActionLink>
@@ -846,21 +856,14 @@ function buildFlagTableRows(
                 <Pill theme={theme} tone={actionTone(action.riskLevel)}>
                   {formatActionLabel(locale, action.action)}
                 </Pill>
-                {action.disabledReasonCode || !historyHref ? (
+                {disabledReason ? (
                   <span style={{ color: theme.textDim, fontSize: 11 }}>
-                    {action.disabledReasonCode
-                      ? formatDisabledReason(locale, action.disabledReasonCode)
-                      : t("flags.disabledReason.history_link_missing", locale)}
+                    {formatDisabledReason(locale, disabledReason)}
                   </span>
                 ) : null}
               </div>
-            ),
-          )}
-          {flag.availableActions.length > 0 && !hasEnabledAction ? (
-            <Pill theme={theme} tone="neutral">
-              {t("flags.readOnly", locale)}
-            </Pill>
-          ) : null}
+            );
+          })}
         </div>
       ),
       _selected: flag.state === "partial",
@@ -1004,34 +1007,7 @@ export default async function FeatureFlagsPage({
           />
         ) : null}
 
-        <div style={kpiGridStyle}>
-          <KPI
-            theme={theme}
-            label={locale === "zh" ? "可見旗標" : "Visible flags"}
-            value={payload.flags.length}
-            sub={locale === "zh" ? "目前快照總數" : "Current snapshot total"}
-          />
-          <KPI
-            theme={theme}
-            label={locale === "zh" ? "已啟用" : "Enabled"}
-            value={enabledCount}
-            sub={locale === "zh" ? "營運可見 enabled" : "Operationally enabled"}
-          />
-          <KPI
-            theme={theme}
-            label={locale === "zh" ? "進行中 rollout" : "Mid-rollout"}
-            value={partialCount}
-            sub={locale === "zh" ? "跨租戶值不一致" : "Tenant values diverge"}
-          />
-          <KPI
-            theme={theme}
-            label={locale === "zh" ? "租戶層級" : "Tenant-scoped"}
-            value={tenantScopedCount}
-            sub={locale === "zh" ? "有 override 足跡" : "Overrides are present"}
-          />
-        </div>
-
-        <div style={splitGridStyle}>
+        <div style={overviewCardStyle}>
           <Card
             theme={theme}
             title={t("flags.registryTitle", locale)}
@@ -1114,6 +1090,31 @@ export default async function FeatureFlagsPage({
                   gap: 8,
                 }}
               >
+                <KPI
+                  theme={theme}
+                  label={locale === "zh" ? "可見旗標" : "Visible flags"}
+                  value={payload.flags.length}
+                  sub={
+                    locale === "zh" ? "目前快照總數" : "Current snapshot total"
+                  }
+                />
+                <KPI
+                  theme={theme}
+                  label={locale === "zh" ? "進行中 rollout" : "Mid-rollout"}
+                  value={partialCount}
+                  sub={
+                    locale === "zh" ? "跨租戶值不一致" : "Tenant values diverge"
+                  }
+                />
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
                 <Pill theme={theme} tone="accent">
                   {t(`flags.refreshTier.${payload.refreshTier}`, locale)}
                 </Pill>
@@ -1134,6 +1135,16 @@ export default async function FeatureFlagsPage({
                   {formatDateTime(payload.refresh.generatedAt, locale)}
                 </Pill>
               </div>
+
+              <div
+                style={{
+                  color: theme.textMuted,
+                  fontSize: 12.5,
+                  lineHeight: 1.55,
+                }}
+              >
+                {t("flags.registryFooterV2", locale)}
+              </div>
             </div>
           </Card>
 
@@ -1147,9 +1158,9 @@ export default async function FeatureFlagsPage({
             }
             padding={18}
           >
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={metaGridStyle}>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                <Pill theme={theme} tone="neutral">
+                <Pill theme={theme} tone="accent">
                   GET /api/ops/feature-flags
                 </Pill>
                 <Pill theme={theme} tone="neutral">
@@ -1158,6 +1169,31 @@ export default async function FeatureFlagsPage({
                 <Pill theme={theme} tone="neutral">
                   EmptyReason x6
                 </Pill>
+                <Pill theme={theme} tone="neutral">
+                  cross-app deep links
+                </Pill>
+              </div>
+              <div style={{ display: "grid", gap: 10 }}>
+                <KPI
+                  theme={theme}
+                  label={locale === "zh" ? "已啟用" : "Enabled"}
+                  value={enabledCount}
+                  sub={
+                    locale === "zh"
+                      ? "營運可見 enabled"
+                      : "Operationally enabled"
+                  }
+                />
+                <KPI
+                  theme={theme}
+                  label={locale === "zh" ? "租戶層級" : "Tenant-scoped"}
+                  value={tenantScopedCount}
+                  sub={
+                    locale === "zh"
+                      ? "有 override 足跡"
+                      : "Overrides are present"
+                  }
+                />
               </div>
               <div
                 style={{
@@ -1207,6 +1243,9 @@ export default async function FeatureFlagsPage({
             reason={effectiveEmptyReason}
             query={query}
             scope={scope}
+            {...(payload.emptyState?.nextAction
+              ? { nextAction: payload.emptyState.nextAction }
+              : {})}
             {...(payload.emptyState?.messageCode
               ? { messageCode: payload.emptyState.messageCode }
               : {})}

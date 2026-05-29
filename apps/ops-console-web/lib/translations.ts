@@ -369,6 +369,8 @@ const en = {
     "History is not available for this flag yet.",
   "flags.disabledReason.history_link_missing":
     "History is enabled by contract but no cross-app link was provided.",
+  "flags.disabledReason.read_only_surface":
+    "This action is not available on the ops read-only surface.",
   "flags.meta.refreshTier": "Refresh tier",
   "flags.meta.freshness": "Freshness",
   "flags.meta.generatedAt": "Generated at",
@@ -1905,6 +1907,8 @@ const zh: Record<keyof typeof en, string> = {
   "flags.disabledReason.history_unavailable": "此旗標尚未提供歷史紀錄。",
   "flags.disabledReason.history_link_missing":
     "contract 允許查看歷史，但沒有提供 cross-app 連結。",
+  "flags.disabledReason.read_only_surface":
+    "這個動作不會在 ops 的唯讀畫面執行。",
   "flags.meta.refreshTier": "刷新層級",
   "flags.meta.freshness": "新鮮度",
   "flags.meta.generatedAt": "產生時間",
