@@ -38,6 +38,13 @@ type DispatchPageProps = {
 };
 
 type DispatchView = "forwarded" | "owned";
+type DispatchBoard =
+  | "ready_queue"
+  | "assigned"
+  | "exception_hold"
+  | "no_eligible_supply"
+  | "governance_blocked"
+  | "forwarded_mirror";
 type OwnedStateFilter =
   | "all"
   | "queued"
@@ -215,14 +222,19 @@ function resolveForwardedFilter(
 
 function buildDispatchHref({
   orderId,
+  board,
   state,
   view,
 }: {
   view: DispatchView;
+  board?: DispatchBoard;
   state?: string;
   orderId?: string;
 }) {
   const params = new URLSearchParams();
+  if (board) {
+    params.set("board", board);
+  }
   if (view === "forwarded") {
     params.set("view", "forwarded");
   }
@@ -234,6 +246,53 @@ function buildDispatchHref({
   }
   const query = params.toString();
   return query ? `/dispatch?${query}` : "/dispatch";
+}
+
+function resolveBoardConfig(board: string | undefined): {
+  view?: DispatchView;
+  state?: string;
+  activeTabKey?: string;
+} {
+  switch (board) {
+    case "forwarded_mirror":
+      return {
+        view: "forwarded",
+        state: "attention",
+        activeTabKey: "forwarded",
+      };
+    case "governance_blocked":
+      return {
+        view: "owned",
+        state: "override_pending",
+        activeTabKey: "override_pending",
+      };
+    case "no_eligible_supply":
+      return {
+        view: "owned",
+        state: "no_supply",
+        activeTabKey: "no_supply",
+      };
+    case "exception_hold":
+      return {
+        view: "owned",
+        state: "exception_hold",
+        activeTabKey: "owned",
+      };
+    case "assigned":
+      return {
+        view: "owned",
+        state: "assigned",
+        activeTabKey: "owned",
+      };
+    case "ready_queue":
+      return {
+        view: "owned",
+        state: "queued",
+        activeTabKey: "owned",
+      };
+    default:
+      return {};
+  }
 }
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
@@ -696,18 +755,23 @@ export default async function DispatchPage({
       )) as Promise<Record<string, string | string[] | undefined>>,
   ]);
 
-  const view = resolveView(firstParam(resolvedSearchParams?.view));
+  const boardParam = firstParam(resolvedSearchParams?.board);
+  const boardConfig = resolveBoardConfig(boardParam);
+  const view =
+    boardConfig.view ?? resolveView(firstParam(resolvedSearchParams?.view));
   const focusOrderId = firstParam(resolvedSearchParams?.orderId) ?? "";
-  const stateParam = firstParam(resolvedSearchParams?.state);
+  const stateParam =
+    boardConfig.state ?? firstParam(resolvedSearchParams?.state);
 
   const activeTabKey =
-    view === "forwarded"
+    boardConfig.activeTabKey ??
+    (view === "forwarded"
       ? "forwarded"
       : stateParam === "override_pending"
         ? "override_pending"
         : stateParam === "no_supply"
           ? "no_supply"
-          : "owned";
+          : "owned");
   const { active: activeTab, tabs } = buildTabLinks(activeTabKey);
 
   if (view === "forwarded") {
@@ -840,9 +904,7 @@ export default async function DispatchPage({
           <Pill
             theme={theme}
             tone={
-              adapterHealth
-                ? getAdapterTone(adapterHealth.status)
-                : "neutral"
+              adapterHealth ? getAdapterTone(adapterHealth.status) : "neutral"
             }
           >
             {adapterHealth
