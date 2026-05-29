@@ -77,7 +77,8 @@ async function loadDashboardData(): Promise<DashboardData> {
     identity:
       identityResult.status === "fulfilled" ? identityResult.value : null,
     featureFlags: flagsResult.status === "fulfilled" ? flagsResult.value : null,
-    bookings: bookingsResult.status === "fulfilled" ? bookingsResult.value : [],
+    bookings:
+      bookingsResult.status === "fulfilled" ? bookingsResult.value.items : [],
     invoices: invoicesResult.status === "fulfilled" ? invoicesResult.value : [],
     notifications:
       notificationsResult.status === "fulfilled"

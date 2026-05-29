@@ -24,7 +24,7 @@ services:
       - redis-data:/data
 
   mailpit:
-    image: axllent/mailpit:v1.26.3
+    image: axllent/mailpit:v1.27.0
     container_name: drts-mailpit
     restart: unless-stopped
     ports:
