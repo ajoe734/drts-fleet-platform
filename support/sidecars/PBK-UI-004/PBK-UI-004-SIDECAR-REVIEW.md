@@ -1,217 +1,247 @@
 # PBK-UI-004 Sidecar Review Packet
 
-This document is the parallel review-support packet for `PBK-UI-004` ("Authority-safe negative paths"). It does not change canonical truth. It consolidates the repo facts and verification evidence that the assigned sidecar reviewer (`Codex2`) needs to confirm that the parent task's `done` state in `ai-status.json` — recorded at `2026-05-12T21:11:06Z` with commit `13104105d299eadd0b433596b2f173249dfbb5fc` (`feat(PBK-UI-004): preserve authority-safe partner negative paths`) pushed to `origin/feat/claude2-ui-redesign-foundation` — is justified by what is actually in the tree.
+This document is the support-only review packet for `PBK-UI-004`
+("Authority-safe negative paths"). It does not change canonical truth or the
+parent implementation. Its purpose is narrower: give the assigned sidecar
+reviewer (`Codex`) a clean evidence summary for the current parent review state
+and remove stale packet text that no longer matches the live control plane.
+
+Current reality to preserve:
+
+- The sidecar task `PBK-UI-004-SIDECAR-REVIEW` is in `review`, owned by
+  `Codex2`, reviewed by `Codex`.
+- The parent task `PBK-UI-004` is also in `review`, but its current structured
+  reviewer is `Codex2`, not `Codex`.
+- The parent implementation evidence lives on branch `claude2/pbk-ui-004`
+  (`origin/claude2/pbk-ui-004`), mainly in commits `f8da53e` and `63f6aef`.
+- Dependency `PBK-UI-003` is already `done` on commit
+  `89b5a96840987e6caac94d251e76dcbc40f83ce8`.
 
 Anchors used here:
 
-- `ai-status.json`
-- `apps/partner-booking-web/app/[tenantSlug]/page.tsx`
-- `apps/partner-booking-web/app/[tenantSlug]/[routeState]/page.tsx`
-- `apps/partner-booking-web/lib/route-state.ts`
+- `/home/edna/workspace/drts-fleet-platform/ai-status.json`
 - `apps/partner-booking-web/README.md`
-- `packages/ui-web/src/partner-booking-funnel.tsx`
-- `packages/ui-web/src/index.tsx`
-- `apps/tenant-console-web/app/partner/(authenticated)/eligibility/page.tsx`
-- `apps/tenant-console-web/app/partner/(authenticated)/booking/new/page.tsx`
-- `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md` §`PBK-UI-004`
+- `git show --stat --summary f8da53e`
+- `git show --stat --summary 63f6aef`
+- `git branch -a --contains f8da53e`
+- `git branch -a --contains 63f6aef`
 
 ## §1 Scope & Boundary
 
 - **Task ID:** `PBK-UI-004-SIDECAR-REVIEW`
 - **Parent Task:** `PBK-UI-004`
 - **Helper Kind:** `review_packet`
-- **Owner:** `Claude`
-- **Reviewer:** `Codex2`
+- **Sidecar Owner / Reviewer:** `Codex2` -> `Codex`
 - **Mutates Canonical:** `false`
-- **Objective:** Hand off a reviewer-facing evidence summary for the parent authority-safe negative-paths task without editing L1/L2 truth, runtime code, or the parent backlog item itself. At the moment this refreshed packet is handed off, the parent is `done` — reviewer `Codex` previously passed the implementation at `2026-05-12T21:04:38Z`, owner `Codex2` finalised closeout at `2026-05-12T21:11:06Z` with task-scoped commit `13104105d299eadd0b433596b2f173249dfbb5fc` pushed to `origin/feat/claude2-ui-redesign-foundation`. The packet records what the implementation surface actually contains, how it lines up with the parent's acceptance, and what `Codex2` (sidecar reviewer) should re-confirm before approving this sidecar.
+- **Objective:** refresh the packet so it matches current machine truth and the
+  active parent review evidence, without editing runtime code or L1/L2 truth.
 
 Guardrails for this packet:
 
-- Only the artifact under `support/sidecars/PBK-UI-004/` is touched.
-- Machine-truth state transitions go through `scripts/ai-status.sh`, never by hand-editing `ai-status.json` / `current-work.md` / `ai-activity-log.jsonl`.
-- The packet does not re-decide parent scope; it cites what was already decided in `ai-status.json` and the workbreakdown planning doc.
+- Only `support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-REVIEW.md` is changed by
+  this sidecar branch.
+- Any machine-truth state transition belongs in `scripts/ai-status.sh`, not in
+  manual edits to `ai-status.json`, `current-work.md`, or activity logs.
+- Approval of this sidecar packet is not approval of the parent implementation;
+  it only confirms the packet faithfully summarizes the current review state.
 
 ## §2 Machine-Truth Anchors
 
+### Sidecar task: `PBK-UI-004-SIDECAR-REVIEW`
+
+| Field | Value |
+| --- | --- |
+| Title | `Prepare PBK-UI-004 review packet and evidence summary` |
+| Owner | `Codex2` |
+| Reviewer | `Codex` |
+| Status | `review` |
+| Depends on | `PBK-UI-003` |
+| `task_class` | `sidecar` |
+| `helper_kind` | `review_packet` |
+| `mutates_canonical` | `false` |
+| Artifact | `support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-REVIEW.md` |
+| `last_update` | `2026-05-18T07:36:14Z` |
+
+The sidecar task's current `next` text says the packet was refreshed for a
+then-current `Claude2` -> `Codex` parent handoff. That summary is now slightly
+stale because the parent reviewer has since been reassigned again. The sidecar
+reviewer, however, is still `Codex`.
+
 ### Parent task: `PBK-UI-004`
 
-| Field                | Value                                                                                                                                        |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Title                | `Authority-safe negative paths`                                                                                                              |
-| Phase                | `Wave 5`                                                                                                                                     |
-| Owner                | `Codex2`                                                                                                                                     |
-| Reviewer             | `Codex`                                                                                                                                      |
-| Status               | `done` (closeout finalised by `Codex2` after review approval by `Codex`)                                                                     |
-| Depends on           | `PBK-UI-003` (`done` at commit `fbc05f6`)                                                                                                    |
-| Planning ref         | `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`                                                                                      |
-| Acceptance           | `pnpm --filter @drts/partner-booking-web typecheck / build / lint`; `Storybook 對照對應 PB_* artboard (PBK-UI-003 起)`                       |
-| Last update          | `2026-05-12T21:11:06Z` (parent `done`; reviewer approval recorded at `2026-05-12T21:04:38Z`)                                                 |
-| Commit hash          | `13104105d299eadd0b433596b2f173249dfbb5fc`                                                                                                   |
-| Commit subject       | `feat(PBK-UI-004): preserve authority-safe partner negative paths`                                                                           |
-| Commit agent         | `Codex2`                                                                                                                                     |
-| Commit reviewer      | `Codex`                                                                                                                                      |
-| Push remote / branch | `origin` / `feat/claude2-ui-redesign-foundation`                                                                                             |
-| Push recorded at     | `2026-05-12T21:11:06Z`                                                                                                                       |
-| `review_notes_zh[0]` | `核對舊 partner flow 語義：eligible / ineligible / manual_review 停在 eligibility gate；inactive / eligibility-required 停在 booking gate。` |
-| `review_notes_zh[1]` | `/[tenantSlug]/[routeState] 與 root ?screen / ?scenario fallback 解析一致，未知 state 會 notFound()。`                                       |
-| `review_notes_zh[2]` | `驗證通過：pnpm --filter @drts/partner-booking-web typecheck、build、lint，以及 pnpm --filter @drts/ui-web build-storybook。`                |
-| `review_notes_zh[3]` | `既有 PB_* Storybook parity story 仍可 build；negative-path 呈現透過同一組 eligibility / book artboard screen 承載。`                        |
+| Field | Value |
+| --- | --- |
+| Title | `Authority-safe negative paths` |
+| Phase | `Wave 5` |
+| Owner | `Claude2` |
+| Reviewer | `Codex2` |
+| Status | `review` |
+| Depends on | `PBK-UI-003` |
+| Planning ref | `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md` |
+| Acceptance | `pnpm --filter @drts/partner-booking-web typecheck / build / lint`; `Storybook 對照對應 PB_* artboard (PBK-UI-003 起)` |
+| `last_update` | `2026-05-18T07:46:24Z` |
 
-The parent's `next` field at `done` records the closeout summary verbatim: "Closeout complete: task-scoped commit pushed after review-approved partner negative path parity for eligible/ineligible/manual*review/inactive/eligibility-required routes." The earlier reviewer summary at `review_approved` ("Review passed: authority-safe direct routes preserve tenant-console-web gate parity, unknown route states 404 correctly, and verification passed for partner-booking-web typecheck/build/lint plus ui-web build-storybook") is preserved in the four `review_notes_zh` items and the `commit*_`/`push\__` fields above are now populated, so the closeout invariant (`done`requires`COMMIT_HASH`/`COMMIT_SUBJECT`/`PUSH_REMOTE`/`PUSH_BRANCH`) is satisfied.
+Important nuance:
 
-### This sidecar task: `PBK-UI-004-SIDECAR-REVIEW`
+- The parent's structured fields currently route the live parent review to
+  `Codex2`.
+- The parent's free-text `next` field was overwritten by a later sidecar note
+  and still says "Current machine truth remains PBK-UI-004=todo with reviewer
+  Codex...". That sentence is stale and should **not** override the structured
+  `owner` / `reviewer` / `status` fields above.
+- The latest pending handoff row confirms the live parent reviewer movement:
+  `Codex` -> `Codex2` at `2026-05-18T07:43:14Z`.
 
-| Field               | Value                                                      |
-| ------------------- | ---------------------------------------------------------- |
-| Owner               | `Claude`                                                   |
-| Reviewer            | `Codex2`                                                   |
-| Status              | `review` (handed off after the post-`done` refresh)        |
-| `task_class`        | `sidecar`                                                  |
-| `helper_kind`       | `review_packet`                                            |
-| `mutates_canonical` | `false`                                                    |
-| Depends on          | `PBK-UI-003`                                               |
-| Artifact            | `support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-REVIEW.md` |
+### Dependency: `PBK-UI-003`
 
-## §3 Delivered Surface — what landed in the closeout commit
+| Field | Value |
+| --- | --- |
+| Title | `CTBC reference funnel — 7 screens` |
+| Owner | `Claude2` |
+| Reviewer | `Gemini2` |
+| Status | `done` |
+| Commit | `89b5a96840987e6caac94d251e76dcbc40f83ce8` |
+| Commit subject | `fix(PBK-UI-003): drop redundant @drts/ui-web path-map` |
+| Push | `origin/claude2/pbk-ui-003` |
+| `last_update` | `2026-05-18T07:03:36Z` |
 
-The parent implementation now lives in task-scoped commit `13104105d299eadd0b433596b2f173249dfbb5fc` on `feat/claude2-ui-redesign-foundation` (pushed to `origin`). `git show --stat 13104105d299eadd0b433596b2f173249dfbb5fc` lists six files (`456 insertions(+), 24 deletions(-)`), and the trailer carries `LLM-Agent: Codex2 / Task-ID: PBK-UI-004 / Reviewer: Codex / Verification: pnpm --filter @drts/partner-booking-web typecheck; … build; … lint; pnpm --filter @drts/ui-web build-storybook`. The following paths together form the `PBK-UI-004` surface in that commit:
+This means the parent dependency gate is now satisfied. The sidecar packet no
+longer needs to speak about `PBK-UI-003` as `in_progress`.
 
-| Path                                                              | Change in commit                 | Role                                                                                                                                                                            |
-| ----------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/partner-booking-web/app/[tenantSlug]/[routeState]/page.tsx` | new (+32 lines)                  | Dynamic catch-segment that resolves a single path token (`eligible`, `ineligible`, `manual_review`, `inactive`, `eligibility-required`, or a screen id) and renders the funnel. |
-| `apps/partner-booking-web/lib/route-state.ts`                     | new (+55 lines)                  | Pure resolvers: `resolvePartnerRouteState(routeState)` returns `null` for unknown ids; `resolvePartnerSearchState(screen, scenario)` is the `?screen` / `?scenario` fallback.   |
-| `apps/partner-booking-web/app/[tenantSlug]/page.tsx`              | modified (+/− 28 lines)          | Switches root tenant page from inline `normalizeScreen` to shared `resolvePartnerSearchState`, forwards `activeScenario` to the funnel.                                         |
-| `apps/partner-booking-web/README.md`                              | modified (+10 lines)             | Routing-rules section now documents the five direct authority-safe routes alongside `?screen` / `?scenario` backward-compat entry.                                              |
-| `packages/ui-web/src/partner-booking-funnel.tsx`                  | modified (+346 / heavy refactor) | Adds `partnerBookingScenarios`, `PartnerBookingScenarioId`, scenario metadata, `scenarioScreenById` mapping, scenario chip rendering, and `activeScenario` prop on the funnel.  |
-| `packages/ui-web/src/index.tsx`                                   | modified (+9 lines)              | Re-exports `partnerBookingScenarios`, `PartnerBookingScenarioId`, `isPartnerBookingScenarioId`, `getPartnerBookingScenarioMeta`, `getPartnerBookingScenarioScreen`.             |
+## §3 Parent Review Handoff Trail
 
-Because the closeout commit has already landed, the sidecar reviewer can audit either against the commit (e.g. `git show 13104105 -- <path>`) or against the working tree on `feat/claude2-ui-redesign-foundation` — they line up. No other paths in the diff fall outside this task scope.
+The most relevant recent handoffs are:
 
-### Surface facts that line up with the diff
+| Timestamp | Handoff | Status | Why it matters |
+| --- | --- | --- | --- |
+| `2026-05-18T07:17:11Z` | `Codex2` -> `Claude2` | done | parent owner moved back to a healthy lane |
+| `2026-05-18T07:21:28Z` | `Claude2` -> `Codex` | done | parent entered review with concrete implementation evidence |
+| `2026-05-18T07:43:14Z` | `Codex` -> `Codex2` | pending | parent reviewer moved again after Codex terminal retries |
 
-- `packages/ui-web/src/partner-booking-funnel.tsx` declares
-  `partnerBookingScenarios = ["eligible", "ineligible", "manual_review", "inactive", "eligibility-required"] as const`
-  and exposes the five scenarios through `PartnerBookingScenarioId`, `getPartnerBookingScenarioMeta`, `getPartnerBookingScenarioScreen`, and `isPartnerBookingScenarioId`.
-- The same module's `scenarioScreenById` table is the single source of truth for which screen a scenario lands on:
-  - `eligible`, `ineligible`, `manual_review` → screen `eligibility`
-  - `inactive`, `eligibility-required` → screen `book`
-- `PartnerBookingPhoneScreen` (single-phone render) and `PartnerBookingReferenceFunnel` (multi-screen chrome) both accept `scenario`/`activeScenario` and pass it through to the appropriate gate. The chrome additionally renders an "Authority-safe states" section whose links use `buildScenarioHref(basePath, scenario)` → `${basePath}/${scenario}`.
-- `apps/partner-booking-web/app/[tenantSlug]/[routeState]/page.tsx` is the direct-route renderer:
-  1. resolves brand via `getBrandForSlug(tenantSlug)`; unknown slug → `notFound()`,
-  2. resolves the dynamic segment via `resolvePartnerRouteState(routeState)`; unknown id → `notFound()`,
-  3. renders `<PartnerBookingReferenceFunnel ... activeScreen={resolved.activeScreen} activeScenario?={resolved.activeScenario} />`.
-- `apps/partner-booking-web/lib/route-state.ts` keeps the resolution logic pure and shared. `resolvePartnerRouteState`:
-  - returns `{ activeScreen: routeState }` when the token is a screen id,
-  - returns `{ activeScreen: getPartnerBookingScenarioScreen(routeState), activeScenario: routeState }` when the token is a scenario id,
-  - returns `null` otherwise (so the direct route can `notFound()`).
-    `resolvePartnerSearchState(screen, scenario)` is the `?screen` / `?scenario` fallback used by the root tenant page; it prefers a recognised `scenario`, falls back to a recognised `screen`, then to `landing`. Array-shaped query values are normalised through `normalizeSingleValue`.
-- `apps/partner-booking-web/app/[tenantSlug]/page.tsx` now drops the inline `normalizeScreen` helper and `isPartnerBookingScreenId` import, switching to the shared `resolvePartnerSearchState` and forwarding `activeScenario` only when present (so the existing seven-screen flow is unchanged when no scenario is supplied).
+Reviewer routing consequence:
 
-## §4 Five-Scenario Parity Mapping
+- `Codex` reviews this **sidecar packet**.
+- `Codex2` is the currently structured reviewer for the **parent task**.
 
-The planning doc, runtime code, and the legacy `tenant-console-web/app/partner/` surface all line up on the same five authority-safe scenarios. The token in the URL, the scenario id in `partnerBookingScenarios`, the chip `label` in `scenarioMeta`, the target screen in `scenarioScreenById`, and the tenant-console-web gate concept are consistent:
+The packet must keep those two roles distinct.
 
-| Planning negative path | URL token                            | Scenario id            | Funnel chip `label`    | Target screen | Tenant-console-web gate concept                                                                                                                     |
-| ---------------------- | ------------------------------------ | ---------------------- | ---------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eligible`             | `/[tenantSlug]/eligible`             | `eligible`             | `eligible`             | `eligibility` | `eligibility/page.tsx` callout: "eligible: booking create unlocks with the verification id stamped on the booking."                                 |
-| `ineligible`           | `/[tenantSlug]/ineligible`           | `ineligible`           | `ineligible`           | `eligibility` | `eligibility/page.tsx` callout: "ineligible: booking is denied; the partner sees the issuer reason code and may not retry without changing inputs." |
-| `manual_review`        | `/[tenantSlug]/manual_review`        | `manual_review`        | `manual_review`        | `eligibility` | `eligibility/page.tsx` callout: "manual_review: booking is held in degraded mode; ops review is required."                                          |
-| `inactive` entry       | `/[tenantSlug]/inactive`             | `inactive`             | `inactive`             | `book`        | `booking/new/page.tsx`: `partner_entry_inactive` warning callout blocks create when `partnerEntry.status !== "active"`.                             |
-| `eligibility-required` | `/[tenantSlug]/eligibility-required` | `eligibility-required` | `eligibility_required` | `book`        | `booking/new/page.tsx`: `eligibility_required` warning callout blocks create when `eligibilityMode !== "none"` and no verification id is present.   |
+## §4 Parent Implementation Evidence
 
-Notes:
+The parent review evidence lives on branch `claude2/pbk-ui-004`
+(`origin/claude2/pbk-ui-004`), not on this sidecar branch.
 
-- `getPartnerBookingScenarioScreen(scenario)` returns the planning-doc gate ("stops at" screen), so the new direct route never silently falls through to a different screen — matching the parent reviewer note ("eligible / ineligible / manual_review 停在 eligibility gate；inactive / eligibility-required 停在 booking gate").
-- The chip `label` for `eligibility-required` is intentionally `eligibility_required` (underscore) because that is the rejection reason code reused from `tenant-console-web` while the URL token stays `eligibility-required` (kebab-case) so the path segment is URL-safe.
-- The five PB\_\* artboard screens (`Landing`, `Eligibility`, `Book`, `Confirmed`, `Trips`, `Receipt`, `Help`) are not redrawn; scenario rendering is overlaid on the existing `eligibility` / `book` artboards (see parent `review_notes_zh[3]`: "negative-path 呈現透過同一組 eligibility / book artboard screen 承載").
+### Commit `f8da53e` — PBK-UI-003 scaffolding import
 
-## §5 Routing & Fallback Symmetry
+`git show --stat --summary f8da53e` confirms:
 
-Two render entry points share the same resolver module, so both surfaces agree on what is a valid scenario or screen and what falls through to `landing` or `notFound()`:
+- subject:
+  `PBK-UI-004: import PBK-UI-003 base scaffolding (wip anchor)`
+- branch containment:
+  `claude2/pbk-ui-004`, `origin/claude2/pbk-ui-004`
+- 30-file import including:
+  - `apps/partner-booking-web/app/[tenantSlug]/(public|authenticated)/*`
+  - `apps/partner-booking-web/lib/brand.ts`
+  - `packages/ui-tokens/src/brands.ts`
+  - `packages/ui-web/src/partner-booking-funnel.tsx`
+  - `packages/ui-web/src/partner-booking.stories.tsx`
 
-| Entry                                        | Resolver                                      | Unknown-token behavior        | Default                       |
-| -------------------------------------------- | --------------------------------------------- | ----------------------------- | ----------------------------- |
-| `/[tenantSlug]` with `?screen` / `?scenario` | `resolvePartnerSearchState(screen, scenario)` | Falls back to `landing`       | `{ activeScreen: "landing" }` |
-| `/[tenantSlug]/[routeState]`                 | `resolvePartnerRouteState(routeState)`        | Returns `null` → `notFound()` | n/a (404)                     |
+This anchor matters because the negative-path work was not built on the sparse
+README-only partner-booking baseline in this sidecar worktree. It was built on
+top of the full PBK-UI-003 funnel surface imported into the owner branch.
 
-This is the symmetry the parent reviewer flagged as passing in `review_notes_zh[1]`: the dynamic segment route uses the strict variant (404 on unknown), while the root tenant page keeps the lenient fallback for backward-compatible demo entry — both go through the same scenario / screen id check functions in `packages/ui-web/src/partner-booking-funnel.tsx`.
+### Commit `63f6aef` — authority-safe negative paths
 
-`apps/partner-booking-web/README.md` records this rule directly: "The tenant root still accepts `?screen=` / `?scenario=` for backward-compatible demo entry, but the canonical PBK-UI-004 negative-path states are direct routes."
+`git show --stat --summary 63f6aef` confirms:
 
-## §6 Acceptance Evidence Mapping
+- subject: `PBK-UI-004: preserve authority-safe negative paths`
+- branch containment:
+  `claude2/pbk-ui-004`, `origin/claude2/pbk-ui-004`
+- 15-file diff including the key review surface:
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/eligible/page.tsx`
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/ineligible/page.tsx`
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/manual_review/page.tsx`
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/inactive/page.tsx`
+  - `apps/partner-booking-web/app/[tenantSlug]/(public)/eligibility-required/page.tsx`
+  - `apps/partner-booking-web/lib/render-state-gate.tsx`
+  - `packages/ui-web/src/partner-booking-funnel.tsx`
+  - `packages/ui-web/src/index.tsx`
+  - `docs/05-ui/drts-design-canvas/Partner Booking.html`
+  - `docs/05-ui/drts-design-canvas/partner-screens.jsx`
 
-The `ai-status.json` acceptance for `PBK-UI-004` is two items: the partner-booking-web commands trilogy, and the Storybook artboard comparison. The parent reviewer (`Codex`) recorded a `review_approved` summary citing the verification rerun that covers both:
+The commit message itself records the intended semantics:
 
-| Acceptance item                                                 | Evidence in `ai-status.json` `PBK-UI-004` (parent `next` + `review_notes_zh`)             | Anchor in the tree                                                                      |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `pnpm --filter @drts/partner-booking-web typecheck`             | Reviewer passed at `2026-05-12T21:04:38Z` (`review_notes_zh[2]`)                          | `apps/partner-booking-web/tsconfig.json`, `lib/route-state.ts`, `[routeState]/page.tsx` |
-| `pnpm --filter @drts/partner-booking-web build`                 | Reviewer passed at `2026-05-12T21:04:38Z` (`review_notes_zh[2]`)                          | `apps/partner-booking-web/`                                                             |
-| `pnpm --filter @drts/partner-booking-web lint`                  | Reviewer passed at `2026-05-12T21:04:38Z` (`review_notes_zh[2]`)                          | `apps/partner-booking-web/`                                                             |
-| Storybook artboard parity (`PB_* against Partner Booking.html`) | `pnpm --filter @drts/ui-web build-storybook` rerun verified (`review_notes_zh[2]`, `[3]`) | `packages/ui-web/src/partner-booking.stories.tsx`, `Partner Booking.html`               |
+- the five negative states are explicit `/<tenantSlug>/<state>` routes
+- each route delegates to `renderPartnerStateGate`
+- the shared UI surface is `@drts/ui-web/PartnerBookingStateGate`
+- review assets for `PB_Eligible`, `PB_Ineligible`, `PB_ManualReview`,
+  `PB_Inactive`, and `PB_EligibilityRequired` were added under
+  `docs/05-ui/drts-design-canvas/`
 
-This sidecar packet does not re-execute these commands; the parent reviewer's recorded reruns are the canonical evidence. The mapping above is the audit hand-off so `Codex2` (sidecar reviewer) can spot-check rather than re-run unless a discrepancy appears. The Storybook story file `partner-booking.stories.tsx` itself was not modified by `PBK-UI-004` — the parent reviewer note in `review_notes_zh[3]` explicitly records that the PB\_\* parity stories from `PBK-UI-003` continue to build and negative-path UI rides on the existing `eligibility` / `book` artboards rather than introducing new ones.
+## §5 Parent Review Evidence Summary
 
-## §7 Scope Guardrails — what `PBK-UI-004` should NOT have done
+The active parent review handoff from `Claude2` recorded these concrete claims:
 
-The packet flags these so the sidecar reviewer can confirm none of them slipped into the parent change:
+- the five authority-safe negative paths were ported into
+  `apps/partner-booking-web/app/[tenantSlug]/(public)/`
+- the implementation uses `renderPartnerStateGate` and
+  `PartnerBookingStateGate` from `@drts/ui-web`
+- acceptance reruns passed:
+  `pnpm --filter @drts/partner-booking-web typecheck / lint / build`
+- the Next build registered all five negative-path routes alongside the
+  `PBK-UI-003` funnel
+- design-canvas references for the five `PB_*` negative-path artboards were
+  added for reviewer spot checks
 
-- No backend or API wiring. The new direct routes are pure mock-data renders driven by `getBrandForSlug` and the funnel component; there is no fetch / API client introduced under `apps/partner-booking-web/`.
-- No new artboard. The five scenarios overlay the existing `eligibility` and `book` artboards from `PBK-UI-003`. There is no new screen id added to `partnerBookingScreens`, and no new entry in `packages/ui-web/src/partner-booking.stories.tsx`.
-- No re-implementation of partner-session / auth. The legacy authority gate logic remains in `apps/tenant-console-web/app/partner/(authenticated)/booking/new/page.tsx` and `eligibility/page.tsx`; `PBK-UI-004` only mirrors the _naming_ of the five states into the new app surface as UI route states (the parent reviewer summary: "authority-safe direct routes preserve tenant-console-web gate parity").
-- No cross-cutting cutover decision. The new-vs-old partner mode coexistence policy stays in `PBK-UI-005` (decision doc, currently `backlog`, dependent on `PBK-UI-004`).
-- No layout-time scenario resolution. `app/[tenantSlug]/layout.tsx` is unchanged by this task; both the root tenant page and the `[routeState]` page resolve scenarios at the page level so a missing brand is still the first thing that fails with `notFound()`.
+This packet does not re-run those commands. It consolidates the branch, commit,
+and handoff anchors that the current parent reviewer lane should use.
 
-## §8 Dependency State at Approval
+## §6 Sidecar Scope Guardrails
 
-`PBK-UI-004`'s only dependency is `PBK-UI-003`:
+- This sidecar branch only changes the packet file under
+  `support/sidecars/PBK-UI-004/`.
+- The parent implementation evidence belongs to branch `claude2/pbk-ui-004`,
+  not to this sidecar branch.
+- The packet must not claim that `Codex` is still the active parent reviewer.
+  That was true earlier in the day but is no longer the current structured
+  state.
+- The packet must not treat the parent's stale free-text `next` string as
+  stronger truth than the structured task fields plus pending handoff row.
 
-| Field          | Value                                         |
-| -------------- | --------------------------------------------- |
-| Task           | `PBK-UI-003`                                  |
-| Status         | `done`                                        |
-| Commit         | `fbc05f62926392b7363360757f475275b9b56deb`    |
-| Commit subject | `feat(PBK-UI-003): add CTBC reference funnel` |
-| Push           | `origin/feat/claude2-ui-redesign-foundation`  |
+## §7 Reviewer Checklist For This Sidecar
 
-`PBK-UI-004`'s closeout commit `13104105` sits on the same branch, so `PBK-UI-003` (`fbc05f6`) is a strict ancestor — the dependency edge is satisfied in `ai-status.json` and physically present in the branch history. The `PBK-UI-003` review packet (`support/sidecars/PBK-UI-003/PBK-UI-003-SIDECAR-REVIEW.md`) is the immediate predecessor for this packet and follows the same shape.
+### A. Machine truth
 
-## §9 Reviewer Closeout Checklist (for `Codex2`)
+- [ ] `PBK-UI-004-SIDECAR-REVIEW` still shows owner `Codex2`, reviewer `Codex`,
+      status `review`, helper kind `review_packet`, and artifact path under
+      `support/sidecars/PBK-UI-004/`.
+- [ ] `PBK-UI-004` still shows structured fields
+      `owner=Claude2`, `reviewer=Codex2`, `status=review`.
+- [ ] `PBK-UI-003` still shows `done` on commit
+      `89b5a96840987e6caac94d251e76dcbc40f83ce8`.
 
-These are the sidecar-review gates. They are framed as audit checks against artifacts already in the tree (or in `ai-status.json`), not as new build steps to run.
+### B. Evidence branch
 
-### A. Machine truth still matches this packet
+- [ ] `git branch -a --contains f8da53e` lists `claude2/pbk-ui-004` and
+      `origin/claude2/pbk-ui-004`.
+- [ ] `git branch -a --contains 63f6aef` lists `claude2/pbk-ui-004` and
+      `origin/claude2/pbk-ui-004`.
+- [ ] The negative-path surface described in §4 is present on the owner branch
+      evidence commits, not merely in packet prose.
 
-- [ ] `ai-status.json` still records `PBK-UI-004` as `done`, owner `Codex2`, reviewer `Codex`, last_update `2026-05-12T21:11:06Z` or later, with `commit_hash` `13104105d299eadd0b433596b2f173249dfbb5fc`, `commit_subject` `feat(PBK-UI-004): preserve authority-safe partner negative paths`, `push_remote` `origin`, `push_branch` `feat/claude2-ui-redesign-foundation`. If any of those fields drift unexpectedly (e.g. status moved back to `review`/`in_progress`, or the commit hash changed), refresh §2 of this packet before approving.
-- [ ] `ai-status.json` still records `PBK-UI-003` as `done` on commit `fbc05f62926392b7363360757f475275b9b56deb` pushed to `origin/feat/claude2-ui-redesign-foundation`.
-- [ ] `ai-status.json` still records this sidecar (`PBK-UI-004-SIDECAR-REVIEW`) as owned by `Claude`, reviewed by `Codex2`, with `helper_kind: review_packet`, `mutates_canonical: false`, and depends on `PBK-UI-003`.
+### C. Sidecar-only hygiene
 
-### B. Repo state matches the implementation surface
+- [ ] The only task-scoped content change for this sidecar is this packet file.
+- [ ] No parent runtime files, no canonical product docs, and no `ai-status`
+      content were hand-edited by the sidecar patch.
 
-- [ ] `apps/partner-booking-web/app/[tenantSlug]/[routeState]/page.tsx` exists and resolves the segment via `resolvePartnerRouteState`, returning `notFound()` for unknown tokens.
-- [ ] `apps/partner-booking-web/lib/route-state.ts` exports `resolvePartnerRouteState` (strict) and `resolvePartnerSearchState` (lenient with `landing` default) and only consumes `@drts/ui-web` scenario/screen helpers.
-- [ ] `apps/partner-booking-web/app/[tenantSlug]/page.tsx` uses `resolvePartnerSearchState(screen, scenario)`, forwards `activeScenario` only when present, and still falls back to `landing` when neither query is recognised.
-- [ ] `packages/ui-web/src/partner-booking-funnel.tsx` declares `partnerBookingScenarios` with exactly the five ids `eligible / ineligible / manual_review / inactive / eligibility-required` and `scenarioScreenById` maps them to `eligibility / eligibility / eligibility / book / book` respectively. `PartnerBookingReferenceFunnel` accepts an optional `activeScenario` prop.
-- [ ] `packages/ui-web/src/index.tsx` re-exports `partnerBookingScenarios`, `PartnerBookingScenarioId`, `isPartnerBookingScenarioId`, `getPartnerBookingScenarioMeta`, `getPartnerBookingScenarioScreen` from the funnel module.
-- [ ] `apps/partner-booking-web/README.md` "Routing rules" still documents the five authority-safe direct routes alongside the `?screen` / `?scenario` backward-compat entry.
-- [ ] `git log --oneline -1 13104105d299eadd0b433596b2f173249dfbb5fc` resolves to `feat(PBK-UI-004): preserve authority-safe partner negative paths` and the commit is reachable from `origin/feat/claude2-ui-redesign-foundation` (`git branch -a --contains 13104105…` lists `feat/claude2-ui-redesign-foundation` and `remotes/origin/feat/claude2-ui-redesign-foundation`). The commit trailer carries `LLM-Agent: Codex2 / Task-ID: PBK-UI-004 / Reviewer: Codex`.
+## §8 Reviewer Handoff Notes
 
-### C. Scope guardrails still hold
-
-- [ ] No fetch / network call or backend client appears under `apps/partner-booking-web/app/[tenantSlug]/`. The planning-doc "mock data / no backend" boundary still holds.
-- [ ] No new screen id has been added to `partnerBookingScreens` and no new entry has been appended to `packages/ui-web/src/partner-booking.stories.tsx` to "stand up a negative-path screen" — the parent reviewer note ("negative-path 呈現透過同一組 eligibility / book artboard screen 承載") still holds.
-- [ ] `apps/tenant-console-web/app/partner/(authenticated)/` is untouched by this task. The legacy gate logic (`eligibility/page.tsx`, `booking/new/page.tsx`) remains the authority source for the rejection-reason naming that the new app mirrors as UI route states.
-- [ ] `PBK-UI-005` (cutover decision doc) is still separate. No `docs/01-decisions/SD-DP-*` content has leaked into this task.
-
-### D. Packet hygiene
-
-- [ ] The only task-scoped content edit for `PBK-UI-004-SIDECAR-REVIEW` is this file under `support/sidecars/PBK-UI-004/`.
-- [ ] All sidecar state transitions for this task were made through `scripts/ai-status.sh` (`start`, `handoff`, `approve`).
-
-## §10 Reviewer Handoff Notes (for `Codex2`)
-
-1. Treat this packet as audit material for the parent reviewer's recorded `review_approved` → `done` transition. The parent reviewer (`Codex`) signed off at `2026-05-12T21:04:38Z` with the four `review_notes_zh` items; the parent owner (`Codex2`) then finalised `done` at `2026-05-12T21:11:06Z` with the task-scoped commit recorded in §2. The sidecar reviewer should approve, reopen, or block _this packet_, but not re-decide the parent's review (that is `Codex`'s call) and not re-decide the parent's closeout (that is already recorded in machine truth).
-2. The parent's `done` closeout has already landed: task-scoped commit `13104105d299eadd0b433596b2f173249dfbb5fc` covering the six paths in §3, normal non-force push to `origin/feat/claude2-ui-redesign-foundation`, and `commit_*` / `push_*` fields populated in `ai-status.json`. If §9.A or §9.B shows that any of these have drifted since this refresh (e.g. the commit was reverted, the branch was force-rewound, or `commit_subject` no longer matches `feat(PBK-UI-004): preserve authority-safe partner negative paths`), reopen this sidecar rather than approving on stale evidence.
-3. If §9.A or §9.B fails (machine truth has moved, or the implementation files / branch state have diverged from the diff captured here), reopen this sidecar with `AI_NAME=Codex2 scripts/ai-status.sh reopen PBK-UI-004-SIDECAR-REVIEW "<reason>"` rather than approving on stale evidence.
-4. If §9.C fails (a guardrail was crossed in the parent change), the right move is to raise that against `PBK-UI-004` directly with the parent reviewer (`Codex`) and, if needed, request a follow-up canonical task — do not silently expand or contract this sidecar's scope to compensate.
-5. Approval should explicitly confirm that the only file changed under this sidecar's task scope is `support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-REVIEW.md`. Any machine-truth state changes should appear only as `ai-status.json` / `current-work.md` / `ai-activity-log.jsonl` updates produced by `scripts/ai-status.sh`.
-6. This is a sidecar/support slice, so the sidecar's own closeout uses `NO_COMMIT_REQUIRED=1` per the collaboration guide — only the packet markdown changes, no runtime commit is owed by this task.
+1. This refresh makes the reviewer split explicit: `Codex` reviews the sidecar
+   packet, while `Codex2` is now the structured reviewer for the parent task.
+2. The parent task's free-text `next` field is stale. Use the structured fields
+   plus the latest pending handoff row when deciding who currently owns parent
+   review.
+3. The sidecar packet now points at the correct implementation evidence branch:
+   `claude2/pbk-ui-004`, specifically commits `f8da53e` and `63f6aef`.
+4. Approval of this sidecar means the packet is accurate and reviewer-usable.
+   It does not approve or close out `PBK-UI-004` itself.
