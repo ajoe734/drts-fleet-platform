@@ -937,6 +937,180 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
         self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
 
+    def test_dispatcher_round_robins_ready_reviews_across_lanes(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"claude": 5, "claude2": 3},
+                "max_dispatches_per_tick": 2,
+            },
+            "agents": {
+                "claude": {
+                    "id": "claude",
+                    "display_name": "Claude",
+                    "provider": "claude",
+                },
+                "claude2": {
+                    "id": "claude2",
+                    "display_name": "Claude2",
+                    "provider": "claude2",
+                },
+            },
+            "providers": {},
+        }
+        state = {"queue": {"events": {}}, "workers": {}, "seen_event_keys": {}}
+        status = {
+            "tasks": [
+                {"id": "CLAUDE-REV-1", "status": "review", "owner": "Codex", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE-REV-2", "status": "review", "owner": "Codex", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE2-REV-1", "status": "review", "owner": "Codex", "reviewer": "Claude2", "depends_on": []},
+                {"id": "CLAUDE2-REV-2", "status": "review", "owner": "Codex", "reviewer": "Claude2", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        queued = [(call.args[1]["task_id"], call.args[1]["target_agent"]) for call in queue_delivery_event.call_args_list]
+        self.assertEqual(
+            queued,
+            [("CLAUDE-REV-1", "Claude"), ("CLAUDE2-REV-1", "Claude2")],
+        )
+
+    def test_dispatcher_returns_to_first_lane_after_each_ready_lane_gets_one(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"claude": 5, "claude2": 3},
+                "max_dispatches_per_tick": 3,
+            },
+            "agents": {
+                "claude": {
+                    "id": "claude",
+                    "display_name": "Claude",
+                    "provider": "claude",
+                },
+                "claude2": {
+                    "id": "claude2",
+                    "display_name": "Claude2",
+                    "provider": "claude2",
+                },
+            },
+            "providers": {},
+        }
+        state = {"queue": {"events": {}}, "workers": {}, "seen_event_keys": {}}
+        status = {
+            "tasks": [
+                {"id": "CLAUDE-REV-1", "status": "review", "owner": "Codex", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE-REV-2", "status": "review", "owner": "Codex", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE2-REV-1", "status": "review", "owner": "Codex", "reviewer": "Claude2", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        queued = [(call.args[1]["task_id"], call.args[1]["target_agent"]) for call in queue_delivery_event.call_args_list]
+        self.assertEqual(
+            queued,
+            [("CLAUDE-REV-1", "Claude"), ("CLAUDE2-REV-1", "Claude2"), ("CLAUDE-REV-2", "Claude")],
+        )
+
+    def test_dispatcher_rotates_start_lane_across_ticks(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"claude": 5, "claude2": 3, "codex": 3, "codex2": 3},
+                "max_dispatches_per_tick": 2,
+            },
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+                "claude2": {"id": "claude2", "display_name": "Claude2", "provider": "claude2"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "codex2": {"id": "codex2", "display_name": "Codex2", "provider": "codex2"},
+            },
+            "providers": {},
+        }
+        status = {
+            "tasks": [
+                {"id": "CLAUDE-REV-1", "status": "review", "owner": "Ops", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE2-REV-1", "status": "review", "owner": "Ops", "reviewer": "Claude2", "depends_on": []},
+                {"id": "CODEX-REV-1", "status": "review", "owner": "Ops", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-REV-1", "status": "review", "owner": "Ops", "reviewer": "Codex2", "depends_on": []},
+            ]
+        }
+        first_state = {"queue": {"events": {}}, "workers": {}, "seen_event_keys": {}, "ready_dispatcher": {}}
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as first_queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, first_state, provider_report={})
+
+        self.assertTrue(changed)
+        first_queued = [
+            (call.args[1]["task_id"], call.args[1]["target_agent"]) for call in first_queue_delivery_event.call_args_list
+        ]
+        self.assertEqual(
+            first_queued,
+            [("CLAUDE-REV-1", "Claude"), ("CLAUDE2-REV-1", "Claude2")],
+        )
+        self.assertEqual(first_state["ready_dispatcher"]["next_agent_cursor"], 2)
+
+        second_state = {
+            "queue": {"events": {}},
+            "workers": {},
+            "seen_event_keys": {},
+            "ready_dispatcher": {"next_agent_cursor": first_state["ready_dispatcher"]["next_agent_cursor"]},
+        }
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as second_queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, second_state, provider_report={})
+
+        self.assertTrue(changed)
+        second_queued = [
+            (call.args[1]["task_id"], call.args[1]["target_agent"]) for call in second_queue_delivery_event.call_args_list
+        ]
+        self.assertEqual(
+            second_queued,
+            [("CODEX-REV-1", "Codex"), ("CODEX2-REV-1", "Codex2")],
+        )
+
     def test_outstanding_delivery_counts_skip_events_with_active_workers(self) -> None:
         config = {
             "ready_dispatcher": {
@@ -1390,6 +1564,76 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(queued_event["task_id"], "FB-003")
         self.assertEqual(queued_event["target_agent"], "Codex")
         self.assertEqual(queued_event["reason"], "owned_ready_dispatch")
+
+    def test_dispatcher_helper_claim_reuses_passed_provider_report(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["todo"],
+                    "require_owner_higher_priority_load": True,
+                }
+            },
+            "worker_reassignment": {
+                "owner_fallbacks": {
+                    "Copilot": ["Codex", "Claude"],
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+            "providers": {},
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-finalize": {
+                    "run_id": "run-finalize",
+                    "task_id": "LP-005",
+                    "provider": "copilot",
+                    "agent_id": "copilot",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
+                }
+            },
+        }
+        status = {
+            "tasks": [
+                {"id": "LP-005", "status": "review_approved", "owner": "Copilot", "reviewer": "Codex", "depends_on": []},
+                {"id": "FB-003", "status": "todo", "owner": "Copilot", "reviewer": "Codex", "depends_on": []},
+            ]
+        }
+        provider_report = {
+            "providers": {
+                "copilot": {"auth_ready": True},
+                "codex": {"auth_ready": True},
+                "claude": {"auth_ready": True},
+            }
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log"),
+            mock.patch.object(
+                supervisor,
+                "load_provider_report",
+                side_effect=AssertionError("dispatch_ready_tasks should reuse the passed provider_report"),
+            ),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report=provider_report)
+
+        self.assertTrue(changed)
 
     def test_dispatcher_availability_first_claims_in_progress_when_owner_is_busy(self) -> None:
         config = {
@@ -2487,6 +2731,32 @@ class UnderutilizationMainTaskDispatchTests(unittest.TestCase):
 
 
 class PollWorkersRecoveryTests(unittest.TestCase):
+    def test_poll_workers_reuses_passed_provider_report(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {},
+        }
+        state = {"queue": {"events": {}}, "workers": {}}
+        provider_report = {"providers": {}, "agent_adapters": {}}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": []}),
+            mock.patch.object(supervisor, "load_provider_report", side_effect=AssertionError("unexpected refresh")),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+        ):
+            changed = supervisor.poll_workers(config, state, provider_report=provider_report)
+
+        self.assertFalse(changed)
+
     def test_lower_priority_worker_is_superseded_when_finalize_backlog_exists(self) -> None:
         config = {
             "schema": {
@@ -2895,6 +3165,7 @@ class PollWorkersRecoveryTests(unittest.TestCase):
             "Worker exited before the task reached a terminal status.",
             terminal=True,
             state=state,
+            provider_report={},
         )
         write_activity_log.assert_not_called()
 
@@ -3678,7 +3949,7 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
         maybe_reassign.assert_called_once()
         self.assertIn("terminated for redispatch", maybe_reassign.call_args.args[2])
-        self.assertEqual(maybe_reassign.call_args.kwargs, {"terminal": True, "state": state})
+        self.assertEqual(maybe_reassign.call_args.kwargs, {"terminal": True, "state": state, "provider_report": {}})
         write_activity_log.assert_not_called()
 
     def test_alive_worker_is_superseded_after_reassignment(self) -> None:
@@ -4016,6 +4287,46 @@ class WorkerReassignmentTests(unittest.TestCase):
         kwargs = persist.call_args.kwargs
         self.assertEqual(kwargs["task_id"], "RUN-PAUSED")
         self.assertEqual(kwargs["new_owner"], "Grok")
+        self.assertEqual(kwargs["new_reviewer"], "Codex")
+
+    def test_reassign_after_failure_reuses_passed_provider_report(self) -> None:
+        worker = {
+            "task_id": "RUN-CACHED",
+            "agent_id": "gemini",
+            "retry_count": 1,
+            "run_id": "gemini-run-cached",
+        }
+        status = {
+            "tasks": [
+                {
+                    "id": "RUN-CACHED",
+                    "status": "review",
+                    "owner": "Claude",
+                    "reviewer": "Gemini",
+                }
+            ]
+        }
+        state = {"dispatch_pauses": []}
+        provider_report = {"providers": {}, "agent_adapters": {}}
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", side_effect=AssertionError("unexpected refresh")),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            reassigned_to = supervisor.maybe_reassign_task_after_worker_failure(
+                self.config,
+                worker,
+                "status: 429",
+                state=state,
+                provider_report=provider_report,
+            )
+
+        self.assertEqual(reassigned_to, "Codex")
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], "RUN-CACHED")
+        self.assertEqual(kwargs["new_owner"], "Claude")
         self.assertEqual(kwargs["new_reviewer"], "Codex")
 
     def test_retry_wrapper_passes_state_into_reassignment(self) -> None:
@@ -4659,6 +4970,157 @@ class ChairmanFlowTests(unittest.TestCase):
             supervisor.validate_chair_review_context(
                 payload,
                 reason="blocked_task_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            )
+        )
+
+    def test_reassignment_triage_synthesizes_followup_unblock_action(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "operational_review",
+            "sidecar_approved": False,
+            "approval_ttl_minutes": 45,
+            "max_sidecars": 2,
+            "reason": "reassign the failing owner first",
+            "blocked_by": [
+                "UI-FE-DRV-ONB remains blocked (history_repair); not reassignable while blocked."
+            ],
+            "blocked_sidecar_parents": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [
+                "Run blocked_task_triage for UI-FE-DRV-ONB: create history_repair unblock task."
+            ],
+        }
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "UI-FE-DRV-ONB",
+                    "status": "blocked",
+                    "owner": "Codex2",
+                    "reviewer": "Claude2",
+                    "depends_on": ["DEP-001"],
+                    "next": "History repair audit still required.",
+                },
+            ]
+        }
+
+        self.assertEqual(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="reassignment_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            ),
+            "reassignment_triage must materialize follow-up task actions via UI-FE-DRV-ONB:create_unblock_task",
+        )
+
+        normalized = supervisor.normalize_chair_review_payload_for_reason(
+            payload,
+            reason="reassignment_triage",
+            config={"paths": {}},
+            status=status,
+        )
+
+        self.assertEqual(
+            normalized["task_actions"],
+            [
+                {
+                    "task_id": "UI-FE-DRV-ONB",
+                    "action": "create_unblock_task",
+                    "unblock_kind": "history_repair",
+                    "reason": (
+                        "Chairman follow-up from reassignment_triage: UI-FE-DRV-ONB remains "
+                        "dependency-ready blocked; materialize the history_repair unblock path now."
+                    ),
+                }
+            ],
+        )
+        self.assertIsNone(supervisor.validate_chair_review_payload(normalized))
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(
+                normalized,
+                reason="reassignment_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            )
+        )
+
+    def test_reassignment_triage_synthesizes_resume_parent_followup_action(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "operational_review",
+            "sidecar_approved": False,
+            "approval_ttl_minutes": 45,
+            "max_sidecars": 2,
+            "reason": "reassign other work but resume the repaired blocked parent",
+            "blocked_by": [
+                "ADM-UI-RD-006 remains blocked only because the parent has not been resumed yet."
+            ],
+            "blocked_sidecar_parents": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [
+                "Resume ADM-UI-RD-006 after the completed history_repair unblock child."
+            ],
+        }
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-006",
+                    "status": "blocked",
+                    "owner": "Codex2",
+                    "reviewer": "Codex",
+                    "depends_on": ["DEP-001"],
+                    "next": "Completed history-repair helper already documented the rebuild route.",
+                },
+                {
+                    "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                    "status": "done",
+                    "task_class": "unblock",
+                    "helper_parent": "ADM-UI-RD-006",
+                    "helper_kind": "history_repair",
+                    "next": "Repair route documented and pushed.",
+                },
+            ]
+        }
+
+        normalized = supervisor.normalize_chair_review_payload_for_reason(
+            payload,
+            reason="reassignment_triage",
+            config={"paths": {}},
+            status=status,
+        )
+
+        self.assertEqual(
+            normalized["task_actions"],
+            [
+                {
+                    "task_id": "ADM-UI-RD-006",
+                    "action": "resume_parent_task",
+                    "resume_status": "todo",
+                    "reason": (
+                        "Chairman follow-up from reassignment_triage: "
+                        "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR already resolved the blocker for "
+                        "ADM-UI-RD-006; resume the parent."
+                    ),
+                }
+            ],
+        )
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(
+                normalized,
+                reason="reassignment_triage",
                 approval_state={"pending": []},
                 config={"paths": {}},
                 status=status,
@@ -5869,6 +6331,113 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertIsNone(state["chair_review"]["active_review"])
             self.assertEqual(state["chair_review"]["last_reason"], "reassignment_triage")
 
+    def test_refresh_chair_review_state_synthesizes_reassignment_followup_unblock_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260528T000500Z-claude2.md"
+            json_path = review_dir / "20260528T000500Z-claude2.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "operational_review",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "Move failing owner off Codex and unblock the blocked parent.",
+                        "blocked_by": [
+                            "UI-FE-DRV-ONB remains blocked (history_repair); not reassignable while blocked."
+                        ],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [],
+                        "provider_actions": [],
+                        "recommended_focus": [
+                            "Run blocked_task_triage for UI-FE-DRV-ONB: create history_repair unblock task."
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {"id": "DEP-001", "status": "done"},
+                            {
+                                "id": "UI-FE-DRV-ONB",
+                                "owner": "Codex2",
+                                "reviewer": "Claude2",
+                                "status": "blocked",
+                                "depends_on": ["DEP-001"],
+                                "next": "History repair audit still required.",
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                    "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude2",
+                        "agent": "Claude2",
+                        "reason": "reassignment_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "create_chair_unblock_task", return_value=True) as create_unblock,
+                mock.patch.object(supervisor, "create_chair_workspace_baseline_task", return_value=False),
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            create_unblock.assert_called_once()
+            action = create_unblock.call_args.args[2]
+            self.assertEqual(action["task_id"], "UI-FE-DRV-ONB")
+            self.assertEqual(action["action"], "create_unblock_task")
+            self.assertEqual(action["unblock_kind"], "history_repair")
+            self.assertIn("reassignment_triage", action["reason"])
+            self.assertEqual(
+                state["chair_review"]["last_decision"]["task_actions"][0]["task_id"],
+                "UI-FE-DRV-ONB",
+            )
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reason"], "reassignment_triage")
     def test_materialize_workspace_baseline_task_from_last_decision_uses_last_reviewer(self) -> None:
         config = {"paths": {"status_file": "ai-status.json"}}
         state = {
