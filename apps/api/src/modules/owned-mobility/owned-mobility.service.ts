@@ -4,6 +4,7 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AddressPayload,
+  ActionReceipt,
   ApplyManualFareOverrideCommand,
   ApproveTenantBookingApprovalRequestCommand,
   AuditLogRecord,
@@ -52,8 +53,10 @@ import type {
   ReassignDispatchCommand,
   RedispatchOrderCommand,
   ReservationHoldStatus,
+  ResourceActionDescriptor,
   ResolveExceptionHoldCommand,
   TenantApprovalEvaluationInputSnapshot,
+  TenantBookingCommandResult,
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
@@ -79,17 +82,6 @@ import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import type { MessageEvent } from "@nestjs/common";
 import { EMPTY, type Observable } from "rxjs";
-
-type TenantBookingResult = {
-  orderId: string;
-  bookingId: string;
-  serviceBucket: "business_dispatch";
-  businessDispatchSubtype: NonNullable<
-    OwnedOrderRecord["businessDispatchSubtype"]
-  >;
-  dispatchSemantics: "reservation";
-  status: OwnedOrderRecord["status"];
-};
 
 type PartnerBookingContext = {
   partnerId: string;
@@ -521,7 +513,7 @@ export class OwnedMobilityService implements OnModuleInit {
     tenantId: string,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
-  ): MaybePromise<TenantBookingResult> {
+  ): MaybePromise<TenantBookingCommandResult> {
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
     this.assertBookingRules(
@@ -662,7 +654,7 @@ export class OwnedMobilityService implements OnModuleInit {
       previousApprovalState: TenantBookingApprovalState,
       approvalRequest: TenantBookingApprovalRequestRecord | null,
       persistOrderWrite = true,
-    ): TenantBookingResult => {
+    ): TenantBookingCommandResult => {
       order.approvalRequestIds = approvalRequest
         ? [approvalRequest.approvalRequestId]
         : [];
@@ -676,7 +668,7 @@ export class OwnedMobilityService implements OnModuleInit {
           "create_tenant_booking",
         );
       }
-      this.recordAudit(
+      const auditLog = this.recordAudit(
         {
           actorId: null,
           actorType: "tenant_admin",
@@ -711,15 +703,14 @@ export class OwnedMobilityService implements OnModuleInit {
         this.cloneOrder(order),
         requestId,
       );
-
-      return {
-        orderId,
-        bookingId,
-        serviceBucket: "business_dispatch",
-        businessDispatchSubtype: order.businessDispatchSubtype!,
-        dispatchSemantics: "reservation",
-        status: order.status,
-      };
+      return this.buildTenantBookingCommandResult(
+        this.mapOrderToBooking(order),
+        order.approvalState === "pending" ? "accepted" : "completed",
+        auditLog?.auditId ?? `audit-${randomUUID()}`,
+        order.approvalState === "pending"
+          ? "Booking command accepted and is pending approval."
+          : "Booking created.",
+      );
     };
 
     const previousApprovalState = order.approvalState;
@@ -995,7 +986,7 @@ export class OwnedMobilityService implements OnModuleInit {
     command: UpdateTenantBookingCommand,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
-  ) {
+  ): MaybePromise<TenantBookingCommandResult> {
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
     const order = this.requireBookingOrder(bookingId, tenantId);
@@ -1175,7 +1166,7 @@ export class OwnedMobilityService implements OnModuleInit {
           "update_tenant_booking",
         );
       }
-      this.recordAudit(
+      const auditLog = this.recordAudit(
         {
           actorId: null,
           actorType: "tenant_admin",
@@ -1199,7 +1190,14 @@ export class OwnedMobilityService implements OnModuleInit {
         previousApprovalState,
         requestId,
       );
-      return this.mapOrderToBooking(order);
+      return this.buildTenantBookingCommandResult(
+        this.mapOrderToBooking(order),
+        order.approvalState === "pending" ? "accepted" : "completed",
+        auditLog?.auditId ?? `audit-${randomUUID()}`,
+        order.approvalState === "pending"
+          ? "Booking update accepted and is pending approval."
+          : "Booking updated.",
+      );
     };
 
     if (!needsApprovalReevaluation) {
@@ -1278,11 +1276,20 @@ export class OwnedMobilityService implements OnModuleInit {
     bookingId: string,
     command: CancelOwnedOrderCommand,
     requestId?: string,
-  ) {
+  ): TenantBookingCommandResult {
     this.assertNonBlank(tenantId, "tenantId");
     const order = this.requireBookingOrder(bookingId, tenantId);
-    this.cancelOwnedOrder(order.orderId, command, requestId);
-    return this.mapOrderToBooking(order);
+    const { auditLog } = this.cancelOwnedOrderInternal(
+      order.orderId,
+      command,
+      requestId,
+    );
+    return this.buildTenantBookingCommandResult(
+      this.mapOrderToBooking(order),
+      "completed",
+      auditLog?.auditId ?? `audit-${randomUUID()}`,
+      "Booking cancelled.",
+    );
   }
 
   applyManualFareOverride(
@@ -2674,6 +2681,15 @@ export class OwnedMobilityService implements OnModuleInit {
     command: CancelOwnedOrderCommand,
     requestId?: string,
   ) {
+    const { order } = this.cancelOwnedOrderInternal(orderId, command, requestId);
+    return order;
+  }
+
+  private cancelOwnedOrderInternal(
+    orderId: string,
+    command: CancelOwnedOrderCommand,
+    requestId?: string,
+  ) {
     const order = this.requireOrder(orderId);
     this.assertOrderCancelable(order);
 
@@ -2731,7 +2747,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "cancel_owned_order",
     );
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "tenant_admin",
@@ -2760,7 +2776,10 @@ export class OwnedMobilityService implements OnModuleInit {
     }
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
-    return this.cloneOrder(order);
+    return {
+      order: this.cloneOrder(order),
+      auditLog,
+    };
   }
 
   /**
@@ -3778,10 +3797,8 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertBookingModifiable(order: OwnedOrderRecord) {
-    if (!order.modifiableUntil) {
-      return;
-    }
-    if (new Date().getTime() <= new Date(order.modifiableUntil).getTime()) {
+    const readOnlyReasonCode = this.getBookingReadOnlyReasonCode(order);
+    if (!readOnlyReasonCode) {
       return;
     }
 
@@ -3792,6 +3809,7 @@ export class OwnedMobilityService implements OnModuleInit {
       {
         orderId: order.orderId,
         modifiableUntil: order.modifiableUntil,
+        readOnlyReasonCode,
       },
     );
   }
@@ -4387,7 +4405,7 @@ export class OwnedMobilityService implements OnModuleInit {
     if (requestId) {
       auditInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditInput);
+    return this.auditNotificationService.recordAuditLog(auditInput);
   }
 
   private recordReservationEscalationNotifications(
@@ -4681,6 +4699,90 @@ export class OwnedMobilityService implements OnModuleInit {
     return next(value);
   }
 
+  private buildBookingUpdateAction(
+    order: OwnedOrderRecord,
+  ): ResourceActionDescriptor {
+    const readOnlyReasonCode = this.getBookingReadOnlyReasonCode(order);
+    return {
+      action: "update_booking",
+      enabled: readOnlyReasonCode === null,
+      ...(readOnlyReasonCode
+        ? { disabledReasonCode: readOnlyReasonCode }
+        : {}),
+      riskLevel: "medium",
+    };
+  }
+
+  private buildBookingCancelAction(
+    order: OwnedOrderRecord,
+  ): ResourceActionDescriptor {
+    const disabledReasonCode = this.getBookingCancelDisabledReasonCode(order);
+    return {
+      action: "cancel_booking",
+      enabled: disabledReasonCode === null,
+      ...(disabledReasonCode ? { disabledReasonCode } : {}),
+      requiresReason: true,
+      riskLevel: "high",
+    };
+  }
+
+  private getBookingReadOnlyReasonCode(order: OwnedOrderRecord): string | null {
+    if (order.status === "cancelled") {
+      return "booking_cancelled";
+    }
+    if (order.status === "completed") {
+      return "booking_completed";
+    }
+    if (
+      order.modifiableUntil &&
+      new Date().getTime() > new Date(order.modifiableUntil).getTime()
+    ) {
+      return "past_editable_until";
+    }
+    return null;
+  }
+
+  private getBookingCancelDisabledReasonCode(
+    order: OwnedOrderRecord,
+  ): string | null {
+    if (order.status === "cancelled") {
+      return "booking_cancelled";
+    }
+    if (order.status === "completed") {
+      return "booking_completed";
+    }
+    if (
+      order.dispatchSemantics === "reservation" &&
+      order.cancelableUntil &&
+      new Date().getTime() > new Date(order.cancelableUntil).getTime()
+    ) {
+      return "past_cancelable_until";
+    }
+    return null;
+  }
+
+  private buildTenantBookingCommandResult(
+    booking: BookingRecord,
+    status: ActionReceipt["status"],
+    auditId: string,
+    message: string,
+  ): TenantBookingCommandResult {
+    const commandId = `booking-command-${randomUUID()}`;
+    return {
+      ...booking,
+      commandId,
+      dispatchSemantics: "reservation",
+      receipt: {
+        actionId: commandId,
+        auditId,
+        resourceType: "booking",
+        resourceId: booking.bookingId,
+        status,
+        message,
+      },
+    };
+  }
+
   private mapOrderToBooking(order: OwnedOrderRecord): BookingRecord {
     if (
       !order.bookingId ||
@@ -4724,6 +4826,7 @@ export class OwnedMobilityService implements OnModuleInit {
       recurrenceRule: order.recurrenceRule,
       modifiableUntil: order.modifiableUntil,
       cancelableUntil: order.cancelableUntil,
+      editableUntil: order.modifiableUntil,
       pickup: { ...order.pickup },
       dropoff: { ...order.dropoff },
       passenger: { ...order.passenger },
@@ -4746,6 +4849,11 @@ export class OwnedMobilityService implements OnModuleInit {
       approvalState: order.approvalState,
       approvalRequestIds: [...order.approvalRequestIds],
       complianceGates,
+      readOnlyReasonCode: this.getBookingReadOnlyReasonCode(order),
+      availableActions: [
+        this.buildBookingUpdateAction(order),
+        this.buildBookingCancelAction(order),
+      ],
       orderStatus: order.status,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,

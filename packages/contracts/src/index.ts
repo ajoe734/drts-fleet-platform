@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ActionReceipt, ResourceActionDescriptor } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -2323,6 +2324,7 @@ export interface BookingRecord {
   recurrenceRule: string | null;
   modifiableUntil: string | null;
   cancelableUntil: string | null;
+  editableUntil: string | null;
   pickup: AddressPayload;
   dropoff: AddressPayload;
   passenger: PassengerProfile;
@@ -2349,9 +2351,17 @@ export interface BookingRecord {
   approvalState: TenantBookingApprovalState;
   approvalRequestIds: string[];
   complianceGates?: ComplianceGateRecord[];
+  readOnlyReasonCode: string | null;
+  availableActions: ResourceActionDescriptor[];
   orderStatus: OwnedOrderStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TenantBookingCommandResult extends BookingRecord {
+  commandId: string;
+  dispatchSemantics: "reservation";
+  receipt: ActionReceipt;
 }
 
 export interface DispatchCandidate {

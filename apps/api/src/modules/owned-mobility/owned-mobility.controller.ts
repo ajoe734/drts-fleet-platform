@@ -5,7 +5,6 @@ import {
   Headers,
   Param,
   Post,
-  Put,
   Query,
   Sse,
 } from "@nestjs/common";
@@ -180,7 +179,7 @@ export class OwnedMobilityController {
     );
   }
 
-  @Post("tenant/bookings")
+  @Post("tenant/bookings/commands/create")
   createTenantBooking(
     @Body() command: CreateTenantBookingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -229,7 +228,7 @@ export class OwnedMobilityController {
     );
   }
 
-  @Put("tenant/bookings/:bookingId")
+  @Post("tenant/bookings/:bookingId/commands/update")
   updateTenantBooking(
     @Param("bookingId") bookingId: string,
     @Body() command: UpdateTenantBookingCommand,
@@ -267,7 +266,7 @@ export class OwnedMobilityController {
     );
   }
 
-  @Post("tenant/bookings/:bookingId/cancel")
+  @Post("tenant/bookings/:bookingId/commands/cancel")
   cancelTenantBooking(
     @Param("bookingId") bookingId: string,
     @Body() command: CancelOwnedOrderCommand,

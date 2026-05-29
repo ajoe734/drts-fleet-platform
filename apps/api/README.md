@@ -29,7 +29,9 @@ Current scope:
 - `POST /api/orders/:orderId/dispatch`
 - `POST /api/orders/:orderId/redispatch`
 - `POST /api/call-center/orders`
-- `POST /api/tenant/bookings`
+- `POST /api/tenant/bookings/commands/create`
+- `POST /api/tenant/bookings/:bookingId/commands/update`
+- `POST /api/tenant/bookings/:bookingId/commands/cancel`
 - `GET /api/dispatch/tasks`
 - `GET /api/dispatch/tasks/:dispatchJobId/candidates`
 - `POST /api/dispatch/assign`

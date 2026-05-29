@@ -327,6 +327,62 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(cleared.costCenter).toBeNull();
   });
 
+  it("returns command receipts and booking action metadata for tenant booking commands", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const created = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T14:00:00.000Z",
+        reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Receipt Rider", phone: "0912000099" },
+      },
+      "tenant-demo-001",
+    );
+
+    expect(created.receipt.status).toBe("completed");
+    expect(created.receipt.resourceType).toBe("booking");
+    expect(created.receipt.resourceId).toBe(created.bookingId);
+    expect(created.commandId).toBe(created.receipt.actionId);
+    expect(created.editableUntil).toBe(created.modifiableUntil);
+    expect(created.readOnlyReasonCode).toBeNull();
+    expect(created.availableActions).toEqual([
+      expect.objectContaining({
+        action: "update_booking",
+        enabled: true,
+        riskLevel: "medium",
+      }),
+      expect.objectContaining({
+        action: "cancel_booking",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      }),
+    ]);
+
+    vi.setSystemTime(new Date("2026-05-13T13:31:00.000Z"));
+    const detail = service.getTenantBooking("tenant-demo-001", created.bookingId);
+    expect(detail.readOnlyReasonCode).toBe("past_editable_until");
+    expect(detail.availableActions).toEqual([
+      expect.objectContaining({
+        action: "update_booking",
+        enabled: false,
+        disabledReasonCode: "past_editable_until",
+      }),
+      expect.objectContaining({
+        action: "cancel_booking",
+        enabled: false,
+        disabledReasonCode: "past_cancelable_until",
+      }),
+    ]);
+  });
+
   it("creates and resolves any_of approval requests on the first approval", async () => {
     const tenantPartnerService = new TenantPartnerService(
       new AuditNotificationService(),
@@ -372,6 +428,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
     )[0]!;
 
+    expect(created.receipt.status).toBe("accepted");
+    expect(created.receipt.message).toContain("pending approval");
     expect(pendingBooking.approvalState).toBe("pending");
     expect(request.resolvedApproverUserIds).toEqual([
       "tenant-user-demo-001",
