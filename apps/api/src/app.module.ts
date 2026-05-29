@@ -36,6 +36,7 @@ import { OperationalObservabilityModule } from "./modules/operational-observabil
 import { PlatformAdminModule } from "./modules/platform-admin/platform-admin.module";
 import { PlatformPresenceModule } from "./modules/platform-presence/platform-presence.module";
 import { PlatformEarningsModule } from "./modules/platform-earnings/platform-earnings.module";
+import { DriverInstructionModule } from "./modules/driver-instruction/driver-instruction.module";
 import { ProductRuleModule } from "./modules/product-rule/product-rule.module";
 import { RegulatoryRegistryModule } from "./modules/regulatory-registry/regulatory-registry.module";
 import { ReportingFilingModule } from "./modules/reporting-filing/reporting-filing.module";
@@ -71,6 +72,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     DriverSettingsModule,
     PlatformPresenceModule,
     PlatformEarningsModule,
+    DriverInstructionModule,
   ],
   providers: [
     JwtAuthService,
