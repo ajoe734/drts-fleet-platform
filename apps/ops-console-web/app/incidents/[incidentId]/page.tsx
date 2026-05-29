@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import type {
   AuditLogRecord,
@@ -664,38 +665,7 @@ export default async function IncidentDetailPage({
   );
 
   if (!incident) {
-    return (
-      <div style={{ padding: 24 }}>
-        <PageHeader
-          theme={theme}
-          title={locale === "en" ? "Incident not found" : "找不到事故"}
-          subtitle={incidentId}
-          actions={
-            <Link href="/incidents" style={actionLinkStyle(theme)}>
-              <CanvasIcon name="arrow" size={12} />
-              <span>
-                {locale === "en" ? "Back to Incident Center" : "返回事故中心"}
-              </span>
-            </Link>
-          }
-        />
-        <Banner
-          theme={theme}
-          tone="danger"
-          icon="warn"
-          title={
-            locale === "en"
-              ? "No incident matched this route"
-              : "此路由沒有對應事故"
-          }
-          body={
-            locale === "en"
-              ? "The incident could be deleted, unavailable in this environment, or the deep link is stale."
-              : "這筆事故可能已不存在、目前環境不可用，或這個 deep link 已過期。"
-          }
-        />
-      </div>
-    );
+    notFound();
   }
 
   const [

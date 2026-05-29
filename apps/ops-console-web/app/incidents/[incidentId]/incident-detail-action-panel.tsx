@@ -134,7 +134,7 @@ function actionSummary(intent: string, locale: Locale) {
     case "acknowledge":
       return locale === "en"
         ? "Record that the escalation target accepted the handoff."
-        : "記錄升級對象已接受此次 handoff。";
+        : "記錄升級對象已接受此次 handoff，不會改寫結案備註。";
     case "lift_suppression":
       return locale === "en"
         ? "Release the linked driver's incident hold from this incident workspace."
@@ -359,11 +359,6 @@ export function IncidentDetailActionPanel({
                     ...withOptionalString(ackActor, (trimmed) => ({
                       assignmentAcknowledgedBy: trimmed,
                     })),
-                    resolutionNote:
-                      reasonText.trim() ||
-                      (locale === "en"
-                        ? "Escalation acknowledged in incident workspace."
-                        : "已在 incident 工作區確認升級。"),
                   };
 
         const updated = (await client.updateIncident(
@@ -619,17 +614,21 @@ export function IncidentDetailActionPanel({
                   style={inputStyle}
                 />
               </Field>
-              <Field
+              <Banner
                 theme={theme}
-                label={locale === "en" ? "Acknowledgment note" : "確認備註"}
-              >
-                <textarea
-                  value={reasonText}
-                  onChange={(event) => setReasonText(event.target.value)}
-                  rows={3}
-                  style={textareaStyle}
-                />
-              </Field>
+                tone="info"
+                icon="info"
+                title={
+                  locale === "en"
+                    ? "Acknowledgment only updates assignee handoff state"
+                    : "確認升級只會更新交接確認狀態"
+                }
+                body={
+                  locale === "en"
+                    ? "This action stamps acknowledgment time and actor, then adds the audit/timeline entry. Resolution notes stay unchanged until resolve or close."
+                    : "這個動作只會寫入確認時間與確認人，並新增 audit / timeline 紀錄；結案備註會保留到 resolve 或 close 時再變更。"
+                }
+              />
             </div>
           ) : null}
 
