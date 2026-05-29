@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 # Ensure the user's local bin (where repair-cli-symlinks.sh maintains the
 # real codex/claude/gemini symlinks into the VS Code extension dirs) is on
 # PATH. Under systemd --user the inherited PATH is the minimal default
@@ -56,6 +57,9 @@ fi
 if [[ -x "$ROOT_DIR/scripts/ensure-local-node-modules.py" ]]; then
   python3 "$ROOT_DIR/scripts/ensure-local-node-modules.py" repair
 fi
+=======
+export PATH="$ROOT_DIR/.orchestrator/bin/node_modules/.bin:$ROOT_DIR/.orchestrator/bin:$PATH"
+>>>>>>> Stashed changes
 =======
 export PATH="$ROOT_DIR/.orchestrator/bin/node_modules/.bin:$ROOT_DIR/.orchestrator/bin:$PATH"
 >>>>>>> Stashed changes
