@@ -477,8 +477,9 @@ export default function PartnerDetailPage() {
       try {
         const entries = await client.listPlatformPartnerEntries();
         const selected =
-          entries.find((candidate) => candidate.entrySlug === entrySlug) ??
-          null;
+          entries.items.find(
+            (candidate) => candidate.entrySlug === entrySlug,
+          ) ?? null;
 
         setEntry(selected);
         setEditForm(selected ? toPartnerFormState(selected) : EMPTY_ENTRY_FORM);

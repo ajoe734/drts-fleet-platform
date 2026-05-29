@@ -153,9 +153,12 @@ export class TenantPartnerController {
 
   @Get("platform-admin/partner-entries")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listPlatformPartnerEntries(@Headers("x-request-id") requestId?: string) {
+  listPlatformPartnerEntries(
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: IdentityContext | null = null,
+  ) {
     return toApiSuccessEnvelope(
-      toApiListData(this.tenantPartnerService.listPlatformPartnerEntries()),
+      this.tenantPartnerService.listPlatformPartnerEntries(identity),
       requestId,
     );
   }

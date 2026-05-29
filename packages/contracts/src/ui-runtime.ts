@@ -229,6 +229,27 @@ export interface CrossAppResourceLink {
   label: string;
 }
 
+/**
+ * Shared runtime fields that any list/detail resource can expose so the UI
+ * does not infer CTA visibility or deep-link topology on its own.
+ */
+export interface ActionableResourceRuntimeFields {
+  availableActions?: ResourceActionDescriptor[];
+  resourceLinks?: CrossAppResourceLink[];
+}
+
+/**
+ * Canonical list envelope for UI-facing resource collections that need list
+ * CTAs, differentiated empty states, and refresh-tier wiring.
+ */
+export interface UiListResourceEnvelope<TItem> {
+  items: TItem[];
+  availableActions: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  refreshTier: RefreshTier;
+  refreshedAt: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Q-X05 / Q-X06 — UserNotificationRecord
 // ─────────────────────────────────────────────────────────────────────────────

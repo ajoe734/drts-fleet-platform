@@ -373,7 +373,7 @@ export default function HomePage() {
 
       setSnapshot({
         tenants: tenants ?? [],
-        partners: partners ?? [],
+        partners: partners.items ?? [],
         users: users ?? [],
         issues: issues ?? [],
         audit: audit ?? [],
