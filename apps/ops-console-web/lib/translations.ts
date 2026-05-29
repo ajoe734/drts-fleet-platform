@@ -1415,6 +1415,82 @@ const en = {
   "revenue.emptyPartnerBenefit": "No partner benefit trips for this filter.",
   "revenue.emptySettlement": "No statements generated yet.",
 
+  // ── Revenue review (canvas-aligned) ──
+  "revenue.canvas.title": "Revenue review",
+  "revenue.canvas.subtitle":
+    "period · service bucket · vehicle · channel mix · settlement matrix — mismatch mutation lives in Platform Admin",
+  "revenue.tab.insight": "Insight",
+  "revenue.tab.channelMix": "Channel mix",
+  "revenue.tab.matrix": "Settlement matrix",
+  "revenue.tab.mismatch": "Mismatch review",
+  "revenue.action.filterPeriod": "Period",
+  "revenue.action.export": "Export",
+  "revenue.action.openInPlatformAdmin": "Open in Platform Admin",
+  "revenue.action.openPlatformAdminPayments":
+    "Open Platform Admin /payments (new tab)",
+  "revenue.action.retry": "Retry fetch",
+  "revenue.action.requestAccess": "Request access",
+  "revenue.action.clearFilters": "Clear filters",
+  "revenue.action.contactPlatform": "Contact platform owner",
+  "revenue.banner.readOnlyTitle": "Read-only mirror · Q-OPS14",
+  "revenue.banner.readOnlyBody":
+    "ops_finance_reviewer can open mismatch drawers, but mutation must deep-link to Platform Admin /payments. The owning platform finance owner resolves the issue.",
+  "revenue.banner.staleTitle": "Snapshot {minutes} min old (T3 · 15s)",
+  "revenue.banner.staleBody":
+    "Next auto refresh in {seconds}s — the matrix and KPIs above may lag the live ledger.",
+  "revenue.kpi.billed": "Billed (MTD)",
+  "revenue.kpi.billedSub": "Recognised revenue this month",
+  "revenue.kpi.ownedShare": "Owned share",
+  "revenue.kpi.ownedShareSub": "Owned trips / all trips this period",
+  "revenue.kpi.forwardedSyncFailed": "Forwarded sync_failed",
+  "revenue.kpi.forwardedSyncFailedSub":
+    "Mirror orders with adapter sync errors",
+  "revenue.kpi.openRecon": "Open reconciliation",
+  "revenue.kpi.openReconSub": "Mutation lives in Platform Admin",
+  "revenue.channelMix.title": "Channel mix",
+  "revenue.channelMix.subtitle":
+    "platform / partner / phone / tenant share of trips and revenue",
+  "revenue.channelMix.col.channel": "Channel",
+  "revenue.channelMix.col.trips": "Trips",
+  "revenue.channelMix.col.share": "Share",
+  "revenue.channelMix.col.revenue": "Revenue",
+  "revenue.channelMix.channel.tenant": "Tenant",
+  "revenue.channelMix.channel.partner": "Partner",
+  "revenue.channelMix.channel.phone": "Phone",
+  "revenue.channelMix.channel.platform": "Platform",
+  "revenue.channelMix.channel.other": "Other",
+  "revenue.mismatch.title": "Mismatch review",
+  "revenue.mismatch.subtitle":
+    "Read-only mirror of forwarder mismatches. Open Platform Admin to resolve.",
+  "revenue.mismatch.col.mirror": "Mirror order",
+  "revenue.mismatch.col.platform": "Platform",
+  "revenue.mismatch.col.reason": "Reason",
+  "revenue.mismatch.col.owner": "Owner",
+  "revenue.mismatch.col.cta": "Action",
+  "revenue.mismatch.openTooltip":
+    "Opens platform-admin /payments/reconciliation/{id} in a new tab",
+  "revenue.emptyReason.no_data.title": "No revenue this period",
+  "revenue.emptyReason.no_data.body":
+    "No completed trips matched the selected period. Try widening the period or check earlier dates.",
+  "revenue.emptyReason.not_provisioned.title": "Feature not provisioned",
+  "revenue.emptyReason.not_provisioned.body":
+    "The settlement matrix has not been turned on for this environment. Ask the platform owner to enable the channel set.",
+  "revenue.emptyReason.fetch_failed.title": "Revenue feed unavailable",
+  "revenue.emptyReason.fetch_failed.body":
+    "The backend errored while fetching this section. The page will retry on the next T3 tick; you may also refresh manually.",
+  "revenue.emptyReason.permission_denied.title": "Access denied",
+  "revenue.emptyReason.permission_denied.body":
+    "Your role does not include ops_finance_reviewer scope for this data. Request access from the operations lead.",
+  "revenue.emptyReason.external_unavailable.title": "External adapter down",
+  "revenue.emptyReason.external_unavailable.body":
+    "An upstream adapter (forwarder sync, partner settlement) is degraded, so cross-app data is not reachable right now.",
+  "revenue.emptyReason.driver_not_eligible.title": "Not eligible",
+  "revenue.emptyReason.driver_not_eligible.body":
+    "This view is not available for your driver-side account.",
+  "revenue.emptyReason.filtered_empty.title": "Filters too narrow",
+  "revenue.emptyReason.filtered_empty.body":
+    "No rows matched the chosen period, product, or vehicle. Clear filters to see more rows.",
+
   // ── Driver Earnings ──
   "driverEarnings.title": "Driver Earnings",
   "driverEarnings.subtitle": "{name} · {driverId}",
@@ -2811,6 +2887,80 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.emptyByVehicle": "此篩選條件無車輛收益。",
   "revenue.emptyPartnerBenefit": "此篩選條件下沒有合作福利行程。",
   "revenue.emptySettlement": "尚未生成帳單。",
+
+  // ── 收益審視（依設計稿）──
+  "revenue.canvas.title": "收益審視",
+  "revenue.canvas.subtitle":
+    "period · service bucket · vehicle · channel mix · settlement matrix — mismatch mutation 在 Platform Admin 完成",
+  "revenue.tab.insight": "Insight",
+  "revenue.tab.channelMix": "Channel mix",
+  "revenue.tab.matrix": "Settlement matrix",
+  "revenue.tab.mismatch": "Mismatch review",
+  "revenue.action.filterPeriod": "期別",
+  "revenue.action.export": "匯出",
+  "revenue.action.openInPlatformAdmin": "在 Platform Admin 開啟",
+  "revenue.action.openPlatformAdminPayments":
+    "開啟 Platform Admin /payments（新分頁）",
+  "revenue.action.retry": "重新取得",
+  "revenue.action.requestAccess": "申請權限",
+  "revenue.action.clearFilters": "清除篩選",
+  "revenue.action.contactPlatform": "聯絡平台負責人",
+  "revenue.banner.readOnlyTitle": "此頁為唯讀鏡像 · Q-OPS14",
+  "revenue.banner.readOnlyBody":
+    "ops_finance_reviewer 可開啟 mismatch drawer 但 mutation 必須 deep-link 到 Platform Admin /payments，對應 issue 由平台財務負責人處理。",
+  "revenue.banner.staleTitle": "快照已過 {minutes} 分鐘（T3 · 15 秒）",
+  "revenue.banner.staleBody":
+    "下次自動刷新還有 {seconds} 秒 — 上方矩陣與 KPI 可能落後即時帳簿。",
+  "revenue.kpi.billed": "當期 billed (MTD)",
+  "revenue.kpi.billedSub": "本月已認列營收",
+  "revenue.kpi.ownedShare": "自營佔比",
+  "revenue.kpi.ownedShareSub": "自營行程 / 本期所有行程",
+  "revenue.kpi.forwardedSyncFailed": "forwarded sync_failed",
+  "revenue.kpi.forwardedSyncFailedSub": "鏡像訂單 adapter 同步失敗",
+  "revenue.kpi.openRecon": "未結 reconciliation",
+  "revenue.kpi.openReconSub": "mutation 在 Platform Admin",
+  "revenue.channelMix.title": "Channel mix",
+  "revenue.channelMix.subtitle":
+    "平台 / 合作 / 電話 / 租戶 通道的行程數與收益分布",
+  "revenue.channelMix.col.channel": "通道",
+  "revenue.channelMix.col.trips": "行程數",
+  "revenue.channelMix.col.share": "佔比",
+  "revenue.channelMix.col.revenue": "收益",
+  "revenue.channelMix.channel.tenant": "租戶",
+  "revenue.channelMix.channel.partner": "合作方",
+  "revenue.channelMix.channel.phone": "電話",
+  "revenue.channelMix.channel.platform": "平台",
+  "revenue.channelMix.channel.other": "其他",
+  "revenue.mismatch.title": "Mismatch review",
+  "revenue.mismatch.subtitle":
+    "轉派 mismatch 的唯讀鏡像，請在 Platform Admin 處理 mutation。",
+  "revenue.mismatch.col.mirror": "鏡像訂單",
+  "revenue.mismatch.col.platform": "平台",
+  "revenue.mismatch.col.reason": "原因",
+  "revenue.mismatch.col.owner": "Owner",
+  "revenue.mismatch.col.cta": "動作",
+  "revenue.mismatch.openTooltip":
+    "在新分頁開啟 platform-admin /payments/reconciliation/{id}",
+  "revenue.emptyReason.no_data.title": "本期間無收益",
+  "revenue.emptyReason.no_data.body":
+    "目前選定的期間內沒有完成的行程。試著拉長期間或檢視更早的日期。",
+  "revenue.emptyReason.not_provisioned.title": "功能未啟用",
+  "revenue.emptyReason.not_provisioned.body":
+    "此環境尚未啟用結算矩陣。請聯絡平台負責人開啟對應通道集。",
+  "revenue.emptyReason.fetch_failed.title": "收益資料無法取得",
+  "revenue.emptyReason.fetch_failed.body":
+    "後端在抓取此區段時發生錯誤，下一個 T3 tick 會自動重試，也可手動重新整理。",
+  "revenue.emptyReason.permission_denied.title": "權限不足",
+  "revenue.emptyReason.permission_denied.body":
+    "你的角色不具備 ops_finance_reviewer 範圍。請向營運負責人申請權限。",
+  "revenue.emptyReason.external_unavailable.title": "外部 adapter 降級",
+  "revenue.emptyReason.external_unavailable.body":
+    "上游 adapter（轉派同步、合作方結算）目前降級，跨應用程式資料暫時無法取得。",
+  "revenue.emptyReason.driver_not_eligible.title": "不適用",
+  "revenue.emptyReason.driver_not_eligible.body": "此檢視不適用於司機端帳號。",
+  "revenue.emptyReason.filtered_empty.title": "篩選太窄",
+  "revenue.emptyReason.filtered_empty.body":
+    "目前的期別 / 產品 / 車輛條件下沒有列。清除篩選可顯示更多。",
 
   // ── Driver Earnings ──
   "driverEarnings.title": "司機收益",
