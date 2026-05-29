@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
 import type {
   CrossAppResourceLink,
   CreateDriverMasterCommand,
@@ -13,8 +14,11 @@ import type {
   DispatchExclusivityRecord,
   DriverDeviceBindingSummary,
   DriverRegistryRecord,
+  EmptyStateEnvelope,
   EmptyReason,
+  RefreshTier,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
   UpdateDriverMasterLifecycleCommand,
   VehicleContractRecord,
   VehicleRegistryRecord,
@@ -24,7 +28,6 @@ import {
   CanvasBtn,
   CanvasCard,
   CanvasIcon,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -35,6 +38,7 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
+const REFRESH_TIER: RefreshTier = "medium_slow";
 const REFRESH_INTERVAL_MS = 30_000;
 const OPS_CONSOLE_ORIGIN =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN?.replace(/\/$/, "") ?? "";
@@ -99,6 +103,18 @@ type EmptyConfig = {
   description: string;
 };
 
+type FleetListEnvelope<T> = {
+  items?: T[];
+  emptyState?: EmptyStateEnvelope;
+  refreshMetadata?: UiRefreshMetadata;
+};
+
+type FleetTabState<T> = {
+  items: T[];
+  emptyState: EmptyStateEnvelope | null;
+  refreshMetadata: UiRefreshMetadata | null;
+};
+
 const TAB_ORDER: TabKey[] = [
   "vehicles",
   "drivers",
@@ -123,28 +139,6 @@ const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "grid",
   gap: 16,
-};
-
-const heroGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-  gap: 12,
-};
-
-const contentGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.7fr) minmax(300px, 0.9fr)",
-  gap: 16,
-  alignItems: "start",
-};
-
-const sideStackStyle: CSSProperties = {
-  display: "grid",
-  gap: 16,
-};
-
-const monoTextStyle: CSSProperties = {
-  fontFamily: theme.monoFamily,
 };
 
 const stackedCellStyle: CSSProperties = {
@@ -174,12 +168,6 @@ const actionRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 6,
-};
-
-const tabRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
 };
 
 const tabButtonStyle = (selected: boolean): CSSProperties => ({
@@ -358,12 +346,29 @@ function resolveCrossAppHref(
 }
 
 function formatFreshness(
-  locale: string,
+  locale: Locale,
   lastFetchedAt: string | null,
   loading: boolean,
+  refreshMetadata?: UiRefreshMetadata | null,
 ) {
   if (loading) {
     return locale === "en" ? "Refreshing..." : "更新中...";
+  }
+  if (refreshMetadata) {
+    const prefix =
+      locale === "en"
+        ? `Snapshot ${formatDateTime(refreshMetadata.generatedAt)}`
+        : `快照時間 ${formatDateTime(refreshMetadata.generatedAt)}`;
+    const suffix =
+      refreshMetadata.source === "live"
+        ? locale === "en"
+          ? "live"
+          : "即時"
+        : formatPlatformCodeLabel(locale, refreshMetadata.source);
+    return `${prefix} · ${suffix} · ${formatPlatformCodeLabel(
+      locale,
+      refreshMetadata.dataFreshness,
+    )}`;
   }
   if (!lastFetchedAt) {
     return locale === "en" ? "Awaiting first snapshot" : "等待首個快照";
@@ -425,6 +430,42 @@ function makeAction(
     requiresReason,
     ...(disabledReasonCode ? { disabledReasonCode } : {}),
   };
+}
+
+function normalizeFleetListEnvelope<T>(
+  payload: T[] | FleetListEnvelope<T>,
+): FleetTabState<T> {
+  if (Array.isArray(payload)) {
+    return {
+      items: payload,
+      emptyState: null,
+      refreshMetadata: null,
+    };
+  }
+  return {
+    items: payload.items ?? [],
+    emptyState: payload.emptyState ?? null,
+    refreshMetadata: payload.refreshMetadata ?? null,
+  };
+}
+
+function refreshTone(
+  refreshMetadata: UiRefreshMetadata | null | undefined,
+  loading: boolean,
+): CanvasTone {
+  if (loading) {
+    return "warn";
+  }
+  switch (refreshMetadata?.dataFreshness) {
+    case "degraded":
+      return "warn";
+    case "stale":
+    case "unknown":
+      return "neutral";
+    case "fresh":
+    default:
+      return "success";
+  }
 }
 
 function emptyStateConfig(locale: string, reason: EmptyReason): EmptyConfig {
@@ -615,6 +656,22 @@ export default function FleetPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [vehiclesEmptyState, setVehiclesEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [driversEmptyState, setDriversEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [contractsEmptyState, setContractsEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [exclusivitiesEmptyState, setExclusivitiesEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [vehiclesRefreshMetadata, setVehiclesRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
+  const [driversRefreshMetadata, setDriversRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
+  const [contractsRefreshMetadata, setContractsRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
+  const [exclusivitiesRefreshMetadata, setExclusivitiesRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
 
   useEffect(() => {
     setActiveTab(queryTab);
@@ -626,15 +683,36 @@ export default function FleetPage() {
     try {
       const [nextVehicles, nextDrivers, nextContracts, nextExclusivities] =
         await Promise.all([
-          client.listVehicles(),
-          client.listDrivers(),
-          client.listContracts(),
-          client.listExclusivities(),
+          client.get<
+            GovernedVehicleRecord[] | FleetListEnvelope<GovernedVehicleRecord>
+          >("/api/regulatory-registry/vehicles"),
+          client.get<
+            GovernedDriverRecord[] | FleetListEnvelope<GovernedDriverRecord>
+          >("/api/regulatory-registry/drivers"),
+          client.get<
+            GovernedContractRecord[] | FleetListEnvelope<GovernedContractRecord>
+          >("/api/regulatory-registry/contracts"),
+          client.get<
+            | GovernedExclusivityRecord[]
+            | FleetListEnvelope<GovernedExclusivityRecord>
+          >("/api/regulatory-registry/exclusivities"),
         ]);
-      setVehicles(nextVehicles as GovernedVehicleRecord[]);
-      setDrivers(nextDrivers as GovernedDriverRecord[]);
-      setContracts(nextContracts as GovernedContractRecord[]);
-      setExclusivities(nextExclusivities as GovernedExclusivityRecord[]);
+      const vehicleState = normalizeFleetListEnvelope(nextVehicles);
+      const driverState = normalizeFleetListEnvelope(nextDrivers);
+      const contractState = normalizeFleetListEnvelope(nextContracts);
+      const exclusivityState = normalizeFleetListEnvelope(nextExclusivities);
+      setVehicles(vehicleState.items);
+      setDrivers(driverState.items);
+      setContracts(contractState.items);
+      setExclusivities(exclusivityState.items);
+      setVehiclesEmptyState(vehicleState.emptyState);
+      setDriversEmptyState(driverState.emptyState);
+      setContractsEmptyState(contractState.emptyState);
+      setExclusivitiesEmptyState(exclusivityState.emptyState);
+      setVehiclesRefreshMetadata(vehicleState.refreshMetadata);
+      setDriversRefreshMetadata(driverState.refreshMetadata);
+      setContractsRefreshMetadata(contractState.refreshMetadata);
+      setExclusivitiesRefreshMetadata(exclusivityState.refreshMetadata);
       setLastFetchedAt(new Date().toISOString());
     } catch (nextError) {
       setError(
@@ -925,16 +1003,6 @@ export default function FleetPage() {
     [vehicles],
   );
 
-  const blockedVehicles = useMemo(
-    () =>
-      vehicles.filter(
-        (vehicle) =>
-          !vehicle.dispatchableFlag ||
-          vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
-      ),
-    [vehicles],
-  );
-
   const blockedDrivers = useMemo(
     () =>
       drivers.filter(
@@ -982,8 +1050,55 @@ export default function FleetPage() {
     [],
   );
 
+  const activeRefreshMetadata = useMemo(() => {
+    switch (activeTab) {
+      case "vehicles":
+      case "offboarding":
+        return vehiclesRefreshMetadata;
+      case "drivers":
+      case "device_binding":
+        return driversRefreshMetadata;
+      case "contracts":
+        return contractsRefreshMetadata;
+      case "exclusivity":
+        return exclusivitiesRefreshMetadata;
+      default:
+        return null;
+    }
+  }, [
+    activeTab,
+    contractsRefreshMetadata,
+    driversRefreshMetadata,
+    exclusivitiesRefreshMetadata,
+    vehiclesRefreshMetadata,
+  ]);
+
+  const envelopeEmptyReason = useMemo<EmptyReason | null>(() => {
+    switch (activeTab) {
+      case "vehicles":
+      case "offboarding":
+        return vehiclesEmptyState?.reason ?? null;
+      case "drivers":
+      case "device_binding":
+        return driversEmptyState?.reason ?? null;
+      case "contracts":
+        return contractsEmptyState?.reason ?? null;
+      case "exclusivity":
+        return exclusivitiesEmptyState?.reason ?? null;
+      default:
+        return null;
+    }
+  }, [
+    activeTab,
+    contractsEmptyState,
+    driversEmptyState,
+    exclusivitiesEmptyState,
+    vehiclesEmptyState,
+  ]);
+
   const activeEmptyReason =
     previewEmptyReason ||
+    envelopeEmptyReason ||
     (error ? "fetch_failed" : tabCounts[activeTab] === 0 ? "no_data" : null);
 
   const activePageActions = pageActions[activeTab];
@@ -992,47 +1107,64 @@ export default function FleetPage() {
     : null;
 
   const renderActionButtons = useCallback(
-    (actions: ResourceActionDescriptor[], context: ActionContext) => (
-      <div style={actionRowStyle}>
-        {actions.map((descriptor, index) => {
-          const resolved = actionTone(descriptor);
-          const keyBase =
-            context.kind === "page"
-              ? context.tab
-              : context.kind === "vehicle"
-                ? context.vehicle.vehicleId
-                : context.kind === "driver"
-                  ? context.driver.driverId
-                  : context.kind === "contract"
-                    ? context.contract.contractId
-                    : context.kind === "binding"
-                      ? context.binding.bindingId
-                      : context.kind === "exclusivity"
-                        ? context.exclusivity.vehicleId
-                        : context.vehicle.vehicleId;
-          const busy = busyAction === `${descriptor.action}:${keyBase}`;
-          return (
-            <CanvasBtn
-              key={`${descriptor.action}-${index}`}
-              theme={theme}
-              size="xs"
-              variant={resolved.variant}
-              {...(resolved.danger !== undefined
-                ? { danger: resolved.danger }
-                : {})}
-              disabled={!descriptor.enabled || busy}
-              onClick={() => void runAction(descriptor, context)}
-            >
-              {busy
-                ? locale === "en"
-                  ? "Working..."
-                  : "處理中..."
-                : actionLabel(locale, descriptor.action)}
-            </CanvasBtn>
-          );
-        })}
-      </div>
-    ),
+    (actions: ResourceActionDescriptor[], context: ActionContext) => {
+      if (actions.length === 0) {
+        return (
+          <CanvasPill theme={theme} tone="neutral">
+            {locale === "en" ? "Read-only" : "唯讀"}
+          </CanvasPill>
+        );
+      }
+      return (
+        <div style={actionRowStyle}>
+          {actions.map((descriptor, index) => {
+            const resolved = actionTone(descriptor);
+            const keyBase =
+              context.kind === "page"
+                ? context.tab
+                : context.kind === "vehicle"
+                  ? context.vehicle.vehicleId
+                  : context.kind === "driver"
+                    ? context.driver.driverId
+                    : context.kind === "contract"
+                      ? context.contract.contractId
+                      : context.kind === "binding"
+                        ? context.binding.bindingId
+                        : context.kind === "exclusivity"
+                          ? context.exclusivity.vehicleId
+                          : context.vehicle.vehicleId;
+            const busy = busyAction === `${descriptor.action}:${keyBase}`;
+            const title = descriptor.enabled
+              ? undefined
+              : descriptor.disabledReasonCode
+                ? formatPlatformCodeLabel(locale, descriptor.disabledReasonCode)
+                : locale === "en"
+                  ? "Unavailable"
+                  : "目前不可用";
+            return (
+              <span key={`${descriptor.action}-${index}`} title={title}>
+                <CanvasBtn
+                  theme={theme}
+                  size="xs"
+                  variant={resolved.variant}
+                  {...(resolved.danger !== undefined
+                    ? { danger: resolved.danger }
+                    : {})}
+                  disabled={!descriptor.enabled || busy}
+                  onClick={() => void runAction(descriptor, context)}
+                >
+                  {busy
+                    ? locale === "en"
+                      ? "Working..."
+                      : "處理中..."
+                    : actionLabel(locale, descriptor.action)}
+                </CanvasBtn>
+              </span>
+            );
+          })}
+        </div>
+      );
+    },
     [busyAction, locale, runAction],
   );
 
@@ -1569,6 +1701,15 @@ export default function FleetPage() {
   ));
 
   const activeTabLabel = tabLabels[activeTab];
+  const activeHeaderActions = activePageActions.filter(
+    (descriptor) => descriptor.action !== "refresh_tab",
+  );
+  const activeFreshnessLabel = formatFreshness(
+    locale,
+    lastFetchedAt,
+    loading,
+    activeRefreshMetadata,
+  );
 
   return (
     <CanvasShell
@@ -1617,62 +1758,20 @@ export default function FleetPage() {
             >
               {locale === "en" ? "Filter" : "篩選"}
             </CanvasBtn>
-            {renderActionButtons(activePageActions, {
-              kind: "page",
-              tab: activeTab,
-            })}
+            {activeHeaderActions.length > 0
+              ? renderActionButtons(activeHeaderActions, {
+                  kind: "page",
+                  tab: activeTab,
+                })
+              : null}
+            <CanvasBtn theme={theme} onClick={() => void loadFleet()}>
+              {locale === "en" ? "Refresh" : "重新整理"}
+            </CanvasBtn>
           </>
         }
       />
 
       <div style={pageBodyStyle}>
-        <div style={heroGridStyle}>
-          <CanvasKPI
-            theme={theme}
-            label={
-              locale === "en" ? "Dispatch blocked vehicles" : "阻擋派遣車輛"
-            }
-            value={blockedVehicles.length}
-            sub={
-              locale === "en"
-                ? "Compliance or lifecycle gaps"
-                : "合規或生命週期缺口"
-            }
-            deltaTone={blockedVehicles.length > 0 ? "down" : "neutral"}
-          />
-          <CanvasKPI
-            theme={theme}
-            label={locale === "en" ? "Driver attention" : "需處理司機"}
-            value={blockedDrivers.length}
-            sub={
-              locale === "en"
-                ? "License, lifecycle, work-state blockers"
-                : "執照、生命週期、工作狀態"
-            }
-            deltaTone={blockedDrivers.length > 0 ? "down" : "neutral"}
-          />
-          <CanvasKPI
-            theme={theme}
-            label={locale === "en" ? "Exclusivity backlog" : "排他待審"}
-            value={
-              exclusivities.filter((row) =>
-                ["draft", "pending"].includes(row.reviewStatus),
-              ).length
-            }
-            sub={locale === "en" ? "Q-ADM08 queue" : "Q-ADM08 審核佇列"}
-            deltaTone="down"
-          />
-          <CanvasKPI
-            theme={theme}
-            label={
-              locale === "en" ? "Offboarding in flight" : "進行中 offboarding"
-            }
-            value={offboardingVehicles.length}
-            sub={locale === "en" ? "Q-ADM09 workflow" : "Q-ADM09 狀態機"}
-            deltaTone={offboardingVehicles.length > 0 ? "down" : "neutral"}
-          />
-        </div>
-
         {error ? (
           <CanvasBanner
             theme={theme}
@@ -1690,6 +1789,26 @@ export default function FleetPage() {
           />
         ) : null}
 
+        {!error &&
+        activeRefreshMetadata &&
+        activeRefreshMetadata.dataFreshness !== "fresh" ? (
+          <CanvasBanner
+            theme={theme}
+            tone={
+              activeRefreshMetadata.dataFreshness === "degraded"
+                ? "warn"
+                : "info"
+            }
+            icon="info"
+            title={
+              locale === "en"
+                ? "Snapshot is not fully fresh"
+                : "目前快照不是最新狀態"
+            }
+            body={activeFreshnessLabel}
+          />
+        ) : null}
+
         {activeTab === "drivers" && blockedDrivers.length > 0 ? (
           <CanvasBanner
             theme={theme}
@@ -1702,8 +1821,13 @@ export default function FleetPage() {
             }
             body={
               locale === "en"
-                ? "dispatch.compliance guardrails remain enforced in ops-console until these blockers are cleared."
-                : "在阻擋原因解除前，ops-console 端仍會持續套用 dispatch.compliance guardrail。"
+                ? "dispatch.compliance.license_warn_30d remains enforced in ops-console until these blockers are cleared."
+                : "在阻擋原因解除前，ops 端仍持續套用 dispatch.compliance.license_warn_30d。"
+            }
+            actions={
+              <CanvasBtn theme={theme} variant="secondary">
+                {locale === "en" ? "Export list" : "匯出名單"}
+              </CanvasBtn>
             }
           />
         ) : null}
@@ -1722,249 +1846,113 @@ export default function FleetPage() {
           />
         ) : null}
 
-        <div style={contentGridStyle}>
-          <div style={{ minWidth: 0 }}>
-            {activeTab === "offboarding" ? (
-              <CanvasCard
-                theme={theme}
-                title="Offboarding state machine · Q-ADM09"
-                subtitle={
-                  locale === "en"
-                    ? "Every transition needs timestamp · actor · evidence · audit"
-                    : "每一步轉換需 timestamp · actor · evidence · audit"
-                }
-              >
-                <div style={stepperRowStyle}>
-                  {[
-                    "initiated",
-                    "dispatch_disabled",
-                    "debranding_pending",
-                    "debranding_verified",
-                    "completed",
-                  ].map((step, index, all) => (
-                    <div
-                      key={step}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        flex: index === all.length - 1 ? "0 0 auto" : 1,
-                      }}
-                    >
-                      <div
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 999,
-                          border: `1px solid ${
-                            index < 2
-                              ? theme.successBorder
-                              : index === 2
-                                ? theme.warnBorder
-                                : theme.border
-                          }`,
-                          background:
-                            index < 2
-                              ? theme.successBg
-                              : index === 2
-                                ? theme.warnBg
-                                : theme.surfaceLo,
-                          color: index < 3 ? theme.text : theme.textMuted,
-                          fontFamily: theme.monoFamily,
-                          fontSize: 11.5,
-                          fontWeight: 700,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {index + 1}. {step}
-                      </div>
-                      {index < all.length - 1 ? (
-                        <div
-                          style={{
-                            flex: 1,
-                            height: 2,
-                            margin: "0 4px",
-                            background:
-                              index < 2 ? theme.success : theme.border,
-                          }}
-                        />
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </CanvasCard>
-            ) : null}
-
-            <CanvasCard
-              theme={theme}
-              title={activeTabLabel}
-              subtitle={
-                locale === "en"
-                  ? `Refresh tier T4 / 30s. ${formatFreshness(locale, lastFetchedAt, loading)}`
-                  : `Refresh tier T4 / 30s。${formatFreshness(locale, lastFetchedAt, loading)}`
-              }
-            >
-              {activeEmptyReason && emptyConfig ? (
-                <div style={emptyPanelStyle(emptyConfig.tone)}>
+        {activeTab === "offboarding" ? (
+          <CanvasCard
+            theme={theme}
+            title="Offboarding state machine · Q-ADM09"
+            subtitle={
+              locale === "en"
+                ? "Every transition needs timestamp · actor · evidence · audit"
+                : "每一步轉換需 timestamp · actor · evidence · audit"
+            }
+          >
+            <div style={stepperRowStyle}>
+              {[
+                "initiated",
+                "dispatch_disabled",
+                "debranding_pending",
+                "debranding_verified",
+                "completed",
+              ].map((step, index, all) => (
+                <div
+                  key={step}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    flex: index === all.length - 1 ? "0 0 auto" : 1,
+                  }}
+                >
                   <div
-                    style={{ display: "flex", alignItems: "center", gap: 10 }}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      border: `1px solid ${
+                        index < 2
+                          ? theme.successBorder
+                          : index === 2
+                            ? theme.warnBorder
+                            : theme.border
+                      }`,
+                      background:
+                        index < 2
+                          ? theme.successBg
+                          : index === 2
+                            ? theme.warnBg
+                            : theme.surfaceLo,
+                      color: index < 3 ? theme.text : theme.textMuted,
+                      fontFamily: theme.monoFamily,
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    <CanvasIcon name="warn" />
-                    <strong>{emptyConfig.title}</strong>
+                    {index + 1}. {step}
                   </div>
-                  <div style={{ color: theme.text, lineHeight: 1.5 }}>
-                    {emptyConfig.description}
-                  </div>
-                  <div style={actionRowStyle}>
-                    <CanvasPill theme={theme} tone={emptyConfig.tone}>
-                      {activeEmptyReason}
-                    </CanvasPill>
-                    <CanvasBtn theme={theme} onClick={() => void loadFleet()}>
-                      {locale === "en" ? "Refresh tab" : "重新整理"}
-                    </CanvasBtn>
-                  </div>
+                  {index < all.length - 1 ? (
+                    <div
+                      style={{
+                        flex: 1,
+                        height: 2,
+                        margin: "0 4px",
+                        background: index < 2 ? theme.success : theme.border,
+                      }}
+                    />
+                  ) : null}
                 </div>
-              ) : (
-                renderActiveTable()
-              )}
-            </CanvasCard>
-          </div>
+              ))}
+            </div>
+          </CanvasCard>
+        ) : null}
 
-          <div style={sideStackStyle}>
-            <CanvasCard
-              theme={theme}
-              title={
-                locale === "en" ? "Live governance context" : "治理即時脈絡"
-              }
-              subtitle={
-                locale === "en"
-                  ? "Packet §5 requires stale affordance, empty states, and cross-app exits on every fleet tab."
-                  : "packet §5 要求每個 fleet tab 都具備 stale affordance、empty states 與 cross-app deep link。"
-              }
-            >
-              <div style={{ display: "grid", gap: 10 }}>
-                <div style={tabRowStyle}>
-                  <CanvasPill theme={theme} tone="accent">
-                    T4 / 30s
-                  </CanvasPill>
-                  <CanvasPill
-                    theme={theme}
-                    tone={loading ? "warn" : "success"}
-                    dot
-                  >
-                    {loading
-                      ? locale === "en"
-                        ? "refreshing"
-                        : "更新中"
-                      : locale === "en"
-                        ? "fresh"
-                        : "最新"}
-                  </CanvasPill>
-                </div>
-                <div
-                  style={{
-                    color: theme.textMuted,
-                    fontSize: 12.5,
-                    lineHeight: 1.5,
-                  }}
+        <CanvasCard
+          theme={theme}
+          title={activeTabLabel}
+          subtitle={
+            locale === "en"
+              ? `Refresh tier ${REFRESH_TIER} / 30s · ${activeFreshnessLabel}`
+              : `Refresh tier ${REFRESH_TIER} / 30s · ${activeFreshnessLabel}`
+          }
+        >
+          {activeEmptyReason && emptyConfig ? (
+            <div style={emptyPanelStyle(emptyConfig.tone)}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <CanvasIcon name="warn" />
+                <strong>{emptyConfig.title}</strong>
+              </div>
+              <div style={{ color: theme.text, lineHeight: 1.5 }}>
+                {emptyConfig.description}
+              </div>
+              <div style={actionRowStyle}>
+                <CanvasPill theme={theme} tone={emptyConfig.tone}>
+                  {activeEmptyReason}
+                </CanvasPill>
+                <CanvasPill
+                  theme={theme}
+                  tone={refreshTone(activeRefreshMetadata, loading)}
+                  dot
                 >
-                  {formatFreshness(locale, lastFetchedAt, loading)}
-                </div>
-                <div
-                  style={{
-                    color: theme.textMuted,
-                    fontSize: 12.5,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {locale === "en"
-                    ? "Cross-app deep links open a new tab by default."
-                    : "cross-app deep link 預設以新分頁開啟。"}
-                </div>
+                  {activeRefreshMetadata?.dataFreshness ?? "fresh"}
+                </CanvasPill>
+                <CanvasBtn theme={theme} onClick={() => void loadFleet()}>
+                  {locale === "en" ? "Refresh tab" : "重新整理"}
+                </CanvasBtn>
               </div>
-            </CanvasCard>
-
-            <CanvasCard
-              theme={theme}
-              title={locale === "en" ? "Cross-app handoff" : "跨 app 交接"}
-              subtitle={
-                locale === "en"
-                  ? "Operational inspection stays in ops-console while governance remains anchored here."
-                  : "營運檢查留在 ops-console，治理上下文則保留在此頁。"
-              }
-            >
-              <div style={{ display: "grid", gap: 10 }}>
-                <div style={renderRouteCardStyle()}>
-                  <div style={secondaryCellTextStyle}>
-                    {locale === "en" ? "Vehicle route" : "車輛路由"}
-                  </div>
-                  <div style={monoTextStyle}>
-                    {opsHref("/vehicles/[vehicleId]")}
-                  </div>
-                </div>
-                <div style={renderRouteCardStyle()}>
-                  <div style={secondaryCellTextStyle}>
-                    {locale === "en" ? "Driver route" : "司機路由"}
-                  </div>
-                  <div style={monoTextStyle}>
-                    {opsHref("/drivers/[driverId]")}
-                  </div>
-                </div>
-              </div>
-            </CanvasCard>
-
-            <CanvasCard
-              theme={theme}
-              title={
-                locale === "en" ? "Empty reason coverage" : "Empty reason 覆蓋"
-              }
-              subtitle={
-                locale === "en"
-                  ? "Preview any packet state with ?emptyReason=<reason>."
-                  : "可用 ?emptyReason=<reason> 預覽 packet 要求的狀態。"
-              }
-            >
-              <div style={{ display: "grid", gap: 8 }}>
-                {[
-                  "no_data",
-                  "not_provisioned",
-                  "fetch_failed",
-                  "permission_denied",
-                  "external_unavailable",
-                  "filtered_empty",
-                ].map((reason) => {
-                  const config = emptyStateConfig(
-                    locale,
-                    reason as EmptyReason,
-                  );
-                  return (
-                    <div key={reason} style={renderRouteCardStyle()}>
-                      <div style={actionRowStyle}>
-                        <CanvasPill theme={theme} tone={config.tone}>
-                          {reason}
-                        </CanvasPill>
-                      </div>
-                      <div style={{ ...primaryCellTextStyle, marginTop: 6 }}>
-                        {config.title}
-                      </div>
-                      <div style={secondaryCellTextStyle}>
-                        {config.description}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CanvasCard>
-          </div>
-        </div>
+            </div>
+          ) : (
+            renderActiveTable()
+          )}
+        </CanvasCard>
       </div>
     </CanvasShell>
   );
-}
-
-function renderRouteCardStyle(): CSSProperties {
-  return {
-    border: `1px solid ${theme.border}`,
-    background: theme.surface,
-    borderRadius: 10,
-    padding: 12,
-  };
 }
