@@ -318,6 +318,114 @@ const en = {
     "{active} active · {draft} draft · {attention} partner eligibility cases need attention",
   "contracts.empty": "No contracts registered.",
 
+  // ── Contract detail (Q-OPS03 · ops read-only) ──
+  "contractDetail.readOnlyPill": "read-only · ops scope",
+  "contractDetail.readOnlyHint":
+    "Read-only · no resource actions available at ops scope",
+  "contractDetail.refreshTierLabel": "refresh tier",
+  "contractDetail.refreshTier.urgent": "urgent",
+  "contractDetail.refreshTier.fast": "fast",
+  "contractDetail.refreshTier.dispatch": "dispatch",
+  "contractDetail.refreshTier.medium": "medium",
+  "contractDetail.refreshTier.medium_slow": "medium-slow",
+  "contractDetail.refreshTier.slow": "slow",
+  "contractDetail.refreshTier.manual": "manual",
+  "contractDetail.openInPlatformAdmin": "Open in Platform Admin →",
+  "contractDetail.openInNewTab": "Open in new tab →",
+  "contractDetail.pendingBackend": "Pending backend (TBD endpoint)",
+  "contractDetail.headerSubtitle.unavailable":
+    "Contract registry temporarily unavailable",
+  "contractDetail.headerSubtitle.notFound": "Contract not found in registry",
+  "contractDetail.operationalTermsTitle": "Operational terms · ops scope",
+  "contractDetail.operationalTermsSubtitle":
+    "Dispatch / billing / compliance reference. Mutation lives in Platform Admin.",
+  "contractDetail.terms.modifiableWindow": "Modifiable window",
+  "contractDetail.terms.proofRequirements": "Proof requirements",
+  "contractDetail.terms.waitingRule": "Waiting rule",
+  "contractDetail.terms.noShowRule": "No-show rule",
+  "contractDetail.terms.slaProfile": "SLA profile",
+  "contractDetail.terms.currentEffectiveVersion": "Current effective version",
+  "contractDetail.terms.partnerProgram": "Partner program",
+  "contractDetail.terms.authMode": "Auth mode",
+  "contractDetail.metaTitle": "Contract registry meta",
+  "contractDetail.metaSubtitle":
+    "Snapshot of the registry record backing this view.",
+  "contractDetail.meta.contractType": "Contract type",
+  "contractDetail.meta.partnerType": "Partner type",
+  "contractDetail.meta.vehicleId": "Vehicle ID",
+  "contractDetail.meta.operatingArea": "Operating area",
+  "contractDetail.meta.serviceScope": "Service scope",
+  "contractDetail.meta.term": "Term",
+  "contractDetail.meta.approvedBy": "Approved by",
+  "contractDetail.meta.approvedAt": "Approved at",
+  "contractDetail.authorityRedirect.title": "Authority redirect",
+  "contractDetail.authorityRedirect.bannerTitle":
+    "Mutation lives in Platform Admin · cross-app",
+  "contractDetail.authorityRedirect.bannerBody":
+    "Contract clauses, version bumps, and termination flows are owned by Platform Admin /partners. Open the contract there to make changes.",
+  "contractDetail.linkage.title": "Linked tenant / partner",
+  "contractDetail.linkage.tenant": "Tenant",
+  "contractDetail.linkage.partnerEntry": "Partner entry",
+  "contractDetail.linkage.programId": "Program ID",
+  "contractDetail.versionHistoryTitle": "Version history (read-only)",
+  "contractDetail.versionHistoryEmpty":
+    "No version history recorded yet for this contract.",
+  "contractDetail.transitionBanner.title":
+    "Pending version {version} not yet effective",
+  "contractDetail.transitionBanner.body":
+    "A new version is scheduled to take effect at {effective}. Until then the current version remains authoritative.",
+  "contractDetail.empty.no_data.title": "No data yet",
+  "contractDetail.empty.no_data.body":
+    "Nothing to show here yet. The registry has the contract but no operational view has been published.",
+  "contractDetail.empty.not_provisioned.title": "Not provisioned",
+  "contractDetail.empty.not_provisioned.body":
+    "This contract is not provisioned in the ops-scope view. Provision it from Platform Admin to make it visible here.",
+  "contractDetail.empty.not_provisioned.cta": "Provision in Platform Admin",
+  "contractDetail.empty.fetch_failed.title": "Could not load contracts",
+  "contractDetail.empty.fetch_failed.body":
+    "The contract registry returned an error. Reload, or try again once the upstream service recovers.",
+  "contractDetail.empty.permission_denied.title": "Permission denied",
+  "contractDetail.empty.permission_denied.body":
+    "Your role does not include scope to view this contract. Ask an ops_manager or ops_finance_reviewer to delegate access.",
+  "contractDetail.empty.external_unavailable.title":
+    "Upstream service unavailable",
+  "contractDetail.empty.external_unavailable.body":
+    "An upstream adapter is degraded. Check the dispatch health envelope and retry when it returns to healthy.",
+  "contractDetail.empty.driver_not_eligible.title": "Driver scope only",
+  "contractDetail.empty.driver_not_eligible.body":
+    "This empty reason applies to the driver app and should not surface at ops. Report if you see it here.",
+  "contractDetail.empty.filtered_empty.title": "Filters too narrow",
+  "contractDetail.empty.filtered_empty.body":
+    "No history rows match the current filters. Widen the filter or clear it to see all versions.",
+  "contractDetail.actions.confirmTitle": "Confirm {action}",
+  "contractDetail.actions.confirmBodyLow":
+    "This action is read-only at ops and will open Platform Admin in a new tab.",
+  "contractDetail.actions.confirmBodyMedium":
+    "Mutation runs in Platform Admin. Confirming opens the partner contract page in a new tab so the action can be completed there.",
+  "contractDetail.actions.confirmBodyHigh":
+    "High-risk action. Provide a written reason; the reason is forwarded with the deep link so Platform Admin can record it on the audit trail.",
+  "contractDetail.actions.reasonLabel": "Reason (required)",
+  "contractDetail.actions.reasonPlaceholder":
+    "Why is this action needed? Will be recorded on the audit log.",
+  "contractDetail.actions.reasonRequired":
+    "Reason is required for high-risk actions.",
+  "contractDetail.actions.confirm": "Confirm & open",
+  "contractDetail.actions.cancel": "Cancel",
+  "contractDetail.actions.disabledTooltip": "Disabled · {code}",
+  "contractDetail.actions.toastTitle": "{action} forwarded to Platform Admin",
+  "contractDetail.actions.toastBody":
+    "Opened a new tab to complete the mutation. The audit record is created when you confirm there.",
+  "contractDetail.actions.toastDismiss": "Dismiss",
+  "contractDetail.refresh.manualLabel": "Refresh now",
+  "contractDetail.refresh.refreshingLabel": "Refreshing…",
+  "contractDetail.refresh.autoCadence": "auto · every {cadence}",
+  "contractDetail.refresh.manualOnly": "manual only",
+  "contractDetail.refresh.lastRefreshed": "last refreshed {time}",
+  "contractDetail.refresh.never": "never",
+  "contractDetail.refresh.justNow": "just now",
+  "contractDetail.refresh.secondsAgo": "{seconds}s ago",
+  "contractDetail.refresh.minutesAgo": "{minutes}m ago",
+
   // ── Feature Flags ──
   "flags.title": "Feature Flags",
   "flags.subtitle": "{total} flags — {enabled} enabled",
@@ -1775,6 +1883,107 @@ const zh: Record<keyof typeof en, string> = {
     "{active} 份生效中 · {draft} 份草稿 · {attention} 筆合作夥伴 eligibility 案例待關注",
   "contracts.col.status": "狀態",
   "contracts.empty": "尚未登記合約。",
+
+  // ── Contract detail (Q-OPS03 · ops 唯讀) ──
+  "contractDetail.readOnlyPill": "唯讀 · ops scope",
+  "contractDetail.readOnlyHint": "唯讀 · ops 不提供資源動作",
+  "contractDetail.refreshTierLabel": "刷新節奏",
+  "contractDetail.refreshTier.urgent": "urgent",
+  "contractDetail.refreshTier.fast": "fast",
+  "contractDetail.refreshTier.dispatch": "dispatch",
+  "contractDetail.refreshTier.medium": "medium",
+  "contractDetail.refreshTier.medium_slow": "medium-slow",
+  "contractDetail.refreshTier.slow": "slow",
+  "contractDetail.refreshTier.manual": "manual",
+  "contractDetail.openInPlatformAdmin": "在 Platform Admin 開啟 →",
+  "contractDetail.openInNewTab": "在新分頁開啟 →",
+  "contractDetail.pendingBackend": "待後端 (新 endpoint)",
+  "contractDetail.headerSubtitle.unavailable": "合約登記暫時無法取得",
+  "contractDetail.headerSubtitle.notFound": "登記中找不到此合約",
+  "contractDetail.operationalTermsTitle": "Operational terms · ops scope",
+  "contractDetail.operationalTermsSubtitle":
+    "派遣 / 結算 / 合規參考資料；變更請至 Platform Admin。",
+  "contractDetail.terms.modifiableWindow": "可修改時段",
+  "contractDetail.terms.proofRequirements": "佐證需求",
+  "contractDetail.terms.waitingRule": "等候規則",
+  "contractDetail.terms.noShowRule": "未到車規則",
+  "contractDetail.terms.slaProfile": "SLA profile",
+  "contractDetail.terms.currentEffectiveVersion": "目前生效版本",
+  "contractDetail.terms.partnerProgram": "合作夥伴計畫",
+  "contractDetail.terms.authMode": "驗證模式",
+  "contractDetail.metaTitle": "合約登記資料",
+  "contractDetail.metaSubtitle": "支撐此視圖的登記紀錄快照。",
+  "contractDetail.meta.contractType": "合約類別",
+  "contractDetail.meta.partnerType": "合作夥伴類型",
+  "contractDetail.meta.vehicleId": "車輛 ID",
+  "contractDetail.meta.operatingArea": "營運區域",
+  "contractDetail.meta.serviceScope": "服務範圍",
+  "contractDetail.meta.term": "效期",
+  "contractDetail.meta.approvedBy": "核准人",
+  "contractDetail.meta.approvedAt": "核准時間",
+  "contractDetail.authorityRedirect.title": "權責導向",
+  "contractDetail.authorityRedirect.bannerTitle":
+    "變更請至 Platform Admin · 跨 app",
+  "contractDetail.authorityRedirect.bannerBody":
+    "合約條款編輯、版本升級、終止流程由 Platform Admin /partners 負責，請於該系統開啟此合約。",
+  "contractDetail.linkage.title": "關聯租戶 / 合作夥伴",
+  "contractDetail.linkage.tenant": "租戶",
+  "contractDetail.linkage.partnerEntry": "Partner entry",
+  "contractDetail.linkage.programId": "Program ID",
+  "contractDetail.versionHistoryTitle": "版本歷程 (唯讀)",
+  "contractDetail.versionHistoryEmpty": "此合約尚無版本歷程。",
+  "contractDetail.transitionBanner.title": "新版本 {version} 尚未生效",
+  "contractDetail.transitionBanner.body":
+    "新版本預計於 {effective} 生效；在此之前，目前版本仍為權威來源。",
+  "contractDetail.empty.no_data.title": "尚無資料",
+  "contractDetail.empty.no_data.body":
+    "目前沒有可顯示的內容。登記中已有合約，但尚未發布 operational view。",
+  "contractDetail.empty.not_provisioned.title": "尚未開通",
+  "contractDetail.empty.not_provisioned.body":
+    "此合約尚未開通至 ops scope 視圖；請在 Platform Admin 開通後再次檢視。",
+  "contractDetail.empty.not_provisioned.cta": "前往 Platform Admin 開通",
+  "contractDetail.empty.fetch_failed.title": "無法載入合約資料",
+  "contractDetail.empty.fetch_failed.body":
+    "合約登記回傳錯誤；請重新整理，或待上游恢復後重試。",
+  "contractDetail.empty.permission_denied.title": "權限不足",
+  "contractDetail.empty.permission_denied.body":
+    "您的角色未包含可檢視此合約的範圍；請洽 ops_manager 或 ops_finance_reviewer 委派權限。",
+  "contractDetail.empty.external_unavailable.title": "上游服務無法使用",
+  "contractDetail.empty.external_unavailable.body":
+    "上游 adapter 處於降級狀態，請檢視 health envelope，待恢復後再重試。",
+  "contractDetail.empty.driver_not_eligible.title": "僅司機端適用",
+  "contractDetail.empty.driver_not_eligible.body":
+    "此 empty reason 僅適用司機端，不應於 ops 出現；若於此見到請回報。",
+  "contractDetail.empty.filtered_empty.title": "篩選條件過窄",
+  "contractDetail.empty.filtered_empty.body":
+    "目前篩選條件無符合的歷程；請放寬或清除篩選以檢視全部版本。",
+  "contractDetail.actions.confirmTitle": "確認執行 {action}",
+  "contractDetail.actions.confirmBodyLow":
+    "ops 端為唯讀；確認後將於新分頁開啟 Platform Admin 完成此動作。",
+  "contractDetail.actions.confirmBodyMedium":
+    "變更於 Platform Admin 執行；確認後於新分頁開啟合約頁面以完成動作。",
+  "contractDetail.actions.confirmBodyHigh":
+    "高風險動作；請輸入文字原因，原因會隨深連結傳遞至 Platform Admin 以寫入稽核紀錄。",
+  "contractDetail.actions.reasonLabel": "原因（必填）",
+  "contractDetail.actions.reasonPlaceholder":
+    "為什麼需要此動作？將寫入稽核紀錄。",
+  "contractDetail.actions.reasonRequired": "高風險動作必須填寫原因。",
+  "contractDetail.actions.confirm": "確認並開啟",
+  "contractDetail.actions.cancel": "取消",
+  "contractDetail.actions.disabledTooltip": "停用 · {code}",
+  "contractDetail.actions.toastTitle": "{action} 已轉至 Platform Admin",
+  "contractDetail.actions.toastBody":
+    "已開啟新分頁以完成變更；於該系統按下確認後將建立稽核紀錄。",
+  "contractDetail.actions.toastDismiss": "關閉",
+  "contractDetail.refresh.manualLabel": "立即重新整理",
+  "contractDetail.refresh.refreshingLabel": "重新整理中…",
+  "contractDetail.refresh.autoCadence": "自動 · 每 {cadence}",
+  "contractDetail.refresh.manualOnly": "僅手動",
+  "contractDetail.refresh.lastRefreshed": "上次更新於 {time}",
+  "contractDetail.refresh.never": "尚未",
+  "contractDetail.refresh.justNow": "剛剛",
+  "contractDetail.refresh.secondsAgo": "{seconds} 秒前",
+  "contractDetail.refresh.minutesAgo": "{minutes} 分前",
 
   // ── Feature Flags ──
   "flags.title": "功能旗標",
