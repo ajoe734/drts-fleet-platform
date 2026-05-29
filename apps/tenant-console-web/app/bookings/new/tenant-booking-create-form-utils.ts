@@ -36,6 +36,10 @@ export interface TenantBookingDraftValues {
   expenseProofRequired: boolean;
 }
 
+export type TenantBookingFieldErrors = Partial<
+  Record<keyof TenantBookingDraftValues, string>
+>;
+
 function hasText(value: string) {
   return value.trim().length > 0;
 }
@@ -150,7 +154,45 @@ export function isReadyForTenantBookingPolicyPreview(
 export function getBlockingTenantBookingDraftErrors(
   draft: TenantBookingDraftValues,
 ) {
-  const errors: string[] = [];
+  const errors = Object.values(getTenantBookingFieldErrors(draft)).filter(
+    (value): value is string => Boolean(value),
+  );
+  return Array.from(new Set(errors));
+}
+
+export function getTenantBookingFieldErrors(
+  draft: TenantBookingDraftValues,
+  options: {
+    includeRequired?: boolean;
+    requireCostCenter?: boolean;
+  } = {},
+): TenantBookingFieldErrors {
+  const errors: TenantBookingFieldErrors = {};
+  const { includeRequired = false, requireCostCenter = false } = options;
+
+  if (includeRequired) {
+    if (!hasText(draft.reservationWindowStart)) {
+      errors.reservationWindowStart = "Reservation window start is required.";
+    }
+    if (!hasText(draft.reservationWindowEnd)) {
+      errors.reservationWindowEnd = "Reservation window end is required.";
+    }
+    if (!hasText(draft.passengerName)) {
+      errors.passengerName = "Passenger name is required.";
+    }
+    if (!hasText(draft.passengerPhone)) {
+      errors.passengerPhone = "Passenger phone is required.";
+    }
+    if (!hasText(draft.pickupAddress)) {
+      errors.pickupAddress = "Pickup address is required.";
+    }
+    if (!hasText(draft.dropoffAddress)) {
+      errors.dropoffAddress = "Drop-off address is required.";
+    }
+    if (requireCostCenter && !hasText(draft.costCenter)) {
+      errors.costCenter = "Cost center is required.";
+    }
+  }
 
   if (
     hasText(draft.reservationWindowStart) &&
@@ -160,16 +202,16 @@ export function getBlockingTenantBookingDraftErrors(
       !isValidDateTime(draft.reservationWindowStart) ||
       !isValidDateTime(draft.reservationWindowEnd)
     ) {
-      errors.push(
-        "Reservation window start and end must be valid date-time values.",
-      );
+      errors.reservationWindowStart =
+        "Reservation window start and end must be valid date-time values.";
+      errors.reservationWindowEnd =
+        "Reservation window start and end must be valid date-time values.";
     } else if (
       new Date(draft.reservationWindowStart).getTime() >=
       new Date(draft.reservationWindowEnd).getTime()
     ) {
-      errors.push(
-        "Reservation window end must be after the reservation window start.",
-      );
+      errors.reservationWindowEnd =
+        "Reservation window end must be after the reservation window start.";
     }
   }
 
@@ -178,48 +220,54 @@ export function getBlockingTenantBookingDraftErrors(
     draft.direction === "pickup" &&
     !hasText(draft.flightNo)
   ) {
-    errors.push("Flight number is required for airport pickup bookings.");
+    errors.flightNo = "Flight number is required for airport pickup bookings.";
   }
 
   if (
     (hasText(draft.bookedByName) && !hasText(draft.bookedByEmail)) ||
     (!hasText(draft.bookedByName) && hasText(draft.bookedByEmail))
   ) {
-    errors.push("Provide both booked-by name and email, or leave both blank.");
+    errors.bookedByName =
+      "Provide both booked-by name and email, or leave both blank.";
+    errors.bookedByEmail =
+      "Provide both booked-by name and email, or leave both blank.";
   }
 
   if (
     (hasText(draft.onsiteContactName) && !hasText(draft.onsiteContactPhone)) ||
     (!hasText(draft.onsiteContactName) && hasText(draft.onsiteContactPhone))
   ) {
-    errors.push(
-      "Provide both onsite contact name and phone, or leave both blank.",
-    );
+    errors.onsiteContactName =
+      "Provide both onsite contact name and phone, or leave both blank.";
+    errors.onsiteContactPhone =
+      "Provide both onsite contact name and phone, or leave both blank.";
   }
 
   if (
     hasText(draft.estimatedAmount) &&
     parseAmountMajor(draft.estimatedAmount) === null
   ) {
-    errors.push("Estimated spend must be a valid non-negative amount.");
+    errors.estimatedAmount =
+      "Estimated spend must be a valid non-negative amount.";
   }
 
   if (hasText(draft.luggageCount)) {
     const luggageCount = parseOptionalInteger(draft.luggageCount);
     if (luggageCount == null || luggageCount < 0) {
-      errors.push("Luggage count must be a whole number of 0 or more.");
+      errors.luggageCount =
+        "Luggage count must be a whole number of 0 or more.";
     }
   }
 
-  const coordinates: Array<[string, string]> = [
-    ["Pickup latitude", draft.pickupLat],
-    ["Pickup longitude", draft.pickupLng],
-    ["Drop-off latitude", draft.dropoffLat],
-    ["Drop-off longitude", draft.dropoffLng],
+  const coordinates: Array<[keyof TenantBookingFieldErrors, string, string]> = [
+    ["pickupLat", "Pickup latitude", draft.pickupLat],
+    ["pickupLng", "Pickup longitude", draft.pickupLng],
+    ["dropoffLat", "Drop-off latitude", draft.dropoffLat],
+    ["dropoffLng", "Drop-off longitude", draft.dropoffLng],
   ];
-  for (const [label, value] of coordinates) {
+  for (const [field, label, value] of coordinates) {
     if (hasText(value) && parseOptionalFloat(value) == null) {
-      errors.push(`${label} must be a valid number when provided.`);
+      errors[field] = `${label} must be a valid number when provided.`;
     }
   }
 

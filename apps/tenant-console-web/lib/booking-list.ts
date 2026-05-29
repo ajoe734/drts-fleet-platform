@@ -1,11 +1,22 @@
-import type { BookingRecord, OwnedOrderStatus } from "@drts/contracts";
-import { OWNED_ORDER_STATUSES } from "@drts/contracts";
+import type {
+  BookingRecord,
+  BusinessDispatchSubtype,
+  OwnedOrderStatus,
+  Phase1ServiceBucket,
+} from "@drts/contracts";
+import {
+  BUSINESS_DISPATCH_SUBTYPES,
+  OWNED_ORDER_STATUSES,
+  PHASE1_SERVICE_BUCKETS,
+} from "@drts/contracts";
 
 export type BookingDateField = "reservationStart" | "createdAt";
 
 export type BookingListQuery = {
   q: string;
   statuses: OwnedOrderStatus[];
+  serviceBucket: Phase1ServiceBucket | "all";
+  subtype: BusinessDispatchSubtype | "all";
   dateField: BookingDateField;
   dateFrom: string;
   dateTo: string;
@@ -18,6 +29,10 @@ type SearchParamValue = string | string[] | undefined;
 const DEFAULT_PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = new Set([10, 25, 50]);
 const ORDER_STATUS_SET = new Set<OwnedOrderStatus>(OWNED_ORDER_STATUSES);
+const SERVICE_BUCKET_SET = new Set<Phase1ServiceBucket>(PHASE1_SERVICE_BUCKETS);
+const BOOKING_SUBTYPE_SET = new Set<BusinessDispatchSubtype>(
+  BUSINESS_DISPATCH_SUBTYPES,
+);
 
 function first(value: SearchParamValue) {
   if (Array.isArray(value)) {
@@ -51,6 +66,16 @@ export function parseBookingListQuery(
   return {
     q: first(searchParams.q).trim(),
     statuses,
+    serviceBucket: SERVICE_BUCKET_SET.has(
+      first(searchParams.serviceBucket) as Phase1ServiceBucket,
+    )
+      ? (first(searchParams.serviceBucket) as Phase1ServiceBucket)
+      : "all",
+    subtype: BOOKING_SUBTYPE_SET.has(
+      first(searchParams.subtype) as BusinessDispatchSubtype,
+    )
+      ? (first(searchParams.subtype) as BusinessDispatchSubtype)
+      : "all",
     dateField:
       first(searchParams.dateField) === "createdAt"
         ? "createdAt"
@@ -94,8 +119,8 @@ function matchesTextQuery(booking: BookingRecord, query: string) {
   return haystack.includes(query.toLowerCase());
 }
 
-export function applyBookingListQuery(
-  bookings: BookingRecord[],
+export function applyBookingListQuery<TBooking extends BookingRecord>(
+  bookings: TBooking[],
   query: BookingListQuery,
 ) {
   const filtered = bookings
@@ -104,6 +129,16 @@ export function applyBookingListQuery(
       query.statuses.length === 0
         ? true
         : query.statuses.includes(booking.orderStatus),
+    )
+    .filter((booking) =>
+      query.serviceBucket === "all"
+        ? true
+        : booking.serviceBucket === query.serviceBucket,
+    )
+    .filter((booking) =>
+      query.subtype === "all"
+        ? true
+        : booking.businessDispatchSubtype === query.subtype,
     )
     .filter((booking) => {
       const value = getBookingDateValue(booking, query.dateField);
@@ -165,6 +200,12 @@ export function buildBookingListQueryString(
   if (next.statuses.length > 0) {
     params.set("status", next.statuses.join(","));
   }
+  if (next.serviceBucket !== "all") {
+    params.set("serviceBucket", next.serviceBucket);
+  }
+  if (next.subtype !== "all") {
+    params.set("subtype", next.subtype);
+  }
   if (next.dateField !== "reservationStart") {
     params.set("dateField", next.dateField);
   }
@@ -205,5 +246,16 @@ export function getStatusCounts(bookings: BookingRecord[]) {
       return summary;
     },
     {} as Partial<Record<OwnedOrderStatus, number>>,
+  );
+}
+
+export function hasActiveBookingFilters(query: BookingListQuery) {
+  return Boolean(
+    query.q ||
+    query.statuses.length > 0 ||
+    query.serviceBucket !== "all" ||
+    query.subtype !== "all" ||
+    query.dateFrom ||
+    query.dateTo,
   );
 }

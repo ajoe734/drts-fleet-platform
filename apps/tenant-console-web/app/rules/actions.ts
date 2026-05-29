@@ -385,16 +385,22 @@ export async function disableApprovalRuleAction(
   try {
     const ruleId = readTrimmedString(formData, "ruleId");
     const ruleName = readTrimmedString(formData, "ruleName");
+    const disabledReason = readTrimmedString(formData, "disabledReason");
 
     if (!ruleId) {
       throw new Error("Select a rule before disabling it.");
+    }
+    if (!disabledReason) {
+      throw new Error(
+        "disabledReason is required before a rule can be paused.",
+      );
     }
 
     await getTenantClient().disableApprovalRule(ruleId);
     payload = {
       tone: "default",
       title: "Rule disabled",
-      description: `${ruleName ?? ruleId} is now paused and will no longer participate in future evaluations.`,
+      description: `${ruleName ?? ruleId} is now paused and will no longer participate in future evaluations. Reason: ${disabledReason}.`,
     };
   } catch (error) {
     payload = {

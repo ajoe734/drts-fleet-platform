@@ -6,7 +6,7 @@ export function PageHero({
   description,
 }: {
   eyebrow: string;
-  title: string;
+  title: ReactNode;
   description: string;
 }) {
   return (
