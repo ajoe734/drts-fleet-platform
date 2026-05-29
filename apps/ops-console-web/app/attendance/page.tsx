@@ -103,19 +103,12 @@ const pageBodyStyle = {
 const kpiGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-  gap: 10,
+  gap: 12,
 };
 
 const splitGridStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.75fr) minmax(290px, 0.95fr)",
-  gap: 16,
-  alignItems: "start",
-};
-
-const secondaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(320px, 0.95fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -127,9 +120,9 @@ const timelineGridStyle = {
 
 const ganttGridStyle = {
   display: "grid",
-  gridTemplateColumns: "170px minmax(0, 1fr) 108px",
+  gridTemplateColumns: "140px minmax(0, 1fr)",
   gap: 10,
-  alignItems: "center",
+  alignItems: "stretch",
 };
 
 const toolbarStyle = {
@@ -167,6 +160,21 @@ const timelineRowStyle = {
   gridTemplateColumns: "220px minmax(0, 1fr) 112px",
   gap: 12,
   alignItems: "center",
+};
+
+const sideStackStyle = {
+  display: "grid",
+  gap: 16,
+};
+
+const ganttScaleStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(24, minmax(0, 1fr))",
+  color: theme.textMuted,
+  paddingBottom: 4,
+  borderBottom: `1px solid ${theme.border}`,
+  fontFamily: theme.monoFamily,
+  fontSize: 11,
 };
 
 function copy(locale: Locale, en: string, zh: string) {
@@ -1334,7 +1342,7 @@ export default async function AttendancePage({
           />
           <KPI
             theme={theme}
-            label={copy(locale, "Completed today", "今日完成")}
+            label={copy(locale, "Completed shifts", "完成班次")}
             value={completedTodayCount}
             sub={copy(
               locale,
@@ -1349,7 +1357,7 @@ export default async function AttendancePage({
           />
           <KPI
             theme={theme}
-            label={copy(locale, "Anomalies", "異常總數")}
+            label={copy(locale, "Anomalies / late", "異常 / 遲到")}
             value={anomalyViews.length}
             sub={copy(
               locale,
@@ -1368,148 +1376,91 @@ export default async function AttendancePage({
 
         <Card
           theme={theme}
-          title={copy(locale, "Filters & pivots", "篩選與跳轉")}
+          title={copy(locale, "On-shift gantt · 0-24h", "當班甘特 · 0–24h")}
           subtitle={copy(
             locale,
-            "Page-level filters stay low risk. Row CTAs still come from availableActions.",
-            "頁面級篩選屬低風險；列級 CTA 仍由 availableActions 驅動。",
+            "Canvas view of roster window vs live clock activity for the current slice.",
+            "以 canvas 方式對照班表視窗與即時打卡活動。",
           )}
         >
-          <div style={{ display: "grid", gap: 10 }}>
-            <div style={toolbarStyle}>
-              <div style={chipRowStyle}>
-                {["today", "yesterday", "all"].map((value) => (
-                  <Link
-                    key={value}
-                    href={`/attendance${buildQueryString(baseQuery, {
-                      view: value === "today" ? undefined : "today",
-                      date: value === "today" ? undefined : value,
-                    })}`}
-                    style={chipLinkStyle(
-                      attendanceView === "today" && dateFilter === value,
-                    )}
-                  >
-                    {filterLabel(locale, value)}
-                  </Link>
-                ))}
-              </div>
-              <div style={chipRowStyle}>
-                {[
-                  { value: "all", label: copy(locale, "All rows", "全部") },
-                  {
-                    value: "only",
-                    label: copy(locale, "Anomalies only", "僅看異常"),
-                  },
-                ].map((option) => (
-                  <Link
-                    key={option.value}
-                    href={`/attendance${buildQueryString(baseQuery, {
-                      view: option.value === "only" ? "anomaly" : undefined,
-                      anomaly:
-                        option.value === "all" ? undefined : option.value,
-                    })}`}
-                    style={chipLinkStyle(
-                      option.value === "only"
-                        ? attendanceView === "anomaly"
-                        : anomalyFilter === option.value &&
-                            attendanceView !== "anomaly",
-                    )}
-                  >
-                    {option.label}
-                  </Link>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "140px minmax(0, 1fr)",
+                gap: 8,
+                alignItems: "end",
+              }}
+            >
+              <div />
+              <div style={ganttScaleStyle}>
+                {Array.from({ length: 24 }, (_, hour) => (
+                  <span key={hour} style={{ textAlign: "center" }}>
+                    {hour.toString().padStart(2, "0")}
+                  </span>
                 ))}
               </div>
             </div>
-            <div style={chipRowStyle}>
-              <Link href="/attendance" style={chipLinkStyle(!activeDriver)}>
-                {copy(locale, "All drivers", "全部司機")}
-              </Link>
-              {distinctDrivers.map((driverId) => (
-                <Link
-                  key={driverId}
-                  href={`/attendance${buildQueryString(baseQuery, {
-                    driver: driverId,
-                  })}`}
-                  style={chipLinkStyle(activeDriver === driverId)}
-                >
-                  {driverId}
-                </Link>
-              ))}
-            </div>
-          </div>
-        </Card>
 
-        {activeEmptyState ? (
-          <Card
-            theme={theme}
-            title={activeEmptyState.title}
-            subtitle={`${activeEmptyState.envelope.reason} · ${activeEmptyState.envelope.messageCode}`}
-          >
-            <div style={{ display: "grid", gap: 12 }}>
+            {activeEmptyState ? (
               <Banner
                 theme={theme}
                 tone={activeEmptyState.tone}
                 icon={activeEmptyState.icon}
-                body={activeEmptyState.body}
+                title={activeEmptyState.title}
+                body={`${activeEmptyState.body} · ${activeEmptyState.envelope.reason}`}
+                actions={
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {activeEmptyState.nextLink
+                      ? renderDeepLink(
+                          activeEmptyState.nextLink,
+                          actionLabel(
+                            activeEmptyState.envelope.nextAction?.action ?? "",
+                            locale,
+                          ),
+                        )
+                      : null}
+                    {activeEmptyState.sameAppHref ? (
+                      <Link
+                        href={activeEmptyState.sameAppHref}
+                        style={actionLinkStyle("primary")}
+                      >
+                        {actionLabel(
+                          activeEmptyState.envelope.nextAction?.action ?? "",
+                          locale,
+                        )}
+                      </Link>
+                    ) : null}
+                  </div>
+                }
               />
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {activeEmptyState.nextLink
-                  ? renderDeepLink(
-                      activeEmptyState.nextLink,
-                      actionLabel(
-                        activeEmptyState.envelope.nextAction?.action ?? "",
-                        locale,
-                      ),
-                    )
-                  : null}
-                {activeEmptyState.sameAppHref ? (
-                  <Link
-                    href={activeEmptyState.sameAppHref}
-                    style={actionLinkStyle("primary")}
+            ) : ganttRows.length > 0 ? (
+              ganttRows.map((row) => (
+                <div key={row.view.shift.shiftId} style={ganttGridStyle}>
+                  <div
+                    style={{
+                      padding: "6px 0",
+                      borderBottom: `1px dashed ${theme.border}`,
+                      fontSize: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
                   >
-                    {actionLabel(
-                      activeEmptyState.envelope.nextAction?.action ?? "",
-                      locale,
-                    )}
-                  </Link>
-                ) : null}
-              </div>
-            </div>
-          </Card>
-        ) : null}
-
-        <div style={splitGridStyle}>
-          <Card
-            theme={theme}
-            title={copy(locale, "On-shift gantt", "當班甘特")}
-            subtitle={copy(
-              locale,
-              "Canvas view of roster window vs live clock activity for the current slice.",
-              "以 canvas 方式對照班表視窗與即時打卡活動。",
-            )}
-          >
-            <div style={{ display: "grid", gap: 12 }}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "170px minmax(0, 1fr) 108px",
-                  gap: 10,
-                  color: theme.textMuted,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  letterSpacing: 0.3,
-                  textTransform: "uppercase",
-                }}
-              >
-                <span>{copy(locale, "Driver", "司機")}</span>
-                <span>00:00 → 24:00 UTC</span>
-                <span>{copy(locale, "State", "狀態")}</span>
-              </div>
-              {ganttRows.length > 0 ? (
-                ganttRows.map((row) => (
-                  <div key={row.view.shift.shiftId} style={ganttGridStyle}>
-                    <div style={{ display: "grid", gap: 4 }}>
-                      <span style={{ fontWeight: 600 }}>
+                    {row.view.anomalyCodes.length > 0 ? (
+                      <Pill theme={theme} tone={row.anomalyTone} dot>
+                        {copy(locale, "Anomaly", "異常")}
+                      </Pill>
+                    ) : null}
+                    <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         {row.view.shift.driverId}
                       </span>
                       <span
@@ -1522,344 +1473,401 @@ export default async function AttendancePage({
                         {row.view.shift.shiftId}
                       </span>
                     </div>
-                    <div
-                      style={{
-                        position: "relative",
-                        height: 26,
-                        borderRadius: 999,
-                        background: theme.surfaceLo,
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        style={{
-                          position: "absolute",
-                          left: `${row.scheduledStart}%`,
-                          width: `${row.scheduledWidth}%`,
-                          top: 7,
-                          height: 12,
-                          borderRadius: 999,
-                          border: `1px dashed ${theme.border}`,
-                          background: "transparent",
-                        }}
-                      />
-                      <div
-                        style={{
-                          position: "absolute",
-                          left: `${row.actualStart}%`,
-                          width: `${row.actualWidth}%`,
-                          top: 5,
-                          height: 16,
-                          borderRadius: 999,
-                          background:
-                            row.anomalyTone === "danger"
-                              ? theme.danger
-                              : row.anomalyTone === "warn"
-                                ? theme.warn
-                                : theme.accent,
-                        }}
-                      />
-                    </div>
-                    <div
-                      style={{ display: "grid", justifyItems: "end", gap: 4 }}
-                    >
-                      <Pill theme={theme} tone={row.anomalyTone} dot>
-                        {formatOpsCodeLabel(locale, row.view.shift.status)}
-                      </Pill>
-                      <span style={{ fontSize: 11, color: theme.textMuted }}>
-                        {row.view.anomalyCodes.length > 0
-                          ? row.view.anomalyCodes.length
-                          : copy(locale, "normal", "正常")}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <Banner
-                  theme={theme}
-                  tone="info"
-                  title={copy(locale, "No visible shifts", "目前沒有可見班次")}
-                  body={copy(
-                    locale,
-                    "Adjust the date, driver, or anomaly filter to widen the attendance slice.",
-                    "請放寬日期、司機或異常篩選條件。",
-                  )}
-                />
-              )}
-            </div>
-          </Card>
-
-          <Card
-            theme={theme}
-            title={copy(locale, "Supervisor brief", "值班摘要")}
-            subtitle={copy(
-              locale,
-              "Why supply looks off right now",
-              "目前供給異常的原因摘要",
-            )}
-          >
-            <div style={{ display: "grid", gap: 14 }}>
-              <DL
-                theme={theme}
-                cols={1}
-                items={[
-                  {
-                    label: copy(locale, "Refresh tier", "更新節奏"),
-                    value: copy(locale, "T3 / 15 seconds", "T3 / 15 秒"),
-                  },
-                  {
-                    label: copy(locale, "Current filter", "目前篩選"),
-                    value: `${currentTab.label} · ${activeDriver ?? copy(locale, "all drivers", "全部司機")} · ${
-                      anomalyFilter === "only"
-                        ? copy(locale, "anomalies only", "僅看異常")
-                        : attendanceView === "week"
-                          ? copy(locale, "7-day slice", "7 天範圍")
-                          : copy(locale, "all rows", "全部")
-                    }`,
-                  },
-                  {
-                    label: copy(locale, "Primary exit", "主要出口"),
-                    value: activeDriver
-                      ? `/drivers/${activeDriver}`
-                      : copy(
-                          locale,
-                          "/drivers/[driverId]",
-                          "/drivers/[driverId]",
-                        ),
-                    mono: true,
-                  },
-                  {
-                    label: copy(locale, "Tracked hours", "追蹤工時"),
-                    value: formatHours(totalTrackedHours),
-                  },
-                ]}
-              />
-
-              <div style={{ display: "grid", gap: 8 }}>
-                {activeEmptyState ? (
-                  <Banner
-                    theme={theme}
-                    tone={activeEmptyState.tone}
-                    icon={activeEmptyState.icon}
-                    title={activeEmptyState.title}
-                    body={activeEmptyState.body}
-                  />
-                ) : null}
-                {activeShiftViews
-                  .filter((view) => !view.shift.vehicleId)
-                  .slice(0, 3)
-                  .map((view) => (
-                    <Banner
-                      key={view.shift.shiftId}
-                      theme={theme}
-                      tone="warn"
-                      title={`${view.shift.driverId} · ${view.shift.shiftId}`}
-                      body={copy(
-                        locale,
-                        "Clocked in but still missing vehicle pairing. Check maintenance impact or dispatch supply board.",
-                        "已打卡但仍未完成掛車。請檢查維修影響或派車供給看板。",
-                      )}
-                    />
-                  ))}
-                {activeShiftViews.filter((view) => !view.shift.vehicleId)
-                  .length === 0 ? (
-                  <Banner
-                    theme={theme}
-                    tone="info"
-                    title={copy(locale, "No vehicle gaps", "目前沒有掛車缺口")}
-                    body={copy(
-                      locale,
-                      "Vehicle assignment looks healthy in the active slice.",
-                      "進行中班次的掛車狀況目前正常。",
-                    )}
-                  />
-                ) : null}
-              </div>
-
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                <Link
-                  href="/dispatch?board=no_eligible_supply"
-                  style={actionLinkStyle("secondary")}
-                >
-                  {copy(
-                    locale,
-                    "Dispatch: no eligible supply",
-                    "派車：無可派供給",
-                  )}
-                </Link>
-                <Link href="/drivers" style={actionLinkStyle("secondary")}>
-                  {copy(locale, "Driver registry", "司機主檔")}
-                </Link>
-                <a
-                  href="/adapter-registry"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={actionLinkStyle("secondary")}
-                >
-                  {copy(locale, "Adapter registry", "Adapter registry")}
-                </a>
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        <Card
-          theme={theme}
-          title={copy(locale, "Shift monitor", "班次監控")}
-          subtitle={copy(
-            locale,
-            "Shift + attendance rows in the current slice, including row-level availableActions.",
-            "目前範圍內的班次與出勤資料，包含列級 availableActions。",
-          )}
-          padding={0}
-        >
-          <Table theme={theme} columns={shiftColumns} rows={shiftRows} />
-        </Card>
-
-        <Card
-          theme={theme}
-          title={copy(locale, "Attendance timeline", "出勤時間軸")}
-          subtitle={copy(
-            locale,
-            "Recent attendance rows rendered against the 24-hour UTC lane.",
-            "最近出勤紀錄以 24 小時 UTC 軸呈現。",
-          )}
-        >
-          <div style={timelineGridStyle}>
-            <div style={timelineHeaderStyle}>
-              <span>{copy(locale, "Driver / day", "司機 / 日期")}</span>
-              <span>00:00 → 24:00 UTC</span>
-              <span>{copy(locale, "State", "狀態")}</span>
-            </div>
-            {timelineRows.map((record) => {
-              const start = attendanceTimelinePercent(record.clockedInAt) ?? 0;
-              const end = attendanceTimelinePercent(record.clockedOutAt) ?? 100;
-              const left = Math.min(start, end);
-              const width = Math.max(6, Math.abs(end - start));
-              const tone = toneForAttendanceStatus(record.status);
-              const color =
-                tone === "success"
-                  ? theme.success
-                  : tone === "danger"
-                    ? theme.danger
-                    : theme.warn;
-
-              return (
-                <div key={record.attendanceId} style={timelineRowStyle}>
-                  <div>
-                    <div style={{ fontWeight: 600, color: theme.text }}>
-                      {record.driverId}
-                    </div>
-                    <div style={{ fontSize: 11, color: theme.textMuted }}>
-                      {record.date} · {formatTime(locale, record.clockedInAt)} →{" "}
-                      {formatTime(locale, record.clockedOutAt)}
-                    </div>
                   </div>
                   <div
                     style={{
                       position: "relative",
-                      height: 12,
-                      borderRadius: 999,
-                      background: theme.surfaceLo,
+                      height: 28,
+                      borderBottom: `1px dashed ${theme.border}`,
                       overflow: "hidden",
                     }}
                   >
                     <div
                       style={{
                         position: "absolute",
-                        left: `${left}%`,
-                        width: `${width}%`,
-                        top: 0,
-                        bottom: 0,
-                        borderRadius: 999,
-                        background: color,
+                        top: 6,
+                        left: `${row.scheduledStart}%`,
+                        width: `${row.scheduledWidth}%`,
+                        height: 16,
+                        background:
+                          row.anomalyTone === "danger"
+                            ? theme.warnBg
+                            : theme.accentBg,
+                        border: `1px solid ${
+                          row.anomalyTone === "danger"
+                            ? theme.warn
+                            : theme.accent
+                        }`,
+                        borderRadius: 4,
                       }}
                     />
-                  </div>
-                  <div style={{ display: "grid", justifyItems: "end", gap: 4 }}>
-                    <Pill theme={theme} tone={tone} dot>
-                      {formatOpsCodeLabel(locale, record.status)}
-                    </Pill>
-                    <span style={{ fontSize: 11, color: theme.textMuted }}>
-                      {formatHours(record.totalHours)}
-                    </span>
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 6,
+                        left: `${row.actualStart}%`,
+                        width: `${row.actualWidth}%`,
+                        height: 16,
+                        borderRadius: 4,
+                        background:
+                          row.anomalyTone === "danger"
+                            ? theme.danger
+                            : row.anomalyTone === "warn"
+                              ? theme.warn
+                              : theme.accent,
+                        opacity: 0.92,
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        left: `calc(${row.actualStart}% + 6px)`,
+                        fontSize: 10,
+                        lineHeight: "14px",
+                        fontFamily: theme.monoFamily,
+                        color: "#fff",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {formatTime(locale, row.view.shift.clockedInAt)}-
+                      {formatTime(
+                        locale,
+                        row.view.shift.clockedOutAt ?? row.scheduledWindow.end,
+                      )}
+                    </div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        <div style={secondaryGridStyle}>
-          <Card
-            theme={theme}
-            title={copy(locale, "Attendance ledger", "出勤帳本")}
-            subtitle={copy(
-              locale,
-              "Driver drill-in stays low risk",
-              "司機 drill-in 屬於低風險導航操作",
-            )}
-            padding={0}
-          >
-            <Table
-              theme={theme}
-              columns={attendanceColumns}
-              rows={attendanceRows}
-            />
-          </Card>
-
-          <Card
-            theme={theme}
-            title={copy(locale, "Cross-surface pivots", "跨頁面跳轉")}
-            subtitle={copy(
-              locale,
-              "Entry, exit, and degraded-state deep links required by packet §5.12",
-              "依 packet §5.12 要求的入口、出口與降級時 deep link",
-            )}
-          >
-            <div style={{ display: "grid", gap: 10 }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                <Link
-                  href="/dispatch?board=no_eligible_supply"
-                  style={actionLinkStyle("secondary")}
-                >
-                  {copy(
-                    locale,
-                    "Dispatch: no eligible supply",
-                    "派車：無可派供給",
-                  )}
-                </Link>
-                <Link href="/drivers" style={actionLinkStyle("secondary")}>
-                  {copy(locale, "Driver registry", "司機主檔")}
-                </Link>
-                <Link href="/maintenance" style={actionLinkStyle("secondary")}>
-                  {copy(locale, "Maintenance board", "維修看板")}
-                </Link>
-                <a
-                  href="/adapter-registry"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={actionLinkStyle("secondary")}
-                >
-                  {copy(
-                    locale,
-                    "Platform admin: adapter registry",
-                    "平台管理：adapter registry",
-                  )}
-                </a>
-              </div>
+              ))
+            ) : (
               <Banner
                 theme={theme}
                 tone="info"
-                title={copy(locale, "Deep-link contract", "Deep-link 契約")}
+                title={copy(locale, "No visible shifts", "目前沒有可見班次")}
                 body={copy(
                   locale,
-                  "In-app exits stay same-tab to /drivers/[driverId]. Degraded upstream investigation pivots cross-app into platform-admin surfaces in a new tab.",
-                  "站內出口維持同頁籤前往 /drivers/[driverId]；若上游降級，則以新分頁跨 app 跳到 platform-admin。",
+                  "Adjust the date, driver, or anomaly filter to widen the attendance slice.",
+                  "請放寬日期、司機或異常篩選條件。",
                 )}
               />
-            </div>
-          </Card>
+            )}
+          </div>
+        </Card>
+
+        <div style={splitGridStyle}>
+          <div style={sideStackStyle}>
+            <Card
+              theme={theme}
+              title={copy(locale, "Shift monitor", "班次監控")}
+              subtitle={copy(
+                locale,
+                "Shift + attendance rows in the current slice, including row-level availableActions.",
+                "目前範圍內的班次與出勤資料，包含列級 availableActions。",
+              )}
+              padding={0}
+            >
+              <Table theme={theme} columns={shiftColumns} rows={shiftRows} />
+            </Card>
+
+            <Card
+              theme={theme}
+              title={copy(locale, "Attendance ledger", "出勤帳本")}
+              subtitle={copy(
+                locale,
+                "Driver drill-in stays low risk",
+                "司機 drill-in 屬於低風險導航操作",
+              )}
+              padding={0}
+            >
+              <Table
+                theme={theme}
+                columns={attendanceColumns}
+                rows={attendanceRows}
+              />
+            </Card>
+          </div>
+
+          <div style={sideStackStyle}>
+            <Card
+              theme={theme}
+              title={copy(locale, "Filters & pivots", "篩選與跳轉")}
+              subtitle={copy(
+                locale,
+                "Page-level filters stay low risk. Row CTAs still come from availableActions.",
+                "頁面級篩選屬低風險；列級 CTA 仍由 availableActions 驅動。",
+              )}
+            >
+              <div style={{ display: "grid", gap: 10 }}>
+                <div style={toolbarStyle}>
+                  <div style={chipRowStyle}>
+                    {["today", "yesterday", "all"].map((value) => (
+                      <Link
+                        key={value}
+                        href={`/attendance${buildQueryString(baseQuery, {
+                          view: value === "today" ? undefined : "today",
+                          date: value === "today" ? undefined : value,
+                        })}`}
+                        style={chipLinkStyle(
+                          attendanceView === "today" && dateFilter === value,
+                        )}
+                      >
+                        {filterLabel(locale, value)}
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={chipRowStyle}>
+                    {[
+                      { value: "all", label: copy(locale, "All rows", "全部") },
+                      {
+                        value: "only",
+                        label: copy(locale, "Anomalies only", "僅看異常"),
+                      },
+                    ].map((option) => (
+                      <Link
+                        key={option.value}
+                        href={`/attendance${buildQueryString(baseQuery, {
+                          view: option.value === "only" ? "anomaly" : undefined,
+                          anomaly:
+                            option.value === "all" ? undefined : option.value,
+                        })}`}
+                        style={chipLinkStyle(
+                          option.value === "only"
+                            ? attendanceView === "anomaly"
+                            : anomalyFilter === option.value &&
+                                attendanceView !== "anomaly",
+                        )}
+                      >
+                        {option.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+                <div style={chipRowStyle}>
+                  <Link href="/attendance" style={chipLinkStyle(!activeDriver)}>
+                    {copy(locale, "All drivers", "全部司機")}
+                  </Link>
+                  {distinctDrivers.map((driverId) => (
+                    <Link
+                      key={driverId}
+                      href={`/attendance${buildQueryString(baseQuery, {
+                        driver: driverId,
+                      })}`}
+                      style={chipLinkStyle(activeDriver === driverId)}
+                    >
+                      {driverId}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </Card>
+
+            <Card
+              theme={theme}
+              title={copy(locale, "Attendance timeline", "出勤時間軸")}
+              subtitle={copy(
+                locale,
+                "Recent attendance rows rendered against the 24-hour UTC lane.",
+                "最近出勤紀錄以 24 小時 UTC 軸呈現。",
+              )}
+            >
+              <div style={timelineGridStyle}>
+                <div style={timelineHeaderStyle}>
+                  <span>{copy(locale, "Driver / day", "司機 / 日期")}</span>
+                  <span>00:00 → 24:00 UTC</span>
+                  <span>{copy(locale, "State", "狀態")}</span>
+                </div>
+                {timelineRows.map((record) => {
+                  const start =
+                    attendanceTimelinePercent(record.clockedInAt) ?? 0;
+                  const end =
+                    attendanceTimelinePercent(record.clockedOutAt) ?? 100;
+                  const left = Math.min(start, end);
+                  const width = Math.max(6, Math.abs(end - start));
+                  const tone = toneForAttendanceStatus(record.status);
+                  const color =
+                    tone === "success"
+                      ? theme.success
+                      : tone === "danger"
+                        ? theme.danger
+                        : theme.warn;
+
+                  return (
+                    <div key={record.attendanceId} style={timelineRowStyle}>
+                      <div>
+                        <div style={{ fontWeight: 600, color: theme.text }}>
+                          {record.driverId}
+                        </div>
+                        <div style={{ fontSize: 11, color: theme.textMuted }}>
+                          {record.date} ·{" "}
+                          {formatTime(locale, record.clockedInAt)} →{" "}
+                          {formatTime(locale, record.clockedOutAt)}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          position: "relative",
+                          height: 12,
+                          borderRadius: 999,
+                          background: theme.surfaceLo,
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: `${left}%`,
+                            width: `${width}%`,
+                            top: 0,
+                            bottom: 0,
+                            borderRadius: 999,
+                            background: color,
+                          }}
+                        />
+                      </div>
+                      <div
+                        style={{ display: "grid", justifyItems: "end", gap: 4 }}
+                      >
+                        <Pill theme={theme} tone={tone} dot>
+                          {formatOpsCodeLabel(locale, record.status)}
+                        </Pill>
+                        <span style={{ fontSize: 11, color: theme.textMuted }}>
+                          {formatHours(record.totalHours)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card
+              theme={theme}
+              title={copy(locale, "Supply context", "供給情境")}
+              subtitle={copy(
+                locale,
+                "Refresh tier, current slice, and cross-surface pivots required by packet §5.12",
+                "packet §5.12 要求的 refresh tier、目前範圍與跨頁面跳轉",
+              )}
+            >
+              <div style={{ display: "grid", gap: 14 }}>
+                <DL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      label: copy(locale, "Refresh tier", "更新節奏"),
+                      value: copy(locale, "T3 / 15 seconds", "T3 / 15 秒"),
+                    },
+                    {
+                      label: copy(locale, "Current filter", "目前篩選"),
+                      value: `${currentTab.label} · ${activeDriver ?? copy(locale, "all drivers", "全部司機")} · ${
+                        anomalyFilter === "only"
+                          ? copy(locale, "anomalies only", "僅看異常")
+                          : attendanceView === "week"
+                            ? copy(locale, "7-day slice", "7 天範圍")
+                            : copy(locale, "all rows", "全部")
+                      }`,
+                    },
+                    {
+                      label: copy(locale, "Primary exit", "主要出口"),
+                      value: activeDriver
+                        ? `/drivers/${activeDriver}`
+                        : copy(
+                            locale,
+                            "/drivers/[driverId]",
+                            "/drivers/[driverId]",
+                          ),
+                      mono: true,
+                    },
+                    {
+                      label: copy(locale, "Tracked hours", "追蹤工時"),
+                      value: formatHours(totalTrackedHours),
+                    },
+                  ]}
+                />
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  {activeShiftViews
+                    .filter((view) => !view.shift.vehicleId)
+                    .slice(0, 3)
+                    .map((view) => (
+                      <Banner
+                        key={view.shift.shiftId}
+                        theme={theme}
+                        tone="warn"
+                        title={`${view.shift.driverId} · ${view.shift.shiftId}`}
+                        body={copy(
+                          locale,
+                          "Clocked in but still missing vehicle pairing. Check maintenance impact or dispatch supply board.",
+                          "已打卡但仍未完成掛車。請檢查維修影響或派車供給看板。",
+                        )}
+                      />
+                    ))}
+                  {activeShiftViews.filter((view) => !view.shift.vehicleId)
+                    .length === 0 ? (
+                    <Banner
+                      theme={theme}
+                      tone="info"
+                      title={copy(
+                        locale,
+                        "No vehicle gaps",
+                        "目前沒有掛車缺口",
+                      )}
+                      body={copy(
+                        locale,
+                        "Vehicle assignment looks healthy in the active slice.",
+                        "進行中班次的掛車狀況目前正常。",
+                      )}
+                    />
+                  ) : null}
+                </div>
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <Link
+                    href="/dispatch?board=no_eligible_supply"
+                    style={actionLinkStyle("secondary")}
+                  >
+                    {copy(
+                      locale,
+                      "Dispatch: no eligible supply",
+                      "派車：無可派供給",
+                    )}
+                  </Link>
+                  <Link href="/drivers" style={actionLinkStyle("secondary")}>
+                    {copy(locale, "Driver registry", "司機主檔")}
+                  </Link>
+                  <Link
+                    href="/maintenance"
+                    style={actionLinkStyle("secondary")}
+                  >
+                    {copy(locale, "Maintenance board", "維修看板")}
+                  </Link>
+                  <a
+                    href="/adapter-registry"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={actionLinkStyle("secondary")}
+                  >
+                    {copy(
+                      locale,
+                      "Platform admin: adapter registry",
+                      "平台管理：adapter registry",
+                    )}
+                  </a>
+                </div>
+                <Banner
+                  theme={theme}
+                  tone="info"
+                  title={copy(locale, "Deep-link contract", "Deep-link 契約")}
+                  body={copy(
+                    locale,
+                    "In-app exits stay same-tab to /drivers/[driverId]. Degraded upstream investigation pivots cross-app into platform-admin surfaces in a new tab.",
+                    "站內出口維持同頁籤前往 /drivers/[driverId]；若上游降級，則以新分頁跨 app 跳到 platform-admin。",
+                  )}
+                />
+              </div>
+            </Card>
+          </div>
         </div>
       </div>
     </>
