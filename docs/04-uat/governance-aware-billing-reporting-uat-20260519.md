@@ -60,7 +60,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 4. Generate the invoice for the billing window.
 5. Generate the report export for the billing window.
 
-**Assert**: the billing record carries the full 13-field verification body for the non-partner owned flow: `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` populated, `legacy_unmapped = false`, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set, and `reportArtifactId` becomes non-null after export. `partnerProgramCode`, `eligibilityVerificationId`, and `platformEarningsRef` remain null on this owned non-partner path. The report export contains the same governance fields for the same booking row.
+**Assert**: the billing record carries `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` populated, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set, `reportArtifactId` non-null after export. `partnerProgramCode` and `platformEarningsRef` null. `legacy_unmapped = false`. `ownerName` and `approvalEvaluationId` are set as enrichment. The report export contains the same booking row with the same field values.
 
 ### `UAT-FIN-GOV-002` — Approval-required threshold, manual approval
 
