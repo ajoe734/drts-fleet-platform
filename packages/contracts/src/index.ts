@@ -1,6 +1,13 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-import type { ResourceActionDescriptor } from "./ui-runtime";
+import type {
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiHealthEnvelope,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -3622,6 +3629,47 @@ export interface ReconciliationIssueRecord {
   comments: ReconciliationIssueCommentRecord[];
   createdAt: string;
   updatedAt: string;
+}
+
+export const OPS_REVENUE_REVIEW_DATASET_KEYS = [
+  "orders",
+  "tasks",
+  "statements",
+  "vehicles",
+  "forwardedOrders",
+  "settlementMatrix",
+  "reconciliationIssues",
+  "forwarderIssues",
+] as const;
+export type OpsRevenueReviewDatasetKey =
+  (typeof OPS_REVENUE_REVIEW_DATASET_KEYS)[number];
+
+export interface OpsRevenueReviewDatasetState {
+  key: OpsRevenueReviewDatasetKey;
+  emptyState?: EmptyStateEnvelope;
+}
+
+export interface OpsRevenueReviewIssueRecord
+  extends ReconciliationIssueRecord {
+  availableActions: ResourceActionDescriptor[];
+  ownerAppLink: CrossAppResourceLink;
+}
+
+export interface OpsRevenueReviewSnapshot {
+  refreshTier: RefreshTier;
+  refreshMetadata: UiRefreshMetadata;
+  healthEnvelope: UiHealthEnvelope;
+  availableActions: ResourceActionDescriptor[];
+  paymentsLink: CrossAppResourceLink;
+  datasets: Record<OpsRevenueReviewDatasetKey, OpsRevenueReviewDatasetState>;
+  orders: OwnedOrderRecord[];
+  tasks: DriverTaskRecord[];
+  statements: DriverStatementRecord[];
+  vehicles: VehicleRegistryRecord[];
+  forwardedOrders: ForwardedOrderRecord[];
+  settlementMatrix: SettlementMatrixRecord[];
+  reconciliationIssues: OpsRevenueReviewIssueRecord[];
+  forwarderIssues: ForwarderReconciliationIssue[];
 }
 
 // --- Reports ---

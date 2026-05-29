@@ -16,7 +16,7 @@ type MoneyLike = {
   currency: string;
 } | null;
 
-export type RevenuePeriod = "today" | "7d" | "30d" | "all";
+export type RevenuePeriod = "today" | "yesterday" | "7d" | "30d" | "all";
 
 export type RevenueFilters = {
   period: RevenuePeriod;
@@ -103,6 +103,10 @@ function periodStart(
 ): Date | null {
   if (period === "all") return null;
   const base = startOfToday(reference);
+  if (period === "yesterday") {
+    base.setDate(base.getDate() - 1);
+    return base;
+  }
   const days = period === "today" ? 0 : period === "7d" ? 6 : 29;
   base.setDate(base.getDate() - days);
   return base;
@@ -114,6 +118,13 @@ function matchesPeriod(
   reference = new Date(),
 ): boolean {
   if (!timestamp) return false;
+  if (period === "yesterday") {
+    const start = periodStart(period, reference);
+    const end = startOfToday(reference);
+    if (!start) return false;
+    const value = new Date(timestamp).getTime();
+    return value >= start.getTime() && value < end.getTime();
+  }
   const start = periodStart(period, reference);
   if (!start) return true;
   return new Date(timestamp).getTime() >= start.getTime();
