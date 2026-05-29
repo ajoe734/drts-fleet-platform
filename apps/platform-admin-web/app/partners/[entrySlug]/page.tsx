@@ -79,6 +79,7 @@ type DetailSectionId =
   | "auth"
   | "eligibility"
   | "credentials"
+  | "readiness"
   | "audit";
 
 type ActionIntent =
@@ -105,8 +106,6 @@ const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
 });
-
-const T4_REFRESH_MS = 30_000;
 
 const shellStyle = {
   margin: "-32px",
@@ -507,63 +506,76 @@ function toCanvasTone(
   return tone === "warning" ? "warn" : tone;
 }
 
-function fallbackActions(
-  entry: PartnerDetailRecord,
-): ResourceActionDescriptor[] {
-  return [
-    {
-      action: "edit",
-      enabled: entry.status !== "revoked",
-      riskLevel: "medium",
-    },
-    {
-      action: "activate",
-      enabled: entry.status === "inactive",
-      disabledReasonCode:
-        entry.status !== "inactive" ? "entry_not_inactive" : undefined,
-      riskLevel: "medium",
-    },
-    {
-      action: "deactivate",
-      enabled: entry.status === "active",
-      disabledReasonCode:
-        entry.status !== "active" ? "entry_not_active" : undefined,
-      riskLevel: "medium",
-    },
-    {
-      action: "issue_credential",
-      enabled:
-        entry.status !== "revoked" && entry.authMode === "partner_api_key",
-      disabledReasonCode:
-        entry.authMode !== "partner_api_key"
-          ? "auth_mode_does_not_use_partner_credentials"
-          : entry.status === "revoked"
-            ? "entry_revoked"
-            : undefined,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "rotate_credential",
-      enabled:
-        entry.status !== "revoked" && entry.authMode === "partner_api_key",
-      disabledReasonCode:
-        entry.authMode !== "partner_api_key"
-          ? "auth_mode_does_not_use_partner_credentials"
-          : entry.status === "revoked"
-            ? "entry_revoked"
-            : undefined,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-  ];
-}
-
 function findAction(
   actions: ResourceActionDescriptor[],
   aliases: readonly string[],
 ): ResourceActionDescriptor | null {
   return actions.find((action) => aliases.includes(action.action)) ?? null;
+}
+
+function refreshTierLabel(
+  refreshTier: RefreshTier,
+): "T0" | "T1" | "T2" | "T3" | "T4" | "T6" {
+  switch (refreshTier) {
+    case "urgent":
+      return "T0";
+    case "fast":
+      return "T1";
+    case "dispatch":
+      return "T2";
+    case "medium":
+      return "T3";
+    case "medium_slow":
+    case "slow":
+      return "T4";
+    case "manual":
+      return "T6";
+    default:
+      return "T4";
+  }
+}
+
+function refreshTierPollMs(refreshTier: RefreshTier): number | null {
+  switch (refreshTier) {
+    case "urgent":
+      return 5_000;
+    case "fast":
+      return 3_000;
+    case "dispatch":
+      return 5_000;
+    case "medium":
+      return 15_000;
+    case "medium_slow":
+    case "slow":
+      return 30_000;
+    case "manual":
+    default:
+      return null;
+  }
+}
+
+function refreshTierCadenceLabel(
+  refreshTier: RefreshTier,
+  locale: string,
+): string {
+  const seconds =
+    refreshTier === "urgent"
+      ? 5
+      : refreshTier === "fast"
+        ? 3
+        : refreshTier === "dispatch"
+          ? 5
+          : refreshTier === "medium"
+            ? 15
+            : refreshTier === "manual"
+              ? 0
+              : 30;
+
+  if (refreshTier === "manual") {
+    return locale === "en" ? "manual refresh" : "手動更新";
+  }
+
+  return locale === "en" ? `${seconds}s cadence` : `${seconds} 秒 cadence`;
 }
 
 function resolveCredentialEmptyReason(
@@ -926,7 +938,8 @@ function deriveDeepLinks(
         : link.targetApp === "ops-console"
           ? `https://ops.drts.io${link.route}`
           : link.route,
-      openInNewTab: link.openMode === "new_tab",
+      openInNewTab:
+        link.openMode === "new_tab" || link.targetApp !== "platform-admin",
       helper: fallbackHelper,
     });
   });
@@ -941,7 +954,8 @@ function deriveDeepLinks(
         : link.targetApp === "ops-console"
           ? `https://ops.drts.io${link.route}`
           : link.route,
-      openInNewTab: link.openMode === "new_tab",
+      openInNewTab:
+        link.openMode === "new_tab" || link.targetApp !== "platform-admin",
       helper:
         locale === "en"
           ? `${link.targetApp} · ${link.resourceType}`
@@ -1238,6 +1252,11 @@ export default function PartnerDetailPage() {
     useState<CredentialLifecycleFilter>("active");
   const [activeSection, setActiveSection] =
     useState<DetailSectionId>("overview");
+  const refreshTier =
+    entry?.refreshTier ?? ("medium_slow" satisfies RefreshTier);
+  const refreshLabel = refreshTierLabel(refreshTier);
+  const refreshCadence = refreshTierCadenceLabel(refreshTier, locale);
+  const refreshPollMs = refreshTierPollMs(refreshTier);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1305,11 +1324,14 @@ export default function PartnerDetailPage() {
     if (!entrySlug) {
       return undefined;
     }
+    if (!refreshPollMs) {
+      return undefined;
+    }
     const timer = window.setInterval(() => {
       void loadEntry({ preserveIssuedCredential: true });
-    }, T4_REFRESH_MS);
+    }, refreshPollMs);
     return () => window.clearInterval(timer);
-  }, [entrySlug, loadEntry]);
+  }, [entrySlug, loadEntry, refreshPollMs]);
 
   const updateFormField = <Key extends keyof EntryFormState>(
     key: Key,
@@ -1325,9 +1347,7 @@ export default function PartnerDetailPage() {
     if (!entry) {
       return [];
     }
-    return entry.availableActions?.length
-      ? entry.availableActions
-      : fallbackActions(entry);
+    return entry.availableActions ?? [];
   }, [entry]);
 
   const editAction = useMemo(
@@ -1366,6 +1386,15 @@ export default function PartnerDetailPage() {
         "revoke_credential",
         "revokeCredential",
         "revoke",
+      ]),
+    [availableActions],
+  );
+  const viewReadinessAction = useMemo(
+    () =>
+      findAction(availableActions, [
+        "view_readiness_gaps",
+        "view_readiness",
+        "viewReadinessGaps",
       ]),
     [availableActions],
   );
@@ -1708,16 +1737,20 @@ export default function PartnerDetailPage() {
           ? { badge: String(credentials.length) }
           : {}),
       },
+      {
+        id: "readiness",
+        label: locale === "en" ? "Readiness" : "Readiness",
+        badge: String(readinessMissingCount),
+      },
       { id: "audit", label: locale === "en" ? "Audit" : "Audit" },
     ],
-    [credentials.length, locale],
+    [credentials.length, locale, readinessMissingCount],
   );
 
-  const refreshTier =
-    entry?.refreshTier ?? ("medium_slow" satisfies RefreshTier);
   const isStaleData = Boolean(
+    refreshPollMs &&
     lastLoadedAt &&
-    Date.now() - new Date(lastLoadedAt).getTime() > T4_REFRESH_MS,
+    Date.now() - new Date(lastLoadedAt).getTime() > refreshPollMs,
   );
   const freshnessTone = error ? "danger" : isStaleData ? "warn" : "success";
 
@@ -1760,7 +1793,7 @@ export default function PartnerDetailPage() {
       },
       {
         k: locale === "en" ? "Refresh tier" : "Refresh tier",
-        v: `${refreshTier} · 30s`,
+        v: `${refreshLabel} · ${refreshTier}`,
         mono: true,
       },
     ],
@@ -1769,6 +1802,7 @@ export default function PartnerDetailPage() {
       entry?.adapterLink,
       entry?.webhookLink,
       locale,
+      refreshLabel,
       refreshTier,
     ],
   );
@@ -1791,11 +1825,18 @@ export default function PartnerDetailPage() {
       },
       {
         k: locale === "en" ? "Refresh target" : "Refresh target",
-        v: `${refreshTier} · 30s`,
+        v: `${refreshLabel} · ${refreshCadence}`,
         mono: true,
       },
     ],
-    [activeCredentialCount, locale, previewUrl, refreshTier, supportValue],
+    [
+      activeCredentialCount,
+      locale,
+      previewUrl,
+      refreshCadence,
+      refreshLabel,
+      supportValue,
+    ],
   );
 
   const credentialSummaryItems = useMemo(
@@ -2095,8 +2136,8 @@ export default function PartnerDetailPage() {
               title={locale === "en" ? "Data is stale" : "資料已變舊"}
               body={
                 locale === "en"
-                  ? `This snapshot is older than the T4 30-second target. Refresh before making activation or credential decisions.`
-                  : "目前畫面超過 T4 的 30 秒更新目標。請先重新整理，再做啟用或 credential 決策。"
+                  ? `This snapshot is older than the ${refreshLabel} ${refreshCadence} target. Refresh before making activation or credential decisions.`
+                  : `目前畫面超過 ${refreshLabel} ${refreshCadence} 更新目標。請先重新整理，再做啟用或 credential 決策。`
               }
             />
           ) : null}
@@ -2119,13 +2160,18 @@ export default function PartnerDetailPage() {
                   {formatPlatformCodeLabel(locale, entry.status)}
                 </Pill>
                 <Pill theme={theme} tone={freshnessTone}>
-                  {refreshTier}
+                  {refreshLabel}
                 </Pill>
                 <Pill theme={theme} tone="accent">
                   {locale === "en"
                     ? `${availableActions.length} action(s)`
                     : `${availableActions.length} 個動作`}
                 </Pill>
+                {availableActions.length === 0 ? (
+                  <Pill theme={theme} tone="warn">
+                    {locale === "en" ? "read-only" : "唯讀"}
+                  </Pill>
+                ) : null}
               </div>
             }
           >
@@ -2189,8 +2235,8 @@ export default function PartnerDetailPage() {
             <KPI
               theme={theme}
               label={locale === "en" ? "Refresh tier" : "Refresh tier"}
-              value="T4"
-              sub={locale === "en" ? "30s cadence" : "30 秒 cadence"}
+              value={refreshLabel}
+              sub={refreshCadence}
               hint={
                 lastLoadedAt
                   ? `${locale === "en" ? "Last refresh" : "最近更新"} ${formatDateTime(
@@ -2247,7 +2293,7 @@ export default function PartnerDetailPage() {
                 actions={
                   <div style={shellBadgeRowStyle}>
                     <Pill theme={theme} tone={freshnessTone}>
-                      {refreshTier}
+                      {refreshLabel}
                     </Pill>
                     <span style={mutedTextStyle}>
                       {lastLoadedAt
@@ -2298,6 +2344,18 @@ export default function PartnerDetailPage() {
                     }
                   />
                   <div style={buttonRowStyle}>
+                    {viewReadinessAction ? (
+                      <Btn
+                        theme={theme}
+                        variant="secondary"
+                        disabled={!viewReadinessAction.enabled}
+                        onClick={() => jumpToSection("readiness")}
+                      >
+                        {locale === "en"
+                          ? "View readiness gaps"
+                          : "查看 readiness 缺口"}
+                      </Btn>
+                    ) : null}
                     {activateAction ? (
                       <Btn
                         theme={theme}
@@ -2347,6 +2405,14 @@ export default function PartnerDetailPage() {
                     <div style={mutedTextStyle}>
                       {disabledReasonLabel(
                         deactivateAction.disabledReasonCode,
+                        locale,
+                      )}
+                    </div>
+                  ) : null}
+                  {viewReadinessAction && !viewReadinessAction.enabled ? (
+                    <div style={mutedTextStyle}>
+                      {disabledReasonLabel(
+                        viewReadinessAction.disabledReasonCode,
                         locale,
                       )}
                     </div>
@@ -2408,6 +2474,20 @@ export default function PartnerDetailPage() {
               >
                 <div style={sectionStackStyle}>
                   <DL theme={theme} items={linkageItems} cols={1} />
+                  {availableActions.length === 0 ? (
+                    <Banner
+                      theme={theme}
+                      tone="warn"
+                      title={
+                        locale === "en" ? "Read-only resource" : "唯讀資源"
+                      }
+                      body={
+                        locale === "en"
+                          ? "This detail route has zero backend-provided availableActions. You can inspect readiness, credential posture, and cross-app context, but cannot mutate the resource."
+                          : "此 detail route 目前沒有後端提供的 availableActions。你可以檢查 readiness、credential posture 與 cross-app context，但不能修改這筆資源。"
+                      }
+                    />
+                  ) : null}
                   <div style={statusSummaryGridStyle}>
                     {deepLinks.map((link) => (
                       <Card
