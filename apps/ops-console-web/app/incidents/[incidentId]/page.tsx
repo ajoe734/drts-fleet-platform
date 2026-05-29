@@ -1,11 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 import type {
   AuditLogRecord,
+  CrossAppResourceLink,
+  DriverMatchingSuppression,
+  DriverRegistryRecord,
+  EmptyReason,
   IncidentRecord,
-  IncidentTimelineEntry,
   OwnedOrderRecord,
-  ServiceRecoveryActionRecord,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
@@ -13,7 +19,6 @@ import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
-  CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasField as Field,
@@ -26,11 +31,56 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 import type { ManagementTone, TimelineItem } from "@drts/ui-web";
+import { IncidentRefreshTier } from "./refresh-tier";
+import { IncidentDetailActionPanel } from "./incident-detail-action-panel";
 
 type IncidentDetailPageProps = {
   params: Promise<{
     incidentId: string;
   }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+type IncidentDetailSearchParams = Record<string, string | string[] | undefined>;
+
+type IncidentRuntimeRecord = IncidentRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  refreshMetadata?: UiRefreshMetadata;
+  driverMatchingSuppression?: DriverMatchingSuppression | null;
+  assignmentAcknowledgedAt?: string | null;
+};
+
+type EmptyStateConfig = {
+  tone: CanvasTone;
+  icon: Parameters<typeof CanvasIcon>[0]["name"];
+  title: Record<Locale, string>;
+  body: Record<Locale, string>;
+};
+
+type RuntimeEmptyState = {
+  reason: EmptyReason;
+  messageCode?: string;
+  nextAction?: ResourceActionDescriptor | null;
+};
+
+type RuntimeListEnvelope<T> =
+  | T[]
+  | {
+      items?: T[];
+      refresh?: UiRefreshMetadata | null;
+      emptyState?: RuntimeEmptyState | null;
+    };
+
+type SectionLoadResult<T> = {
+  data: T;
+  error: Error | null;
+};
+
+type RuntimeSectionLoadResult<T> = {
+  data: T[];
+  error: Error | null;
+  refresh: UiRefreshMetadata | null;
+  emptyState: RuntimeEmptyState | null;
 };
 
 const theme = buildCanvasTheme({
@@ -38,6 +88,71 @@ const theme = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
+
+const INCIDENT_REFRESH_TIER: RefreshTier = "medium";
+
+const EMPTY_STATE_CONFIG: Record<
+  Exclude<EmptyReason, "driver_not_eligible">,
+  EmptyStateConfig
+> = {
+  no_data: {
+    tone: "info",
+    icon: "reports",
+    title: { en: "No records yet", zh: "目前沒有資料" },
+    body: {
+      en: "This section is valid but empty. Data will appear once the incident flow produces records.",
+      zh: "這個區塊目前是合法空白；等事故流程產生資料後會顯示在這裡。",
+    },
+  },
+  not_provisioned: {
+    tone: "warn",
+    icon: "flags",
+    title: { en: "Feature not provisioned", zh: "功能尚未開通" },
+    body: {
+      en: "The backing capability is not enabled for this tenant or environment yet.",
+      zh: "這個租戶或環境尚未開通對應能力。",
+    },
+  },
+  fetch_failed: {
+    tone: "danger",
+    icon: "warn",
+    title: { en: "Fetch failed", zh: "資料讀取失敗" },
+    body: {
+      en: "The request failed before the page could build a trustworthy section state.",
+      zh: "請求失敗，頁面無法建立可信的區塊狀態。",
+    },
+  },
+  permission_denied: {
+    tone: "warn",
+    icon: "audit",
+    title: { en: "Permission denied", zh: "沒有檢視權限" },
+    body: {
+      en: "Your scope can view the incident shell but not this related dataset.",
+      zh: "你可以看到事故頁框架，但沒有此關聯資料的讀取權限。",
+    },
+  },
+  external_unavailable: {
+    tone: "danger",
+    icon: "ext",
+    title: { en: "External dependency unavailable", zh: "外部依賴暫時不可用" },
+    body: {
+      en: "This section depends on another service. The incident stays visible while the dependency is degraded.",
+      zh: "這個區塊依賴其他服務；事故仍可檢視，但外部依賴目前降級。",
+    },
+  },
+  filtered_empty: {
+    tone: "accent",
+    icon: "search",
+    title: {
+      en: "No results under current filters",
+      zh: "目前篩選條件沒有結果",
+    },
+    body: {
+      en: "The source has data, but the active filter view excludes it.",
+      zh: "來源有資料，但目前篩選視圖把它排除了。",
+    },
+  },
+};
 
 async function resolveOrFallback<T>(
   loader: () => Promise<T>,
@@ -47,6 +162,53 @@ async function resolveOrFallback<T>(
     return await loader();
   } catch {
     return fallback;
+  }
+}
+
+async function resolveSection<T>(
+  loader: () => Promise<T>,
+  fallback: T,
+): Promise<SectionLoadResult<T>> {
+  try {
+    return {
+      data: await loader(),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      data: fallback,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+async function resolveRuntimeSection<T>(
+  loader: () => Promise<RuntimeListEnvelope<T>>,
+): Promise<RuntimeSectionLoadResult<T>> {
+  try {
+    const payload = await loader();
+    if (Array.isArray(payload)) {
+      return {
+        data: payload,
+        error: null,
+        refresh: null,
+        emptyState: null,
+      };
+    }
+
+    return {
+      data: Array.isArray(payload.items) ? payload.items : [],
+      error: null,
+      refresh: payload.refresh ?? null,
+      emptyState: payload.emptyState ?? null,
+    };
+  } catch (error) {
+    return {
+      data: [],
+      error: error instanceof Error ? error : new Error(String(error)),
+      refresh: null,
+      emptyState: null,
+    };
   }
 }
 
@@ -109,61 +271,71 @@ function formatIncidentAge(locale: Locale, value: string | null | undefined) {
 function actionLinkStyle(
   theme: CanvasTheme,
   variant: "primary" | "secondary" | "ghost" = "secondary",
+  disabled = false,
 ) {
-  if (variant === "primary") {
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: "6px",
-      height: "28px",
-      padding: "5px 10px",
-      borderRadius: "7px",
-      background: theme.accent,
-      color: "#ffffff",
-      border: `1px solid ${theme.accent}`,
-      fontSize: "12px",
-      fontWeight: 500,
-      lineHeight: 1,
-      textDecoration: "none",
-    } as const;
-  }
-
-  if (variant === "ghost") {
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: "6px",
-      height: "28px",
-      padding: "5px 10px",
-      borderRadius: "7px",
-      background: "transparent",
-      color: theme.textMuted,
-      border: "1px solid transparent",
-      fontSize: "12px",
-      fontWeight: 500,
-      lineHeight: 1,
-      textDecoration: "none",
-    } as const;
-  }
+  const base =
+    variant === "primary"
+      ? {
+          background: theme.accent,
+          color: "#ffffff",
+          border: `1px solid ${theme.accent}`,
+        }
+      : variant === "ghost"
+        ? {
+            background: "transparent",
+            color: theme.textMuted,
+            border: "1px solid transparent",
+          }
+        : {
+            background: theme.surface,
+            color: theme.text,
+            border: `1px solid ${theme.border}`,
+          };
 
   return {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     gap: "6px",
-    height: "28px",
+    minHeight: "28px",
     padding: "5px 10px",
     borderRadius: "7px",
-    background: theme.surface,
-    color: theme.text,
-    border: `1px solid ${theme.border}`,
     fontSize: "12px",
     fontWeight: 500,
     lineHeight: 1,
     textDecoration: "none",
+    opacity: disabled ? 0.48 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    ...base,
   } as const;
+}
+
+function ActionAffordance({
+  href,
+  disabled,
+  title,
+  style,
+  children,
+}: {
+  href: string;
+  disabled: boolean;
+  title: string | undefined;
+  style: ReturnType<typeof actionLinkStyle>;
+  children: ReactNode;
+}) {
+  if (disabled) {
+    return (
+      <span title={title} aria-disabled="true" style={style}>
+        {children}
+      </span>
+    );
+  }
+
+  return (
+    <Link href={href} title={title} style={style}>
+      {children}
+    </Link>
+  );
 }
 
 function getStatusTone(status: IncidentRecord["status"]): CanvasTone {
@@ -219,74 +391,406 @@ function getTenantLabel(order: OwnedOrderRecord | null) {
   );
 }
 
-function buildRelatedLink(
-  href: string,
-  label: string,
-  value: string,
-  variant: "primary" | "secondary" | "ghost" = "secondary",
+function inferSuppression(
+  incident: IncidentRuntimeRecord,
+  driver: DriverRegistryRecord | null,
+): DriverMatchingSuppression | null {
+  if (incident.driverMatchingSuppression) {
+    return incident.driverMatchingSuppression;
+  }
+
+  if (
+    driver?.eligibilityBlockedReasons.includes("work_state_incident_hold") &&
+    incident.relatedDriverId
+  ) {
+    return {
+      active: true,
+      reasonCode: "incident",
+      sourceIncidentId: incident.incidentId,
+      expiresAt: incident.updatedAt,
+      liftedAt: null,
+    };
+  }
+
+  return null;
+}
+
+function inferEmptyReason(
+  error: Error | null,
+  fallbackReason: Exclude<EmptyReason, "driver_not_eligible"> = "no_data",
+): Exclude<EmptyReason, "driver_not_eligible"> {
+  if (!error) {
+    return fallbackReason;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("403")) {
+    return "permission_denied";
+  }
+  if (message.includes("404")) {
+    return "no_data";
+  }
+  if (message.includes("501")) {
+    return "not_provisioned";
+  }
+  if (
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("504")
+  ) {
+    return "external_unavailable";
+  }
+
+  return "fetch_failed";
+}
+
+function normalizeIncidentEmptyReason(
+  reason: EmptyReason | null | undefined,
+  fallbackReason: Exclude<EmptyReason, "driver_not_eligible"> = "no_data",
+): Exclude<EmptyReason, "driver_not_eligible"> {
+  if (!reason || reason === "driver_not_eligible") {
+    return fallbackReason;
+  }
+
+  return reason;
+}
+
+function getActionCopy(action: string, locale: Locale) {
+  const normalized = action.toLowerCase();
+  if (normalized.includes("update")) {
+    return locale === "en" ? "Update incident" : "更新事故";
+  }
+  if (normalized.includes("resolve")) {
+    return locale === "en" ? "Resolve" : "標記已處理";
+  }
+  if (normalized.includes("close")) {
+    return locale === "en" ? "Close" : "關閉事故";
+  }
+  if (normalized.includes("recovery")) {
+    return locale === "en" ? "Add recovery" : "新增補救";
+  }
+  if (normalized.includes("ack")) {
+    return locale === "en" ? "Acknowledge escalation" : "確認升級";
+  }
+  if (normalized.includes("lift")) {
+    return locale === "en" ? "Lift suppression" : "解除抑制";
+  }
+  return formatOpsCodeLabel(locale, action);
+}
+
+function buildIncidentDetailLink(incidentId: string, intent?: string) {
+  const base = `/incidents/${encodeURIComponent(incidentId)}`;
+  return intent ? `${base}?intent=${encodeURIComponent(intent)}` : base;
+}
+
+function buildComplaintDetailLink(caseNo: string) {
+  return `/complaints/${encodeURIComponent(caseNo)}`;
+}
+
+function buildVehicleRegistryLink(vehicleId: string) {
+  return `/vehicles/${encodeURIComponent(vehicleId)}`;
+}
+
+function getActionIntent(action: string) {
+  const normalized = action.toLowerCase();
+  if (normalized.includes("update")) {
+    return "update";
+  }
+  if (normalized.includes("resolve")) {
+    return "resolve";
+  }
+  if (normalized.includes("close")) {
+    return "close";
+  }
+  if (normalized.includes("recovery")) {
+    return "service_recovery";
+  }
+  if (normalized.includes("ack")) {
+    return "acknowledge";
+  }
+  if (normalized.includes("lift")) {
+    return "lift_suppression";
+  }
+  return normalized;
+}
+
+function getActionIcon(action: string) {
+  const normalized = action.toLowerCase();
+  if (normalized.includes("close")) {
+    return "audit";
+  }
+  if (normalized.includes("resolve")) {
+    return "check";
+  }
+  if (normalized.includes("recovery")) {
+    return "plus";
+  }
+  if (normalized.includes("lift")) {
+    return "clock";
+  }
+  if (normalized.includes("ack")) {
+    return "warn";
+  }
+  if (normalized.includes("update")) {
+    return "copy";
+  }
+  return "ext";
+}
+
+function buildActionTitle(
+  action: ResourceActionDescriptor,
+  locale: Locale,
+  isInPlace: boolean,
 ) {
-  return (
-    <Link href={href} style={actionLinkStyle(theme, variant)}>
-      <CanvasIcon name="ext" size={12} />
-      <span>
-        {label} {value}
-      </span>
-    </Link>
+  const details = [
+    action.enabled
+      ? null
+      : locale === "en"
+        ? `Disabled: ${formatOpsCodeLabel(locale, action.disabledReasonCode ?? "unavailable")}`
+        : `停用：${formatOpsCodeLabel(locale, action.disabledReasonCode ?? "unavailable")}`,
+    action.riskLevel === "high"
+      ? locale === "en"
+        ? "High-risk confirmation"
+        : "高風險確認"
+      : action.riskLevel === "medium"
+        ? locale === "en"
+          ? "Medium-risk confirmation"
+          : "中風險確認"
+        : locale === "en"
+          ? "Low-risk action"
+          : "低風險動作",
+    action.requiresReason
+      ? locale === "en"
+        ? "Reason required"
+        : "必填原因"
+      : null,
+    isInPlace
+      ? locale === "en"
+        ? "Stays in this incident workspace"
+        : "停留在此事故工作區"
+      : null,
+  ].filter(Boolean);
+
+  return details.join(" · ");
+}
+
+function actionTarget(
+  incident: IncidentRuntimeRecord,
+  action: ResourceActionDescriptor,
+) {
+  const normalized = action.action.toLowerCase();
+  if (
+    normalized.includes("recovery") ||
+    normalized.includes("update") ||
+    normalized.includes("resolve") ||
+    normalized.includes("close") ||
+    normalized.includes("ack") ||
+    normalized.includes("escalation")
+  ) {
+    return buildIncidentDetailLink(
+      incident.incidentId,
+      getActionIntent(action.action),
+    );
+  }
+  if (normalized.includes("lift") && incident.relatedDriverId) {
+    return `/drivers/${encodeURIComponent(incident.relatedDriverId)}?incidentId=${encodeURIComponent(incident.incidentId)}&intent=lift_suppression`;
+  }
+  return buildIncidentDetailLink(
+    incident.incidentId,
+    getActionIntent(action.action),
   );
+}
+
+function EmptyStateBlock({
+  reason,
+  locale,
+  messageCode,
+  nextAction,
+}: {
+  reason: Exclude<EmptyReason, "driver_not_eligible">;
+  locale: Locale;
+  messageCode?: string | undefined;
+  nextAction?: ReactNode | undefined;
+}) {
+  const config = EMPTY_STATE_CONFIG[reason]!;
+  return (
+    <div
+      style={{
+        border: `1px dashed ${theme.border}`,
+        borderRadius: 12,
+        padding: 16,
+        display: "grid",
+        gap: 10,
+        background: theme.surfaceLo,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 10,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background:
+              config.tone === "danger"
+                ? theme.dangerBg
+                : config.tone === "warn"
+                  ? theme.warnBg
+                  : config.tone === "accent"
+                    ? theme.accentBg
+                    : theme.infoBg,
+          }}
+        >
+          <CanvasIcon name={config.icon} size={14} />
+        </span>
+        <div style={{ display: "grid", gap: 2 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <strong style={{ fontSize: 13 }}>{config.title[locale]}</strong>
+            <span
+              style={{
+                fontFamily: theme.monoFamily,
+                fontSize: 11,
+                color: theme.textDim,
+              }}
+            >
+              {reason}
+            </span>
+          </div>
+          <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+            {config.body[locale]}
+          </span>
+          {messageCode ? (
+            <span
+              style={{
+                fontFamily: theme.monoFamily,
+                fontSize: 11.5,
+                color: theme.textDim,
+              }}
+            >
+              {messageCode}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {nextAction}
+    </div>
+  );
+}
+
+function buildCrossAppHref(link: CrossAppResourceLink) {
+  const platformAdminBaseUrl =
+    process.env.PLATFORM_ADMIN_BASE_URL ??
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_BASE_URL;
+
+  if (!platformAdminBaseUrl) {
+    return link.route;
+  }
+
+  return new URL(link.route, platformAdminBaseUrl).toString();
+}
+
+function buildAuditLink(auditId: string) {
+  return buildCrossAppHref({
+    targetApp: "platform-admin",
+    route: `/audit?auditId=${encodeURIComponent(auditId)}`,
+    resourceType: "audit",
+    resourceId: auditId,
+    openMode: "new_tab",
+    label: "View audit",
+  });
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 export default async function IncidentDetailPage({
   params,
+  searchParams,
 }: IncidentDetailPageProps) {
-  const [{ incidentId }, locale, client] = await Promise.all([
-    params,
-    getServerLocale(),
-    getServerOpsClient(),
-  ]);
+  const [{ incidentId }, locale, client, resolvedSearchParams] =
+    await Promise.all([
+      params,
+      getServerLocale(),
+      getServerOpsClient(),
+      searchParams ?? Promise.resolve({} as IncidentDetailSearchParams),
+    ]);
 
   const incident = await resolveOrFallback(
-    () => client.getIncident(incidentId),
-    null as IncidentRecord | null,
+    () => client.getIncident(incidentId) as Promise<IncidentRuntimeRecord>,
+    null as IncidentRuntimeRecord | null,
   );
 
   if (!incident) {
     notFound();
   }
 
-  const [timelineEntries, recoveryEntries, relatedOrder, auditLogs] =
-    await Promise.all([
-      resolveOrFallback(
-        () => client.getIncidentTimeline(incidentId),
-        [] as IncidentTimelineEntry[],
-      ),
-      resolveOrFallback(
-        () => client.getServiceRecoveryActions(incidentId),
-        incident.serviceRecoveryActions ??
-          ([] as ServiceRecoveryActionRecord[]),
-      ),
-      incident.relatedOrderId
-        ? resolveOrFallback(
-            () => client.getOrder(incident.relatedOrderId as string),
-            null as OwnedOrderRecord | null,
-          )
-        : Promise.resolve(null as OwnedOrderRecord | null),
-      resolveOrFallback(() => client.listAuditLogs(), [] as AuditLogRecord[]),
-    ]);
+  const [
+    timelineResult,
+    recoveryResult,
+    relatedOrder,
+    auditLogsResult,
+    driverRegistryResult,
+  ] = await Promise.all([
+    resolveRuntimeSection(() => client.getIncidentTimeline(incidentId)),
+    resolveRuntimeSection(() => client.getServiceRecoveryActions(incidentId)),
+    incident.relatedOrderId
+      ? resolveOrFallback(
+          () => client.getOrder(incident.relatedOrderId as string),
+          null as OwnedOrderRecord | null,
+        )
+      : Promise.resolve(null as OwnedOrderRecord | null),
+    resolveSection(() => client.listAuditLogs(), [] as AuditLogRecord[]),
+    incident.relatedDriverId
+      ? resolveSection(() => client.listDrivers(), [] as DriverRegistryRecord[])
+      : Promise.resolve({
+          data: [] as DriverRegistryRecord[],
+          error: null,
+        }),
+  ]);
 
+  const relatedDriver =
+    driverRegistryResult.data.find(
+      (driver: DriverRegistryRecord) =>
+        driver.driverId === incident.relatedDriverId,
+    ) ?? null;
   const tenantLabel = getTenantLabel(relatedOrder);
-  const latestAudit =
-    [...auditLogs]
-      .filter(
-        (entry) =>
-          entry.resourceType === "incident" &&
-          entry.resourceId === incident.incidentId,
+  const suppression = inferSuppression(incident, relatedDriver);
+  const refreshMetadata = incident.refreshMetadata ?? null;
+  const availableActions = incident.availableActions ?? [];
+  const serviceRecoveryAction =
+    availableActions.find((action) =>
+      action.action.toLowerCase().includes("recovery"),
+    ) ?? null;
+  const incidentAuditLogs = [...auditLogsResult.data]
+    .filter(
+      (entry) =>
+        entry.resourceType === "incident" &&
+        entry.resourceId === incident.incidentId,
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  const isReadOnly =
+    incident.status === "resolved" || incident.status === "closed";
+  const suppressionEmptyReason = incident.relatedDriverId
+    ? inferEmptyReason(
+        relatedDriver ? null : driverRegistryResult.error,
+        "no_data",
       )
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )[0] ?? null;
+    : "no_data";
 
-  const timelineItems: TimelineItem[] = [...timelineEntries]
+  const timelineItems: TimelineItem[] = [...timelineResult.data]
     .sort(
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -298,29 +802,14 @@ export default async function IncidentDetailPage({
       timestamp: formatShortDateTime(locale, entry.createdAt),
       tone: getTimelineTone(entry.action),
       eyebrow: entry.actor,
-      supportingContent:
-        latestAudit?.requestId && latestAudit.createdAt === entry.createdAt ? (
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              color: "#94a3b8",
-              fontSize: "12px",
-            }}
-          >
-            <CanvasIcon name="audit" size={12} />
-            {latestAudit.requestId}
-          </span>
-        ) : null,
     }));
 
   const recoveryItems =
-    recoveryEntries.length > 0
-      ? [...recoveryEntries]
+    recoveryResult.data.length > 0
+      ? [...recoveryResult.data]
           .sort(
             (a, b) =>
-              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
           )
           .map((action) => ({
             k: `${formatShortDateTime(locale, action.createdAt)} · ${t(
@@ -328,17 +817,12 @@ export default async function IncidentDetailPage({
               locale,
             )}`,
             v: (
-              <div
-                style={{
-                  display: "grid",
-                  gap: "6px",
-                }}
-              >
+              <div style={{ display: "grid", gap: 6 }}>
                 <div
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: "8px",
+                    gap: 8,
                     flexWrap: "wrap",
                   }}
                 >
@@ -347,65 +831,108 @@ export default async function IncidentDetailPage({
                   </Pill>
                   <span>{action.note}</span>
                 </div>
-                <span style={{ color: theme.textMuted, fontSize: "12px" }}>
+                <span style={{ color: theme.textMuted, fontSize: 12 }}>
                   {action.actor}
                 </span>
               </div>
             ),
           }))
-      : [
-          {
-            k: locale === "en" ? "Recovery" : "恢復",
-            v: t("incidents.serviceRecovery.empty", locale),
-          },
-        ];
+      : null;
+
+  const auditItems =
+    incidentAuditLogs.length > 0
+      ? incidentAuditLogs.slice(0, 6).map((entry) => ({
+          k: `${formatShortDateTime(locale, entry.createdAt)} · ${entry.actionName}`,
+          v: (
+            <div style={{ display: "grid", gap: 4 }}>
+              <span style={{ color: theme.text, fontSize: 12.5 }}>
+                {entry.moduleName} / {entry.resourceType}
+              </span>
+              <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                {entry.actorType}
+                {entry.actorId ? ` · ${entry.actorId}` : ""}
+              </span>
+            </div>
+          ),
+        }))
+      : null;
 
   const relatedItems = [
     {
+      k: locale === "en" ? "Dispatch" : "派遣單",
+      v: incident.relatedOrderId ? (
+        <Link
+          href={`/dispatch/${encodeURIComponent(incident.relatedOrderId)}`}
+          style={actionLinkStyle(theme, "secondary")}
+        >
+          <CanvasIcon name="ext" size={12} />
+          <span>
+            {getOpsLabel(locale, "order")} {incident.relatedOrderId}
+          </span>
+        </Link>
+      ) : (
+        "—"
+      ),
+    },
+    {
+      k: locale === "en" ? "Vehicle" : "車輛",
+      v: incident.relatedVehicleId ? (
+        <Link
+          href={buildVehicleRegistryLink(incident.relatedVehicleId)}
+          style={actionLinkStyle(theme, "secondary")}
+        >
+          <CanvasIcon name="ext" size={12} />
+          <span>{incident.relatedVehicleId}</span>
+        </Link>
+      ) : (
+        "—"
+      ),
+    },
+    {
+      k: locale === "en" ? "Driver" : "司機",
+      v: incident.relatedDriverId ? (
+        <Link
+          href={`/drivers/${encodeURIComponent(incident.relatedDriverId)}`}
+          style={actionLinkStyle(theme, "secondary")}
+        >
+          <CanvasIcon name="ext" size={12} />
+          <span>{incident.relatedDriverId}</span>
+        </Link>
+      ) : (
+        "—"
+      ),
+    },
+    {
       k: locale === "en" ? "Complaint" : "客訴",
-      v: incident.relatedComplaintCaseNo
-        ? buildRelatedLink(
-            `/complaints?caseNo=${encodeURIComponent(
-              incident.relatedComplaintCaseNo,
-            )}`,
-            getOpsLabel(locale, "complaint"),
-            incident.relatedComplaintCaseNo,
-          )
-        : "—",
+      v: incident.relatedComplaintCaseNo ? (
+        <Link
+          href={buildComplaintDetailLink(incident.relatedComplaintCaseNo)}
+          style={actionLinkStyle(theme, "secondary")}
+        >
+          <CanvasIcon name="ext" size={12} />
+          <span>{incident.relatedComplaintCaseNo}</span>
+        </Link>
+      ) : (
+        "—"
+      ),
     },
     {
-      k: locale === "en" ? "Order" : "訂單",
-      v: incident.relatedOrderId
-        ? buildRelatedLink(
-            `/dispatch?orderId=${encodeURIComponent(incident.relatedOrderId)}`,
-            getOpsLabel(locale, "order"),
-            incident.relatedOrderId,
-          )
-        : "—",
-      mono: !incident.relatedOrderId,
-    },
-    {
-      k: locale === "en" ? "Tenant" : "租戶",
-      v: tenantLabel ?? "—",
-      mono: Boolean(tenantLabel),
-    },
-    {
-      k: locale === "en" ? "Audit" : "稽核",
-      v: latestAudit ? (
-        <div style={{ display: "grid", gap: "4px" }}>
-          <span
-            style={{
-              fontFamily: theme.monoFamily,
-              fontSize: "11.5px",
-              color: theme.text,
-            }}
-          >
-            {latestAudit.requestId}
-          </span>
-          <span style={{ color: theme.textMuted, fontSize: "12px" }}>
-            {formatShortDateTime(locale, latestAudit.createdAt)}
-          </span>
-        </div>
+      k: locale === "en" ? "Latest audit" : "最新審計",
+      v: incidentAuditLogs[0] ? (
+        <a
+          href={buildAuditLink(incidentAuditLogs[0].auditId)}
+          target="_blank"
+          rel="noreferrer"
+          style={actionLinkStyle(theme, "ghost")}
+          title={
+            locale === "en"
+              ? "Opens platform-admin audit in a new tab"
+              : "於新分頁開啟 platform-admin 審計"
+          }
+        >
+          <CanvasIcon name="ext" size={12} />
+          <span>{incidentAuditLogs[0].auditId}</span>
+        </a>
       ) : (
         "—"
       ),
@@ -419,37 +946,43 @@ export default async function IncidentDetailPage({
       mono: true,
     },
     {
-      k: locale === "en" ? "Location" : "地點",
-      v: incident.location ?? "—",
+      k: locale === "en" ? "Created" : "建立時間",
+      v: formatDateTime(locale, incident.createdAt),
+      mono: true,
     },
     {
-      k: locale === "en" ? "Driver" : "司機",
-      v: incident.relatedDriverId ?? "—",
-      mono: Boolean(incident.relatedDriverId),
-    },
-    {
-      k: locale === "en" ? "Vehicle" : "車輛",
-      v: incident.relatedVehicleId ?? "—",
-      mono: Boolean(incident.relatedVehicleId),
-    },
-    {
-      k: locale === "en" ? "Order" : "訂單",
-      v: incident.relatedOrderId ?? "—",
-      mono: Boolean(incident.relatedOrderId),
-    },
-    {
-      k: locale === "en" ? "Tenant" : "租戶",
-      v: tenantLabel ?? "—",
-      mono: Boolean(tenantLabel),
-    },
-    {
-      k: locale === "en" ? "Reported by" : "回報來源",
-      v: incident.reportedBy,
-    },
-    {
-      k: locale === "en" ? "Complaint" : "客訴",
-      v: incident.relatedComplaintCaseNo ?? "—",
-      mono: Boolean(incident.relatedComplaintCaseNo),
+      k: locale === "en" ? "Assigned to" : "負責人",
+      v: (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: incident.assignedTo ? theme.monoFamily : undefined,
+            }}
+          >
+            {incident.assignedTo ?? "—"}
+          </span>
+          <Pill
+            theme={theme}
+            tone={incident.assignmentAcknowledgedAt ? "success" : "warn"}
+            dot
+          >
+            {incident.assignmentAcknowledgedAt
+              ? locale === "en"
+                ? "Acknowledged"
+                : "已確認"
+              : locale === "en"
+                ? "Pending acknowledgment"
+                : "待確認"}
+          </Pill>
+        </div>
+      ),
     },
     {
       k: locale === "en" ? "Severity" : "嚴重程度",
@@ -458,6 +991,11 @@ export default async function IncidentDetailPage({
           {formatOpsCodeLabel(locale, incident.severity)}
         </Pill>
       ),
+    },
+    {
+      k: locale === "en" ? "Acknowledged at" : "確認時間",
+      v: formatDateTime(locale, incident.assignmentAcknowledgedAt),
+      mono: true,
     },
     {
       k: locale === "en" ? "Status" : "狀態",
@@ -477,9 +1015,22 @@ export default async function IncidentDetailPage({
         : t("incidents.form.escalationNone", locale),
     },
     {
-      k: locale === "en" ? "Assignee" : "負責人",
-      v: incident.assignedTo ?? "—",
-      mono: Boolean(incident.assignedTo),
+      k: locale === "en" ? "Location" : "地點",
+      v: incident.location ?? "—",
+    },
+    {
+      k: locale === "en" ? "Vehicle" : "車輛",
+      v: incident.relatedVehicleId ?? "—",
+      mono: Boolean(incident.relatedVehicleId),
+    },
+    {
+      k: locale === "en" ? "Tenant" : "租戶",
+      v: tenantLabel ?? "—",
+      mono: Boolean(tenantLabel),
+    },
+    {
+      k: locale === "en" ? "Reported by" : "回報來源",
+      v: incident.reportedBy,
     },
   ];
 
@@ -489,11 +1040,6 @@ export default async function IncidentDetailPage({
       : incident.status === "open" || incident.status === "investigating"
         ? "warn"
         : "info";
-
-  const bannerTitle =
-    locale === "en"
-      ? `${formatOpsCodeLabel(locale, incident.severity)} incident coordination is active`
-      : `${formatOpsCodeLabel(locale, incident.severity)}事故協調進行中`;
   const bannerBody = [
     incident.sourceDispatchExceptionOrderId
       ? locale === "en"
@@ -509,192 +1055,553 @@ export default async function IncidentDetailPage({
   ]
     .filter(Boolean)
     .join(" · ");
+  const refreshTone =
+    refreshMetadata?.dataFreshness === "degraded"
+      ? "danger"
+      : refreshMetadata?.dataFreshness === "stale"
+        ? "warn"
+        : refreshMetadata?.dataFreshness === "unknown" || !refreshMetadata
+          ? "info"
+          : null;
+  const initialIntent = firstParam(resolvedSearchParams.intent) ?? null;
+  const platformAdminAuditBaseUrl =
+    process.env.PLATFORM_ADMIN_BASE_URL ??
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_BASE_URL ??
+    null;
+  const latestAuditHref = incidentAuditLogs[0]
+    ? buildAuditLink(incidentAuditLogs[0].auditId)
+    : null;
+  const timelineEmptyAction = timelineResult.emptyState?.nextAction;
+  const recoveryEmptyAction = recoveryResult.emptyState?.nextAction;
+  const titlePills = (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+      <span>{incident.incidentId}</span>
+      <Pill theme={theme} tone={getSeverityTone(incident.severity)} dot>
+        {formatOpsCodeLabel(locale, incident.severity)}
+      </Pill>
+      <Pill theme={theme} tone={getStatusTone(incident.status)}>
+        {formatOpsCodeLabel(locale, incident.status)}
+      </Pill>
+    </span>
+  );
 
   return (
     <>
       <PageHeader
-          theme={theme}
-          title={`${incident.incidentId} · ${incident.title}`}
-          subtitle={[
-            formatOpsCodeLabel(locale, incident.category),
-            formatOpsCodeLabel(locale, incident.severity),
-            formatOpsCodeLabel(locale, incident.status),
-            formatDateTime(locale, incident.createdAt),
-            formatIncidentAge(
-              locale,
-              incident.occurredAt ?? incident.createdAt,
-            ),
-          ].join(" · ")}
-          actions={
+        theme={theme}
+        title={titlePills}
+        subtitle={[
+          incident.title,
+          formatOpsCodeLabel(locale, incident.category),
+          formatDateTime(locale, incident.occurredAt ?? incident.createdAt),
+          formatIncidentAge(locale, incident.occurredAt ?? incident.createdAt),
+        ].join(" · ")}
+        actions={
+          <div
+            style={{
+              display: "grid",
+              gap: 10,
+              justifyItems: "end",
+            }}
+          >
+            <IncidentRefreshTier
+              tier={INCIDENT_REFRESH_TIER}
+              metadata={refreshMetadata}
+              theme={theme}
+              locale={locale}
+            />
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "8px",
+                gap: 8,
                 flexWrap: "wrap",
                 justifyContent: "flex-end",
+                maxWidth: 620,
               }}
             >
-              <Btn theme={theme} icon="phone">
-                {locale === "en" ? "Notify police" : "通知警方"}
-              </Btn>
-              <Btn theme={theme} icon="copy">
-                {locale === "en" ? "Notify tenant" : "通報租戶"}
-              </Btn>
-              <Btn theme={theme} variant="primary" icon="check">
-                {locale === "en" ? "Mark contained" : "標記受控"}
-              </Btn>
+              {availableActions.length > 0 ? (
+                availableActions.map(
+                  (action: ResourceActionDescriptor, index: number) => (
+                    <ActionAffordance
+                      key={`${action.action}:${index}`}
+                      href={actionTarget(incident, action)}
+                      disabled={!action.enabled}
+                      title={buildActionTitle(action, locale, true)}
+                      style={actionLinkStyle(
+                        theme,
+                        action.riskLevel === "high"
+                          ? "primary"
+                          : action.riskLevel === "medium"
+                            ? "secondary"
+                            : "ghost",
+                        !action.enabled,
+                      )}
+                    >
+                      <CanvasIcon
+                        name={getActionIcon(action.action)}
+                        size={12}
+                      />
+                      <span>{getActionCopy(action.action, locale)}</span>
+                    </ActionAffordance>
+                  ),
+                )
+              ) : (
+                <Pill theme={theme} tone="neutral">
+                  {locale === "en"
+                    ? "Read-only by contract"
+                    : "依 contract 唯讀"}
+                </Pill>
+              )}
             </div>
-          }
-        />
+            <span
+              style={{
+                color: theme.textMuted,
+                fontSize: 11.5,
+                maxWidth: 620,
+                textAlign: "right",
+              }}
+            >
+              {locale === "en"
+                ? "Actions are backend-driven via availableActions. Medium and high-risk actions keep confirmation semantics; high-risk actions require a reason."
+                : "所有 CTA 由 availableActions 驅動；中高風險動作維持確認語意，高風險動作必須填寫原因。"}
+            </span>
+          </div>
+        }
+      />
 
+      <div style={{ padding: 24 }}>
         <div
           style={{
-            padding: 24,
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.7fr) minmax(320px, 0.95fr)",
+            gap: 16,
           }}
         >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-              gap: 16,
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                gap: 16,
-                alignContent: "start",
-              }}
-            >
+          <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+            <Banner
+              theme={theme}
+              tone={bannerTone}
+              icon={incident.severity === "critical" ? "warn" : "info"}
+              title={
+                locale === "en"
+                  ? `${formatOpsCodeLabel(locale, incident.severity)} incident coordination is active`
+                  : `${formatOpsCodeLabel(locale, incident.severity)}事故協調進行中`
+              }
+              body={bannerBody || incident.description}
+            />
+
+            {refreshTone ? (
               <Banner
                 theme={theme}
-                tone={bannerTone}
-                icon="warn"
-                title={bannerTitle}
-                body={bannerBody || incident.description}
+                tone={refreshTone}
+                icon={
+                  refreshMetadata?.dataFreshness === "degraded"
+                    ? "warn"
+                    : "clock"
+                }
+                title={
+                  refreshMetadata
+                    ? locale === "en"
+                      ? `Snapshot is ${refreshMetadata.dataFreshness}`
+                      : `資料快照目前為 ${formatOpsCodeLabel(locale, refreshMetadata.dataFreshness)}`
+                    : locale === "en"
+                      ? "Refresh metadata unavailable"
+                      : "缺少刷新中繼資料"
+                }
+                body={
+                  refreshMetadata
+                    ? locale === "en"
+                      ? `Source ${refreshMetadata.source}. Use refresh before acting if the timeline or assignment state looks out of date.`
+                      : `來源 ${formatOpsCodeLabel(locale, refreshMetadata.source)}。若時間線或指派狀態看起來過期，請先重新整理再操作。`
+                    : locale === "en"
+                      ? "The backend did not return UiRefreshMetadata for this incident snapshot."
+                      : "後端沒有為這筆 incident snapshot 回傳 UiRefreshMetadata。"
+                }
               />
+            ) : null}
 
-              <Card
+            {isReadOnly ? (
+              <Banner
                 theme={theme}
-                title={locale === "en" ? "Event Summary" : "事件摘要"}
-              >
-                <DL theme={theme} cols={3} items={summaryItems} />
-                <div style={{ height: 14 }} />
-                <Field
-                  theme={theme}
-                  label={t("incidents.form.description", locale)}
-                >
-                  <div
-                    style={{
-                      color: theme.text,
-                      fontSize: "12.5px",
-                      lineHeight: 1.55,
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
-                    {incident.description}
-                  </div>
-                </Field>
-                {incident.resolutionNote ? (
-                  <>
-                    <div style={{ height: 12 }} />
-                    <Field
-                      theme={theme}
-                      label={t("incidents.form.resolutionNote", locale)}
-                    >
-                      <div
-                        style={{
-                          color: theme.text,
-                          fontSize: "12.5px",
-                          lineHeight: 1.55,
-                          whiteSpace: "pre-wrap",
-                        }}
-                      >
-                        {incident.resolutionNote}
-                      </div>
-                    </Field>
-                  </>
-                ) : null}
-              </Card>
+                tone="success"
+                icon="check"
+                title={
+                  locale === "en" ? "Read-only incident state" : "唯讀事故狀態"
+                }
+                body={
+                  locale === "en"
+                    ? "This incident is resolved or closed. Recovery and audit remain visible, while mutation actions should stay disabled."
+                    : "此事故已處理或關閉。補救與審計資訊仍可檢視，但變更動作應維持停用。"
+                }
+              />
+            ) : null}
 
-              <Card theme={theme} title={t("incidents.timeline", locale)}>
+            <IncidentDetailActionPanel
+              incidentId={incident.incidentId}
+              locale={locale}
+              availableActions={availableActions}
+              initialIntent={initialIntent}
+              initialStatus={incident.status}
+              initialCategory={incident.category}
+              initialSeverity={incident.severity}
+              initialAssignedTo={incident.assignedTo}
+              initialEscalationTarget={incident.escalationTarget}
+              initialResolutionNote={incident.resolutionNote}
+              latestAuditHref={latestAuditHref}
+              platformAdminAuditBaseUrl={platformAdminAuditBaseUrl}
+            />
+
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Event summary" : "事件摘要"}
+            >
+              <DL theme={theme} cols={3} items={summaryItems} />
+              <div style={{ height: 14 }} />
+              <Field
+                theme={theme}
+                label={t("incidents.form.description", locale)}
+              >
+                <div
+                  style={{
+                    color: theme.text,
+                    fontSize: "12.5px",
+                    lineHeight: 1.55,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {incident.description}
+                </div>
+              </Field>
+              {incident.resolutionNote ? (
+                <>
+                  <div style={{ height: 12 }} />
+                  <Field
+                    theme={theme}
+                    label={t("incidents.form.resolutionNote", locale)}
+                  >
+                    <div
+                      style={{
+                        color: theme.text,
+                        fontSize: "12.5px",
+                        lineHeight: 1.55,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {incident.resolutionNote}
+                    </div>
+                  </Field>
+                </>
+              ) : null}
+            </Card>
+
+            <Card theme={theme} title={t("incidents.timeline", locale)}>
+              {timelineItems.length > 0 ? (
                 <Timeline
                   density="compact"
                   items={timelineItems}
                   emptyState={t("incidents.timelineEmpty", locale)}
                 />
-              </Card>
-            </div>
+              ) : (
+                <EmptyStateBlock
+                  reason={normalizeIncidentEmptyReason(
+                    timelineResult.emptyState?.reason,
+                    inferEmptyReason(timelineResult.error, "no_data"),
+                  )}
+                  locale={locale}
+                  {...(timelineResult.emptyState?.messageCode
+                    ? { messageCode: timelineResult.emptyState.messageCode }
+                    : {})}
+                  {...(timelineEmptyAction
+                    ? {
+                        nextAction: (
+                          <ActionAffordance
+                            href={actionTarget(incident, timelineEmptyAction)}
+                            disabled={!timelineEmptyAction.enabled}
+                            title={buildActionTitle(
+                              timelineEmptyAction,
+                              locale,
+                              true,
+                            )}
+                            style={actionLinkStyle(
+                              theme,
+                              timelineEmptyAction.riskLevel === "high"
+                                ? "primary"
+                                : "secondary",
+                              !timelineEmptyAction.enabled,
+                            )}
+                          >
+                            <CanvasIcon
+                              name={getActionIcon(timelineEmptyAction.action)}
+                              size={12}
+                            />
+                            <span>
+                              {getActionCopy(
+                                timelineEmptyAction.action,
+                                locale,
+                              )}
+                            </span>
+                          </ActionAffordance>
+                        ),
+                      }
+                    : {})}
+                />
+              )}
+            </Card>
 
-            <div
-              style={{
-                display: "grid",
-                gap: 16,
-                alignContent: "start",
-              }}
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Audit subset" : "事故審計摘要"}
             >
-              <Card
-                theme={theme}
-                title={t("incidents.serviceRecovery.title", locale)}
-                actions={
-                  <Link
-                    href={`/incidents?incidentId=${encodeURIComponent(incident.incidentId)}`}
-                    style={actionLinkStyle(theme, "primary")}
+              {auditItems ? (
+                <DL theme={theme} cols={1} items={auditItems} />
+              ) : (
+                <EmptyStateBlock
+                  reason={inferEmptyReason(auditLogsResult.error, "no_data")}
+                  locale={locale}
+                />
+              )}
+            </Card>
+          </div>
+
+          <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+            <Card
+              theme={theme}
+              title={t("incidents.serviceRecovery.title", locale)}
+              actions={
+                serviceRecoveryAction ? (
+                  <ActionAffordance
+                    href={actionTarget(incident, serviceRecoveryAction)}
+                    title={
+                      serviceRecoveryAction.enabled
+                        ? undefined
+                        : serviceRecoveryAction.disabledReasonCode
+                    }
+                    disabled={!serviceRecoveryAction.enabled}
+                    style={actionLinkStyle(
+                      theme,
+                      "primary",
+                      !serviceRecoveryAction.enabled,
+                    )}
                   >
                     <CanvasIcon name="plus" size={12} />
                     <span>{t("incidents.serviceRecovery.add", locale)}</span>
-                  </Link>
-                }
-              >
+                  </ActionAffordance>
+                ) : undefined
+              }
+            >
+              {recoveryItems ? (
                 <DL theme={theme} cols={1} items={recoveryItems} />
-              </Card>
+              ) : (
+                <EmptyStateBlock
+                  reason={normalizeIncidentEmptyReason(
+                    recoveryResult.emptyState?.reason,
+                    inferEmptyReason(recoveryResult.error, "no_data"),
+                  )}
+                  locale={locale}
+                  {...(recoveryResult.emptyState?.messageCode
+                    ? { messageCode: recoveryResult.emptyState.messageCode }
+                    : {})}
+                  {...(() => {
+                    if (recoveryEmptyAction) {
+                      return {
+                        nextAction: (
+                          <ActionAffordance
+                            href={actionTarget(incident, recoveryEmptyAction)}
+                            disabled={!recoveryEmptyAction.enabled}
+                            title={buildActionTitle(
+                              recoveryEmptyAction,
+                              locale,
+                              true,
+                            )}
+                            style={actionLinkStyle(
+                              theme,
+                              recoveryEmptyAction.riskLevel === "high"
+                                ? "primary"
+                                : "secondary",
+                              !recoveryEmptyAction.enabled,
+                            )}
+                          >
+                            <CanvasIcon
+                              name={getActionIcon(recoveryEmptyAction.action)}
+                              size={12}
+                            />
+                            <span>
+                              {getActionCopy(
+                                recoveryEmptyAction.action,
+                                locale,
+                              )}
+                            </span>
+                          </ActionAffordance>
+                        ),
+                      };
+                    }
 
-              <Card theme={theme} title={locale === "en" ? "Related" : "關聯"}>
-                <DL theme={theme} cols={1} items={relatedItems} />
-              </Card>
+                    if (recoveryResult.error) {
+                      return {};
+                    }
 
-              <Card
-                theme={theme}
-                title={locale === "en" ? "Navigation" : "導覽"}
-                padding={14}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "8px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <Link href="/incidents" style={actionLinkStyle(theme)}>
-                    <CanvasIcon name="arrow" size={12} />
-                    <span>{t("nav.incidents", locale)}</span>
-                  </Link>
-                  {incident.relatedOrderId
-                    ? buildRelatedLink(
-                        `/dispatch?orderId=${encodeURIComponent(
-                          incident.relatedOrderId,
-                        )}`,
-                        getOpsLabel(locale, "order"),
-                        incident.relatedOrderId,
-                        "ghost",
-                      )
-                    : null}
-                  {incident.relatedComplaintCaseNo
-                    ? buildRelatedLink(
-                        `/complaints?caseNo=${encodeURIComponent(
-                          incident.relatedComplaintCaseNo,
-                        )}`,
-                        getOpsLabel(locale, "complaint"),
-                        incident.relatedComplaintCaseNo,
-                        "ghost",
-                      )
-                    : null}
+                    return {
+                      nextAction: (
+                        <span
+                          style={{ color: theme.textMuted, fontSize: 12.5 }}
+                        >
+                          {locale === "en"
+                            ? "This is the pre-recovery variant. Record the first recovery action from the incident workflow."
+                            : "這是 pre-recovery 狀態；請透過 incident 流程記錄第一筆補救。"}
+                        </span>
+                      ),
+                    };
+                  })()}
+                />
+              )}
+            </Card>
+
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Suppression state" : "配對抑制狀態"}
+            >
+              {suppression?.active ? (
+                <div style={{ display: "grid", gap: 12 }}>
+                  <Banner
+                    theme={theme}
+                    tone="warn"
+                    icon="warn"
+                    title={
+                      locale === "en"
+                        ? "Driver matching suppressed"
+                        : "司機配對已被抑制"
+                    }
+                    body={[
+                      locale === "en"
+                        ? `Reason ${suppression.reasonCode}`
+                        : `原因 ${suppression.reasonCode}`,
+                      suppression.expiresAt
+                        ? `${locale === "en" ? "Expires" : "到期"} ${formatDateTime(locale, suppression.expiresAt)}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  />
+                  <DL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      {
+                        k: locale === "en" ? "Reason code" : "原因代碼",
+                        v: formatOpsCodeLabel(locale, suppression.reasonCode),
+                      },
+                      {
+                        k: locale === "en" ? "Expires at" : "到期時間",
+                        v: formatDateTime(locale, suppression.expiresAt),
+                        mono: true,
+                      },
+                      {
+                        k: locale === "en" ? "Source incident" : "來源事故",
+                        v: suppression.sourceIncidentId ?? incident.incidentId,
+                      },
+                      {
+                        k: locale === "en" ? "Lifted at" : "解除時間",
+                        v: suppression.liftedAt
+                          ? formatDateTime(locale, suppression.liftedAt)
+                          : "—",
+                      },
+                    ]}
+                  />
                 </div>
-              </Card>
-            </div>
+              ) : incident.relatedDriverId ? (
+                <EmptyStateBlock
+                  reason={suppressionEmptyReason}
+                  locale={locale}
+                  nextAction={
+                    suppressionEmptyReason === "no_data" ? (
+                      <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                        {locale === "en"
+                          ? "Linked driver exists, but no active DriverMatchingSuppression is in force."
+                          : "此事故已有關聯司機，但目前沒有生效中的 DriverMatchingSuppression。"}
+                      </span>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <EmptyStateBlock
+                  reason="no_data"
+                  locale={locale}
+                  nextAction={
+                    <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                      {locale === "en"
+                        ? "This incident is not linked to a driver, so suppression does not apply."
+                        : "這筆事故目前沒有關聯司機，因此不適用配對抑制狀態。"}
+                    </span>
+                  }
+                />
+              )}
+            </Card>
+
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Linked entities" : "關聯實體"}
+            >
+              <DL theme={theme} cols={1} items={relatedItems} />
+            </Card>
+
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Navigation" : "導覽"}
+              padding={14}
+            >
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Link href="/incidents" style={actionLinkStyle(theme)}>
+                  <CanvasIcon name="arrow" size={12} />
+                  <span>{t("nav.incidents", locale)}</span>
+                </Link>
+                {incident.relatedOrderId ? (
+                  <Link
+                    href={`/dispatch/${encodeURIComponent(incident.relatedOrderId)}`}
+                    style={actionLinkStyle(theme, "ghost")}
+                  >
+                    <CanvasIcon name="ext" size={12} />
+                    <span>
+                      {locale === "en" ? "Open dispatch" : "開啟派遣單"}
+                    </span>
+                  </Link>
+                ) : null}
+                {incident.relatedDriverId ? (
+                  <Link
+                    href={`/drivers/${encodeURIComponent(incident.relatedDriverId)}`}
+                    style={actionLinkStyle(theme, "ghost")}
+                  >
+                    <CanvasIcon name="ext" size={12} />
+                    <span>{locale === "en" ? "Open driver" : "開啟司機"}</span>
+                  </Link>
+                ) : null}
+                {incident.relatedVehicleId ? (
+                  <Link
+                    href={buildVehicleRegistryLink(incident.relatedVehicleId)}
+                    style={actionLinkStyle(theme, "ghost")}
+                  >
+                    <CanvasIcon name="ext" size={12} />
+                    <span>{locale === "en" ? "Open vehicle" : "開啟車輛"}</span>
+                  </Link>
+                ) : null}
+                {incident.relatedComplaintCaseNo ? (
+                  <Link
+                    href={buildComplaintDetailLink(
+                      incident.relatedComplaintCaseNo,
+                    )}
+                    style={actionLinkStyle(theme, "ghost")}
+                  >
+                    <CanvasIcon name="ext" size={12} />
+                    <span>
+                      {locale === "en" ? "Open complaint" : "開啟客訴"}
+                    </span>
+                  </Link>
+                ) : null}
+              </div>
+            </Card>
           </div>
         </div>
+      </div>
     </>
   );
 }
