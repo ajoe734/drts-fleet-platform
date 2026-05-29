@@ -7,9 +7,6 @@ import type {
   TenantWebhookEndpoint,
 } from "@drts/contracts";
 import {
-  CANVAS_EMPTY_REASONS,
-  CANVAS_REFRESH_TIERS,
-  CANVAS_RISK_LEVELS,
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
@@ -19,12 +16,17 @@ import {
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
-  CanvasToggle,
-  type CanvasEmptyReason,
   type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  CANVAS_EMPTY_REASONS,
+  CANVAS_REFRESH_TIERS,
+  CANVAS_RISK_LEVELS,
+  CanvasToggle,
+  type CanvasEmptyReason,
+} from "@/lib/notification-canvas";
 import { getTenantClient } from "@/lib/api-client";
 
 export const dynamic = "force-dynamic";
@@ -335,7 +337,10 @@ function buildSubscriptionIndex(
 type MatrixRow = Record<string, unknown> & {
   eventType: string;
   description: string;
-  cells: Record<NotificationChannel, "enabled" | "disabled" | "not_provisioned">;
+  cells: Record<
+    NotificationChannel,
+    "enabled" | "disabled" | "not_provisioned"
+  >;
 };
 
 function buildMatrixRows(
@@ -513,7 +518,7 @@ export default async function NotificationsPage() {
         if (cell === "not_provisioned") {
           return (
             <CanvasPill theme={th} tone="neutral">
-              <CanvasIcon name="lock" size={10} />
+              <CanvasIcon name="x" size={10} />
               not_provisioned
             </CanvasPill>
           );
@@ -608,9 +613,7 @@ export default async function NotificationsPage() {
             label="Last update"
             value={formatUpdated(data.preferences?.updatedAt)}
             sub={
-              hasCustomConfiguration
-                ? "Custom configuration"
-                : "All defaults"
+              hasCustomConfiguration ? "Custom configuration" : "All defaults"
             }
           />
         </div>
@@ -637,9 +640,7 @@ export default async function NotificationsPage() {
                 </div>
               </>
             ) : (
-              <div style={tableEmptyStateStyle}>
-                目前沒有可顯示的事件路由
-              </div>
+              <div style={tableEmptyStateStyle}>目前沒有可顯示的事件路由</div>
             )}
           </CanvasCard>
 
@@ -708,10 +709,9 @@ export default async function NotificationsPage() {
                   tone={
                     getEmptyReasonTone(activeEmptyReason.reason) === "neutral"
                       ? "info"
-                      : (getEmptyReasonTone(activeEmptyReason.reason) as Exclude<
-                          CanvasTone,
-                          "neutral"
-                        >)
+                      : (getEmptyReasonTone(
+                          activeEmptyReason.reason,
+                        ) as Exclude<CanvasTone, "neutral">)
                   }
                   icon={
                     activeEmptyReason.reason === "fetch_failed"
@@ -753,9 +753,7 @@ export default async function NotificationsPage() {
                   style={{
                     ...emptyCardStyle,
                     borderColor: isActive ? th.accent : th.border,
-                    boxShadow: isActive
-                      ? `0 0 0 1px ${th.accent}`
-                      : undefined,
+                    boxShadow: isActive ? `0 0 0 1px ${th.accent}` : undefined,
                   }}
                 >
                   <div style={emptyHeaderStyle}>
