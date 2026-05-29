@@ -18,7 +18,6 @@ import { SnakeCaseExceptionFilter } from "./common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
 import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler.guard";
 import { GLOBAL_RATE_LIMIT } from "./common/throttling/rate-limit.constants";
-import { HealthModule } from "./health/health.module";
 import { AuditNotificationModule } from "./modules/audit-notification/audit-notification.module";
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
@@ -28,6 +27,7 @@ import { DriverSettingsModule } from "./modules/driver-settings/driver-settings.
 import { FeatureFlagsModule } from "./modules/feature-flags/feature-flags.module";
 import { FoundationModule } from "./modules/foundation/foundation.module";
 import { ForwarderModule } from "./modules/forwarder/forwarder.module";
+import { HealthModule } from "./modules/health/health.module";
 import { IdentityModule } from "./modules/identity/identity.module";
 import { IncidentModule } from "./modules/incident/incident.module";
 import { MaintenanceModule } from "./modules/maintenance/maintenance.module";

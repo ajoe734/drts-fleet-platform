@@ -3,7 +3,8 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
-import { buildHealthPayload } from "./health/health.controller";
+import { deepToSnakeCase } from "./common/snake-case.interceptor";
+import { createHealthService } from "./modules/health/health.module";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -13,16 +14,18 @@ async function bootstrap() {
     exclude: ["health"],
   });
 
+  // UI-facing alias for the `/health` controller route. It lives outside
+  // the Nest pipeline, so the global SnakeCaseInterceptor does not run on
+  // it — apply the same snake_case wire transform here so `/api/health`
+  // and `/health` emit a byte-identical UiHealthEnvelope.
+  const healthService = createHealthService();
   app
     .getHttpAdapter()
     .getInstance()
     .get(
       "/api/health",
-      (
-        _req: unknown,
-        res: { json: (body: ReturnType<typeof buildHealthPayload>) => void },
-      ) => {
-        res.json(buildHealthPayload());
+      async (_req: unknown, res: { json: (body: unknown) => void }) => {
+        res.json(deepToSnakeCase(await healthService.getHealth()));
       },
     );
 

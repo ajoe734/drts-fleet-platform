@@ -14,7 +14,7 @@ import {
   RATE_LIMIT_SKIP_DEFAULT,
   READ_HEAVY_RATE_LIMIT,
 } from "../../src/common/throttling/rate-limit.constants";
-import { HealthController } from "../../src/health/health.controller";
+import { HealthController } from "../../src/modules/health/health.controller";
 import { IdentityController } from "../../src/modules/identity/identity.controller";
 import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
 
