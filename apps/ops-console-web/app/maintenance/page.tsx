@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useEffect, useState, useTransition } from "react";
-import { PageHeader } from "@drts/ui-web";
-import { useTranslation } from "@/lib/i18n";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import type {
   CreateMaintenanceRecordCommand,
   MaintenanceRecord,
@@ -12,13 +11,141 @@ import type {
   UpdateMaintenanceRecordCommand,
 } from "@drts/contracts";
 import { MAINTENANCE_STATUSES, MAINTENANCE_TYPES } from "@drts/contracts";
+import {
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasDL as DL,
+  CanvasField as Field,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasShell as Shell,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasShellNavItem,
+  type CanvasTableColumn,
+  type CanvasTheme,
+  type CanvasTone,
+} from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 import { getOpsClient } from "@/lib/api-client";
 import { isMaintenanceOverdue } from "@/lib/ops-analytics";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
 const STATUSES: MaintenanceStatus[] = [...MAINTENANCE_STATUSES];
 const TYPES: MaintenanceType[] = [...MAINTENANCE_TYPES];
+
 type StatusFilter = MaintenanceStatus | "all";
+type MaintenanceTableRow = MaintenanceRecord & Record<string, unknown>;
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
+
+const pageStackStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const formGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+};
+
+const fullWidthStyle: CSSProperties = {
+  gridColumn: "1 / -1",
+};
+
+const tableCellStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  minWidth: 0,
+};
+
+const actionRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const controlsBarStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  padding: "14px 16px",
+  borderBottom: `1px solid ${theme.border}`,
+};
+
+const tabRailStyle: CSSProperties = {
+  display: "flex",
+  gap: 0,
+  flexWrap: "wrap",
+  alignItems: "center",
+};
+
+const tabButtonStyle = (
+  active: boolean,
+  tone: CanvasTone = "neutral",
+): CSSProperties => ({
+  border: "none",
+  borderBottom: `2px solid ${
+    active
+      ? tone === "danger"
+        ? theme.danger
+        : tone === "warn"
+          ? theme.warn
+          : tone === "success"
+            ? theme.success
+            : tone === "info"
+              ? theme.info
+              : theme.accent
+      : "transparent"
+  }`,
+  background: "transparent",
+  color: active
+    ? tone === "danger"
+      ? theme.danger
+      : tone === "warn"
+        ? theme.warn
+        : tone === "success"
+          ? theme.success
+          : tone === "info"
+            ? theme.info
+            : theme.accent
+    : theme.textMuted,
+  padding: "10px 12px",
+  fontSize: 12.5,
+  fontWeight: active ? 700 : 500,
+  cursor: "pointer",
+  transition: "color 160ms ease, border-color 160ms ease",
+});
+
+const controlsMetaStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
+const controlsMetaTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  fontWeight: 700,
+  color: theme.text,
+};
+
+const controlsMetaSubtitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  color: theme.textMuted,
+};
 
 function copy(locale: "en" | "zh", en: string, zh: string) {
   return locale === "zh" ? zh : en;
@@ -33,8 +160,151 @@ function formatCost(value: number | null): string {
   }).format(value);
 }
 
+function formatDateTime(locale: "en" | "zh", value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
+}
+
 function getEffectiveStatus(record: MaintenanceRecord): MaintenanceStatus {
   return isMaintenanceOverdue(record) ? "overdue" : record.status;
+}
+
+function getStatusTone(status: MaintenanceStatus): CanvasTone {
+  if (status === "completed") return "success";
+  if (status === "overdue") return "danger";
+  if (status === "in_progress") return "info";
+  if (status === "scheduled") return "warn";
+  return "neutral";
+}
+
+function shellNav(
+  locale: "en" | "zh",
+  t: (key: string, params?: Record<string, string | number>) => string,
+): CanvasShellNavItem[] {
+  return [
+    {
+      divider: locale === "en" ? "Workspaces" : "工作面",
+    },
+    {
+      key: "dashboard",
+      href: "/dashboard",
+      icon: "dashboard",
+      label: t("nav.dashboard"),
+    },
+    {
+      divider: locale === "en" ? "Live Ops" : "即時派遣",
+    },
+    {
+      key: "dispatch",
+      href: "/dispatch",
+      icon: "dispatch",
+      label: t("nav.dispatch"),
+      matchPaths: ["/dispatch"],
+    },
+    {
+      key: "callcenter",
+      href: "/callcenter",
+      icon: "callcenter",
+      label: t("nav.callcenter"),
+    },
+    {
+      divider: locale === "en" ? "Casework" : "案件處理",
+    },
+    {
+      key: "complaints",
+      href: "/complaints",
+      icon: "complaints",
+      label: t("nav.complaints"),
+    },
+    {
+      key: "incidents",
+      href: "/incidents",
+      icon: "incidents",
+      label: t("nav.incidents"),
+      matchPaths: ["/incidents"],
+    },
+    {
+      divider: locale === "en" ? "Monitoring" : "營運監控",
+    },
+    {
+      key: "reports",
+      href: "/reports",
+      icon: "reports",
+      label: t("nav.reports"),
+    },
+    {
+      key: "revenue",
+      href: "/revenue",
+      icon: "revenue",
+      label: t("nav.revenue"),
+    },
+    {
+      key: "attendance",
+      href: "/attendance",
+      icon: "attendance",
+      label: t("nav.attendance"),
+    },
+    {
+      key: "maintenance",
+      href: "/maintenance",
+      icon: "maintenance",
+      label: t("nav.maintenance"),
+    },
+    {
+      divider: locale === "en" ? "Registry" : "主資料",
+    },
+    {
+      key: "drivers",
+      href: "/drivers",
+      icon: "fleet",
+      label: t("nav.drivers"),
+    },
+    {
+      key: "vehicles",
+      href: "/vehicles",
+      icon: "vehicles",
+      label: t("nav.vehicles"),
+    },
+    {
+      key: "contracts",
+      href: "/contracts",
+      icon: "contracts",
+      label: t("nav.contracts"),
+    },
+    {
+      key: "feature-flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: t("nav.featureFlags"),
+    },
+  ];
+}
+
+function controlStyle(theme: CanvasTheme): CSSProperties {
+  return {
+    width: "100%",
+    borderRadius: 7,
+    border: `1px solid ${theme.border}`,
+    background: theme.bgRaised,
+    color: theme.text,
+    padding: "8px 10px",
+    fontSize: 12.5,
+    fontFamily: theme.fontFamily,
+    boxSizing: "border-box",
+  };
 }
 
 export default function MaintenancePage() {
@@ -45,8 +315,8 @@ export default function MaintenancePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   useEffect(() => {
     void loadRecords();
@@ -71,6 +341,7 @@ export default function MaintenancePage() {
       return false;
     }
     if (!deferredQuery) return true;
+
     const haystack = [
       record.maintenanceId,
       record.vehicleId,
@@ -82,6 +353,7 @@ export default function MaintenancePage() {
     ]
       .join(" ")
       .toLowerCase();
+
     return haystack.includes(deferredQuery);
   });
 
@@ -90,7 +362,7 @@ export default function MaintenancePage() {
   >(
     (counts, record) => {
       const effectiveStatus = getEffectiveStatus(record);
-      counts[effectiveStatus] += 1;
+      counts[effectiveStatus] = (counts[effectiveStatus] ?? 0) + 1;
       return counts;
     },
     {
@@ -101,347 +373,262 @@ export default function MaintenancePage() {
       overdue: 0,
     },
   );
-  const overdueCount = effectiveStatusCounts.overdue;
-  const scheduledCount = effectiveStatusCounts.scheduled;
-  const activeCount = records.filter(
-    (record) =>
-      record.status === "scheduled" || record.status === "in_progress",
-  ).length;
-  const completedCount = effectiveStatusCounts.completed;
-  const dispatchImpactCount = records.filter(
-    (record) =>
-      isMaintenanceOverdue(record) ||
-      record.status === "scheduled" ||
-      record.status === "in_progress",
-  ).length;
-  const todayKey = new Date().toISOString().slice(0, 10);
-  const dueTodayCount = records.filter(
-    (record) => record.scheduledAt?.slice(0, 10) === todayKey,
-  ).length;
-  const impactedVehicles = new Set(
-    records
-      .filter(
-        (record) =>
-          isMaintenanceOverdue(record) ||
-          record.status === "scheduled" ||
-          record.status === "in_progress",
-      )
-      .map((record) => record.vehicleId),
-  );
-  const watchlist = records
-    .filter(
-      (record) =>
-        isMaintenanceOverdue(record) ||
-        record.status === "scheduled" ||
-        record.status === "in_progress",
-    )
-    .sort((left, right) => {
-      const leftPriority = isMaintenanceOverdue(left)
-        ? 0
-        : left.status === "in_progress"
-          ? 1
-          : 2;
-      const rightPriority = isMaintenanceOverdue(right)
-        ? 0
-        : right.status === "in_progress"
-          ? 1
-          : 2;
-      if (leftPriority !== rightPriority) {
-        return leftPriority - rightPriority;
-      }
-      return (left.scheduledAt ?? "").localeCompare(right.scheduledAt ?? "");
-    })
-    .slice(0, 4);
-  const statusTabs: Array<{
+
+  const statusTabs: Array<{ value: StatusFilter; label: string }> = [
+    { value: "all", label: copy(locale, "All", "全部") },
+    { value: "scheduled", label: copy(locale, "Scheduled", "排程中") },
+    { value: "in_progress", label: copy(locale, "In Progress", "進行中") },
+    { value: "completed", label: copy(locale, "Completed", "已完成") },
+    { value: "overdue", label: copy(locale, "Overdue", "逾期") },
+  ];
+  const inFlightCount =
+    effectiveStatusCounts.scheduled + effectiveStatusCounts.in_progress;
+  const activeTab =
+    statusTabs.find((tab) => tab.value === statusFilter)?.label ??
+    statusTabs[0]!.label;
+  const editingRecord = editingId
+    ? (records.find((record) => record.maintenanceId === editingId) ?? null)
+    : null;
+  const tabMeta: Array<{
     value: StatusFilter;
-    label: string;
     count: number;
-  }> = [
+    tone?: CanvasTone;
+  }> = statusTabs.map((tab) => ({
+    value: tab.value,
+    count:
+      tab.value === "all"
+        ? records.length
+        : effectiveStatusCounts[tab.value as MaintenanceStatus],
+    tone:
+      tab.value === "overdue"
+        ? "danger"
+        : tab.value === "completed"
+          ? "success"
+          : tab.value === "scheduled"
+            ? "warn"
+            : tab.value === "in_progress"
+              ? "info"
+              : "neutral",
+  }));
+
+  const columns: CanvasTableColumn<MaintenanceTableRow>[] = [
     {
-      value: "all",
-      label: copy(locale, "All", "全部"),
-      count: records.length,
+      h: t("maintenance.col.workOrder"),
+      w: 250,
+      mono: true,
+      r: (record: MaintenanceTableRow) => (
+        <div style={tableCellStackStyle}>
+          <div>
+            <div style={{ fontWeight: 700 }}>{record.maintenanceId}</div>
+            <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+              {record.description}
+            </div>
+          </div>
+          <div style={actionRowStyle}>
+            {record.status !== "completed" && record.status !== "cancelled" ? (
+              <Btn
+                theme={theme}
+                size="xs"
+                onClick={() => {
+                  setShowCreate(false);
+                  setEditingId(record.maintenanceId);
+                }}
+              >
+                {t("common.edit")}
+              </Btn>
+            ) : null}
+            {record.status !== "completed" && record.status !== "cancelled" ? (
+              <Btn
+                theme={theme}
+                size="xs"
+                variant="secondary"
+                onClick={() => void completeRecord(record.maintenanceId)}
+              >
+                {t("maintenance.completeBtn")}
+              </Btn>
+            ) : null}
+            <Btn
+              theme={theme}
+              size="xs"
+              variant="ghost"
+              danger
+              onClick={() => void deleteRecord(record.maintenanceId)}
+            >
+              {t("common.delete")}
+            </Btn>
+          </div>
+        </div>
+      ),
     },
     {
-      value: "scheduled",
-      label: formatOpsCodeLabel(locale, "scheduled"),
-      count: scheduledCount,
+      h: t("maintenance.col.vehicle"),
+      w: 108,
+      mono: true,
+      r: (record: MaintenanceTableRow) => (
+        <Link
+          href="/vehicles"
+          style={{
+            color: theme.text,
+            textDecoration: "none",
+            fontWeight: 600,
+          }}
+        >
+          {record.vehicleId}
+        </Link>
+      ),
     },
     {
-      value: "in_progress",
-      label: formatOpsCodeLabel(locale, "in_progress"),
-      count: effectiveStatusCounts.in_progress,
+      h: copy(locale, "Category", "類別"),
+      w: 190,
+      r: (record: MaintenanceTableRow) =>
+        formatOpsCodeLabel(locale, record.type),
     },
     {
-      value: "overdue",
-      label: formatOpsCodeLabel(locale, "overdue"),
-      count: overdueCount,
+      h: t("maintenance.col.status"),
+      w: 132,
+      r: (record: MaintenanceTableRow) => {
+        const effectiveStatus = getEffectiveStatus(record);
+        return (
+          <Pill theme={theme} tone={getStatusTone(effectiveStatus)} dot>
+            {formatOpsCodeLabel(locale, effectiveStatus)}
+          </Pill>
+        );
+      },
     },
     {
-      value: "completed",
-      label: formatOpsCodeLabel(locale, "completed"),
-      count: completedCount,
+      h: t("maintenance.col.schedule"),
+      mono: true,
+      w: 170,
+      r: (record: MaintenanceTableRow) => (
+        <div style={tableCellStackStyle}>
+          <div>{formatDateTime(locale, record.scheduledAt)}</div>
+          <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+            {record.completedAt
+              ? `${copy(locale, "Done", "完成")} ${formatDateTime(
+                  locale,
+                  record.completedAt,
+                )}`
+              : copy(locale, "Open work order", "未結工單")}
+          </div>
+        </div>
+      ),
+    },
+    {
+      h: t("maintenance.col.technician"),
+      w: 96,
+      r: (record: MaintenanceTableRow) => record.technician ?? "—",
+    },
+    {
+      h: t("maintenance.col.cost"),
+      mono: true,
+      align: "right",
+      w: 120,
+      r: (record: MaintenanceTableRow) => formatCost(record.cost),
     },
   ];
 
-  function impactCue(record: MaintenanceRecord) {
-    if (isMaintenanceOverdue(record)) {
-      return {
-        tone: "critical",
-        title: copy(locale, "Dispatch hold recommended", "建議暫停派車"),
-        detail: copy(
-          locale,
-          "Overdue maintenance is still open on this vehicle.",
-          "此車輛仍有逾期工單未結案。",
-        ),
-      };
+  async function completeRecord(maintenanceId: string) {
+    try {
+      await getOpsClient().updateMaintenance(maintenanceId, {
+        status: "completed",
+      });
+      await loadRecords();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("common.unknown"));
     }
-    if (record.status === "in_progress") {
-      return {
-        tone: "warning",
-        title: copy(locale, "Vehicle in workshop", "車輛仍在保修"),
-        detail: copy(
-          locale,
-          "Keep spare capacity ready before assigning new trips.",
-          "派新單前請先確認替代運能。",
-        ),
-      };
+  }
+
+  async function deleteRecord(maintenanceId: string) {
+    try {
+      await getOpsClient().deleteMaintenance(maintenanceId);
+      if (editingId === maintenanceId) {
+        setEditingId(null);
+      }
+      await loadRecords();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("common.unknown"));
     }
-    if (record.status === "scheduled") {
-      return {
-        tone: "info",
-        title: copy(locale, "Schedule around service slot", "請避開保養時段"),
-        detail: copy(
-          locale,
-          "Upcoming work order may reduce dispatchable supply.",
-          "即將到來的工單可能影響可派車量。",
-        ),
-      };
-    }
-    return {
-      tone: "neutral",
-      title: copy(locale, "No dispatch impact", "目前無派車影響"),
-      detail: copy(locale, "Record is already closed.", "工單已結案。"),
-    };
   }
 
   return (
-    <>
+    <Shell
+      theme={theme}
+      nav={shellNav(locale, t)}
+      active="maintenance"
+      breadcrumb={[t("nav.maintenance")]}
+      searchPlaceholder={t("maintenance.search")}
+    >
       <PageHeader
+        theme={theme}
         title={t("maintenance.title")}
-        subtitle={t("maintenance.subtitle")}
-      />
-      <div>
-        {error && (
-          <div className="error-banner">
-            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
-          </div>
+        subtitle={copy(
+          locale,
+          "Work orders, schedule, technicians, and dispatch impact",
+          "工單、排程、技師與派遣影響",
         )}
-
-        <section className="summary-grid">
-          {[
-            {
-              label: t("maintenance.activeOrders"),
-              value: activeCount,
-              note: t("maintenance.activeOrdersSub"),
-            },
-            {
-              label: t("maintenance.overdue"),
-              value: overdueCount,
-              note: t("maintenance.overdueSub"),
-            },
-            {
-              label: t("maintenance.completed"),
-              value: completedCount,
-              note: t("maintenance.completedSub"),
-            },
-            {
-              label: copy(locale, "Dispatch-impact backlog", "派車影響工單"),
-              value: dispatchImpactCount,
-              note: copy(
-                locale,
-                "Open work orders that may affect dispatch supply",
-                "可能影響派車供給的未結工單",
-              ),
-            },
-          ].map((card) => (
-            <div key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
-            </div>
-          ))}
-        </section>
-
-        <section className="watch-grid">
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copy(locale, "Dispatch impact", "派車影響")}
-                </p>
-                <h3>{copy(locale, "Operational watchlist", "營運關注清單")}</h3>
-              </div>
-              <span className="panel-note">
-                {copy(locale, "Vehicles at risk", "受影響車輛")}{" "}
-                {impactedVehicles.size}
-              </span>
-            </div>
-            <div className="watch-list">
-              {watchlist.length > 0 ? (
-                watchlist.map((record) => {
-                  const cue = impactCue(record);
-                  return (
-                    <div
-                      key={record.maintenanceId}
-                      className={`watch-card watch-${cue.tone}`}
-                    >
-                      <div>
-                        <div className="cell-title">{record.vehicleId}</div>
-                        <div className="cell-subcopy">
-                          {record.maintenanceId} ·{" "}
-                          {formatOpsCodeLabel(locale, record.type)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="watch-title">{cue.title}</div>
-                        <div className="cell-subcopy">{cue.detail}</div>
-                      </div>
-                      <div className="cell-subcopy">
-                        {copy(locale, "Scheduled", "排程")}{" "}
-                        {record.scheduledAt
-                          ? new Date(record.scheduledAt).toLocaleString()
-                          : "-"}
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="cell-subcopy">
-                  {copy(
-                    locale,
-                    "No overdue or active maintenance items.",
-                    "目前沒有逾期或進行中的保養工單。",
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copy(locale, "Shift planner", "排程摘要")}
-                </p>
-                <h3>
-                  {copy(locale, "Today and next actions", "今日與近期動作")}
-                </h3>
-              </div>
-            </div>
-            <div className="detail-card-grid">
-              <div className="detail-card">
-                <span>{copy(locale, "Due today", "今日到期")}</span>
-                <strong>{dueTodayCount}</strong>
-                <small>
-                  {copy(
-                    locale,
-                    "Work orders scheduled for today",
-                    "今天排定的工單數",
-                  )}
-                </small>
-              </div>
-              <div className="detail-card">
-                <span>{copy(locale, "In workshop", "保修中")}</span>
-                <strong>
-                  {
-                    records.filter((record) => record.status === "in_progress")
-                      .length
-                  }
-                </strong>
-                <small>
-                  {copy(
-                    locale,
-                    "Vehicles currently unavailable",
-                    "目前無法派車的車輛",
-                  )}
-                </small>
-              </div>
-              <div className="detail-card">
-                <span>{copy(locale, "Ready to return", "可回歸車隊")}</span>
-                <strong>{completedCount}</strong>
-                <small>
-                  {copy(
-                    locale,
-                    "Completed work orders awaiting dispatch reuse",
-                    "已完成且可重新投入派車",
-                  )}
-                </small>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <div className="toolbar">
-          <div className="status-tabs">
-            {statusTabs.map((tab) => (
-              <button
-                key={tab.value}
-                className={statusFilter === tab.value ? "tab active" : "tab"}
-                type="button"
-                onClick={() => setStatusFilter(tab.value)}
-              >
-                {tab.label}
-                <span>{tab.count}</span>
-              </button>
-            ))}
-          </div>
-          <input
-            className="search-input"
-            type="search"
-            placeholder={t("maintenance.search")}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
+        tabs={statusTabs.map((tab) => tab.label)}
+        activeTab={activeTab}
+        actions={
+          <>
+            <Btn
+              theme={theme}
+              variant="secondary"
+              icon="arrow"
+              onClick={() => void loadRecords()}
+            >
+              {t("common.refresh")}
+            </Btn>
+            <Btn
+              theme={theme}
+              variant="primary"
+              icon="plus"
+              onClick={() => {
+                setShowCreate(true);
+                setEditingId(null);
+              }}
+            >
+              {t("maintenance.createBtn")}
+            </Btn>
+          </>
+        }
+      />
+      <div style={pageStackStyle}>
+        {error ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={`${getOpsLabel(locale, "error")}: ${error}`}
+            body={copy(
+              locale,
+              "Maintenance registry could not be fully refreshed. Use refresh after upstream data recovers.",
+              "保養工單資料尚未完全更新，請在上游資料恢復後重新整理。",
+            )}
           />
-          <select
-            className="filter-select"
-            value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as StatusFilter)
-            }
-          >
-            <option value="all">{t("common.allStatuses")}</option>
-            {STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {formatOpsCodeLabel(locale, status)}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={() => {
-              setShowCreate(true);
-              setEditingId(null);
-            }}
-          >
-            {t("maintenance.createBtn")}
-          </button>
-          <button
-            className="btn"
-            type="button"
-            onClick={() => void loadRecords()}
-          >
-            {t("common.refresh")}
-          </button>
-        </div>
+        ) : null}
 
-        {(showCreate || editingId) && (
-          <MaintenanceForm
-            editingRecord={
-              editingId
-                ? records.find((record) => record.maintenanceId === editingId)
-                : undefined
-            }
+        {(effectiveStatusCounts.overdue ?? 0) > 0 ? (
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="maintenance"
+            title={copy(
+              locale,
+              `${effectiveStatusCounts.overdue ?? 0} overdue work order(s) may affect dispatchable supply`,
+              `${effectiveStatusCounts.overdue ?? 0} 筆逾期工單可能影響可派車量`,
+            )}
+            body={copy(
+              locale,
+              "Review overdue vehicles before reopening them for new trips.",
+              "重新投入派車前，請先確認逾期保修車輛是否已解除限制。",
+            )}
+          />
+        ) : null}
+
+        {showCreate || editingRecord ? (
+          <MaintenanceEditor
+            key={editingRecord?.maintenanceId ?? "create"}
+            editingRecord={editingRecord}
             onCancel={() => {
               setShowCreate(false);
               setEditingId(null);
@@ -449,9 +636,9 @@ export default function MaintenancePage() {
             onSubmit={async (command) => {
               try {
                 const client = getOpsClient();
-                if (editingId) {
+                if (editingRecord) {
                   await client.updateMaintenance(
-                    editingId,
+                    editingRecord.maintenanceId,
                     command as UpdateMaintenanceRecordCommand,
                   );
                 } else {
@@ -467,367 +654,107 @@ export default function MaintenancePage() {
               }
             }}
           />
-        )}
+        ) : null}
 
-        {loading ? (
-          <p>{t("common.loading")}</p>
-        ) : (
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("maintenance.registry")}</p>
-                <h3>{t("maintenance.backlog")}</h3>
-              </div>
-              <span className="panel-note">
-                {t("maintenance.visibleOrders", {
-                  count: filteredRecords.length,
-                })}
-              </span>
-            </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t("maintenance.col.workOrder")}</th>
-                  <th>{t("maintenance.col.status")}</th>
-                  <th>{copy(locale, "Dispatch cue", "派車提示")}</th>
-                  <th>{t("maintenance.col.vehicle")}</th>
-                  <th>{t("maintenance.col.schedule")}</th>
-                  <th>{t("maintenance.col.technician")}</th>
-                  <th>{t("maintenance.col.cost")}</th>
-                  <th>{t("maintenance.col.actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRecords.length > 0 ? (
-                  filteredRecords.map((record) => {
-                    const overdue = isMaintenanceOverdue(record);
-                    const effectiveStatus = getEffectiveStatus(record);
-                    const cue = impactCue(record);
-                    return (
-                      <tr
-                        key={record.maintenanceId}
-                        className={overdue ? "row-overdue" : ""}
-                      >
-                        <td>
-                          <div className="cell-title">
-                            {record.maintenanceId}
-                          </div>
-                          <div className="cell-subcopy">
-                            {formatOpsCodeLabel(locale, record.type)}
-                          </div>
-                          <div className="cell-subcopy">
-                            {record.description}
-                          </div>
-                        </td>
-                        <td>
-                          <span className="status-badge">
-                            {formatOpsCodeLabel(locale, effectiveStatus)}
-                          </span>
-                        </td>
-                        <td>
-                          <div className={`impact-chip impact-${cue.tone}`}>
-                            {cue.title}
-                          </div>
-                          <div className="cell-subcopy">{cue.detail}</div>
-                        </td>
-                        <td>
-                          <Link className="inline-link" href="/vehicles">
-                            {record.vehicleId}
-                          </Link>
-                        </td>
-                        <td>
-                          <div className="cell-subcopy">
-                            {t("common.scheduledAt", {
-                              value: record.scheduledAt
-                                ? new Date(record.scheduledAt).toLocaleString()
-                                : "-",
-                            })}
-                          </div>
-                          <div className="cell-subcopy">
-                            {t("common.completedAt", {
-                              value: record.completedAt
-                                ? new Date(record.completedAt).toLocaleString()
-                                : "-",
-                            })}
-                          </div>
-                        </td>
-                        <td>{record.technician ?? "-"}</td>
-                        <td>{formatCost(record.cost)}</td>
-                        <td>
-                          <div className="action-stack">
-                            {record.status !== "completed" &&
-                              record.status !== "cancelled" && (
-                                <button
-                                  className="btn"
-                                  type="button"
-                                  onClick={() =>
-                                    setEditingId(record.maintenanceId)
-                                  }
-                                >
-                                  {t("common.edit")}
-                                </button>
-                              )}
-                            {record.status !== "completed" &&
-                              record.status !== "cancelled" && (
-                                <button
-                                  className="btn btn-warning"
-                                  type="button"
-                                  onClick={async () => {
-                                    try {
-                                      const client = getOpsClient();
-                                      await client.updateMaintenance(
-                                        record.maintenanceId,
-                                        {
-                                          status: "completed",
-                                        },
-                                      );
-                                      await loadRecords();
-                                    } catch (e) {
-                                      setError(
-                                        e instanceof Error
-                                          ? e.message
-                                          : t("common.unknown"),
-                                      );
-                                    }
-                                  }}
-                                >
-                                  {t("maintenance.completeBtn")}
-                                </button>
-                              )}
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  const client = getOpsClient();
-                                  await client.deleteMaintenance(
-                                    record.maintenanceId,
-                                  );
-                                  await loadRecords();
-                                } catch (e) {
-                                  setError(
-                                    e instanceof Error
-                                      ? e.message
-                                      : t("common.unknown"),
-                                  );
-                                }
-                              }}
-                            >
-                              {t("common.delete")}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan={8}>{t("maintenance.empty")}</td>
-                  </tr>
+        <Card theme={theme} padding={0}>
+          <div style={controlsBarStyle}>
+            <div style={controlsMetaStyle}>
+              <p style={controlsMetaTitleStyle}>
+                {copy(locale, "Maintenance work orders", "保養工單")}
+              </p>
+              <p style={controlsMetaSubtitleStyle}>
+                {copy(
+                  locale,
+                  `${inFlightCount} open work order(s) in flight`,
+                  `共有 ${inFlightCount} 筆未結工單`,
                 )}
-              </tbody>
-            </table>
+              </p>
+            </div>
+            <div style={{ minWidth: 260, flex: "1 1 320px", maxWidth: 420 }}>
+              <Field theme={theme} label={t("maintenance.search")} srOnlyLabel>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t("maintenance.search")}
+                  style={controlStyle(theme)}
+                />
+              </Field>
+            </div>
           </div>
-        )}
-
-        <Link className="route-link" href="/dashboard">
-          <strong>{t("common.backToDashboard")}</strong>{" "}
-          {t("common.backToDashboardSub")}
-        </Link>
-
-        <style jsx>{`
-          .summary-grid,
-          .watch-grid,
-          .toolbar,
-          .action-stack,
-          .detail-card-grid,
-          .watch-list,
-          .status-tabs {
-            display: grid;
-            gap: 0.75rem;
-          }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .summary-card,
-          .panel,
-          .detail-card,
-          .watch-card {
-            padding: 1rem;
-            border-radius: 1rem;
-            border: 1px solid #e2e8f0;
-            background: #fff;
-          }
-          .summary-card {
-            background: #f8fafc;
-          }
-          .summary-card strong {
-            font-size: 1.4rem;
-          }
-          .toolbar {
-            grid-template-columns: minmax(0, 1.4fr) 2fr minmax(0, 1fr) auto auto;
-            align-items: center;
-            margin-bottom: 1rem;
-          }
-          .watch-grid {
-            grid-template-columns: 1.2fr 0.8fr;
-            margin-bottom: 1rem;
-          }
-          .detail-card-grid {
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-          }
-          .detail-card {
-            background: #f8fafc;
-          }
-          .watch-card {
-            display: grid;
-            gap: 0.4rem;
-          }
-          .watch-info {
-            background: #eff6ff;
-          }
-          .watch-warning {
-            background: #fff7ed;
-          }
-          .watch-critical {
-            background: #fef2f2;
-          }
-          .status-tabs {
-            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-          }
-          .tab {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 0.7rem 0.85rem;
-            border-radius: 0.8rem;
-            border: 1px solid #cbd5e1;
-            background: #fff;
-            cursor: pointer;
-          }
-          .tab.active {
-            border-color: #0f172a;
-            background: #0f172a;
-            color: #fff;
-          }
-          .tab span {
-            font-size: 0.82rem;
-            opacity: 0.8;
-          }
-          .search-input,
-          .filter-select {
-            width: 100%;
-            padding: 0.75rem 0.85rem;
-            border-radius: 0.8rem;
-            border: 1px solid #cbd5e1;
-          }
-          .btn {
-            padding: 0.65rem 0.85rem;
-            border-radius: 0.75rem;
-            border: 1px solid #cbd5e1;
-            background: white;
-            cursor: pointer;
-          }
-          .btn-primary {
-            background: #0f172a;
-            color: white;
-            border-color: #0f172a;
-          }
-          .btn-warning {
-            background: #fef3c7;
-            border-color: #f59e0b;
-            color: #92400e;
-          }
-          .panel-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 1rem;
-            align-items: flex-start;
-            margin-bottom: 0.75rem;
-          }
-          .eyebrow,
-          .panel-note,
-          .cell-subcopy {
-            color: #64748b;
-          }
-          .eyebrow {
-            margin: 0 0 0.25rem;
-            font-size: 0.75rem;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-          }
-          .table {
-            width: 100%;
-            border-collapse: collapse;
-          }
-          .table th,
-          .table td {
-            padding: 0.75rem 0.5rem;
-            border-bottom: 1px solid #e2e8f0;
-            text-align: left;
-            vertical-align: top;
-          }
-          .cell-title {
-            font-weight: 600;
-            color: #0f172a;
-          }
-          .status-badge {
-            display: inline-block;
-            padding: 0.25rem 0.6rem;
-            border-radius: 999px;
-            background: #f1f5f9;
-          }
-          .impact-chip {
-            display: inline-flex;
-            padding: 0.22rem 0.6rem;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            margin-bottom: 0.2rem;
-          }
-          .impact-info {
-            background: #eff6ff;
-            color: #1d4ed8;
-          }
-          .impact-warning {
-            background: #fff7ed;
-            color: #c2410c;
-          }
-          .impact-critical {
-            background: #fef2f2;
-            color: #b91c1c;
-          }
-          .impact-neutral {
-            background: #f1f5f9;
-            color: #475569;
-          }
-          .row-overdue {
-            background: #fff7ed;
-          }
-          .inline-link,
-          .route-link {
-            color: #0f172a;
-            text-decoration: none;
-          }
-        `}</style>
+          <div
+            style={{
+              ...tabRailStyle,
+              padding: "0 16px",
+              borderBottom: `1px solid ${theme.border}`,
+            }}
+          >
+            {tabMeta.map((tab) => {
+              const statusTab = statusTabs.find(
+                (candidate) => candidate.value === tab.value,
+              );
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => setStatusFilter(tab.value)}
+                  style={tabButtonStyle(statusFilter === tab.value, tab.tone)}
+                >
+                  {statusTab?.label ?? tab.value} {tab.count}
+                </button>
+              );
+            })}
+          </div>
+          {loading ? (
+            <div style={{ padding: 16, color: theme.textMuted }}>
+              {t("common.loading")}
+            </div>
+          ) : filteredRecords.length > 0 ? (
+            <Table
+              theme={theme}
+              columns={columns}
+              rows={filteredRecords as MaintenanceTableRow[]}
+            />
+          ) : (
+            <div
+              style={{
+                padding: 24,
+                color: theme.textMuted,
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              <strong style={{ color: theme.text }}>
+                {copy(
+                  locale,
+                  "No work orders in this view",
+                  "目前篩選下沒有工單",
+                )}
+              </strong>
+              <span>{t("maintenance.empty")}</span>
+            </div>
+          )}
+        </Card>
       </div>
-    </>
+    </Shell>
   );
 }
 
-function MaintenanceForm({
+function MaintenanceEditor({
   editingRecord,
   onCancel,
   onSubmit,
 }: {
-  editingRecord: MaintenanceRecord | undefined;
+  editingRecord: MaintenanceRecord | null;
   onCancel: () => void;
   onSubmit: (
     command: CreateMaintenanceRecordCommand | UpdateMaintenanceRecordCommand,
   ) => Promise<void>;
 }) {
   const { t, locale } = useTranslation();
-  const [pending, startTransition] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+  const [pending, setPending] = useState(false);
   const [vehicleId, setVehicleId] = useState(editingRecord?.vehicleId ?? "");
   const [type, setType] = useState<MaintenanceType>(
     editingRecord?.type ?? "scheduled_service",
@@ -858,9 +785,11 @@ function MaintenanceForm({
 
   const isEditing = Boolean(editingRecord);
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    startTransition(() => {
+    setPending(true);
+
+    try {
       if (isEditing) {
         const command: UpdateMaintenanceRecordCommand = {
           status,
@@ -871,7 +800,7 @@ function MaintenanceForm({
           ...(cost ? { cost: Number(cost) } : {}),
           ...(notes.trim() ? { notes: notes.trim() } : {}),
         };
-        void onSubmit(command);
+        await onSubmit(command);
         return;
       }
 
@@ -886,182 +815,198 @@ function MaintenanceForm({
         ...(cost ? { cost: Number(cost) } : {}),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
       };
-      void onSubmit(command);
-    });
+      await onSubmit(command);
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
-    <form className="maintenance-form" onSubmit={handleSubmit}>
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">{t("maintenance.form.editor")}</p>
-          <h3>
-            {isEditing
-              ? t("maintenance.form.updateTitle")
-              : t("maintenance.form.createTitle")}
-          </h3>
+    <Card
+      theme={theme}
+      title={
+        isEditing
+          ? t("maintenance.form.updateTitle")
+          : t("maintenance.form.createTitle")
+      }
+      subtitle={t("maintenance.form.editor")}
+      actions={
+        <>
+          <Btn theme={theme} variant="ghost" onClick={onCancel}>
+            {t("common.cancel")}
+          </Btn>
+          <Btn
+            theme={theme}
+            variant="primary"
+            onClick={() => formRef.current?.requestSubmit()}
+            disabled={pending}
+          >
+            {pending
+              ? t("maintenance.form.saving")
+              : isEditing
+                ? t("maintenance.form.saveChanges")
+                : t("maintenance.form.createRecord")}
+          </Btn>
+        </>
+      }
+    >
+      {editingRecord ? (
+        <div style={{ marginBottom: 12 }}>
+          <DL
+            theme={theme}
+            cols={4}
+            items={[
+              { k: "WO", v: editingRecord.maintenanceId, mono: true },
+              {
+                k: t("maintenance.col.vehicle"),
+                v: editingRecord.vehicleId,
+                mono: true,
+              },
+              {
+                k: copy(locale, "Created", "建立"),
+                v: formatDateTime(locale, editingRecord.createdAt),
+                mono: true,
+              },
+              {
+                k: copy(locale, "Updated", "更新"),
+                v: formatDateTime(locale, editingRecord.updatedAt),
+                mono: true,
+              },
+            ]}
+          />
         </div>
-      </div>
-      <div className="form-grid">
-        {!isEditing && (
-          <>
-            <label>
-              {t("maintenance.form.vehicleId")}
+      ) : null}
+
+      <form ref={formRef} onSubmit={handleSubmit}>
+        <div style={formGridStyle}>
+          {!isEditing ? (
+            <>
+              <div>
+                <Field
+                  theme={theme}
+                  label={t("maintenance.form.vehicleId")}
+                  required
+                >
+                  <input
+                    value={vehicleId}
+                    onChange={(event) => setVehicleId(event.target.value)}
+                    required
+                    style={controlStyle(theme)}
+                  />
+                </Field>
+              </div>
+              <div>
+                <Field
+                  theme={theme}
+                  label={t("maintenance.form.type")}
+                  required
+                >
+                  <select
+                    value={type}
+                    onChange={(event) =>
+                      setType(event.target.value as MaintenanceType)
+                    }
+                    style={controlStyle(theme)}
+                  >
+                    {TYPES.map((value) => (
+                      <option key={value} value={value}>
+                        {formatOpsCodeLabel(locale, value)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <div style={fullWidthStyle}>
+                <Field
+                  theme={theme}
+                  label={t("maintenance.form.description")}
+                  required
+                >
+                  <textarea
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    rows={4}
+                    required
+                    style={controlStyle(theme)}
+                  />
+                </Field>
+              </div>
+              <div>
+                <Field theme={theme} label={t("maintenance.form.scheduledAt")}>
+                  <input
+                    type="datetime-local"
+                    value={scheduledAt}
+                    onChange={(event) => setScheduledAt(event.target.value)}
+                    style={controlStyle(theme)}
+                  />
+                </Field>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <Field theme={theme} label={t("maintenance.form.status")}>
+                  <select
+                    value={status}
+                    onChange={(event) =>
+                      setStatus(event.target.value as MaintenanceStatus)
+                    }
+                    style={controlStyle(theme)}
+                  >
+                    {STATUSES.map((value) => (
+                      <option key={value} value={value}>
+                        {formatOpsCodeLabel(locale, value)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <div>
+                <Field theme={theme} label={t("maintenance.form.completedAt")}>
+                  <input
+                    type="datetime-local"
+                    value={completedAt}
+                    onChange={(event) => setCompletedAt(event.target.value)}
+                    style={controlStyle(theme)}
+                  />
+                </Field>
+              </div>
+            </>
+          )}
+
+          <div>
+            <Field theme={theme} label={t("maintenance.form.technician")}>
               <input
-                value={vehicleId}
-                onChange={(event) => setVehicleId(event.target.value)}
-                required
+                value={technician}
+                onChange={(event) => setTechnician(event.target.value)}
+                style={controlStyle(theme)}
               />
-            </label>
-            <label>
-              {t("maintenance.form.type")}
-              <select
-                value={type}
-                onChange={(event) =>
-                  setType(event.target.value as MaintenanceType)
-                }
-              >
-                {TYPES.map((value) => (
-                  <option key={value} value={value}>
-                    {formatOpsCodeLabel(locale, value)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="full-width">
-              {t("maintenance.form.description")}
+            </Field>
+          </div>
+          <div>
+            <Field theme={theme} label={t("maintenance.form.cost")}>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={cost}
+                onChange={(event) => setCost(event.target.value)}
+                style={controlStyle(theme)}
+              />
+            </Field>
+          </div>
+          <div style={fullWidthStyle}>
+            <Field theme={theme} label={t("maintenance.form.notes")}>
               <textarea
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                rows={4}
-                required
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={3}
+                style={controlStyle(theme)}
               />
-            </label>
-            <label>
-              {t("maintenance.form.scheduledAt")}
-              <input
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(event) => setScheduledAt(event.target.value)}
-              />
-            </label>
-          </>
-        )}
-        {isEditing && (
-          <>
-            <label>
-              {t("maintenance.form.status") || t("common.status")}
-              <select
-                value={status}
-                onChange={(event) =>
-                  setStatus(event.target.value as MaintenanceStatus)
-                }
-              >
-                {STATUSES.map((value) => (
-                  <option key={value} value={value}>
-                    {formatOpsCodeLabel(locale, value)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {t("maintenance.form.completedAt")}
-              <input
-                type="datetime-local"
-                value={completedAt}
-                onChange={(event) => setCompletedAt(event.target.value)}
-              />
-            </label>
-          </>
-        )}
-        <label>
-          {t("maintenance.form.technician")}
-          <input
-            value={technician}
-            onChange={(event) => setTechnician(event.target.value)}
-          />
-        </label>
-        <label>
-          {t("maintenance.form.cost")}
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={cost}
-            onChange={(event) => setCost(event.target.value)}
-          />
-        </label>
-        <label className="full-width">
-          {t("maintenance.form.notes")}
-          <textarea
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            rows={4}
-          />
-        </label>
-      </div>
-      <div className="form-actions">
-        <button className="btn btn-primary" type="submit" disabled={pending}>
-          {pending
-            ? t("maintenance.form.saving")
-            : isEditing
-              ? t("maintenance.form.saveChanges")
-              : t("maintenance.form.createRecord")}
-        </button>
-        <button className="btn" type="button" onClick={onCancel}>
-          {t("common.cancel")}
-        </button>
-      </div>
-      <style jsx>{`
-        .maintenance-form {
-          margin-bottom: 1rem;
-          padding: 1rem;
-          border-radius: 1rem;
-          border: 1px solid #e2e8f0;
-          background: #f8fafc;
-        }
-        .panel-head {
-          display: flex;
-          justify-content: space-between;
-          gap: 1rem;
-          align-items: flex-start;
-          margin-bottom: 0.75rem;
-        }
-        .eyebrow {
-          margin: 0 0 0.25rem;
-          font-size: 0.75rem;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          color: #64748b;
-        }
-        .form-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 0.75rem;
-        }
-        label {
-          display: grid;
-          gap: 0.35rem;
-          color: #0f172a;
-        }
-        input,
-        select,
-        textarea {
-          width: 100%;
-          padding: 0.7rem 0.8rem;
-          border-radius: 0.75rem;
-          border: 1px solid #cbd5e1;
-          background: white;
-        }
-        .full-width {
-          grid-column: 1 / -1;
-        }
-        .form-actions {
-          display: flex;
-          gap: 0.75rem;
-          margin-top: 0.75rem;
-        }
-      `}</style>
-    </form>
+            </Field>
+          </div>
+        </div>
+      </form>
+    </Card>
   );
 }
