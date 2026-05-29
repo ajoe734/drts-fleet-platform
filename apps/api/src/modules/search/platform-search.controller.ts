@@ -15,12 +15,16 @@ export class PlatformSearchController {
   @Throttle(READ_HEAVY_RATE_LIMIT)
   search(
     @Query("q") query?: string,
+    @Query("query") legacyQuery?: string,
     @Query("types") requestedTypes?: string | string[],
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       {
-        items: this.platformSearchService.searchPlatform(query, requestedTypes),
+        items: this.platformSearchService.searchPlatform(
+          query ?? legacyQuery,
+          requestedTypes,
+        ),
       },
       requestId,
     );

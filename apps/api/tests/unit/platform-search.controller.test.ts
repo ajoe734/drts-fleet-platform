@@ -33,6 +33,7 @@ describe("PlatformSearchController", () => {
 
     const response = controller.search(
       "tenant",
+      undefined,
       ["tenants", "audit"],
       "req-platform-search-001",
     );
@@ -70,5 +71,47 @@ describe("PlatformSearchController", () => {
         timestamp: expect.any(String),
       },
     });
+  });
+
+  it("accepts the legacy query param alias when q is absent", () => {
+    const platformSearchService = {
+      searchPlatform: vi.fn(() => []),
+    };
+    const controller = new PlatformSearchController(
+      platformSearchService as never,
+    );
+
+    controller.search(
+      undefined,
+      "platform",
+      ["users"],
+      "req-platform-search-002",
+    );
+
+    expect(platformSearchService.searchPlatform).toHaveBeenCalledWith(
+      "platform",
+      ["users"],
+    );
+  });
+
+  it("prefers q over the legacy query alias when both are present", () => {
+    const platformSearchService = {
+      searchPlatform: vi.fn(() => []),
+    };
+    const controller = new PlatformSearchController(
+      platformSearchService as never,
+    );
+
+    controller.search(
+      "tenant",
+      "platform",
+      "tenants,users",
+      "req-platform-search-003",
+    );
+
+    expect(platformSearchService.searchPlatform).toHaveBeenCalledWith(
+      "tenant",
+      "tenants,users",
+    );
   });
 });
