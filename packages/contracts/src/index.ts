@@ -1,8 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type {
-  DriverMatchingSuppression,
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  RefreshTier,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
@@ -4188,6 +4191,22 @@ export interface FeatureFlag {
 export interface FeatureFlagSummary {
   flags: FeatureFlag[];
   notes: string[];
+}
+
+export interface OpsFeatureFlagRecord extends FeatureFlag {
+  scope: "global" | "tenant";
+  currentValue: string;
+  lastChangedBy: string;
+  availableActions: ResourceActionDescriptor[];
+  historyLink: CrossAppResourceLink;
+}
+
+export interface OpsFeatureFlagSummary {
+  flags: OpsFeatureFlagRecord[];
+  notes: string[];
+  refresh: UiRefreshMetadata;
+  refreshTier: RefreshTier;
+  emptyState?: EmptyStateEnvelope;
 }
 
 export interface FeatureFlagTenantOverrideCommand {

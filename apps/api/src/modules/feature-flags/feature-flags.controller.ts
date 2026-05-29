@@ -2,14 +2,17 @@ import {
   Body,
   Controller,
   Get,
-  Param,
   Patch,
-  Post,
   Headers,
+  Param,
+  Post,
   Query,
 } from "@nestjs/common";
 import { FeatureFlagsService } from "./feature-flags.service";
-import type { FeatureFlagSummary } from "@drts/contracts";
+import type {
+  FeatureFlagSummary,
+  OpsFeatureFlagSummary,
+} from "@drts/contracts";
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { ApiRequestError } from "../../common/api-envelope";
 
@@ -85,5 +88,20 @@ export class FeatureFlagsController {
   ) {
     const enabled = await this.service.isEnabled(key, tenantId);
     return toApiSuccessEnvelope({ key, enabled }, requestId);
+  }
+}
+
+@Controller("ops")
+export class OpsFeatureFlagsController {
+  constructor(private readonly service: FeatureFlagsService) {}
+
+  @Get("feature-flags")
+  async getOpsFeatureFlags(
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+  ) {
+    const summary: OpsFeatureFlagSummary =
+      await this.service.getOpsSummary(tenantId);
+    return toApiSuccessEnvelope(summary, requestId);
   }
 }
