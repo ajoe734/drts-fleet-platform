@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
+import type { DriverRegistryListItem } from "@drts/api-client";
 import type {
   DriverLocationSnapshot,
   DriverMatchingSuppression,
@@ -69,7 +70,7 @@ type DriverListFilters = {
 };
 
 type DriverRowModel = {
-  driver: DriverRegistryRecord;
+  driver: DriverRegistryListItem;
   location: DriverLocationSnapshot | undefined;
   locationState: "live" | "stale" | "missing" | "unknown";
   presences: PlatformPresenceRecord[];
@@ -294,104 +295,6 @@ async function loadWithError<T>(
         error instanceof Error ? error.message : t("common.unknown", locale),
     };
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isRiskLevel(
-  value: unknown,
-): value is ResourceActionDescriptor["riskLevel"] {
-  return value === "low" || value === "medium" || value === "high";
-}
-
-function readActions(value: unknown): ResourceActionDescriptor[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  return value.flatMap((entry) => {
-    if (!isRecord(entry)) {
-      return [];
-    }
-    if (
-      typeof entry.action !== "string" ||
-      typeof entry.enabled !== "boolean" ||
-      !isRiskLevel(entry.riskLevel)
-    ) {
-      return [];
-    }
-
-    return [
-      {
-        action: entry.action,
-        enabled: entry.enabled,
-        riskLevel: entry.riskLevel,
-        ...(typeof entry.disabledReasonCode === "string"
-          ? { disabledReasonCode: entry.disabledReasonCode }
-          : {}),
-        ...(typeof entry.requiresReason === "boolean"
-          ? { requiresReason: entry.requiresReason }
-          : {}),
-      },
-    ];
-  });
-}
-
-function readMatchingSuppression(
-  value: unknown,
-): DriverMatchingSuppression | null | undefined {
-  if (value == null) {
-    return null;
-  }
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  if (
-    typeof value.active !== "boolean" ||
-    (value.reasonCode !== "incident" &&
-      value.reasonCode !== "compliance_hold" &&
-      value.reasonCode !== "manual_ops_hold") ||
-    typeof value.expiresAt !== "string" ||
-    !(typeof value.liftedAt === "string" || value.liftedAt === null)
-  ) {
-    return undefined;
-  }
-
-  return {
-    active: value.active,
-    reasonCode: value.reasonCode,
-    expiresAt: value.expiresAt,
-    liftedAt: value.liftedAt,
-    ...(typeof value.sourceIncidentId === "string" ||
-    value.sourceIncidentId === null
-      ? { sourceIncidentId: value.sourceIncidentId }
-      : {}),
-  };
-}
-
-function readDriverRegistryListItem(
-  value: unknown,
-): DriverRegistryRecord | null {
-  if (
-    !isRecord(value) ||
-    typeof value.driverId !== "string" ||
-    typeof value.name !== "string"
-  ) {
-    return null;
-  }
-
-  const availableActions = readActions(value.availableActions);
-  const matchingSuppression = readMatchingSuppression(
-    value.matchingSuppression,
-  );
-
-  return {
-    ...(value as unknown as DriverRegistryRecord),
-    ...(availableActions ? { availableActions } : {}),
-    ...(matchingSuppression !== undefined ? { matchingSuppression } : {}),
-  };
 }
 
 function isLocationStale(
@@ -936,7 +839,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   const generatedAt = new Date().toISOString();
 
   const [driversResult, locationsResult, forwardedResult] = await Promise.all([
-    loadWithError<LoadedListEnvelope<DriverRegistryRecord>>(
+    loadWithError<LoadedListEnvelope<DriverRegistryListItem>>(
       () =>
         client.listDriversEnvelope().then((envelope) => ({
           items: envelope.items,
@@ -956,10 +859,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
   ]);
 
   const driversEnvelope = driversResult.data;
-  const drivers = (driversEnvelope?.items ?? []).flatMap((driver) => {
-    const parsed = readDriverRegistryListItem(driver);
-    return parsed ? [parsed] : [];
-  });
+  const drivers = driversEnvelope?.items ?? [];
 
   const locationByDriver = new Map<string, DriverLocationSnapshot>();
   for (const snapshot of locationsResult.data ?? []) {
