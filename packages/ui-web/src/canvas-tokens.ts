@@ -226,14 +226,14 @@ export const CANVAS_REALM_COLORS: Record<
     ops: { fg: "#DC2626", bg: "#FEF2F2", bd: "#FECACA" },
     platform: { fg: "#4F46E5", bg: "#EEF2FF", bd: "#C7D2FE" },
     system: { fg: "#6B7280", bg: "#F1F4F8", bd: "#CBD5E1" },
-    driver: { fg: "#0F4C75", bg: "#E6F0F8", bd: "#BBD3E6" },
+    driver: { fg: "#A8590B", bg: "#FCEED6", bd: "#F0CC95" },
   },
   dark: {
     tenant: { fg: "#5EEAD4", bg: "#0F2A28", bd: "#134E48" },
     ops: { fg: "#FCA5A5", bg: "#3F1212", bd: "#5C1A1A" },
     platform: { fg: "#A5B4FC", bg: "#1E1B4B", bd: "#312E81" },
     system: { fg: "#94A3B8", bg: "#1A2230", bd: "#2A3445" },
-    driver: { fg: "#7BC0FF", bg: "#0F2236", bd: "#1B3A5A" },
+    driver: { fg: "#FCD34D", bg: "#3A2A0A", bd: "#5C4218" },
   },
 };
 
@@ -296,29 +296,27 @@ export const CANVAS_EMPTY_REASONS: Record<
   },
 };
 
-export const CANVAS_RISK_LEVELS: Record<
-  CanvasRiskLevel,
-  CanvasRiskLevelMeta
-> = {
-  low: {
-    label: "低風險",
-    icon: "check",
-    tone: "success",
-    pattern: "直接執行 + toast 收據",
-  },
-  medium: {
-    label: "中風險",
-    icon: "warn",
-    tone: "warn",
-    pattern: "modal 確認 + toast 收據",
-  },
-  high: {
-    label: "高風險",
-    icon: "danger",
-    tone: "danger",
-    pattern: "modal + 必填原因 + toast 收據",
-  },
-};
+export const CANVAS_RISK_LEVELS: Record<CanvasRiskLevel, CanvasRiskLevelMeta> =
+  {
+    low: {
+      label: "低風險",
+      icon: "check",
+      tone: "success",
+      pattern: "直接執行 + toast 收據",
+    },
+    medium: {
+      label: "中風險",
+      icon: "warn",
+      tone: "warn",
+      pattern: "modal 確認 + toast 收據",
+    },
+    high: {
+      label: "高風險",
+      icon: "danger",
+      tone: "danger",
+      pattern: "modal + 必填原因 + toast 收據",
+    },
+  };
 
 export const CANVAS_TYPE = {
   family:
