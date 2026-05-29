@@ -1,16 +1,16 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import type {
   AuditLogRecord,
+  CrossAppResourceLink,
   DriverMatchingSuppression,
   DriverRegistryRecord,
   EmptyReason,
   IncidentRecord,
-  IncidentTimelineEntry,
   OwnedOrderRecord,
   RefreshTier,
   ResourceActionDescriptor,
-  ServiceRecoveryActionRecord,
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
@@ -57,9 +57,30 @@ type EmptyStateConfig = {
   body: Record<Locale, string>;
 };
 
+type RuntimeEmptyState = {
+  reason: EmptyReason;
+  messageCode?: string;
+  nextAction?: ResourceActionDescriptor | null;
+};
+
+type RuntimeListEnvelope<T> =
+  | T[]
+  | {
+      items?: T[];
+      refresh?: UiRefreshMetadata | null;
+      emptyState?: RuntimeEmptyState | null;
+    };
+
 type SectionLoadResult<T> = {
   data: T;
   error: Error | null;
+};
+
+type RuntimeSectionLoadResult<T> = {
+  data: T[];
+  error: Error | null;
+  refresh: UiRefreshMetadata | null;
+  emptyState: RuntimeEmptyState | null;
 };
 
 const theme = buildCanvasTheme({
@@ -157,6 +178,36 @@ async function resolveSection<T>(
     return {
       data: fallback,
       error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+async function resolveRuntimeSection<T>(
+  loader: () => Promise<RuntimeListEnvelope<T>>,
+): Promise<RuntimeSectionLoadResult<T>> {
+  try {
+    const payload = await loader();
+    if (Array.isArray(payload)) {
+      return {
+        data: payload,
+        error: null,
+        refresh: null,
+        emptyState: null,
+      };
+    }
+
+    return {
+      data: Array.isArray(payload.items) ? payload.items : [],
+      error: null,
+      refresh: payload.refresh ?? null,
+      emptyState: payload.emptyState ?? null,
+    };
+  } catch (error) {
+    return {
+      data: [],
+      error: error instanceof Error ? error : new Error(String(error)),
+      refresh: null,
+      emptyState: null,
     };
   }
 }
@@ -393,6 +444,17 @@ function inferEmptyReason(
   return "fetch_failed";
 }
 
+function normalizeIncidentEmptyReason(
+  reason: EmptyReason | null | undefined,
+  fallbackReason: Exclude<EmptyReason, "driver_not_eligible"> = "no_data",
+): Exclude<EmptyReason, "driver_not_eligible"> {
+  if (!reason || reason === "driver_not_eligible") {
+    return fallbackReason;
+  }
+
+  return reason;
+}
+
 function getActionCopy(action: string, locale: Locale) {
   const normalized = action.toLowerCase();
   if (normalized.includes("update")) {
@@ -426,7 +488,7 @@ function buildComplaintDetailLink(caseNo: string) {
 }
 
 function buildVehicleRegistryLink(vehicleId: string) {
-  return `/vehicles?vehicleId=${encodeURIComponent(vehicleId)}`;
+  return `/vehicles/${encodeURIComponent(vehicleId)}`;
 }
 
 function getActionIntent(action: string) {
@@ -542,11 +604,13 @@ function actionTarget(
 function EmptyStateBlock({
   reason,
   locale,
+  messageCode,
   nextAction,
 }: {
   reason: Exclude<EmptyReason, "driver_not_eligible">;
   locale: Locale;
-  nextAction?: ReactNode;
+  messageCode?: string | undefined;
+  nextAction?: ReactNode | undefined;
 }) {
   const config = EMPTY_STATE_CONFIG[reason]!;
   return (
@@ -582,10 +646,39 @@ function EmptyStateBlock({
           <CanvasIcon name={config.icon} size={14} />
         </span>
         <div style={{ display: "grid", gap: 2 }}>
-          <strong style={{ fontSize: 13 }}>{config.title[locale]}</strong>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <strong style={{ fontSize: 13 }}>{config.title[locale]}</strong>
+            <span
+              style={{
+                fontFamily: theme.monoFamily,
+                fontSize: 11,
+                color: theme.textDim,
+              }}
+            >
+              {reason}
+            </span>
+          </div>
           <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
             {config.body[locale]}
           </span>
+          {messageCode ? (
+            <span
+              style={{
+                fontFamily: theme.monoFamily,
+                fontSize: 11.5,
+                color: theme.textDim,
+              }}
+            >
+              {messageCode}
+            </span>
+          ) : null}
         </div>
       </div>
       {nextAction}
@@ -593,17 +686,27 @@ function EmptyStateBlock({
   );
 }
 
-function buildAuditLink(auditId: string) {
-  const route = `/audit?auditId=${encodeURIComponent(auditId)}`;
+function buildCrossAppHref(link: CrossAppResourceLink) {
   const platformAdminBaseUrl =
     process.env.PLATFORM_ADMIN_BASE_URL ??
     process.env.NEXT_PUBLIC_PLATFORM_ADMIN_BASE_URL;
 
   if (!platformAdminBaseUrl) {
-    return route;
+    return link.route;
   }
 
-  return new URL(route, platformAdminBaseUrl).toString();
+  return new URL(link.route, platformAdminBaseUrl).toString();
+}
+
+function buildAuditLink(auditId: string) {
+  return buildCrossAppHref({
+    targetApp: "platform-admin",
+    route: `/audit?auditId=${encodeURIComponent(auditId)}`,
+    resourceType: "audit",
+    resourceId: auditId,
+    openMode: "new_tab",
+    label: "View audit",
+  });
 }
 
 function firstParam(value: string | string[] | undefined) {
@@ -628,38 +731,7 @@ export default async function IncidentDetailPage({
   );
 
   if (!incident) {
-    return (
-      <div style={{ padding: 24 }}>
-        <PageHeader
-          theme={theme}
-          title={locale === "en" ? "Incident not found" : "找不到事故"}
-          subtitle={incidentId}
-          actions={
-            <Link href="/incidents" style={actionLinkStyle(theme)}>
-              <CanvasIcon name="arrow" size={12} />
-              <span>
-                {locale === "en" ? "Back to Incident Center" : "返回事故中心"}
-              </span>
-            </Link>
-          }
-        />
-        <Banner
-          theme={theme}
-          tone="danger"
-          icon="warn"
-          title={
-            locale === "en"
-              ? "No incident matched this route"
-              : "此路由沒有對應事故"
-          }
-          body={
-            locale === "en"
-              ? "The incident could be deleted, unavailable in this environment, or the deep link is stale."
-              : "這筆事故可能已不存在、目前環境不可用，或這個 deep link 已過期。"
-          }
-        />
-      </div>
-    );
+    notFound();
   }
 
   const [
@@ -669,14 +741,8 @@ export default async function IncidentDetailPage({
     auditLogsResult,
     driverRegistryResult,
   ] = await Promise.all([
-    resolveSection(
-      () => client.getIncidentTimeline(incidentId),
-      [] as IncidentTimelineEntry[],
-    ),
-    resolveSection(
-      () => client.getServiceRecoveryActions(incidentId),
-      incident.serviceRecoveryActions ?? ([] as ServiceRecoveryActionRecord[]),
-    ),
+    resolveRuntimeSection(() => client.getIncidentTimeline(incidentId)),
+    resolveRuntimeSection(() => client.getServiceRecoveryActions(incidentId)),
     incident.relatedOrderId
       ? resolveOrFallback(
           () => client.getOrder(incident.relatedOrderId as string),
@@ -1005,17 +1071,29 @@ export default async function IncidentDetailPage({
   const latestAuditHref = incidentAuditLogs[0]
     ? buildAuditLink(incidentAuditLogs[0].auditId)
     : null;
+  const timelineEmptyAction = timelineResult.emptyState?.nextAction;
+  const recoveryEmptyAction = recoveryResult.emptyState?.nextAction;
+  const titlePills = (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+      <span>{incident.incidentId}</span>
+      <Pill theme={theme} tone={getSeverityTone(incident.severity)} dot>
+        {formatOpsCodeLabel(locale, incident.severity)}
+      </Pill>
+      <Pill theme={theme} tone={getStatusTone(incident.status)}>
+        {formatOpsCodeLabel(locale, incident.status)}
+      </Pill>
+    </span>
+  );
 
   return (
     <>
       <PageHeader
         theme={theme}
-        title={`${incident.incidentId} · ${incident.title}`}
+        title={titlePills}
         subtitle={[
+          incident.title,
           formatOpsCodeLabel(locale, incident.category),
-          formatOpsCodeLabel(locale, incident.severity),
-          formatOpsCodeLabel(locale, incident.status),
-          formatDateTime(locale, incident.createdAt),
+          formatDateTime(locale, incident.occurredAt ?? incident.createdAt),
           formatIncidentAge(locale, incident.occurredAt ?? incident.createdAt),
         ].join(" · ")}
         actions={
@@ -1226,8 +1304,47 @@ export default async function IncidentDetailPage({
                 />
               ) : (
                 <EmptyStateBlock
-                  reason={inferEmptyReason(timelineResult.error, "no_data")}
+                  reason={normalizeIncidentEmptyReason(
+                    timelineResult.emptyState?.reason,
+                    inferEmptyReason(timelineResult.error, "no_data"),
+                  )}
                   locale={locale}
+                  {...(timelineResult.emptyState?.messageCode
+                    ? { messageCode: timelineResult.emptyState.messageCode }
+                    : {})}
+                  {...(timelineEmptyAction
+                    ? {
+                        nextAction: (
+                          <ActionAffordance
+                            href={actionTarget(incident, timelineEmptyAction)}
+                            disabled={!timelineEmptyAction.enabled}
+                            title={buildActionTitle(
+                              timelineEmptyAction,
+                              locale,
+                              true,
+                            )}
+                            style={actionLinkStyle(
+                              theme,
+                              timelineEmptyAction.riskLevel === "high"
+                                ? "primary"
+                                : "secondary",
+                              !timelineEmptyAction.enabled,
+                            )}
+                          >
+                            <CanvasIcon
+                              name={getActionIcon(timelineEmptyAction.action)}
+                              size={12}
+                            />
+                            <span>
+                              {getActionCopy(
+                                timelineEmptyAction.action,
+                                locale,
+                              )}
+                            </span>
+                          </ActionAffordance>
+                        ),
+                      }
+                    : {})}
                 />
               )}
             </Card>
@@ -1277,17 +1394,65 @@ export default async function IncidentDetailPage({
                 <DL theme={theme} cols={1} items={recoveryItems} />
               ) : (
                 <EmptyStateBlock
-                  reason={inferEmptyReason(recoveryResult.error, "no_data")}
+                  reason={normalizeIncidentEmptyReason(
+                    recoveryResult.emptyState?.reason,
+                    inferEmptyReason(recoveryResult.error, "no_data"),
+                  )}
                   locale={locale}
-                  nextAction={
-                    recoveryResult.error ? undefined : (
-                      <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
-                        {locale === "en"
-                          ? "This is the pre-recovery variant. Record the first recovery action from the Incident Center action flow."
-                          : "這是 pre-recovery 狀態；請透過 Incident Center 的既有動作流程記錄第一筆補救。"}
-                      </span>
-                    )
-                  }
+                  {...(recoveryResult.emptyState?.messageCode
+                    ? { messageCode: recoveryResult.emptyState.messageCode }
+                    : {})}
+                  {...(() => {
+                    if (recoveryEmptyAction) {
+                      return {
+                        nextAction: (
+                          <ActionAffordance
+                            href={actionTarget(incident, recoveryEmptyAction)}
+                            disabled={!recoveryEmptyAction.enabled}
+                            title={buildActionTitle(
+                              recoveryEmptyAction,
+                              locale,
+                              true,
+                            )}
+                            style={actionLinkStyle(
+                              theme,
+                              recoveryEmptyAction.riskLevel === "high"
+                                ? "primary"
+                                : "secondary",
+                              !recoveryEmptyAction.enabled,
+                            )}
+                          >
+                            <CanvasIcon
+                              name={getActionIcon(recoveryEmptyAction.action)}
+                              size={12}
+                            />
+                            <span>
+                              {getActionCopy(
+                                recoveryEmptyAction.action,
+                                locale,
+                              )}
+                            </span>
+                          </ActionAffordance>
+                        ),
+                      };
+                    }
+
+                    if (recoveryResult.error) {
+                      return {};
+                    }
+
+                    return {
+                      nextAction: (
+                        <span
+                          style={{ color: theme.textMuted, fontSize: 12.5 }}
+                        >
+                          {locale === "en"
+                            ? "This is the pre-recovery variant. Record the first recovery action from the incident workflow."
+                            : "這是 pre-recovery 狀態；請透過 incident 流程記錄第一筆補救。"}
+                        </span>
+                      ),
+                    };
+                  })()}
                 />
               )}
             </Card>
