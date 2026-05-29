@@ -8,22 +8,30 @@ interface EmptyStateProps {
   title: string;
   description?: string;
   icon?: keyof typeof Ionicons.glyphMap;
+  tone?: "default" | "warning" | "danger";
   actionTitle?: string;
   onAction?: () => void;
   style?: ViewStyle;
 }
 
+const TONE_ICON_COLOR: Record<NonNullable<EmptyStateProps["tone"]>, string> = {
+  default: Tokens.colors.borderStrong,
+  warning: Tokens.colors.warning,
+  danger: Tokens.colors.danger,
+};
+
 export const EmptyState: React.FC<EmptyStateProps> = ({
   title,
   description,
   icon = "information-circle-outline",
+  tone = "default",
   actionTitle,
   onAction,
   style,
 }) => {
   return (
     <View style={[styles.container, style]}>
-      <Ionicons name={icon} size={48} color={Tokens.colors.borderStrong} />
+      <Ionicons name={icon} size={48} color={TONE_ICON_COLOR[tone]} />
       <Text style={styles.title}>{title}</Text>
       {description ? (
         <Text style={styles.description}>{description}</Text>

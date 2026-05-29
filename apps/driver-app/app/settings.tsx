@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
   Alert,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Switch,
   Text,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import type { DriverProfileRecord, DriverSettings } from "@drts/contracts";
 import { PlatformBinding } from "@/components/platform-binding";
 import { ActionButton } from "@/components/ui/ActionButton";
@@ -27,6 +28,13 @@ import {
   clearDriverProvisioning,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
+import {
+  describeEmptyReason,
+  findAction,
+  resolvePreferenceActions,
+  resolveProfileActions,
+  SETTINGS_REFRESH_TIER,
+} from "@/lib/driver-ui-runtime";
 import {
   DEFAULT_PROFILE_VALUES,
   DEFAULT_SETTINGS_VALUES,
@@ -61,6 +69,15 @@ function formatSectionList(labels: string[]): string {
     return `${labels[0]}和${labels[1]}`;
   }
   return `${labels.slice(0, -1).join("、")}和${labels.at(-1)}`;
+}
+
+function formatSyncedAt(value: Date | null): string {
+  if (!value) {
+    return driverStrings.common.notUpdatedYet;
+  }
+  const hh = `${value.getHours()}`.padStart(2, "0");
+  const mm = `${value.getMinutes()}`.padStart(2, "0");
+  return `上次更新 ${hh}:${mm}`;
 }
 
 interface SaveStatusDescriptor {
@@ -184,15 +201,23 @@ export default function SettingsScreen() {
   const driverId = isProvisioned ? getDriverId() : "";
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<"success" | "error" | null>(
     null,
   );
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [bindingRefresh, setBindingRefresh] = useState(0);
 
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [settingsRecord, setSettingsRecord] = useState<DriverSettings | null>(
+    null,
+  );
+  const [profileRecord, setProfileRecord] =
+    useState<DriverProfileRecord | null>(null);
   const [settingsValues, setSettingsValues] = useState<SettingsFormValues>(
     DEFAULT_SETTINGS_VALUES,
   );
@@ -206,31 +231,34 @@ export default function SettingsScreen() {
     DEFAULT_PROFILE_VALUES,
   );
 
-  useEffect(() => {
-    if (!isProvisioned) {
-      setLoading(false);
-      return;
-    }
+  const mountedRef = useRef(true);
 
-    let isActive = true;
-    const client = getDriverClient();
+  const loadAll = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!isProvisioned) {
+        setLoading(false);
+        return;
+      }
 
-    const loadAll = async () => {
+      if (silent) {
+        setRefreshing(true);
+      }
+      const client = getDriverClient();
       const [settingsResult, profileResult] = await Promise.allSettled([
         client.getDriverSettings(driverId),
         client.getDriverProfile(),
       ]);
 
-      if (!isActive) {
+      if (!mountedRef.current) {
         return;
       }
 
       const failures: string[] = [];
 
       if (settingsResult.status === "fulfilled") {
-        const next = settingsValuesFromRecord(
-          settingsResult.value as DriverSettings,
-        );
+        const record = settingsResult.value as DriverSettings;
+        const next = settingsValuesFromRecord(record);
+        setSettingsRecord(record);
         setSettingsValues(next);
         setInitialSettings(next);
         setSettingsLoaded(true);
@@ -239,9 +267,9 @@ export default function SettingsScreen() {
       }
 
       if (profileResult.status === "fulfilled") {
-        const next = profileValuesFromRecord(
-          profileResult.value as DriverProfileRecord,
-        );
+        const record = profileResult.value as DriverProfileRecord;
+        const next = profileValuesFromRecord(record);
+        setProfileRecord(record);
         setProfileValues(next);
         setInitialProfile(next);
         setProfileLoaded(true);
@@ -250,27 +278,54 @@ export default function SettingsScreen() {
       }
 
       if (failures.length > 0) {
-        setLoadError(
-          `已使用可用資料。無法載入 ${formatSectionList(failures)}。`,
-        );
+        setLoadError(`已使用可用資料。無法載入 ${formatSectionList(failures)}。`);
       } else {
         setLoadError(null);
       }
 
+      setLastSyncedAt(new Date());
       setLoading(false);
-    };
+      setRefreshing(false);
+    },
+    [driverId, isProvisioned],
+  );
 
-    void loadAll();
+  // Manual refresh tier (packet §3.2): refresh on focus + pull-to-refresh.
+  useFocusEffect(
+    useCallback(() => {
+      mountedRef.current = true;
+      void loadAll({ silent: true });
+      setBindingRefresh((value) => value + 1);
+      return () => {
+        mountedRef.current = false;
+      };
+    }, [loadAll]),
+  );
 
-    return () => {
-      isActive = false;
-    };
-  }, [driverId, isProvisioned]);
+  const handleManualRefresh = useCallback(() => {
+    void loadAll({ silent: true });
+    setBindingRefresh((value) => value + 1);
+  }, [loadAll]);
+
+  const profileActions = resolveProfileActions(profileRecord);
+  const preferenceActions = resolvePreferenceActions(settingsRecord);
+  const updateProfileAction = findAction(profileActions, "update_profile");
+  const updateEmergencyAction = findAction(
+    profileActions,
+    "update_emergency_contact",
+  );
+  const updatePreferencesAction = findAction(
+    preferenceActions,
+    "update_preferences",
+  );
+  const profileEditable = profileLoaded && (updateProfileAction?.enabled ?? true);
+  const emergencyEditable =
+    profileLoaded && (updateEmergencyAction?.enabled ?? true);
+  const preferencesEditable =
+    settingsLoaded && (updatePreferencesAction?.enabled ?? true);
 
   const settingsErrors = validateSettingsValues(settingsValues);
-  const profileErrors = profileLoaded
-    ? validateProfileValues(profileValues)
-    : {};
+  const profileErrors = profileLoaded ? validateProfileValues(profileValues) : {};
 
   const settingsDirty =
     settingsLoaded && !settingsValuesEqual(initialSettings, settingsValues);
@@ -414,13 +469,19 @@ export default function SettingsScreen() {
   };
 
   if (!isProvisioned) {
+    const descriptor = describeEmptyReason("not_provisioned", {
+      title: "尚未完成裝置配置",
+      description: "此裝置尚未分配司機身份，無法載入設定。",
+      icon: "lock-closed-outline",
+    });
     return (
       <AppScreen scrollable={false}>
         <PageHeader title={driverStrings.settings.title} />
         <EmptyState
-          title="尚未完成裝置配置"
-          description="此裝置尚未分配司機身份，無法載入設定。"
-          icon="lock-closed-outline"
+          title={descriptor.title}
+          description={descriptor.description}
+          icon={descriptor.icon}
+          tone={descriptor.tone}
           actionTitle="前往配置裝置"
           onAction={() => router.push("/onboarding")}
           style={styles.fillState}
@@ -441,15 +502,62 @@ export default function SettingsScreen() {
     );
   }
 
+  // Total load failure → distinct fetch_failed EmptyReason treatment.
+  if (!settingsLoaded && !profileLoaded && loadError) {
+    const descriptor = describeEmptyReason("fetch_failed");
+    return (
+      <AppScreen scrollable={false}>
+        <PageHeader title={driverStrings.settings.title} />
+        <EmptyState
+          title={descriptor.title}
+          description={descriptor.description}
+          icon={descriptor.icon}
+          tone={descriptor.tone}
+          actionTitle={driverStrings.common.retry}
+          onAction={handleManualRefresh}
+          style={styles.fillState}
+        />
+      </AppScreen>
+    );
+  }
+
   const saveDisabled = !dirty || hasValidation || saving;
 
   return (
     <View style={styles.root}>
-      <AppScreen>
+      <AppScreen
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleManualRefresh}
+            tintColor={Tokens.colors.primary}
+          />
+        }
+      >
         <View style={styles.heroHeader}>
-          <Text style={styles.screenTitle}>設定</Text>
-          <Text style={styles.screenSubtitle}>
-            個人資料、偏好設定與平台帳號綁定
+          <View style={styles.heroTitleRow}>
+            <View style={styles.heroTitleBlock}>
+              <Text style={styles.screenTitle}>設定</Text>
+              <Text style={styles.screenSubtitle}>
+                個人資料、偏好設定與平台帳號綁定
+              </Text>
+            </View>
+            <Pressable
+              onPress={handleManualRefresh}
+              style={styles.refreshButton}
+              accessibilityRole="button"
+              accessibilityLabel={driverStrings.common.refresh}
+            >
+              <Ionicons
+                name="refresh"
+                size={18}
+                color={Tokens.colors.primary}
+              />
+            </Pressable>
+          </View>
+          <Text style={styles.freshnessLabel}>
+            {SETTINGS_REFRESH_TIER === "manual" ? "手動更新" : ""} ·{" "}
+            {formatSyncedAt(lastSyncedAt)}
           </Text>
         </View>
 
@@ -489,7 +597,7 @@ export default function SettingsScreen() {
               onChangeText={(value) => updateProfile({ profileName: value })}
               placeholder="司機姓名"
               error={profileErrors.profileName}
-              editable={profileLoaded && !saving}
+              editable={profileEditable && !saving}
             />
             <FormField
               label="電話"
@@ -498,7 +606,7 @@ export default function SettingsScreen() {
               placeholder="+886-900-000-000"
               keyboardType="phone-pad"
               error={profileErrors.profilePhone}
-              editable={profileLoaded && !saving}
+              editable={profileEditable && !saving}
             />
             <FormField
               label="電子郵件"
@@ -508,8 +616,17 @@ export default function SettingsScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               error={profileErrors.profileEmail}
-              editable={profileLoaded && !saving}
+              editable={profileEditable && !saving}
             />
+            {updateProfileAction && !updateProfileAction.enabled ? (
+              <Text style={styles.actionDisabledNote}>
+                目前無法編輯個人資料
+                {updateProfileAction.disabledReasonCode
+                  ? `（${updateProfileAction.disabledReasonCode}）`
+                  : ""}
+                。
+              </Text>
+            ) : null}
           </FormSection>
 
           <FormSection
@@ -522,7 +639,7 @@ export default function SettingsScreen() {
               onChangeText={(value) => updateProfile({ emergencyName: value })}
               placeholder="緊急聯絡人姓名"
               error={profileErrors.emergencyName}
-              editable={profileLoaded && !saving}
+              editable={emergencyEditable && !saving}
             />
             <FormField
               label="聯絡人電話"
@@ -531,7 +648,7 @@ export default function SettingsScreen() {
               placeholder="+886-900-000-001"
               keyboardType="phone-pad"
               error={profileErrors.emergencyPhone}
-              editable={profileLoaded && !saving}
+              editable={emergencyEditable && !saving}
             />
             <FormField
               label="關係"
@@ -540,7 +657,7 @@ export default function SettingsScreen() {
                 updateProfile({ emergencyRelationship: value })
               }
               placeholder="配偶、兄弟姐妹、父母…"
-              editable={profileLoaded && !saving}
+              editable={emergencyEditable && !saving}
             />
           </FormSection>
 
@@ -555,7 +672,7 @@ export default function SettingsScreen() {
               placeholder="zh-TW"
               autoCapitalize="none"
               error={settingsErrors.language}
-              editable={settingsLoaded && !saving}
+              editable={preferencesEditable && !saving}
             />
             <FormField
               label="最大接單範圍（公里）"
@@ -563,11 +680,11 @@ export default function SettingsScreen() {
               onChangeText={(value) =>
                 updateSettings({ maxAcceptRadius: value })
               }
-              placeholder="例如：10"
+              placeholder="例如：5"
               keyboardType="numeric"
               error={settingsErrors.maxAcceptRadius}
-              helpText="留白代表不限制；最大可設定到 200 公里。"
-              editable={settingsLoaded && !saving}
+              helpText="自營派單預設 5 公里；留白代表不限制，最大可設定到 200 公里（Q-DRV14）。"
+              editable={preferencesEditable && !saving}
             />
             <View style={styles.switchCard}>
               <SwitchRow
@@ -577,26 +694,39 @@ export default function SettingsScreen() {
                 onValueChange={(value) =>
                   updateSettings({ notificationsEnabled: value })
                 }
-                disabled={!settingsLoaded || saving}
+                disabled={!preferencesEditable || saving}
               />
               <View style={styles.switchDivider} />
               <SwitchRow
-                label="自動接單（全平台）"
-                description="開啟後會對所有已綁定平台的合格派遣自動接單；目前尚未提供逐平台覆寫，外部平台仍以該平台的接單規則為準。"
+                label="自動接單（自營派單）"
+                description="僅對 DRTS 自營派單自動接單。依 Q-DRV13，外部平台的全域自動接單在 Phase 1 不開放；外部平台請於下方各平台綁定列查看是否可逐平台開啟。"
                 value={settingsValues.autoAcceptEnabled}
                 onValueChange={(value) =>
                   updateSettings({ autoAcceptEnabled: value })
                 }
-                disabled={!settingsLoaded || saving}
+                disabled={!preferencesEditable || saving}
               />
             </View>
+            {updatePreferencesAction && !updatePreferencesAction.enabled ? (
+              <Text style={styles.actionDisabledNote}>
+                目前無法編輯偏好設定
+                {updatePreferencesAction.disabledReasonCode
+                  ? `（${updatePreferencesAction.disabledReasonCode}）`
+                  : ""}
+                。
+              </Text>
+            ) : null}
           </FormSection>
 
           <FormSection
             title="平台帳號綁定"
             description="管理外部平台帳號綁定、重新驗證、平台憑證與接單資格；狀態與「平台健康中心」即時同步。"
           >
-            <PlatformBinding showSectionTitle={false} />
+            <PlatformBinding
+              showSectionTitle={false}
+              refreshSignal={bindingRefresh}
+              onOpenPresence={() => router.push("/platform-presence")}
+            />
           </FormSection>
 
           <FormSection
@@ -668,6 +798,30 @@ const styles = StyleSheet.create({
     paddingTop: Tokens.spacing.sm,
     gap: Tokens.spacing.xs,
   },
+  heroTitleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: Tokens.spacing.md,
+  },
+  heroTitleBlock: {
+    flex: 1,
+    gap: Tokens.spacing.xs,
+  },
+  refreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: Tokens.radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Tokens.colors.brandBg,
+    borderWidth: 1,
+    borderColor: Tokens.colors.ownedBorder,
+  },
+  freshnessLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textDim,
+  },
   screenTitle: {
     ...Tokens.type.screenTitle,
     color: Tokens.colors.textStrong,
@@ -696,6 +850,11 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   sectionBody: { gap: Tokens.spacing.xs },
+  actionDisabledNote: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.warning,
+    marginTop: Tokens.spacing.xs,
+  },
   profileHeroCard: {
     flexDirection: "row",
     alignItems: "center",

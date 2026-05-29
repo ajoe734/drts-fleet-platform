@@ -15,6 +15,11 @@ interface AppScreenProps {
   style?: ViewStyle;
   contentContainerStyle?: ViewStyle;
   backgroundColor?: string;
+  /**
+   * Optional pull-to-refresh control. Only applies when `scrollable` (the
+   * default); used by manual-refresh-tier screens per packet §3.2.
+   */
+  refreshControl?: React.ReactElement;
 }
 
 export const AppScreen: React.FC<AppScreenProps> = ({
@@ -23,23 +28,25 @@ export const AppScreen: React.FC<AppScreenProps> = ({
   style,
   contentContainerStyle,
   backgroundColor = Tokens.colors.appBg,
+  refreshControl,
 }) => {
-  const Container = scrollable ? ScrollView : View;
-
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor }]}>
       <StatusBar
         barStyle={Tokens.mode === "dark" ? "light-content" : "dark-content"}
         backgroundColor={backgroundColor}
       />
-      <Container
-        style={[styles.container, style]}
-        contentContainerStyle={
-          scrollable ? [styles.scrollContent, contentContainerStyle] : undefined
-        }
-      >
-        {children}
-      </Container>
+      {scrollable ? (
+        <ScrollView
+          style={[styles.container, style]}
+          contentContainerStyle={[styles.scrollContent, contentContainerStyle]}
+          refreshControl={refreshControl}
+        >
+          {children}
+        </ScrollView>
+      ) : (
+        <View style={[styles.container, style]}>{children}</View>
+      )}
     </SafeAreaView>
   );
 };

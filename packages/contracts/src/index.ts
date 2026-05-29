@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ResourceActionDescriptor } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4437,6 +4438,8 @@ export interface DriverSettings {
   maxAcceptRadius: number | null;
   preferredAreas: string[];
   updatedAt: string;
+  // Q-X13: backend-provided action descriptors for the preferences resource.
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface UpdateDriverSettingsCommand {
@@ -4469,6 +4472,8 @@ export interface DriverProfileRecord {
   bankAccount: DriverProfileBankAccount | null;
   deviceBindings: DriverDeviceBindingSummary[];
   updatedAt: string;
+  // Q-X13: backend-provided action descriptors for the profile resource.
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface CreateDriverProfileCommand {
