@@ -120,6 +120,14 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "users",
     label: "人員與角色",
   },
+  { divider: "系統" },
+  {
+    key: "featureflags",
+    href: "/feature-flags",
+    icon: "flags",
+    label: "功能旗標",
+    matchPaths: ["/feature-flags"],
+  },
   {
     key: "settings",
     href: "/settings",
