@@ -1,3 +1,24 @@
+/**
+ * /pricing — Pricing Governance (platform-admin)
+ *
+ * Rebuilt to the `Platform Admin.html` canvas artboard `PA_Pricing` (4 tabs:
+ * Passenger Pricing / Driver Fee Plans / Subsidy · Reimbursement / Published
+ * Versions) and the design hand-off packet §5.10. Behaviour is driven by the
+ * cross-cutting `@drts/contracts` ui-runtime envelopes:
+ *   - refresh tier T4 `medium_slow` (30s) per packet §5.10 / canvas
+ *   - `availableActions[]` (ResourceActionDescriptor) drives every CTA per §3.5
+ *   - risk-classified confirmation (medium/high) per §3.4 — publish is high +
+ *     requiresReason (atomic version-replace per Q-ADM10)
+ *   - six distinct `EmptyReason` treatments per §3.6 (the driver-only
+ *     `driver_not_eligible` is N/A here)
+ *   - cross-app deep links (CrossAppResourceLink) per §3.10 — pricing exits to
+ *     audit-trail entries (§5.10.E); action receipts surface a "View audit"
+ *     deep link.
+ *
+ * Visual system: `@drts/ui-web` canvas primitives (platform dark surface),
+ * matching the dominant platform-admin-web canvas pages.
+ */
+
 "use client";
 
 import {
@@ -7,6 +28,7 @@ import {
   useState,
   type CSSProperties,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -18,6 +40,12 @@ import type {
   DriverFeePlanRecord,
   PlatformPricingRuleRecord,
   ProductRuleCatalog,
+  ResourceActionDescriptor,
+  EmptyReason,
+  RefreshTier,
+  UiRefreshMetadata,
+  CrossAppResourceLink,
+  ActionReceipt,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -33,6 +61,164 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Tabs (canvas PA_Pricing artboards)
+// ─────────────────────────────────────────────────────────────────────────────
+type TabId = "passenger" | "driver" | "subsidy" | "history";
+const TAB_IDS: readonly TabId[] = ["passenger", "driver", "subsidy", "history"];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Refresh model (packet §3.2 / §5.10 — T4 medium_slow) ─────────────────────────
+// Pricing data is governance-cadence; canvas wires `refreshTier="medium_slow"`.
+const REFRESH_TIER: RefreshTier = "medium_slow";
+const REFRESH_CADENCE_MS: Record<RefreshTier, number | null> = {
+  urgent: 5000,
+  fast: 3000,
+  dispatch: 5000,
+  medium: 15000,
+  medium_slow: 30000,
+  slow: 30000,
+  manual: null,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EmptyReason → distinct treatment (packet §3.6 / Q-X15) ───────────────────────
+// Six platform-admin reasons (the driver-only `driver_not_eligible` is N/A here).
+type PlatformEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+
+interface EmptyTreatment {
+  glyph: string;
+  tone: CanvasTone;
+  action?: "retry" | "clear_filters";
+}
+
+const EMPTY_TREATMENTS: Record<PlatformEmptyReason, EmptyTreatment> = {
+  no_data: { glyph: "🗂", tone: "neutral" },
+  not_provisioned: { glyph: "🧩", tone: "info" },
+  fetch_failed: { glyph: "⚠️", tone: "danger", action: "retry" },
+  permission_denied: { glyph: "🔒", tone: "warn" },
+  external_unavailable: { glyph: "🛰", tone: "warn", action: "retry" },
+  filtered_empty: { glyph: "🔍", tone: "neutral", action: "clear_filters" },
+};
+
+// Classify a thrown error into a distinct EmptyReason so the six treatments are
+// all reachable (permission vs upstream-unavailable vs generic fetch failure).
+function classifyFetchError(message: string): PlatformEmptyReason {
+  const m = message.toLowerCase();
+  if (
+    m.includes("403") ||
+    m.includes("permission") ||
+    m.includes("forbidden") ||
+    m.includes("unauthor")
+  ) {
+    return "permission_denied";
+  }
+  if (
+    m.includes("502") ||
+    m.includes("503") ||
+    m.includes("504") ||
+    m.includes("unavailable") ||
+    m.includes("timeout") ||
+    m.includes("gateway") ||
+    m.includes("network")
+  ) {
+    return "external_unavailable";
+  }
+  return "fetch_failed";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// availableActions (packet §3.5 / Q-X13) ───────────────────────────────────────
+// Backend will eventually decorate records with `availableActions[]`; until then
+// we derive the descriptor set packet §5.10.B mandates, but rendering always
+// reads from a descriptor array so CTAs are authority-driven, never hard-coded.
+const ACTION_CREATE_DRAFT: ResourceActionDescriptor = {
+  action: "create_draft",
+  enabled: true,
+  riskLevel: "medium",
+};
+const ACTION_PUBLISH_RULE: ResourceActionDescriptor = {
+  action: "publish_rule",
+  enabled: true,
+  requiresReason: true,
+  riskLevel: "high",
+};
+const ACTION_PUBLISH_FEE_PLAN: ResourceActionDescriptor = {
+  action: "publish_fee_plan",
+  enabled: true,
+  requiresReason: true,
+  riskLevel: "high",
+};
+// Subsidy authoring is not provisioned in Phase 1 (no contract surface yet).
+const ACTION_CREATE_SUBSIDY_DRAFT: ResourceActionDescriptor = {
+  action: "create_subsidy_draft",
+  enabled: false,
+  disabledReasonCode: "not_provisioned",
+  riskLevel: "medium",
+};
+
+function readActions<T>(
+  record: T,
+  derived: ResourceActionDescriptor[],
+): ResourceActionDescriptor[] {
+  const provided = (record as { availableActions?: ResourceActionDescriptor[] })
+    .availableActions;
+  return Array.isArray(provided) ? provided : derived;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-app deep links (packet §3.10 / §5.10.E — exits to audit trail) ─────────
+// Pricing mutations are audited; rows/receipts deep-link to the platform-admin
+// audit surface (same-tab, in-app). A `CrossAppResourceLink` keeps the open-mode
+// + target explicit so the affordance is uniform with the rest of the suite.
+function auditLink(
+  resourceType: string,
+  resourceId: string,
+  label: string,
+): CrossAppResourceLink {
+  return {
+    targetApp: "platform-admin",
+    route: `/audit?module=pricing&resourceType=${encodeURIComponent(
+      resourceType,
+    )}&resourceId=${encodeURIComponent(resourceId)}`,
+    resourceType,
+    resourceId,
+    openMode: "same_tab",
+    label,
+  };
+}
+
+function CrossAppLink({
+  link,
+  theme,
+}: {
+  link: CrossAppResourceLink;
+  theme: ReturnType<typeof buildCanvasTheme>;
+}) {
+  const external = link.openMode === "new_tab";
+  return (
+    <a
+      href={link.route}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noopener noreferrer" : undefined}
+      title={external ? `${link.targetApp} ↗` : link.targetApp}
+      style={{
+        color: theme.accent,
+        textDecoration: "none",
+        fontSize: 11.5,
+        fontFamily: theme.monoFamily,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {link.label}
+      {external ? " ↗" : " →"}
+    </a>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Form + history view models
+// ─────────────────────────────────────────────────────────────────────────────
 type PricingFormState = {
   ruleName: string;
   version: string;
@@ -49,17 +235,24 @@ type FeePlanFormState = {
   reimbursementMode: "platform_funded" | "mixed";
 };
 
-type PublishRuleFormState = {
+type PublishFormState = {
   effectiveFrom: string;
   effectiveTo: string;
+  reason: string;
 };
 
-type PricingRuleRow = PlatformPricingRuleRecord &
-  Record<string, unknown> & {
-    _selected?: boolean;
-  };
-
+type PricingRuleRow = PlatformPricingRuleRecord & Record<string, unknown>;
 type FeePlanRow = DriverFeePlanRecord & Record<string, unknown>;
+type HistoryRow = {
+  key: string;
+  version: string;
+  type: "passenger" | "driver_fee";
+  name: string;
+  publishedAt: string;
+  publishedBy: string;
+  status: string;
+  link: CrossAppResourceLink;
+};
 
 const EMPTY_PRICING_FORM: PricingFormState = {
   ruleName: "",
@@ -77,9 +270,10 @@ const EMPTY_FEE_PLAN_FORM: FeePlanFormState = {
   reimbursementMode: "platform_funded",
 };
 
-const EMPTY_PUBLISH_RULE_FORM: PublishRuleFormState = {
+const EMPTY_PUBLISH_FORM: PublishFormState = {
   effectiveFrom: "",
   effectiveTo: "",
+  reason: "",
 };
 
 const th = buildCanvasTheme({
@@ -88,6 +282,7 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
+// ── styles ────────────────────────────────────────────────────────────────────
 const pageRootStyle: CSSProperties = {
   minHeight: "100%",
   background: th.bg,
@@ -119,24 +314,28 @@ const summaryRowStyle: CSSProperties = {
   alignItems: "center",
 };
 
-const splitLayoutStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 16,
-  alignItems: "flex-start",
+const tabButtonStyle: CSSProperties = {
+  appearance: "none",
+  border: 0,
+  background: "transparent",
+  color: "inherit",
+  font: "inherit",
+  padding: 0,
+  margin: 0,
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
 };
 
-const mainColumnStyle: CSSProperties = {
-  flex: "1.65 1 640px",
-  minWidth: 0,
-};
-
-const sideColumnStyle: CSSProperties = {
-  flex: "1 1 320px",
-  minWidth: 280,
-  display: "grid",
-  gap: 16,
-};
+const tabCountStyle = (active: boolean): CSSProperties => ({
+  fontSize: 10.5,
+  fontFamily: th.monoFamily,
+  padding: "0 6px",
+  borderRadius: 999,
+  background: active ? th.accentBg : th.surfaceLo,
+  color: active ? th.accent : th.textDim,
+});
 
 const cardToolbarStyle: CSSProperties = {
   padding: "14px 14px 0",
@@ -214,7 +413,7 @@ const monoInputStyle: CSSProperties = {
 
 const textAreaStyle: CSSProperties = {
   ...inputStyle,
-  minHeight: 92,
+  minHeight: 80,
   resize: "vertical",
 };
 
@@ -225,41 +424,11 @@ const formActionsStyle: CSSProperties = {
   flexWrap: "wrap",
 };
 
-const submitButtonStyle = (disabled: boolean): CSSProperties => ({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minWidth: 120,
-  height: 28,
-  padding: "5px 10px",
-  borderRadius: 7,
-  border: `1px solid ${th.accent}`,
-  background: th.accent,
-  color: "#ffffff",
-  fontSize: 12,
-  fontWeight: 500,
-  lineHeight: 1,
-  cursor: disabled ? "not-allowed" : "pointer",
-  opacity: disabled ? 0.55 : 1,
-  fontFamily: th.fontFamily,
-});
-
 const helperTextStyle: CSSProperties = {
   margin: 0,
   fontSize: 11.5,
   color: th.textMuted,
   lineHeight: 1.45,
-};
-
-const draftSelectorStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-};
-
-const dividerStyle: CSSProperties = {
-  height: 1,
-  background: th.border,
 };
 
 const sectionIntroStyle: CSSProperties = {
@@ -296,7 +465,6 @@ const bucketCellStyle = (tone: CanvasTone): CSSProperties => {
         : tone === "warn"
           ? th.warnBorder
           : th.successBorder;
-
   const badgeColor =
     tone === "accent"
       ? th.accent
@@ -305,7 +473,6 @@ const bucketCellStyle = (tone: CanvasTone): CSSProperties => {
         : tone === "warn"
           ? th.warn
           : th.success;
-
   const badgeBg =
     tone === "accent"
       ? th.accentBg
@@ -314,7 +481,6 @@ const bucketCellStyle = (tone: CanvasTone): CSSProperties => {
         : tone === "warn"
           ? th.warnBg
           : th.successBg;
-
   return {
     border: `1px solid ${borderColor}`,
     borderRadius: 8,
@@ -329,17 +495,38 @@ const bucketCellStyle = (tone: CanvasTone): CSSProperties => {
   };
 };
 
+const modalOverlayStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(2,6,23,0.62)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 50,
+  padding: 16,
+};
+
+const modalStyle: CSSProperties = {
+  background: th.bgRaised,
+  border: `1px solid ${th.border}`,
+  borderRadius: 14,
+  padding: 22,
+  width: "min(480px, 100%)",
+  maxHeight: "90vh",
+  overflowY: "auto",
+  boxShadow: th.shadow,
+  color: th.text,
+  fontFamily: th.fontFamily,
+};
+
+// ── helpers ─────────────────────────────────────────────────────────────────
 function normalizeDateTimeLocalValue(value: string) {
   const normalized = value.trim();
-  if (!normalized) {
-    return { localValue: "", isoValue: null };
-  }
-
+  if (!normalized) return { localValue: "", isoValue: null as string | null };
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) {
-    return { localValue: normalized, isoValue: null };
+    return { localValue: normalized, isoValue: null as string | null };
   }
-
   const localValue = [
     parsed.getFullYear(),
     String(parsed.getMonth() + 1).padStart(2, "0"),
@@ -353,11 +540,7 @@ function normalizeDateTimeLocalValue(value: string) {
         String(parsed.getMinutes()).padStart(2, "0"),
       ].join(":"),
     );
-
-  return {
-    localValue,
-    isoValue: parsed.toISOString(),
-  };
+  return { localValue, isoValue: parsed.toISOString() };
 }
 
 function formatBps(locale: string, value: number) {
@@ -371,12 +554,8 @@ function formatPercent(value: number) {
 function statusTone(
   status: PlatformPricingRuleRecord["status"] | DriverFeePlanRecord["status"],
 ): CanvasTone {
-  if (status === "active" || status === "published") {
-    return "success";
-  }
-  if (status === "draft") {
-    return "warn";
-  }
+  if (status === "active" || status === "published") return "success";
+  if (status === "draft") return "warn";
   return "neutral";
 }
 
@@ -384,12 +563,18 @@ export default function PricingPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const defaultPlanName = getPlatformLabel(locale, "defaultPlanName");
+
   const [rules, setRules] = useState<PlatformPricingRuleRecord[]>([]);
   const [feePlans, setFeePlans] = useState<DriverFeePlanRecord[]>([]);
   const [productRuleCatalog, setProductRuleCatalog] =
     useState<ProductRuleCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshMeta, setRefreshMeta] = useState<UiRefreshMetadata | null>(
+    null,
+  );
+
+  const [activeTab, setActiveTab] = useState<TabId>("passenger");
   const [filter, setFilter] = useState<"all" | "active" | "draft" | "archived">(
     "all",
   );
@@ -400,54 +585,130 @@ export default function PricingPage() {
     ...EMPTY_FEE_PLAN_FORM,
     planName: defaultPlanName,
   }));
-  const [publishRuleFormRuleId, setPublishRuleFormRuleId] = useState<
-    string | null
-  >(null);
-  const [publishRuleForm, setPublishRuleForm] = useState(
-    EMPTY_PUBLISH_RULE_FORM,
-  );
-  const [publishRuleFormError, setPublishRuleFormError] = useState<
-    string | null
-  >(null);
+  const [showFeePlanForm, setShowFeePlanForm] = useState(false);
+
+  const [publishRuleId, setPublishRuleId] = useState<string | null>(null);
+  const [publishForm, setPublishForm] =
+    useState<PublishFormState>(EMPTY_PUBLISH_FORM);
+  const [publishFormError, setPublishFormError] = useState<string | null>(null);
+
   const [creatingPricingRule, setCreatingPricingRule] = useState(false);
   const [publishingRuleId, setPublishingRuleId] = useState<string | null>(null);
   const [publishingFeePlan, setPublishingFeePlan] = useState(false);
+  const [toast, setToast] = useState<{
+    receipt: ActionReceipt;
+    ok: boolean;
+  } | null>(null);
+
+  // Cross-app entry: deep-links may target a tab (?tab=driver). Read client-side
+  // to stay build-safe (no useSearchParams Suspense boundary required).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab && (TAB_IDS as readonly string[]).includes(tab)) {
+      setActiveTab(tab as TabId);
+    }
+  }, []);
 
   const copy =
     locale === "en"
       ? {
           title: "Pricing",
-          subtitle: "pricing rules · driver fee plans · publish windows",
-          tabs: ["Pricing rules", "Driver fee plans", "Override governance"],
+          subtitle:
+            "draft → published → retired · publish is an atomic version-replace (Q-ADM10)",
+          tabs: {
+            passenger: "Passenger Pricing",
+            driver: "Driver Fee Plans",
+            subsidy: "Subsidy / Reimbursement",
+            history: "Published Versions",
+          } as Record<TabId, string>,
           authorityTitle: "canonical quoted fare authority",
           authorityFallback:
             "Backend remains the only quoted-fare source. Manual overrides must keep actor, reason, and trace evidence.",
-          rulesTitle: "Pricing rules",
+          authorityAuditLink: "Audit trail",
+          rulesTitle: "Passenger pricing rules",
           rulesSubtitle:
             "Platform-owned pricing rules remain the only fare authority for quoted fare.",
-          governanceTitle: "Override governance",
-          governanceSubtitle:
-            "Quoted-fare authority, manual override scope, and draft publish windows.",
-          governanceEmpty:
-            "Select a draft pricing rule to configure effective dates before publish.",
-          governanceNoDrafts: "No draft pricing rules are waiting for publish.",
-          governanceDraftQueue: "Draft publish queue",
-          governancePublishWindow: "Publish window",
-          governancePublishWindowCopy:
-            "Leave either field blank to keep the draft's stored effective window.",
+          authorityCardTitle: "Quoted-fare authority",
           feePlansTitle: "Driver fee plans",
           feePlansSubtitle:
             "Immutable settlement plans used when generating driver statements and payout trails.",
           feePlansComposer:
             "Publish a new immutable fee-plan version for downstream settlement.",
+          subsidyTitle: "Subsidy / reimbursement rules",
+          subsidySubtitle:
+            "Subsidy-rule authoring is not provisioned in Phase 1; reimbursement is governed via pricing-rule reimbursement mode and the payments reimbursement queue.",
+          historyTitle: "Published versions · cross-tab history",
+          historySubtitle:
+            "Chronological published & retired versions across passenger pricing and driver fee plans. Each exits to its audit-trail entry.",
           bucketTitle: (version: string) =>
             `Service bucket fee breakdown (${version})`,
           currentVersionLabel: "canonical version",
           refresh: "Refresh",
-          configureDraft: "Configure draft",
-          draftSelected: "Selected",
-          openEnded: "open-ended",
+          refreshTierLabel: "refresh T4 · medium_slow (30s)",
+          lastRefreshed: (time: string) => `updated ${time}`,
+          freshness: {
+            fresh: "fresh",
+            stale: "stale",
+            degraded: "degraded",
+            unknown: "—",
+          } as Record<string, string>,
           notAllowed: "Not allowed",
+          openEnded: "open-ended",
+          publishWindow: "Publish window",
+          publishWindowCopy:
+            "Leave either field blank to keep the draft's stored effective window.",
+          publishReasonLabel: "Publish reason (required · high-risk)",
+          publishReasonPlaceholder:
+            "Why is this version safe to publish now? (scope, effective date, conflict check)",
+          publishReasonRequired: "A publish reason is required.",
+          riskHigh: "HIGH RISK",
+          cancel: "Cancel",
+          receiptTitle: "Action complete",
+          receiptFailed: "Action failed",
+          viewAudit: "View audit entry",
+          empty: {
+            no_data: {
+              title: "No records yet",
+              body: "Nothing has been created on this tab yet.",
+            },
+            not_provisioned: {
+              title: "Not provisioned in Phase 1",
+              body: "This governance surface has no backing contract yet. Track it via pricing-rule reimbursement mode and the payments reimbursement queue.",
+            },
+            fetch_failed: {
+              title: "Couldn't load",
+              body: "The pricing service returned an error. Retry, or check the gateway.",
+            },
+            permission_denied: {
+              title: "Permission denied",
+              body: "Your role can't read this surface. Requires pa_finance_gov or pa_super_admin.",
+            },
+            external_unavailable: {
+              title: "Upstream unavailable",
+              body: "The pricing service is unreachable right now. This is usually transient — retry shortly.",
+            },
+            filtered_empty: {
+              title: "No matches",
+              body: "No records match the current filters.",
+            },
+            retry: "Retry",
+            clearFilters: "Clear filters",
+          } as Record<string, { title: string; body: string } | string>,
+          col: {
+            version: "VERSION",
+            name: "NAME",
+            status: "STATUS",
+            fee: "SERVICE FEE bps",
+            reimburse: "REIMBURSE",
+            scope: "SCOPE",
+            effective: "EFFECTIVE",
+            type: "TYPE",
+            publishedAt: "PUBLISHED AT",
+            publishedBy: "PUBLISHED BY",
+            audit: "AUDIT",
+            plan: "PLAN",
+          },
           bucketCards: [
             {
               key: "standard",
@@ -486,54 +747,98 @@ export default function PricingPage() {
               tone: "success" as const,
             },
           ],
-          feeColumns: {
-            plan: "PLAN",
-            version: "VERSION",
-            fee: "SERVICE FEE bps",
-            reimburse: "REIMBURSE",
-            status: "STATUS",
-            published: "PUBLISHED",
-          },
-          ruleColumns: {
-            version: "VERSION",
-            name: "Name",
-            status: "STATUS",
-            fee: "SERVICE FEE bps",
-            reimburse: "REIMBURSE",
-            scope: "SCOPE",
-            effective: "EFFECTIVE",
-          },
         }
       : {
           title: "計價",
-          subtitle: "pricing rules · driver fee plans · publish windows",
-          tabs: ["Pricing rules", "Driver fee plans", "Override governance"],
+          subtitle:
+            "draft → published → retired · 發佈為 atomic version-replace (Q-ADM10)",
+          tabs: {
+            passenger: "Passenger Pricing",
+            driver: "Driver Fee Plans",
+            subsidy: "Subsidy / Reimbursement",
+            history: "Published Versions",
+          } as Record<TabId, string>,
           authorityTitle: "canonical quoted fare authority",
           authorityFallback:
             "後端仍是 quoted fare 的唯一真值，所有 manual override 都必須留下 actor、reason 與 trace 證據。",
-          rulesTitle: "定價規則",
+          authorityAuditLink: "稽核軌跡",
+          rulesTitle: "乘客定價規則",
           rulesSubtitle:
             "平台自有 pricing rule 是 quoted fare 的唯一規則真值。",
-          governanceTitle: "覆寫治理",
-          governanceSubtitle:
-            "quoted fare authority、manual override 範圍與 draft 發布視窗。",
-          governanceEmpty: "請先選一條 draft pricing rule，再設定發布時間。",
-          governanceNoDrafts: "目前沒有待發布的定價草稿。",
-          governanceDraftQueue: "待發布草稿",
-          governancePublishWindow: "發布視窗",
-          governancePublishWindowCopy:
-            "任一欄位留空時，會沿用草稿原本儲存的生效區間。",
+          authorityCardTitle: "Quoted-fare 權威",
           feePlansTitle: "司機費用方案",
           feePlansSubtitle:
             "發布後不可變更，供 driver statement 與 payout trail 使用。",
           feePlansComposer: "發布新的 immutable fee plan 版本供後續結算使用。",
+          subsidyTitle: "補助 / 報銷規則",
+          subsidySubtitle:
+            "Phase 1 尚未提供補助規則編輯介面；報銷透過 pricing rule 的 reimbursement mode 與 payments 報銷佇列治理。",
+          historyTitle: "已發佈版本 · 跨 tab 歷史",
+          historySubtitle:
+            "跨乘客定價與司機費用方案的已發佈 / 已退役版本（依時間排序），每筆可跳轉其稽核軌跡。",
           bucketTitle: (version: string) => `服務 bucket fee 拆解 (${version})`,
           currentVersionLabel: "canonical version",
           refresh: "重新整理",
-          configureDraft: "設定發布",
-          draftSelected: "已選取",
-          openEnded: "未設定截止",
+          refreshTierLabel: "refresh T4 · medium_slow (30s)",
+          lastRefreshed: (time: string) => `更新於 ${time}`,
+          freshness: {
+            fresh: "fresh",
+            stale: "stale",
+            degraded: "degraded",
+            unknown: "—",
+          } as Record<string, string>,
           notAllowed: "不允許",
+          openEnded: "未設定截止",
+          publishWindow: "發布視窗",
+          publishWindowCopy: "任一欄位留空時，會沿用草稿原本儲存的生效區間。",
+          publishReasonLabel: "發布理由（必填 · 高風險）",
+          publishReasonPlaceholder:
+            "為何此版本現在可安全發布？（範圍、生效時間、衝突檢查）",
+          publishReasonRequired: "發布理由為必填。",
+          riskHigh: "高風險",
+          cancel: "取消",
+          receiptTitle: "操作完成",
+          receiptFailed: "操作失敗",
+          viewAudit: "檢視稽核紀錄",
+          empty: {
+            no_data: { title: "尚無紀錄", body: "此分頁目前沒有任何資料。" },
+            not_provisioned: {
+              title: "Phase 1 尚未提供",
+              body: "此治理介面目前沒有對應 contract。請改由 pricing rule 的 reimbursement mode 與 payments 報銷佇列追蹤。",
+            },
+            fetch_failed: {
+              title: "載入失敗",
+              body: "計價服務回傳錯誤。請重試或檢查 gateway。",
+            },
+            permission_denied: {
+              title: "權限不足",
+              body: "你的角色無法讀取此介面，需要 pa_finance_gov 或 pa_super_admin。",
+            },
+            external_unavailable: {
+              title: "上游暫時無法連線",
+              body: "計價服務目前無法連線，通常為暫時性問題，請稍後重試。",
+            },
+            filtered_empty: {
+              title: "無符合項目",
+              body: "沒有符合目前篩選條件的紀錄。",
+            },
+            retry: "重試",
+            clearFilters: "清除篩選",
+          } as Record<string, { title: string; body: string } | string>,
+          col: {
+            version: "版本",
+            name: "名稱",
+            status: "狀態",
+            fee: "SERVICE FEE bps",
+            reimburse: "報銷",
+            scope: "SCOPE",
+            effective: "EFFECTIVE",
+            type: "類型",
+            publishedAt: "發布時間",
+            publishedBy: "發布者",
+            audit: "稽核",
+            plan: "方案",
+          },
           bucketCards: [
             {
               key: "standard",
@@ -572,23 +877,6 @@ export default function PricingPage() {
               tone: "success" as const,
             },
           ],
-          feeColumns: {
-            plan: "方案",
-            version: "版本",
-            fee: "SERVICE FEE bps",
-            reimburse: "報銷",
-            status: "狀態",
-            published: "發布時間",
-          },
-          ruleColumns: {
-            version: "版本",
-            name: "名稱",
-            status: "狀態",
-            fee: "SERVICE FEE bps",
-            reimburse: "報銷",
-            scope: "SCOPE",
-            effective: "EFFECTIVE",
-          },
         };
 
   const loadData = useCallback(async () => {
@@ -603,8 +891,20 @@ export default function PricingPage() {
       setRules(pricingRules ?? []);
       setFeePlans(settlementPlans ?? []);
       setProductRuleCatalog(productRules);
+      setRefreshMeta({
+        generatedAt: new Date().toISOString(),
+        staleAfterMs: REFRESH_CADENCE_MS[REFRESH_TIER] ?? 0,
+        dataFreshness: "fresh",
+        source: "live",
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
+      setRefreshMeta({
+        generatedAt: new Date().toISOString(),
+        staleAfterMs: 0,
+        dataFreshness: "unknown",
+        source: "live",
+      });
     } finally {
       setLoading(false);
     }
@@ -614,20 +914,26 @@ export default function PricingPage() {
     void loadData();
   }, [loadData]);
 
+  // Refresh-tier polling: medium_slow schedules a 30s reload. A manual tier
+  // would skip the timer; here the cadence map drives it (packet §3.2).
+  useEffect(() => {
+    const cadence = REFRESH_CADENCE_MS[REFRESH_TIER];
+    if (!cadence) return;
+    const id = setInterval(() => void loadData(), cadence);
+    return () => clearInterval(id);
+  }, [loadData]);
+
   const sortedRules = useMemo(
     () =>
       [...rules].sort(
-        (left, right) =>
-          new Date(right.updatedAt).getTime() -
-          new Date(left.updatedAt).getTime(),
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
       ),
     [rules],
   );
 
   const filteredRules = useMemo(() => {
-    if (filter === "all") {
-      return sortedRules;
-    }
+    if (filter === "all") return sortedRules;
     return sortedRules.filter((rule) => rule.status === filter);
   }, [filter, sortedRules]);
 
@@ -641,49 +947,97 @@ export default function PricingPage() {
     [sortedRules],
   );
 
-  const selectedDraftRule = useMemo(
-    () =>
-      draftRules.find((rule) => rule.ruleId === publishRuleFormRuleId) ?? null,
-    [draftRules, publishRuleFormRuleId],
-  );
-
   const ruleCounts = useMemo(
     () => ({
       all: rules.length,
-      active: rules.filter((rule) => rule.status === "active").length,
-      draft: rules.filter((rule) => rule.status === "draft").length,
-      archived: rules.filter((rule) => rule.status === "archived").length,
+      active: rules.filter((r) => r.status === "active").length,
+      draft: rules.filter((r) => r.status === "draft").length,
+      archived: rules.filter((r) => r.status === "archived").length,
     }),
     [rules],
   );
 
   const ruleRows = useMemo<PricingRuleRow[]>(
-    () =>
-      filteredRules.map((rule) => ({
-        ...rule,
-        _selected: rule.ruleId === publishRuleFormRuleId,
-      })),
-    [filteredRules, publishRuleFormRuleId],
+    () => filteredRules.map((rule) => ({ ...rule })),
+    [filteredRules],
   );
 
   const feePlanRows = useMemo<FeePlanRow[]>(
     () =>
       [...feePlans]
         .sort(
-          (left, right) =>
-            new Date(right.publishedAt).getTime() -
-            new Date(left.publishedAt).getTime(),
+          (a, b) =>
+            new Date(b.publishedAt).getTime() -
+            new Date(a.publishedAt).getTime(),
         )
         .map((plan) => ({ ...plan })),
     [feePlans],
   );
 
+  const historyRows = useMemo<HistoryRow[]>(() => {
+    const fromRules: HistoryRow[] = rules
+      .filter((r) => r.status === "active" || r.status === "archived")
+      .map((r) => ({
+        key: `rule:${r.ruleId}`,
+        version: r.version,
+        type: "passenger",
+        name: r.ruleName,
+        publishedAt: r.publishedAt ?? r.updatedAt,
+        publishedBy: r.publishedBy ?? "—",
+        status: r.status === "active" ? "published" : "retired",
+        link: auditLink("platform_pricing_rule", r.ruleId, copy.col.audit),
+      }));
+    const fromPlans: HistoryRow[] = feePlans.map((p) => ({
+      key: `plan:${p.feePlanId}`,
+      version: p.version,
+      type: "driver_fee",
+      name: p.planName,
+      publishedAt: p.publishedAt,
+      publishedBy: "—",
+      status: p.status,
+      link: auditLink("driver_fee_plan", p.feePlanId, copy.col.audit),
+    }));
+    return [...fromRules, ...fromPlans].sort(
+      (a, b) =>
+        new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
+    );
+  }, [rules, feePlans, copy.col.audit]);
+
+  // ── receipt helper ──────────────────────────────────────────────────────────
+  const emitReceipt = useCallback(
+    (
+      actionId: string,
+      resourceType: string,
+      resourceId: string,
+      ok: boolean,
+      err?: unknown,
+    ) => {
+      setToast({
+        ok,
+        receipt: {
+          actionId,
+          auditId: ok ? resourceId : "",
+          resourceType,
+          resourceId,
+          status: ok ? "completed" : "failed",
+          message: ok
+            ? `${actionId} · ${resourceId || resourceType}`
+            : err instanceof Error
+              ? err.message
+              : String(err ?? "error"),
+        },
+      });
+    },
+    [],
+  );
+
+  // ── form handlers ───────────────────────────────────────────────────────────
   async function handleCreatePricingRule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreatingPricingRule(true);
     setError(null);
     try {
-      await client.createPlatformPricingRule({
+      const created = await client.createPlatformPricingRule({
         ruleName: pricingForm.ruleName,
         version: pricingForm.version,
         serviceFeeBps: Number(pricingForm.serviceFeeBps),
@@ -693,79 +1047,77 @@ export default function PricingPage() {
       });
       setPricingForm(EMPTY_PRICING_FORM);
       setShowCreate(false);
+      emitReceipt(
+        "create_draft",
+        "platform_pricing_rule",
+        created.ruleId,
+        true,
+      );
       await loadData();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
+      emitReceipt("create_draft", "platform_pricing_rule", "", false, e);
     } finally {
       setCreatingPricingRule(false);
     }
   }
 
-  function openPublishRuleForm(rule: PlatformPricingRuleRecord) {
-    const normalizedEffectiveFrom = normalizeDateTimeLocalValue(
-      rule.effectiveFrom ?? "",
-    );
-    const normalizedEffectiveTo = normalizeDateTimeLocalValue(
-      rule.effectiveTo ?? "",
-    );
+  function openPublishModal(rule: PlatformPricingRuleRecord) {
+    const from = normalizeDateTimeLocalValue(rule.effectiveFrom ?? "");
+    const to = normalizeDateTimeLocalValue(rule.effectiveTo ?? "");
     setError(null);
-    setPublishRuleFormError(null);
-    setPublishRuleFormRuleId(rule.ruleId);
-    setPublishRuleForm({
-      effectiveFrom: normalizedEffectiveFrom.localValue,
-      effectiveTo: normalizedEffectiveTo.localValue,
+    setPublishFormError(null);
+    setPublishRuleId(rule.ruleId);
+    setPublishForm({
+      effectiveFrom: from.localValue,
+      effectiveTo: to.localValue,
+      reason: "",
     });
   }
 
-  function closePublishRuleForm() {
-    setPublishRuleFormRuleId(null);
-    setPublishRuleForm(EMPTY_PUBLISH_RULE_FORM);
-    setPublishRuleFormError(null);
+  function closePublishModal() {
+    setPublishRuleId(null);
+    setPublishForm(EMPTY_PUBLISH_FORM);
+    setPublishFormError(null);
   }
 
   async function handlePublishRule(ruleId: string) {
-    const normalizedEffectiveFrom = normalizeDateTimeLocalValue(
-      publishRuleForm.effectiveFrom,
-    );
-    const normalizedEffectiveTo = normalizeDateTimeLocalValue(
-      publishRuleForm.effectiveTo,
-    );
+    const from = normalizeDateTimeLocalValue(publishForm.effectiveFrom);
+    const to = normalizeDateTimeLocalValue(publishForm.effectiveTo);
 
-    if (
-      publishRuleForm.effectiveFrom.trim() &&
-      !normalizedEffectiveFrom.isoValue
-    ) {
-      setPublishRuleFormError(t("switchboard.err.effectiveFrom"));
+    // high-risk action: reason is required (packet §3.4 / §5.10.B)
+    if (!publishForm.reason.trim()) {
+      setPublishFormError(copy.publishReasonRequired);
       return;
     }
-
-    if (publishRuleForm.effectiveTo.trim() && !normalizedEffectiveTo.isoValue) {
-      setPublishRuleFormError(t("switchboard.err.effectiveTo"));
+    if (publishForm.effectiveFrom.trim() && !from.isoValue) {
+      setPublishFormError(t("switchboard.err.effectiveFrom"));
       return;
     }
-
-    if (
-      normalizedEffectiveFrom.isoValue &&
-      normalizedEffectiveTo.isoValue &&
-      normalizedEffectiveTo.isoValue < normalizedEffectiveFrom.isoValue
-    ) {
-      setPublishRuleFormError(t("switchboard.err.effectiveToOrder"));
+    if (publishForm.effectiveTo.trim() && !to.isoValue) {
+      setPublishFormError(t("switchboard.err.effectiveTo"));
+      return;
+    }
+    if (from.isoValue && to.isoValue && to.isoValue < from.isoValue) {
+      setPublishFormError(t("switchboard.err.effectiveToOrder"));
       return;
     }
 
     setPublishingRuleId(ruleId);
     setError(null);
-    setPublishRuleFormError(null);
+    setPublishFormError(null);
     try {
       await client.publishPlatformPricingRule(ruleId, {
-        effectiveFrom: normalizedEffectiveFrom.isoValue,
-        effectiveTo: normalizedEffectiveTo.isoValue,
+        effectiveFrom: from.isoValue,
+        effectiveTo: to.isoValue,
         publishedBy: "platform-admin-web",
       });
-      closePublishRuleForm();
+      closePublishModal();
+      emitReceipt("publish_rule", "platform_pricing_rule", ruleId, true);
       await loadData();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
+      emitReceipt("publish_rule", "platform_pricing_rule", ruleId, false, e);
     } finally {
       setPublishingRuleId(null);
     }
@@ -786,14 +1138,23 @@ export default function PricingPage() {
         ...EMPTY_FEE_PLAN_FORM,
         planName: feePlanForm.planName,
       });
+      setShowFeePlanForm(false);
+      emitReceipt(
+        "publish_fee_plan",
+        "driver_fee_plan",
+        feePlanForm.version,
+        true,
+      );
       await loadData();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
+      emitReceipt("publish_fee_plan", "driver_fee_plan", "", false, e);
     } finally {
       setPublishingFeePlan(false);
     }
   }
 
+  // ── derived: authority + empty reasons ───────────────────────────────────────
   const authorityItems = productRuleCatalog
     ? [
         {
@@ -835,9 +1196,21 @@ export default function PricingPage() {
       ]
     : [];
 
+  const errorReason = error ? classifyFetchError(error) : null;
+  const filtersActive = filter !== "all";
+  const passengerEmptyReason: PlatformEmptyReason =
+    errorReason ?? (filtersActive ? "filtered_empty" : "no_data");
+  const listEmptyReason: PlatformEmptyReason = errorReason ?? "no_data";
+
+  const canonicalVersion =
+    activeRule?.version ??
+    productRuleCatalog?.pricingAuthority.canonicalPricingRuleVersion ??
+    "draft";
+
+  // ── columns ───────────────────────────────────────────────────────────────
   const ruleColumns: CanvasTableColumn<PricingRuleRow>[] = [
     {
-      h: copy.ruleColumns.version,
+      h: copy.col.version,
       w: 124,
       mono: true,
       r: (rule) => (
@@ -850,8 +1223,8 @@ export default function PricingPage() {
       ),
     },
     {
-      h: copy.ruleColumns.name,
-      w: 260,
+      h: copy.col.name,
+      w: 240,
       r: (rule) => (
         <div style={stackedCellStyle}>
           <span style={primaryTextStyle}>{rule.ruleName}</span>
@@ -863,8 +1236,8 @@ export default function PricingPage() {
       ),
     },
     {
-      h: copy.ruleColumns.status,
-      w: 116,
+      h: copy.col.status,
+      w: 112,
       r: (rule) => (
         <CanvasPill theme={th} tone={statusTone(rule.status)} dot>
           {formatPlatformCodeLabel(locale, rule.status)}
@@ -872,8 +1245,8 @@ export default function PricingPage() {
       ),
     },
     {
-      h: copy.ruleColumns.fee,
-      w: 148,
+      h: copy.col.fee,
+      w: 140,
       align: "right",
       mono: true,
       r: (rule) => (
@@ -886,13 +1259,13 @@ export default function PricingPage() {
       ),
     },
     {
-      h: copy.ruleColumns.reimburse,
-      w: 146,
+      h: copy.col.reimburse,
+      w: 140,
       r: (rule) => formatPlatformCodeLabel(locale, rule.reimbursementMode),
     },
     {
-      h: copy.ruleColumns.scope,
-      w: 180,
+      h: copy.col.scope,
+      w: 160,
       mono: true,
       r: (rule) =>
         rule.applicableTo === "all"
@@ -900,8 +1273,8 @@ export default function PricingPage() {
           : rule.applicableTo,
     },
     {
-      h: copy.ruleColumns.effective,
-      w: 220,
+      h: copy.col.effective,
+      w: 210,
       mono: true,
       r: (rule) => (
         <div style={stackedCellStyle}>
@@ -914,11 +1287,33 @@ export default function PricingPage() {
         </div>
       ),
     },
+    {
+      h: "",
+      w: 120,
+      r: (rule) => {
+        if (rule.status !== "draft")
+          return <span style={secondaryMonoStyle}>—</span>;
+        const actions = readActions(rule, [ACTION_PUBLISH_RULE]);
+        return (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {actions.map((d) => (
+              <ActionCTA
+                key={d.action}
+                descriptor={d}
+                size="xs"
+                label={t("pricing.publishDraft")}
+                onClick={() => openPublishModal(rule)}
+              />
+            ))}
+          </div>
+        );
+      },
+    },
   ];
 
   const feePlanColumns: CanvasTableColumn<FeePlanRow>[] = [
     {
-      h: copy.feeColumns.plan,
+      h: copy.col.plan,
       w: 240,
       r: (plan) => (
         <div style={stackedCellStyle}>
@@ -927,14 +1322,9 @@ export default function PricingPage() {
         </div>
       ),
     },
+    { h: copy.col.version, w: 140, mono: true, k: "version" },
     {
-      h: copy.feeColumns.version,
-      w: 140,
-      mono: true,
-      k: "version",
-    },
-    {
-      h: copy.feeColumns.fee,
+      h: copy.col.fee,
       w: 160,
       align: "right",
       mono: true,
@@ -948,12 +1338,12 @@ export default function PricingPage() {
       ),
     },
     {
-      h: copy.feeColumns.reimburse,
+      h: copy.col.reimburse,
       w: 140,
       r: (plan) => formatPlatformCodeLabel(locale, plan.reimbursementMode),
     },
     {
-      h: copy.feeColumns.status,
+      h: copy.col.status,
       w: 120,
       r: (plan) => (
         <CanvasPill theme={th} tone={statusTone(plan.status)} dot>
@@ -962,21 +1352,96 @@ export default function PricingPage() {
       ),
     },
     {
-      h: copy.feeColumns.published,
+      h: copy.col.publishedAt,
       w: 170,
       mono: true,
       r: (plan) => formatDateTime(plan.publishedAt),
     },
   ];
 
-  if (loading) {
+  const historyColumns: CanvasTableColumn<HistoryRow>[] = [
+    { h: copy.col.version, w: 110, mono: true, r: (r) => r.version },
+    {
+      h: copy.col.type,
+      w: 130,
+      r: (r) => (
+        <CanvasPill
+          theme={th}
+          tone={r.type === "passenger" ? "info" : "accent"}
+        >
+          {r.type}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: copy.col.name,
+      w: 230,
+      r: (r) => <span style={primaryTextStyle}>{r.name}</span>,
+    },
+    {
+      h: copy.col.publishedAt,
+      w: 160,
+      mono: true,
+      r: (r) => formatDateTime(r.publishedAt),
+    },
+    { h: copy.col.publishedBy, w: 160, r: (r) => r.publishedBy },
+    {
+      h: copy.col.status,
+      w: 110,
+      r: (r) => (
+        <CanvasPill
+          theme={th}
+          tone={r.status === "published" ? "success" : "neutral"}
+          dot
+        >
+          {r.status}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: copy.col.audit,
+      w: 110,
+      r: (r) => <CrossAppLink link={r.link} theme={th} />,
+    },
+  ];
+
+  if (loading && rules.length === 0 && feePlans.length === 0) {
     return <div style={loadingStateStyle}>{t("pricing.loading")}</div>;
   }
 
-  const canonicalVersion =
-    activeRule?.version ??
-    productRuleCatalog?.pricingAuthority.canonicalPricingRuleVersion ??
-    "draft";
+  // ── interactive tabs rendered into the canvas page header ─────────────────────
+  const tabNodes: ReactNode[] = TAB_IDS.map((id) => {
+    const isActive = activeTab === id;
+    const count =
+      id === "passenger"
+        ? rules.length
+        : id === "driver"
+          ? feePlans.length
+          : id === "history"
+            ? historyRows.length
+            : 0;
+    return (
+      <button
+        key={id}
+        type="button"
+        role="tab"
+        aria-selected={isActive}
+        style={tabButtonStyle}
+        onClick={() => setActiveTab(id)}
+      >
+        {copy.tabs[id]}
+        {id !== "subsidy" ? (
+          <span style={tabCountStyle(isActive)}>{count}</span>
+        ) : null}
+      </button>
+    );
+  });
+  const activeTabNode = tabNodes[TAB_IDS.indexOf(activeTab)];
+
+  const publishingRule =
+    publishRuleId !== null
+      ? (sortedRules.find((r) => r.ruleId === publishRuleId) ?? null)
+      : null;
 
   return (
     <div style={pageRootStyle}>
@@ -984,33 +1449,75 @@ export default function PricingPage() {
         theme={th}
         title={copy.title}
         subtitle={copy.subtitle}
-        tabs={copy.tabs}
-        activeTab={copy.tabs[0]}
+        tabs={tabNodes}
+        activeTab={activeTabNode}
         actions={
           <>
+            <RefreshIndicator
+              meta={refreshMeta}
+              tierLabel={copy.refreshTierLabel}
+              freshness={copy.freshness}
+              lastRefreshed={copy.lastRefreshed}
+            />
+            {activeTab === "passenger" ? (
+              <ActionCTA
+                descriptor={ACTION_CREATE_DRAFT}
+                icon={showCreate ? "x" : "plus"}
+                label={
+                  showCreate
+                    ? t("pricing.cancelDraft")
+                    : t("pricing.newPricingDraft")
+                }
+                onClick={() => setShowCreate((c) => !c)}
+              />
+            ) : null}
+            {activeTab === "passenger" ? (
+              <ActionCTA
+                descriptor={
+                  draftRules.length > 0
+                    ? ACTION_PUBLISH_RULE
+                    : {
+                        ...ACTION_PUBLISH_RULE,
+                        enabled: false,
+                        disabledReasonCode: "no_draft",
+                      }
+                }
+                variant="primary"
+                icon="check"
+                label={t("pricing.publishDraft")}
+                onClick={() => {
+                  const next = draftRules[0];
+                  if (next) openPublishModal(next);
+                }}
+              />
+            ) : null}
+            {activeTab === "driver" ? (
+              <ActionCTA
+                descriptor={ACTION_PUBLISH_FEE_PLAN}
+                variant="primary"
+                icon={showFeePlanForm ? "x" : "plus"}
+                label={
+                  showFeePlanForm
+                    ? t("pricing.hidePublishForm")
+                    : t("pricing.publishSettlementPlan")
+                }
+                onClick={() => setShowFeePlanForm((c) => !c)}
+              />
+            ) : null}
+            {activeTab === "subsidy" ? (
+              <ActionCTA
+                descriptor={ACTION_CREATE_SUBSIDY_DRAFT}
+                icon="plus"
+                label={t("pricing.createDraft")}
+                onClick={() => undefined}
+              />
+            ) : null}
             <CanvasBtn
               theme={th}
               variant="secondary"
-              icon={showCreate ? "x" : "plus"}
-              onClick={() => setShowCreate((current) => !current)}
+              onClick={() => void loadData()}
             >
-              {showCreate
-                ? t("pricing.cancelDraft")
-                : t("pricing.newPricingDraft")}
-            </CanvasBtn>
-            <CanvasBtn
-              theme={th}
-              variant="primary"
-              icon="check"
-              disabled={draftRules.length === 0}
-              onClick={() => {
-                const nextDraft = selectedDraftRule ?? draftRules[0];
-                if (nextDraft) {
-                  openPublishRuleForm(nextDraft);
-                }
-              }}
-            >
-              {t("pricing.publishDraft")}
+              {copy.refresh}
             </CanvasBtn>
           </>
         }
@@ -1033,33 +1540,50 @@ export default function PricingPage() {
           icon="warn"
           title={copy.authorityTitle}
           body={
-            productRuleCatalog ? (
-              <>
-                <strong>
-                  {
-                    productRuleCatalog.pricingAuthority
-                      .canonicalQuotedFareSource
-                  }
-                </strong>
-                {" · "}
-                <strong>
-                  {
-                    productRuleCatalog.pricingAuthority
-                      .canonicalPricingRuleVersion
-                  }
-                </strong>
-                {" · "}
-                {productRuleCatalog.pricingAuthority.manualOverrideActorTypes.join(
-                  " / ",
+            <span
+              style={{
+                display: "inline-flex",
+                gap: 8,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              {productRuleCatalog ? (
+                <>
+                  <strong>
+                    {
+                      productRuleCatalog.pricingAuthority
+                        .canonicalQuotedFareSource
+                    }
+                  </strong>
+                  {" · "}
+                  <strong>
+                    {
+                      productRuleCatalog.pricingAuthority
+                        .canonicalPricingRuleVersion
+                    }
+                  </strong>
+                  {" · "}
+                  {productRuleCatalog.pricingAuthority.manualOverrideActorTypes.join(
+                    " / ",
+                  )}
+                  {" · "}
+                  {productRuleCatalog.pricingAuthority.manualOverrideRequiredFields.join(
+                    ", ",
+                  )}
+                </>
+              ) : (
+                copy.authorityFallback
+              )}
+              <CrossAppLink
+                link={auditLink(
+                  "pricing_authority",
+                  canonicalVersion,
+                  copy.authorityAuditLink,
                 )}
-                {" · "}
-                {productRuleCatalog.pricingAuthority.manualOverrideRequiredFields.join(
-                  ", ",
-                )}
-              </>
-            ) : (
-              copy.authorityFallback
-            )
+                theme={th}
+              />
+            </span>
           }
         />
 
@@ -1078,149 +1602,160 @@ export default function PricingPage() {
           </CanvasPill>
         </div>
 
-        {showCreate ? (
-          <CanvasCard
-            theme={th}
-            title={t("pricing.sectionCreateDraft")}
-            subtitle={copy.rulesSubtitle}
-          >
-            <form onSubmit={handleCreatePricingRule} style={composerStyle}>
-              <div style={fieldGridStyle}>
-                <CanvasField
-                  theme={th}
-                  label={t("pricing.form.ruleName")}
-                  required
-                >
-                  <input
-                    value={pricingForm.ruleName}
-                    onChange={(event) =>
-                      setPricingForm((current) => ({
-                        ...current,
-                        ruleName: event.target.value,
-                      }))
-                    }
-                    required
-                    placeholder={defaultPlanName}
-                    style={inputStyle}
-                  />
-                </CanvasField>
-                <CanvasField
-                  theme={th}
-                  label={t("pricing.form.version")}
-                  required
-                >
-                  <input
-                    value={pricingForm.version}
-                    onChange={(event) =>
-                      setPricingForm((current) => ({
-                        ...current,
-                        version: event.target.value,
-                      }))
-                    }
-                    required
-                    style={monoInputStyle}
-                  />
-                </CanvasField>
-                <CanvasField
-                  theme={th}
-                  label={getPlatformLabel(locale, "applicableTo")}
-                >
-                  <input
-                    value={pricingForm.applicableTo}
-                    onChange={(event) =>
-                      setPricingForm((current) => ({
-                        ...current,
-                        applicableTo: event.target.value,
-                      }))
-                    }
-                    style={monoInputStyle}
-                  />
-                </CanvasField>
-                <CanvasField
-                  theme={th}
-                  label={t("pricing.form.serviceFeeBps")}
-                  required
-                >
-                  <input
-                    type="number"
-                    min={0}
-                    value={pricingForm.serviceFeeBps}
-                    onChange={(event) =>
-                      setPricingForm((current) => ({
-                        ...current,
-                        serviceFeeBps: event.target.value,
-                      }))
-                    }
-                    required
-                    style={monoInputStyle}
-                  />
-                </CanvasField>
-                <CanvasField theme={th} label={t("pricing.form.reimbMode")}>
-                  <select
-                    value={pricingForm.reimbursementMode}
-                    onChange={(event) =>
-                      setPricingForm((current) => ({
-                        ...current,
-                        reimbursementMode: event.target
-                          .value as PricingFormState["reimbursementMode"],
-                      }))
-                    }
-                    style={inputStyle}
-                  >
-                    <option value="platform_funded">
-                      {t("pricing.platformFunded")}
-                    </option>
-                    <option value="mixed">{t("pricing.mixed")}</option>
-                  </select>
-                </CanvasField>
-              </div>
+        {/* ── Passenger Pricing tab ───────────────────────────────────────── */}
+        {activeTab === "passenger" ? (
+          <>
+            {showCreate ? (
+              <CanvasCard
+                theme={th}
+                title={t("pricing.sectionCreateDraft")}
+                subtitle={copy.rulesSubtitle}
+              >
+                <form onSubmit={handleCreatePricingRule} style={composerStyle}>
+                  <div style={fieldGridStyle}>
+                    <CanvasField
+                      theme={th}
+                      label={t("pricing.form.ruleName")}
+                      required
+                    >
+                      <input
+                        value={pricingForm.ruleName}
+                        onChange={(e) =>
+                          setPricingForm((c) => ({
+                            ...c,
+                            ruleName: e.target.value,
+                          }))
+                        }
+                        required
+                        placeholder={defaultPlanName}
+                        style={inputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      label={t("pricing.form.version")}
+                      required
+                    >
+                      <input
+                        value={pricingForm.version}
+                        onChange={(e) =>
+                          setPricingForm((c) => ({
+                            ...c,
+                            version: e.target.value,
+                          }))
+                        }
+                        required
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      label={getPlatformLabel(locale, "applicableTo")}
+                    >
+                      <input
+                        value={pricingForm.applicableTo}
+                        onChange={(e) =>
+                          setPricingForm((c) => ({
+                            ...c,
+                            applicableTo: e.target.value,
+                          }))
+                        }
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      label={t("pricing.form.serviceFeeBps")}
+                      required
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        value={pricingForm.serviceFeeBps}
+                        onChange={(e) =>
+                          setPricingForm((c) => ({
+                            ...c,
+                            serviceFeeBps: e.target.value,
+                          }))
+                        }
+                        required
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField theme={th} label={t("pricing.form.reimbMode")}>
+                      <select
+                        value={pricingForm.reimbursementMode}
+                        onChange={(e) =>
+                          setPricingForm((c) => ({
+                            ...c,
+                            reimbursementMode: e.target
+                              .value as PricingFormState["reimbursementMode"],
+                          }))
+                        }
+                        style={inputStyle}
+                      >
+                        <option value="platform_funded">
+                          {t("pricing.platformFunded")}
+                        </option>
+                        <option value="mixed">{t("pricing.mixed")}</option>
+                      </select>
+                    </CanvasField>
+                  </div>
+                  <CanvasField theme={th} label={t("pricing.form.notes")}>
+                    <textarea
+                      value={pricingForm.notes}
+                      onChange={(e) =>
+                        setPricingForm((c) => ({ ...c, notes: e.target.value }))
+                      }
+                      rows={3}
+                      style={textAreaStyle}
+                    />
+                  </CanvasField>
+                  <div style={formActionsStyle}>
+                    <CanvasBtn
+                      theme={th}
+                      variant="secondary"
+                      onClick={() => setShowCreate(false)}
+                    >
+                      {copy.cancel}
+                    </CanvasBtn>
+                    <button
+                      type="submit"
+                      disabled={
+                        creatingPricingRule ||
+                        !pricingForm.ruleName.trim() ||
+                        !pricingForm.version.trim()
+                      }
+                      style={{
+                        ...inputStyle,
+                        width: "auto",
+                        cursor:
+                          creatingPricingRule ||
+                          !pricingForm.ruleName.trim() ||
+                          !pricingForm.version.trim()
+                            ? "not-allowed"
+                            : "pointer",
+                        border: `1px solid ${th.accent}`,
+                        background: th.accent,
+                        color: "#ffffff",
+                        fontWeight: 600,
+                        opacity:
+                          creatingPricingRule ||
+                          !pricingForm.ruleName.trim() ||
+                          !pricingForm.version.trim()
+                            ? 0.55
+                            : 1,
+                      }}
+                    >
+                      {creatingPricingRule
+                        ? t("pricing.creating")
+                        : t("pricing.createDraft")}
+                    </button>
+                  </div>
+                </form>
+              </CanvasCard>
+            ) : null}
 
-              <CanvasField theme={th} label={t("pricing.form.notes")}>
-                <textarea
-                  value={pricingForm.notes}
-                  onChange={(event) =>
-                    setPricingForm((current) => ({
-                      ...current,
-                      notes: event.target.value,
-                    }))
-                  }
-                  rows={3}
-                  style={textAreaStyle}
-                />
-              </CanvasField>
-
-              <div style={formActionsStyle}>
-                <CanvasBtn
-                  theme={th}
-                  variant="secondary"
-                  onClick={() => setShowCreate(false)}
-                >
-                  {t("common.cancel")}
-                </CanvasBtn>
-                <button
-                  type="submit"
-                  disabled={
-                    creatingPricingRule ||
-                    !pricingForm.ruleName.trim() ||
-                    !pricingForm.version.trim()
-                  }
-                  style={submitButtonStyle(
-                    creatingPricingRule ||
-                      !pricingForm.ruleName.trim() ||
-                      !pricingForm.version.trim(),
-                  )}
-                >
-                  {creatingPricingRule
-                    ? t("pricing.creating")
-                    : t("pricing.createDraft")}
-                </button>
-              </div>
-            </form>
-          </CanvasCard>
-        ) : null}
-
-        <div style={splitLayoutStyle}>
-          <div style={mainColumnStyle}>
             <CanvasCard
               theme={th}
               title={copy.rulesTitle}
@@ -1238,7 +1773,6 @@ export default function PricingPage() {
                           : value === "draft"
                             ? ruleCounts.draft
                             : ruleCounts.archived;
-
                     return (
                       <button
                         key={value}
@@ -1257,322 +1791,633 @@ export default function PricingPage() {
                     );
                   },
                 )}
-                <span style={{ flex: 1 }} />
-                <CanvasBtn
-                  theme={th}
-                  variant="secondary"
-                  onClick={() => void loadData()}
-                >
-                  {copy.refresh}
-                </CanvasBtn>
               </div>
-
-              <CanvasTable theme={th} columns={ruleColumns} rows={ruleRows} />
+              {ruleRows.length > 0 ? (
+                <CanvasTable theme={th} columns={ruleColumns} rows={ruleRows} />
+              ) : (
+                <div style={{ padding: 14 }}>
+                  <EmptyState
+                    reason={passengerEmptyReason}
+                    copy={copy}
+                    onRetry={() => void loadData()}
+                    onClearFilters={() => setFilter("all")}
+                  />
+                </div>
+              )}
             </CanvasCard>
-          </div>
 
-          <div style={sideColumnStyle}>
+            <CanvasCard theme={th} title={copy.bucketTitle(canonicalVersion)}>
+              <div style={bucketGridStyle}>
+                {copy.bucketCards.map((bucket) => (
+                  <div key={bucket.key} style={bucketCellStyle(bucket.tone)}>
+                    <div
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        width: "fit-content",
+                        padding: "2px 7px",
+                        borderRadius: 999,
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        letterSpacing: 0.3,
+                        color: "var(--badge-color)",
+                        background: "var(--badge-bg)",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {bucket.title}
+                    </div>
+                    <div style={{ display: "grid", gap: 3 }}>
+                      <span style={primaryTextStyle}>{bucket.base}</span>
+                      <span style={secondaryTextStyle}>
+                        {bucket.continuation}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        color: "var(--badge-color)",
+                        fontFamily: th.monoFamily,
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {bucket.fee}
+                    </div>
+                    <div style={secondaryMonoStyle}>{bucket.note}</div>
+                  </div>
+                ))}
+              </div>
+            </CanvasCard>
+
             <CanvasCard
               theme={th}
-              title={copy.governanceTitle}
-              subtitle={copy.governanceSubtitle}
+              title={copy.authorityCardTitle}
+              subtitle={copy.authorityFallback}
             >
               {authorityItems.length > 0 ? (
-                <CanvasDL theme={th} cols={1} items={authorityItems} />
+                <CanvasDL theme={th} cols={2} items={authorityItems} />
               ) : (
                 <p style={helperTextStyle}>{copy.authorityFallback}</p>
               )}
+            </CanvasCard>
+          </>
+        ) : null}
 
-              <div style={{ height: 16 }} />
-
-              <div style={sectionIntroStyle}>
-                <h3 style={sectionTitleStyle}>{copy.governanceDraftQueue}</h3>
-                <p style={sectionCopyStyle}>{copy.governanceSubtitle}</p>
-              </div>
-
-              <div style={{ height: 10 }} />
-
-              {draftRules.length > 0 ? (
-                <div style={draftSelectorStyle}>
-                  {draftRules.map((rule) => (
-                    <CanvasBtn
-                      key={rule.ruleId}
-                      theme={th}
-                      size="xs"
-                      variant={
-                        publishRuleFormRuleId === rule.ruleId
-                          ? "primary"
-                          : "secondary"
-                      }
-                      onClick={() => openPublishRuleForm(rule)}
-                    >
-                      {rule.version}
-                    </CanvasBtn>
-                  ))}
-                </div>
-              ) : (
-                <p style={helperTextStyle}>{copy.governanceNoDrafts}</p>
-              )}
-
-              <div style={{ height: 16 }} />
-
-              {publishRuleFormError ? (
-                <>
-                  <CanvasBanner
-                    theme={th}
-                    tone="danger"
-                    icon="warn"
-                    title={getPlatformLabel(locale, "error")}
-                    body={publishRuleFormError}
-                  />
-                  <div style={{ height: 12 }} />
-                </>
-              ) : null}
-
-              {selectedDraftRule ? (
-                <div style={composerStyle}>
-                  <div style={sectionIntroStyle}>
-                    <h3 style={sectionTitleStyle}>
-                      {copy.governancePublishWindow}
-                    </h3>
-                    <p style={sectionCopyStyle}>
-                      {selectedDraftRule.ruleName} · {selectedDraftRule.version}
-                    </p>
-                  </div>
-
-                  <div style={twoFieldRowStyle}>
+        {/* ── Driver Fee Plans tab ────────────────────────────────────────── */}
+        {activeTab === "driver" ? (
+          <>
+            {showFeePlanForm ? (
+              <CanvasCard
+                theme={th}
+                title={t("pricing.sectionPublishPlan")}
+                subtitle={copy.feePlansComposer}
+              >
+                <form onSubmit={handlePublishFeePlan} style={composerStyle}>
+                  <div style={fieldGridStyle}>
                     <CanvasField
                       theme={th}
-                      label={t("pricing.effectiveFromOverride")}
+                      label={t("pricing.form.planName")}
+                      required
                     >
                       <input
-                        type="datetime-local"
-                        value={publishRuleForm.effectiveFrom}
-                        onChange={(event) => {
-                          setPublishRuleFormError(null);
-                          setPublishRuleForm((current) => ({
-                            ...current,
-                            effectiveFrom: event.target.value,
-                          }));
-                        }}
+                        value={feePlanForm.planName}
+                        onChange={(e) =>
+                          setFeePlanForm((c) => ({
+                            ...c,
+                            planName: e.target.value,
+                          }))
+                        }
+                        required
                         style={inputStyle}
-                        max={publishRuleForm.effectiveTo || undefined}
                       />
                     </CanvasField>
                     <CanvasField
                       theme={th}
-                      label={t("pricing.effectiveToOverride")}
+                      label={t("pricing.form.version")}
+                      required
                     >
                       <input
-                        type="datetime-local"
-                        value={publishRuleForm.effectiveTo}
-                        onChange={(event) => {
-                          setPublishRuleFormError(null);
-                          setPublishRuleForm((current) => ({
-                            ...current,
-                            effectiveTo: event.target.value,
-                          }));
-                        }}
-                        style={inputStyle}
-                        min={publishRuleForm.effectiveFrom || undefined}
+                        value={feePlanForm.version}
+                        onChange={(e) =>
+                          setFeePlanForm((c) => ({
+                            ...c,
+                            version: e.target.value,
+                          }))
+                        }
+                        required
+                        placeholder="drv-fee-v2"
+                        style={monoInputStyle}
                       />
                     </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      label={t("pricing.form.serviceFeeBps")}
+                      required
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        value={feePlanForm.serviceFeeBps}
+                        onChange={(e) =>
+                          setFeePlanForm((c) => ({
+                            ...c,
+                            serviceFeeBps: e.target.value,
+                          }))
+                        }
+                        required
+                        style={monoInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField theme={th} label={t("pricing.form.reimbMode")}>
+                      <select
+                        value={feePlanForm.reimbursementMode}
+                        onChange={(e) =>
+                          setFeePlanForm((c) => ({
+                            ...c,
+                            reimbursementMode: e.target
+                              .value as FeePlanFormState["reimbursementMode"],
+                          }))
+                        }
+                        style={inputStyle}
+                      >
+                        <option value="platform_funded">
+                          {t("pricing.platformFunded")}
+                        </option>
+                        <option value="mixed">{t("pricing.mixed")}</option>
+                      </select>
+                    </CanvasField>
                   </div>
-
-                  <p style={helperTextStyle}>
-                    {copy.governancePublishWindowCopy}
-                  </p>
-
+                  <p style={helperTextStyle}>{copy.feePlansComposer}</p>
                   <div style={formActionsStyle}>
                     <CanvasBtn
                       theme={th}
                       variant="secondary"
-                      onClick={closePublishRuleForm}
-                      disabled={publishingRuleId === selectedDraftRule.ruleId}
+                      onClick={() => setShowFeePlanForm(false)}
                     >
-                      {t("common.cancel")}
+                      {copy.cancel}
                     </CanvasBtn>
-                    <CanvasBtn
-                      theme={th}
-                      variant="primary"
-                      icon="check"
-                      disabled={publishingRuleId === selectedDraftRule.ruleId}
-                      onClick={() =>
-                        void handlePublishRule(selectedDraftRule.ruleId)
+                    <button
+                      type="submit"
+                      disabled={
+                        publishingFeePlan || !feePlanForm.version.trim()
                       }
+                      style={{
+                        ...inputStyle,
+                        width: "auto",
+                        cursor:
+                          publishingFeePlan || !feePlanForm.version.trim()
+                            ? "not-allowed"
+                            : "pointer",
+                        border: `1px solid ${th.accent}`,
+                        background: th.accent,
+                        color: "#ffffff",
+                        fontWeight: 600,
+                        opacity:
+                          publishingFeePlan || !feePlanForm.version.trim()
+                            ? 0.55
+                            : 1,
+                      }}
                     >
-                      {publishingRuleId === selectedDraftRule.ruleId
+                      {publishingFeePlan
                         ? t("pricing.publishing")
-                        : t("pricing.confirmPublish")}
-                    </CanvasBtn>
+                        : t("pricing.publishSettlementPlan")}
+                    </button>
                   </div>
-                </div>
+                </form>
+              </CanvasCard>
+            ) : null}
+
+            <CanvasCard
+              theme={th}
+              title={copy.feePlansTitle}
+              subtitle={copy.feePlansSubtitle}
+              padding={0}
+            >
+              {feePlanRows.length > 0 ? (
+                <CanvasTable
+                  theme={th}
+                  columns={feePlanColumns}
+                  rows={feePlanRows}
+                />
               ) : (
-                <p style={helperTextStyle}>{copy.governanceEmpty}</p>
+                <div style={{ padding: 14 }}>
+                  <EmptyState
+                    reason={listEmptyReason}
+                    copy={copy}
+                    onRetry={() => void loadData()}
+                  />
+                </div>
               )}
             </CanvasCard>
+          </>
+        ) : null}
+
+        {/* ── Subsidy / Reimbursement tab (not provisioned in Phase 1) ─────── */}
+        {activeTab === "subsidy" ? (
+          <CanvasCard
+            theme={th}
+            title={copy.subsidyTitle}
+            subtitle={copy.subsidySubtitle}
+          >
+            <EmptyState
+              reason={errorReason ?? "not_provisioned"}
+              copy={copy}
+              onRetry={() => void loadData()}
+            />
+          </CanvasCard>
+        ) : null}
+
+        {/* ── Published Versions tab (cross-tab history) ──────────────────── */}
+        {activeTab === "history" ? (
+          <CanvasCard
+            theme={th}
+            title={copy.historyTitle}
+            subtitle={copy.historySubtitle}
+            padding={0}
+          >
+            {historyRows.length > 0 ? (
+              <CanvasTable
+                theme={th}
+                columns={historyColumns}
+                rows={historyRows}
+              />
+            ) : (
+              <div style={{ padding: 14 }}>
+                <EmptyState
+                  reason={listEmptyReason}
+                  copy={copy}
+                  onRetry={() => void loadData()}
+                />
+              </div>
+            )}
+          </CanvasCard>
+        ) : null}
+      </div>
+
+      {/* ── Publish modal — high-risk, requiresReason (packet §3.4) ──────────── */}
+      {publishingRule ? (
+        <div style={modalOverlayStyle} role="dialog" aria-modal="true">
+          <div style={modalStyle}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 14,
+              }}
+            >
+              <CanvasPill theme={th} tone="danger" dot>
+                {copy.riskHigh}
+              </CanvasPill>
+              <h2 style={{ margin: 0, fontSize: 16 }}>
+                {t("pricing.publishDraft")}
+              </h2>
+            </div>
+            <div style={sectionIntroStyle}>
+              <h3 style={sectionTitleStyle}>{publishingRule.ruleName}</h3>
+              <p style={sectionCopyStyle}>
+                {publishingRule.version} · {copy.publishWindow}
+              </p>
+            </div>
+
+            {publishFormError ? (
+              <div style={{ margin: "12px 0" }}>
+                <CanvasBanner
+                  theme={th}
+                  tone="danger"
+                  icon="warn"
+                  title={getPlatformLabel(locale, "error")}
+                  body={publishFormError}
+                />
+              </div>
+            ) : null}
+
+            <div style={{ ...twoFieldRowStyle, marginTop: 14 }}>
+              <CanvasField
+                theme={th}
+                label={t("pricing.effectiveFromOverride")}
+              >
+                <input
+                  type="datetime-local"
+                  value={publishForm.effectiveFrom}
+                  onChange={(e) => {
+                    setPublishFormError(null);
+                    setPublishForm((c) => ({
+                      ...c,
+                      effectiveFrom: e.target.value,
+                    }));
+                  }}
+                  style={inputStyle}
+                  max={publishForm.effectiveTo || undefined}
+                />
+              </CanvasField>
+              <CanvasField theme={th} label={t("pricing.effectiveToOverride")}>
+                <input
+                  type="datetime-local"
+                  value={publishForm.effectiveTo}
+                  onChange={(e) => {
+                    setPublishFormError(null);
+                    setPublishForm((c) => ({
+                      ...c,
+                      effectiveTo: e.target.value,
+                    }));
+                  }}
+                  style={inputStyle}
+                  min={publishForm.effectiveFrom || undefined}
+                />
+              </CanvasField>
+            </div>
+
+            <p style={{ ...helperTextStyle, marginTop: 10 }}>
+              {copy.publishWindowCopy}
+            </p>
+
+            <div style={{ marginTop: 14 }}>
+              <CanvasField theme={th} label={copy.publishReasonLabel} required>
+                <textarea
+                  value={publishForm.reason}
+                  onChange={(e) => {
+                    setPublishFormError(null);
+                    setPublishForm((c) => ({ ...c, reason: e.target.value }));
+                  }}
+                  rows={3}
+                  style={textAreaStyle}
+                  placeholder={copy.publishReasonPlaceholder}
+                />
+              </CanvasField>
+            </div>
+
+            <div style={{ ...formActionsStyle, marginTop: 18 }}>
+              <CanvasBtn
+                theme={th}
+                variant="secondary"
+                onClick={closePublishModal}
+                disabled={publishingRuleId === publishingRule.ruleId}
+              >
+                {copy.cancel}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={th}
+                variant="primary"
+                danger
+                icon="check"
+                disabled={
+                  publishingRuleId === publishingRule.ruleId ||
+                  !publishForm.reason.trim()
+                }
+                onClick={() => void handlePublishRule(publishingRule.ruleId)}
+              >
+                {publishingRuleId === publishingRule.ruleId
+                  ? t("pricing.publishing")
+                  : t("pricing.confirmPublish")}
+              </CanvasBtn>
+            </div>
           </div>
         </div>
+      ) : null}
 
-        <CanvasCard theme={th} title={copy.bucketTitle(canonicalVersion)}>
-          <div style={bucketGridStyle}>
-            {copy.bucketCards.map((bucket) => (
-              <div key={bucket.key} style={bucketCellStyle(bucket.tone)}>
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    width: "fit-content",
-                    padding: "2px 7px",
-                    borderRadius: 999,
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    letterSpacing: 0.3,
-                    color: "var(--badge-color)",
-                    background: "var(--badge-bg)",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {bucket.title}
-                </div>
-                <div style={{ display: "grid", gap: 3 }}>
-                  <span style={primaryTextStyle}>{bucket.base}</span>
-                  <span style={secondaryTextStyle}>{bucket.continuation}</span>
-                </div>
-                <div
-                  style={{
-                    color: "var(--badge-color)",
-                    fontFamily: th.monoFamily,
-                    fontSize: 12,
-                    fontWeight: 700,
-                  }}
-                >
-                  {bucket.fee}
-                </div>
-                <div style={secondaryMonoStyle}>{bucket.note}</div>
-              </div>
-            ))}
-          </div>
-        </CanvasCard>
+      {/* ── Receipt toast — ActionReceipt with cross-app "View audit" link ──── */}
+      {toast ? (
+        <ReceiptToast
+          ok={toast.ok}
+          receipt={toast.receipt}
+          title={toast.ok ? copy.receiptTitle : copy.receiptFailed}
+          viewAuditLabel={copy.viewAudit}
+          onClose={() => setToast(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
 
-        <CanvasCard
-          theme={th}
-          title={copy.feePlansTitle}
-          subtitle={copy.feePlansSubtitle}
+// ─────────────────────────────────────────────────────────────────────────────
+// Descriptor-driven CTA (packet §3.5) — disabled CTAs stay visible with a
+// tooltip reason; high-risk gets a ⚠ prefix.
+// ─────────────────────────────────────────────────────────────────────────────
+function ActionCTA({
+  descriptor,
+  label,
+  onClick,
+  variant = "secondary",
+  size = "sm",
+  icon,
+}: {
+  descriptor: ResourceActionDescriptor;
+  label: string;
+  onClick: () => void;
+  variant?: "primary" | "secondary";
+  size?: "xs" | "sm" | "md";
+  icon?: string;
+}) {
+  const disabled = !descriptor.enabled;
+  return (
+    <CanvasBtn
+      theme={th}
+      variant={variant}
+      size={size}
+      danger={descriptor.riskLevel === "high" && variant === "primary"}
+      icon={icon as never}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {descriptor.riskLevel === "high" ? "⚠ " : ""}
+      {label}
+    </CanvasBtn>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Refresh indicator (packet §3.2 — tier + freshness + last-refreshed)
+// ─────────────────────────────────────────────────────────────────────────────
+function RefreshIndicator({
+  meta,
+  tierLabel,
+  freshness,
+  lastRefreshed,
+}: {
+  meta: UiRefreshMetadata | null;
+  tierLabel: string;
+  freshness: Record<string, string>;
+  lastRefreshed: (time: string) => string;
+}) {
+  const fresh = meta?.dataFreshness ?? "unknown";
+  const tone: CanvasTone =
+    fresh === "fresh"
+      ? "success"
+      : fresh === "degraded"
+        ? "danger"
+        : fresh === "stale"
+          ? "warn"
+          : "neutral";
+  return (
+    <span
+      title={tierLabel}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        marginRight: 4,
+        fontSize: 11.5,
+        color: th.textMuted,
+      }}
+    >
+      <CanvasPill theme={th} tone={tone} dot>
+        {freshness[fresh] ?? fresh}
+      </CanvasPill>
+      {meta ? (
+        <span
+          style={{ fontFamily: th.monoFamily, fontSize: 11, color: th.textDim }}
         >
-          <form onSubmit={handlePublishFeePlan} style={composerStyle}>
-            <div style={sectionIntroStyle}>
-              <h3 style={sectionTitleStyle}>
-                {t("pricing.sectionPublishPlan")}
-              </h3>
-              <p style={sectionCopyStyle}>{copy.feePlansComposer}</p>
-            </div>
+          {lastRefreshed(formatDateTime(meta.generatedAt))}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
-            <div style={fieldGridStyle}>
-              <CanvasField
-                theme={th}
-                label={t("pricing.form.planName")}
-                required
-              >
-                <input
-                  value={feePlanForm.planName}
-                  onChange={(event) =>
-                    setFeePlanForm((current) => ({
-                      ...current,
-                      planName: event.target.value,
-                    }))
-                  }
-                  required
-                  style={inputStyle}
-                />
-              </CanvasField>
-              <CanvasField
-                theme={th}
-                label={t("pricing.form.version")}
-                required
-              >
-                <input
-                  value={feePlanForm.version}
-                  onChange={(event) =>
-                    setFeePlanForm((current) => ({
-                      ...current,
-                      version: event.target.value,
-                    }))
-                  }
-                  required
-                  placeholder="drv-fee-v2"
-                  style={monoInputStyle}
-                />
-              </CanvasField>
-              <CanvasField
-                theme={th}
-                label={t("pricing.form.serviceFeeBps")}
-                required
-              >
-                <input
-                  type="number"
-                  min={0}
-                  value={feePlanForm.serviceFeeBps}
-                  onChange={(event) =>
-                    setFeePlanForm((current) => ({
-                      ...current,
-                      serviceFeeBps: event.target.value,
-                    }))
-                  }
-                  required
-                  style={monoInputStyle}
-                />
-              </CanvasField>
-              <CanvasField theme={th} label={t("pricing.form.reimbMode")}>
-                <select
-                  value={feePlanForm.reimbursementMode}
-                  onChange={(event) =>
-                    setFeePlanForm((current) => ({
-                      ...current,
-                      reimbursementMode: event.target
-                        .value as FeePlanFormState["reimbursementMode"],
-                    }))
-                  }
-                  style={inputStyle}
-                >
-                  <option value="platform_funded">
-                    {t("pricing.platformFunded")}
-                  </option>
-                  <option value="mixed">{t("pricing.mixed")}</option>
-                </select>
-              </CanvasField>
-            </div>
+// ─────────────────────────────────────────────────────────────────────────────
+// Empty state — six distinct EmptyReason treatments (packet §3.6)
+// ─────────────────────────────────────────────────────────────────────────────
+function EmptyState({
+  reason,
+  copy,
+  onRetry,
+  onClearFilters,
+}: {
+  reason: PlatformEmptyReason;
+  copy: { empty: Record<string, { title: string; body: string } | string> };
+  onRetry?: () => void;
+  onClearFilters?: () => void;
+}) {
+  const treatment = EMPTY_TREATMENTS[reason];
+  const text = copy.empty[reason] as { title: string; body: string };
+  const accent =
+    treatment.tone === "danger"
+      ? th.danger
+      : treatment.tone === "warn"
+        ? th.warn
+        : treatment.tone === "info"
+          ? th.info
+          : th.textDim;
+  return (
+    <div
+      data-empty-reason={reason}
+      style={{
+        borderLeft: `3px solid ${accent}`,
+        background: th.surfaceLo,
+        borderRadius: 8,
+        textAlign: "center",
+        padding: "32px 24px",
+        display: "grid",
+        gap: 8,
+        justifyItems: "center",
+      }}
+    >
+      <div style={{ fontSize: 34 }}>{treatment.glyph}</div>
+      <h3 style={{ margin: 0, fontSize: 14, color: th.text }}>{text.title}</h3>
+      <p
+        style={{
+          margin: 0,
+          fontSize: 12,
+          color: th.textMuted,
+          maxWidth: 460,
+          lineHeight: 1.5,
+        }}
+      >
+        {text.body}
+      </p>
+      {treatment.action === "retry" && onRetry ? (
+        <CanvasBtn theme={th} variant="secondary" size="sm" onClick={onRetry}>
+          {copy.empty.retry as string}
+        </CanvasBtn>
+      ) : null}
+      {treatment.action === "clear_filters" && onClearFilters ? (
+        <CanvasBtn
+          theme={th}
+          variant="secondary"
+          size="sm"
+          onClick={onClearFilters}
+        >
+          {copy.empty.clearFilters as string}
+        </CanvasBtn>
+      ) : null}
+    </div>
+  );
+}
 
-            <div style={formActionsStyle}>
-              <button
-                type="submit"
-                disabled={publishingFeePlan || !feePlanForm.version.trim()}
-                style={submitButtonStyle(
-                  publishingFeePlan || !feePlanForm.version.trim(),
-                )}
-              >
-                {publishingFeePlan
-                  ? t("pricing.publishing")
-                  : t("pricing.publishSettlementPlan")}
-              </button>
-            </div>
-          </form>
-
-          <div style={{ height: 16 }} />
-          <div style={dividerStyle} />
-          <div style={{ height: 16 }} />
-
-          {feePlanRows.length > 0 ? (
-            <CanvasTable
-              theme={th}
-              columns={feePlanColumns}
-              rows={feePlanRows}
-            />
-          ) : (
-            <p style={helperTextStyle}>{t("pricing.noPlans")}</p>
-          )}
-        </CanvasCard>
+// ─────────────────────────────────────────────────────────────────────────────
+// Receipt toast — ActionReceipt + cross-app "View audit" deep link (§3.4/§3.10)
+// ─────────────────────────────────────────────────────────────────────────────
+function ReceiptToast({
+  ok,
+  receipt,
+  title,
+  viewAuditLabel,
+  onClose,
+}: {
+  ok: boolean;
+  receipt: ActionReceipt;
+  title: string;
+  viewAuditLabel: string;
+  onClose: () => void;
+}) {
+  const link =
+    ok && receipt.auditId
+      ? auditLink(receipt.resourceType, receipt.auditId, viewAuditLabel)
+      : null;
+  return (
+    <div
+      role="status"
+      style={{
+        position: "fixed",
+        right: 24,
+        bottom: 24,
+        zIndex: 60,
+        maxWidth: 360,
+        background: th.bgRaised,
+        border: `1px solid ${ok ? th.successBorder : th.dangerBorder}`,
+        borderRadius: 12,
+        boxShadow: th.shadow,
+        padding: 16,
+        color: th.text,
+        fontFamily: th.fontFamily,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 6,
+        }}
+      >
+        <strong style={{ fontSize: 13 }}>{title}</strong>
+        <button
+          onClick={onClose}
+          type="button"
+          aria-label="close"
+          style={{
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            fontSize: 16,
+            color: th.textMuted,
+          }}
+        >
+          ×
+        </button>
       </div>
+      <p
+        style={{
+          margin: "0 0 8px",
+          fontSize: 12,
+          color: th.textMuted,
+          wordBreak: "break-word",
+        }}
+      >
+        {receipt.message}
+      </p>
+      {link ? <CrossAppLink link={link} theme={th} /> : null}
     </div>
   );
 }
