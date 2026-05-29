@@ -6,14 +6,16 @@ import type {
   AuditLogRecord,
   CreateIncidentCommand,
   CreateIncidentFromDispatchExceptionCommand,
-  DriverMatchingSuppression,
-  ExtendDriverMatchingSuppressionCommand,
+  EmptyReason,
+  EmptyStateEnvelope,
   IncidentRecord,
   IncidentStatus,
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
   ResourceActionDescriptor,
   ServiceRecoveryActionRecord,
+  UiCollectionEnvelope,
+  UiRefreshMetadata,
   UpdateIncidentCommand,
 } from "@drts/contracts";
 
@@ -73,12 +75,15 @@ const TIMELINE_ACTIONS = {
   suppressionLifted: "matching_suppression_lifted",
 } as const;
 
-type PersistSuppressionRecord = {
-  incidentId: string;
-  driverId: string;
-  updatedAt: string;
-  suppression: DriverMatchingSuppression;
-};
+const INCIDENT_CENTER_EMPTY_REASON_OVERRIDES = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+] as const satisfies readonly EmptyReason[];
+type IncidentCenterEmptyReason =
+  (typeof INCIDENT_CENTER_EMPTY_REASON_OVERRIDES)[number];
 
 @Injectable()
 export class IncidentService implements OnModuleInit {
@@ -212,22 +217,53 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
-    return this.cloneIncident(decorated);
+    return this.toView(incident);
   }
 
-  listIncidents(identity: BootstrapRequestIdentity | null = null) {
-    return this.incidents.map((incident) =>
-      this.cloneIncident(this.decorateIncident(incident, identity)),
-    );
+  listIncidents() {
+    return this.incidents.map((i) => this.toView(i));
   }
 
-  getIncident(
-    incidentId: string,
-    identity: BootstrapRequestIdentity | null = null,
-  ) {
-    return this.cloneIncident(
-      this.decorateIncident(this.require(incidentId), identity),
-    );
+  getIncidentCenterFeed(input?: {
+    emptyReason?: string;
+    dispatchExceptionOrderId?: string;
+    exceptionReasonCode?: string;
+  }): UiCollectionEnvelope<IncidentRecord> {
+    const emptyReason = this.resolveEmptyReasonOverride(input?.emptyReason);
+    const refreshMetadata: UiRefreshMetadata = {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: 15_000,
+      dataFreshness:
+        emptyReason === "fetch_failed" || emptyReason === "external_unavailable"
+          ? "degraded"
+          : "fresh",
+      source: "live" as const,
+    };
+    const availableActions = this.buildPageActions(input);
+
+    if (emptyReason) {
+      return {
+        items: [],
+        refreshMetadata,
+        availableActions,
+        emptyState: this.buildEmptyState(emptyReason),
+      };
+    }
+
+    const items = this.incidents.map((incident) => this.toView(incident));
+
+    return {
+      items,
+      refreshMetadata,
+      availableActions,
+      ...(items.length === 0
+        ? { emptyState: this.buildEmptyState("no_data") }
+        : {}),
+    };
+  }
+
+  getIncident(incidentId: string) {
+    return this.toView(this.require(incidentId));
   }
 
   updateIncident(
@@ -391,7 +427,7 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
-    return this.cloneIncident(decorated);
+    return this.toView(updated);
   }
 
   linkComplaint(
@@ -419,7 +455,7 @@ export class IncidentService implements OnModuleInit {
       );
     }
     if (incident.relatedComplaintCaseNo === normalizedComplaintCaseNo) {
-      return this.cloneIncident(this.decorateIncident(incident, identity));
+      return this.toView(incident);
     }
 
     const updated = this.decorateIncident(
@@ -462,7 +498,7 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
-    return this.cloneIncident(updated);
+    return this.toView(updated);
   }
 
   getTimeline(incidentId: string) {
@@ -559,7 +595,7 @@ export class IncidentService implements OnModuleInit {
       requestId,
     );
 
-    return this.cloneIncident(decorated);
+    return this.toView(incident);
   }
 
   recordServiceRecoveryAction(
@@ -843,201 +879,143 @@ export class IncidentService implements OnModuleInit {
     };
   }
 
-  private decorateIncident(
-    incident: IncidentRecord,
-    identity: BootstrapRequestIdentity | null = null,
-  ): IncidentRecord {
-    const recoveryActions =
-      this.recoveryActions.get(incident.incidentId)?.map((action) => ({
-        ...action,
-      })) ?? incident.serviceRecoveryActions.map((action) => ({ ...action }));
-    const suppression = this.resolveSuppression(incident);
+  private toView(incident: IncidentRecord): IncidentRecord {
     return {
-      ...incident,
-      serviceRecoveryActions: recoveryActions,
-      matchingSuppression: suppression,
-      ...(() => {
-        const availableActions = this.buildAvailableActions(
-          suppression,
-          identity,
-        );
-        return availableActions.length > 0 ? { availableActions } : {};
-      })(),
+      ...this.clone(incident),
+      availableActions: this.buildIncidentActions(incident),
     };
   }
 
-  private resolveSuppression(
-    incident: IncidentRecord,
-  ): DriverMatchingSuppression | null {
-    const suppression =
-      incident.matchingSuppression ??
-      this.suppressions.get(incident.incidentId) ??
-      null;
-    if (!suppression) {
-      return null;
-    }
-
-    const active =
-      suppression.active &&
-      suppression.liftedAt === null &&
-      new Date(suppression.expiresAt).getTime() > Date.now();
-    const next = { ...suppression, active };
-    this.suppressions.set(incident.incidentId, next);
-    return next;
+  private clone(incident: IncidentRecord) {
+    return { ...incident };
   }
 
-  private buildAvailableActions(
-    suppression: DriverMatchingSuppression | null,
-    identity: BootstrapRequestIdentity | null,
+  private buildIncidentActions(
+    incident: IncidentRecord,
   ): ResourceActionDescriptor[] {
-    if (!suppression?.active) {
-      return [];
+    const actions: ResourceActionDescriptor[] = [
+      {
+        action: "open_incident_detail",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
+
+    if (
+      (incident.status === "open" || incident.status === "investigating") &&
+      incident.serviceRecoveryActions.length === 0
+    ) {
+      actions.push({
+        action: "add_service_recovery",
+        enabled: true,
+        riskLevel: "medium",
+      });
     }
 
-    const isOpsManager = this.hasRole(identity, "ops_manager");
+    return actions;
+  }
+
+  private buildPageActions(input?: {
+    dispatchExceptionOrderId?: string;
+    exceptionReasonCode?: string;
+  }): ResourceActionDescriptor[] {
+    const hasDispatchContext = Boolean(
+      input?.dispatchExceptionOrderId?.trim() &&
+      input?.exceptionReasonCode?.trim(),
+    );
+
     return [
       {
-        action: "extend_matching_suppression",
-        enabled: isOpsManager,
-        requiresReason: true,
-        riskLevel: "high",
-        ...(isOpsManager ? {} : { disabledReasonCode: "ops_manager_required" }),
+        action: "create_incident",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      {
+        action: "create_incident_from_dispatch_exception",
+        enabled: hasDispatchContext,
+        ...(!hasDispatchContext
+          ? { disabledReasonCode: "dispatch_context_required" }
+          : {}),
+        riskLevel: "medium",
+      },
+      {
+        action: "refresh_incidents",
+        enabled: true,
+        riskLevel: "low",
       },
     ];
   }
 
-  private maybeActivateSuppression(
-    incident: IncidentRecord,
-    nowIso: string,
-  ): PersistSuppressionRecord | null {
-    if (!incident.relatedDriverId) {
-      return null;
-    }
-
-    const suppression: DriverMatchingSuppression = {
-      active: true,
-      reasonCode: "incident",
-      sourceIncidentId: incident.incidentId,
-      expiresAt: new Date(
-        new Date(nowIso).getTime() + DRIVER_MATCHING_SUPPRESSION_DEFAULT_TTL_MS,
-      ).toISOString(),
-      liftedAt: null,
-    };
-    this.suppressions.set(incident.incidentId, { ...suppression });
-    incident.matchingSuppression = { ...suppression };
-    return {
-      incidentId: incident.incidentId,
-      driverId: incident.relatedDriverId,
-      updatedAt: nowIso,
-      suppression,
-    };
-  }
-
-  private liftSuppression(
-    incident: IncidentRecord,
-    nowIso: string,
-  ): PersistSuppressionRecord | null {
-    if (!incident.relatedDriverId || !incident.matchingSuppression) {
-      return null;
-    }
-    const suppression: DriverMatchingSuppression = {
-      ...incident.matchingSuppression,
-      active: false,
-      liftedAt: nowIso,
-    };
-    this.suppressions.set(incident.incidentId, { ...suppression });
-    incident.matchingSuppression = { ...suppression };
-    return {
-      incidentId: incident.incidentId,
-      driverId: incident.relatedDriverId,
-      updatedAt: nowIso,
-      suppression,
-    };
-  }
-
-  private resolveSuppressionExpiry(
-    suppression: DriverMatchingSuppression,
-    command: ExtendDriverMatchingSuppressionCommand,
-  ) {
-    if (command.expiresAt) {
-      const timestamp = Date.parse(command.expiresAt);
-      if (Number.isNaN(timestamp)) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "VALIDATION_ERROR",
-          "expiresAt must be a valid ISO timestamp.",
-          { expiresAt: command.expiresAt },
-        );
-      }
-      if (timestamp <= Date.now()) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "VALIDATION_ERROR",
-          "expiresAt must be in the future.",
-          { expiresAt: command.expiresAt },
-        );
-      }
-      return new Date(timestamp).toISOString();
-    }
-
-    if (
-      command.extendByHours === undefined ||
-      !Number.isFinite(command.extendByHours) ||
-      command.extendByHours <= 0
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        "extendByHours must be a positive number when expiresAt is not provided.",
-        { extendByHours: command.extendByHours },
-      );
-    }
-
-    const base = Date.parse(suppression.expiresAt);
-    return new Date(
-      base + command.extendByHours * 60 * 60 * 1000,
-    ).toISOString();
-  }
-
-  private requireOpsManager(identity: BootstrapRequestIdentity | null) {
-    if (this.hasRole(identity, "ops_manager")) {
-      return;
-    }
-    throw new ApiRequestError(
-      HttpStatus.FORBIDDEN,
-      "OPS_MANAGER_REQUIRED",
-      "Only ops_manager can extend driver matching suppression.",
-    );
-  }
-
-  private hasRole(
-    identity: BootstrapRequestIdentity | null,
-    role: string,
-  ): boolean {
-    return identity?.roles?.includes(role) ?? false;
-  }
-
-  private resolveActorId(
-    identity: BootstrapRequestIdentity | null,
-    fallback: string,
-  ) {
-    return identity?.actorId ?? fallback;
-  }
-
-  private resolveAuditActorType(
-    identity: BootstrapRequestIdentity | null,
-    fallback: AuditLogRecord["actorType"],
-  ): AuditLogRecord["actorType"] {
-    switch (identity?.actorType) {
-      case "system":
-      case "platform_admin":
-      case "tenant_admin":
-      case "ops_user":
-      case "partner_api_key":
-        return identity.actorType;
+  private buildEmptyState(
+    reason: IncidentCenterEmptyReason,
+  ): EmptyStateEnvelope {
+    switch (reason) {
+      case "not_provisioned":
+        return {
+          reason,
+          messageCode: "incidents.empty.not_provisioned",
+          nextAction: {
+            action: "open_feature_flags",
+            enabled: true,
+            riskLevel: "low",
+          },
+        };
+      case "permission_denied":
+        return {
+          reason,
+          messageCode: "incidents.empty.permission_denied",
+          nextAction: {
+            action: "open_dashboard",
+            enabled: true,
+            riskLevel: "low",
+          },
+        };
+      case "external_unavailable":
+        return {
+          reason,
+          messageCode: "incidents.empty.external_unavailable",
+          nextAction: {
+            action: "refresh_incidents",
+            enabled: true,
+            riskLevel: "low",
+          },
+        };
+      case "fetch_failed":
+        return {
+          reason,
+          messageCode: "incidents.empty.fetch_failed",
+          nextAction: {
+            action: "refresh_incidents",
+            enabled: true,
+            riskLevel: "low",
+          },
+        };
+      case "no_data":
       default:
-        return fallback;
+        return {
+          reason,
+          messageCode: "incidents.empty.no_data",
+          nextAction: {
+            action: "create_incident",
+            enabled: true,
+            riskLevel: "medium",
+          },
+        };
     }
+  }
+
+  private resolveEmptyReasonOverride(
+    value?: string,
+  ): IncidentCenterEmptyReason | null {
+    if (!value) {
+      return null;
+    }
+
+    return INCIDENT_CENTER_EMPTY_REASON_OVERRIDES.includes(
+      value as IncidentCenterEmptyReason,
+    )
+      ? (value as IncidentCenterEmptyReason)
+      : null;
   }
 
   private persist(

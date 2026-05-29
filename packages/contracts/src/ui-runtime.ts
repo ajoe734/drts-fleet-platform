@@ -184,6 +184,18 @@ export interface EmptyStateEnvelope {
   nextAction?: ResourceActionDescriptor;
 }
 
+/**
+ * Shared list/read-model envelope for UI surfaces that need more than a raw
+ * `items[]`: refresh metadata, page-level actions, and a typed empty-state
+ * contract travel together with the collection snapshot.
+ */
+export interface UiCollectionEnvelope<T> {
+  items: T[];
+  refreshMetadata: UiRefreshMetadata;
+  availableActions?: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Q-X09 / Q-X10 — ActionReceipt
 // ─────────────────────────────────────────────────────────────────────────────
