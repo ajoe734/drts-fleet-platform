@@ -19,6 +19,7 @@ import type {
   RefreshTier,
   ResourceActionDescriptor,
   TransferCallToComplaintCommand,
+  EmptyStateEnvelope,
   UiHealthEnvelope,
   UiRefreshMetadata,
 } from "@drts/contracts";
@@ -62,11 +63,7 @@ type RuntimeCallbackRecord = CallbackTaskRecord & {
 type CallcenterListEnvelope<T> = {
   items: T[];
   refresh?: UiRefreshMetadata;
-  emptyState?: {
-    reason: EmptyReason;
-    messageCode: string;
-    nextAction?: ResourceActionDescriptor;
-  };
+  emptyState?: EmptyStateEnvelope;
   health?: UiHealthEnvelope;
 };
 
@@ -591,12 +588,12 @@ function buildSessionResource(session: RuntimeSessionRecord): SessionResource {
   return {
     ...session,
     availableActions:
-      session.availableActions && session.availableActions.length > 0
-        ? session.availableActions
+      "availableActions" in session
+        ? (session.availableActions ?? [])
         : buildSessionActions(session),
     deepLinks:
-      session.deepLinks && session.deepLinks.length > 0
-        ? session.deepLinks
+      "deepLinks" in session
+        ? (session.deepLinks ?? [])
         : buildSessionLinks(session),
   };
 }
@@ -770,6 +767,10 @@ export default function CallcenterPage() {
     useState<EmptyReason | null>(null);
   const [callbackEmptyReason, setCallbackEmptyReason] =
     useState<EmptyReason | null>(null);
+  const [sessionEmptyState, setSessionEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [callbackEmptyState, setCallbackEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
   const [health, setHealth] = useState<UiHealthEnvelope>(
     buildFallbackHealth(null),
   );
@@ -876,10 +877,20 @@ export default function CallcenterPage() {
     emptyReason === "no_data"
       ? (sessionEmptyReason ?? callbackEmptyReason ?? emptyReason)
       : emptyReason;
+  const effectiveEmptyState =
+    effectiveEmptyReason === sessionEmptyState?.reason
+      ? sessionEmptyState
+      : effectiveEmptyReason === callbackEmptyState?.reason
+        ? callbackEmptyState
+        : null;
   const emptyCopy = getEmptyStateCopy(currentLocale, effectiveEmptyReason);
   const workspaceAction = buildWorkspaceAction(
     sessions.some((session) => session.status === "active"),
   );
+  const emptyStateAction =
+    effectiveEmptyState?.nextAction?.action === "open_call_session"
+      ? effectiveEmptyState.nextAction
+      : workspaceAction;
   const activeRefresh =
     queueView === "callback" ? callbackRefresh : sessionRefresh;
   const workspaceStale = isRefreshStale(activeRefresh);
@@ -918,7 +929,7 @@ export default function CallcenterPage() {
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       void loadData(selectedCallId ?? undefined, true);
-    }, 5000);
+    }, CALLCENTER_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
   }, [selectedCallId]);
@@ -992,6 +1003,8 @@ export default function CallcenterPage() {
       );
       setSessionEmptyReason(nextSessionsEnvelope.emptyState?.reason ?? null);
       setCallbackEmptyReason(nextCallbacksEnvelope.emptyState?.reason ?? null);
+      setSessionEmptyState(nextSessionsEnvelope.emptyState ?? null);
+      setCallbackEmptyState(nextCallbacksEnvelope.emptyState ?? null);
       setHealth(nextHealth);
       setLastRefreshAt(new Date().toISOString());
       setError(null);
@@ -1009,6 +1022,8 @@ export default function CallcenterPage() {
       setError(message);
       setSessionRefresh(buildFallbackRefreshMetadata("degraded"));
       setCallbackRefresh(buildFallbackRefreshMetadata("degraded"));
+      setSessionEmptyState(null);
+      setCallbackEmptyState(null);
       setHealth(buildFallbackHealth(message));
     } finally {
       if (!silent) {
@@ -1543,12 +1558,22 @@ export default function CallcenterPage() {
                   </button>
                 ) : (
                   <button
-                    className="toolbar-btn toolbar-btn-primary"
+                    className={`toolbar-btn ${
+                      emptyStateAction.enabled ? "toolbar-btn-primary" : ""
+                    }`}
                     type="button"
                     onClick={() => setShowIntake(true)}
-                    disabled={!workspaceAction.enabled}
+                    disabled={!emptyStateAction.enabled}
+                    title={
+                      emptyStateAction.enabled
+                        ? undefined
+                        : getDisabledReasonLabel(
+                            currentLocale,
+                            emptyStateAction.disabledReasonCode,
+                          )
+                    }
                   >
-                    {getActionLabel(currentLocale, "open_call_session")}
+                    {getActionLabel(currentLocale, emptyStateAction.action)}
                   </button>
                 )}
               </article>
@@ -1793,12 +1818,22 @@ export default function CallcenterPage() {
                     </button>
                   ) : (
                     <button
-                      className="toolbar-btn toolbar-btn-primary"
+                      className={`toolbar-btn ${
+                        emptyStateAction.enabled ? "toolbar-btn-primary" : ""
+                      }`}
                       type="button"
                       onClick={() => setShowIntake(true)}
-                      disabled={!workspaceAction.enabled}
+                      disabled={!emptyStateAction.enabled}
+                      title={
+                        emptyStateAction.enabled
+                          ? undefined
+                          : getDisabledReasonLabel(
+                              currentLocale,
+                              emptyStateAction.disabledReasonCode,
+                            )
+                      }
                     >
-                      {getActionLabel(currentLocale, "open_call_session")}
+                      {getActionLabel(currentLocale, emptyStateAction.action)}
                     </button>
                   )}
                 </div>
