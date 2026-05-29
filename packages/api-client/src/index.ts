@@ -101,7 +101,11 @@ import type {
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
   LinkCallOrderCommand,
+  MaintenanceDeleteResult,
+  MaintenanceListView,
+  MaintenanceMutationResult,
   MaintenanceRecord,
+  MaintenanceRuntimeRecord,
   MarkReimbursementPaidCommand,
   NotificationRecord,
   OpenCallSessionCommand,
@@ -2464,23 +2468,41 @@ export class ApiClient {
     return this.getList<MaintenanceRecord>(path);
   }
 
-  async createMaintenance(command: CreateMaintenanceRecordCommand) {
-    return this.post("/api/maintenance", { body: command });
+  async getMaintenanceView(vehicleId?: string): Promise<MaintenanceListView> {
+    const path = vehicleId
+      ? `/api/maintenance?vehicleId=${encodeURIComponent(vehicleId)}`
+      : "/api/maintenance";
+    return this.get<MaintenanceListView>(path);
   }
 
-  async getMaintenance(maintenanceId: string) {
-    return this.get(`/api/maintenance/${maintenanceId}`);
+  async createMaintenance(
+    command: CreateMaintenanceRecordCommand,
+  ): Promise<MaintenanceMutationResult> {
+    return this.post<MaintenanceMutationResult>("/api/maintenance", {
+      body: command,
+    });
+  }
+
+  async getMaintenance(maintenanceId: string): Promise<MaintenanceRuntimeRecord> {
+    return this.get<MaintenanceRuntimeRecord>(
+      `/api/maintenance/${maintenanceId}`,
+    );
   }
 
   async updateMaintenance(
     maintenanceId: string,
     command: UpdateMaintenanceRecordCommand,
-  ) {
-    return this.patch(`/api/maintenance/${maintenanceId}`, { body: command });
+  ): Promise<MaintenanceMutationResult> {
+    return this.patch<MaintenanceMutationResult>(
+      `/api/maintenance/${maintenanceId}`,
+      { body: command },
+    );
   }
 
-  async deleteMaintenance(maintenanceId: string) {
-    return this.delete(`/api/maintenance/${maintenanceId}`);
+  async deleteMaintenance(
+    maintenanceId: string,
+  ): Promise<MaintenanceDeleteResult> {
+    return this.delete<MaintenanceDeleteResult>(`/api/maintenance/${maintenanceId}`);
   }
 
   async listShifts(driverId?: string): Promise<ShiftRecord[]> {

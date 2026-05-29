@@ -1,6 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-import type { ResourceActionDescriptor } from "./ui-runtime";
+import type {
+  ActionReceipt,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4377,6 +4382,28 @@ export interface MaintenanceRecord {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MaintenanceRuntimeRecord extends MaintenanceRecord {
+  availableActions: ResourceActionDescriptor[];
+}
+
+export interface MaintenanceMutationResult {
+  record: MaintenanceRuntimeRecord;
+  receipt: ActionReceipt;
+}
+
+export interface MaintenanceDeleteResult {
+  deleted: true;
+  maintenanceId: string;
+  receipt: ActionReceipt;
+}
+
+export interface MaintenanceListView {
+  items: MaintenanceRuntimeRecord[];
+  availableActions: ResourceActionDescriptor[];
+  refresh: UiRefreshMetadata;
+  emptyState?: EmptyStateEnvelope;
 }
 
 // ---------------------------------------------------------------------------

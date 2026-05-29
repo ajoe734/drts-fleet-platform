@@ -116,6 +116,20 @@ export type RefreshTier =
   | "slow"
   | "manual";
 
+/**
+ * Shared refresh cadence lookup for UI/runtime consumers so pages and backend
+ * read models can agree on tier timing without hard-coded local numbers.
+ */
+export const UI_REFRESH_INTERVAL_MS: Record<RefreshTier, number> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 0,
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Q-X13 — ResourceActionDescriptor
 // ─────────────────────────────────────────────────────────────────────────────
