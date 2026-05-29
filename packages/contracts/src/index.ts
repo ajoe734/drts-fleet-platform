@@ -3249,6 +3249,19 @@ export const COMPLAINT_CASE_STATUSES = [
 ] as const;
 export type ComplaintCaseStatus = (typeof COMPLAINT_CASE_STATUSES)[number];
 
+/**
+ * Backend-computed SLA state per Q-OPS13. The complaint UI must render this
+ * value directly and must NOT re-derive SLA status client-side from
+ * `slaDueAt` / `slaBreach`; those remain for backwards compatibility while
+ * `slaStatus` is the authoritative tri-state.
+ */
+export const COMPLAINT_SLA_STATUSES = [
+  "within_sla",
+  "warning",
+  "breached",
+] as const;
+export type ComplaintSlaStatus = (typeof COMPLAINT_SLA_STATUSES)[number];
+
 export interface CreateComplaintCaseCommand {
   caseSource: "phone" | "web" | "app" | "ops";
   relatedOrderId?: string | null;
@@ -3316,6 +3329,20 @@ export interface ComplaintCaseRecord {
   status: ComplaintCaseStatus;
   slaDueAt: string;
   slaBreach: boolean;
+  /**
+   * Backend-computed SLA tri-state (Q-OPS13). Optional during the rollout in
+   * which backends start emitting it alongside the legacy `slaBreach` flag;
+   * the UI prefers this value when present.
+   */
+  slaStatus?: ComplaintSlaStatus;
+  /** Timestamp the case crossed into `breached`, when known. */
+  slaBreachedAt?: string | null;
+  /**
+   * Authority-resolved CTAs for this case (Q-X13). Drives which actions the
+   * complaint UI renders and their confirmation pattern. Optional until the
+   * backend populates it; the UI falls back to a status-derived action set.
+   */
+  availableActions?: ResourceActionDescriptor[];
   reopenCount: number;
   resolutionCode: ComplaintResolutionCode | null;
   closingNote: string | null;
