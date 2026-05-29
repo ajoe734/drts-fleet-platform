@@ -22,6 +22,7 @@ import type {
   PlatformTenantRolloutStage,
   PlatformTenantRolloutState,
   SetPlatformTenantRolloutStageCommand,
+  TenantRolloutStateMachineRecord,
   TenantNotificationSubscription,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
@@ -34,12 +35,16 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { TenantRolloutService } from "../tenant-rollout/tenant-rollout.service";
+import type {
+  PersistedTenantRolloutRecord,
+} from "../tenant-rollout/tenant-rollout.types";
 import {
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
 } from "./platform-admin.repository";
 
-export type TenantSummary = PlatformAdminTenantRecord;
+export type TenantSummary = PersistedTenantRolloutRecord;
 
 const DEFAULT_QUOTAS: PlatformTenantQuotaSummary = {
   activeDrivers: 25,
@@ -109,14 +114,15 @@ const DEMO_CREATED_AT = "2026-04-01T00:00:00.000Z";
 @Injectable()
 export class TenantsService implements OnModuleInit {
   private readonly logger = new Logger(TenantsService.name);
-  private readonly tenants: Map<string, PlatformAdminTenantRecord> = new Map();
+  private readonly tenants: Map<string, PersistedTenantRolloutRecord> = new Map();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
+    private readonly tenantRolloutService: TenantRolloutService,
     @Optional()
     private readonly platformAdminRepository?: PlatformAdminRepository,
   ) {
-    const seed = this.createSeedTenant();
+    const seed = this.tenantRolloutService.hydrateTenant(this.createSeedTenant());
     this.tenants.set(seed.id, seed);
   }
 
@@ -139,7 +145,10 @@ export class TenantsService implements OnModuleInit {
 
       this.tenants.clear();
       for (const tenant of persistedState.platformTenants) {
-        this.tenants.set(tenant.id, this.cloneTenant(tenant));
+        this.tenants.set(
+          tenant.id,
+          this.cloneTenant(this.tenantRolloutService.hydrateTenant(tenant)),
+        );
       }
     } catch (error) {
       this.platformAdminRepository.reportPersistenceFailure(
@@ -150,13 +159,16 @@ export class TenantsService implements OnModuleInit {
   }
 
   list(): TenantSummary[] {
-    return Array.from(this.tenants.values()).map((tenant) =>
-      this.cloneTenant(tenant),
-    );
+    return Array.from(this.tenants.values()).map((tenant) => {
+      this.tenantRolloutService.hydrateTenant(tenant);
+      return this.cloneTenant(tenant);
+    });
   }
 
   get(tenantId: string): TenantSummary {
-    return this.cloneTenant(this.requireTenant(tenantId));
+    const tenant = this.requireTenant(tenantId);
+    this.tenantRolloutService.hydrateTenant(tenant);
+    return this.cloneTenant(tenant);
   }
 
   create(
@@ -190,6 +202,7 @@ export class TenantsService implements OnModuleInit {
       updatedAt: now,
     };
 
+    this.tenantRolloutService.hydrateTenant(created, "platform_admin");
     this.tenants.set(created.id, this.cloneTenant(created));
     this.logger.log(`Created tenant ${created.id} (${created.code})`);
     this.persistChanges(
@@ -239,6 +252,7 @@ export class TenantsService implements OnModuleInit {
       tenant.quotas = this.mergeQuotas(tenant.quotas, command.quotas);
     }
     tenant.updatedAt = new Date().toISOString();
+    this.tenantRolloutService.hydrateTenant(tenant, "platform_admin");
 
     this.persistChanges(
       {
@@ -389,6 +403,15 @@ export class TenantsService implements OnModuleInit {
     }
 
     tenant.updatedAt = new Date().toISOString();
+    if (command.rollout) {
+      this.tenantRolloutService.updateFromOnboarding(
+        tenant,
+        command.rollout,
+        "platform_admin",
+      );
+    } else {
+      this.tenantRolloutService.hydrateTenant(tenant, "platform_admin");
+    }
     this.persistChanges(
       {
         platformTenants: [this.cloneTenant(tenant)],
@@ -443,6 +466,7 @@ export class TenantsService implements OnModuleInit {
     const now = new Date().toISOString();
     role.invitedAt = now;
     tenant.updatedAt = now;
+    this.tenantRolloutService.hydrateTenant(tenant, "platform_admin");
 
     this.persistChanges(
       { platformTenants: [this.cloneTenant(tenant)] },
@@ -499,6 +523,7 @@ export class TenantsService implements OnModuleInit {
     const now = new Date().toISOString();
     role.acknowledgedAt = now;
     tenant.updatedAt = now;
+    this.tenantRolloutService.hydrateTenant(tenant, "platform_admin");
 
     this.persistChanges(
       { platformTenants: [this.cloneTenant(tenant)] },
@@ -524,11 +549,10 @@ export class TenantsService implements OnModuleInit {
   setRollbackHold(tenantId: string, requestId?: string): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const oldStatus = tenant.status;
-    const now = new Date().toISOString();
-
-    tenant.status = "rollback_hold";
-    tenant.rollout.productionStatus = "blocked";
-    tenant.updatedAt = now;
+    const oldRolloutStateMachine = tenant.rolloutStateMachine
+      ? { ...tenant.rolloutStateMachine }
+      : null;
+    this.tenantRolloutService.enterRollbackHold(tenant, "platform_admin");
 
     this.logger.log(`Tenant ${tenantId} placed in rollback_hold`);
     this.persistChanges(
@@ -548,6 +572,8 @@ export class TenantsService implements OnModuleInit {
         newValuesSummary: {
           status: "rollback_hold",
           productionStatus: "blocked",
+          rolloutStateMachine: tenant.rolloutStateMachine,
+          previousRolloutStateMachine: oldRolloutStateMachine,
         },
       },
       requestId,
@@ -563,31 +589,13 @@ export class TenantsService implements OnModuleInit {
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const oldRollout = { ...tenant.rollout };
+    const oldRolloutStateMachine = tenant.rolloutStateMachine
+      ? { ...tenant.rolloutStateMachine }
+      : null;
     const nextStage = this.normalizeRolloutStage(command.stage);
 
-    this.enforcePromotionGates(tenant, nextStage);
-
-    tenant.rollout.stage = nextStage;
-    tenant.rollout.lastPromotedAt = new Date().toISOString();
-    tenant.rollout.notes = this.coalesceNullableText(
-      command.notes,
-      tenant.rollout.notes,
-    );
-
-    if (nextStage === "sandbox") {
-      tenant.rollout.sandboxStatus = "approved";
-    }
-    if (nextStage === "pilot") {
-      tenant.rollout.sandboxStatus = "approved";
-      tenant.rollout.pilotStatus = "approved";
-    }
-    if (nextStage === "production") {
-      tenant.rollout.sandboxStatus = "approved";
-      tenant.rollout.pilotStatus = "approved";
-      tenant.rollout.productionStatus = "approved";
-    }
-
-    tenant.updatedAt = new Date().toISOString();
+    this.tenantRolloutService.setStage(tenant, nextStage, "platform_admin");
+    tenant.rollout.notes = this.coalesceNullableText(command.notes, tenant.rollout.notes);
     this.persistChanges(
       {
         platformTenants: [this.cloneTenant(tenant)],
@@ -604,12 +612,61 @@ export class TenantsService implements OnModuleInit {
         resourceType: "platform_tenant",
         resourceId: tenant.id,
         oldValuesSummary: { ...oldRollout },
-        newValuesSummary: { ...tenant.rollout },
+        newValuesSummary: {
+          ...tenant.rollout,
+          rolloutStateMachine: tenant.rolloutStateMachine,
+          previousRolloutStateMachine: oldRolloutStateMachine,
+        },
       },
       requestId,
     );
 
     return this.cloneTenant(tenant);
+  }
+
+  getRolloutStateMachine(tenantId: string): TenantRolloutStateMachineRecord {
+    const tenant = this.requireTenant(tenantId);
+    return this.tenantRolloutService.getStateMachine(tenant);
+  }
+
+  setRolloutGateStatus(
+    tenantId: string,
+    gateStatus: PlatformTenantGateStatus,
+    requestId?: string,
+  ): TenantRolloutStateMachineRecord {
+    const tenant = this.requireTenant(tenantId);
+    const before = tenant.rolloutStateMachine ? { ...tenant.rolloutStateMachine } : null;
+    const updated = this.tenantRolloutService.setGateStatus(
+      tenant,
+      this.normalizeGateStatus(gateStatus),
+      "platform_admin",
+    );
+    const auditInput: Omit<
+      AuditLogRecord,
+      "auditId" | "createdAt" | "requestId"
+    > = {
+      actorId: null,
+      actorType: "platform_admin",
+      tenantId: null,
+      moduleName: "platform-admin",
+      actionName: "update_platform_tenant_rollout_gate",
+      resourceType: "tenant_rollout_state_machine",
+      resourceId: tenant.id,
+      newValuesSummary: updated,
+    };
+    if (before) {
+      auditInput.oldValuesSummary = before;
+    }
+
+    this.persistChanges(
+      {
+        platformTenants: [this.cloneTenant(tenant)],
+      },
+      "set tenant rollout gate status",
+    );
+    this.recordAudit(auditInput, requestId);
+
+    return updated;
   }
 
   setStatus(
@@ -618,9 +675,21 @@ export class TenantsService implements OnModuleInit {
     requestId?: string,
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
+    if (
+      newStatus !== "rollback_hold" &&
+      tenant.rolloutStateMachine?.stage === "rollback_hold"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_ROLLOUT_STAGE_TRANSITION_BLOCKED",
+        "Resolve rollback hold through the rollout state machine before changing tenant status.",
+        { tenantId: tenant.id, requestedStatus: newStatus },
+      );
+    }
     const oldStatus = tenant.status;
     tenant.status = newStatus;
     tenant.updatedAt = new Date().toISOString();
+    this.tenantRolloutService.hydrateTenant(tenant, "platform_admin");
     this.logger.log(`Tenant ${tenantId} status set to ${newStatus}`);
     this.persistChanges(
       {
@@ -645,62 +714,7 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  private enforcePromotionGates(
-    tenant: PlatformAdminTenantRecord,
-    nextStage: PlatformTenantRolloutStage,
-  ) {
-    if (tenant.status === "rollback_hold") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "TENANT_IN_ROLLBACK_HOLD",
-        "Tenant is in rollback hold. Resolve the hold before promoting.",
-        { tenantId: tenant.id, status: tenant.status },
-      );
-    }
-
-    const missing: string[] = [];
-
-    if (nextStage === "pilot") {
-      if (tenant.rollout.sandboxStatus !== "approved") {
-        missing.push("sandboxStatus must be approved");
-      }
-    }
-
-    if (nextStage === "production") {
-      if (tenant.rollout.pilotStatus !== "approved") {
-        missing.push("pilotStatus must be approved");
-      }
-      if (!tenant.rollout.cutoverOwner) {
-        missing.push("cutoverOwner is required");
-      }
-      if (!tenant.rollout.rollbackOwner) {
-        missing.push("rollbackOwner is required");
-      }
-      if (!tenant.rollout.rollbackPrepared) {
-        missing.push("rollbackPrepared must be true");
-      }
-
-      const unacknowledgedRequired = tenant.bootstrapDefaults.roleDefaults
-        .filter((r) => r.required && !r.acknowledgedAt)
-        .map((r) => r.roleCode);
-      if (unacknowledgedRequired.length > 0) {
-        missing.push(
-          `required roles not acknowledged: ${unacknowledgedRequired.join(", ")}`,
-        );
-      }
-    }
-
-    if (missing.length > 0) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "TENANT_PROMOTION_GATE_BLOCKED",
-        `Cannot promote to ${nextStage}: ${missing.join("; ")}.`,
-        { tenantId: tenant.id, nextStage, missing },
-      );
-    }
-  }
-
-  private requireTenant(tenantId: string): PlatformAdminTenantRecord {
+  private requireTenant(tenantId: string): PersistedTenantRolloutRecord {
     const tenant = this.tenants.get(tenantId);
     if (!tenant) {
       throw new ApiRequestError(
@@ -1014,9 +1028,9 @@ export class TenantsService implements OnModuleInit {
   }
 
   private cloneTenant(
-    tenant: PlatformAdminTenantRecord,
-  ): PlatformAdminTenantRecord {
-    return {
+    tenant: PersistedTenantRolloutRecord,
+  ): PersistedTenantRolloutRecord {
+    const cloned: PersistedTenantRolloutRecord = {
       ...tenant,
       enabledModules: [...tenant.enabledModules],
       quotas: { ...tenant.quotas },
@@ -1037,6 +1051,20 @@ export class TenantsService implements OnModuleInit {
       },
       rollout: { ...tenant.rollout },
     };
+
+    if (tenant.rolloutStateMachine) {
+      cloned.rolloutStateMachine = {
+        ...tenant.rolloutStateMachine,
+        availableActions: tenant.rolloutStateMachine.availableActions.map(
+          (action) => ({ ...action }),
+        ),
+      };
+    }
+    if (tenant.rolloutStateMachineMeta) {
+      cloned.rolloutStateMachineMeta = { ...tenant.rolloutStateMachineMeta };
+    }
+
+    return cloned;
   }
 
   private persistChanges(

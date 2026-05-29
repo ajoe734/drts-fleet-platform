@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { TenantsService } from "../../src/modules/platform-admin/tenants.service";
+import { TenantRolloutService } from "../../src/modules/tenant-rollout/tenant-rollout.service";
 import { ApiRequestError } from "../../src/common/api-envelope";
 
 function expectApiError(fn: () => unknown, errorCode: string) {
@@ -32,6 +33,7 @@ function createService() {
 
   const service = new TenantsService(
     auditNotificationService as never,
+    new TenantRolloutService(),
     platformAdminRepository as never,
   );
 
@@ -144,6 +146,8 @@ describe("TenantsService", () => {
     const pilot = service.setRolloutStage(created.id, {
       stage: "pilot",
     });
+    service.setRolloutGateStatus(created.id, "ready");
+    service.setRolloutGateStatus(created.id, "approved");
 
     // set production prerequisites before promoting
     for (const role of created.bootstrapDefaults.roleDefaults) {
@@ -168,13 +172,13 @@ describe("TenantsService", () => {
     expect(pilot.rollout).toMatchObject({
       stage: "pilot",
       sandboxStatus: "approved",
-      pilotStatus: "approved",
+      pilotStatus: "pending",
     });
     expect(production.rollout).toMatchObject({
       stage: "production",
       sandboxStatus: "approved",
       pilotStatus: "approved",
-      productionStatus: "approved",
+      productionStatus: "pending",
       notes: "Production cutover completed.",
     });
     expect(production.rollout.lastPromotedAt).toEqual(expect.any(String));
@@ -187,7 +191,7 @@ describe("TenantsService", () => {
     // sandbox starts in "ready" state, not "approved"
     expectApiError(
       () => service.setRolloutStage(created.id, { stage: "pilot" }),
-      "TENANT_PROMOTION_GATE_BLOCKED",
+      "TENANT_ROLLOUT_STAGE_TRANSITION_BLOCKED",
     );
   });
 
@@ -204,12 +208,14 @@ describe("TenantsService", () => {
         rollbackPrepared: true,
       },
     });
-    // promote to pilot first (sets pilot approved)
+    // promote to pilot first, then mark the pilot gate ready/approved
     service.setRolloutStage(created.id, { stage: "pilot" });
+    service.setRolloutGateStatus(created.id, "ready");
+    service.setRolloutGateStatus(created.id, "approved");
 
     expectApiError(
       () => service.setRolloutStage(created.id, { stage: "production" }),
-      "TENANT_PROMOTION_GATE_BLOCKED",
+      "TENANT_ROLLOUT_STAGE_TRANSITION_BLOCKED",
     );
   });
 
@@ -226,6 +232,8 @@ describe("TenantsService", () => {
       },
     });
     service.setRolloutStage(created.id, { stage: "pilot" });
+    service.setRolloutGateStatus(created.id, "ready");
+    service.setRolloutGateStatus(created.id, "approved");
 
     // acknowledge required roles
     for (const role of created.bootstrapDefaults.roleDefaults) {
@@ -237,7 +245,7 @@ describe("TenantsService", () => {
 
     expectApiError(
       () => service.setRolloutStage(created.id, { stage: "production" }),
-      "TENANT_PROMOTION_GATE_BLOCKED",
+      "TENANT_ROLLOUT_STAGE_TRANSITION_BLOCKED",
     );
   });
 
@@ -249,7 +257,45 @@ describe("TenantsService", () => {
 
     expectApiError(
       () => service.setRolloutStage(created.id, { stage: "pilot" }),
-      "TENANT_IN_ROLLBACK_HOLD",
+      "TENANT_ROLLOUT_STAGE_TRANSITION_BLOCKED",
+    );
+  });
+
+  it("returns rollout state machine read model and updates gate status", () => {
+    const { service, auditNotificationService } = createService();
+    const created = service.create({
+      name: "Read Model Test",
+      code: "read_model_test",
+    });
+
+    const initialState = service.getRolloutStateMachine(created.id);
+    expect(initialState).toMatchObject({
+      tenantId: created.id,
+      stage: "sandbox",
+      gateStatus: "ready",
+    });
+
+    const updated = service.setRolloutGateStatus(created.id, "approved");
+    const state = service.getRolloutStateMachine(created.id);
+
+    expect(updated).toMatchObject({
+      tenantId: created.id,
+      stage: "sandbox",
+      gateStatus: "approved",
+    });
+    expect(state).toMatchObject({
+      tenantId: created.id,
+      stage: "sandbox",
+      gateStatus: "approved",
+    });
+    expect(
+      state.availableActions.find((action) => action.action === "set_stage_pilot"),
+    ).toMatchObject({ enabled: true });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "update_platform_tenant_rollout_gate",
+        resourceType: "tenant_rollout_state_machine",
+      }),
     );
   });
 
@@ -326,6 +372,21 @@ describe("TenantsService", () => {
     );
   });
 
+  it("emits audit when the rollout gate status changes", () => {
+    const { service, auditNotificationService } = createService();
+    const created = service.create({ name: "Gate Audit", code: "gate_audit" });
+
+    const updated = service.setRolloutGateStatus(created.id, "approved");
+
+    expect(updated.gateStatus).toBe("approved");
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "update_platform_tenant_rollout_gate",
+        resourceType: "tenant_rollout_state_machine",
+      }),
+    );
+  });
+
   it("suspends and reactivates a tenant", () => {
     const { service } = createService();
     const created = service.create({ name: "Toggle", code: "toggle_co" });
@@ -361,11 +422,13 @@ describe("TenantsService", () => {
 
     // promote through stages
     service.setRolloutStage(created.id, { stage: "pilot" });
+    service.setRolloutGateStatus(created.id, "ready");
+    service.setRolloutGateStatus(created.id, "approved");
     const production = service.setRolloutStage(created.id, {
       stage: "production",
     });
 
     expect(production.rollout.stage).toBe("production");
-    expect(production.rollout.productionStatus).toBe("approved");
+    expect(production.rollout.productionStatus).toBe("pending");
   });
 });
