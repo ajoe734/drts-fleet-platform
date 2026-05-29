@@ -1,13 +1,15 @@
 import Link from "next/link";
 import type {
   BookingRecord,
-  EmptyReason,
+  EmptyStateEnvelope,
   ResourceActionDescriptor,
+  TenantBookingForwardedAuthorityPolicy,
+  TenantBookingListResponse,
 } from "@drts/contracts";
 import { OWNED_ORDER_STATUSES } from "@drts/contracts";
 import {
   CalloutPanel,
-  PageHero,
+  PageHeader,
   SurfaceCard,
 } from "@/components/page-primitives";
 import {
@@ -19,16 +21,15 @@ import {
 import {
   BOOKING_LIST_ACTION_HREFS,
   BOOKING_LIST_ACTION_LABELS,
-  BOOKING_LIST_PAGE_ACTIONS,
   BOOKING_LIST_REFRESH_TIER,
   BOOKING_TABS,
+  EMPTY_REASONS,
   REFRESH_TIER_CADENCE_LABEL,
-  buildRefreshMetadata,
+  buildHarnessEmptyState,
   countBookingsByTab,
   filterBookingsByTab,
   getBookingCrossAppLink,
-  getBookingEditability,
-  getBookingRowActions,
+  getEditableUrgencyMinutes,
   getEmptyStateView,
   getRefreshFreshnessView,
   isApprovalRequired,
@@ -45,15 +46,36 @@ import {
 export const dynamic = "force-dynamic";
 
 type FetchOutcome =
-  | { ok: true; bookings: BookingRecord[] }
-  | { ok: false; bookings: BookingRecord[] };
+  | { ok: true; response: TenantBookingListResponse }
+  | { ok: false; response: TenantBookingListResponse };
+
+const FETCH_FAILED_FALLBACK: TenantBookingListResponse = {
+  items: [],
+  refreshMetadata: {
+    generatedAt: new Date(0).toISOString(),
+    staleAfterMs: 30_000,
+    dataFreshness: "degraded",
+    source: "live",
+  },
+  pageActions: [],
+  emptyState: {
+    reason: "fetch_failed",
+    messageCode: "tenant.bookings.empty.fetch_failed",
+    nextAction: { action: "retry", enabled: true, riskLevel: "low" },
+  },
+  forwardedAuthorityPolicy: {
+    applies: false,
+    message: "",
+    forwardedAdapterStates: [],
+  },
+};
 
 async function loadBookings(): Promise<FetchOutcome> {
   try {
-    const bookings = await getTenantClient().listTenantBookings();
-    return { ok: true, bookings };
+    const response = await getTenantClient().listTenantBookings();
+    return { ok: true, response };
   } catch {
-    return { ok: false, bookings: [] };
+    return { ok: false, response: FETCH_FAILED_FALLBACK };
   }
 }
 
@@ -68,9 +90,10 @@ export default async function BookingsPage({
   const emptyOverride = parseEmptyReasonOverride(params.empty);
 
   const outcome = await loadBookings();
-  const tabFiltered = filterBookingsByTab(outcome.bookings, tab);
+  const { response } = outcome;
+  const tabFiltered = filterBookingsByTab(response.items, tab);
   const result = applyBookingListQuery(tabFiltered, query);
-  const tabCounts = countBookingsByTab(outcome.bookings);
+  const tabCounts = countBookingsByTab(response.items);
 
   const hasFilters =
     query.q.length > 0 ||
@@ -79,29 +102,20 @@ export default async function BookingsPage({
     query.dateTo.length > 0 ||
     tab !== "all";
 
-  const derivedReason = !outcome.ok
-    ? "fetch_failed"
+  const envelopeForVisual: EmptyStateEnvelope | null = emptyOverride
+    ? buildHarnessEmptyState(emptyOverride)
     : result.items.length === 0
       ? hasFilters
-        ? "filtered_empty"
-        : outcome.bookings.length === 0
-          ? "no_data"
-          : "filtered_empty"
+        ? buildHarnessEmptyState("filtered_empty")
+        : (response.emptyState ?? buildHarnessEmptyState("no_data"))
       : null;
-  const emptyReason = emptyOverride ?? derivedReason;
-  const emptyView = emptyReason ? getEmptyStateView(emptyReason) : null;
+  const emptyView = envelopeForVisual
+    ? getEmptyStateView(envelopeForVisual)
+    : null;
 
-  const refreshMeta = buildRefreshMetadata(
-    new Date(),
-    "live",
-    outcome.ok ? "fresh" : "degraded",
-  );
-  const freshness = getRefreshFreshnessView(refreshMeta);
-
-  const forwardedAuthorityRows = result.items.filter(
-    (booking) =>
-      getBookingSourceVisibility(booking).domain === "forwarded_authority",
-  );
+  const freshness = getRefreshFreshnessView(response.refreshMetadata);
+  const pageActions = response.pageActions;
+  const forwardedPolicy = response.forwardedAuthorityPolicy;
 
   const buildTabHref = (nextTab: string) => {
     const queryString = buildBookingListQueryString(query, { page: 1 });
@@ -125,12 +139,28 @@ export default async function BookingsPage({
     return serialized ? `/bookings?${serialized}` : "/bookings";
   };
 
+  const headerTabs = BOOKING_TABS.map((descriptor) => ({
+    id: descriptor.id,
+    label: `${descriptor.labelZh} · ${descriptor.labelEn}`,
+    href: buildTabHref(descriptor.id),
+    badge: tabCounts[descriptor.id],
+    tone:
+      descriptor.tone === "info" || descriptor.tone === "warn"
+        ? descriptor.tone
+        : ("default" as const),
+  }));
+
   return (
     <div className="page-shell">
-      <PageHero
+      <PageHeader
         eyebrow="Bookings · 訂單"
-        title="租戶訂單列表 · 同步 command (Q-TEN04) · availableActions 驅動 CTA (Q-X13)"
-        description="本月所有預約 · 含進行中與已完成。狀態 chip 對應 canonical OwnedOrderStatus；可編輯性由 availableActions + editableUntil 決定 (Q-TEN05)。"
+        title="租戶訂單列表 · 同步 command (Q-TEN04)"
+        subtitle="本月所有預約 · 含進行中與已完成。CTA 由 availableActions 驅動 (Q-TEN05 / Q-X13)；篩選 chip 鎖定 canonical OwnedOrderStatus。"
+        tabs={headerTabs}
+        activeTabId={tab}
+        actions={pageActions.map((descriptor) => (
+          <PageActionButton key={descriptor.action} descriptor={descriptor} />
+        ))}
       />
 
       <section className="surface-grid surface-grid-wide">
@@ -140,18 +170,19 @@ export default async function BookingsPage({
           description={freshness.detail}
         >
           <p className="muted-copy">
-            產生時間 {formatDateTime(refreshMeta.generatedAt)} · source ={" "}
-            {refreshMeta.source} · staleAfterMs = {refreshMeta.staleAfterMs}
+            產生時間 {formatDateTime(response.refreshMetadata.generatedAt)} ·
+            source = {response.refreshMetadata.source} · staleAfterMs ={" "}
+            {response.refreshMetadata.staleAfterMs}
           </p>
         </SurfaceCard>
 
         <SurfaceCard
           kicker="Actions · availableActions"
-          title="頁面層級 CTA"
-          description="CTA 不從角色推導，而是由 ResourceActionDescriptor[] 驅動 (Q-X13)。"
+          title="頁面層級 CTA · 來自後端 envelope"
+          description="CTA 不從角色推導，而是由後端 pageActions[] 驅動 (Q-X13)。"
         >
           <div className="link-row">
-            {BOOKING_LIST_PAGE_ACTIONS.map((descriptor) => (
+            {pageActions.map((descriptor) => (
               <PageActionButton
                 key={descriptor.action}
                 descriptor={descriptor}
@@ -165,95 +196,67 @@ export default async function BookingsPage({
         </SurfaceCard>
       </section>
 
-      <section className="surface-grid surface-grid-wide">
-        <SurfaceCard
-          kicker="Tabs"
-          title="訂單分頁 · 對應 canvas Tenant Console.html"
-          description="approval bucket 由 approvalState=pending 驅動 (Q-TEN12)；live / reserve 由 OwnedOrderStatus 決定。"
-        >
-          <div className="chip-row">
-            {BOOKING_TABS.map((descriptor) => {
-              const isActive = descriptor.id === tab;
-              return (
-                <Link
-                  className={`status-chip${isActive ? " is-active" : ""}${descriptor.tone === "warn" ? " is-warning" : ""}`}
-                  href={buildTabHref(descriptor.id)}
-                  key={descriptor.id}
-                >
-                  {descriptor.labelZh} · {descriptor.labelEn}
-                  <span>{tabCounts[descriptor.id]}</span>
-                </Link>
-              );
-            })}
+      <SurfaceCard
+        kicker="Query"
+        title="共用 list-query 詞彙"
+        description="Search / OwnedOrderStatus / date / pageSize 都使用 XS-UI-004 的 normalized vocabulary。"
+      >
+        <form action="/bookings" className="query-form" id="filters">
+          <input name="tab" type="hidden" value={tab} />
+          <label className="field-stack">
+            <span>Search · 搜尋</span>
+            <input
+              defaultValue={query.q}
+              name="q"
+              placeholder="Booking ID, order ID, passenger, route"
+            />
+          </label>
+          <label className="field-stack">
+            <span>Date field · 日期欄位</span>
+            <select defaultValue={query.dateField} name="dateField">
+              <option value="reservationStart">Reservation start</option>
+              <option value="createdAt">Created at</option>
+            </select>
+          </label>
+          <label className="field-stack">
+            <span>From · 自</span>
+            <input defaultValue={query.dateFrom} name="dateFrom" type="date" />
+          </label>
+          <label className="field-stack">
+            <span>To · 至</span>
+            <input defaultValue={query.dateTo} name="dateTo" type="date" />
+          </label>
+          <label className="field-stack">
+            <span>Page size · 每頁筆數</span>
+            <select defaultValue={String(query.pageSize)} name="pageSize">
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+            </select>
+          </label>
+          {query.statuses.length > 0 ? (
+            <input
+              name="status"
+              type="hidden"
+              value={query.statuses.join(",")}
+            />
+          ) : null}
+          <div className="form-actions">
+            <button
+              className="action-button action-button-primary"
+              type="submit"
+            >
+              Apply filters
+            </button>
+            <Link
+              className="action-button action-button-secondary"
+              href="/bookings"
+            >
+              Reset
+            </Link>
           </div>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Query"
-          title="共用 list-query 詞彙"
-          description="Search / OwnedOrderStatus / date / pageSize 都使用 XS-UI-004 的 normalized vocabulary。"
-        >
-          <form action="/bookings" className="query-form" id="filters">
-            <input name="tab" type="hidden" value={tab} />
-            <label className="field-stack">
-              <span>Search · 搜尋</span>
-              <input
-                defaultValue={query.q}
-                name="q"
-                placeholder="Booking ID, order ID, passenger, route"
-              />
-            </label>
-            <label className="field-stack">
-              <span>Date field · 日期欄位</span>
-              <select defaultValue={query.dateField} name="dateField">
-                <option value="reservationStart">Reservation start</option>
-                <option value="createdAt">Created at</option>
-              </select>
-            </label>
-            <label className="field-stack">
-              <span>From · 自</span>
-              <input
-                defaultValue={query.dateFrom}
-                name="dateFrom"
-                type="date"
-              />
-            </label>
-            <label className="field-stack">
-              <span>To · 至</span>
-              <input defaultValue={query.dateTo} name="dateTo" type="date" />
-            </label>
-            <label className="field-stack">
-              <span>Page size · 每頁筆數</span>
-              <select defaultValue={String(query.pageSize)} name="pageSize">
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50">50</option>
-              </select>
-            </label>
-            {query.statuses.length > 0 ? (
-              <input
-                name="status"
-                type="hidden"
-                value={query.statuses.join(",")}
-              />
-            ) : null}
-            <div className="form-actions">
-              <button
-                className="action-button action-button-primary"
-                type="submit"
-              >
-                Apply filters
-              </button>
-              <Link
-                className="action-button action-button-secondary"
-                href="/bookings"
-              >
-                Reset
-              </Link>
-            </div>
-          </form>
-        </SurfaceCard>
-      </section>
+        </form>
+      </SurfaceCard>
 
       <SurfaceCard
         kicker="Status · OwnedOrderStatus"
@@ -287,27 +290,15 @@ export default async function BookingsPage({
         </div>
       </SurfaceCard>
 
+      <ForwardedAuthorityCallout policy={forwardedPolicy} />
+
       <SurfaceCard
         kicker="List"
         title={`顯示 ${result.items.length} / ${result.total} 筆訂單 · tab=${tab}`}
         description="此列表為唯讀面板；update / cancel / 高風險動作落在詳情頁與 commands 端點 (Q-TEN04)。"
       >
-        {forwardedAuthorityRows.length > 0 ? (
-          <CalloutPanel
-            title="Forwarded 訂單 · 外部平台保留 dispatch 權威"
-            description="Q-DRV04 / forwarded_authority — tenant 列表保留可讀的業務紀錄；adapter-native 生命週期狀態與平台復原仍在 ops / driver 路線。"
-            tone="warning"
-          >
-            <p>
-              <code>accept_pending</code>、<code>confirmed_by_platform</code>、
-              <code>lost_race</code>、<code>cancelled_by_platform</code>、
-              <code>sync_failed</code> 不會在此列表轉成 tenant workflow 動作。
-            </p>
-          </CalloutPanel>
-        ) : null}
-
         {emptyView ? (
-          <BookingEmptyState emptyReason={emptyView.envelope.reason} />
+          <BookingEmptyState view={emptyView} />
         ) : (
           <div className="table-wrap">
             <table className="data-grid">
@@ -358,18 +349,11 @@ export default async function BookingsPage({
         description="後端 list response 會在 items 為空時帶 EmptyStateEnvelope；以下連結強制渲染各種 reason，視覺團隊可驗證每種狀態都有獨立 copy + CTA。"
       >
         <div className="chip-row">
-          {(
-            [
-              "no_data",
-              "not_provisioned",
-              "fetch_failed",
-              "permission_denied",
-              "external_unavailable",
-              "filtered_empty",
-            ] as const
+          {EMPTY_REASONS.filter(
+            (reason) => reason !== "driver_not_eligible",
           ).map((reason) => (
             <Link
-              className={`status-chip${emptyReason === reason ? " is-active" : ""}`}
+              className={`status-chip${emptyOverride === reason ? " is-active" : ""}`}
               href={`/bookings?empty=${reason}`}
               key={reason}
             >
@@ -378,7 +362,11 @@ export default async function BookingsPage({
           ))}
         </div>
         <p className="muted-copy">
-          目前顯示: {emptyReason ?? "(無 — 列表有資料)"}
+          目前顯示: {envelopeForVisual?.reason ?? "(無 — 列表有資料)"} · backend
+          envelope ={" "}
+          {response.emptyState
+            ? `${response.emptyState.reason} (${response.emptyState.messageCode})`
+            : "null"}
         </p>
       </SurfaceCard>
 
@@ -387,6 +375,33 @@ export default async function BookingsPage({
         description="本列表直接消費 /api/tenant/bookings*，狀態與 OwnedOrderStatus[] 對齊，不引入 tenant-local workflow 別名。Forwarded 訂單的 deep link 跨應用到 ops-console 開新分頁 (Q-X03)。"
       />
     </div>
+  );
+}
+
+function ForwardedAuthorityCallout({
+  policy,
+}: {
+  policy: TenantBookingForwardedAuthorityPolicy;
+}) {
+  if (!policy.applies) {
+    return null;
+  }
+  return (
+    <CalloutPanel
+      title="Forwarded 訂單 · 外部平台保留 dispatch 權威"
+      description={policy.message}
+      tone="warning"
+    >
+      <p>
+        {policy.forwardedAdapterStates.map((state, index) => (
+          <span key={state}>
+            {index > 0 ? "、" : null}
+            <code>{state}</code>
+          </span>
+        ))}{" "}
+        不會在此列表轉成 tenant workflow 動作。
+      </p>
+    </CalloutPanel>
   );
 }
 
@@ -429,15 +444,13 @@ function PageActionButton({
 
 function BookingRow({ booking }: { booking: BookingRecord }) {
   const source = getBookingSourceVisibility(booking);
-  const editability = getBookingEditability(booking);
-  const actions = getBookingRowActions(booking);
   const crossAppLink = getBookingCrossAppLink(booking);
   const approvalNeeded = isApprovalRequired(booking);
-
-  const editableUntilLabel = editability.editableUntil
-    ? editability.isEditable
-      ? `${formatDateTime(editability.editableUntil)} · 剩 ${editability.urgencyMinutes ?? 0} 分鐘`
-      : `已過 · ${formatDateTime(editability.editableUntil)}`
+  const urgencyMinutes = getEditableUrgencyMinutes(booking);
+  const editableUntilLabel = booking.editableUntil
+    ? urgencyMinutes !== null
+      ? `${formatDateTime(booking.editableUntil)} · 剩 ${urgencyMinutes} 分鐘`
+      : `已過 · ${formatDateTime(booking.editableUntil)}`
     : "—";
 
   return (
@@ -506,21 +519,21 @@ function BookingRow({ booking }: { booking: BookingRecord }) {
         <div className="table-primary">
           <span
             className={
-              editability.isEditable ? "status-badge" : "table-secondary"
+              urgencyMinutes !== null ? "status-badge" : "table-secondary"
             }
           >
             {editableUntilLabel}
           </span>
-          {!editability.isEditable && editability.readOnlyReasonCode ? (
+          {booking.readOnlyReasonCode ? (
             <span className="table-secondary">
-              readOnly: {editability.readOnlyReasonCode}
+              readOnly: {booking.readOnlyReasonCode}
             </span>
           ) : null}
         </div>
       </td>
       <td>
         <div className="row-actions">
-          {actions.map((action) => (
+          {booking.availableActions.map((action) => (
             <BookingRowAction
               action={action}
               bookingId={booking.bookingId}
@@ -579,8 +592,11 @@ function BookingRowAction({
   );
 }
 
-function BookingEmptyState({ emptyReason }: { emptyReason: EmptyReason }) {
-  const view = getEmptyStateView(emptyReason);
+function BookingEmptyState({
+  view,
+}: {
+  view: ReturnType<typeof getEmptyStateView>;
+}) {
   return (
     <div className="empty-panel">
       <strong>{view.title}</strong>

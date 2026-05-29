@@ -3,12 +3,10 @@ import type {
   CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
-  ResourceActionDescriptor,
   RefreshTier,
+  ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "@drts/contracts";
-
-import { isFutureIso } from "./formatters";
 
 /**
  * Tenant `/bookings` runs at the T5 Tenant-slow refresh tier per
@@ -30,6 +28,11 @@ export const REFRESH_TIER_CADENCE_LABEL: Record<RefreshTier, string> = {
   manual: "manual",
 };
 
+/**
+ * All Q-X15 empty reasons. Used by the visual harness section so designers
+ * can preview every empty state via `?empty=<reason>` without needing the
+ * backend to be in that state.
+ */
 export const EMPTY_REASONS: readonly EmptyReason[] = [
   "no_data",
   "not_provisioned",
@@ -60,24 +63,18 @@ export type EmptyStateView = {
 };
 
 /**
- * Map each Q-X15 `EmptyReason` to user-facing copy + an optional CTA
- * descriptor. Backend is expected to ship `EmptyStateEnvelope` alongside
- * the list response; until that wire format exists we synthesise the
- * same shape locally so the UI exhibits all six states distinctly.
+ * Render-time copy lookup for an `EmptyStateEnvelope`. The page passes
+ * either the backend-emitted envelope (preferred) or a locally-built
+ * envelope for the `?empty=` design harness; either way the visual copy
+ * is keyed off `reason`.
  */
-export function getEmptyStateView(reason: EmptyReason): EmptyStateView {
-  switch (reason) {
+export function getEmptyStateView(
+  envelope: EmptyStateEnvelope,
+): EmptyStateView {
+  switch (envelope.reason) {
     case "no_data":
       return {
-        envelope: {
-          reason,
-          messageCode: "tenant.bookings.empty.no_data",
-          nextAction: {
-            action: "create_booking",
-            enabled: true,
-            riskLevel: "medium",
-          },
-        },
+        envelope,
         title: "尚無訂單 · No bookings yet",
         description:
           "本租戶目前沒有任何訂單。第一張預約建立後就會出現在這個列表。",
@@ -86,15 +83,7 @@ export function getEmptyStateView(reason: EmptyReason): EmptyStateView {
       };
     case "not_provisioned":
       return {
-        envelope: {
-          reason,
-          messageCode: "tenant.bookings.empty.not_provisioned",
-          nextAction: {
-            action: "open_integration_governance",
-            enabled: true,
-            riskLevel: "low",
-          },
-        },
+        envelope,
         title: "租戶尚未開通 · Tenant not provisioned",
         description:
           "派遣模組尚未為此租戶完成設定。請先到整合就緒度頁面查看缺漏的子系統 (API 金鑰 / Webhook / 通知)。",
@@ -103,15 +92,7 @@ export function getEmptyStateView(reason: EmptyReason): EmptyStateView {
       };
     case "fetch_failed":
       return {
-        envelope: {
-          reason,
-          messageCode: "tenant.bookings.empty.fetch_failed",
-          nextAction: {
-            action: "retry",
-            enabled: true,
-            riskLevel: "low",
-          },
-        },
+        envelope,
         title: "暫時無法載入 · Unable to load bookings",
         description:
           "後端訂單服務沒有回應。這通常是暫時的；請稍候再試。若持續失敗請至整合健康頁面查詢。",
@@ -120,10 +101,7 @@ export function getEmptyStateView(reason: EmptyReason): EmptyStateView {
       };
     case "permission_denied":
       return {
-        envelope: {
-          reason,
-          messageCode: "tenant.bookings.empty.permission_denied",
-        },
+        envelope,
         title: "權限不足 · Permission denied",
         description:
           "您目前的角色 (tc_viewer / 訪客) 沒有閱覽此列表的權限。請聯絡 tenant admin 調整角色設定。",
@@ -132,10 +110,7 @@ export function getEmptyStateView(reason: EmptyReason): EmptyStateView {
       };
     case "external_unavailable":
       return {
-        envelope: {
-          reason,
-          messageCode: "tenant.bookings.empty.external_unavailable",
-        },
+        envelope,
         title: "外部派遣引擎暫不可用 · External dispatch unavailable",
         description:
           "上游派遣 / 平台服務暫時不可用。已既有的訂單仍可查看,但新預約可能延遲或進入 accepted+pending 狀態 (Q-TEN04)。",
@@ -144,10 +119,7 @@ export function getEmptyStateView(reason: EmptyReason): EmptyStateView {
       };
     case "filtered_empty":
       return {
-        envelope: {
-          reason,
-          messageCode: "tenant.bookings.empty.filtered_empty",
-        },
+        envelope,
         title: "沒有符合的訂單 · No matching bookings",
         description:
           "目前的搜尋條件 / 狀態 chip / 日期區間沒有命中任何訂單。試著清除狀態 chip 或放寬時間區間。",
@@ -156,19 +128,44 @@ export function getEmptyStateView(reason: EmptyReason): EmptyStateView {
       };
     case "driver_not_eligible":
       return {
-        envelope: {
-          reason,
-          messageCode: "tenant.bookings.empty.driver_not_eligible",
-        },
+        envelope,
         title: "駕駛資格未達 · Driver not eligible",
         description:
           "此 reason 屬於 driver-app 專用 (Q-DRV01)。tenant /bookings 不會自然進入此狀態；保留以滿足 EmptyReason 枚舉完備性與視覺驗證。",
       };
     default: {
-      const exhaustive: never = reason;
+      const exhaustive: never = envelope.reason;
       throw new Error(`Unhandled EmptyReason: ${String(exhaustive)}`);
     }
   }
+}
+
+/**
+ * Build a `?empty=<reason>` harness envelope so designers can preview a
+ * reason that the backend has not actually emitted. The shape mirrors
+ * what backend ships so `getEmptyStateView` does not need to branch.
+ */
+export function buildHarnessEmptyState(
+  reason: EmptyReason,
+): EmptyStateEnvelope {
+  const nextAction: ResourceActionDescriptor | undefined =
+    reason === "no_data"
+      ? { action: "create_booking", enabled: true, riskLevel: "medium" }
+      : reason === "not_provisioned"
+        ? {
+            action: "open_integration_governance",
+            enabled: true,
+            riskLevel: "low",
+          }
+        : reason === "fetch_failed"
+          ? { action: "retry", enabled: true, riskLevel: "low" }
+          : undefined;
+
+  return {
+    reason,
+    messageCode: `tenant.bookings.empty.${reason}`,
+    ...(nextAction ? { nextAction } : {}),
+  };
 }
 
 export type RefreshFreshnessView = {
@@ -210,112 +207,22 @@ export function getRefreshFreshnessView(
 }
 
 /**
- * Synthesise a `UiRefreshMetadata` envelope for the page. Real backend
- * support will replace this with the response envelope (per Q-X01).
+ * Compute remaining minutes until `editableUntil` so the UI can render a
+ * "剩 N 分鐘" urgency label. Returns null when the booking is not
+ * currently editable.
  */
-export function buildRefreshMetadata(
-  generatedAt: Date = new Date(),
-  source: UiRefreshMetadata["source"] = "live",
-  dataFreshness: UiRefreshMetadata["dataFreshness"] = "fresh",
-): UiRefreshMetadata {
-  return {
-    generatedAt: generatedAt.toISOString(),
-    staleAfterMs: 30_000,
-    dataFreshness,
-    source,
-  };
-}
-
-/**
- * Q-TEN05 booking editability is driven by `availableActions` +
- * `editableUntil`, not by status alone. Until backend ships those fields
- * we approximate from `modifiableUntil` / `cancelableUntil` so the
- * visual treats the locally-derived state as if it came from the
- * descriptor envelope.
- */
-export type BookingEditabilityView = {
-  editableUntil: string | null;
-  isEditable: boolean;
-  readOnlyReasonCode: string | null;
-  urgencyMinutes: number | null;
-};
-
-export function getBookingEditability(
+export function getEditableUrgencyMinutes(
   booking: BookingRecord,
-): BookingEditabilityView {
-  const editableUntil = booking.modifiableUntil;
-  const isEditable = Boolean(
-    editableUntil && isFutureIso(editableUntil) && booking.status === "active",
-  );
-
-  let readOnlyReasonCode: string | null = null;
-  if (!isEditable) {
-    if (booking.status === "completed") {
-      readOnlyReasonCode = "booking_completed";
-    } else if (booking.status === "cancelled") {
-      readOnlyReasonCode = "booking_cancelled";
-    } else if (booking.issuerAuthorizationRef) {
-      readOnlyReasonCode = "forwarded_authority";
-    } else {
-      readOnlyReasonCode = "past_editable_until";
-    }
+): number | null {
+  if (!booking.editableUntil) {
+    return null;
   }
-
-  let urgencyMinutes: number | null = null;
-  if (isEditable && editableUntil) {
-    urgencyMinutes = Math.max(
-      0,
-      Math.round((new Date(editableUntil).getTime() - Date.now()) / 60_000),
-    );
+  const remainingMs = new Date(booking.editableUntil).getTime() - Date.now();
+  if (remainingMs <= 0) {
+    return null;
   }
-
-  return {
-    editableUntil,
-    isEditable,
-    readOnlyReasonCode,
-    urgencyMinutes,
-  };
+  return Math.round(remainingMs / 60_000);
 }
-
-/**
- * Per-row `availableActions[]`. Backend should attach this to each
- * `BookingRecord`; until that field lands we derive it from the same
- * editability signals so the UI surface matches the eventual envelope
- * shape (Q-X13).
- */
-export function getBookingRowActions(
-  booking: BookingRecord,
-): ResourceActionDescriptor[] {
-  const { isEditable, readOnlyReasonCode } = getBookingEditability(booking);
-  const disabledReason =
-    !isEditable && readOnlyReasonCode ? readOnlyReasonCode : null;
-  return [
-    { action: "view_detail", enabled: true, riskLevel: "low" },
-    {
-      action: "update",
-      enabled: isEditable,
-      ...(disabledReason ? { disabledReasonCode: disabledReason } : {}),
-      riskLevel: "medium",
-    },
-    {
-      action: "cancel",
-      enabled: isEditable,
-      ...(disabledReason ? { disabledReasonCode: disabledReason } : {}),
-      requiresReason: true,
-      riskLevel: "high",
-    },
-  ];
-}
-
-/**
- * List-level CTAs per packet §5.2 "must-support actions". Driven by
- * descriptor envelope, not by role lookup (Q-X13).
- */
-export const BOOKING_LIST_PAGE_ACTIONS: ResourceActionDescriptor[] = [
-  { action: "create_booking", enabled: true, riskLevel: "medium" },
-  { action: "filter", enabled: true, riskLevel: "low" },
-  { action: "export", enabled: true, riskLevel: "low" },
-];
 
 export const BOOKING_LIST_ACTION_LABELS: Record<string, string> = {
   create_booking: "新增訂單",

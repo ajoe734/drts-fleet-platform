@@ -13,6 +13,11 @@ import type {
   CompletionProofBundle,
   AssignDispatchCommand,
   BookingRecord,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  TenantBookingForwardedAuthorityPolicy,
+  TenantBookingReadOnlyReasonCode,
+  UiRefreshMetadata,
   CancelOwnedOrderCommand,
   CreateCallCenterOrderCommand,
   CreateOwnedOrderCommand,
@@ -895,6 +900,11 @@ export class OwnedMobilityService implements OnModuleInit {
         totalItems: items.length,
         totalPages: items.length > 0 ? 1 : 0,
       },
+      refreshMetadata: this.buildTenantBookingListRefreshMetadata(),
+      pageActions: this.buildTenantBookingListPageActions(),
+      emptyState: this.buildTenantBookingListEmptyState(items.length),
+      forwardedAuthorityPolicy:
+        this.buildTenantBookingForwardedAuthorityPolicy(items),
     };
   }
 
@@ -4747,8 +4757,137 @@ export class OwnedMobilityService implements OnModuleInit {
       approvalRequestIds: [...order.approvalRequestIds],
       complianceGates,
       orderStatus: order.status,
+      ...this.computeBookingActionability(order),
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
+    };
+  }
+
+  /**
+   * Q-TEN05 / Q-X13 — compute `editableUntil`, `readOnlyReasonCode`, and
+   * `availableActions` from a single source so list/detail/command
+   * responses agree on what the actor can do with this booking.
+   */
+  private computeBookingActionability(order: OwnedOrderRecord): {
+    editableUntil: string | null;
+    readOnlyReasonCode: TenantBookingReadOnlyReasonCode | null;
+    availableActions: ResourceActionDescriptor[];
+  } {
+    const isForwarded = Boolean(order.issuerAuthorizationRef);
+    let readOnlyReasonCode: TenantBookingReadOnlyReasonCode | null = null;
+    let isEditable = false;
+
+    if (order.status === "completed") {
+      readOnlyReasonCode = "completed";
+    } else if (order.status === "cancelled") {
+      readOnlyReasonCode = "cancelled";
+    } else if (isForwarded) {
+      readOnlyReasonCode = "forwarded_authority";
+    } else if (
+      order.modifiableUntil &&
+      new Date(order.modifiableUntil).getTime() > Date.now()
+    ) {
+      isEditable = true;
+    } else {
+      readOnlyReasonCode = "past_editable_window";
+    }
+
+    const editableUntil = isEditable ? order.modifiableUntil : null;
+    const disabledReason: string | null = readOnlyReasonCode;
+
+    const availableActions: ResourceActionDescriptor[] = [
+      { action: "view_detail", enabled: true, riskLevel: "low" },
+      {
+        action: "update",
+        enabled: isEditable,
+        ...(disabledReason ? { disabledReasonCode: disabledReason } : {}),
+        riskLevel: "medium",
+      },
+      {
+        action: "cancel",
+        enabled: isEditable,
+        ...(disabledReason ? { disabledReasonCode: disabledReason } : {}),
+        requiresReason: true,
+        riskLevel: "high",
+      },
+    ];
+
+    return { editableUntil, readOnlyReasonCode, availableActions };
+  }
+
+  /**
+   * Q-X13 — page-level CTAs for `/api/tenant/bookings`. Driven by the
+   * envelope so the UI does not synthesize role→action mapping.
+   */
+  private buildTenantBookingListPageActions(): ResourceActionDescriptor[] {
+    return [
+      { action: "create_booking", enabled: true, riskLevel: "medium" },
+      { action: "filter", enabled: true, riskLevel: "low" },
+      { action: "export", enabled: true, riskLevel: "low" },
+    ];
+  }
+
+  /**
+   * Q-X01 — per-response freshness envelope. Tenant `/bookings` is a T5
+   * slow tier (30s staleness budget per packet §3.2).
+   */
+  private buildTenantBookingListRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: 30_000,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+  }
+
+  /**
+   * Q-X15 — empty-state envelope. Tenant /bookings reports `no_data`
+   * when the tenant has zero bookings and `null` when there is at least
+   * one row. Filtered-empty / fetch-failed are computed by the UI from
+   * its own query state — the backend cannot tell the difference between
+   * "the operator searched for X" and "the tenant has no bookings
+   * matching X".
+   */
+  private buildTenantBookingListEmptyState(
+    itemCount: number,
+  ): EmptyStateEnvelope | null {
+    if (itemCount > 0) {
+      return null;
+    }
+    return {
+      reason: "no_data",
+      messageCode: "tenant.bookings.empty.no_data",
+      nextAction: {
+        action: "create_booking",
+        enabled: true,
+        riskLevel: "medium",
+      },
+    };
+  }
+
+  /**
+   * Q-DRV04 / forwarded_authority — informational policy banner for the
+   * tenant /bookings page. Applies whenever the tenant book has any
+   * forwarded-authority rows; the message and adapter-state enumeration
+   * are static per spec.
+   */
+  private buildTenantBookingForwardedAuthorityPolicy(
+    items: BookingRecord[],
+  ): TenantBookingForwardedAuthorityPolicy {
+    const applies = items.some(
+      (booking) => booking.issuerAuthorizationRef !== null,
+    );
+    return {
+      applies,
+      message:
+        "Forwarded 訂單 · 外部平台保留 dispatch 權威 (Q-DRV04)。tenant 列表保留可讀的業務紀錄；adapter-native 生命週期狀態與平台復原仍在 ops / driver 路線。",
+      forwardedAdapterStates: [
+        "accept_pending",
+        "confirmed_by_platform",
+        "lost_race",
+        "cancelled_by_platform",
+        "sync_failed",
+      ],
     };
   }
 

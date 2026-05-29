@@ -19,7 +19,6 @@ import type {
   AttachCallRecordingCommand,
   ApiSuccessEnvelope,
   AttendanceRecord,
-  BookingRecord,
   CallbackTaskRecord,
   CallSessionRecord,
   ClockInCommand,
@@ -47,6 +46,7 @@ import type {
   CreatePlatformTenantCommand,
   CreateReportJobCommand,
   CreateTenantBookingCommand,
+  TenantBookingListResponse,
   CreateCallCenterOrderCommand,
   CreateCallbackTaskCommand,
   CreateComplaintCaseCommand,
@@ -682,8 +682,17 @@ export class ApiClient {
     return this.post("/api/tenant/bookings", { body: command });
   }
 
-  async listTenantBookings(): Promise<BookingRecord[]> {
-    return this.getList<BookingRecord>("/api/tenant/bookings");
+  async listTenantBookings(): Promise<TenantBookingListResponse> {
+    const response = await this.get<TenantBookingListResponse>(
+      "/api/tenant/bookings",
+    );
+    return {
+      items: response.items ?? [],
+      refreshMetadata: response.refreshMetadata,
+      pageActions: response.pageActions ?? [],
+      emptyState: response.emptyState ?? null,
+      forwardedAuthorityPolicy: response.forwardedAuthorityPolicy,
+    };
   }
 
   async getTenantBooking(bookingId: string) {
