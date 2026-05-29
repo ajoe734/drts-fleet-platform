@@ -32,6 +32,10 @@ type ReportAction = ResourceActionDescriptor & {
   href?: string;
   openMode?: CrossAppResourceLink["openMode"];
   label?: string;
+  targetApp?: CrossAppResourceLink["targetApp"];
+  route?: string;
+  resourceType?: string;
+  resourceId?: string;
 };
 
 type RuntimeReportJob = ReportJobRecord & {
@@ -306,9 +310,75 @@ function normalizeListResponse<T>(
       ? { refreshMetadata: payload.refreshMetadata }
       : {}),
     ...(payload.availableActions
-      ? { availableActions: payload.availableActions }
+      ? { availableActions: coerceActionArray(payload.availableActions) }
       : {}),
   };
+}
+
+function readCrossAppLink(value: unknown): CrossAppResourceLink | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Partial<CrossAppResourceLink>;
+  if (
+    typeof candidate.route !== "string" ||
+    typeof candidate.targetApp !== "string" ||
+    typeof candidate.openMode !== "string"
+  ) {
+    return null;
+  }
+  return candidate as CrossAppResourceLink;
+}
+
+function crossAppHref(link: CrossAppResourceLink) {
+  return link.route;
+}
+
+function coerceAction(
+  action: ReportAction | ResourceActionDescriptor,
+): ReportAction {
+  const rawAction = action as ReportAction & {
+    link?: CrossAppResourceLink;
+    resourceLink?: CrossAppResourceLink;
+  };
+  const link =
+    readCrossAppLink(rawAction.link) ??
+    readCrossAppLink(rawAction.resourceLink);
+
+  return {
+    action: rawAction.action,
+    enabled: rawAction.enabled,
+    riskLevel: rawAction.riskLevel,
+    ...(rawAction.disabledReasonCode
+      ? { disabledReasonCode: rawAction.disabledReasonCode }
+      : {}),
+    ...(rawAction.requiresReason
+      ? { requiresReason: rawAction.requiresReason }
+      : {}),
+    ...(rawAction.label ? { label: rawAction.label } : {}),
+    ...(rawAction.href ? { href: rawAction.href } : {}),
+    ...(rawAction.openMode ? { openMode: rawAction.openMode } : {}),
+    ...(link
+      ? {
+          href: rawAction.href ?? crossAppHref(link),
+          openMode: rawAction.openMode ?? link.openMode,
+          label: rawAction.label ?? link.label,
+          targetApp: link.targetApp,
+          route: link.route,
+          resourceType: link.resourceType,
+          resourceId: link.resourceId,
+        }
+      : {}),
+  };
+}
+
+function coerceActionArray(
+  actions:
+    | readonly (ReportAction | ResourceActionDescriptor)[]
+    | null
+    | undefined,
+) {
+  return (actions ?? []).map((action) => coerceAction(action));
 }
 
 function readNonEmptyString(value: unknown) {
@@ -487,7 +557,7 @@ function fallbackJobActions(
     enabled: true,
     riskLevel: "low",
   });
-  return actions;
+  return coerceActionArray(actions);
 }
 
 function fallbackPackageActions(
@@ -527,7 +597,7 @@ function fallbackPackageActions(
     enabled: true,
     riskLevel: "low",
   });
-  return actions;
+  return coerceActionArray(actions);
 }
 
 function labelForAction(action: string, locale: "en" | "zh") {
@@ -797,8 +867,18 @@ export default function ReportsPage() {
       ]);
       const reportJobs = normalizeListResponse(reportJobsPayload);
       const filingPackages = normalizeListResponse(filingPackagesPayload);
-      setJobs(reportJobs.items ?? []);
-      setPackages(filingPackages.items ?? []);
+      setJobs(
+        (reportJobs.items ?? []).map((job) => ({
+          ...job,
+          availableActions: coerceActionArray(job.availableActions),
+        })),
+      );
+      setPackages(
+        (filingPackages.items ?? []).map((filingPackage) => ({
+          ...filingPackage,
+          availableActions: coerceActionArray(filingPackage.availableActions),
+        })),
+      );
       setJobEmptyState(reportJobs.emptyState ?? null);
       setPackageEmptyState(filingPackages.emptyState ?? null);
       setJobListRefreshMetadata(reportJobs.refreshMetadata ?? null);
@@ -822,7 +902,12 @@ export default function ReportsPage() {
     setError(null);
     try {
       const detail = await getOpsClient().getReportJob(jobId);
-      setJobDetail(detail as RuntimeReportJobDetail);
+      setJobDetail({
+        ...(detail as RuntimeReportJobDetail),
+        availableActions: coerceActionArray(
+          (detail as RuntimeReportJobDetail).availableActions,
+        ),
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("common.unknown"));
     } finally {
@@ -837,7 +922,12 @@ export default function ReportsPage() {
     setError(null);
     try {
       const detail = await getOpsClient().getFilingPackage(packageId);
-      setPackageDetail(detail as RuntimeFilingPackageDetail);
+      setPackageDetail({
+        ...(detail as RuntimeFilingPackageDetail),
+        availableActions: coerceActionArray(
+          (detail as RuntimeFilingPackageDetail).availableActions,
+        ),
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("common.unknown"));
     } finally {
@@ -1152,9 +1242,10 @@ export default function ReportsPage() {
   }, [locale, packages, normalizedSearch, statusFilter]);
 
   const urlEmptyReason = searchParams.get("emptyReason") as EmptyReason | null;
+  const activeEmptyStateEnvelope =
+    activeTab === "jobs" ? jobEmptyState : packageEmptyState;
   const activeEmptyReason = (() => {
-    const backendEmptyReason =
-      activeTab === "jobs" ? jobEmptyState?.reason : packageEmptyState?.reason;
+    const backendEmptyReason = activeEmptyStateEnvelope?.reason;
     if (backendEmptyReason) {
       return backendEmptyReason;
     }
@@ -1224,10 +1315,15 @@ export default function ReportsPage() {
       ...(jobDetail ? [jobDetail] : []),
       ...(packageDetail ? [packageDetail] : []),
     ];
+    const emptyActions = coerceActionArray([
+      ...(jobEmptyState?.nextAction ? [jobEmptyState.nextAction] : []),
+      ...(packageEmptyState?.nextAction ? [packageEmptyState.nextAction] : []),
+    ]);
 
     for (const actionName of knownActions) {
       const match =
         pageAvailableActions.find((action) => action.action === actionName) ??
+        emptyActions.find((action) => action.action === actionName) ??
         records
           .flatMap((record) => record.availableActions ?? [])
           .find((action) => action.action === actionName);
@@ -1241,7 +1337,31 @@ export default function ReportsPage() {
     }
 
     return inventory;
-  }, [jobDetail, jobs, packageDetail, packages, pageAvailableActions]);
+  }, [
+    jobDetail,
+    jobEmptyState,
+    jobs,
+    packageDetail,
+    packageEmptyState,
+    packages,
+    pageAvailableActions,
+  ]);
+
+  const activeEmptyAction = activeEmptyStateEnvelope?.nextAction
+    ? coerceAction(activeEmptyStateEnvelope.nextAction)
+    : null;
+  const activeReadModelCount =
+    activeTab === "jobs" ? filteredJobs.length : filteredPackages.length;
+  const crossAppActions = [
+    ...(selectedJobActions ?? []),
+    ...(selectedPackageActions ?? []),
+  ].filter(
+    (action, index, source) =>
+      !!action.href &&
+      action.openMode === "new_tab" &&
+      source.findIndex((candidate) => candidate.action === action.action) ===
+        index,
+  );
 
   const metrics = [
     {
@@ -1304,14 +1424,14 @@ export default function ReportsPage() {
           <div className="hero-top">
             <div>
               <p className="hero-brow">
-                {copyText(locale, "Monitoring", "營運監控")}
+                {copyText(locale, "5.10 /reports", "5.10 /reports")}
               </p>
               <h1>{copyText(locale, "Reporting workspace", "報表工作台")}</h1>
               <p className="hero-copy">
                 {copyText(
                   locale,
-                  "Kick off report jobs, issue filing packages, watch signed artifact expiry, and only refresh when you need a new snapshot.",
-                  "在同一工作台建立報表、發行申報套件、追蹤簽名成品到期時間，並以手動 refresh 控制快照更新。",
+                  "Kick off report jobs, issue filing packages, watch signed artifact expiry, and manually refresh before handoff or download.",
+                  "在同一工作台建立報表、發行申報套件、追蹤簽名成品到期時間，並在交付或下載前手動刷新。",
                 )}
               </p>
             </div>
@@ -1368,67 +1488,76 @@ export default function ReportsPage() {
 
           <div className="hero-meta">
             <div className={`freshness-banner freshness-${effectiveFreshness}`}>
-              <div>
+              <div className="banner-tier">
                 <span className="meta-label">T6</span>
-                <strong>
-                  {copyText(locale, "Manual refresh", "手動刷新")}
-                </strong>
-              </div>
-              <div className="freshness-copy">
-                {activeRefreshMetadata ? (
-                  <>
-                    <span>
-                      {copyText(locale, "Generated", "產生時間")}{" "}
-                      {formatDateTimeShort(effectiveGeneratedAt)}
-                    </span>
-                    <span>
-                      {copyText(locale, "Source", "來源")}{" "}
-                      {activeRefreshMetadata.source}
-                    </span>
-                    <span>
-                      {effectiveFreshness === "stale"
-                        ? copyText(
-                            locale,
-                            "Snapshot may be stale. Refresh before download handoff.",
-                            "快照可能已過時。交付下載前請先刷新。",
-                          )
-                        : copyText(
-                            locale,
-                            "Snapshot still within the manual freshness window.",
-                            "快照仍在手動刷新可接受的新鮮度範圍內。",
-                          )}
-                    </span>
-                  </>
-                ) : (
+                <div className="banner-tier-copy">
+                  <strong>
+                    {copyText(locale, "Manual refresh only", "僅支援手動刷新")}
+                  </strong>
                   <span>
                     {copyText(
                       locale,
-                      "Backend freshness metadata is unavailable for this snapshot.",
-                      "此快照尚未提供後端 freshness metadata。",
+                      "No polling on this surface. Refresh is an explicit operator action.",
+                      "此頁不輪詢，刷新必須由操作員明確觸發。",
                     )}
                   </span>
-                )}
+                </div>
+              </div>
+              <div className="freshness-copy">
+                <span>
+                  {copyText(locale, "Generated", "產生時間")}{" "}
+                  {activeRefreshMetadata
+                    ? formatDateTimeShort(effectiveGeneratedAt)
+                    : copyText(locale, "Unavailable", "未提供")}
+                </span>
+                <span>
+                  {copyText(locale, "Source", "來源")}{" "}
+                  {activeRefreshMetadata?.source ?? "—"}
+                </span>
+                <span>
+                  {effectiveFreshness === "stale"
+                    ? copyText(
+                        locale,
+                        "Snapshot is stale. Refresh before download handoff.",
+                        "快照已過時。下載交付前請先刷新。",
+                      )
+                    : copyText(
+                        locale,
+                        "Snapshot is within the declared freshness window.",
+                        "快照仍在宣告的新鮮度視窗內。",
+                      )}
+                </span>
               </div>
             </div>
 
-            <div className="tab-strip">
-              <button
-                type="button"
-                className={activeTab === "jobs" ? "tab active" : "tab"}
-                onClick={() => setActiveTab("jobs")}
-              >
-                Report jobs
-                <span>{jobs.length}</span>
-              </button>
-              <button
-                type="button"
-                className={activeTab === "packages" ? "tab active" : "tab"}
-                onClick={() => setActiveTab("packages")}
-              >
-                Filing packages
-                <span>{packages.length}</span>
-              </button>
+            <div className="hero-kpis">
+              {metrics.map((metric) => (
+                <article key={metric.label} className="metric-card">
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}</strong>
+                  <small>{metric.note}</small>
+                </article>
+              ))}
             </div>
+          </div>
+
+          <div className="tab-strip">
+            <button
+              type="button"
+              className={activeTab === "jobs" ? "tab active" : "tab"}
+              onClick={() => setActiveTab("jobs")}
+            >
+              {copyText(locale, "Report jobs", "Report jobs")}
+              <span>{jobs.length}</span>
+            </button>
+            <button
+              type="button"
+              className={activeTab === "packages" ? "tab active" : "tab"}
+              onClick={() => setActiveTab("packages")}
+            >
+              {copyText(locale, "Filing packages", "Filing packages")}
+              <span>{packages.length}</span>
+            </button>
           </div>
         </section>
 
@@ -1609,14 +1738,41 @@ export default function ReportsPage() {
           </section>
         )}
 
-        <section className="metric-grid">
-          {metrics.map((metric) => (
-            <article key={metric.label} className="metric-card">
-              <span>{metric.label}</span>
-              <strong>{metric.value}</strong>
-              <small>{metric.note}</small>
-            </article>
-          ))}
+        <section className="packet-banner">
+          <div>
+            <p>{copyText(locale, "Decision point", "決策點")}</p>
+            <strong>
+              {copyText(
+                locale,
+                "Reuse an existing artifact or issue a new one?",
+                "沿用既有成品，還是重新發行？",
+              )}
+            </strong>
+            <span>
+              {copyText(
+                locale,
+                "Per packet §5.10, operators compare status, parameters, failure reason, and signed-link TTL before creating new work.",
+                "依 packet §5.10，操作員需先比對狀態、參數、失敗原因與簽名連結 TTL，再決定是否建立新工作。",
+              )}
+            </span>
+          </div>
+          <div>
+            <p>{copyText(locale, "Cross-app", "跨系統")}</p>
+            <strong>
+              {copyText(
+                locale,
+                "New-tab links remain explicit",
+                "新分頁 deep link 必須清楚標示",
+              )}
+            </strong>
+            <span>
+              {copyText(
+                locale,
+                "Any cross-app link from availableActions keeps its open mode and is labeled in the action pills below.",
+                "來自 availableActions 的跨系統連結會保留 open mode，並在下方操作按鈕明確標示。",
+              )}
+            </span>
+          </div>
         </section>
 
         <section className="workspace-grid">
@@ -1629,6 +1785,13 @@ export default function ReportsPage() {
                     ? copyText(locale, "Report job queue", "報表工作佇列")
                     : copyText(locale, "Filing package queue", "申報套件佇列")}
                 </h2>
+                <span className="surface-subcopy">
+                  {copyText(
+                    locale,
+                    `${activeReadModelCount} visible rows · actions come from availableActions`,
+                    `目前顯示 ${activeReadModelCount} 筆 · CTA 由 availableActions 決定`,
+                  )}
+                </span>
               </div>
               <div className="surface-controls">
                 <input
@@ -1668,14 +1831,9 @@ export default function ReportsPage() {
             ) : activeTab === "jobs" ? (
               filteredJobs.length === 0 ? (
                 <EmptyStatePanel
+                  reason={activeEmptyReason}
                   definition={emptyStateDefinition}
-                  action={
-                    filteredJobs.length === 0 &&
-                    jobs.length === 0 &&
-                    jobEmptyState?.nextAction
-                      ? (jobEmptyState.nextAction as ReportAction)
-                      : null
-                  }
+                  action={jobs.length === 0 ? activeEmptyAction : null}
                   onAction={handleSurfaceAction}
                   locale={locale}
                 />
@@ -1784,14 +1942,9 @@ export default function ReportsPage() {
               )
             ) : filteredPackages.length === 0 ? (
               <EmptyStatePanel
+                reason={activeEmptyReason}
                 definition={emptyStateDefinition}
-                action={
-                  filteredPackages.length === 0 &&
-                  packages.length === 0 &&
-                  packageEmptyState?.nextAction
-                    ? (packageEmptyState.nextAction as ReportAction)
-                    : null
-                }
+                action={packages.length === 0 ? activeEmptyAction : null}
                 onAction={handleSurfaceAction}
                 locale={locale}
               />
@@ -2056,6 +2209,7 @@ export default function ReportsPage() {
                 </>
               ) : (
                 <EmptyStatePanel
+                  reason={activeEmptyReason}
                   definition={emptyStateDefinition}
                   compact
                   locale={locale}
@@ -2188,11 +2342,55 @@ export default function ReportsPage() {
               </>
             ) : (
               <EmptyStatePanel
+                reason={activeEmptyReason}
                 definition={emptyStateDefinition}
                 compact
                 locale={locale}
               />
             )}
+
+            {crossAppActions.length > 0 ? (
+              <div className="detail-block cross-app-block">
+                <div className="mini-banner">
+                  <strong>
+                    {copyText(
+                      locale,
+                      "Cross-app deep links",
+                      "跨系統 deep links",
+                    )}
+                  </strong>
+                  <span>
+                    {copyText(
+                      locale,
+                      "These actions leave Ops Console and open in a new tab per packet §3.10.",
+                      "這些操作會離開 Ops Console，並依 packet §3.10 以新分頁開啟。",
+                    )}
+                  </span>
+                </div>
+                <div className="detail-actions">
+                  {crossAppActions.map((action) => (
+                    <button
+                      key={`cross-app-${action.action}`}
+                      type="button"
+                      className="ghost-button"
+                      disabled={!action.enabled}
+                      title={
+                        action.enabled
+                          ? undefined
+                          : formatDisabledReason(
+                              action.disabledReasonCode,
+                              locale,
+                            )
+                      }
+                      onClick={() => handleSurfaceAction(action)}
+                    >
+                      {action.label ?? labelForAction(action.action, locale)}
+                      {copyText(locale, " (new tab)", "（新分頁）")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </aside>
         </section>
       </div>
@@ -2250,7 +2448,7 @@ export default function ReportsPage() {
         .reports-page {
           display: flex;
           flex-direction: column;
-          gap: 24px;
+          gap: 16px;
           padding-bottom: 40px;
         }
 
@@ -2259,26 +2457,19 @@ export default function ReportsPage() {
         .surface-card,
         .detail-card,
         .metric-card,
+        .packet-banner,
         .notice-banner,
         .error-banner {
-          border: 1px solid #f3d4d4;
-          border-radius: 28px;
-          background:
-            radial-gradient(
-              circle at top right,
-              rgba(251, 191, 188, 0.2),
-              transparent 30%
-            ),
-            linear-gradient(
-              180deg,
-              rgba(255, 250, 250, 0.98),
-              rgba(255, 245, 244, 0.96)
-            );
-          box-shadow: 0 20px 50px rgba(127, 29, 29, 0.08);
+          border: 1px solid #e5e8ee;
+          border-radius: 12px;
+          background: #ffffff;
+          box-shadow:
+            0 1px 2px rgba(15, 23, 42, 0.04),
+            0 8px 24px rgba(15, 23, 42, 0.06);
         }
 
         .hero-shell {
-          padding: 28px;
+          padding: 18px;
         }
 
         .hero-top {
@@ -2290,25 +2481,28 @@ export default function ReportsPage() {
 
         .hero-brow {
           margin: 0 0 8px;
-          font-size: 0.74rem;
-          letter-spacing: 0.16em;
+          font-size: 0.68rem;
+          letter-spacing: 0.14em;
           text-transform: uppercase;
-          color: #b45309;
+          color: #64748b;
+          font-family: "JetBrains Mono", monospace;
         }
 
         h1 {
           margin: 0;
-          font-size: clamp(2rem, 4vw, 3rem);
-          line-height: 1;
-          color: #1f2937;
+          font-size: clamp(1.8rem, 3vw, 2.4rem);
+          line-height: 1.05;
+          color: #0b1220;
+          letter-spacing: -0.03em;
         }
 
         .hero-copy,
         .modal-copy {
-          max-width: 64ch;
-          margin: 12px 0 0;
-          color: #6b7280;
-          line-height: 1.6;
+          max-width: 70ch;
+          margin: 10px 0 0;
+          color: #475569;
+          line-height: 1.5;
+          font-size: 0.95rem;
         }
 
         .hero-actions,
@@ -2340,28 +2534,32 @@ export default function ReportsPage() {
         .primary-button,
         .secondary-button,
         .ghost-button {
-          border-radius: 999px;
-          padding: 0.85rem 1.2rem;
-          border: 1px solid transparent;
+          border-radius: 7px;
+          padding: 0.58rem 0.88rem;
+          border: 1px solid #c9d2dd;
           font: inherit;
           cursor: pointer;
+          font-size: 0.84rem;
+          line-height: 1;
+          font-weight: 500;
         }
 
         .primary-button {
-          background: linear-gradient(135deg, #111827, #7f1d1d);
+          background: #dc2626;
           color: white;
+          border-color: #dc2626;
         }
 
         .secondary-button {
-          background: #fee2e2;
-          color: #7f1d1d;
+          background: #fef2f2;
+          color: #b42318;
           border-color: #fecaca;
         }
 
         .ghost-button {
-          background: rgba(255, 255, 255, 0.88);
-          color: #374151;
-          border-color: #e5e7eb;
+          background: #ffffff;
+          color: #0b1220;
+          border-color: #e5e8ee;
         }
 
         .primary-button:hover,
@@ -2384,69 +2582,98 @@ export default function ReportsPage() {
         }
 
         .hero-meta {
-          display: flex;
-          justify-content: space-between;
+          display: grid;
           gap: 16px;
-          align-items: flex-end;
-          margin-top: 28px;
+          margin-top: 18px;
         }
 
         .freshness-banner {
-          display: flex;
-          gap: 18px;
-          align-items: center;
-          padding: 16px 18px;
-          border-radius: 24px;
-          border: 1px solid rgba(255, 255, 255, 0.65);
-          min-width: min(100%, 720px);
+          display: grid;
+          gap: 12px;
+          align-items: start;
+          padding: 14px;
+          border-radius: 10px;
+          border: 1px solid #e5e8ee;
+          min-width: 0;
         }
 
         .freshness-fresh {
-          background: rgba(255, 255, 255, 0.78);
+          background: #f8fafc;
         }
 
         .freshness-stale {
-          background: rgba(254, 240, 138, 0.22);
-          border-color: rgba(202, 138, 4, 0.32);
+          background: #fcefd8;
+          border-color: #f0cc95;
         }
 
         .freshness-copy {
           display: flex;
-          gap: 18px;
+          gap: 12px;
           flex-wrap: wrap;
-          color: #6b7280;
-          font-size: 0.92rem;
+          color: #475569;
+          font-size: 0.82rem;
+          line-height: 1.45;
+        }
+
+        .banner-tier {
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+        }
+
+        .banner-tier-copy {
+          display: grid;
+          gap: 4px;
+        }
+
+        .banner-tier-copy strong {
+          color: #0b1220;
+          font-size: 0.94rem;
+        }
+
+        .banner-tier-copy span {
+          color: #64748b;
+          font-size: 0.8rem;
         }
 
         .meta-label {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-width: 42px;
-          height: 42px;
+          min-width: 38px;
+          height: 24px;
           border-radius: 999px;
-          background: #111827;
+          background: #0b1220;
           color: white;
           font-weight: 700;
-          margin-right: 12px;
+          font-size: 0.74rem;
+          font-family: "JetBrains Mono", monospace;
+        }
+
+        .hero-kpis {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 12px;
         }
 
         .tab-strip {
           display: flex;
           gap: 10px;
+          flex-wrap: wrap;
         }
 
         .tab {
-          border: 1px solid #f3d4d4;
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.8);
-          padding: 0.78rem 1rem;
+          border: 1px solid #e5e8ee;
+          border-radius: 8px;
+          background: #ffffff;
+          padding: 0.6rem 0.8rem;
           cursor: pointer;
-          color: #6b7280;
+          color: #475569;
           display: inline-flex;
           align-items: center;
           gap: 10px;
           font: inherit;
+          font-size: 0.84rem;
         }
 
         .tab span {
@@ -2454,21 +2681,21 @@ export default function ReportsPage() {
           min-width: 1.6rem;
           height: 1.6rem;
           border-radius: 999px;
-          background: #fee2e2;
+          background: #f1f4f8;
           align-items: center;
           justify-content: center;
-          color: #7f1d1d;
-          font-size: 0.86rem;
+          color: #475569;
+          font-size: 0.78rem;
         }
 
         .tab.active {
-          background: #111827;
-          color: white;
-          border-color: #111827;
+          background: #fef2f2;
+          color: #b42318;
+          border-color: #f8b3ac;
         }
 
         .tab.active span {
-          background: rgba(255, 255, 255, 0.18);
+          background: #dc2626;
           color: white;
         }
 
@@ -2486,27 +2713,18 @@ export default function ReportsPage() {
         }
 
         .notice-banner {
-          border-color: #cbd5e1;
-          background:
-            radial-gradient(
-              circle at top right,
-              rgba(148, 163, 184, 0.14),
-              transparent 28%
-            ),
-            linear-gradient(
-              180deg,
-              rgba(248, 250, 252, 0.98),
-              rgba(241, 245, 249, 0.96)
-            );
+          border-color: #b6cbec;
+          background: #e4edfb;
         }
 
         .error-banner {
-          border-color: #fecaca;
-          color: #991b1b;
+          border-color: #f8b3ac;
+          color: #b42318;
+          background: #fee4e2;
         }
 
         .composer-panel {
-          padding: 22px;
+          padding: 16px;
         }
 
         .composer-form {
@@ -2525,32 +2743,34 @@ export default function ReportsPage() {
         .surface-head p,
         .detail-id-row p {
           margin: 0;
-          color: #9a3412;
+          color: #64748b;
           text-transform: uppercase;
           letter-spacing: 0.12em;
-          font-size: 0.74rem;
+          font-size: 0.68rem;
+          font-family: "JetBrains Mono", monospace;
         }
 
         .composer-head h2,
         .surface-head h2 {
           margin: 6px 0 0;
-          font-size: 1.28rem;
-          color: #1f2937;
+          font-size: 1.1rem;
+          color: #0b1220;
         }
 
         .composer-chip,
         .status-pill {
           display: inline-flex;
           align-items: center;
-          border-radius: 999px;
-          padding: 0.45rem 0.78rem;
-          font-size: 0.85rem;
+          border-radius: 6px;
+          padding: 0.28rem 0.5rem;
+          font-size: 0.74rem;
           font-weight: 600;
         }
 
         .composer-chip {
-          background: #111827;
+          background: #0b1220;
           color: white;
+          font-family: "JetBrains Mono", monospace;
         }
 
         .composer-grid {
@@ -2570,12 +2790,12 @@ export default function ReportsPage() {
         select,
         textarea {
           width: 100%;
-          border-radius: 16px;
-          border: 1px solid #e5e7eb;
-          background: rgba(255, 255, 255, 0.92);
-          padding: 0.85rem 1rem;
+          border-radius: 8px;
+          border: 1px solid #c9d2dd;
+          background: #ffffff;
+          padding: 0.72rem 0.85rem;
           font: inherit;
-          color: #111827;
+          color: #0b1220;
         }
 
         small {
@@ -2583,29 +2803,67 @@ export default function ReportsPage() {
           font-weight: 500;
         }
 
-        .metric-grid,
         .workspace-grid {
           display: grid;
           gap: 18px;
         }
 
-        .metric-grid {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
-
         .metric-card {
-          padding: 20px;
+          padding: 14px;
           display: grid;
-          gap: 10px;
+          gap: 6px;
         }
 
         .metric-card span {
-          color: #6b7280;
+          color: #64748b;
+          font-size: 0.7rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 600;
         }
 
         .metric-card strong {
-          font-size: clamp(1.8rem, 3vw, 2.4rem);
-          color: #111827;
+          font-size: clamp(1.4rem, 2vw, 1.8rem);
+          color: #0b1220;
+          font-family: "JetBrains Mono", monospace;
+          line-height: 1;
+        }
+
+        .metric-card small {
+          color: #64748b;
+          line-height: 1.4;
+        }
+
+        .packet-banner {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+          padding: 14px 16px;
+        }
+
+        .packet-banner > div {
+          display: grid;
+          gap: 4px;
+        }
+
+        .packet-banner p {
+          margin: 0;
+          color: #64748b;
+          font-size: 0.68rem;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          font-family: "JetBrains Mono", monospace;
+        }
+
+        .packet-banner strong {
+          color: #0b1220;
+          font-size: 0.95rem;
+        }
+
+        .packet-banner span {
+          color: #475569;
+          font-size: 0.84rem;
+          line-height: 1.45;
         }
 
         .workspace-grid {
@@ -2615,7 +2873,7 @@ export default function ReportsPage() {
 
         .surface-card,
         .detail-card {
-          padding: 22px;
+          padding: 16px;
         }
 
         .surface-head {
@@ -2632,6 +2890,13 @@ export default function ReportsPage() {
           flex-wrap: wrap;
         }
 
+        .surface-subcopy {
+          display: inline-block;
+          margin-top: 8px;
+          color: #64748b;
+          font-size: 0.8rem;
+        }
+
         .search-input {
           min-width: 240px;
         }
@@ -2642,11 +2907,11 @@ export default function ReportsPage() {
 
         .loading-card,
         .empty-state {
-          border-radius: 24px;
-          border: 1px dashed #f3d4d4;
-          padding: 32px 24px;
-          background: rgba(255, 255, 255, 0.64);
-          color: #6b7280;
+          border-radius: 10px;
+          border: 1px dashed #c9d2dd;
+          padding: 22px 18px;
+          background: #f8fafc;
+          color: #475569;
         }
 
         .table-shell {
@@ -2661,12 +2926,13 @@ export default function ReportsPage() {
         }
 
         .table-head {
-          padding: 0 14px 10px;
-          color: #9ca3af;
-          font-size: 0.72rem;
+          padding: 0 12px 8px;
+          color: #64748b;
+          font-size: 0.64rem;
           font-weight: 700;
-          letter-spacing: 0.12em;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
+          font-family: "JetBrains Mono", monospace;
         }
 
         .table-head-jobs,
@@ -2691,13 +2957,13 @@ export default function ReportsPage() {
         .table-row {
           width: 100%;
           text-align: left;
-          padding: 16px 14px;
-          border: 1px solid transparent;
-          border-radius: 22px;
-          background: rgba(255, 255, 255, 0.76);
+          padding: 12px;
+          border: 1px solid #e5e8ee;
+          border-radius: 10px;
+          background: #ffffff;
           cursor: pointer;
           margin-bottom: 8px;
-          color: #374151;
+          color: #475569;
           font: inherit;
         }
 
@@ -2712,15 +2978,9 @@ export default function ReportsPage() {
         }
 
         .table-row.active {
-          border-color: #fca5a5;
-          background:
-            linear-gradient(
-              135deg,
-              rgba(255, 255, 255, 0.98),
-              rgba(254, 242, 242, 0.96)
-            ),
-            #fff;
-          box-shadow: inset 0 0 0 1px rgba(252, 165, 165, 0.24);
+          border-color: #f8b3ac;
+          background: #fef2f2;
+          box-shadow: inset 0 0 0 1px rgba(248, 179, 172, 0.22);
         }
 
         .table-row:hover {
@@ -2748,14 +3008,14 @@ export default function ReportsPage() {
         }
 
         .action-pill {
-          border-radius: 999px;
-          border: 1px solid #e5e7eb;
-          background: rgba(255, 255, 255, 0.9);
-          color: #374151;
-          padding: 0.45rem 0.78rem;
+          border-radius: 6px;
+          border: 1px solid #e5e8ee;
+          background: #ffffff;
+          color: #0b1220;
+          padding: 0.32rem 0.56rem;
           cursor: pointer;
           font: inherit;
-          font-size: 0.82rem;
+          font-size: 0.76rem;
         }
 
         .ttl-badge {
@@ -2785,12 +3045,12 @@ export default function ReportsPage() {
         }
 
         .detail-block {
-          border: 1px solid #f3e8e8;
-          border-radius: 24px;
-          padding: 18px;
-          background: rgba(255, 255, 255, 0.82);
+          border: 1px solid #e5e8ee;
+          border-radius: 10px;
+          padding: 14px;
+          background: #ffffff;
           display: grid;
-          gap: 16px;
+          gap: 12px;
         }
 
         .detail-id-row {
@@ -2839,13 +3099,13 @@ export default function ReportsPage() {
         }
 
         .mini-banner {
-          background: #fff7ed;
-          color: #9a3412;
+          background: #e4edfb;
+          color: #1f5db8;
         }
 
         .failure-card {
-          background: #fef2f2;
-          color: #991b1b;
+          background: #fee4e2;
+          color: #b42318;
         }
 
         .detail-table {
@@ -2857,9 +3117,9 @@ export default function ReportsPage() {
           display: grid;
           grid-template-columns: 1.15fr 1fr 1fr;
           gap: 10px;
-          border-radius: 16px;
-          padding: 12px 14px;
-          background: #f8fafc;
+          border-radius: 8px;
+          padding: 10px 12px;
+          background: #f1f4f8;
           color: #334155;
         }
 
@@ -2901,34 +3161,54 @@ export default function ReportsPage() {
         }
 
         .empty-state.compact {
-          padding: 24px 18px;
+          padding: 18px 16px;
         }
 
         .empty-accent {
-          width: 54px;
-          height: 54px;
-          border-radius: 18px;
-          margin-bottom: 14px;
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          margin-bottom: 10px;
         }
 
         .empty-eyebrow {
           margin: 0 0 8px;
-          color: #9a3412 !important;
+          color: #64748b !important;
           text-transform: uppercase;
           letter-spacing: 0.12em;
-          font-size: 0.72rem;
+          font-size: 0.64rem;
           font-weight: 700;
+          font-family: "JetBrains Mono", monospace;
+        }
+
+        .empty-reason-code {
+          display: inline-flex;
+          width: fit-content;
+          border-radius: 999px;
+          border: 1px solid #cbd5e1;
+          background: #ffffff;
+          color: #475569;
+          padding: 0.2rem 0.45rem;
+          font-size: 0.68rem;
+          font-family: "JetBrains Mono", monospace;
+          text-transform: lowercase;
         }
 
         .empty-state h3 {
           margin: 0 0 8px;
-          color: #111827;
+          color: #0b1220;
         }
 
         .empty-state p {
           margin: 0;
-          color: #6b7280;
-          line-height: 1.6;
+          color: #475569;
+          line-height: 1.5;
+        }
+
+        .reason-fetch_failed,
+        .reason-permission_denied,
+        .reason-external_unavailable {
+          border-style: solid;
         }
 
         .reason-field {
@@ -2948,21 +3228,11 @@ export default function ReportsPage() {
 
         .confirm-modal {
           width: min(100%, 520px);
-          border-radius: 28px;
-          border: 1px solid #f3d4d4;
-          background:
-            radial-gradient(
-              circle at top right,
-              rgba(251, 191, 188, 0.2),
-              transparent 30%
-            ),
-            linear-gradient(
-              180deg,
-              rgba(255, 250, 250, 0.99),
-              rgba(255, 245, 244, 0.97)
-            );
+          border-radius: 12px;
+          border: 1px solid #e5e8ee;
+          background: #ffffff;
           padding: 24px;
-          box-shadow: 0 30px 70px rgba(17, 24, 39, 0.18);
+          box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
         }
 
         .confirm-modal h2 {
@@ -2971,13 +3241,13 @@ export default function ReportsPage() {
         }
 
         @media (max-width: 1180px) {
-          .metric-grid,
+          .hero-kpis,
+          .packet-banner,
           .workspace-grid,
           .composer-grid {
             grid-template-columns: 1fr 1fr;
           }
 
-          .hero-meta,
           .hero-top {
             flex-direction: column;
             align-items: stretch;
@@ -2989,7 +3259,8 @@ export default function ReportsPage() {
         }
 
         @media (max-width: 900px) {
-          .metric-grid,
+          .hero-kpis,
+          .packet-banner,
           .workspace-grid,
           .composer-grid {
             grid-template-columns: 1fr;
@@ -3024,12 +3295,14 @@ export default function ReportsPage() {
 }
 
 function EmptyStatePanel({
+  reason,
   definition,
   compact = false,
   action = null,
   onAction,
   locale,
 }: {
+  reason: EmptyReason;
   definition: EmptyStateDefinition;
   compact?: boolean;
   action?: ReportAction | null;
@@ -3037,7 +3310,13 @@ function EmptyStatePanel({
   locale: "en" | "zh";
 }) {
   return (
-    <div className={compact ? "empty-state compact" : "empty-state"}>
+    <div
+      className={
+        compact
+          ? `empty-state compact reason-${reason}`
+          : `empty-state reason-${reason}`
+      }
+    >
       <div
         className="empty-accent"
         style={{
@@ -3045,6 +3324,7 @@ function EmptyStatePanel({
         }}
       />
       <p className="empty-eyebrow">{definition.eyebrow}</p>
+      <span className="empty-reason-code">{reason}</span>
       <h3>{definition.title}</h3>
       <p>{definition.body}</p>
       <p>{definition.suggestion}</p>
