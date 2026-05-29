@@ -50,9 +50,11 @@ type TabId = "today" | "week" | "anomaly";
 type ShiftRow = Record<string, unknown> & {
   shiftId: string;
   driverId: string;
+  shiftCell: ReactNode;
   driverCell: ReactNode;
   vehicleCell: ReactNode;
-  scheduleCell: ReactNode;
+  scheduledCell: ReactNode;
+  actualCell: ReactNode;
   durationCell: ReactNode;
   statusCell: ReactNode;
   anomalyCell: ReactNode;
@@ -842,6 +844,11 @@ export default async function AttendancePage({
     return {
       shiftId: shift.shiftId,
       driverId: shift.driverId,
+      shiftCell: (
+        <span style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+          {shift.shiftId}
+        </span>
+      ),
       driverCell: (
         <Link
           href={`/drivers/${encodeURIComponent(shift.driverId)}`}
@@ -863,7 +870,26 @@ export default async function AttendancePage({
           {copy(locale, "no vehicle", "未掛車")}
         </Pill>
       ),
-      scheduleCell: (
+      // Scheduled start/end is not modelled by the Phase 1 ShiftRecord contract
+      // (shifts are clock-in driven, see phase1_service_contracts ShiftRecord);
+      // render an honest n/a rather than the page-level not_provisioned reason.
+      scheduledCell: (
+        <span
+          title={copy(
+            locale,
+            "Scheduled roster not modelled in the Phase 1 ShiftRecord contract — shifts are clock-in driven.",
+            "Phase 1 ShiftRecord 合約未建模排程班表 — 班次以打卡為準。",
+          )}
+          style={{
+            fontFamily: theme.monoFamily,
+            fontSize: 11.5,
+            color: theme.textDim,
+          }}
+        >
+          {copy(locale, "— no roster", "— 無排程")}
+        </span>
+      ),
+      actualCell: (
         <span style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
           {formatTimeUtc(shift.clockedInAt)}–
           {formatTimeUtc(shift.clockedOutAt)}{" "}
@@ -916,11 +942,13 @@ export default async function AttendancePage({
   });
 
   const shiftColumns: CanvasTableColumn<ShiftRow>[] = [
-    { h: copy(locale, "DRIVER", "司機"), k: "driverCell", w: 130 },
-    { h: copy(locale, "VEHICLE", "車輛"), k: "vehicleCell", w: 140 },
-    { h: copy(locale, "WINDOW", "時段"), k: "scheduleCell", w: 220 },
+    { h: copy(locale, "SHIFT", "班次"), k: "shiftCell", w: 120 },
+    { h: copy(locale, "DRIVER", "司機"), k: "driverCell", w: 120 },
+    { h: copy(locale, "VEHICLE", "車輛"), k: "vehicleCell", w: 130 },
+    { h: copy(locale, "SCHEDULED", "排程"), k: "scheduledCell", w: 120 },
+    { h: copy(locale, "ACTUAL", "實際"), k: "actualCell", w: 190 },
     { h: copy(locale, "DURATION", "時長"), k: "durationCell", w: 90 },
-    { h: copy(locale, "STATUS", "狀態"), k: "statusCell", w: 120 },
+    { h: copy(locale, "STATUS", "狀態"), k: "statusCell", w: 110 },
     { h: copy(locale, "ANOMALY", "異常"), k: "anomalyCell" },
   ];
 
