@@ -12,6 +12,7 @@ import type {
   CreatePlatformTenantCommand,
   InviteTenantRoleCommand,
   PlatformAdminTenantRecord,
+  PlatformTenantLifecycleActionCommand,
   PlatformTenantBootstrapDefaults,
   PlatformTenantBootstrapRoleDefault,
   PlatformTenantGateStatus,
@@ -521,10 +522,15 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  setRollbackHold(tenantId: string, requestId?: string): TenantSummary {
+  setRollbackHold(
+    tenantId: string,
+    command?: PlatformTenantLifecycleActionCommand,
+    requestId?: string,
+  ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const oldStatus = tenant.status;
     const now = new Date().toISOString();
+    const reason = this.normalizeNullableText(command?.reason);
 
     tenant.status = "rollback_hold";
     tenant.rollout.productionStatus = "blocked";
@@ -548,6 +554,7 @@ export class TenantsService implements OnModuleInit {
         newValuesSummary: {
           status: "rollback_hold",
           productionStatus: "blocked",
+          reason,
         },
       },
       requestId,
@@ -615,10 +622,12 @@ export class TenantsService implements OnModuleInit {
   setStatus(
     tenantId: string,
     newStatus: "active" | "paused" | "rollback_hold",
+    command?: PlatformTenantLifecycleActionCommand,
     requestId?: string,
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const oldStatus = tenant.status;
+    const reason = this.normalizeNullableText(command?.reason);
     tenant.status = newStatus;
     tenant.updatedAt = new Date().toISOString();
     this.logger.log(`Tenant ${tenantId} status set to ${newStatus}`);
@@ -638,7 +647,7 @@ export class TenantsService implements OnModuleInit {
         resourceType: "platform_tenant",
         resourceId: tenant.id,
         oldValuesSummary: { status: oldStatus },
-        newValuesSummary: { status: newStatus },
+        newValuesSummary: { status: newStatus, reason },
       },
       requestId,
     );
