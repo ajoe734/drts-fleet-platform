@@ -1,6 +1,10 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { IncidentRecord, IncidentTimelineEntry } from "@drts/contracts";
+import type {
+  DriverMatchingSuppression,
+  IncidentRecord,
+  IncidentTimelineEntry,
+} from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
 
@@ -11,11 +15,20 @@ type JsonRecordRow = {
 type IncidentState = {
   incidents: IncidentRecord[];
   timelines: IncidentTimelineEntry[];
+  suppressions: DriverMatchingSuppression[];
+};
+
+type PersistIncidentSuppressionRecord = {
+  incidentId: string;
+  driverId: string;
+  updatedAt: string;
+  suppression: DriverMatchingSuppression;
 };
 
 type PersistIncidentChanges = {
   incidents?: readonly IncidentRecord[];
   timelines?: readonly IncidentTimelineEntry[];
+  suppressions?: readonly PersistIncidentSuppressionRecord[];
 };
 
 @Injectable()
@@ -30,10 +43,11 @@ export class IncidentRepository {
 
   async loadState(): Promise<IncidentState> {
     if (!this.isEnabled()) {
-      return { incidents: [], timelines: [] };
+      return { incidents: [], timelines: [], suppressions: [] };
     }
 
-    const [incidentsResult, timelinesResult] = await Promise.all([
+    const [incidentsResult, timelinesResult, suppressionsResult] =
+      await Promise.all([
       this.databaseService!.query<JsonRecordRow>(
         `
           SELECT record
@@ -48,6 +62,13 @@ export class IncidentRepository {
           ORDER BY created_at ASC
         `,
       ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM ops.phase1_driver_matching_suppressions
+          ORDER BY updated_at DESC
+        `,
+      ),
     ]);
 
     return {
@@ -58,6 +79,12 @@ export class IncidentRepository {
         this.parseRecord<IncidentTimelineEntry>(
           row.record,
           "ops.phase1_incident_timelines",
+        ),
+      ),
+      suppressions: suppressionsResult.rows.map((row) =>
+        this.parseRecord<DriverMatchingSuppression>(
+          row.record,
+          "ops.phase1_driver_matching_suppressions",
         ),
       ),
     };
@@ -139,6 +166,37 @@ export class IncidentRepository {
             timeline.actor ?? null,
             timeline.createdAt,
             JSON.stringify(timeline),
+          ],
+        ),
+      );
+    }
+
+    for (const entry of changes.suppressions ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO ops.phase1_driver_matching_suppressions (
+              source_incident_id, driver_id, active, reason_code,
+              expires_at, lifted_at, updated_at, record
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+            ON CONFLICT (source_incident_id) DO UPDATE SET
+              driver_id = EXCLUDED.driver_id,
+              active = EXCLUDED.active,
+              reason_code = EXCLUDED.reason_code,
+              expires_at = EXCLUDED.expires_at,
+              lifted_at = EXCLUDED.lifted_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
+          `,
+          [
+            entry.incidentId,
+            entry.driverId,
+            entry.suppression.active,
+            entry.suppression.reasonCode,
+            entry.suppression.expiresAt,
+            entry.suppression.liftedAt,
+            entry.updatedAt,
+            JSON.stringify(entry.suppression),
           ],
         ),
       );
