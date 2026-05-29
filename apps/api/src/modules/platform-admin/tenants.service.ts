@@ -9,20 +9,27 @@ import {
 import type {
   AcknowledgeTenantRoleCommand,
   AuditLogRecord,
+  CrossAppResourceLink,
   CreatePlatformTenantCommand,
   InviteTenantRoleCommand,
   PlatformAdminTenantRecord,
+  PlatformAdminTenantListItem,
+  PlatformAdminTenantListResponse,
   PlatformTenantBootstrapDefaults,
   PlatformTenantBootstrapRoleDefault,
   PlatformTenantGateStatus,
   PlatformTenantIntegrationMode,
   PlatformTenantIntegrationPackage,
+  PlatformTenantLifecycleActionCommand,
   PlatformTenantModule,
   PlatformTenantQuotaSummary,
   PlatformTenantRolloutStage,
   PlatformTenantRolloutState,
+  RefreshTier,
+  ResourceActionDescriptor,
   SetPlatformTenantRolloutStageCommand,
   TenantNotificationSubscription,
+  UiRefreshMetadata,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
 } from "@drts/contracts";
@@ -105,6 +112,8 @@ const DEFAULT_API_KEY_SCOPES = [
 ];
 
 const DEMO_CREATED_AT = "2026-04-01T00:00:00.000Z";
+const TENANT_LIST_REFRESH_TIER: RefreshTier = "medium_slow";
+const TENANT_LIST_STALE_AFTER_MS = 30_000;
 
 @Injectable()
 export class TenantsService implements OnModuleInit {
@@ -153,6 +162,33 @@ export class TenantsService implements OnModuleInit {
     return Array.from(this.tenants.values()).map((tenant) =>
       this.cloneTenant(tenant),
     );
+  }
+
+  listRoster(): PlatformAdminTenantListResponse {
+    const items = this.list().map((tenant) => this.toTenantListItem(tenant));
+    const refresh: UiRefreshMetadata = {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: TENANT_LIST_STALE_AFTER_MS,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+    const createAction = this.createActionDescriptor();
+    const response: PlatformAdminTenantListResponse = {
+      items,
+      availableActions: [createAction],
+      refresh,
+      refreshTier: TENANT_LIST_REFRESH_TIER,
+    };
+
+    if (items.length === 0) {
+      response.emptyState = {
+        reason: "no_data",
+        messageCode: "platformAdmin.tenants.empty.no_data",
+        nextAction: createAction,
+      };
+    }
+
+    return response;
   }
 
   get(tenantId: string): TenantSummary {
@@ -521,7 +557,11 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  setRollbackHold(tenantId: string, requestId?: string): TenantSummary {
+  setRollbackHold(
+    tenantId: string,
+    command?: PlatformTenantLifecycleActionCommand,
+    requestId?: string,
+  ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
     const oldStatus = tenant.status;
     const now = new Date().toISOString();
@@ -548,6 +588,7 @@ export class TenantsService implements OnModuleInit {
         newValuesSummary: {
           status: "rollback_hold",
           productionStatus: "blocked",
+          ...(command?.reason ? { reason: command.reason } : {}),
         },
       },
       requestId,
@@ -615,6 +656,7 @@ export class TenantsService implements OnModuleInit {
   setStatus(
     tenantId: string,
     newStatus: "active" | "paused" | "rollback_hold",
+    command?: PlatformTenantLifecycleActionCommand,
     requestId?: string,
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
@@ -638,7 +680,10 @@ export class TenantsService implements OnModuleInit {
         resourceType: "platform_tenant",
         resourceId: tenant.id,
         oldValuesSummary: { status: oldStatus },
-        newValuesSummary: { status: newStatus },
+        newValuesSummary: {
+          status: newStatus,
+          ...(command?.reason ? { reason: command.reason } : {}),
+        },
       },
       requestId,
     );
@@ -1011,6 +1056,90 @@ export class TenantsService implements OnModuleInit {
       );
     }
     return normalized;
+  }
+
+  private toTenantListItem(
+    tenant: PlatformAdminTenantRecord,
+  ): PlatformAdminTenantListItem {
+    return {
+      ...this.cloneTenant(tenant),
+      availableActions: this.getTenantAvailableActions(tenant),
+      operationalViewLink: this.getOperationalViewLink(tenant),
+    };
+  }
+
+  private createActionDescriptor(): ResourceActionDescriptor {
+    return {
+      action: "create",
+      enabled: true,
+      riskLevel: "medium",
+    };
+  }
+
+  private getTenantAvailableActions(
+    tenant: PlatformAdminTenantRecord,
+  ): ResourceActionDescriptor[] {
+    const activateDisabledReason =
+      tenant.status === "active"
+        ? "tenant_already_active"
+        : tenant.status === "rollback_hold"
+          ? "rollback_hold_requires_triage"
+          : undefined;
+    const suspendDisabledReason =
+      tenant.status === "paused"
+        ? "tenant_already_paused"
+        : tenant.status === "rollback_hold"
+          ? "rollback_hold_requires_triage"
+          : tenant.status === "draft"
+            ? "draft_tenant_not_activated"
+            : undefined;
+    const rollbackDisabledReason =
+      tenant.status === "rollback_hold"
+        ? "rollback_hold_already_enabled"
+        : undefined;
+
+    return [
+      {
+        action: "activate",
+        enabled:
+          tenant.status !== "active" && tenant.status !== "rollback_hold",
+        ...(activateDisabledReason
+          ? { disabledReasonCode: activateDisabledReason }
+          : {}),
+        riskLevel: "medium",
+      },
+      {
+        action: "suspend",
+        enabled: tenant.status === "active",
+        ...(suspendDisabledReason
+          ? { disabledReasonCode: suspendDisabledReason }
+          : {}),
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "rollback_hold",
+        enabled: tenant.status !== "rollback_hold",
+        ...(rollbackDisabledReason
+          ? { disabledReasonCode: rollbackDisabledReason }
+          : {}),
+        requiresReason: true,
+        riskLevel: "high",
+      },
+    ];
+  }
+
+  private getOperationalViewLink(
+    tenant: PlatformAdminTenantRecord,
+  ): CrossAppResourceLink {
+    return {
+      targetApp: "ops-console",
+      route: `/dispatch?tenantId=${encodeURIComponent(tenant.id)}`,
+      resourceType: "dispatch_board",
+      resourceId: tenant.id,
+      openMode: "new_tab",
+      label: `Ops view · ${tenant.name}`,
+    };
   }
 
   private cloneTenant(
