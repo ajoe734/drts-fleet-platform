@@ -292,14 +292,17 @@ What is missing from the published tenant contract:
   - `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`
   - `ai-status.json` task `TEN-UI-RD-013`
 
-### Required follow-up
+### Remaining follow-up (out of scope for the shipped read-only route)
 
-Supervisor should decide one of these before reopening `TEN-UI-RD-013`:
+The unblock decision above has already been made and executed: `BE-CC-001`
+published the canonical tenant cost-center directory contract, and
+`TEN-UI-RD-013` shipped as a read-only informational surface on top of it.
 
-1. Add canonical tenant cost-center read/write contracts, including quota,
-   usage, owner, and approval metadata.
-2. Narrow the UI acceptance so the route ships only after a revised,
-   authority-safe informational scope is explicitly approved.
+Only the broader management-table editor remains deferred. If product still
+wants inline create / disable controls, owner reassignment, or approval-policy
+mutation in this route, open a separate follow-up task against a new backend
+mutation decision. Do not re-block the shipped read-only route on that larger
+scope.
 
 ## TEN-UI-RD-011 — TN_Passengers contract validation
 
