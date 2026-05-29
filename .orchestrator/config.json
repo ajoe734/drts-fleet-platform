@@ -30,13 +30,7 @@
   "worker_retry": {
     "enabled": true,
     "max_attempts": 5,
-    "backoff_schedule_seconds": [
-      5,
-      15,
-      30,
-      60,
-      120
-    ],
+    "backoff_schedule_seconds": [5, 15, 30, 60, 120],
     "jitter_seconds": 3,
     "transient_error_patterns": [
       "429",
@@ -71,120 +65,22 @@
       "review_approved"
     ],
     "owner_fallbacks": {
-      "Claude": [
-        "Claude2",
-        "Codex",
-        "Codex2",
-        "Copilot",
-        "Gemini",
-        "Gemini2"
-      ],
-      "Claude2": [
-        "Codex",
-        "Codex2",
-        "Claude",
-        "Copilot",
-        "Gemini",
-        "Gemini2"
-      ],
-      "Gemini": [
-        "Gemini2",
-        "Codex",
-        "Codex2",
-        "Claude",
-        "Claude2",
-        "Copilot"
-      ],
-      "Gemini2": [
-        "Gemini",
-        "Codex",
-        "Codex2",
-        "Claude",
-        "Claude2",
-        "Copilot"
-      ],
-      "Codex": [
-        "Codex2",
-        "Claude2",
-        "Claude",
-        "Copilot",
-        "Gemini",
-        "Gemini2"
-      ],
-      "Codex2": [
-        "Codex",
-        "Claude2",
-        "Claude",
-        "Copilot",
-        "Gemini",
-        "Gemini2"
-      ],
-      "Copilot": [
-        "Codex",
-        "Codex2",
-        "Claude2",
-        "Claude",
-        "Gemini",
-        "Gemini2"
-      ]
+      "Claude": ["Claude2", "Codex", "Codex2", "Copilot", "Gemini", "Gemini2"],
+      "Claude2": ["Codex", "Codex2", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Gemini": ["Gemini2", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
+      "Gemini2": ["Gemini", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
+      "Codex": ["Codex2", "Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Codex2": ["Codex", "Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Copilot": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"]
     },
     "reviewer_fallbacks": {
-      "Claude": [
-        "Claude2",
-        "Codex",
-        "Codex2",
-        "Copilot",
-        "Gemini",
-        "Gemini2"
-      ],
-      "Claude2": [
-        "Codex",
-        "Codex2",
-        "Claude",
-        "Copilot",
-        "Gemini",
-        "Gemini2"
-      ],
-      "Gemini": [
-        "Gemini2",
-        "Codex",
-        "Codex2",
-        "Claude",
-        "Claude2",
-        "Copilot"
-      ],
-      "Gemini2": [
-        "Gemini",
-        "Codex",
-        "Codex2",
-        "Claude",
-        "Claude2",
-        "Copilot"
-      ],
-      "Codex": [
-        "Codex2",
-        "Claude2",
-        "Claude",
-        "Copilot",
-        "Gemini",
-        "Gemini2"
-      ],
-      "Codex2": [
-        "Codex",
-        "Claude2",
-        "Claude",
-        "Copilot",
-        "Gemini",
-        "Gemini2"
-      ],
-      "Copilot": [
-        "Codex",
-        "Codex2",
-        "Claude2",
-        "Claude",
-        "Gemini",
-        "Gemini2"
-      ]
+      "Claude": ["Claude2", "Codex", "Codex2", "Copilot", "Gemini", "Gemini2"],
+      "Claude2": ["Codex", "Codex2", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Gemini": ["Gemini2", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
+      "Gemini2": ["Gemini", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
+      "Codex": ["Codex2", "Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Codex2": ["Codex", "Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Copilot": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"]
     }
   },
   "underutilization_dispatch": {
@@ -222,18 +118,9 @@
     "auto_request_reviewers": false,
     "close_resolved_issues": false,
     "labels": {
-      "review": [
-        "pantheon-bus",
-        "pantheon-review"
-      ],
-      "ops": [
-        "pantheon-bus",
-        "pantheon-ops",
-        "approval-needed"
-      ],
-      "resolved": [
-        "resolved"
-      ]
+      "review": ["pantheon-bus", "pantheon-review"],
+      "ops": ["pantheon-bus", "pantheon-ops", "approval-needed"],
+      "resolved": ["resolved"]
     },
     "commands": [
       "/approve",
@@ -244,24 +131,12 @@
       "/status"
     ],
     "reviewers": {
-      "Claude": [
-        "your-github-handle"
-      ],
-      "Claude2": [
-        "your-github-handle"
-      ],
-      "Gemini": [
-        "your-github-handle"
-      ],
-      "Gemini2": [
-        "your-github-handle"
-      ],
-      "Codex": [
-        "your-github-handle"
-      ],
-      "Copilot": [
-        "your-github-handle"
-      ]
+      "Claude": ["your-github-handle"],
+      "Claude2": ["your-github-handle"],
+      "Gemini": ["your-github-handle"],
+      "Gemini2": ["your-github-handle"],
+      "Codex": ["your-github-handle"],
+      "Copilot": ["your-github-handle"]
     },
     "templates": {
       "ops_issue": ".orchestrator/templates/github_ops_issue.md",
@@ -300,23 +175,17 @@
   },
   "events": {
     "enqueue_runtime_events": false,
-    "review_statuses": [
-      "review"
-    ],
+    "review_statuses": ["review"],
     "status_targets": {
       "needs_reply": "owner",
       "needs_input": "owner",
       "handoff": "owner"
     },
-    "waiting_status_patterns": [
-      "^waiting_on_(?P<agent>[A-Za-z0-9_-]+)$"
-    ],
+    "waiting_status_patterns": ["^waiting_on_(?P<agent>[A-Za-z0-9_-]+)$"],
     "watch_assignee_changes": false,
     "watch_reviewer_changes": false,
     "watch_handoffs": false,
-    "pending_handoff_statuses": [
-      "pending"
-    ]
+    "pending_handoff_statuses": ["pending"]
   },
   "agents": {
     "claude": {
@@ -455,9 +324,7 @@
         },
         "include_directories": true,
         "skip_trust": true,
-        "allowed_tools": [
-          "run_shell_command"
-        ]
+        "allowed_tools": ["run_shell_command"]
       },
       "approval": {
         "default_approval_mode": "auto_edit",
@@ -487,20 +354,13 @@
         "model": "gemini-2.5-flash-lite",
         "include_directories": true,
         "skip_trust": true,
-        "allowed_tools": [
-          "run_shell_command"
-        ],
-        "extra_include_directories": [
-          "/home/edna/workspace/tenant-commute-hub"
-        ]
+        "allowed_tools": ["run_shell_command"],
+        "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"]
       },
       "model_preference": {
         "default": "gemini-2.5-flash-lite",
         "gemini2": "gemini-2.5-flash-lite",
-        "supported": [
-          "gemini-2.5-flash-lite",
-          "gemini-2.5-flash"
-        ]
+        "supported": ["gemini-2.5-flash-lite", "gemini-2.5-flash"]
       },
       "approval": {
         "default_approval_mode": "yolo",
@@ -595,24 +455,11 @@
   },
   "ready_dispatcher": {
     "enabled": true,
-    "review_statuses": [
-      "review"
-    ],
-    "finalize_statuses": [
-      "review_approved"
-    ],
-    "owned_statuses": [
-      "in_progress",
-      "todo",
-      "backlog"
-    ],
-    "dependency_done_statuses": [
-      "done"
-    ],
-    "worker_terminal_statuses": [
-      "done",
-      "review_approved"
-    ],
+    "review_statuses": ["review"],
+    "finalize_statuses": ["review_approved"],
+    "owned_statuses": ["in_progress", "todo", "backlog"],
+    "dependency_done_statuses": ["done"],
+    "worker_terminal_statuses": ["done", "review_approved"],
     "active_worker_statuses": [
       "running",
       "waiting_approval",
@@ -638,12 +485,10 @@
     },
     "max_tasks_per_agent": 1,
     "max_tasks_per_agent_by_lane": {
-      "codex": 3,
-      "codex2": 3,
       "claude": 5,
       "claude2": 3
     },
-    "max_dispatches_per_tick": 2,
+    "max_dispatches_per_tick": 4,
     "dispatch_cooldown_seconds": 600
   }
 }
