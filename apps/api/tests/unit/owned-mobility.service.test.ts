@@ -373,6 +373,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     )[0]!;
 
     expect(pendingBooking.approvalState).toBe("pending");
+    expect(pendingBooking.status).toBe("pending");
     expect(request.resolvedApproverUserIds).toEqual([
       "tenant-user-demo-001",
       "tenant-user-demo-003",
@@ -392,7 +393,75 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
 
     expect(approved.status).toBe("approved");
     expect(approvedBooking.approvalState).toBe("approved");
+    expect(approvedBooking.status).toBe("accepted");
     expect(approvedBooking.approvalRequestIds).toEqual([]);
+  });
+
+  it("exposes editableUntil, readOnlyReasonCode, and booking actions from the read model", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T14:00:00.000Z",
+        reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider Four", phone: "0912000006" },
+      },
+      "tenant-demo-001",
+    );
+
+    const editable = service.getTenantBooking("tenant-demo-001", booking.bookingId);
+    expect(editable.status).toBe("accepted");
+    expect(editable.editableUntil).toBe(editable.modifiableUntil);
+    expect(editable.readOnlyReasonCode).toBeNull();
+    expect(editable.availableActions).toEqual([
+      {
+        action: "update",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      {
+        action: "cancel",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      },
+    ]);
+
+    vi.setSystemTime(new Date("2026-05-13T13:31:00.000Z"));
+    const readOnly = service.getTenantBooking("tenant-demo-001", booking.bookingId);
+    expect(readOnly.readOnlyReasonCode).toBe("past_editable_until");
+    expect(readOnly.availableActions).toContainEqual({
+      action: "update",
+      enabled: false,
+      disabledReasonCode: "past_editable_until",
+      riskLevel: "medium",
+    });
+    expect(readOnly.availableActions).toContainEqual({
+      action: "cancel",
+      enabled: true,
+      requiresReason: true,
+      riskLevel: "high",
+    });
+
+    vi.setSystemTime(new Date("2026-05-13T13:46:00.000Z"));
+    const cancelLocked = service.getTenantBooking(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    expect(cancelLocked.availableActions).toContainEqual({
+      action: "cancel",
+      enabled: false,
+      disabledReasonCode: "past_cancelable_until",
+      requiresReason: true,
+      riskLevel: "high",
+    });
   });
 
   it("enforces approver authorization and all_of_parallel rejection semantics", async () => {
