@@ -220,6 +220,7 @@ import type {
   UpsertTenantPassengerCommand,
   UpsertTenantQuotaPolicyCommand,
   VehicleContractRecord,
+  CreateVehicleContractCommand,
   VehicleRegistryRecord,
   VerifyPartnerEligibilityCommand,
   WebhookDeliveryRecord,
@@ -2311,6 +2312,17 @@ export class ApiClient {
   async listContracts(): Promise<VehicleContractRecord[]> {
     return this.getList<VehicleContractRecord>(
       "/api/regulatory-registry/contracts",
+    );
+  }
+
+  async createContract(
+    command: CreateVehicleContractCommand,
+  ): Promise<VehicleContractRecord> {
+    return this.post<VehicleContractRecord>(
+      "/api/regulatory-registry/contracts",
+      {
+        body: command,
+      },
     );
   }
 
