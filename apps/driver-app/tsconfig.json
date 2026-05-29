@@ -5,6 +5,10 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
+      "@drts/contracts": ["../../packages/contracts/src/index.ts"],
+      "@drts/contracts/*": ["../../packages/contracts/src/*"],
+      "@drts/ui-tokens": ["../../packages/ui-tokens/src/index.ts"],
+      "@drts/ui-tokens/*": ["../../packages/ui-tokens/src/*"],
       "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"],
       "@drts/ui-web/*": ["../../packages/ui-web/src/*"]
     }

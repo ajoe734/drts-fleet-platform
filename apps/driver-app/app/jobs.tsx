@@ -980,7 +980,7 @@ function TaskCard({
 }: {
   task: UnifiedDriverTaskView;
   order: OwnedOrderRecord | null;
-  onOpen: () => void;
+  onOpen: (taskId: string) => void;
   onAccept: () => void;
   accepting: boolean;
 }) {
@@ -1020,7 +1020,10 @@ function TaskCard({
       padding={14}
     >
       <View>
-        <Pressable accessibilityRole="button" onPress={onOpen}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => onOpen(task.taskId)}
+        >
           <View style={styles.cardTopRow}>
             <View style={styles.cardTopLead}>
               <PlatformBadge
@@ -1107,7 +1110,9 @@ function TaskCard({
                 variant="primary"
                 size="sm"
                 disabled={accepting}
-                onPress={showPrimaryAction ? onAccept : onOpen}
+                onPress={
+                  showPrimaryAction ? onAccept : () => onOpen(task.taskId)
+                }
               >
                 {accepting ? "提交中…" : actionLabel}
               </Btn>
@@ -1130,7 +1135,7 @@ function DenseTaskRow({
   task: UnifiedDriverTaskView;
   order: OwnedOrderRecord | null;
   busy: boolean;
-  onOpen: () => void;
+  onOpen: (taskId: string) => void;
   onAccept: () => void;
   onReject: () => void;
 }) {
@@ -1235,7 +1240,7 @@ function DenseTaskRow({
         <Pressable
           accessibilityRole="button"
           disabled={busy}
-          onPress={onOpen}
+          onPress={() => onOpen(task.taskId)}
           style={({ pressed }) => [
             styles.denseRowPressable,
             pressed && !busy ? styles.denseRowPressed : null,
@@ -1435,7 +1440,15 @@ export default function JobsScreen() {
     }
   }
 
-  function openTripWorkspace() {
+  function openTripWorkspace(taskId?: string) {
+    if (taskId) {
+      router.push({
+        pathname: "/trip",
+        params: { taskId },
+      });
+      return;
+    }
+
     router.push("/trip");
   }
 

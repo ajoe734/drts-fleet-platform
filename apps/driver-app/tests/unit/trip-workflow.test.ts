@@ -63,6 +63,17 @@ describe("trip forwarded workflow actions", () => {
     expect(getPrimaryTripAction(task, effectiveState)?.action).toBe("depart");
   });
 
+  it("treats manual fallback as a distinct blocked forwarded state", () => {
+    const task = makeTask({
+      sourcePlatform: "fleet_partner",
+      forwardedStatus: "manual_fallback",
+    } as Partial<DriverTaskRecord>);
+
+    expect(getTripExperienceState(task)).toBe("manual_fallback");
+    expect(getPrimaryTripAction(task)).toBeNull();
+    expect(shouldShowTripCompletionProof(task)).toBe(false);
+  });
+
   it("treats completed sandbox sync as a terminal forwarded state", () => {
     const task = makeTask({
       sourcePlatform: "fleet_partner",
