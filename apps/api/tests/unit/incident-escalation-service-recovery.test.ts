@@ -11,6 +11,157 @@ function createServices() {
 }
 
 describe("Incident escalation, service recovery, and dispatch-exception handoff", () => {
+  describe("driver matching suppression", () => {
+    it("creates a default 24h suppression when the incident targets a driver", () => {
+      const { incidentService } = createServices();
+
+      const before = Date.now();
+      const incident = incidentService.createIncident({
+        title: "Driver safety review",
+        description: "Investigate active driver incident.",
+        category: "safety",
+        severity: "high",
+        reportedBy: "ops-user-001",
+        relatedDriverId: "DRV-100",
+      });
+      const after = Date.now();
+
+      expect(incident.matchingSuppression).toBeTruthy();
+      expect(incident.matchingSuppression?.active).toBe(true);
+      expect(incident.matchingSuppression?.reasonCode).toBe("incident");
+      expect(incident.matchingSuppression?.sourceIncidentId).toBe(
+        incident.incidentId,
+      );
+
+      const expiresAt = Date.parse(incident.matchingSuppression!.expiresAt);
+      expect(expiresAt).toBeGreaterThanOrEqual(before + 23.5 * 60 * 60 * 1000);
+      expect(expiresAt).toBeLessThanOrEqual(after + 24.5 * 60 * 60 * 1000);
+
+      const timeline = incidentService.getTimeline(incident.incidentId);
+      expect(
+        timeline.some(
+          (entry) => entry.action === "matching_suppression_activated",
+        ),
+      ).toBe(true);
+    });
+
+    it("lifts suppression when the incident is resolved", () => {
+      const { incidentService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Driver investigation",
+        description: "Needs temporary hold.",
+        category: "operational",
+        severity: "medium",
+        reportedBy: "ops-user-001",
+        relatedDriverId: "DRV-101",
+      });
+
+      const updated = incidentService.updateIncident(incident.incidentId, {
+        status: "resolved",
+      });
+
+      expect(updated.matchingSuppression?.active).toBe(false);
+      expect(updated.matchingSuppression?.liftedAt).toBeTruthy();
+
+      const timeline = incidentService.getTimeline(incident.incidentId);
+      expect(
+        timeline.some((entry) => entry.action === "matching_suppression_lifted"),
+      ).toBe(true);
+    });
+
+    it("allows ops_manager to extend suppression and exposes the action as enabled", () => {
+      const { incidentService } = createServices();
+
+      const incident = incidentService.createIncident({
+        title: "Driver hold extension",
+        description: "Driver requires extended suppression.",
+        category: "safety",
+        severity: "critical",
+        reportedBy: "ops-user-001",
+        relatedDriverId: "DRV-102",
+      });
+
+      const originalExpiry = Date.parse(
+        incident.matchingSuppression!.expiresAt,
+      );
+      const identity = {
+        authMode: "bootstrap_headers" as const,
+        actorType: "ops_user" as const,
+        actorId: "ops-manager-001",
+        realm: "ops" as const,
+        tenantId: null,
+        roleFamilies: ["ops"] as const,
+        roles: ["ops_manager"],
+        scopes: ["incident:write"],
+        requestId: "req-ops-manager-001",
+      };
+
+      const updated = incidentService.extendMatchingSuppression(
+        incident.incidentId,
+        {
+          reason: "Safety review still open.",
+          extendByHours: 6,
+        },
+        identity,
+      );
+
+      expect(
+        Date.parse(updated.matchingSuppression!.expiresAt),
+      ).toBeGreaterThan(originalExpiry);
+      expect(updated.availableActions?.[0]).toMatchObject({
+        action: "extend_matching_suppression",
+        enabled: true,
+      });
+    });
+
+    it("rejects extension from a non-manager and returns a disabled action", () => {
+      const { incidentService } = createServices();
+
+      const identity = {
+        authMode: "bootstrap_headers" as const,
+        actorType: "ops_user" as const,
+        actorId: "ops-dispatcher-001",
+        realm: "ops" as const,
+        tenantId: null,
+        roleFamilies: ["ops"] as const,
+        roles: ["ops_dispatcher"],
+        scopes: ["incident:write"],
+        requestId: "req-ops-dispatcher-001",
+      };
+
+      const incident = incidentService.createIncident(
+        {
+          title: "Dispatcher cannot extend",
+          description: "Hold requires manager authority.",
+          category: "operational",
+          severity: "high",
+          reportedBy: "ops-user-001",
+          relatedDriverId: "DRV-103",
+        },
+        undefined,
+        identity,
+      );
+
+      expect(incident.availableActions?.[0]).toMatchObject({
+        action: "extend_matching_suppression",
+        enabled: false,
+        disabledReasonCode: "ops_manager_required",
+      });
+
+      expect(() =>
+        incidentService.extendMatchingSuppression(
+          incident.incidentId,
+          {
+            reason: "Dispatcher attempted extension.",
+            extendByHours: 4,
+          },
+          identity,
+        ),
+      ).toThrowError(ApiRequestError);
+    });
+  });
+
   describe("createFromDispatchException", () => {
     it("creates an incident from a dispatch exception with order trace", () => {
       const { incidentService } = createServices();
