@@ -1,12 +1,27 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
+  type CrossAppResourceLink,
+  type EmptyStateEnvelope,
   PLATFORM_CODE_REGISTRY,
+  type EmptyReason,
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
+  type ResourceActionDescriptor,
   type ShiftRecord,
+  type UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   assessPlatformHealth,
@@ -35,8 +50,44 @@ import { driverStrings } from "@/lib/strings";
 
 const ODOMETER_PATTERN = /^\d+$/;
 const EXPECTED_SHIFT_HOURS = 8;
+const MAX_SHIFT_ODOMETER_DELTA_KM = 800;
+const SHIFT_REFRESH_STALE_AFTER_MS = 5 * 60 * 1000;
+const CROSS_APP_BASE_URLS = {
+  "ops-console":
+    process.env.EXPO_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003",
+  "platform-admin":
+    process.env.EXPO_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002",
+  "tenant-console":
+    process.env.EXPO_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3004",
+} as const;
 
-function getOdometerValidationMessage(value: string): string | null {
+type ShiftActionName = "refresh" | "clock_in" | "clock_out";
+
+type InlineEmptyStateConfig = {
+  reason: EmptyReason;
+  title: string;
+  description: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  variant: "default" | "info" | "warning" | "danger";
+  actionTitle?: string;
+  onAction?: () => void;
+};
+
+type ShiftScreenResource = {
+  activeShift: ShiftRecord | null;
+  shifts: ShiftRecord[];
+  availableActions: ResourceActionDescriptor[];
+  fullScreenEmptyState: EmptyStateEnvelope | null;
+  inlineEmptyStates: EmptyStateEnvelope[];
+  refreshMetadata: UiRefreshMetadata;
+  platformCenterRoute: "/platform-presence";
+  opsReviewLink: CrossAppResourceLink;
+};
+
+function getOdometerValidationMessage(
+  value: string,
+  activeShift: ShiftRecord | null,
+): string | null {
   const trimmed = value.trim();
   if (!trimmed) {
     return null;
@@ -51,6 +102,13 @@ function getOdometerValidationMessage(value: string): string | null {
     return "里程數值過大，請重新確認。";
   }
 
+  if (
+    activeShift?.startOdometer != null &&
+    parsed < activeShift.startOdometer
+  ) {
+    return "下線里程不得小於起始里程。";
+  }
+
   return null;
 }
 
@@ -58,7 +116,7 @@ function formatShiftDateTime(value: string) {
   return new Date(value).toLocaleString("zh-TW");
 }
 
-function formatCompactDateTime(value: string | null) {
+function formatCompactDateTime(value: string | null | undefined) {
   if (!value) {
     return "尚無更新";
   }
@@ -175,6 +233,166 @@ function getAvailabilityVariant(
   }
 }
 
+function getActionByName(
+  actions: ResourceActionDescriptor[],
+  actionName: ShiftActionName,
+) {
+  return actions.find((action) => action.action === actionName) ?? null;
+}
+
+function extractShiftRecord(payload: unknown): ShiftRecord {
+  if (payload && typeof payload === "object" && "shift" in payload) {
+    const shift = (payload as { shift?: ShiftRecord }).shift;
+    if (shift) {
+      return shift;
+    }
+  }
+
+  return payload as ShiftRecord;
+}
+
+function getActionDisabledReason(action: ResourceActionDescriptor | null) {
+  switch (action?.disabledReasonCode) {
+    case "shift_snapshot_loading":
+      return "班次資料尚在載入中，請稍候再重新整理。";
+    case "shift_submit_in_progress":
+      return "打卡提交中，請等待本次動作完成。";
+    case "odometer_invalid":
+      return "請先修正里程輸入，確認為整數且不小於起始里程。";
+    case "ops_review_reason_required":
+      return "超過 800 km 門檻時，必須先填寫複核說明。";
+    default:
+      return null;
+  }
+}
+
+function getCrossAppTargetLabel(link: CrossAppResourceLink) {
+  switch (link.targetApp) {
+    case "platform-admin":
+      return "Platform Admin";
+    case "ops-console":
+      return "Ops Console";
+    case "tenant-console":
+      return "Tenant Console";
+    default:
+      return link.targetApp;
+  }
+}
+
+function buildCrossAppHref(link: CrossAppResourceLink) {
+  const baseUrl = CROSS_APP_BASE_URLS[link.targetApp];
+  const url = new URL(link.route, `${baseUrl}/`);
+  url.searchParams.set("resourceType", link.resourceType);
+  url.searchParams.set("resourceId", link.resourceId);
+  return url.toString();
+}
+
+function getRefreshLabel(metadata: UiRefreshMetadata) {
+  switch (metadata.dataFreshness) {
+    case "fresh":
+      return "資料最新";
+    case "stale":
+      return "資料稍舊";
+    case "degraded":
+      return "同步降級";
+    default:
+      return "等待同步";
+  }
+}
+
+function getRefreshVariant(metadata: UiRefreshMetadata) {
+  switch (metadata.dataFreshness) {
+    case "fresh":
+      return "success" as const;
+    case "stale":
+      return "warning" as const;
+    case "degraded":
+      return "danger" as const;
+    default:
+      return "default" as const;
+  }
+}
+
+function getEmptyStateConfig(
+  state: EmptyStateEnvelope,
+  actions: ResourceActionDescriptor[],
+  router: ReturnType<typeof useRouter>,
+  openPlatformCenter: () => void,
+): InlineEmptyStateConfig {
+  const refreshAction = getActionByName(actions, "refresh");
+
+  switch (state.reason) {
+    case "not_provisioned":
+      return {
+        reason: state.reason,
+        title: "尚未完成裝置配置",
+        description: "完成裝置綁定後，才能查看班次與進行上下線打卡。",
+        icon: "lock-closed-outline",
+        variant: "info",
+        actionTitle: "前往配置裝置",
+        onAction: () => router.push("/onboarding"),
+      };
+    case "permission_denied":
+      return {
+        reason: state.reason,
+        title: "班次權限尚未開放",
+        description: "此司機帳號目前沒有 Shift / clock in-out 權限。",
+        icon: "shield-outline",
+        variant: "warning",
+        actionTitle: "返回工作台",
+        onAction: () => router.push("/"),
+      };
+    case "fetch_failed":
+      return {
+        reason: state.reason,
+        title: "班次資料暫時無法載入",
+        description: state.messageCode,
+        icon: "cloud-offline-outline",
+        variant: "danger",
+        actionTitle: refreshAction?.enabled ? "重新整理" : undefined,
+      };
+    case "driver_not_eligible":
+      return {
+        reason: state.reason,
+        title: "目前不具備接單資格",
+        description: "所有平台都顯示資格受限或審核中，請先回平台中心處理。",
+        icon: "ban-outline",
+        variant: "warning",
+        actionTitle: "查看平台狀態",
+        onAction: openPlatformCenter,
+      };
+    case "external_unavailable":
+      return {
+        reason: state.reason,
+        title: "外部平台同步暫時不可用",
+        description: state.messageCode,
+        icon: "warning-outline",
+        variant: "danger",
+        actionTitle: "查看平台狀態",
+        onAction: openPlatformCenter,
+      };
+    case "filtered_empty":
+      return {
+        reason: state.reason,
+        title: "平台仍在線，但你目前未上班",
+        description: state.messageCode,
+        icon: "swap-horizontal-outline",
+        variant: "warning",
+        actionTitle: "查看平台狀態",
+        onAction: openPlatformCenter,
+      };
+    case "no_data":
+    default:
+      return {
+        reason: state.reason,
+        title: "今天還沒有班次記錄",
+        description: "準備好後直接打卡上線；這頁會建立第一筆 active shift。",
+        icon: "time-outline",
+        variant: "info",
+      };
+  }
+}
+
 function HeroField({
   label,
   value,
@@ -249,6 +467,59 @@ function ShiftInfoTile({
   );
 }
 
+function InlineEmptyCard({
+  title,
+  description,
+  icon,
+  variant,
+  actionTitle,
+  onAction,
+}: InlineEmptyStateConfig) {
+  return (
+    <View
+      style={[
+        styles.inlineEmptyCard,
+        variant === "info"
+          ? styles.inlineEmptyInfo
+          : variant === "warning"
+            ? styles.inlineEmptyWarning
+            : variant === "danger"
+              ? styles.inlineEmptyDanger
+              : null,
+      ]}
+    >
+      <View style={styles.inlineEmptyHeader}>
+        <View
+          style={[
+            styles.inlineEmptyIconWrap,
+            variant === "info"
+              ? styles.inlineEmptyIconInfo
+              : variant === "warning"
+                ? styles.inlineEmptyIconWarning
+                : variant === "danger"
+                  ? styles.inlineEmptyIconDanger
+                  : null,
+          ]}
+        >
+          <Ionicons name={icon} size={18} color={Tokens.colors.textStrong} />
+        </View>
+        <View style={styles.inlineEmptyTextBlock}>
+          <Text style={styles.inlineEmptyTitle}>{title}</Text>
+          <Text style={styles.inlineEmptyDescription}>{description}</Text>
+        </View>
+      </View>
+      {actionTitle && onAction ? (
+        <ActionButton
+          title={actionTitle}
+          onPress={onAction}
+          variant="secondary"
+          style={styles.inlineEmptyAction}
+        />
+      ) : null}
+    </View>
+  );
+}
+
 export default function ShiftScreen() {
   const router = useRouter();
   const isProvisioned = isDriverIdentityProvisioned();
@@ -256,10 +527,12 @@ export default function ShiftScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [shifts, setShifts] = useState<ShiftRecord[]>([]);
   const [activeShift, setActiveShift] = useState<ShiftRecord | null>(null);
   const [vehicleId, setVehicleId] = useState("");
   const [location, setLocation] = useState("");
   const [odometer, setOdometer] = useState("");
+  const [reviewReason, setReviewReason] = useState("");
   const [shiftEnabled, setShiftEnabled] = useState<boolean | null>(null);
   const [screenError, setScreenError] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
@@ -267,10 +540,22 @@ export default function ShiftScreen() {
     useState<PlatformPresenceSummary | null>(null);
   const [presenceError, setPresenceError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [lastSuccessfulLoadAt, setLastSuccessfulLoadAt] = useState<
+    string | null
+  >(null);
+  const [highRiskSheetVisible, setHighRiskSheetVisible] = useState(false);
 
-  const odometerError = getOdometerValidationMessage(odometer);
-  const hasValidationError = Boolean(odometerError);
-
+  const odometerError = getOdometerValidationMessage(odometer, activeShift);
+  const parsedOdometer = odometer.trim() ? Number(odometer.trim()) : null;
+  const odometerDelta =
+    activeShift?.startOdometer != null && parsedOdometer != null
+      ? parsedOdometer - activeShift.startOdometer
+      : null;
+  const overThreshold =
+    odometerDelta != null && odometerDelta > MAX_SHIFT_ODOMETER_DELTA_KM;
+  const requiresHighRiskReason = activeShift != null && overThreshold;
+  const highRiskReasonMissing =
+    requiresHighRiskReason && reviewReason.trim().length === 0;
   useEffect(() => {
     if (!activeShift) {
       return;
@@ -296,17 +581,21 @@ export default function ShiftScreen() {
       .then((enabled) => {
         setShiftEnabled(enabled);
         if (enabled) {
-          void loadShifts();
+          void loadShiftSnapshot();
         } else {
           setLoading(false);
         }
       })
       .catch(() => {
-        void loadShifts();
+        void loadShiftSnapshot();
       });
   }, [isProvisioned]);
 
-  const loadShifts = async ({ manual = false }: { manual?: boolean } = {}) => {
+  const loadShiftSnapshot = async ({
+    manual = false,
+  }: {
+    manual?: boolean;
+  } = {}) => {
     if (!isProvisioned) {
       return;
     }
@@ -317,8 +606,9 @@ export default function ShiftScreen() {
 
     const client = getDriverClient();
     const driverId = getDriverId();
+
     try {
-      const [shifts, platformPresenceResult] = await Promise.all([
+      const [shiftList, platformPresenceResult] = await Promise.all([
         client.listShifts(driverId),
         client
           .getPlatformPresence()
@@ -331,12 +621,16 @@ export default function ShiftScreen() {
             ),
           })),
       ]);
-      const active = shifts.find((shift) => shift.status === "active");
-      setActiveShift(active ?? null);
+
+      const nextActiveShift =
+        shiftList.find((shift) => shift.status === "active") ?? null;
+      setShifts(shiftList);
+      setActiveShift(nextActiveShift);
       setPresenceSummary(platformPresenceResult.summary);
       setPresenceError(platformPresenceResult.error);
       setScreenError(null);
       setNow(Date.now());
+      setLastSuccessfulLoadAt(new Date().toISOString());
     } catch (error: unknown) {
       setScreenError(getErrorMessage(error, "班次資料載入失敗，請稍後再試。"));
     } finally {
@@ -344,152 +638,6 @@ export default function ShiftScreen() {
       setRefreshing(false);
     }
   };
-
-  if (!isProvisioned) {
-    return (
-      <AppScreen scrollable={false}>
-        <PageHeader
-          title={driverStrings.shift.title}
-          subtitle="需要完成裝置配置"
-        />
-        <EmptyState
-          title="尚未完成裝置配置"
-          description="完成裝置綁定後，才能查看班表與進行上下線打卡。"
-          icon="lock-closed-outline"
-          actionTitle="前往配置裝置"
-          onAction={() => router.push("/onboarding")}
-          style={styles.fillState}
-        />
-      </AppScreen>
-    );
-  }
-
-  const handleClockIn = async () => {
-    if (odometerError) {
-      Alert.alert("輸入錯誤", odometerError);
-      return;
-    }
-
-    const trimmedOdometer = odometer.trim();
-    setSubmitting(true);
-    setSubmissionError(null);
-    const client = getDriverClient();
-    const driverId = getDriverId();
-    try {
-      const result = await client.clockIn({
-        driverId,
-        vehicleId: vehicleId.trim() || undefined,
-        location: location.trim() || undefined,
-        odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
-      });
-      setActiveShift(result);
-      setScreenError(null);
-      setNow(Date.now());
-      Alert.alert("成功", "已完成上線打卡。");
-      setVehicleId("");
-      setLocation("");
-      setOdometer("");
-    } catch (error: unknown) {
-      setSubmissionError(getErrorMessage(error, "上線打卡失敗，請稍後再試。"));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleClockOut = async () => {
-    if (odometerError) {
-      Alert.alert("輸入錯誤", odometerError);
-      return;
-    }
-
-    const trimmedOdometer = odometer.trim();
-    setSubmitting(true);
-    setSubmissionError(null);
-    const client = getDriverClient();
-    const driverId = getDriverId();
-    try {
-      await client.clockOut({
-        driverId,
-        location: location.trim() || undefined,
-        odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
-      });
-      setActiveShift(null);
-      setScreenError(null);
-      Alert.alert("成功", "已完成下線打卡。");
-      setLocation("");
-      setOdometer("");
-    } catch (error: unknown) {
-      setSubmissionError(getErrorMessage(error, "下線打卡失敗，請稍後再試。"));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <AppScreen scrollable={false}>
-        <PageHeader
-          title={driverStrings.shift.title}
-          subtitle="載入今日打卡記錄"
-        />
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={Tokens.colors.primary} />
-          <Text style={styles.loadingLabel}>載入班次資料中…</Text>
-        </View>
-      </AppScreen>
-    );
-  }
-
-  if (shiftEnabled === false) {
-    return (
-      <AppScreen scrollable={false}>
-        <PageHeader
-          title={driverStrings.shift.title}
-          subtitle="班次功能未啟用"
-        />
-        <EmptyState
-          title="班表追蹤暫停提供"
-          description="此功能目前未啟用，請稍後再試或先返回工作台。"
-          icon="calendar-outline"
-          actionTitle="返回工作台"
-          onAction={() => router.push("/onboarding")}
-          style={styles.fillState}
-        />
-      </AppScreen>
-    );
-  }
-
-  if (screenError && !activeShift && !refreshing) {
-    return (
-      <AppScreen scrollable={false}>
-        <PageHeader
-          title={driverStrings.shift.title}
-          subtitle="班次資料暫時無法載入"
-          rightElement={
-            <IconButton
-              icon="refresh"
-              onPress={() => {
-                setLoading(true);
-                void loadShifts();
-              }}
-              accessibilityLabel="重新整理班次資料"
-            />
-          }
-        />
-        <EmptyState
-          title="班次資料暫時無法載入"
-          description={screenError}
-          icon="alert-circle-outline"
-          actionTitle="重新整理"
-          onAction={() => {
-            setLoading(true);
-            void loadShifts();
-          }}
-          style={styles.fillState}
-        />
-      </AppScreen>
-    );
-  }
 
   const availabilityItems = [...(presenceSummary?.presences ?? [])]
     .map((record) => {
@@ -516,20 +664,381 @@ export default function ShiftScreen() {
   const onlinePlatforms = availabilityItems.filter(
     (item) => item.record.status === "online",
   ).length;
+  const eligiblePlatforms = availabilityItems.filter(
+    (item) => item.record.eligibility === "eligible",
+  ).length;
+  const allAdaptersUnavailable =
+    availabilityItems.length > 0 &&
+    availabilityItems.every((item) => item.adapterStatus?.status === "down");
+  const latestPresenceSyncAt =
+    availabilityItems
+      .map((item) => item.adapterStatus?.lastSyncAt ?? item.record.updatedAt)
+      .sort(
+        (left, right) => new Date(right).getTime() - new Date(left).getTime(),
+      )[0] ?? null;
+  const refreshMetadata: UiRefreshMetadata = {
+    generatedAt:
+      lastSuccessfulLoadAt ??
+      latestPresenceSyncAt ??
+      activeShift?.updatedAt ??
+      new Date(now).toISOString(),
+    staleAfterMs: SHIFT_REFRESH_STALE_AFTER_MS,
+    dataFreshness: screenError
+      ? "degraded"
+      : presenceError
+        ? "degraded"
+        : lastSuccessfulLoadAt == null
+          ? "unknown"
+          : now - new Date(lastSuccessfulLoadAt).getTime() >
+              SHIFT_REFRESH_STALE_AFTER_MS
+            ? "stale"
+            : "fresh",
+    source: "live",
+  };
+
+  const availableActions: ResourceActionDescriptor[] = [
+    {
+      action: "refresh",
+      enabled: !loading && !submitting && !refreshing,
+      disabledReasonCode: loading ? "shift_snapshot_loading" : undefined,
+      riskLevel: "low",
+    },
+    activeShift
+      ? {
+          action: "clock_out",
+          enabled: !submitting && !odometerError && !highRiskReasonMissing,
+          disabledReasonCode: submitting
+            ? "shift_submit_in_progress"
+            : odometerError
+              ? "odometer_invalid"
+              : highRiskReasonMissing
+                ? "ops_review_reason_required"
+                : undefined,
+          requiresReason: requiresHighRiskReason,
+          riskLevel: requiresHighRiskReason ? "high" : "medium",
+        }
+      : {
+          action: "clock_in",
+          enabled: !submitting && !odometerError,
+          disabledReasonCode: submitting
+            ? "shift_submit_in_progress"
+            : odometerError
+              ? "odometer_invalid"
+              : undefined,
+          riskLevel: "medium",
+        },
+  ];
+
+  const refreshAction = getActionByName(availableActions, "refresh");
+  const primaryAction =
+    getActionByName(availableActions, "clock_out") ??
+    getActionByName(availableActions, "clock_in");
+  const primaryActionDisabledReason =
+    primaryAction && !primaryAction.enabled
+      ? getActionDisabledReason(primaryAction)
+      : null;
+  const fullScreenEmptyState: EmptyStateEnvelope | null = !isProvisioned
+    ? {
+        reason: "not_provisioned",
+        messageCode: "完成裝置綁定後，才能查看班次與進行上下線打卡。",
+      }
+    : shiftEnabled === false
+      ? {
+          reason: "permission_denied",
+          messageCode: "此司機帳號目前沒有 Shift / clock in-out 權限。",
+        }
+      : screenError && !activeShift && !refreshing
+        ? {
+            reason: "fetch_failed",
+            messageCode: screenError,
+            nextAction: refreshAction ?? undefined,
+          }
+        : null;
+
+  const inlineEmptyStates: EmptyStateEnvelope[] = [];
+  if (!activeShift && shifts.length === 0) {
+    inlineEmptyStates.push({
+      reason: "no_data",
+      messageCode: "today_shift_history_empty",
+    });
+  }
+  if (!activeShift && eligiblePlatforms === 0 && availabilityItems.length > 0) {
+    inlineEmptyStates.push({
+      reason: "driver_not_eligible",
+      messageCode: "driver_presence_not_eligible",
+    });
+  }
+  if (
+    !activeShift &&
+    (allAdaptersUnavailable ||
+      (presenceError && availabilityItems.length === 0))
+  ) {
+    inlineEmptyStates.push({
+      reason: "external_unavailable",
+      messageCode:
+        presenceError ??
+        "目前無法取得外部平台 adapter 狀態，班次仍可操作，但可接單狀態可能延遲。",
+    });
+  }
+  const activePlatformsWhileOffShift = !activeShift && onlinePlatforms > 0;
+  if (activePlatformsWhileOffShift) {
+    inlineEmptyStates.push({
+      reason: "filtered_empty",
+      messageCode: `${onlinePlatforms} 個平台顯示在線中；請確認是否需要先上班，或到平台中心手動調整接單狀態。`,
+    });
+  }
+  const shiftResource: ShiftScreenResource = {
+    activeShift,
+    shifts,
+    availableActions,
+    fullScreenEmptyState,
+    inlineEmptyStates,
+    refreshMetadata,
+    platformCenterRoute: "/platform-presence",
+    opsReviewLink: {
+      targetApp: "ops-console",
+      route: "/attendance",
+      resourceType: "shift",
+      resourceId: activeShift?.shiftId ?? getDriverId(),
+      openMode: "new_tab",
+      label: "Ops Console 出勤複核",
+    },
+  };
+  const opsReviewDestinationLabel = getCrossAppTargetLabel(
+    shiftResource.opsReviewLink,
+  );
+  const opsReviewHref = buildCrossAppHref(shiftResource.opsReviewLink);
+
+  const openPlatformCenter = () => {
+    router.push(shiftResource.platformCenterRoute);
+  };
+
+  const openCrossAppLink = async (link: CrossAppResourceLink) => {
+    try {
+      await Linking.openURL(buildCrossAppHref(link));
+    } catch (error: unknown) {
+      setSubmissionError(
+        getErrorMessage(
+          error,
+          `${getCrossAppTargetLabel(link)} 連結開啟失敗，請稍後再試。`,
+        ),
+      );
+    }
+  };
+
+  const handleClockIn = async () => {
+    if (odometerError) {
+      Alert.alert("輸入錯誤", odometerError);
+      return;
+    }
+
+    const trimmedOdometer = odometer.trim();
+    setSubmitting(true);
+    setSubmissionError(null);
+    const client = getDriverClient();
+    const driverId = getDriverId();
+    try {
+      const result = await client.clockIn({
+        driverId,
+        vehicleId: vehicleId.trim() || undefined,
+        location: location.trim() || undefined,
+        odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
+      });
+      const nextShift = extractShiftRecord(result);
+      setShifts((current) => [
+        nextShift,
+        ...current.filter((shift) => shift.shiftId !== nextShift.shiftId),
+      ]);
+      setActiveShift(nextShift);
+      setScreenError(null);
+      setNow(Date.now());
+      Alert.alert("已上班", "班次已建立，工作台會依 Q-DRV08 同步可接單狀態。");
+      setVehicleId("");
+      setLocation("");
+      setOdometer("");
+      setReviewReason("");
+      void loadShiftSnapshot({ manual: true });
+    } catch (error: unknown) {
+      setSubmissionError(getErrorMessage(error, "上線打卡失敗，請稍後再試。"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleClockOut = async () => {
+    if (odometerError) {
+      Alert.alert("輸入錯誤", odometerError);
+      return;
+    }
+    if (highRiskReasonMissing) {
+      Alert.alert("需要確認", "高里程差異需要填寫複核說明。");
+      return;
+    }
+
+    const trimmedOdometer = odometer.trim();
+    setSubmitting(true);
+    setSubmissionError(null);
+    const client = getDriverClient();
+    const driverId = getDriverId();
+    try {
+      const result = await client.clockOut({
+        driverId,
+        location: location.trim() || undefined,
+        odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
+        notes: reviewReason.trim() || undefined,
+      });
+      const completedShift = extractShiftRecord(result);
+      setShifts((current) => [
+        completedShift,
+        ...current.filter((shift) => shift.shiftId !== completedShift.shiftId),
+      ]);
+      setActiveShift(null);
+      setHighRiskSheetVisible(false);
+      setScreenError(null);
+      Alert.alert(
+        "已下班",
+        requiresHighRiskReason
+          ? `班次已結束，異常里程說明已隨下線資料送出，待營運於 ${opsReviewDestinationLabel} 複核。`
+          : "班次已結束，平台可接單狀態會依設定自動下線。",
+      );
+      setLocation("");
+      setOdometer("");
+      setReviewReason("");
+      void loadShiftSnapshot({ manual: true });
+    } catch (error: unknown) {
+      setSubmissionError(getErrorMessage(error, "下線打卡失敗，請稍後再試。"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const runResourceAction = (action: ResourceActionDescriptor | null) => {
+    if (!action?.enabled) {
+      return;
+    }
+
+    if (action.action === "refresh") {
+      void loadShiftSnapshot({ manual: true });
+      return;
+    }
+
+    if (action.action === "clock_in") {
+      Alert.alert(
+        "確認上班",
+        "開始班次後，工作台會切換成執勤中的 punch-clock 狀態。",
+        [
+          { text: "取消", style: "cancel" },
+          {
+            text: "確認上班",
+            onPress: () => {
+              void handleClockIn();
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    if (action.action === "clock_out") {
+      if (action.riskLevel === "high") {
+        setHighRiskSheetVisible(true);
+        return;
+      }
+
+      const confirmMessage =
+        "結束班次後，平台可接單狀態會依 autoOfflineOnShiftEnd 設定同步更新。";
+
+      Alert.alert("確認下班", confirmMessage, [
+        { text: "取消", style: "cancel" },
+        {
+          text: "確認下班",
+          style: "default",
+          onPress: () => {
+            void handleClockOut();
+          },
+        },
+      ]);
+    }
+  };
+
+  if (loading) {
+    return (
+      <AppScreen scrollable={false}>
+        <PageHeader
+          title={driverStrings.shift.title}
+          subtitle="載入 Shift / clock in-out"
+        />
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Tokens.colors.primary} />
+          <Text style={styles.loadingLabel}>載入班次資料中…</Text>
+        </View>
+      </AppScreen>
+    );
+  }
+
+  if (fullScreenEmptyState) {
+    const fullScreenEmptyConfig = getEmptyStateConfig(
+      fullScreenEmptyState,
+      shiftResource.availableActions,
+      router,
+      () => {
+        openPlatformCenter();
+      },
+    );
+    return (
+      <AppScreen scrollable={false}>
+        <PageHeader
+          title={driverStrings.shift.title}
+          subtitle="Shift / clock in-out"
+          rightElement={
+            refreshAction ? (
+              <IconButton
+                icon="refresh"
+                onPress={() => runResourceAction(refreshAction)}
+                disabled={!refreshAction.enabled}
+                accessibilityLabel="重新整理班次資料"
+              />
+            ) : null
+          }
+        />
+        <EmptyState
+          title={fullScreenEmptyConfig.title}
+          description={fullScreenEmptyConfig.description}
+          icon={fullScreenEmptyConfig.icon}
+          actionTitle={fullScreenEmptyConfig.actionTitle}
+          onAction={
+            fullScreenEmptyState.reason === "fetch_failed"
+              ? () => {
+                  setLoading(true);
+                  void loadShiftSnapshot();
+                }
+              : fullScreenEmptyConfig.onAction
+          }
+          style={styles.fillState}
+        />
+      </AppScreen>
+    );
+  }
+
+  const lastCompletedShift =
+    shifts.find((shift) => shift.status === "completed") ?? null;
+  const refreshStatusLabel = getRefreshLabel(shiftResource.refreshMetadata);
 
   return (
     <View style={styles.screen}>
       <AppScreen contentContainerStyle={styles.screenContent}>
         <PageHeader
           title={driverStrings.shift.title}
-          subtitle={activeShift ? "今日打卡記錄" : "準備開始班次"}
+          subtitle="Manual refresh · punch clock · Q-DRV09"
           rightElement={
-            <IconButton
-              icon="refresh"
-              onPress={() => void loadShifts({ manual: true })}
-              disabled={loading || submitting || refreshing}
-              accessibilityLabel="重新整理班次資料"
-            />
+            refreshAction ? (
+              <IconButton
+                icon="refresh"
+                onPress={() => runResourceAction(refreshAction)}
+                disabled={!refreshAction.enabled}
+                accessibilityLabel="重新整理班次資料"
+              />
+            ) : null
           }
         />
 
@@ -537,13 +1046,32 @@ export default function ShiftScreen() {
           <ErrorBanner message={`資料同步異常：${screenError}`} />
         ) : null}
         {submissionError ? <ErrorBanner message={submissionError} /> : null}
+        {refreshing ? (
+          <StatusChip label="手動重新整理中" variant="brand" />
+        ) : null}
+        <View style={styles.refreshRow}>
+          <StatusChip
+            label={refreshStatusLabel}
+            variant={getRefreshVariant(shiftResource.refreshMetadata)}
+            dot
+          />
+          <Text style={styles.refreshCaption}>
+            Manual refresh · 最近快照{" "}
+            {formatCompactDateTime(shiftResource.refreshMetadata.generatedAt)}
+          </Text>
+        </View>
 
         <View style={styles.heroCard}>
-          <View style={styles.heroStatusRow}>
+          <View style={styles.heroTopRow}>
             <StatusChip
-              label={activeShift ? "上班中" : "待上線"}
+              label={activeShift ? "ON DUTY" : "OFF DUTY"}
               variant={activeShift ? "success" : "default"}
               dot
+              strong={Boolean(activeShift)}
+            />
+            <StatusChip
+              label={activeShift ? "Clock-out available" : "Clock-in available"}
+              variant={activeShift ? "warning" : "info"}
             />
           </View>
 
@@ -552,8 +1080,8 @@ export default function ShiftScreen() {
           </Text>
           <Text style={styles.heroSubtitle}>
             {activeShift
-              ? `已工作 ${formatElapsedSentence(activeShift, now)} · 自 ${formatClockLabel(activeShift.clockedInAt)} 起`
-              : "完成上線打卡後，系統會開始追蹤本班次的出勤與里程資訊。"}
+              ? `自 ${formatClockLabel(activeShift.clockedInAt)} 起已執勤 ${formatElapsedSentence(activeShift, now)}`
+              : "班次頁是 punch-clock anchor；開始班次後會建立 active shift，結束班次時同步 auto-offline 規則。"}
           </Text>
 
           <View style={styles.heroGrid}>
@@ -567,14 +1095,14 @@ export default function ShiftScreen() {
               value={
                 activeShift
                   ? formatOdometer(activeShift.startOdometer)
-                  : odometer.trim()
-                    ? `${Number(odometer).toLocaleString("zh-TW")} km`
+                  : parsedOdometer != null
+                    ? `${parsedOdometer.toLocaleString("zh-TW")} km`
                     : "尚未填寫"
               }
               subdued={
                 activeShift
                   ? activeShift.startOdometer == null
-                  : !odometer.trim()
+                  : parsedOdometer == null
               }
             />
             <HeroField
@@ -585,38 +1113,59 @@ export default function ShiftScreen() {
               subdued={!activeShift?.startLocation && !location.trim()}
             />
             <HeroField
-              label={activeShift ? "開始時間" : "開始後顯示"}
+              label={activeShift ? "開始時間" : "上次下班"}
               value={
                 activeShift
                   ? formatShiftDateTime(activeShift.clockedInAt)
-                  : "等待上線打卡"
+                  : lastCompletedShift?.clockedOutAt
+                    ? formatShiftDateTime(lastCompletedShift.clockedOutAt)
+                    : "尚無記錄"
               }
+              subdued={!activeShift && !lastCompletedShift?.clockedOutAt}
+            />
+            <HeroField
+              label="預計下班"
+              value={formatExpectedOffTime(activeShift)}
               subdued={!activeShift}
             />
             <HeroField
-              label="預計下線"
-              value={formatExpectedOffTime(activeShift)}
-              subdued={!activeShift}
+              label="最近同步"
+              value={formatCompactDateTime(
+                latestPresenceSyncAt ??
+                  activeShift?.updatedAt ??
+                  lastCompletedShift?.updatedAt,
+              )}
+              subdued={false}
             />
           </View>
         </View>
 
+        {shiftResource.inlineEmptyStates.map((state) => (
+          <InlineEmptyCard
+            key={`${state.reason}-${state.messageCode}`}
+            {...getEmptyStateConfig(
+              state,
+              shiftResource.availableActions,
+              router,
+              () => {
+                openPlatformCenter();
+              },
+            )}
+          />
+        ))}
+
         <SectionCard
-          title={
-            activeShift
-              ? driverStrings.shift.summaryTitle
-              : driverStrings.shift.readinessTitle
-          }
+          title={activeShift ? "班次摘要" : "上班前設定"}
           subtitle={
             activeShift
-              ? "顯示目前班次內可確認的出勤資訊。"
-              : "上線前可先填寫車輛、位置與里程。"
+              ? "可接單狀態與班次 guardrail 一起看，避免平台在線但實際已下班。"
+              : "vehicle / location / odometer 皆為選填，但若輸入 odometer 必須符合 Q-DRV09。"
           }
         >
           <View style={styles.infoTileRow}>
             <ShiftInfoTile
-              label={driverStrings.shift.statusLabel}
-              value={activeShift ? "執勤中" : "待上線"}
+              label="班次狀態"
+              value={activeShift ? "執勤中" : "待上班"}
               tone={activeShift ? "success" : "default"}
             />
             <ShiftInfoTile
@@ -638,19 +1187,19 @@ export default function ShiftScreen() {
               tone={readyPlatforms > 0 ? "warning" : "default"}
             />
             <ShiftInfoTile
-              label="預計下線"
-              value={formatExpectedOffTime(activeShift)}
-              tone={activeShift ? "warning" : "default"}
+              label="同步狀態"
+              value={refreshStatusLabel}
+              tone={getRefreshVariant(shiftResource.refreshMetadata)}
             />
           </View>
         </SectionCard>
 
         <SectionCard
-          title={activeShift ? "班次更新" : "上線設定"}
+          title={activeShift ? "下班資料" : "上班資料"}
           subtitle={
             activeShift
-              ? "下線前可補充目前里程與位置。"
-              : "這些欄位皆為選填，不影響班次 guardrails。"
+              ? "Clock-out 屬 medium risk；若里程超過 800 km，自動升級為 high risk 複核流程。"
+              : "Clock-in 屬 medium risk；確認後才會建立 active shift。"
           }
         >
           {activeShift ? (
@@ -661,7 +1210,7 @@ export default function ShiftScreen() {
                 onChangeText={setOdometer}
                 placeholder="例如 50000"
                 keyboardType="numeric"
-                helpText="若需更新里程，請於下線前填寫。"
+                helpText="若輸入里程，必須為整數且不得小於起始里程。"
                 error={odometerError ?? undefined}
               />
 
@@ -669,8 +1218,33 @@ export default function ShiftScreen() {
                 label="目前位置（選填）"
                 value={location}
                 onChangeText={setLocation}
-                placeholder="例如 營運據點 B"
+                placeholder="例如 台北車站接送區"
               />
+
+              {requiresHighRiskReason ? (
+                <View style={styles.reviewCard}>
+                  <View style={styles.reviewHeader}>
+                    <StatusChip label="High risk" variant="danger" />
+                    <Text style={styles.reviewTitle}>里程差異超過複核門檻</Text>
+                  </View>
+                  <Text style={styles.reviewBody}>
+                    本次預估差異 {odometerDelta?.toLocaleString("zh-TW")}{" "}
+                    km，超過 {MAX_SHIFT_ODOMETER_DELTA_KM}{" "}
+                    km。送出下班前需填寫說明，系統會一併標記待營運複核。
+                  </Text>
+                  <FormField
+                    label="複核說明（必填）"
+                    value={reviewReason}
+                    onChangeText={setReviewReason}
+                    placeholder="例如：跨縣市臨時加班、返場保養繞行"
+                    error={
+                      highRiskReasonMissing
+                        ? "高里程差異必須填寫複核說明。"
+                        : undefined
+                    }
+                  />
+                </View>
+              ) : null}
             </View>
           ) : (
             <View>
@@ -706,7 +1280,7 @@ export default function ShiftScreen() {
           subtitle={
             availabilityItems.length > 0
               ? `${onlinePlatforms} 個平台上線中，${readyPlatforms} 個平台目前可接單。`
-              : "沿用既有 platform presence 資料來源，只讀顯示目前可接單狀態。"
+              : "Shift page 只提示平台可接單 readiness；詳細操作請前往平台中心。"
           }
         >
           {presenceError ? <ErrorBanner message={presenceError} /> : null}
@@ -807,50 +1381,142 @@ export default function ShiftScreen() {
               title="尚無平台可接單狀態"
               description="目前沒有可顯示的平台 presence 資料，可前往平台狀態頁確認綁定與上線狀態。"
               icon="swap-horizontal-outline"
-              actionTitle="查看平台狀態"
-              onAction={() => router.push("/platform-presence")}
+              actionTitle="查看平台中心"
+              onAction={() => {
+                openPlatformCenter();
+              }}
               style={styles.inlineEmptyState}
             />
           )}
         </SectionCard>
 
         <AuthorityBanner
-          title="班次資料 guardrails"
-          authorityLabel="不變更定位心跳、provisioning 與上下線 API"
-          description="這個畫面只調整呈現方式；資料寫入仍沿用現有班次與出勤流程。"
+          title="班次 guardrails"
+          authorityLabel="visual 依 canvas，行為依 packet §5.6 / Q-DRV08 / Q-DRV09"
+          description={`這頁只做 shift / attendance 呈現與操作；平台上下線仍在 app 內平台中心處理，高風險里程複核才會交接到 ${opsReviewDestinationLabel}。`}
           tone="owned"
           icon="shield-checkmark"
         />
       </AppScreen>
 
+      <Modal
+        animationType="slide"
+        transparent
+        visible={highRiskSheetVisible}
+        onRequestClose={() => setHighRiskSheetVisible(false)}
+      >
+        <Pressable
+          style={styles.sheetBackdrop}
+          onPress={() => setHighRiskSheetVisible(false)}
+        />
+        <View style={styles.sheetContainer}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <StatusChip label="High risk" variant="danger" />
+            <Text style={styles.sheetTitle}>高里程差異需營運複核</Text>
+          </View>
+          <Text style={styles.sheetBody}>
+            本次班次里程差異 {odometerDelta?.toLocaleString("zh-TW")} km，
+            已超過 {MAX_SHIFT_ODOMETER_DELTA_KM} km 預設門檻。確認送出後， 這筆
+            clock-out 會連同複核說明交接到 {opsReviewDestinationLabel}，
+            供營運追蹤處理。
+          </Text>
+
+          <View style={styles.sheetSummaryCard}>
+            <Text style={styles.sheetSummaryLabel}>ops-review handoff</Text>
+            <Text style={styles.sheetSummaryValue}>
+              {opsReviewDestinationLabel}
+            </Text>
+            <Text style={styles.sheetSummaryMeta}>
+              {shiftResource.opsReviewLink.route}
+            </Text>
+            <Text style={styles.sheetSummaryMeta} numberOfLines={1}>
+              {opsReviewHref}
+            </Text>
+          </View>
+
+          <View style={styles.sheetSummaryCard}>
+            <Text style={styles.sheetSummaryLabel}>複核說明</Text>
+            <Text style={styles.sheetSummaryReason}>{reviewReason.trim()}</Text>
+          </View>
+
+          <View style={styles.sheetActionColumn}>
+            <ActionButton
+              title="打開複核看板"
+              onPress={() => {
+                void openCrossAppLink(shiftResource.opsReviewLink);
+              }}
+              variant="secondary"
+              icon="open-outline"
+            />
+            <ActionButton
+              title="打開平台中心"
+              onPress={() => {
+                openPlatformCenter();
+              }}
+              variant="secondary"
+              icon="open-outline"
+            />
+            <ActionButton
+              title="送出複核並下班"
+              onPress={() => {
+                void handleClockOut();
+              }}
+              variant="danger"
+              icon="checkmark-done-outline"
+              loading={submitting}
+            />
+            <ActionButton
+              title="取消"
+              onPress={() => setHighRiskSheetVisible(false)}
+              variant="ghost"
+              disabled={submitting}
+            />
+          </View>
+        </View>
+      </Modal>
+
       <BottomActionBar
         notice={
-          activeShift
-            ? "完成下線打卡前，可先更新里程與位置。"
-            : "上線打卡後才會建立 active shift。"
+          primaryActionDisabledReason ??
+          (primaryAction?.action === "clock_out"
+            ? primaryAction.riskLevel === "high"
+              ? "高里程差異需先填寫複核說明，再送出下班。"
+              : "下班後會依平台設定同步 auto-offline 狀態。"
+            : "上班後才會建立 active shift，並切換工作台可接單語意。")
         }
-      >
-        {activeShift ? (
-          <ActionButton
-            title={driverStrings.shift.punchOut}
-            onPress={handleClockOut}
-            variant="secondary"
-            loading={submitting}
-            disabled={hasValidationError}
-            style={[styles.bottomAction, styles.bottomDangerAction]}
-            textStyle={styles.bottomDangerText}
-          />
-        ) : (
-          <ActionButton
-            title={driverStrings.shift.punchIn}
-            onPress={handleClockIn}
-            variant="primary"
-            loading={submitting}
-            disabled={hasValidationError}
-            style={styles.bottomAction}
-          />
-        )}
-      </BottomActionBar>
+        secondaryAction={{
+          title: "前往平台中心",
+          onPress: openPlatformCenter,
+          variant: "secondary",
+          icon: "swap-horizontal-outline",
+        }}
+        primaryAction={
+          primaryAction
+            ? {
+                title:
+                  primaryAction.action === "clock_out"
+                    ? primaryAction.riskLevel === "high"
+                      ? "送出複核並下班"
+                      : driverStrings.shift.punchOut
+                    : driverStrings.shift.punchIn,
+                onPress: () => runResourceAction(primaryAction),
+                variant:
+                  primaryAction.action === "clock_out"
+                    ? primaryAction.riskLevel === "high"
+                      ? "danger"
+                      : "secondary"
+                    : "primary",
+                icon:
+                  primaryAction.action === "clock_out"
+                    ? "log-out-outline"
+                    : "log-in-outline",
+                loading: submitting,
+                disabled: !primaryAction.enabled,
+              }
+            : undefined
+        }
+      />
     </View>
   );
 }
@@ -879,6 +1545,16 @@ const styles = StyleSheet.create({
   inlineEmptyState: {
     paddingVertical: Tokens.spacing.sm,
   },
+  refreshRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+    flexWrap: "wrap",
+  },
+  refreshCaption: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textDim,
+  },
   heroCard: {
     backgroundColor: Tokens.colors.surface,
     borderRadius: Tokens.radius.xl,
@@ -888,16 +1564,19 @@ const styles = StyleSheet.create({
     gap: Tokens.spacing.sm,
     ...Tokens.shadows.md,
   },
-  heroStatusRow: {
+  heroTopRow: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
+    gap: Tokens.spacing.sm,
+    flexWrap: "wrap",
   },
   heroValue: {
-    fontSize: 32,
-    lineHeight: 36,
+    fontSize: 36,
+    lineHeight: 40,
     fontWeight: "700",
     color: Tokens.colors.textStrong,
-    letterSpacing: -1,
+    letterSpacing: -1.2,
     fontFamily: Tokens.fonts.mono,
   },
   heroSubtitle: {
@@ -982,6 +1661,85 @@ const styles = StyleSheet.create({
     backgroundColor: Tokens.colors.dangerBg,
     borderColor: `${Tokens.colors.danger}22`,
   },
+  inlineEmptyCard: {
+    backgroundColor: Tokens.colors.bgRaised,
+    borderRadius: Tokens.radius.xl,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.lg,
+    gap: Tokens.spacing.md,
+  },
+  inlineEmptyInfo: {
+    backgroundColor: Tokens.colors.infoBg,
+    borderColor: `${Tokens.colors.info}33`,
+  },
+  inlineEmptyWarning: {
+    backgroundColor: Tokens.colors.warningBg,
+    borderColor: `${Tokens.colors.warning}33`,
+  },
+  inlineEmptyDanger: {
+    backgroundColor: Tokens.colors.dangerBg,
+    borderColor: `${Tokens.colors.danger}33`,
+  },
+  inlineEmptyHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Tokens.spacing.md,
+  },
+  inlineEmptyIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Tokens.colors.surface,
+  },
+  inlineEmptyIconInfo: {
+    backgroundColor: `${Tokens.colors.info}20`,
+  },
+  inlineEmptyIconWarning: {
+    backgroundColor: `${Tokens.colors.warning}20`,
+  },
+  inlineEmptyIconDanger: {
+    backgroundColor: `${Tokens.colors.danger}20`,
+  },
+  inlineEmptyTextBlock: {
+    flex: 1,
+    gap: 4,
+  },
+  inlineEmptyTitle: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+  },
+  inlineEmptyDescription: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
+  inlineEmptyAction: {
+    alignSelf: "flex-start",
+  },
+  reviewCard: {
+    backgroundColor: Tokens.colors.dangerBg,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: `${Tokens.colors.danger}44`,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.sm,
+  },
+  reviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+  },
+  reviewTitle: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+    flex: 1,
+  },
+  reviewBody: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
   availabilityList: {
     gap: Tokens.spacing.sm,
   },
@@ -1033,14 +1791,67 @@ const styles = StyleSheet.create({
     ...Tokens.type.micro,
     color: Tokens.colors.textDim,
   },
-  bottomAction: {
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.48)",
+  },
+  sheetContainer: {
+    backgroundColor: Tokens.colors.bgRaised,
+    borderTopLeftRadius: Tokens.radius.xl,
+    borderTopRightRadius: Tokens.radius.xl,
+    padding: Tokens.spacing.lg,
+    gap: Tokens.spacing.md,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: Tokens.colors.border,
+  },
+  sheetHandle: {
+    width: 48,
+    height: 5,
+    borderRadius: Tokens.radius.full,
+    backgroundColor: Tokens.colors.borderStrong,
+    alignSelf: "center",
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+  },
+  sheetTitle: {
+    ...Tokens.type.title,
+    color: Tokens.colors.textStrong,
     flex: 1,
   },
-  bottomDangerAction: {
-    backgroundColor: Tokens.colors.surfaceDanger,
-    borderColor: Tokens.colors.danger,
+  sheetBody: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
   },
-  bottomDangerText: {
-    color: Tokens.colors.danger,
+  sheetSummaryCard: {
+    backgroundColor: Tokens.colors.surfaceLo,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.xs,
+  },
+  sheetSummaryLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+  },
+  sheetSummaryValue: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+  },
+  sheetSummaryMeta: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textDim,
+  },
+  sheetSummaryReason: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textStrong,
+  },
+  sheetActionColumn: {
+    gap: Tokens.spacing.sm,
   },
 });
