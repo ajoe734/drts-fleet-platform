@@ -1730,8 +1730,40 @@ export type DriverTaskStatus = (typeof DRIVER_TASK_STATUSES)[number];
 export const BOOKING_TYPES = ["oneway", "roundtrip", "recurring"] as const;
 export type BookingType = (typeof BOOKING_TYPES)[number];
 
-export const BOOKING_STATUSES = ["active", "completed", "cancelled"] as const;
+export interface ResourceActionDescriptor {
+  action: string;
+  enabled: boolean;
+  disabledReasonCode?: string;
+  requiresReason?: boolean;
+  riskLevel: "low" | "medium" | "high";
+}
+
+export const BOOKING_STATUSES = [
+  "accepted",
+  "pending",
+  "completed",
+  "cancelled",
+] as const;
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
+export const BOOKING_READ_ONLY_REASON_CODES = [
+  "past_editable_until",
+  "booking_cancelled",
+  "booking_completed",
+  "approval_rejected",
+] as const;
+export type BookingReadOnlyReasonCode =
+  (typeof BOOKING_READ_ONLY_REASON_CODES)[number];
+export const TENANT_BOOKING_COMMAND_STATES = [
+  "completed",
+  "accepted",
+] as const;
+export type TenantBookingCommandState =
+  (typeof TENANT_BOOKING_COMMAND_STATES)[number];
+export const TENANT_BOOKING_COMMAND_PENDING_REASON_CODES = [
+  "approval_pending",
+] as const;
+export type TenantBookingCommandPendingReasonCode =
+  (typeof TENANT_BOOKING_COMMAND_PENDING_REASON_CODES)[number];
 
 export const QUEUE_ENTRY_STATUSES = ["checked_in", "checked_out"] as const;
 export type QueueEntryStatus = (typeof QUEUE_ENTRY_STATUSES)[number];
@@ -2326,8 +2358,11 @@ export interface BookingRecord {
   reservationWindowStart: string;
   reservationWindowEnd: string;
   recurrenceRule: string | null;
+  editableUntil: string | null;
   modifiableUntil: string | null;
   cancelableUntil: string | null;
+  readOnlyReasonCode: BookingReadOnlyReasonCode | null;
+  availableActions: ResourceActionDescriptor[];
   pickup: AddressPayload;
   dropoff: AddressPayload;
   passenger: PassengerProfile;
@@ -2358,6 +2393,22 @@ export interface BookingRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface TenantBookingCommandCompletedResult {
+  state: "completed";
+  booking: BookingRecord;
+}
+
+export interface TenantBookingCommandAcceptedResult {
+  state: "accepted";
+  commandId: string;
+  pendingReasonCode: TenantBookingCommandPendingReasonCode;
+  booking: BookingRecord;
+}
+
+export type TenantBookingCommandResult =
+  | TenantBookingCommandCompletedResult
+  | TenantBookingCommandAcceptedResult;
 
 export interface DispatchCandidate {
   vehicleId: string;

@@ -7,6 +7,7 @@ import type {
   ApplyManualFareOverrideCommand,
   ApproveTenantBookingApprovalRequestCommand,
   AuditLogRecord,
+  BookingReadOnlyReasonCode,
   CallRecordingState,
   ComplianceGateRecord,
   ComplianceGateState,
@@ -42,6 +43,7 @@ import type {
   OverrideRequestRecord,
   RejectExceptionOverrideCommand,
   RejectTenantBookingApprovalRequestCommand,
+  ResourceActionDescriptor,
   RequestExceptionOverrideCommand,
   NoSupplyEscalationAction,
   OwnedOrderRecord,
@@ -4681,6 +4683,78 @@ export class OwnedMobilityService implements OnModuleInit {
     return next(value);
   }
 
+  private getBookingReadOnlyReasonCode(
+    order: OwnedOrderRecord,
+  ): BookingReadOnlyReasonCode | null {
+    if (order.approvalState === "rejected") {
+      return "approval_rejected";
+    }
+    if (order.status === "cancelled") {
+      return "booking_cancelled";
+    }
+    if (order.status === "completed") {
+      return "booking_completed";
+    }
+    if (
+      order.modifiableUntil &&
+      new Date().getTime() > new Date(order.modifiableUntil).getTime()
+    ) {
+      return "past_editable_until";
+    }
+    return null;
+  }
+
+  private buildTenantBookingAvailableActions(
+    order: OwnedOrderRecord,
+    readOnlyReasonCode: BookingReadOnlyReasonCode | null,
+  ): ResourceActionDescriptor[] {
+    const updateEnabled = readOnlyReasonCode === null;
+    const cancelDisabledReasonCode =
+      order.approvalState === "rejected"
+        ? "approval_rejected"
+        : order.status === "cancelled"
+          ? "booking_cancelled"
+          : order.status === "completed"
+            ? "booking_completed"
+            : order.cancelableUntil &&
+                new Date().getTime() > new Date(order.cancelableUntil).getTime()
+              ? "past_cancelable_until"
+              : undefined;
+
+    return [
+      {
+        action: "update",
+        enabled: updateEnabled,
+        ...(readOnlyReasonCode
+          ? { disabledReasonCode: readOnlyReasonCode }
+          : {}),
+        riskLevel: "medium",
+      },
+      {
+        action: "cancel",
+        enabled: !cancelDisabledReasonCode,
+        ...(cancelDisabledReasonCode
+          ? { disabledReasonCode: cancelDisabledReasonCode }
+          : {}),
+        requiresReason: true,
+        riskLevel: "high",
+      },
+    ];
+  }
+
+  private getBookingStatus(order: OwnedOrderRecord): BookingRecord["status"] {
+    if (order.status === "cancelled") {
+      return "cancelled";
+    }
+    if (order.status === "completed") {
+      return "completed";
+    }
+    if (order.approvalState === "pending") {
+      return "pending";
+    }
+    return "accepted";
+  }
+
   private mapOrderToBooking(order: OwnedOrderRecord): BookingRecord {
     if (
       !order.bookingId ||
@@ -4701,6 +4775,7 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     const complianceGates = this.listComplianceGatesForOrder(order);
+    const readOnlyReasonCode = this.getBookingReadOnlyReasonCode(order);
     return {
       bookingId: order.bookingId,
       orderId: order.orderId,
@@ -4710,20 +4785,21 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug: order.partnerEntrySlug,
       eligibilityVerificationId: order.eligibilityVerificationId,
       issuerAuthorizationRef: order.issuerAuthorizationRef,
-      status:
-        order.status === "cancelled"
-          ? "cancelled"
-          : order.status === "completed"
-            ? "completed"
-            : "active",
+      status: this.getBookingStatus(order),
       serviceBucket: "business_dispatch",
       businessDispatchSubtype: order.businessDispatchSubtype,
       bookingType: order.bookingType,
       reservationWindowStart: order.reservationWindowStart,
       reservationWindowEnd: order.reservationWindowEnd,
       recurrenceRule: order.recurrenceRule,
+      editableUntil: order.modifiableUntil,
       modifiableUntil: order.modifiableUntil,
       cancelableUntil: order.cancelableUntil,
+      readOnlyReasonCode,
+      availableActions: this.buildTenantBookingAvailableActions(
+        order,
+        readOnlyReasonCode,
+      ),
       pickup: { ...order.pickup },
       dropoff: { ...order.dropoff },
       passenger: { ...order.passenger },
