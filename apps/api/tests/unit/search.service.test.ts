@@ -128,6 +128,35 @@ describe("SearchService", () => {
     );
   });
 
+  it("filters grouped results by the documented types query", () => {
+    const service = createService();
+
+    const result = service.search("acme", "tenants,users");
+
+    expect(result.tenants).toHaveLength(1);
+    expect(result.users).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "tenant-acme-ops",
+        }),
+      ]),
+    );
+    expect(result.partners).toEqual([]);
+    expect(result.adapter_registry).toEqual([]);
+    expect(result.audit).toEqual([]);
+  });
+
+  it("supports repeated types params and ignores unknown filter values", () => {
+    const service = createService();
+
+    const result = service.search("acme", ["partners", "unknown,audit"]);
+
+    expect(result.tenants).toEqual([]);
+    expect(result.users).toEqual([]);
+    expect(result.partners).toHaveLength(1);
+    expect(result.audit).toHaveLength(1);
+  });
+
   it("returns empty grouped buckets for blank queries", () => {
     const service = createService();
 

@@ -22,6 +22,14 @@ export type PlatformSearchResponse = Record<
   SearchResultRecord[]
 >;
 
+const PLATFORM_SEARCH_CATEGORIES: PlatformSearchCategory[] = [
+  "tenants",
+  "partners",
+  "users",
+  "adapter_registry",
+  "audit",
+];
+
 @Injectable()
 export class SearchService {
   constructor(
@@ -31,11 +39,15 @@ export class SearchService {
     private readonly auditNotificationService: AuditNotificationService,
   ) {}
 
-  search(rawQuery?: string | null): PlatformSearchResponse {
+  search(
+    rawQuery?: string | null,
+    rawTypes?: string | string[] | null,
+  ): PlatformSearchResponse {
     const query = rawQuery?.trim().toLowerCase();
     if (!query) {
       return this.emptyResults();
     }
+    const typeFilter = this.normalizeTypes(rawTypes);
 
     const tenants = this.tenantsService
       .list()
@@ -225,13 +237,13 @@ export class SearchService {
       )
       .filter((result): result is SearchResultRecord => result !== null);
 
-    return {
+    return this.applyTypeFilter(typeFilter, {
       tenants,
       partners,
       users: [...platformAdminUsers, ...tenantUsers],
       adapter_registry: adapterRegistry,
       audit,
-    };
+    });
   }
 
   private emptyResults(): PlatformSearchResponse {
@@ -241,6 +253,42 @@ export class SearchService {
       users: [],
       adapter_registry: [],
       audit: [],
+    };
+  }
+
+  private normalizeTypes(
+    rawTypes?: string | string[] | null,
+  ): Set<PlatformSearchCategory> | null {
+    if (rawTypes == null) {
+      return null;
+    }
+
+    const requestedTypes = (Array.isArray(rawTypes) ? rawTypes : [rawTypes])
+      .flatMap((value) => value.split(","))
+      .map((value) => value.trim().toLowerCase())
+      .filter((value): value is PlatformSearchCategory =>
+        PLATFORM_SEARCH_CATEGORIES.includes(value as PlatformSearchCategory),
+      );
+
+    return new Set(requestedTypes);
+  }
+
+  private applyTypeFilter(
+    typeFilter: Set<PlatformSearchCategory> | null,
+    results: PlatformSearchResponse,
+  ): PlatformSearchResponse {
+    if (typeFilter === null) {
+      return results;
+    }
+
+    return {
+      tenants: typeFilter.has("tenants") ? results.tenants : [],
+      partners: typeFilter.has("partners") ? results.partners : [],
+      users: typeFilter.has("users") ? results.users : [],
+      adapter_registry: typeFilter.has("adapter_registry")
+        ? results.adapter_registry
+        : [],
+      audit: typeFilter.has("audit") ? results.audit : [],
     };
   }
 

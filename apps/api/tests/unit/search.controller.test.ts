@@ -15,9 +15,14 @@ describe("SearchController", () => {
     };
     const controller = new SearchController(searchService as never);
 
-    const response = controller.search("acme", undefined, "req-search-001");
+    const response = controller.search(
+      "acme",
+      undefined,
+      undefined,
+      "req-search-001",
+    );
 
-    expect(searchService.search).toHaveBeenCalledWith("acme");
+    expect(searchService.search).toHaveBeenCalledWith("acme", undefined);
     expect(response).toEqual({
       data: {
         tenants: [{ resourceId: "tenant-acme" }],
@@ -45,8 +50,25 @@ describe("SearchController", () => {
     };
     const controller = new SearchController(searchService as never);
 
-    controller.search(undefined, "platform", "req-search-002");
+    controller.search(undefined, "platform", undefined, "req-search-002");
 
-    expect(searchService.search).toHaveBeenCalledWith("platform");
+    expect(searchService.search).toHaveBeenCalledWith("platform", undefined);
+  });
+
+  it("forwards the documented types filter to the service", () => {
+    const searchService = {
+      search: vi.fn(() => ({
+        tenants: [],
+        partners: [],
+        users: [],
+        adapter_registry: [],
+        audit: [],
+      })),
+    };
+    const controller = new SearchController(searchService as never);
+
+    controller.search("acme", undefined, "tenants,users", "req-search-003");
+
+    expect(searchService.search).toHaveBeenCalledWith("acme", "tenants,users");
   });
 });

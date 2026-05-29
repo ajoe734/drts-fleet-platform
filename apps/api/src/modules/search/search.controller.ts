@@ -14,10 +14,11 @@ export class SearchController {
   search(
     @Query("q") q?: string,
     @Query("query") query?: string,
+    @Query("types") types?: string | string[],
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.searchService.search(q ?? query),
+      this.searchService.search(q ?? query, types),
       requestId,
     );
   }
