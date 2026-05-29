@@ -2585,17 +2585,31 @@ def display_name_is_legacy_alias(name: str | None) -> bool:
     return "legacy alias" in str(name or "").lower()
 
 
-def first_viable_agent(config: dict[str, Any], preferred: list[str], exclude: set[str], state: dict[str, Any] | None = None) -> str | None:
+def first_viable_agent(
+    config: dict[str, Any],
+    preferred: list[str],
+    exclude: set[str],
+    state: dict[str, Any] | None = None,
+    *,
+    provider_report: dict[str, Any] | None = None,
+) -> str | None:
     known = known_agent_display_names(config)
     seen: set[str] = set()
-    provider_report = load_provider_report(config) if state is not None else None
+    effective_provider_report = provider_report
+    if effective_provider_report is None and state is not None:
+        effective_provider_report = load_provider_report(config)
     for candidate in preferred:
         name = str(candidate or "").strip()
         if not name or name in seen or name in exclude or display_name_is_legacy_alias(name):
             continue
         seen.add(name)
         if name in known:
-            if state is not None and is_agent_dispatch_paused(config, state, name, provider_report=provider_report):
+            if state is not None and is_agent_dispatch_paused(
+                config,
+                state,
+                name,
+                provider_report=effective_provider_report,
+            ):
                 continue
             return name
     return None
@@ -3182,6 +3196,7 @@ def maybe_reassign_task_after_worker_failure(
     *,
     terminal: bool = False,
     state: dict[str, Any] | None = None,
+    provider_report: dict[str, Any] | None = None,
 ) -> str | None:
     settings = worker_reassignment_settings(config)
     if not settings.get("enabled", True):
@@ -3223,7 +3238,13 @@ def maybe_reassign_task_after_worker_failure(
 
     if task_status in review_statuses and reviewer == failing_agent:
         candidates = normalized_mapping_values(settings.get("reviewer_fallbacks", {}), failing_agent)
-        new_reviewer = first_viable_agent(config, candidates, exclude={owner, reviewer}, state=state)
+        new_reviewer = first_viable_agent(
+            config,
+            candidates,
+            exclude={owner, reviewer},
+            state=state,
+            provider_report=provider_report,
+        )
         if not new_reviewer:
             return None
         message = f"Auto-reassigned review from {reviewer} to {new_reviewer} after repeated {failing_agent} {failure_summary}"
@@ -3259,13 +3280,25 @@ def maybe_reassign_task_after_worker_failure(
 
     if task_status in owned_statuses | finalize_statuses and owner == failing_agent:
         candidates = normalized_mapping_values(settings.get("owner_fallbacks", {}), failing_agent)
-        new_owner = first_viable_agent(config, candidates, exclude={owner, reviewer}, state=state)
+        new_owner = first_viable_agent(
+            config,
+            candidates,
+            exclude={owner, reviewer},
+            state=state,
+            provider_report=provider_report,
+        )
         if not new_owner:
             return None
         reviewer_candidates = [reviewer]
         reviewer_candidates.extend(normalized_mapping_values(settings.get("reviewer_fallbacks", {}), failing_agent))
         reviewer_candidates.extend(normalized_mapping_values(settings.get("owner_fallbacks", {}), failing_agent))
-        new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={new_owner}, state=state)
+        new_reviewer = first_viable_agent(
+            config,
+            reviewer_candidates,
+            exclude={new_owner},
+            state=state,
+            provider_report=provider_report,
+        )
         if not new_reviewer:
             return None
         message = f"Auto-reassigned ownership from {owner} to {new_owner} after repeated {failing_agent} {failure_summary}"
@@ -3763,7 +3796,11 @@ def resume_claude_worker(
     }
 
 
-def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
+def poll_workers(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
     changed = False
     approval_state = load_approval_state(config)
     task_map = task_index_from_status(config, load_status(config))
@@ -3783,7 +3820,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
 
     stall_after = float(config.get("supervisor", {}).get("stall_after_seconds", 300))
     now = datetime.now(timezone.utc)
-    provider_report = load_provider_report(config)
+    provider_report = provider_report or load_provider_report(config)
     changed = retry_due_workers(config, state, provider_report, now) or changed
     workers = state.setdefault("workers", {})
     for run_id, worker in list(workers.items()):
@@ -4161,6 +4198,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                         live_failure_reason,
                         terminal=True,
                         state=state,
+                        provider_report=provider_report,
                     )
                     if reassigned_to:
                         worker["status"] = "reassigned"
@@ -4263,6 +4301,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 failure_reason,
                 terminal=True,
                 state=state,
+                provider_report=provider_report,
             )
             if reassigned_to:
                 worker["status"] = "reassigned"
@@ -8111,7 +8150,7 @@ def run_once(
         changed = bool(expire_provider_pauses(config, state, provider_report)) or changed
     status = load_status(config)
     desired_focus_mode = desired_focus_mode_from_status(status)
-    changed = poll_workers(config, state) or changed
+    changed = poll_workers(config, state, provider_report) or changed
     changed = reconcile_queue_records(config, state) or changed
     reconcile_status_from_git(config, state)
     changed = prune_event_queue(config, state) or changed
@@ -8130,7 +8169,7 @@ def run_once(
         changed = dispatch_underutilization_sidecars(config, state) or changed
         changed = dispatch_underutilization_main_tasks(config, state) or changed
     changed = process_queue(config, state, provider_report) or changed
-    changed = poll_workers(config, state) or changed
+    changed = poll_workers(config, state, provider_report) or changed
     status = load_status(config)
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
