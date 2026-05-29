@@ -129,7 +129,9 @@ describe("IncidentController", () => {
       identity,
     );
 
-    expect(response.data.matchingSuppression?.expiresAt).not.toBe(originalExpiry);
+    expect(response.data.matchingSuppression?.expiresAt).not.toBe(
+      originalExpiry,
+    );
     expect(response.data.availableActions?.[0]).toMatchObject({
       action: "extend_matching_suppression",
       enabled: true,
@@ -137,6 +139,87 @@ describe("IncidentController", () => {
     expect(response.meta).toEqual({
       requestId: "req-incident-extend-001",
       timestamp: expect.any(String),
+    });
+  });
+
+  it("returns the timeline inside the UI read-model list envelope", () => {
+    const { controller, incidentService } = createController();
+
+    const incident = incidentService.createIncident({
+      title: "Timeline envelope incident",
+      description: "Timeline should use the standard read-model list wrapper.",
+      category: "operational",
+      severity: "medium",
+      reportedBy: "ops-user-004",
+    });
+
+    const response = controller.getTimeline(
+      incident.incidentId,
+      "req-incident-timeline-001",
+    );
+
+    expect(response).toEqual({
+      data: {
+        items: [
+          expect.objectContaining({
+            incidentId: incident.incidentId,
+            action: "incident_created",
+          }),
+        ],
+        refresh: {
+          generatedAt: expect.any(String),
+          staleAfterMs: 15_000,
+          dataFreshness: "fresh",
+          source: "live",
+        },
+      },
+      meta: {
+        requestId: "req-incident-timeline-001",
+        timestamp: expect.any(String),
+      },
+    });
+  });
+
+  it("returns service recovery actions inside the UI read-model list envelope", () => {
+    const { controller, incidentService } = createController();
+
+    const incident = incidentService.createIncident({
+      title: "Service recovery envelope incident",
+      description: "Service recovery should use the standard list wrapper.",
+      category: "operational",
+      severity: "high",
+      reportedBy: "ops-user-005",
+    });
+    incidentService.recordServiceRecoveryAction(incident.incidentId, {
+      actionType: "voucher_issued",
+      note: "Issued make-good voucher.",
+      actor: "ops-user-005",
+    });
+
+    const response = controller.getServiceRecoveryActions(
+      incident.incidentId,
+      "req-incident-recovery-001",
+    );
+
+    expect(response).toEqual({
+      data: {
+        items: [
+          expect.objectContaining({
+            incidentId: incident.incidentId,
+            actionType: "voucher_issued",
+          }),
+        ],
+        refresh: {
+          generatedAt: expect.any(String),
+          staleAfterMs: 15_000,
+          dataFreshness: "fresh",
+          source: "live",
+        },
+      },
+      meta: {
+        requestId: "req-incident-recovery-001",
+        timestamp: expect.any(String),
+      },
     });
   });
 });

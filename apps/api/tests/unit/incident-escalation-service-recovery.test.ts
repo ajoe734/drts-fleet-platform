@@ -66,7 +66,9 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
 
       const timeline = incidentService.getTimeline(incident.incidentId);
       expect(
-        timeline.some((entry) => entry.action === "matching_suppression_lifted"),
+        timeline.some(
+          (entry) => entry.action === "matching_suppression_lifted",
+        ),
       ).toBe(true);
     });
 
@@ -155,6 +157,85 @@ describe("Incident escalation, service recovery, and dispatch-exception handoff"
           {
             reason: "Dispatcher attempted extension.",
             extendByHours: 4,
+          },
+          identity,
+        ),
+      ).toThrowError(ApiRequestError);
+    });
+
+    it("supports explicit future expiresAt for ops_manager extension", () => {
+      const { incidentService } = createServices();
+
+      const identity = {
+        authMode: "bootstrap_headers" as const,
+        actorType: "ops_user" as const,
+        actorId: "ops-manager-002",
+        realm: "ops" as const,
+        tenantId: null,
+        roleFamilies: ["ops"] as const,
+        roles: ["ops_manager"],
+        scopes: ["incident:write"],
+        requestId: "req-ops-manager-002",
+      };
+
+      const incident = incidentService.createIncident({
+        title: "Absolute expiry extension",
+        description: "Manager sets a specific suppression expiry.",
+        category: "safety",
+        severity: "high",
+        reportedBy: "ops-user-006",
+        relatedDriverId: "DRV-104",
+      });
+
+      const expiresAt = new Date(
+        Date.now() + 48 * 60 * 60 * 1000,
+      ).toISOString();
+      const updated = incidentService.extendMatchingSuppression(
+        incident.incidentId,
+        {
+          reason: "Compliance review scheduled.",
+          expiresAt,
+        },
+        identity,
+      );
+
+      expect(updated.matchingSuppression?.expiresAt).toBe(expiresAt);
+    });
+
+    it("rejects suppression extension after the incident resolves and lift occurs", () => {
+      const { incidentService } = createServices();
+
+      const identity = {
+        authMode: "bootstrap_headers" as const,
+        actorType: "ops_user" as const,
+        actorId: "ops-manager-003",
+        realm: "ops" as const,
+        tenantId: null,
+        roleFamilies: ["ops"] as const,
+        roles: ["ops_manager"],
+        scopes: ["incident:write"],
+        requestId: "req-ops-manager-003",
+      };
+
+      const incident = incidentService.createIncident({
+        title: "Resolved incident suppression",
+        description: "Resolved incidents should not allow new extensions.",
+        category: "operational",
+        severity: "medium",
+        reportedBy: "ops-user-007",
+        relatedDriverId: "DRV-105",
+      });
+
+      incidentService.updateIncident(incident.incidentId, {
+        status: "resolved",
+      });
+
+      expect(() =>
+        incidentService.extendMatchingSuppression(
+          incident.incidentId,
+          {
+            reason: "Should fail after resolution.",
+            extendByHours: 2,
           },
           identity,
         ),
