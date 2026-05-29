@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
-  confirmDangerAction: vi.fn(),
   isFeatureEnabled: vi.fn(),
   listUnifiedDriverTasks: vi.fn(),
   listDriverTasks: vi.fn(),
   createIncident: vi.fn(),
   updateIncident: vi.fn(),
+  localSearchParams: {} as Record<string, string | undefined>,
 }));
 
 vi.mock("react-native", () => ({
@@ -24,6 +24,7 @@ vi.mock("expo-router", () => ({
   useRouter: () => ({
     replace: mocks.replace,
   }),
+  useLocalSearchParams: () => mocks.localSearchParams,
 }));
 
 vi.mock("@/components/ui/ActionButton", () => ({
@@ -61,13 +62,14 @@ vi.mock("@/components/ui/PageHeader", () => ({
     React.createElement("PageHeader", props),
 }));
 
+vi.mock("@/components/ui/PlatformBadge", () => ({
+  PlatformBadge: (props: Record<string, unknown>) =>
+    React.createElement("PlatformBadge", props),
+}));
+
 vi.mock("@/components/ui/StatusChip", () => ({
   StatusChip: (props: Record<string, unknown>) =>
     React.createElement("StatusChip", props),
-}));
-
-vi.mock("@/components/ui/confirm-danger-action", () => ({
-  confirmDangerAction: mocks.confirmDangerAction,
 }));
 
 vi.mock("@/lib/api-client", () => ({
@@ -104,7 +106,6 @@ function findLongPressButton(renderer: any) {
 describe("IncidentScreen", () => {
   beforeEach(() => {
     mocks.replace.mockReset();
-    mocks.confirmDangerAction.mockReset();
     mocks.isFeatureEnabled.mockReset().mockResolvedValue(true);
     mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
     mocks.listDriverTasks.mockReset().mockResolvedValue([]);
@@ -112,9 +113,10 @@ describe("IncidentScreen", () => {
       .mockReset()
       .mockResolvedValue({ incidentId: "INC-001" });
     mocks.updateIncident.mockReset().mockResolvedValue(undefined);
+    mocks.localSearchParams = {};
   });
 
-  it("requires long press plus confirmation before creating a critical SOS incident", async () => {
+  it("requires a 2-second long press before creating a critical SOS incident", async () => {
     let renderer: any;
 
     await act(async () => {
@@ -135,28 +137,11 @@ describe("IncidentScreen", () => {
       findLongPressButton(renderer).props.onPress();
     });
 
-    expect(mocks.confirmDangerAction).not.toHaveBeenCalled();
     expect(mocks.createIncident).not.toHaveBeenCalled();
+    expect(findLongPressButton(renderer).props.delayLongPress).toBe(2000);
 
     await act(async () => {
       findLongPressButton(renderer).props.onLongPress();
-    });
-
-    expect(mocks.confirmDangerAction).toHaveBeenCalledTimes(1);
-
-    const options = mocks.confirmDangerAction.mock.calls[0]?.[0] as {
-      title: string;
-      confirmLabel: string;
-      cancelLabel: string;
-      onConfirm: () => void;
-    };
-
-    expect(options.title).toBe("確認送出 SOS");
-    expect(options.confirmLabel).toBe("確認送出");
-    expect(options.cancelLabel).toBe("取消");
-
-    await act(async () => {
-      options.onConfirm();
       await flushEffects();
     });
 
@@ -171,6 +156,21 @@ describe("IncidentScreen", () => {
       escalationTarget: "safety_officer",
     });
     expect(mocks.replace).toHaveBeenCalledWith("/trip");
+  });
+
+  it("renders a distinct driver_not_eligible empty state", async () => {
+    mocks.localSearchParams = { emptyReason: "driver_not_eligible" };
+
+    let renderer: any;
+
+    await act(async () => {
+      renderer = create(React.createElement(IncidentScreen));
+      await flushEffects();
+    });
+
+    const emptyState = renderer.root.findByType("EmptyState");
+    expect(emptyState.props.title).toBe("目前狀態不可送出 SOS");
+    expect(emptyState.props.description).toContain("司機資格");
   });
 
   it("preserves forwarded task context in the SOS incident payload", async () => {
@@ -210,14 +210,6 @@ describe("IncidentScreen", () => {
 
     await act(async () => {
       findLongPressButton(renderer).props.onLongPress();
-    });
-
-    const options = mocks.confirmDangerAction.mock.calls[0]?.[0] as {
-      onConfirm: () => void;
-    };
-
-    await act(async () => {
-      options.onConfirm();
       await flushEffects();
     });
 
