@@ -36,11 +36,16 @@ export class ReportingFilingController {
   @RequireRealms("platform", "ops")
   createReportJob(
     @Body() command: CreateReportJobCommand,
-    @CurrentIdentity() _identity: BootstrapRequestIdentity | null,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.reportingFilingService.createReportJob(command, requestId),
+      this.reportingFilingService.createReportJob(
+        command,
+        requestId,
+        undefined,
+        identity,
+      ),
       requestId,
     );
   }
@@ -49,7 +54,7 @@ export class ReportingFilingController {
   @RequireRealms("tenant", "platform", "ops")
   createTenantReportJob(
     @Body() command: CreateReportJobCommand,
-    @CurrentIdentity() _identity: BootstrapRequestIdentity | null,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -58,6 +63,7 @@ export class ReportingFilingController {
         command,
         requestId,
         this.requireTenantId(tenantId),
+        identity,
       ),
       requestId,
     );
@@ -127,11 +133,15 @@ export class ReportingFilingController {
   @RequireRealms("platform", "ops")
   generateFilingPackage(
     @Body() command: GenerateFilingPackageCommand,
-    @CurrentIdentity() _identity: BootstrapRequestIdentity | null,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.reportingFilingService.generateFilingPackage(command, requestId),
+      this.reportingFilingService.generateFilingPackage(
+        command,
+        requestId,
+        identity,
+      ),
       requestId,
     );
   }
