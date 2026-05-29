@@ -1,6 +1,12 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-import type { ResourceActionDescriptor } from "./ui-runtime";
+import type {
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -1403,7 +1409,6 @@ export interface OpsPendingApprovalRequestRecord extends TenantBookingApprovalRe
   opsSlaAcknowledgedAt: string | null;
   opsSlaAcknowledgedByActorId: string | null;
   opsSlaAcknowledgedByActorType: IdentityContext["actorType"] | null;
-  availableActions: ResourceActionDescriptor[];
 }
 
 export interface ListTenantBookingApprovalRequestsQuery {
@@ -4589,6 +4594,19 @@ export interface PlatformAdminTenantRecord {
   updatedAt: string;
 }
 
+export interface PlatformAdminTenantListItem extends PlatformAdminTenantRecord {
+  availableActions: ResourceActionDescriptor[];
+  operationalViewLink: CrossAppResourceLink | null;
+}
+
+export interface PlatformAdminTenantListResponse {
+  items: PlatformAdminTenantListItem[];
+  availableActions: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  refresh: UiRefreshMetadata;
+  refreshTier: RefreshTier;
+}
+
 export interface PlatformTenantGovernanceSummaryQuery {
   page?: number;
   pageSize?: number;
@@ -4639,6 +4657,10 @@ export interface UpdatePlatformTenantOnboardingCommand {
 export interface SetPlatformTenantRolloutStageCommand {
   stage: PlatformTenantRolloutStage;
   notes?: string | null;
+}
+
+export interface PlatformTenantLifecycleActionCommand {
+  reason?: string;
 }
 
 export interface InviteTenantRoleCommand {

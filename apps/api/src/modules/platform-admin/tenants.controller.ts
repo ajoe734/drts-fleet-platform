@@ -4,6 +4,8 @@ import type {
   AcknowledgeTenantRoleCommand,
   CreatePlatformTenantCommand,
   InviteTenantRoleCommand,
+  PlatformAdminTenantListResponse,
+  PlatformTenantLifecycleActionCommand,
   SetPlatformTenantRolloutStageCommand,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
@@ -11,7 +13,6 @@ import type {
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { TenantsService } from "./tenants.service";
-import type { TenantSummary } from "./tenants.service";
 
 @Controller("platform-admin")
 export class TenantsController {
@@ -19,8 +20,8 @@ export class TenantsController {
 
   @Get("tenants")
   list(@Headers("x-request-id") requestId?: string) {
-    const items: TenantSummary[] = this.tenants.list();
-    return toApiSuccessEnvelope({ items }, requestId);
+    const roster: PlatformAdminTenantListResponse = this.tenants.listRoster();
+    return toApiSuccessEnvelope(roster, requestId);
   }
 
   @Post("tenants")
@@ -93,27 +94,30 @@ export class TenantsController {
   @Post("tenants/:tenantId/rollback-hold")
   rollbackHold(
     @Param("tenantId") tenantId: string,
+    @Body() body: PlatformTenantLifecycleActionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setRollbackHold(tenantId, requestId);
+    const updated = this.tenants.setRollbackHold(tenantId, body, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/suspend")
   suspend(
     @Param("tenantId") tenantId: string,
+    @Body() body: PlatformTenantLifecycleActionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setStatus(tenantId, "paused", requestId);
+    const updated = this.tenants.setStatus(tenantId, "paused", body, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/activate")
   activate(
     @Param("tenantId") tenantId: string,
+    @Body() body: PlatformTenantLifecycleActionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setStatus(tenantId, "active", requestId);
+    const updated = this.tenants.setStatus(tenantId, "active", body, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 }
