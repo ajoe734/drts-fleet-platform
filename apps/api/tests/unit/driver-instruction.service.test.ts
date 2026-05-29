@@ -210,6 +210,71 @@ describe("DriverInstructionService", () => {
     );
   });
 
+  it("rejects null bodies and non-string create fields without throwing runtime errors", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new DriverInstructionService(auditNotificationService);
+
+    await expect(
+      service.createInstruction(null as never, OPS_IDENTITY),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "INVALID_DRIVER_OPS_INSTRUCTION",
+            details: { field: "driverId" },
+          }),
+        }),
+      }),
+    );
+
+    await expect(
+      service.createInstruction(
+        createCommand({ taskId: 123 as never }),
+        OPS_IDENTITY,
+      ),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "INVALID_DRIVER_OPS_INSTRUCTION",
+            details: { field: "taskId" },
+          }),
+        }),
+      }),
+    );
+
+    await expect(
+      service.createInstruction(
+        createCommand({ message: { text: "Call dispatch" } as never }),
+        OPS_IDENTITY,
+      ),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "INVALID_DRIVER_OPS_INSTRUCTION",
+            details: { field: "message" },
+          }),
+        }),
+      }),
+    );
+
+    await expect(
+      service.createInstruction(
+        createCommand({ expiresAt: 123 as never }),
+        OPS_IDENTITY,
+      ),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "INVALID_DRIVER_OPS_INSTRUCTION_EXPIRY",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("waits for durable create persistence before exposing the instruction", async () => {
     const auditNotificationService = new AuditNotificationService();
     const deferred = createDeferred();
@@ -392,5 +457,25 @@ describe("DriverInstructionService", () => {
     } finally {
       Date.now = originalDateNow;
     }
+  });
+
+  it("rejects non-string task filters instead of throwing from trim", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new DriverInstructionService(auditNotificationService);
+
+    await service.createInstruction(createCommand(), OPS_IDENTITY);
+
+    expect(() =>
+      service.listInstructionsForDriver(DRIVER_IDENTITY, ["task-001"] as never),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "INVALID_DRIVER_OPS_INSTRUCTION",
+            details: { field: "taskId" },
+          }),
+        }),
+      }),
+    );
   });
 });

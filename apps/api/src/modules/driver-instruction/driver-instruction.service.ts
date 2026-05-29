@@ -58,11 +58,15 @@ export class DriverInstructionService implements OnModuleInit {
     requestId?: string,
   ): Promise<DriverOpsInstruction> {
     const actor = this.requireOpsIdentity(identity);
-    const driverId = this.requireText("driverId", command.driverId);
-    const taskId = this.requireText("taskId", command.taskId);
-    const message = this.requireText("message", command.message);
+    const normalizedCommand = this.requireCommand(command);
+    const driverId = this.requireText("driverId", normalizedCommand.driverId);
+    const taskId = this.requireText("taskId", normalizedCommand.taskId);
+    const message = this.requireText("message", normalizedCommand.message);
     const issuedAt = new Date().toISOString();
-    const expiresAt = this.normalizeExpiry(command.expiresAt, issuedAt);
+    const expiresAt = this.normalizeExpiry(
+      normalizedCommand.expiresAt,
+      issuedAt,
+    );
 
     const instruction: PersistedDriverInstructionRecord = {
       instructionId: `drvinst-${randomUUID()}`,
@@ -124,7 +128,7 @@ export class DriverInstructionService implements OnModuleInit {
     taskId?: string,
   ): DriverOpsInstruction[] {
     const actor = this.requireDriverIdentity(identity);
-    const normalizedTaskId = taskId?.trim();
+    const normalizedTaskId = this.normalizeOptionalTaskId(taskId);
     const now = Date.now();
 
     return [...this.instructions.values()]
@@ -246,6 +250,19 @@ export class DriverInstructionService implements OnModuleInit {
     return identity;
   }
 
+  private requireCommand(command: unknown) {
+    if (!command || typeof command !== "object") {
+      throw new ApiRequestError(
+        400,
+        "INVALID_DRIVER_OPS_INSTRUCTION",
+        "driverId is required.",
+        { field: "driverId" },
+      );
+    }
+
+    return command as Partial<CreateDriverOpsInstructionCommand>;
+  }
+
   private requireText(field: string, value: unknown) {
     if (typeof value !== "string") {
       throw new ApiRequestError(
@@ -267,6 +284,24 @@ export class DriverInstructionService implements OnModuleInit {
     }
 
     return normalized;
+  }
+
+  private normalizeOptionalTaskId(taskId: unknown) {
+    if (taskId == null) {
+      return undefined;
+    }
+
+    if (typeof taskId !== "string") {
+      throw new ApiRequestError(
+        400,
+        "INVALID_DRIVER_OPS_INSTRUCTION",
+        "taskId must be a string.",
+        { field: "taskId" },
+      );
+    }
+
+    const normalized = taskId.trim();
+    return normalized || undefined;
   }
 
   private normalizeExpiry(expiresAt: unknown, issuedAt: string) {
