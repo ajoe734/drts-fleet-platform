@@ -6589,5 +6589,98 @@ class PruneDoneHandoffsTests(unittest.TestCase):
         self.assertEqual(s["handoffs"], "not-a-list")  # unchanged
 
 
+class PruneDoneTasksTests(unittest.TestCase):
+    """`prune_done_tasks` bounds ai-status.json's tasks array.
+
+    Without this prune the array accumulated 646 done tasks / ~1.0 MB by the
+    2026-05-30 incident, pushing ai-status.json past the 256 KB cap the
+    chair/coordination worker's Read tool enforces. See
+    feedback_ai_status_handoff_bloat.
+    """
+
+    def test_noop_under_keep_threshold(self) -> None:
+        s = {"tasks": [{"id": f"D{i}", "status": "done"} for i in range(100)]}
+        supervisor.prune_done_tasks(s, keep=150)
+        self.assertEqual(len(s["tasks"]), 100)
+        self.assertNotIn("archived_task_ids", s)
+
+    def test_active_tasks_always_preserved(self) -> None:
+        tasks = (
+            [{"id": f"D{i}", "status": "done"} for i in range(2000)]
+            + [{"id": f"A{i}", "status": "in_progress"} for i in range(5)]
+            + [{"id": f"B{i}", "status": "todo"} for i in range(5)]
+        )
+        s = {"tasks": list(tasks)}
+        supervisor.prune_done_tasks(s, keep=10)
+        statuses = [t["status"] for t in s["tasks"]]
+        self.assertEqual(statuses.count("in_progress"), 5)
+        self.assertEqual(statuses.count("todo"), 5)
+        self.assertEqual(statuses.count("done"), 10, "only the last `keep` done tasks survive")
+
+    def test_keeps_most_recent_done_and_preserves_order(self) -> None:
+        # Interleave active + done; prune must keep the done *tail* and leave the
+        # relative order of surviving entries intact.
+        tasks = []
+        for i in range(1000):
+            tasks.append({"id": f"T{i}", "status": "done"})
+            if i % 100 == 0:
+                tasks.append({"id": f"ACT{i}", "status": "todo"})
+        s = {"tasks": list(tasks)}
+        supervisor.prune_done_tasks(s, keep=3)
+        done_ids = [t["id"] for t in s["tasks"] if t["status"] == "done"]
+        self.assertEqual(done_ids, ["T997", "T998", "T999"])
+        # all active survive, in original order
+        active_ids = [t["id"] for t in s["tasks"] if t["status"] == "todo"]
+        self.assertEqual(active_ids, [f"ACT{i}" for i in range(0, 1000, 100)])
+
+    def test_dropped_ids_recorded_in_archive_without_duplicates(self) -> None:
+        s = {
+            "tasks": [{"id": f"D{i}", "status": "done"} for i in range(10)],
+            "archived_task_ids": ["D0"],  # already archived once
+        }
+        supervisor.prune_done_tasks(s, keep=3)
+        # D0..D6 dropped; D0 not duplicated; recent D7..D9 kept in tasks.
+        self.assertEqual([t["id"] for t in s["tasks"]], ["D7", "D8", "D9"])
+        self.assertEqual(s["archived_task_ids"].count("D0"), 1)
+        for i in range(7):
+            self.assertIn(f"D{i}", s["archived_task_ids"])
+
+    def test_missing_and_non_list_tasks_are_safe(self) -> None:
+        empty: dict = {}
+        supervisor.prune_done_tasks(empty, keep=150)
+        self.assertNotIn("tasks", empty)
+        bad = {"tasks": "not-a-list"}
+        supervisor.prune_done_tasks(bad, keep=150)
+        self.assertEqual(bad["tasks"], "not-a-list")
+
+
+class PruneBlockersTests(unittest.TestCase):
+    """`prune_blockers` keeps every open blocker plus the recent resolved tail."""
+
+    def test_open_blockers_always_preserved(self) -> None:
+        blockers = (
+            [{"task_id": f"R{i}", "status": "resolved"} for i in range(500)]
+            + [{"task_id": "OPEN1", "status": "open"}]
+        )
+        s = {"blockers": list(blockers)}
+        supervisor.prune_blockers(s, keep=10)
+        statuses = [b["status"] for b in s["blockers"]]
+        self.assertEqual(statuses.count("open"), 1, "open blockers must survive prune")
+        self.assertEqual(statuses.count("resolved"), 10)
+
+    def test_keeps_most_recent_resolved(self) -> None:
+        s = {"blockers": [{"task_id": f"R{i}", "status": "resolved"} for i in range(100)]}
+        supervisor.prune_blockers(s, keep=2)
+        self.assertEqual([b["task_id"] for b in s["blockers"]], ["R98", "R99"])
+
+    def test_noop_under_threshold_and_safe_on_bad_input(self) -> None:
+        s = {"blockers": [{"status": "resolved"}] * 5}
+        supervisor.prune_blockers(s, keep=100)
+        self.assertEqual(len(s["blockers"]), 5)
+        empty: dict = {}
+        supervisor.prune_blockers(empty, keep=100)  # must not raise
+        self.assertNotIn("blockers", empty)
+
+
 if __name__ == "__main__":
     unittest.main()
