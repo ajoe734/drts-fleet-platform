@@ -550,8 +550,7 @@ export default async function ContractDetailPage({
 
   const timelineItems = buildVersionTimeline(versionHistory, locale);
 
-  const versionHistoryEmptyReason: EmptyReason =
-    versionHistory.length === 0 ? "no_data" : "no_data";
+  const versionHistoryEmptyReason: EmptyReason = "no_data";
 
   return (
     <>
