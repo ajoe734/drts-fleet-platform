@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type {
   AddressPayload,
-  BookingRecord,
   CreateTenantBookingCommand,
   PassengerProfile,
 } from "@drts/contracts";
@@ -169,14 +168,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const client = buildPartnerClient(session);
-    const response = (await client.createTenantBooking(command)) as
-      | BookingRecord
-      | { booking?: BookingRecord };
-
-    const booking =
-      response && typeof response === "object" && "bookingId" in response
-        ? (response as BookingRecord)
-        : (response as { booking?: BookingRecord }).booking;
+    // Q-TEN04 — unwrap the TenantBookingCommandResult envelope; its top-level
+    // `bookingId` must not be mistaken for a BookingRecord.
+    const result = await client.createTenantBooking(command);
+    const booking = result.booking;
 
     if (!booking) {
       return NextResponse.json(

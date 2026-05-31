@@ -256,15 +256,11 @@ export async function createPartnerBooking(
   session: PartnerSessionRecord,
   command: CreateTenantBookingCommand,
 ): Promise<BookingRecord> {
-  const response = (await getAuthorityClient(session).createTenantBooking(
-    command,
-  )) as BookingRecord | { booking?: BookingRecord };
-
-  if (response && typeof response === "object" && "bookingId" in response) {
-    return response as BookingRecord;
-  }
-
-  const booking = (response as { booking?: BookingRecord }).booking;
+  // Q-TEN04 — createTenantBooking resolves to a TenantBookingCommandResult
+  // envelope whose top-level `bookingId` is not a BookingRecord; unwrap the
+  // nested `.booking` record instead.
+  const result = await getAuthorityClient(session).createTenantBooking(command);
+  const booking = result.booking;
   if (!booking) {
     throw new Error("Backend did not return a booking record.");
   }

@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import type {
-  BookingRecord,
-  CreateTenantBookingCommand,
-} from "@drts/contracts";
+import type { CreateTenantBookingCommand } from "@drts/contracts";
 import { createTenantClient } from "@drts/api-client";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
 
@@ -10,14 +7,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as CreateTenantBookingCommand;
     const client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
-    const response = (await client.createTenantBooking(body)) as
-      | BookingRecord
-      | { booking?: BookingRecord };
-
-    const booking =
-      response && typeof response === "object" && "bookingId" in response
-        ? (response as BookingRecord)
-        : (response as { booking?: BookingRecord }).booking;
+    // Q-TEN04 — createTenantBooking resolves to a TenantBookingCommandResult
+    // envelope ({ commandId, command, status, bookingId, booking }). The
+    // envelope carries a top-level `bookingId`, so it must be unwrapped via
+    // `.booking` rather than treated as a BookingRecord itself.
+    const result = await client.createTenantBooking(body);
+    const booking = result.booking;
 
     if (!booking) {
       return NextResponse.json(
