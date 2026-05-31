@@ -118,7 +118,8 @@ export class TenantsService implements OnModuleInit {
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
-    private readonly tenantRolloutService: TenantRolloutService,
+    @Optional()
+    private readonly tenantRolloutService: TenantRolloutService = new TenantRolloutService(),
     @Optional()
     private readonly platformAdminRepository?: PlatformAdminRepository,
   ) {
