@@ -4990,6 +4990,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         ].join(" "),
         status: "unread",
       });
+      this.auditNotificationService.emitUserNotification({
+        recipientRealm: "tenant",
+        tenantId: endpoint.tenantId,
+        severity: "warning",
+        eventType: "webhook.delivery_failed",
+        title: "Webhook delivery failed",
+        message: [
+          `Endpoint ${endpoint.webhookId} (${endpoint.url})`,
+          `failed ${result.attempt} attempts for ${delivery.eventType}`,
+          `and was disabled pending revalidation.`,
+        ].join(" "),
+      });
       this.recordTenantAudit({
         actorId: null,
         actorType: "system",
@@ -6737,14 +6749,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private async recordOpsApprovalDecision(input: {
     approvalRequestId: string;
     actorId: string;
-    actorType: Extract<AuditLogRecord["actorType"], "ops_user" | "platform_admin">;
+    actorType: Extract<
+      AuditLogRecord["actorType"],
+      "ops_user" | "platform_admin"
+    >;
     actorRoleCode: string | null;
     decision: "approve" | "reject";
     reasonCode: string | null;
     reasonNote: string | null;
     requestId?: string;
   }) {
-    const request = this.requirePendingApprovalRequestById(input.approvalRequestId);
+    const request = this.requirePendingApprovalRequestById(
+      input.approvalRequestId,
+    );
     const decidedAt = new Date().toISOString();
     const decision: TenantBookingApprovalDecisionRecord = {
       decisionId: `approval-decision-${randomUUID()}`,

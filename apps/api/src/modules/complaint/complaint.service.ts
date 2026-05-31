@@ -531,6 +531,13 @@ export class ComplaintService implements OnModuleInit {
       message: `Complaint ${caseNo} exceeded SLA due at ${complaintCase.slaDueAt}.`,
       status: "unread",
     });
+    this.auditNotificationService.emitUserNotification({
+      recipientRealm: "ops",
+      severity: "warning",
+      eventType: "complaint.sla_breached",
+      title: "Complaint SLA breached",
+      message: `Complaint ${caseNo} exceeded SLA due at ${complaintCase.slaDueAt}.`,
+    });
     this.recordAudit(
       {
         actorId: null,

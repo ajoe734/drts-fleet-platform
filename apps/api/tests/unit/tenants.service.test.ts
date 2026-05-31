@@ -19,6 +19,7 @@ function expectApiError(fn: () => unknown, errorCode: string) {
 function createService() {
   const auditNotificationService = {
     recordAuditLog: vi.fn(),
+    emitUserNotification: vi.fn(),
   };
   const platformAdminRepository = {
     loadState: vi.fn().mockResolvedValue({
@@ -323,6 +324,12 @@ describe("TenantsService", () => {
     expect(held.rollout.productionStatus).toBe("blocked");
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ actionName: "set_tenant_rollback_hold" }),
+    );
+    expect(auditNotificationService.emitUserNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientRealm: "platform",
+        eventType: "tenant.rollback_hold.enabled",
+      }),
     );
   });
 

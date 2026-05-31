@@ -211,6 +211,7 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
+    this.emitCriticalIncidentNotification(incident);
 
     return this.cloneIncident(decorated);
   }
@@ -558,6 +559,7 @@ export class IncidentService implements OnModuleInit {
       },
       requestId,
     );
+    this.emitCriticalIncidentNotification(incident);
 
     return this.cloneIncident(decorated);
   }
@@ -1038,6 +1040,20 @@ export class IncidentService implements OnModuleInit {
       default:
         return fallback;
     }
+  }
+
+  private emitCriticalIncidentNotification(incident: IncidentRecord) {
+    if (incident.severity !== "critical") {
+      return;
+    }
+
+    this.auditNotificationService.emitUserNotification({
+      recipientRealm: "ops",
+      severity: "critical",
+      eventType: "incident.critical.created",
+      title: "Critical incident created",
+      message: `${incident.title} requires immediate ops triage.`,
+    });
   }
 
   private persist(

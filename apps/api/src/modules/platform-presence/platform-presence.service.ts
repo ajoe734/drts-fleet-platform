@@ -8,6 +8,7 @@ import type {
   PlatformPresenceSummary,
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { ForwarderService } from "../forwarder/forwarder.service";
 import { PlatformPresenceRepository } from "./platform-presence.repository";
 
@@ -25,6 +26,8 @@ export class PlatformPresenceService {
   constructor(
     @Optional() private readonly repo?: PlatformPresenceRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   private dbEnabled(): boolean {
@@ -83,10 +86,13 @@ export class PlatformPresenceService {
     };
 
     if (this.dbEnabled()) {
-      return this.repo!.upsert(record);
+      const persisted = await this.repo!.upsert(record);
+      this.emitReauthRequiredNotificationIfNeeded(persisted);
+      return persisted;
     }
     const bucket = this.getMemoryBucket(driverId);
     bucket.set(platformCode, record);
+    this.emitReauthRequiredNotificationIfNeeded(record);
     return record;
   }
 
@@ -187,5 +193,22 @@ export class PlatformPresenceService {
         "可使用 POST /api/platform-presence/online 或 /api/platform-presence/offline 更新單一平台的綁定、上下線與重新驗證狀態。",
       ],
     };
+  }
+
+  private emitReauthRequiredNotificationIfNeeded(
+    record: PlatformPresenceRecord,
+  ) {
+    if (!record.reauthRequired || !this.auditNotificationService) {
+      return;
+    }
+
+    this.auditNotificationService.emitUserNotification({
+      recipientActorId: record.driverId,
+      recipientRealm: "driver",
+      severity: "warning",
+      eventType: "driver.platform.reauth_required",
+      title: "Platform re-authentication required",
+      message: `${record.platformCode} requires re-authentication before the token expires.`,
+    });
   }
 }

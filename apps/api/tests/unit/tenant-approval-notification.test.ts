@@ -152,4 +152,53 @@ describe("tenant approval notification fan-out", () => {
     expect(newRequestEmails).toHaveLength(1);
     expect(newRequestEmails[0]?.recipientUserId).toBe("tenant-user-demo-001");
   });
+
+  it("maps approval lifecycle notifications into the Q-X06 inbox taxonomy", async () => {
+    const { auditNotificationService } = createHarness();
+    const templateKeys = [
+      "new_request",
+      "approaching_timeout",
+      "escalated",
+      "approved",
+      "rejected",
+    ] as const;
+
+    for (const [index, templateKey] of templateKeys.entries()) {
+      await auditNotificationService.dispatchApprovalNotification({
+        templateKey,
+        tenantId: TENANT_ID,
+        approvalRequestId: `approval-taxonomy-${index}`,
+        bookingId: `booking-taxonomy-${index}`,
+        orderId: `order-taxonomy-${index}`,
+        timeoutAt: "2026-05-30T00:00:00.000Z",
+        recipients: [
+          {
+            userId: "tenant-user-demo-001",
+            email: "tenant.admin@example.com",
+            displayName: "Tenant Admin",
+            approvalNotificationOptOut: false,
+          },
+        ],
+      });
+    }
+
+    expect(
+      auditNotificationService
+        .listUserNotifications({
+          actorType: "tenant_admin",
+          actorId: "tenant-user-demo-001",
+          realm: "tenant",
+          scopes: ["notifications:read"],
+          tenantId: TENANT_ID,
+        })
+        .slice(0, 5)
+        .map((notification) => notification.eventType),
+    ).toEqual([
+      "booking.approval_rejected",
+      "booking.approval_approved",
+      "approval_request.escalated",
+      "approval_request.timeout_warning",
+      "approval_request.created",
+    ]);
+  });
 });

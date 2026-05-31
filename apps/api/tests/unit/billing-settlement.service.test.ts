@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { ForwarderReconciliationIssue } from "@drts/contracts";
+import type {
+  ForwarderReconciliationIssue,
+  IdentityContext,
+} from "@drts/contracts";
 
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
@@ -12,6 +15,14 @@ function createService(forwarderIssues: ForwarderReconciliationIssue[] = []) {
     listReconciliationIssues: () => forwarderIssues,
   } as any);
 }
+
+const TENANT_IDENTITY: IdentityContext = {
+  actorType: "tenant_admin",
+  actorId: "tenant-user-demo-001",
+  realm: "tenant",
+  scopes: ["notifications:read"],
+  tenantId: "tenant-demo-001",
+};
 
 describe("BillingSettlementService settlement matrix", () => {
   it("returns the canonical channel-aware settlement matrix", () => {
@@ -140,6 +151,29 @@ describe("BillingSettlementService settlement matrix", () => {
         }),
       ]),
     );
+  });
+
+  it("emits the Q-X06 invoice.ready notification when a tenant invoice is generated", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new BillingSettlementService(
+      auditNotificationService,
+      undefined,
+      {
+        listReconciliationIssues: () => [],
+      } as any,
+    );
+
+    await service.generateTenantInvoice("tenant-demo-001", {
+      tenantId: "tenant-demo-001",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      periodEnd: "2026-03-31T23:59:59.000Z",
+    });
+
+    expect(
+      auditNotificationService
+        .listUserNotifications(TENANT_IDENTITY)
+        .map((notification) => notification.eventType),
+    ).toContain("invoice.ready");
   });
 
   it("derives forwarder reconciliation issues into the finance queue", () => {

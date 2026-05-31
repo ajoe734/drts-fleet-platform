@@ -45,6 +45,7 @@ import {
   renderApprovalNotificationTemplate,
   type ApprovalNotificationTemplateKey,
 } from "./templates/approval-notification.templates";
+import { NotificationService } from "../notification/notification.service";
 
 const MAX_IN_MEMORY_AUDIT_LOGS = 1000;
 
@@ -123,6 +124,8 @@ export class AuditNotificationService implements OnModuleInit {
     @Optional() private readonly auditLogRepository?: AuditLogRepository,
     @Optional()
     private readonly auditNotificationEmailAdapter: AuditNotificationEmailAdapter = new AuditNotificationEmailAdapter(),
+    @Optional()
+    private readonly notificationService: NotificationService = new NotificationService(),
   ) {
     this.rebuildEvidenceGovernanceState(this.auditLogs);
   }
@@ -148,6 +151,10 @@ export class AuditNotificationService implements OnModuleInit {
 
   listNotifications() {
     return this.notifications.map((notification) => ({ ...notification }));
+  }
+
+  listUserNotifications(identity?: IdentityContext | null) {
+    return this.notificationService.listNotifications(identity);
   }
 
   listEmailDeliveries() {
@@ -267,6 +274,19 @@ export class AuditNotificationService implements OnModuleInit {
         title: zh.title,
         message: `${zh.message}\n${en.message}`,
         status: "unread",
+      });
+      this.notificationService.emit({
+        recipientActorId: recipient.userId,
+        recipientRealm: "tenant",
+        tenantId: input.tenantId,
+        severity:
+          input.templateKey === "approaching_timeout" ||
+          input.templateKey === "escalated"
+            ? "warning"
+            : "info",
+        eventType: this.toApprovalUserNotificationEventType(input.templateKey),
+        title: zh.title,
+        message: `${zh.message}\n${en.message}`,
       });
     }
 
@@ -781,6 +801,10 @@ export class AuditNotificationService implements OnModuleInit {
     };
   }
 
+  emitUserNotification(input: Parameters<NotificationService["emit"]>[0]) {
+    return this.notificationService.emit(input);
+  }
+
   private appendAuditLog(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
       requestId?: string;
@@ -790,6 +814,23 @@ export class AuditNotificationService implements OnModuleInit {
     this.auditLogs = trimAuditLogs([auditLog, ...this.auditLogs]);
     this.persistAuditLog(auditLog);
     return auditLog;
+  }
+
+  private toApprovalUserNotificationEventType(
+    templateKey: ApprovalNotificationTemplateKey,
+  ) {
+    switch (templateKey) {
+      case "new_request":
+        return "approval_request.created";
+      case "approaching_timeout":
+        return "approval_request.timeout_warning";
+      case "escalated":
+        return "approval_request.escalated";
+      case "approved":
+        return "booking.approval_approved";
+      case "rejected":
+        return "booking.approval_rejected";
+    }
   }
 
   private rebuildEvidenceGovernanceState(trail: AuditLogRecord[]) {
