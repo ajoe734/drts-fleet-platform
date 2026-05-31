@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { CSSProperties, ReactNode } from "react";
 import {
   type CSSProperties,
   useDeferredValue,
@@ -10,6 +9,7 @@ import {
   useMemo,
   useState,
   useTransition,
+  type ReactNode,
 } from "react";
 import type {
   CreateIncidentCommand,
@@ -49,12 +49,6 @@ import {
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-
-const theme = buildCanvasTheme({
-  surface: "ops",
-  dark: true,
-  density: "compact",
-});
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -191,13 +185,6 @@ const actionClusterStyle = {
   alignItems: "center",
 };
 
-type IncidentTab = "active" | "resolved" | "closed";
-
-type IncidentTableRow = Record<string, unknown> &
-  IncidentRecord & {
-    _selected?: boolean;
-  };
-
 type IncidentFormInitialValues = {
   title?: string;
   description?: string;
@@ -245,14 +232,6 @@ function formatDateTime(
   })
     .format(new Date(value))
     .replace(",", "");
-}
-
-function formatTableDateTime(value: string | null | undefined) {
-  if (!value) {
-    return "—";
-  }
-
-  return new Date(value).toISOString().slice(0, 16).replace("T", " ");
 }
 
 function formatIncidentAge(
@@ -699,7 +678,9 @@ export default function IncidentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<IncidentTab>("active");
+  const [statusFilter, setStatusFilter] = useState<IncidentStatus | "all">(
+    "all",
+  );
   const [severityFilter, setSeverityFilter] = useState<
     IncidentSeverity | "all"
   >("all");
@@ -1387,19 +1368,7 @@ export default function IncidentsPage() {
   ];
 
   return (
-    <Shell
-      theme={theme}
-      nav={nav}
-      active="incidents"
-      currentPath="/incidents"
-      breadcrumb={[locale === "en" ? "Incidents" : "事故"]}
-      brandLabel="DRTS Fleet"
-      brandSubLabel={locale === "en" ? "Operations Console" : "營運控制台"}
-      brandMark="OC"
-      searchPlaceholder={t("incidents.search")}
-      avatarLabel="OC"
-      style={{ minHeight: "100vh" }}
-    >
+    <>
       <PageHeader
         theme={theme}
         title={t("incidents.title")}
@@ -1888,7 +1857,7 @@ export default function IncidentsPage() {
           </div>
         </div>
       </div>
-    </Shell>
+    </>
   );
 }
 
