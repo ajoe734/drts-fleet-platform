@@ -60,3 +60,4 @@ docs-site/ai-activity-log.jsonl
 docs-site/orchestrator-state.json
 docs/03-runbooks/local-development.local.md
 .local/
+.orchestrator/state-digest.json
