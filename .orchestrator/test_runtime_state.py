@@ -67,5 +67,32 @@ class RuntimeStateMigrationTests(unittest.TestCase):
         self.assertEqual(state["dispatch_pauses"], [])
 
 
+
+class PruneExpiredReassignmentGuardsTests(unittest.TestCase):
+    def test_drops_expired_keeps_future_and_unparseable(self) -> None:
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        past = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+        future = (now + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+        state = {
+            "chair_reassignment_guards": {
+                "T1:reviewer": {"task_id": "T1", "expires_at": past},
+                "T2:owner": {"task_id": "T2", "expires_at": future},
+                "T3:owner": {"task_id": "T3", "expires_at": "not-a-date"},
+                "T4:owner": {"task_id": "T4"},  # missing expires_at
+            }
+        }
+        runtime_state.prune_expired_reassignment_guards(state)
+        self.assertEqual(set(state["chair_reassignment_guards"]), {"T2:owner", "T3:owner", "T4:owner"})
+
+    def test_safe_on_missing_or_empty(self) -> None:
+        empty: dict = {}
+        runtime_state.prune_expired_reassignment_guards(empty)  # must not raise
+        self.assertNotIn("chair_reassignment_guards", empty)
+        state = {"chair_reassignment_guards": {}}
+        runtime_state.prune_expired_reassignment_guards(state)
+        self.assertEqual(state["chair_reassignment_guards"], {})
+
+
 if __name__ == "__main__":
     unittest.main()
