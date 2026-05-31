@@ -274,7 +274,7 @@ export class TenantRolloutService {
   }
 
   private resolveLegacyGateStatus(tenant: PersistedTenantRolloutRecord) {
-    const stage = tenant.status === "rollback_hold" ? tenant.rollout.stage : tenant.rollout.stage;
+    const stage = tenant.rollout.stage;
     if (tenant.status === "rollback_hold") {
       return tenant.rollout.productionStatus;
     }
