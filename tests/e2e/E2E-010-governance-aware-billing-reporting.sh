@@ -170,19 +170,27 @@ jq -n \
 
 http_call POST "/tenant/bookings/commands/create" "$BOOKING_FIXTURE"
 assert_status "200|201"
-# Command pattern (UI-BE-007-BKG): create returns a TenantBookingCommandResult
-# under `.data`; the legacy flat fields are namespaced under booking/approval.
-BOOKING_ID=$(json_get '.data.booking.bookingId')
-APPROVAL_REQUEST_ID=$(json_get '.data.approval.requestId')
-APPROVAL_EVAL_ID=$(json_get '.data.approval.evaluationId')
-APPROVAL_STATE=$(json_get '.data.approval.state')
+# Command pattern (UI-BE-007-BKG / Q-TEN04): create returns a
+# TenantBookingCommandResult under `.data`. The booking id stays top-level
+# (`.data.bookingId`); approval state + request ids now live on the embedded
+# BookingRecord (`.data.booking.approvalState`, `.data.booking.approvalRequestIds[]`).
+# There is no longer a per-command approvalEvaluationId — the evaluation id is
+# emitted only by the downstream billing verification body (asserted at step 7).
+COMMAND_STATUS=$(json_get '.data.status')
+PENDING_REASON=$(json_get '.data.pendingReasonCode')
+BOOKING_ID=$(json_get_first '.data.bookingId' '.data.booking.bookingId')
+APPROVAL_STATE=$(json_get_first '.data.booking.approvalState' '.data.approvalState')
+APPROVAL_REQUEST_ID=$(echo "$RESP_BODY" | jq -r '.data.booking.approvalRequestIds[0] // empty')
+[[ "$COMMAND_STATUS" == "accepted" && "$PENDING_REASON" == "approval_required" ]] || {
+  log_fail "expected accepted+approval_required command envelope; got status='$COMMAND_STATUS' reason='$PENDING_REASON'"
+  exit 1
+}
 [[ -n "$BOOKING_ID" && -n "$APPROVAL_REQUEST_ID" ]] || {
-  log_fail "booking did not enter approval; missing bookingId/approvalRequestId"
+  log_fail "booking did not enter approval; missing bookingId/approvalRequestIds[0]"
   exit 1
 }
 chain_set "$SCENARIO" "booking.id" "$BOOKING_ID"
 chain_set "$SCENARIO" "booking.approvalRequestId" "$APPROVAL_REQUEST_ID"
-chain_set "$SCENARIO" "booking.approvalEvaluationId" "$APPROVAL_EVAL_ID"
 log_ok "booking $BOOKING_ID created; approval queued ($APPROVAL_REQUEST_ID), state=$APPROVAL_STATE"
 
 log_step "2. Approve booking"
