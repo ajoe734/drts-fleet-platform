@@ -514,9 +514,11 @@ function fallbackPackageActions(
       openMode: "new_tab",
     });
   } else if (filingPackage.artifactZipUrl) {
+    const zipExpired = isExpired(filingPackage.expiresAt);
     actions.push({
       action: "download_zip",
-      enabled: true,
+      enabled: !zipExpired,
+      ...(zipExpired ? { disabledReasonCode: "artifact_expired" } : {}),
       riskLevel: "low",
       href: filingPackage.artifactZipUrl,
       openMode: "new_tab",
