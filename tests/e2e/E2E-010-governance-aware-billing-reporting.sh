@@ -170,10 +170,12 @@ jq -n \
 
 http_call POST "/tenant/bookings/commands/create" "$BOOKING_FIXTURE"
 assert_status "200|201"
-BOOKING_ID=$(json_get '.data.bookingId')
-APPROVAL_REQUEST_ID=$(json_get '.data.approvalRequestId')
-APPROVAL_EVAL_ID=$(json_get '.data.approvalEvaluationId')
-APPROVAL_STATE=$(json_get '.data.approvalState')
+# Command pattern (UI-BE-007-BKG): create returns a TenantBookingCommandResult
+# under `.data`; the legacy flat fields are namespaced under booking/approval.
+BOOKING_ID=$(json_get '.data.booking.bookingId')
+APPROVAL_REQUEST_ID=$(json_get '.data.approval.requestId')
+APPROVAL_EVAL_ID=$(json_get '.data.approval.evaluationId')
+APPROVAL_STATE=$(json_get '.data.approval.state')
 [[ -n "$BOOKING_ID" && -n "$APPROVAL_REQUEST_ID" ]] || {
   log_fail "booking did not enter approval; missing bookingId/approvalRequestId"
   exit 1
