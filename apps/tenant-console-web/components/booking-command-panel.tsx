@@ -6,7 +6,7 @@ import type {
   BookingRecord,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
-import { formatDateTime, isFutureIso } from "@/lib/formatters";
+import { resolveBookingEditability } from "@/lib/booking-actions";
 
 type Mode = "update" | "cancel" | null;
 
@@ -24,33 +24,21 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
   );
   const [cancelReason, setCancelReason] = useState("");
 
-  const commandState = useMemo(() => {
-    const isTerminal =
-      booking.orderStatus === "completed" ||
-      booking.orderStatus === "cancelled";
-    const isOnTrip = booking.orderStatus === "on_trip";
-    const withinUpdateWindow =
-      booking.modifiableUntil == null || isFutureIso(booking.modifiableUntil);
-    const withinCancelWindow =
-      booking.cancelableUntil == null || isFutureIso(booking.cancelableUntil);
-
-    return {
-      canUpdate: !isTerminal && !isOnTrip && withinUpdateWindow,
-      canCancel: !isTerminal && withinCancelWindow,
-      updateReason: isTerminal
-        ? "Completed and cancelled bookings are read-only."
-        : isOnTrip
-          ? "On-trip bookings can no longer be edited from tenant control."
-          : withinUpdateWindow
-            ? null
-            : `Update window closed at ${formatDateTime(booking.modifiableUntil)}.`,
-      cancelReason: isTerminal
-        ? "Completed and cancelled bookings cannot be cancelled again."
-        : withinCancelWindow
-          ? null
-          : `Cancellation window closed at ${formatDateTime(booking.cancelableUntil)}.`,
-    };
-  }, [booking]);
+  // CTAs are driven by `availableActions` + `editableUntil` per Q-TEN05, not
+  // by status — see lib/booking-actions.ts. Falls back to the legacy
+  // modify/cancel windows only when the backend has not populated the field.
+  const editability = useMemo(
+    () => resolveBookingEditability(booking),
+    [booking],
+  );
+  const commandState = {
+    canUpdate: editability.update.enabled,
+    canCancel: editability.cancel.enabled,
+    updateReason: editability.update.reason,
+    cancelReason: editability.cancel.reason,
+    cancelRequiresReason: editability.cancel.requiresReason,
+    acceptedPending: editability.acceptedPending,
+  };
 
   async function submitUpdate() {
     setLoading(true);
@@ -126,12 +114,18 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
     <div className="action-panel">
       <div className="action-stack">
         <div className="action-copy">
-          <strong>Allowed tenant actions</strong>
+          <strong>租戶可用操作</strong>
           <p>
-            Tenant users can only call supported booking commands. They cannot
-            override dispatch state, fare authority, or fulfillment ownership.
+            CTA 由後端 <code>availableActions</code> + <code>editableUntil</code>{" "}
+            決定（Q-TEN05），不由前端依狀態硬編碼。租戶僅能呼叫受支援的 booking
+            command，無法覆寫派遣狀態、計價權責或履約歸屬。
           </p>
         </div>
+        {commandState.acceptedPending ? (
+          <p className="action-note">
+            上一個 command 已受理、等待外部確認中，期間暫不開放新的變更。
+          </p>
+        ) : null}
         <div className="action-row">
           <button
             className="action-button action-button-secondary"
@@ -250,7 +244,10 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
             ) : (
               <div className="form-stack">
                 <label className="field-stack">
-                  <span>Cancellation reason</span>
+                  <span>
+                    取消原因
+                    {commandState.cancelRequiresReason ? " （必填）" : ""}
+                  </span>
                   <textarea
                     rows={4}
                     value={cancelReason}
@@ -260,11 +257,15 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
                 <div className="action-row">
                   <button
                     className="action-button action-button-danger"
-                    disabled={loading}
+                    disabled={
+                      loading ||
+                      (commandState.cancelRequiresReason &&
+                        !cancelReason.trim())
+                    }
                     type="button"
                     onClick={() => void submitCancel()}
                   >
-                    {loading ? "Cancelling..." : "Confirm cancel"}
+                    {loading ? "取消處理中…" : "確認取消"}
                   </button>
                 </div>
               </div>

@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ResourceActionDescriptor } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -2350,6 +2351,38 @@ export interface BookingRecord {
   approvalRequestIds: string[];
   complianceGates?: ComplianceGateRecord[];
   orderStatus: OwnedOrderStatus;
+  /**
+   * Q-TEN05 — backend-driven editability window. ISO timestamp until which
+   * tenant edits are accepted, or `null` when the booking is read-only. The
+   * UI must NOT compute editability from `status`/`orderStatus` alone; it
+   * combines this with `availableActions`. Optional so existing producers
+   * that have not yet populated the field remain valid.
+   */
+  editableUntil?: string | null;
+  /**
+   * Q-TEN05 — machine code explaining why the booking is read-only (surfaced
+   * when `editableUntil` is `null`), e.g. `past_editable_until`,
+   * `terminal_state`, `dispatch_in_progress`, `pending_external_confirmation`.
+   */
+  readOnlyReasonCode?: string | null;
+  /**
+   * Q-X13 — backend-resolved CTAs for this booking (`update`, `cancel`,
+   * `resubmit_approval`, …). A zero-length array means read-only for the
+   * current actor. The UI renders affordances from this list rather than
+   * hard-coding role/status → action mapping.
+   */
+  availableActions?: ResourceActionDescriptor[];
+  /**
+   * Q-TEN04 — present when the most recent synchronous command was accepted
+   * but is awaiting external confirmation (the `accepted+pending` state). The
+   * UI surfaces a "received, awaiting confirmation" affordance keyed by
+   * `commandId`.
+   */
+  pendingCommand?: {
+    commandId: string;
+    action: string;
+    acceptedAt: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }

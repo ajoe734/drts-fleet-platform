@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import type {
   AddressPayload,
-  BookingRecord,
   CreateTenantBookingCommand,
   PassengerProfile,
+  TenantBookingCommandResult,
 } from "@drts/contracts";
 import { buildPartnerClient, getPartnerSession } from "@/lib/partner-session";
 
@@ -169,14 +169,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const client = buildPartnerClient(session);
-    const response = (await client.createTenantBooking(command)) as
-      | BookingRecord
-      | { booking?: BookingRecord };
-
-    const booking =
-      response && typeof response === "object" && "bookingId" in response
-        ? (response as BookingRecord)
-        : (response as { booking?: BookingRecord }).booking;
+    // Q-TEN04 — createTenantBooking resolves to a TenantBookingCommandResult
+    // command envelope; the actual booking record is nested under `.booking`
+    // (the envelope's own top-level `bookingId` is just the id, not a record).
+    const result: TenantBookingCommandResult =
+      await client.createTenantBooking(command);
+    const booking = result.booking;
 
     if (!booking) {
       return NextResponse.json(
