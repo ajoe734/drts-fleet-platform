@@ -266,4 +266,13 @@ def load_approval_state(config: dict[str, Any]) -> dict[str, Any]:
 def save_approval_state(config: dict[str, Any], state: dict[str, Any]) -> None:
     payload = deepcopy(state)
     payload["updated_at"] = utc_now()
+    # Bound the resolved-approval history tail. approval-queue.json's ``history``
+    # array grows forever (757 entries / ~1.0 MB by the 2026-05-30 incident),
+    # pushing the file past the 256 KB cap the chair/coordination worker's Read
+    # tool enforces. Pending approvals are never trimmed. Tunable via the
+    # ``supervisor.approval_history_keep`` config key.
+    keep = int(config.get("supervisor", {}).get("approval_history_keep", 300))
+    history = payload.get("history")
+    if isinstance(history, list) and keep >= 0 and len(history) > keep:
+        payload["history"] = history[-keep:]
     write_json(config_path(config, "approval_queue"), payload)
