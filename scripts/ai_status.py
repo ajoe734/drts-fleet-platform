@@ -20,6 +20,7 @@ ROOT = Path(
 ).resolve()
 STATUS_FILE = ROOT / "ai-status.json"
 LOG_FILE = ROOT / "ai-activity-log.jsonl"
+TASK_ARCHIVE_FILE = ROOT / "ai-task-archive.jsonl"
 CURRENT_WORK_FILE = ROOT / "current-work.md"
 DOCS_SITE_DIR = ROOT / "docs-site"
 
@@ -620,12 +621,39 @@ def _retention_keeps() -> dict[str, int]:
     }
 
 
+def archive_task_bodies(dropped: list[dict[str, Any]]) -> None:
+    """Append the full bodies of pruned done-tasks to ``ai-task-archive.jsonl``
+    so completed-task detail (summary/owner/review notes/artifacts) stays
+    auditable after the live status file drops them — ``archived_task_ids`` only
+    keeps the id. Append-only JSONL + O_APPEND is used deliberately: ai_status.py
+    is the dominant, highly concurrent writer (~153k invocations), so a
+    read-modify-write of a single JSON object would race and lose records. A task
+    is dropped from ``state["tasks"]`` exactly once, so no de-dup is needed here.
+    Best-effort: archival must never block or fail a status write."""
+    if not dropped:
+        return
+    stamp = iso_now()
+    try:
+        with TASK_ARCHIVE_FILE.open("a", encoding="utf-8") as handle:
+            for task in dropped:
+                if not task.get("id"):
+                    continue
+                record = dict(task)
+                record["_archived_at"] = stamp
+                record["_archived_by"] = "ai_status.py"
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 def prune_state_for_size(state: dict[str, Any]) -> None:
     """Bound the unbounded audit tails (done handoffs, done tasks, resolved
     blockers) in place. Mirrors supervisor.{prune_done_handoffs,prune_done_tasks,
     prune_blockers}; pending handoffs and open blockers are never trimmed, and
     dropped done-task ids are recorded in ``archived_task_ids`` (dependency-safe
-    because ``dependencies_satisfied`` treats a missing dep as archived/done)."""
+    because ``dependencies_satisfied`` treats a missing dep as archived/done).
+    Dropped done-task bodies are appended to ``ai-task-archive.jsonl`` first so
+    their detail stays auditable (see ``archive_task_bodies``)."""
     keeps = _retention_keeps()
 
     handoffs = state.get("handoffs")
@@ -644,6 +672,7 @@ def prune_state_for_size(state: dict[str, Any]) -> None:
             dropped = done[:-keep] if keep > 0 else done
             dropped_ids = {t.get("id") for t in dropped if t.get("id")}
             if dropped_ids:
+                archive_task_bodies(dropped)
                 state["tasks"] = [
                     t
                     for t in tasks
