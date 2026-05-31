@@ -214,10 +214,36 @@ def prune_done_handoffs(status: dict[str, Any], keep: int = 500) -> None:
     status["handoffs"] = pending + done[-keep:]
 
 
-def prune_done_tasks(status: dict[str, Any], keep: int = 150) -> None:
+def archive_task_bodies(archive_path: Path | None, dropped: list[dict[str, Any]]) -> None:
+    """Append full bodies of pruned done-tasks to ``ai-task-archive.jsonl`` so
+    their detail stays auditable after the live status file drops them (which
+    keeps only the id in ``archived_task_ids``). Append-only JSONL + O_APPEND is
+    deliberate — it is concurrency-safe, unlike a read-modify-write of one JSON
+    object. Mirrors ``ai_status.py.archive_task_bodies``. Best-effort: archival
+    must never block or fail a status write."""
+    if not archive_path or not dropped:
+        return
+    stamp = utc_now()
+    try:
+        with archive_path.open("a", encoding="utf-8") as handle:
+            for task in dropped:
+                if not task.get("id"):
+                    continue
+                record = dict(task)
+                record["_archived_at"] = stamp
+                record["_archived_by"] = "supervisor.py"
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def prune_done_tasks(
+    status: dict[str, Any], keep: int = 150, archive_path: Path | None = None
+) -> None:
     """Trim ``status["tasks"]`` in place, keeping every non-done task plus the
     most recent ``keep`` done tasks. Dropped done-task ids are recorded in
-    ``status["archived_task_ids"]``.
+    ``status["archived_task_ids"]``; their full bodies are appended to
+    ``archive_path`` (``ai-task-archive.jsonl``) when supplied.
 
     ai-status.json's tasks array accumulates every completed task forever
     (646 done / ~1.0 MB by the 2026-05-30 incident), pushing the file past the
@@ -238,6 +264,7 @@ def prune_done_tasks(status: dict[str, Any], keep: int = 150) -> None:
     dropped_ids = {t.get("id") for t in dropped if t.get("id")}
     if not dropped_ids:
         return
+    archive_task_bodies(archive_path, dropped)
     status["tasks"] = [
         t
         for t in tasks
@@ -293,7 +320,11 @@ def write_status_with_prune(
     if keep_blockers is None:
         keep_blockers = int(supervisor_cfg.get("blocker_keep_count", 100))
     prune_done_handoffs(status, keep=keep_handoffs)
-    prune_done_tasks(status, keep=keep_done_tasks)
+    prune_done_tasks(
+        status,
+        keep=keep_done_tasks,
+        archive_path=Path(status_path).parent / "ai-task-archive.jsonl",
+    )
     prune_blockers(status, keep=keep_blockers)
     write_json(status_path, status)
 
