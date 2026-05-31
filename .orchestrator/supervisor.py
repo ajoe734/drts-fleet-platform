@@ -5672,6 +5672,17 @@ def build_chair_review_message(
             path = config_path(config, key)
         except KeyError:
             continue
+        if key == "state_file":
+            # Point the chair at the bounded chair-scoped digest, not the full
+            # state.json — the latter exceeds the 256 KB worker Read cap under
+            # concurrent dispatch (fat per-worker request_snapshot/command/metadata
+            # + seen_event_keys). See runtime_state.build_state_digest /
+            # feedback_ai_status_handoff_bloat.
+            path = path.parent / "state-digest.json"
+            machine_truth_lines.append(
+                f"- {label} (chair-scoped digest of state.json; tasks live in ai-status): `{path.resolve()}`"
+            )
+            continue
         machine_truth_lines.append(f"- {label}: `{path.resolve()}`")
     if not machine_truth_lines:
         machine_truth_lines.append("- configured machine-truth paths are unavailable in this test/config context")

@@ -226,9 +226,69 @@ def prune_expired_reassignment_guards(state: dict[str, Any]) -> None:
     state["chair_reassignment_guards"] = kept
 
 
+def _slim_worker_for_digest(worker: dict[str, Any]) -> dict[str, Any]:
+    snapshot = worker.get("request_snapshot") or {}
+    return {
+        "status": worker.get("status"),
+        "task_id": worker.get("task_id"),
+        "provider": worker.get("provider"),
+        "agent_id": worker.get("agent_id"),
+        "reason": snapshot.get("reason"),
+        "mode": worker.get("mode"),
+        "last_event_at": worker.get("last_event_at"),
+        "last_error_kind": worker.get("last_error_kind"),
+        "last_error_summary": worker.get("last_error_summary"),
+        "attempt_count": worker.get("attempt_count"),
+        "retry_count": worker.get("retry_count"),
+        "queue_event_id": worker.get("queue_event_id"),
+    }
+
+
+def state_digest_path(config: dict[str, Any]):
+    return config_path(config, "state_file").parent / "state-digest.json"
+
+
+def build_state_digest(state: dict[str, Any]) -> dict[str, Any]:
+    """Chair-scoped slim view of runtime state.
+
+    The chair/coordination worker reads runtime state only to decide provider
+    pauses, reassignments, and dispatch readiness. The full state.json carries
+    fat, chair-irrelevant payloads — per-worker ``request_snapshot`` /
+    ``command`` / ``metadata`` (~27 KB each, all retry/resume-critical so they
+    cannot be dropped from state.json itself), ``seen_event_keys``, and the
+    ``tasks`` mirror — that push it past the 256 KB worker Read cap under
+    concurrent dispatch. This digest keeps only the decision-relevant slices and
+    slims worker records, so the chair read stays bounded regardless of how many
+    workers are active. See feedback_ai_status_handoff_bloat.
+    """
+    workers = state.get("workers") or {}
+    return {
+        "version": state.get("version"),
+        "generated_at": utc_now(),
+        "last_scan_at": state.get("last_scan_at"),
+        "note": "Chair-scoped digest of state.json (slim workers; seen_event_keys + tasks mirror omitted). Tasks live in ai-status.json.",
+        "provider_pauses": state.get("provider_pauses", {}),
+        "quota_paused_agents": state.get("quota_paused_agents", {}),
+        "failure_streaks": state.get("failure_streaks", {}),
+        "dispatch_pauses": state.get("dispatch_pauses", []),
+        "chair_reassignment_guards": state.get("chair_reassignment_guards", {}),
+        "chair_review": state.get("chair_review", {}),
+        "underutilization": state.get("underutilization", {}),
+        "supervisor": state.get("supervisor", {}),
+        "approvals": state.get("approvals", {}),
+        "workers": {run_id: _slim_worker_for_digest(worker) for run_id, worker in workers.items() if isinstance(worker, dict)},
+    }
+
+
+def write_state_digest(config: dict[str, Any], state: dict[str, Any]) -> None:
+    write_json(state_digest_path(config), build_state_digest(state))
+
+
 def save_runtime_state(config: dict[str, Any], state: dict[str, Any]) -> None:
     prune_expired_reassignment_guards(state)
-    write_json(config_path(config, "state_file"), migrate_state(state))
+    migrated = migrate_state(state)
+    write_json(config_path(config, "state_file"), migrated)
+    write_state_digest(config, migrated)
 
 
 def load_event_queue(config: dict[str, Any]) -> list[dict[str, Any]]:
