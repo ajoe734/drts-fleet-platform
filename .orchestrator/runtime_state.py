@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 from common import append_jsonl, config_path, load_json, load_jsonl, utc_now, write_json
@@ -192,7 +193,41 @@ def load_runtime_state(config: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def prune_expired_reassignment_guards(state: dict[str, Any]) -> None:
+    """Drop expired entries from ``state["chair_reassignment_guards"]``.
+
+    Each guard carries an ``expires_at`` and ``chair_reassignment_guard_active``
+    already treats an expired guard as inactive (and pops it on access). But
+    guards for tasks that are never accessed again (e.g. completed tasks) linger
+    forever — 110 of 122 guards observed pointing at month-old done tasks during
+    the 2026-05-31 incident, ~21 KB of pure dead weight in state.json. Pruning
+    them eagerly here keeps state.json under the 256 KB worker Read cap when
+    several workers are active at once. Only provably-expired guards are dropped;
+    unparseable/missing ``expires_at`` is kept conservatively. See
+    feedback_ai_status_handoff_bloat.
+    """
+    guards = state.get("chair_reassignment_guards")
+    if not isinstance(guards, dict) or not guards:
+        return
+    now = datetime.now(timezone.utc)
+    kept: dict[str, Any] = {}
+    for key, guard in guards.items():
+        expires_at = guard.get("expires_at") if isinstance(guard, dict) else None
+        if expires_at:
+            try:
+                parsed = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                if parsed < now:
+                    continue
+            except ValueError:
+                pass
+        kept[key] = guard
+    state["chair_reassignment_guards"] = kept
+
+
 def save_runtime_state(config: dict[str, Any], state: dict[str, Any]) -> None:
+    prune_expired_reassignment_guards(state)
     write_json(config_path(config, "state_file"), migrate_state(state))
 
 
