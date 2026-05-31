@@ -104,8 +104,8 @@ jq \
   '.reservationWindowStart = $ws | .reservationWindowEnd = $we' \
   "${SCRIPT_DIR}/fixtures/e2e-booking-enterprise.json" > "$BOOKING_FIXTURE"
 
-log_step "2.1 — POST /tenant/bookings (as new tenant)"
-http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
+log_step "2.1 — POST /tenant/bookings/commands/create (as new tenant)"
+http_call POST "/tenant/bookings/commands/create" "$BOOKING_FIXTURE"
 assert_status "200|201"
 
 NEW_BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")

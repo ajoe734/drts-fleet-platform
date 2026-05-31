@@ -350,7 +350,7 @@ subcase_unknown_cost_center() {
   switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
   local fixture="${TMP_DIR}/booking-unknown.json"
   write_booking_fixture "$fixture" "CC-UNKNOWN-${SUFFIX}" ""
-  http_call POST "/tenant/bookings" "$fixture"
+  http_call POST "/tenant/bookings/commands/create" "$fixture"
   assert_status "400"
   require_error_code "BOOKING_COST_CENTER_UNKNOWN"
   save_evidence "$SCENARIO" "caseA" "httpStatus" "$RESP_STATUS"
@@ -363,7 +363,7 @@ subcase_disabled_cost_center() {
   switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
   local fixture="${TMP_DIR}/booking-disabled.json"
   write_booking_fixture "$fixture" "$CC_DISABLED" ""
-  http_call POST "/tenant/bookings" "$fixture"
+  http_call POST "/tenant/bookings/commands/create" "$fixture"
   assert_status "400"
   require_error_code "BOOKING_COST_CENTER_DISABLED"
   save_evidence "$SCENARIO" "caseB" "httpStatus" "$RESP_STATUS"
@@ -403,7 +403,7 @@ subcase_cross_tenant_cost_center() {
   switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
   local booking_fixture="${TMP_DIR}/booking-cross.json"
   write_booking_fixture "$booking_fixture" "$CC_XTEN" ""
-  http_call POST "/tenant/bookings" "$booking_fixture"
+  http_call POST "/tenant/bookings/commands/create" "$booking_fixture"
   assert_status "400"
   require_error_code "BOOKING_COST_CENTER_UNKNOWN"
   save_evidence "$SCENARIO" "caseC" "otherTenantId" "$OTHER_TENANT_ID"
@@ -416,7 +416,7 @@ subcase_quota_insufficient() {
   switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
   local fixture="${TMP_DIR}/booking-limit.json"
   write_booking_fixture "$fixture" "$CC_LIMIT" ""
-  http_call POST "/tenant/bookings" "$fixture"
+  http_call POST "/tenant/bookings/commands/create" "$fixture"
   assert_status "409"
   require_error_code "QUOTA_INSUFFICIENT_AT_COMMIT"
   save_evidence "$SCENARIO" "caseD" "httpStatus" "$RESP_STATUS"
@@ -429,7 +429,7 @@ subcase_rule_block() {
   switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
   local fixture="${TMP_DIR}/booking-block.json"
   write_booking_fixture "$fixture" "$CC_BLOCK" ""
-  http_call POST "/tenant/bookings" "$fixture"
+  http_call POST "/tenant/bookings/commands/create" "$fixture"
   assert_status "200|201"
   local booking_id order_id approval_state
   booking_id=$(json_get_first ".data.bookingId" ".data.booking_id")
@@ -463,7 +463,7 @@ subcase_no_approver_rollback() {
   before_count=$(json_get ".data.items | length")
   fixture="${TMP_DIR}/booking-noapp.json"
   write_booking_fixture "$fixture" "$CC_NOAPP" ""
-  http_call POST "/tenant/bookings" "$fixture"
+  http_call POST "/tenant/bookings/commands/create" "$fixture"
   assert_status "409"
   require_error_code "APPROVAL_NO_RESOLVABLE_APPROVERS"
   http_call GET "/tenant/quotas/ledger?costCenterCode=${CC_NOAPP}"
@@ -484,7 +484,7 @@ subcase_notes_and_reevaluation_and_rejection() {
 
   local booking_fixture="${TMP_DIR}/booking-ops.json"
   write_booking_fixture "$booking_fixture" "$CC_OPS" ""
-  http_call POST "/tenant/bookings" "$booking_fixture"
+  http_call POST "/tenant/bookings/commands/create" "$booking_fixture"
   assert_status "200|201"
   local booking_id order_id initial_request_id notes_request_id reevaluated_request_id
   booking_id=$(json_get_first ".data.bookingId" ".data.booking_id")
@@ -499,9 +499,9 @@ subcase_notes_and_reevaluation_and_rejection() {
 
   local notes_fixture="${TMP_DIR}/booking-notes-update.json"
   write_booking_update_fixture "$notes_fixture" "notes" "No governance change"
-  http_call PUT "/tenant/bookings/${booking_id}" "$notes_fixture"
+  http_call POST "/tenant/bookings/${booking_id}/commands/update" "$notes_fixture"
   assert_status "200"
-  notes_request_id=$(echo "$RESP_BODY" | jq -r '.data.approvalRequestIds[0] // empty' 2>/dev/null || true)
+  notes_request_id=$(echo "$RESP_BODY" | jq -r '.data.booking.approvalRequestIds[0] // empty' 2>/dev/null || true)
   if [[ "$notes_request_id" != "$initial_request_id" ]]; then
     log_fail "Notes-only update re-evaluated unexpectedly: before=${initial_request_id}, after=${notes_request_id}"
     exit 1
@@ -510,9 +510,9 @@ subcase_notes_and_reevaluation_and_rejection() {
 
   local reevaluate_fixture="${TMP_DIR}/booking-reevaluate-update.json"
   write_booking_update_fixture "$reevaluate_fixture" "cost_center" "$CC_FIN"
-  http_call PUT "/tenant/bookings/${booking_id}" "$reevaluate_fixture"
+  http_call POST "/tenant/bookings/${booking_id}/commands/update" "$reevaluate_fixture"
   assert_status "200"
-  reevaluated_request_id=$(echo "$RESP_BODY" | jq -r '.data.approvalRequestIds[0] // empty' 2>/dev/null || true)
+  reevaluated_request_id=$(echo "$RESP_BODY" | jq -r '.data.booking.approvalRequestIds[0] // empty' 2>/dev/null || true)
   if [[ -z "$reevaluated_request_id" || "$reevaluated_request_id" == "$initial_request_id" ]]; then
     log_fail "Governance-sensitive update did not produce a replacement approval request."
     exit 1
@@ -548,7 +548,7 @@ subcase_escalation_visible() {
 
   local booking_fixture="${TMP_DIR}/booking-escalate.json"
   write_booking_fixture "$booking_fixture" "$CC_FIN" ""
-  http_call POST "/tenant/bookings" "$booking_fixture"
+  http_call POST "/tenant/bookings/commands/create" "$booking_fixture"
   assert_status "200|201"
   local booking_id request_id pending_count
   booking_id=$(json_get_first ".data.bookingId" ".data.booking_id")

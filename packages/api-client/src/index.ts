@@ -607,9 +607,18 @@ export class ApiClient {
   }
 
   // ── Owned Mobility: Tenant Bookings ──
+  //
+  // Q-TEN04 — tenant booking writes use the synchronous command pattern.
+  // create/update/cancel post to the `/commands/*` endpoints and resolve to a
+  // `TenantBookingCommandResult` ({ commandId, command, status,
+  // pendingReasonCode, bookingId, booking }). There is no legacy REST write
+  // surface; reads stay on the plain `/tenant/bookings` GET routes.
 
   async createTenantBooking(command: CreateTenantBookingCommand) {
-    return this.post("/api/tenant/bookings", { body: command });
+    return this.post<TenantBookingCommandResult>(
+      "/api/tenant/bookings/commands/create",
+      { body: command },
+    );
   }
 
   async listTenantBookings(): Promise<BookingRecord[]> {
@@ -624,44 +633,13 @@ export class ApiClient {
     bookingId: string,
     command: UpdateTenantBookingCommand,
   ) {
-    return this.request(
-      "PUT",
-      `/api/tenant/bookings/${encodeURIComponent(bookingId)}`,
-      { body: command },
-    );
-  }
-
-  async cancelTenantBooking(
-    bookingId: string,
-    command: CancelOwnedOrderCommand,
-  ) {
-    return this.post(
-      `/api/tenant/bookings/${encodeURIComponent(bookingId)}/cancel`,
-      { body: command },
-    );
-  }
-
-  // Q-TEN04 — synchronous command pattern entry points. UI clients should
-  // prefer these over the REST verbs above so they observe `commandId` +
-  // `accepted+pending` status uniformly.
-  async createTenantBookingCommand(command: CreateTenantBookingCommand) {
-    return this.post<TenantBookingCommandResult>(
-      "/api/tenant/bookings/commands/create",
-      { body: command },
-    );
-  }
-
-  async updateTenantBookingCommand(
-    bookingId: string,
-    command: UpdateTenantBookingCommand,
-  ) {
     return this.post<TenantBookingCommandResult>(
       `/api/tenant/bookings/${encodeURIComponent(bookingId)}/commands/update`,
       { body: command },
     );
   }
 
-  async cancelTenantBookingCommand(
+  async cancelTenantBooking(
     bookingId: string,
     command: CancelOwnedOrderCommand,
   ) {

@@ -55,8 +55,8 @@ jq \
   '.reservationWindowStart = $ws | .reservationWindowEnd = $we' \
   "${SCRIPT_DIR}/fixtures/e2e-booking-enterprise.json" > "$BOOKING_FIXTURE"
 
-log_step "1.1 — POST /tenant/bookings"
-http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
+log_step "1.1 — POST /tenant/bookings/commands/create"
+http_call POST "/tenant/bookings/commands/create" "$BOOKING_FIXTURE"
 assert_status "200|201"
 
 BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
@@ -68,7 +68,7 @@ fi
 chain_set "tenant" "bookingId" "$BOOKING_ID"
 chain_set "tenant" "tenantId" "$E2E_SEED_TENANT_ID"
 save_evidence "$SCENARIO" "tenant" "bookingId" "$BOOKING_ID"
-log_ok "POST /tenant/bookings → HTTP ${RESP_STATUS}, bookingId=${BOOKING_ID}"
+log_ok "POST /tenant/bookings/commands/create → HTTP ${RESP_STATUS}, bookingId=${BOOKING_ID}"
 
 log_step "1.2 — GET /tenant/bookings/:bookingId (read-back)"
 http_call GET "/tenant/bookings/${BOOKING_ID}"

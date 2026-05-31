@@ -25,7 +25,7 @@ jq \
   '.reservationWindowStart = $ws | .reservationWindowEnd = $we' \
   "${SCRIPT_DIR}/fixtures/booking-create.json" > "$FIXTURE_TMP"
 
-http_call POST "/tenant/bookings" "$FIXTURE_TMP"
+http_call POST "/tenant/bookings/commands/create" "$FIXTURE_TMP"
 assert_status "200|201"
 
 BOOKING_ID=$(json_get ".data.bookingId")
@@ -35,7 +35,7 @@ if [[ -z "$BOOKING_ID" ]]; then
 fi
 
 state_set "bookingId" "$BOOKING_ID"
-log_ok "POST /tenant/bookings → HTTP ${RESP_STATUS}, bookingId=${BOOKING_ID}"
+log_ok "POST /tenant/bookings/commands/create → HTTP ${RESP_STATUS}, bookingId=${BOOKING_ID}"
 
 # Verify we can read the booking back
 http_call GET "/tenant/bookings/${BOOKING_ID}"

@@ -162,8 +162,8 @@ jq \
    | .eligibilityVerificationId = $verificationId' \
   "${SCRIPT_DIR}/fixtures/e2e-booking-airport.json" > "$BOOKING_FIXTURE"
 
-log_step "2.1 — POST /tenant/bookings"
-http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
+log_step "2.1 — POST /tenant/bookings/commands/create"
+http_call POST "/tenant/bookings/commands/create" "$BOOKING_FIXTURE"
 assert_status "200|201"
 
 BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")

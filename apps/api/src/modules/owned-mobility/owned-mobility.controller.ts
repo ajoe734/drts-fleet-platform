@@ -5,7 +5,6 @@ import {
   Headers,
   Param,
   Post,
-  Put,
   Query,
   Sse,
 } from "@nestjs/common";
@@ -180,27 +179,11 @@ export class OwnedMobilityController {
     );
   }
 
-  @Post("tenant/bookings")
-  createTenantBooking(
-    @Body() command: CreateTenantBookingCommand,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-tenant-id") tenantId?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.createTenantBooking(
-        command,
-        this.requireTenantId(tenantId),
-        identity,
-        requestId,
-      ),
-      requestId,
-    );
-  }
-
-  // Q-TEN04 — synchronous command pattern. UI clients consume these
-  // instead of the REST verbs above so they can render
-  // `commandId` + `accepted+pending` status uniformly.
+  // Q-TEN04 — tenant booking writes go through the synchronous command
+  // pattern. These command endpoints are the only booking write surface;
+  // there are no legacy REST verbs (`POST /tenant/bookings`,
+  // `PUT /tenant/bookings/:id`, `POST /tenant/bookings/:id/cancel`) so every
+  // write renders `commandId` + `accepted+pending` status uniformly.
   @Post("tenant/bookings/commands/create")
   createTenantBookingCommand(
     @Body() command: CreateTenantBookingCommand,
@@ -288,26 +271,6 @@ export class OwnedMobilityController {
     );
   }
 
-  @Put("tenant/bookings/:bookingId")
-  updateTenantBooking(
-    @Param("bookingId") bookingId: string,
-    @Body() command: UpdateTenantBookingCommand,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-tenant-id") tenantId?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.updateTenantBooking(
-        this.requireTenantId(tenantId),
-        bookingId,
-        command,
-        identity,
-        requestId,
-      ),
-      requestId,
-    );
-  }
-
   @Post("orders/:orderId/manual-fare-override")
   applyManualFareOverride(
     @Param("orderId") orderId: string,
@@ -320,24 +283,6 @@ export class OwnedMobilityController {
         orderId,
         command,
         identity,
-        requestId,
-      ),
-      requestId,
-    );
-  }
-
-  @Post("tenant/bookings/:bookingId/cancel")
-  cancelTenantBooking(
-    @Param("bookingId") bookingId: string,
-    @Body() command: CancelOwnedOrderCommand,
-    @Headers("x-tenant-id") tenantId?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.cancelTenantBooking(
-        this.requireTenantId(tenantId),
-        bookingId,
-        command,
         requestId,
       ),
       requestId,

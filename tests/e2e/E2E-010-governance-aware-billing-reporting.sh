@@ -168,7 +168,7 @@ jq -n \
     quoteHint: {currency: "TWD", expected: 1800}
   }' > "$BOOKING_FIXTURE"
 
-http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
+http_call POST "/tenant/bookings/commands/create" "$BOOKING_FIXTURE"
 assert_status "200|201"
 BOOKING_ID=$(json_get '.data.bookingId')
 APPROVAL_REQUEST_ID=$(json_get '.data.approvalRequestId')
