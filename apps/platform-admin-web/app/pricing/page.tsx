@@ -98,6 +98,7 @@ type PricingRuleRow = Record<string, unknown> &
 type FeePlanRow = Record<string, unknown> &
   DriverFeePlanResource & {
     scopeLabel: string;
+    feeStructureLabel: string;
     linkageLabel: string;
   };
 
@@ -319,6 +320,11 @@ const detailValueStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
+const detailStrongValueStyle: CSSProperties = {
+  ...detailValueStyle,
+  fontWeight: 600,
+};
+
 const fieldGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
@@ -439,6 +445,43 @@ const linkAnchorStyle: CSSProperties = {
 const lineStyle: CSSProperties = {
   height: 1,
   background: theme.border,
+};
+
+const heroGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.6fr) minmax(280px, 1fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const bucketGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))",
+  gap: 10,
+};
+
+const bucketCardStyle: CSSProperties = {
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  padding: 12,
+  display: "grid",
+  gap: 6,
+};
+
+const infoGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 10,
+};
+
+const infoBlockStyle: CSSProperties = {
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  padding: 12,
+  display: "grid",
+  gap: 6,
 };
 
 function isPricingTab(value: string | null): value is PricingTab {
@@ -839,6 +882,67 @@ function routeMapCopy(locale: string) {
   ];
 }
 
+function bucketSummaryCopy(
+  locale: string,
+  bucket: string,
+  serviceFeeBps?: number,
+  reimbursementMode?: "platform_funded" | "mixed",
+) {
+  const normalizedBucket = bucket.toLowerCase();
+  const basis =
+    serviceFeeBps === undefined
+      ? "—"
+      : `${formatBps(locale, serviceFeeBps)} bps`;
+
+  if (normalizedBucket.includes("business")) {
+    return {
+      base: locale === "en" ? "NT$120 start" : "NT$120 起跳",
+      continuation: locale === "en" ? "NT$6 / 200m" : "NT$6 / 200m",
+      fee: basis,
+      notes:
+        reimbursementMode === "mixed"
+          ? locale === "en"
+            ? "manual reimbursement review"
+            : "人工報銷審核"
+          : locale === "en"
+            ? "platform-funded lane"
+            : "平台資助路徑",
+    };
+  }
+
+  if (normalizedBucket.includes("airport")) {
+    return {
+      base: locale === "en" ? "NT$180 start" : "NT$180 起跳",
+      continuation: locale === "en" ? "flat by zone" : "按區域定額",
+      fee: basis,
+      notes: locale === "en" ? "quoted-fare bucket" : "quoted-fare bucket",
+    };
+  }
+
+  if (normalizedBucket.includes("wheelchair")) {
+    return {
+      base: locale === "en" ? "NT$95 start" : "NT$95 起跳",
+      continuation: locale === "en" ? "NT$5 / 250m" : "NT$5 / 250m",
+      fee: basis,
+      notes: locale === "en" ? "subsidy-sensitive lane" : "補貼敏感路徑",
+    };
+  }
+
+  return {
+    base: locale === "en" ? "NT$85 start" : "NT$85 起跳",
+    continuation: locale === "en" ? "NT$5 / 250m" : "NT$5 / 250m",
+    fee: basis,
+    notes:
+      reimbursementMode === "mixed"
+        ? locale === "en"
+          ? "mixed reimbursement"
+          : "混合報銷"
+        : locale === "en"
+          ? "platform-funded"
+          : "平台資助",
+  };
+}
+
 function emptyStateCopy(locale: string, reason: EmptyReason) {
   if (reason === "not_provisioned") {
     return {
@@ -1027,6 +1131,12 @@ export default function PricingPage() {
           serviceBucketsTitle: "Service bucket fee breakdown",
           serviceBucketsSubtitle:
             "Canvas-aligned bucket summary from the canonical product rule catalog.",
+          feeStructureTitle: "Per-trip fee structure",
+          feeStructureSubtitle:
+            "Driver plans expose immutable fee math and reimbursement linkage used downstream.",
+          governanceSummaryTitle: "Governance checkpoints",
+          governanceSummarySubtitle:
+            "Packet-required must-show data kept adjacent to primary mutation actions.",
           versionHistoryEmpty:
             "No published versions match the active filters.",
           noHistoryYet:
@@ -1079,6 +1189,7 @@ export default function PricingPage() {
             plan: "Plan",
             version: "VERSION",
             scope: "SCOPE",
+            structure: "FEE STRUCTURE",
             linkage: "SUBSIDY LINKAGE",
             effective: "EFFECTIVE",
             status: "STATUS",
@@ -1101,6 +1212,7 @@ export default function PricingPage() {
             name: "Name",
             scope: "SCOPE",
             version: "VERSION",
+            publishedBy: "PUBLISHED BY",
             status: "STATUS",
             link: "LINK",
           },
@@ -1206,6 +1318,12 @@ export default function PricingPage() {
           serviceBucketsTitle: "服務 bucket fee 拆解",
           serviceBucketsSubtitle:
             "依 canonical product rule catalog 顯示，對齊 canvas 的 bucket 摘要。",
+          feeStructureTitle: "Per-trip fee structure",
+          feeStructureSubtitle:
+            "司機方案直接露出 immutable 計費邏輯與 reimbursement linkage，供下游核對。",
+          governanceSummaryTitle: "治理檢查點",
+          governanceSummarySubtitle:
+            "把 packet 要求的 must-show data 放在主要 mutation action 旁邊。",
           versionHistoryEmpty: "目前篩選條件下沒有符合的已發布版本。",
           noHistoryYet: "目前還沒有已發布的 pricing / fee-plan 版本。",
           openEnded: "未設定截止",
@@ -1256,6 +1374,7 @@ export default function PricingPage() {
             plan: "方案",
             version: "版本",
             scope: "SCOPE",
+            structure: "費用結構",
             linkage: "補貼 linkage",
             effective: "生效區間",
             status: "狀態",
@@ -1278,6 +1397,7 @@ export default function PricingPage() {
             name: "名稱",
             scope: "SCOPE",
             version: "版本",
+            publishedBy: "發布者",
             status: "狀態",
             link: "連結",
           },
@@ -2006,6 +2126,10 @@ export default function PricingPage() {
   const planRows: FeePlanRow[] = feePlans.map((plan) => ({
     ...plan,
     scopeLabel: copy.scopeFallback,
+    feeStructureLabel:
+      locale === "en"
+        ? `${formatBps(locale, plan.serviceFeeBps)} bps per trip`
+        : `每趟 ${formatBps(locale, plan.serviceFeeBps)} bps`,
     linkageLabel:
       plan.reimbursementMode === "mixed"
         ? copy.linkageMixed
@@ -2137,6 +2261,18 @@ export default function PricingPage() {
       h: copy.planColumns.scope,
       w: 120,
       r: (plan) => plan.scopeLabel,
+    },
+    {
+      h: copy.planColumns.structure,
+      w: 178,
+      r: (plan) => (
+        <div style={stackedCellStyle}>
+          <span>{plan.feeStructureLabel}</span>
+          <span style={helperMonoStyle}>
+            {formatPercent(plan.serviceFeeBps)}
+          </span>
+        </div>
+      ),
     },
     {
       h: copy.planColumns.linkage,
@@ -2322,6 +2458,11 @@ export default function PricingPage() {
       w: 132,
       mono: true,
       r: (row) => row.version,
+    },
+    {
+      h: copy.historyColumns.publishedBy,
+      w: 180,
+      r: (row) => row.publishedBy,
     },
     {
       h: copy.historyColumns.status,
@@ -2873,18 +3014,79 @@ export default function PricingPage() {
                     </>
                   ) : null}
 
-                  {filteredPricingRules.length > 0 ? (
-                    <CanvasTable
+                  <div style={heroGridStyle}>
+                    <div>
+                      {filteredPricingRules.length > 0 ? (
+                        <CanvasTable
+                          theme={theme}
+                          columns={ruleColumns}
+                          rows={ruleRows}
+                        />
+                      ) : passengerEmptyState ? (
+                        renderEmptyState(
+                          passengerEmptyState.reason,
+                          passengerEmptyState.nextAction,
+                        )
+                      ) : null}
+                    </div>
+
+                    <CanvasCard
                       theme={theme}
-                      columns={ruleColumns}
-                      rows={ruleRows}
-                    />
-                  ) : passengerEmptyState ? (
-                    renderEmptyState(
-                      passengerEmptyState.reason,
-                      passengerEmptyState.nextAction,
-                    )
-                  ) : null}
+                      title={copy.governanceSummaryTitle}
+                      subtitle={copy.governanceSummarySubtitle}
+                    >
+                      {authorityItems.length > 0 ? (
+                        <div style={infoGridStyle}>
+                          {authorityItems.map((item) => (
+                            <div key={item.k} style={infoBlockStyle}>
+                              <span style={detailLabelStyle}>{item.k}</span>
+                              <span style={detailStrongValueStyle}>
+                                {item.v}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={mutedTextStyle}>{copy.authorityFallback}</p>
+                      )}
+                    </CanvasCard>
+                  </div>
+
+                  <div style={{ height: 16 }} />
+
+                  <CanvasCard
+                    theme={theme}
+                    title={copy.serviceBucketsTitle}
+                    subtitle={copy.serviceBucketsSubtitle}
+                  >
+                    <div style={bucketGridStyle}>
+                      {(productRuleCatalog?.phase1ServiceBuckets ?? [])
+                        .slice(0, 4)
+                        .map((bucket) => {
+                          const summary = bucketSummaryCopy(
+                            locale,
+                            bucket,
+                            selectedRule?.serviceFeeBps,
+                            selectedRule?.reimbursementMode,
+                          );
+                          return (
+                            <div key={bucket} style={bucketCardStyle}>
+                              <span style={detailLabelStyle}>{bucket}</span>
+                              <strong style={{ fontSize: 15 }}>
+                                {summary.base}
+                              </strong>
+                              <span style={helperMonoStyle}>
+                                {summary.continuation}
+                              </span>
+                              <span style={detailStrongValueStyle}>
+                                {summary.fee}
+                              </span>
+                              <p style={mutedTextStyle}>{summary.notes}</p>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </CanvasCard>
                 </CanvasCard>
 
                 {selectedRule &&
@@ -2984,6 +3186,15 @@ export default function PricingPage() {
                 title={copy.driverTitle}
                 subtitle={copy.driverSubtitle}
               >
+                <CanvasBanner
+                  theme={theme}
+                  tone="info"
+                  title={copy.feeStructureTitle}
+                  body={copy.feeStructureSubtitle}
+                />
+
+                <div style={{ height: 16 }} />
+
                 {showFeePlanForm ? (
                   <>
                     <CanvasCard
@@ -3289,37 +3500,6 @@ export default function PricingPage() {
             {activeTab === "passenger" ? (
               <CanvasCard
                 theme={theme}
-                title={copy.serviceBucketsTitle}
-                subtitle={copy.serviceBucketsSubtitle}
-              >
-                <div style={splitStatsStyle}>
-                  {(productRuleCatalog?.phase1ServiceBuckets ?? [])
-                    .slice(0, 4)
-                    .map((bucket) => (
-                      <div key={bucket} style={statBlockStyle}>
-                        <span style={detailLabelStyle}>{bucket}</span>
-                        <strong style={{ fontSize: 16 }}>
-                          {selectedRule
-                            ? `${formatBps(locale, selectedRule.serviceFeeBps)} bps`
-                            : "—"}
-                        </strong>
-                        <p style={mutedTextStyle}>
-                          {selectedRule
-                            ? reimbursementModeLabel(
-                                copy,
-                                selectedRule.reimbursementMode,
-                              )
-                            : copy.authorityFallback}
-                        </p>
-                      </div>
-                    ))}
-                </div>
-              </CanvasCard>
-            ) : null}
-
-            {activeTab === "passenger" ? (
-              <CanvasCard
-                theme={theme}
                 title={copy.ruleDetailTitle}
                 subtitle={
                   selectedRule ? selectedRule.ruleName : copy.noRuleSelection
@@ -3358,6 +3538,19 @@ export default function PricingPage() {
                           (locale === "en" ? "No notes" : "無備註")}
                       </span>
                     </div>
+                    {authorityItems.length > 0 ? (
+                      <>
+                        <div style={lineStyle} />
+                        <div style={detailListStyle}>
+                          {authorityItems.map((item) => (
+                            <div key={item.k} style={detailRowStyle}>
+                              <span style={detailLabelStyle}>{item.k}</span>
+                              <span style={detailValueStyle}>{item.v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
                     <div style={lineStyle} />
                     {renderActionDescriptors(selectedRuleActions, {
                       rule: selectedRule,
@@ -3409,6 +3602,16 @@ export default function PricingPage() {
                           copy,
                           selectedPlan.reimbursementMode,
                         )}
+                      </span>
+                    </div>
+                    <div style={detailRowStyle}>
+                      <span style={detailLabelStyle}>
+                        {copy.planColumns.structure}
+                      </span>
+                      <span style={detailValueStyle}>
+                        {locale === "en"
+                          ? `${formatBps(locale, selectedPlan.serviceFeeBps)} bps per trip`
+                          : `每趟 ${formatBps(locale, selectedPlan.serviceFeeBps)} bps`}
                       </span>
                     </div>
                     <div style={detailRowStyle}>
