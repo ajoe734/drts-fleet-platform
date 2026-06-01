@@ -54,15 +54,8 @@ export default async function SlaPage() {
         lastRecalculationAt={data.view?.lastRecalculationAt ?? null}
         availableActions={data.view?.availableActions ?? []}
         emptyState={data.view?.emptyState ?? null}
-        refreshTier={data.view?.refreshTier ?? "manual"}
-        refreshMetadata={
-          data.view?.refreshMetadata ?? {
-            generatedAt: "",
-            staleAfterMs: 0,
-            dataFreshness: "unknown",
-            source: "cache",
-          }
-        }
+        refreshTier={data.view?.refreshTier ?? null}
+        refreshMetadata={data.view?.refreshMetadata ?? null}
         loadErrorMessage={data.errorMessage}
         links={[
           { href: "/integration-governance", label: "查看整合就緒度" },

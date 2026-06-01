@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
   ActionReceipt,
-  EmptyReason,
   EmptyStateEnvelope,
   RefreshTier,
   ResourceActionDescriptor,
@@ -45,16 +44,13 @@ type CrossAppLinkItem = {
 };
 
 type EmptyStateConfig = {
-  reason: Exclude<EmptyStateEnvelope["reason"], "driver_not_eligible">;
+  reason: EmptyStateEnvelope["reason"];
   title: string;
   body: string;
   tone: "warn" | "danger" | "info" | "success" | "accent";
 };
 
-type TenantSlaEmptyReason = Exclude<
-  EmptyStateEnvelope["reason"],
-  "driver_not_eligible"
->;
+type TenantSlaEmptyReason = EmptyStateEnvelope["reason"];
 
 type SlaManagerProps = {
   profile: SlaSnapshot | null;
@@ -62,8 +58,8 @@ type SlaManagerProps = {
   lastRecalculationAt: string | null;
   availableActions: ResourceActionDescriptor[];
   emptyState: EmptyStateEnvelope | null;
-  refreshTier: RefreshTier;
-  refreshMetadata: UiRefreshMetadata;
+  refreshTier: RefreshTier | null;
+  refreshMetadata: UiRefreshMetadata | null;
   loadErrorMessage: string | null;
   links: LinkItem[];
   crossAppLinks: CrossAppLinkItem[];
@@ -227,6 +223,12 @@ const EMPTY_STATE_CONFIG: Record<TenantSlaEmptyReason, EmptyStateConfig> = {
     body: "SLA profile 目前受外部計算或同步服務影響而不可用。請稍後重試並留意平台公告。",
     tone: "danger",
   },
+  driver_not_eligible: {
+    reason: "driver_not_eligible",
+    title: "資料狀態不適用於租戶主控台",
+    body: "後端回傳了 driver-app 專用的 empty reason。此 SLA profile 應由後端改正 tenant-scoped 狀態後再顯示。",
+    tone: "danger",
+  },
   filtered_empty: {
     reason: "filtered_empty",
     title: "目前篩選條件下沒有結果",
@@ -252,8 +254,11 @@ function formatDateTime(value: string | null | undefined) {
     .replace(",", "");
 }
 
-function getAction(actions: ResourceActionDescriptor[], matcher: string[]) {
-  return actions.find((action) => matcher.includes(action.action)) ?? null;
+function getAction(
+  actions: ResourceActionDescriptor[],
+  expectedAction: string,
+) {
+  return actions.find((action) => action.action === expectedAction) ?? null;
 }
 
 function disabledReasonLabel(reason: string | undefined) {
@@ -299,13 +304,6 @@ const REFRESH_TIER_LABEL: Record<RefreshTier, string> = {
   manual: "手動更新",
 };
 
-function toRenderableEmptyReason(
-  reason: EmptyReason | null | undefined,
-): TenantSlaEmptyReason | null {
-  if (!reason) return null;
-  return reason === "driver_not_eligible" ? "fetch_failed" : reason;
-}
-
 function formatActionCaption(action: ResourceActionDescriptor) {
   if (action.enabled) return `${actionLabel(action.action)} 可直接執行`;
   return `${actionLabel(action.action)} 目前不可執行：${disabledReasonLabel(action.disabledReasonCode)}`;
@@ -348,25 +346,18 @@ export function SlaManager({
   } | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const updateAction = getAction(availableActions, [
-    "update_sla_profile",
-    "save",
-  ]);
-  const recalcAction = getAction(availableActions, [
-    "recalculate_sla_bookings",
-    "recalculate",
-  ]);
-  const effectiveEmptyReason = toRenderableEmptyReason(
-    emptyState?.reason ?? (loadErrorMessage ? "fetch_failed" : null),
-  );
-  const activeEmptyState = effectiveEmptyReason
-    ? EMPTY_STATE_CONFIG[effectiveEmptyReason]
+  const updateAction = getAction(availableActions, "update_sla_profile");
+  const recalcAction = getAction(availableActions, "recalculate_sla_bookings");
+  const activeEmptyState = emptyState
+    ? EMPTY_STATE_CONFIG[emptyState.reason]
     : null;
   const showEditor = Boolean(profile) || Boolean(updateAction);
   const reasonRequired = Boolean(
     updateAction?.requiresReason || recalcAction?.requiresReason,
   );
-  const refreshMetadataAvailable = Boolean(refreshMetadata.generatedAt);
+  const refreshMetadataAvailable = Boolean(
+    refreshTier && refreshMetadata?.generatedAt,
+  );
 
   const handleUpdate = () => {
     startTransition(async () => {
@@ -449,16 +440,18 @@ export function SlaManager({
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <CanvasPill theme={th} tone="accent">
-              refresh tier · T5 / {refreshTier}
+              refresh tier · T5 / {refreshTier ?? "—"}
             </CanvasPill>
             {refreshMetadataAvailable ? (
               <CanvasPill
                 theme={th}
                 tone={
-                  refreshMetadata.dataFreshness === "fresh" ? "success" : "warn"
+                  refreshMetadata!.dataFreshness === "fresh"
+                    ? "success"
+                    : "warn"
                 }
               >
-                freshness · {refreshMetadata.dataFreshness}
+                freshness · {refreshMetadata!.dataFreshness}
               </CanvasPill>
             ) : null}
           </div>
@@ -507,10 +500,10 @@ export function SlaManager({
           <CanvasBanner
             theme={th}
             tone="info"
-            title={`Refresh cadence · ${REFRESH_TIER_LABEL[refreshTier]}`}
-            body={`metadata source=${refreshMetadata.source} · generatedAt=${formatDateTime(
-              refreshMetadata.generatedAt,
-            )} · staleAfterMs=${refreshMetadata.staleAfterMs}`}
+            title={`Refresh cadence · ${REFRESH_TIER_LABEL[refreshTier!]}`}
+            body={`metadata source=${refreshMetadata!.source} · generatedAt=${formatDateTime(
+              refreshMetadata!.generatedAt,
+            )} · staleAfterMs=${refreshMetadata!.staleAfterMs}`}
           />
         ) : null}
 
@@ -527,9 +520,7 @@ export function SlaManager({
                 {activeEmptyState.body}
               </div>
               <div style={noteStyle}>
-                messageCode ·{" "}
-                {emptyState?.messageCode ??
-                  (loadErrorMessage ? "tenant.sla.fetch_failed" : "—")}
+                messageCode · {emptyState?.messageCode ?? "—"}
               </div>
               {emptyState?.nextAction ? (
                 <div style={emptyActionStyle}>
