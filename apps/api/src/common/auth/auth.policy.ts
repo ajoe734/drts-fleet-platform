@@ -67,6 +67,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "platform/search" && upperMethod === "GET") {
+    return {
+      routeKey: "platform:search",
+      requiredScopes: ["foundation:read"],
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Platform cross-entity search",
+    };
+  }
+
   if (routePath === "partner/eligibility/verify") {
     return {
       routeKey: "partner:eligibility:verify",
