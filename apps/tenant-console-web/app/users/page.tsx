@@ -45,6 +45,14 @@ const REFRESH_TIER_CADENCE_MS: Record<RefreshTier, number | null> = {
 };
 const TENANT_REFRESH_CADENCE_MS =
   REFRESH_TIER_CADENCE_MS[TENANT_REFRESH_TIER] ?? 30_000;
+const CROSS_APP_BASE_URLS = {
+  "ops-console":
+    process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003",
+  "platform-admin":
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002",
+  "tenant-console":
+    process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3004",
+} as const;
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -484,7 +492,7 @@ function buildUserRows(
 function getEmptyStateConfig(
   reason: EmptyReason,
   nextAction: ResourceActionDescriptor | undefined,
-  refreshHref: string,
+  refreshHref: string | null,
 ): EmptyStateConfig {
   switch (reason) {
     case "not_provisioned":
@@ -501,9 +509,13 @@ function getEmptyStateConfig(
         body: "後端快照沒有成功回來。請重新整理，若持續失敗再進 audit 或支援流程。",
         tone: "danger",
         icon: "warn",
-        actionHref: refreshHref,
-        actionLabel: "重新整理",
-        actionIcon: "refresh",
+        ...(refreshHref
+          ? {
+              actionHref: refreshHref,
+              actionLabel: "重新整理",
+              actionIcon: "refresh" as const,
+            }
+          : {}),
       };
     case "permission_denied":
       return {
@@ -518,9 +530,13 @@ function getEmptyStateConfig(
         body: "租戶使用者清單可讀性受外部 identity / session 依賴影響。可先到 audit 查看近期 role 變更。",
         tone: "warn",
         icon: "warn",
-        actionHref: refreshHref,
-        actionLabel: "重新整理",
-        actionIcon: "refresh",
+        ...(refreshHref
+          ? {
+              actionHref: refreshHref,
+              actionLabel: "重新整理",
+              actionIcon: "refresh" as const,
+            }
+          : {}),
       };
     case "filtered_empty":
       return {
@@ -542,7 +558,9 @@ function getEmptyStateConfig(
 }
 
 function resolveCrossAppHref(link: CrossAppResourceLink) {
-  return link.route;
+  if (/^https?:\/\//.test(link.route)) return link.route;
+  const appBaseUrl = CROSS_APP_BASE_URLS[link.targetApp];
+  return new URL(link.route, appBaseUrl).toString();
 }
 
 async function loadUsersData(): Promise<UsersPageData> {
@@ -769,9 +787,11 @@ export default async function UsersPage({
     refreshMetadata: backendRefreshMetadata,
     crossAppLinks: backendCrossAppLinks,
   } = await loadUsersData();
-  const refreshHref = buildQueryString(resolvedSearchParams, {
-    refreshedAt: Date.now().toString(),
-  });
+  const refreshHref = backendRefreshMetadata
+    ? buildQueryString(resolvedSearchParams, {
+        refreshedAt: Date.now().toString(),
+      })
+    : null;
   const tenantId = identity?.tenantId ?? users[0]?.tenantId ?? DEMO_TENANT_ID;
   const assignableRoles = roles.filter((role) => role.assignable);
   const pageInviteAction = getAction(availableActions, "invite");
@@ -908,16 +928,6 @@ export default async function UsersPage({
                 />
               ))}
             </div>
-            {row.availableActions.length > 0 ? (
-              <span style={userMetaStyle}>
-                availableActions:
-                {row.availableActions.map((action) =>
-                  action.enabled
-                    ? ` ${action.action}`
-                    : ` ${action.action}[off]`,
-                )}
-              </span>
-            ) : null}
           </div>
         );
       },
@@ -932,16 +942,18 @@ export default async function UsersPage({
         subtitle="只有 tc_admin 可操作 · tenant_admin / operator / finance / integration_mgr / viewer"
         actions={
           <>
-            <a href={refreshHref} style={{ textDecoration: "none" }}>
-              <CanvasBtn
-                theme={th}
-                variant="secondary"
-                icon="refresh"
-                size="sm"
-              >
-                重新整理
-              </CanvasBtn>
-            </a>
+            {refreshHref ? (
+              <a href={refreshHref} style={{ textDecoration: "none" }}>
+                <CanvasBtn
+                  theme={th}
+                  variant="secondary"
+                  icon="refresh"
+                  size="sm"
+                >
+                  重新整理
+                </CanvasBtn>
+              </a>
+            ) : null}
             <ActionDescriptorButton
               descriptor={pageInviteAction}
               label="邀請"
