@@ -37,6 +37,8 @@ type CrossAppLinkItem = {
   label: string;
 };
 
+type SlaActionKey = "update_sla_profile" | "recalculate_sla_bookings";
+
 type EmptyStateConfig = {
   reason: TenantSlaEmptyReason;
   title: string;
@@ -104,6 +106,40 @@ const nativeTextAreaStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
+const modalScrimStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.42)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 24,
+  zIndex: 50,
+};
+
+const modalCardStyle: CSSProperties = {
+  width: "min(100%, 540px)",
+  background: th.bg,
+  border: `1px solid ${th.border}`,
+  borderRadius: 16,
+  boxShadow: "0 28px 70px rgba(15, 23, 42, 0.22)",
+  padding: 20,
+  display: "grid",
+  gap: 16,
+};
+
+const modalHeaderStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const modalFooterStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
 const footerStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -160,6 +196,12 @@ const linkRowStyle: CSSProperties = {
   gap: 10,
 };
 
+const inlineLinkRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+};
+
 const linkStyle: CSSProperties = {
   color: th.accent,
   fontSize: 12.5,
@@ -213,34 +255,7 @@ const sectionStackStyle: CSSProperties = {
 const summaryCardStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 18,
-};
-
-const statListStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
-};
-
-const statRowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "baseline",
-  justifyContent: "space-between",
-  gap: 12,
-  paddingBottom: 10,
-  borderBottom: `1px solid ${th.border}`,
-};
-
-const statKeyStyle: CSSProperties = {
-  fontSize: 12,
-  color: th.textMuted,
-};
-
-const statValueStyle: CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: th.text,
-  fontFamily: th.monoFamily,
-  textAlign: "right",
+  gap: 14,
 };
 
 const inputShellStyle: CSSProperties = {
@@ -388,6 +403,18 @@ function formatThresholdInput(value: number | null | undefined) {
   return typeof value === "number" ? String(value) : "";
 }
 
+function formatUpdatedByLine(
+  updatedAt: string | null | undefined,
+  updatedBy: string | null,
+) {
+  const dateLabel = formatDateTime(updatedAt);
+  if (dateLabel === "—") {
+    return "—";
+  }
+
+  return updatedBy ? `${dateLabel} · ${updatedBy}` : dateLabel;
+}
+
 function getActiveEmptyState(
   emptyState: EmptyStateEnvelope | null,
   loadErrorMessage: string | null,
@@ -457,6 +484,36 @@ function requiresReasonForAction(action: ResourceActionDescriptor | null) {
   return Boolean(action?.enabled && action.requiresReason);
 }
 
+function resolveActionVariant(action: ResourceActionDescriptor | null) {
+  if (action?.riskLevel === "high" || action?.riskLevel === "medium") {
+    return "primary" as const;
+  }
+  return "secondary" as const;
+}
+
+function buildActionPrompt(action: ResourceActionDescriptor | null) {
+  switch (action?.action) {
+    case "update_sla_profile":
+      return {
+        title: "確認更新 SLA Profile",
+        body: "Threshold 變更會影響新建立的訂單，以及之後重新計算的 SLA event。確認後會寫入 audit trail。",
+        confirmLabel: "確認儲存",
+      };
+    case "recalculate_sla_bookings":
+      return {
+        title: "確認重算既有訂單",
+        body: "此操作會對既有訂單送出 SLA 重算請求，receipt 會回傳 accepted/completed 狀態並可追蹤 audit。",
+        confirmLabel: "確認重算",
+      };
+    default:
+      return {
+        title: "確認操作",
+        body: "此操作會留下 audit trail。",
+        confirmLabel: "確認",
+      };
+  }
+}
+
 export function SlaManager({
   view,
   loadErrorMessage,
@@ -480,7 +537,10 @@ export function SlaManager({
   const [completionThresholdMin, setCompletionThresholdMin] = useState(
     formatThresholdInput(profile?.completionThresholdMin),
   );
-  const [reason, setReason] = useState("");
+  const [pendingActionKey, setPendingActionKey] = useState<SlaActionKey | null>(
+    null,
+  );
+  const [pendingReason, setPendingReason] = useState("");
   const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -494,37 +554,49 @@ export function SlaManager({
     ((emptyState?.reason === "not_provisioned" ||
       emptyState?.reason === "no_data") &&
       Boolean(updateAction));
-  const reasonRequired = Boolean(
-    updateAction?.requiresReason || recalcAction?.requiresReason,
-  );
   const refreshMetadataAvailable = Boolean(
     refreshTier && refreshMetadata?.generatedAt,
   );
   const refreshDeadline = getRefreshDeadline(refreshMetadata);
-  const metricRows = [
+  const pendingAction =
+    pendingActionKey === "update_sla_profile"
+      ? updateAction
+      : pendingActionKey === "recalculate_sla_bookings"
+        ? recalcAction
+        : null;
+  const pendingActionPrompt = buildActionPrompt(pendingAction);
+  const attainmentUnavailableLabel =
+    profile && !activeEmptyState ? "待 SLA attainment read model" : "—";
+  const attainmentItems = [
     {
-      label: "profile state",
-      value: profile ? "configured" : (emptyState?.reason ?? "unknown"),
+      k: "總 SLA 評估趟次",
+      v: attainmentUnavailableLabel,
+      mono: true,
     },
     {
-      label: "update action",
-      value: updateAction
-        ? updateAction.enabled
-          ? "enabled"
-          : `disabled · ${disabledReasonLabel(updateAction.disabledReasonCode)}`
-        : "not returned",
+      k: "達標",
+      v: attainmentUnavailableLabel,
+      mono: true,
     },
     {
-      label: "recalculate",
-      value: recalcAction
-        ? recalcAction.enabled
-          ? "enabled"
-          : `disabled · ${disabledReasonLabel(recalcAction.disabledReasonCode)}`
-        : "not returned",
+      k: "wait 違規",
+      v: attainmentUnavailableLabel,
+      mono: true,
     },
     {
-      label: "last recalc",
-      value: lastRecalculationAt ? formatDateTime(lastRecalculationAt) : "idle",
+      k: "arrival 違規",
+      v: attainmentUnavailableLabel,
+      mono: true,
+    },
+    {
+      k: "completion 違規",
+      v: attainmentUnavailableLabel,
+      mono: true,
+    },
+    {
+      k: "updatedAt",
+      v: formatUpdatedByLine(profile?.updatedAt, updatedBy),
+      mono: true,
     },
   ];
 
@@ -534,6 +606,8 @@ export function SlaManager({
     setCompletionThresholdMin(
       formatThresholdInput(profile?.completionThresholdMin),
     );
+    setPendingActionKey(null);
+    setPendingReason("");
   }, [
     profile?.waitThresholdMin,
     profile?.arrivalThresholdMin,
@@ -565,36 +639,15 @@ export function SlaManager({
     return () => window.clearTimeout(timer);
   }, [refreshDeadline, router]);
 
-  const handleUpdate = () => {
-    const waitValue = parseThresholdValue(waitThresholdMin, "waitThresholdMin");
-    if (!waitValue.ok) {
-      setActionError(waitValue.message);
-      setReceipt(null);
-      return;
-    }
-
-    const arrivalValue = parseThresholdValue(
-      arrivalThresholdMin,
-      "arrivalThresholdMin",
-    );
-    if (!arrivalValue.ok) {
-      setActionError(arrivalValue.message);
-      setReceipt(null);
-      return;
-    }
-
-    const completionValue = parseThresholdValue(
-      completionThresholdMin,
-      "completionThresholdMin",
-    );
-    if (!completionValue.ok) {
-      setActionError(completionValue.message);
-      setReceipt(null);
-      return;
-    }
-
-    if (requiresReasonForAction(updateAction) && !reason.trim()) {
-      setActionError("更新 SLA profile 前必須填寫變更原因。");
+  const executeAction = (actionKey: SlaActionKey, reason: string) => {
+    const selectedAction =
+      actionKey === "update_sla_profile" ? updateAction : recalcAction;
+    if (requiresReasonForAction(selectedAction) && !reason.trim()) {
+      setActionError(
+        actionKey === "update_sla_profile"
+          ? "更新 SLA profile 前必須填寫變更原因。"
+          : "重算既有訂單前必須填寫操作原因。",
+      );
       setReceipt(null);
       return;
     }
@@ -603,48 +656,74 @@ export function SlaManager({
       setActionError(null);
       setReceipt(null);
       try {
-        const nextReceipt = await updateTenantSlaProfileAction({
-          waitThresholdMin: waitValue.value,
-          arrivalThresholdMin: arrivalValue.value,
-          completionThresholdMin: completionValue.value,
-          reason: reason.trim(),
-        });
-        setReceipt(nextReceipt);
-        setReason("");
-        router.refresh();
-      } catch (error) {
-        setActionError(
-          error instanceof Error ? error.message : "SLA update failed.",
-        );
-      }
-    });
-  };
+        const nextReceipt =
+          actionKey === "update_sla_profile"
+            ? await (async () => {
+                const waitValue = parseThresholdValue(
+                  waitThresholdMin,
+                  "waitThresholdMin",
+                );
+                if (!waitValue.ok) {
+                  throw new Error(waitValue.message);
+                }
 
-  const handleRecalculate = () => {
-    if (requiresReasonForAction(recalcAction) && !reason.trim()) {
-      setActionError("重算既有訂單前必須填寫操作原因。");
-      setReceipt(null);
-      return;
-    }
+                const arrivalValue = parseThresholdValue(
+                  arrivalThresholdMin,
+                  "arrivalThresholdMin",
+                );
+                if (!arrivalValue.ok) {
+                  throw new Error(arrivalValue.message);
+                }
 
-    startTransition(async () => {
-      setActionError(null);
-      setReceipt(null);
-      try {
-        const nextReceipt = await recalculateTenantSlaBookingsAction(
-          reason.trim(),
-        );
+                const completionValue = parseThresholdValue(
+                  completionThresholdMin,
+                  "completionThresholdMin",
+                );
+                if (!completionValue.ok) {
+                  throw new Error(completionValue.message);
+                }
+
+                return updateTenantSlaProfileAction({
+                  waitThresholdMin: waitValue.value,
+                  arrivalThresholdMin: arrivalValue.value,
+                  completionThresholdMin: completionValue.value,
+                  reason: reason.trim(),
+                });
+              })()
+            : await recalculateTenantSlaBookingsAction(reason.trim());
         setReceipt(nextReceipt);
-        setReason("");
+        setPendingActionKey(null);
+        setPendingReason("");
         router.refresh();
       } catch (error) {
         setActionError(
           error instanceof Error
             ? error.message
-            : "SLA recalculation request failed.",
+            : actionKey === "update_sla_profile"
+              ? "SLA update failed."
+              : "SLA recalculation request failed.",
         );
       }
     });
+  };
+
+  const openActionConfirm = (actionKey: SlaActionKey) => {
+    const selectedAction =
+      actionKey === "update_sla_profile" ? updateAction : recalcAction;
+    if (!selectedAction?.enabled || isPending) {
+      return;
+    }
+    setActionError(null);
+    setPendingActionKey(actionKey);
+    setPendingReason("");
+  };
+
+  const closeActionConfirm = () => {
+    if (isPending) {
+      return;
+    }
+    setPendingActionKey(null);
+    setPendingReason("");
   };
 
   const emptyStateCard = activeEmptyState ? (
@@ -905,31 +984,10 @@ export function SlaManager({
                   </CanvasField>
                 </div>
 
-                <div style={{ marginTop: 14 }}>
-                  <CanvasField
-                    theme={th}
-                    label="變更原因"
-                    hint="High-risk actions require a non-empty reason for audit."
-                  >
-                    <textarea
-                      value={reason}
-                      onChange={(event) => setReason(event.target.value)}
-                      style={nativeTextAreaStyle}
-                      disabled={isPending || (!updateAction && !recalcAction)}
-                      aria-label="reason"
-                      placeholder={
-                        reasonRequired
-                          ? "請填寫操作原因，會寫入 audit trail"
-                          : undefined
-                      }
-                    />
-                  </CanvasField>
-                </div>
-
                 <div style={footerStyle}>
                   <div style={noteStyle}>
                     {updateAction || recalcAction
-                      ? `availableActions 決定 CTA 顯示；${reasonRequired ? "目前可執行動作需要 reason，送出後會刷新本頁與相關 deep links。" : "送出後會刷新本頁與相關 deep links。"}`
+                      ? "availableActions 決定 CTA 顯示；高風險動作會在確認視窗收集 reason，送出後刷新本頁與相關 deep links。"
                       : "目前 API 沒有回傳可操作的 SLA 動作。"}
                     {nextAction ? (
                       <div style={actionHintStyle}>
@@ -954,7 +1012,10 @@ export function SlaManager({
                     {recalcAction ? (
                       <CanvasBtn
                         theme={th}
-                        onClick={handleRecalculate}
+                        variant={resolveActionVariant(recalcAction)}
+                        onClick={() =>
+                          openActionConfirm("recalculate_sla_bookings")
+                        }
                         disabled={isPending || !recalcAction.enabled}
                       >
                         {recalcAction.enabled
@@ -967,8 +1028,8 @@ export function SlaManager({
                     {updateAction ? (
                       <CanvasBtn
                         theme={th}
-                        variant="primary"
-                        onClick={handleUpdate}
+                        variant={resolveActionVariant(updateAction)}
+                        onClick={() => openActionConfirm("update_sla_profile")}
                         disabled={isPending || !updateAction.enabled}
                       >
                         {updateAction.enabled
@@ -982,86 +1043,122 @@ export function SlaManager({
                 </div>
               </CanvasCard>
 
-              <CanvasCard theme={th} title="效益 · SLA 檔案狀態">
+              <CanvasCard theme={th} title="效益 · 上月 SLA 達成率">
                 <div style={summaryCardStyle}>
-                  <div style={statListStyle}>
-                    {metricRows.map((row) => (
-                      <div key={row.label} style={statRowStyle}>
-                        <div style={statKeyStyle}>{row.label}</div>
-                        <div style={statValueStyle}>{row.value}</div>
-                      </div>
-                    ))}
+                  <CanvasDL theme={th} cols={1} items={attainmentItems} />
+                  <div style={noteStyle}>
+                    SLA attainment KPI card follows the design canvas. Current
+                    `TenantSlaProfileView` does not expose monthly attainment
+                    counters, so this panel keeps the artboard layout and shows
+                    live profile provenance until that read model lands.
                   </div>
-
                   <div style={summaryListStyle}>
                     <div>
-                      <div style={summaryLabelStyle}>updatedAt</div>
+                      <div style={summaryLabelStyle}>profile state</div>
                       <div style={summaryValueStyle}>
-                        {formatDateTime(profile?.updatedAt)}
+                        {profile ? "configured" : (emptyState?.reason ?? "—")}
                       </div>
                     </div>
                     <div>
-                      <div style={summaryLabelStyle}>updated by</div>
-                      <div style={summaryValueStyle}>{updatedBy ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div style={summaryLabelStyle}>recalculation</div>
+                      <div style={summaryLabelStyle}>last recalculation</div>
                       <div style={summaryValueStyle}>
                         {lastRecalculationAt
-                          ? `pending since ${formatDateTime(lastRecalculationAt)}`
+                          ? formatDateTime(lastRecalculationAt)
                           : "idle"}
                       </div>
                     </div>
                   </div>
-
-                  <CanvasDL
-                    theme={th}
-                    cols={1}
-                    items={[
-                      {
-                        k: "waitThresholdMin",
-                        v: profile ? `${profile.waitThresholdMin} min` : "—",
-                        mono: true,
-                      },
-                      {
-                        k: "arrivalThresholdMin",
-                        v: profile ? `${profile.arrivalThresholdMin} min` : "—",
-                        mono: true,
-                      },
-                      {
-                        k: "completionThresholdMin",
-                        v: profile
-                          ? `${profile.completionThresholdMin} min`
-                          : "—",
-                        mono: true,
-                      },
-                    ]}
-                  />
-
-                  <div style={linkRowStyle}>
-                    {links.map((link) => (
-                      <Link key={link.href} href={link.href} style={linkStyle}>
-                        {link.label} →
-                      </Link>
-                    ))}
-                    {crossAppLinks.map((link) => (
-                      <a
-                        key={link.href}
-                        href={link.href}
-                        style={linkStyle}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {link.label} ↗
-                      </a>
-                    ))}
-                  </div>
                 </div>
               </CanvasCard>
             </div>
+            <CanvasCard theme={th} title="深連結與後續追蹤">
+              <div style={summaryCardStyle}>
+                <div style={noteStyle}>
+                  In-app receipt links stay inside Tenant Console; cross-app
+                  targets open in a new tab per Q-X03.
+                </div>
+                <div style={inlineLinkRowStyle}>
+                  {links.map((link) => (
+                    <Link key={link.href} href={link.href} style={linkStyle}>
+                      {link.label} →
+                    </Link>
+                  ))}
+                  {crossAppLinks.map((link) => (
+                    <a
+                      key={link.href}
+                      href={link.href}
+                      style={linkStyle}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {link.label} ↗
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </CanvasCard>
           </div>
         )}
       </div>
+      {pendingAction ? (
+        <div style={modalScrimStyle}>
+          <div style={modalCardStyle} role="dialog" aria-modal="true">
+            <div style={modalHeaderStyle}>
+              <CanvasPill
+                theme={th}
+                tone={pendingAction.riskLevel === "high" ? "danger" : "accent"}
+              >
+                {pendingAction.riskLevel} risk
+              </CanvasPill>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>
+                {pendingActionPrompt.title}
+              </div>
+              <div style={noteStyle}>{pendingActionPrompt.body}</div>
+            </div>
+            {pendingAction.requiresReason ? (
+              <CanvasField
+                theme={th}
+                label="操作原因"
+                hint="此欄位為必填，提交後會寫入 audit trail。"
+              >
+                <textarea
+                  value={pendingReason}
+                  onChange={(event) => setPendingReason(event.target.value)}
+                  style={nativeTextAreaStyle}
+                  disabled={isPending}
+                  aria-label="pending-action-reason"
+                  placeholder="請填寫原因，說明這次 threshold 變更或重算目的"
+                />
+              </CanvasField>
+            ) : null}
+            <div style={modalFooterStyle}>
+              <CanvasBtn
+                theme={th}
+                onClick={closeActionConfirm}
+                disabled={isPending}
+              >
+                取消
+              </CanvasBtn>
+              <CanvasBtn
+                theme={th}
+                variant={resolveActionVariant(pendingAction)}
+                onClick={() =>
+                  executeAction(
+                    pendingAction.action as SlaActionKey,
+                    pendingReason,
+                  )
+                }
+                disabled={Boolean(
+                  isPending ||
+                  (pendingAction.requiresReason && !pendingReason.trim()),
+                )}
+              >
+                {pendingActionPrompt.confirmLabel}
+              </CanvasBtn>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
