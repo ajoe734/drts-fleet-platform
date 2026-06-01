@@ -26,7 +26,6 @@ import {
   CanvasDL,
   CanvasField,
   CanvasIcon,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -263,25 +262,7 @@ const bodyStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const kpiGridStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-} satisfies CSSProperties;
-
-const topGridStyle = {
-  display: "grid",
-  gap: 16,
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-} satisfies CSSProperties;
-
-const bottomGridStyle = {
-  display: "grid",
-  gap: 16,
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-} satisfies CSSProperties;
-
-const overviewGridStyle = {
+const contextGridStyle = {
   display: "grid",
   gap: 16,
   gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
@@ -291,6 +272,12 @@ const fieldGridStyle = {
   display: "grid",
   gap: 14,
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+} satisfies CSSProperties;
+
+const detailGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.65fr)",
 } satisfies CSSProperties;
 
 const loadingStateStyle = {
@@ -410,12 +397,14 @@ const noteListStyle = {
 } satisfies CSSProperties;
 
 const sitemapListStyle = {
-  display: "grid",
-  gap: 10,
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
 } satisfies CSSProperties;
 
 const sitemapRowStyle = {
-  display: "grid",
+  display: "inline-grid",
   gap: 4,
   padding: "10px 12px",
   borderRadius: 10,
@@ -1102,19 +1091,6 @@ function describeDisabledReason(locale: string, code: string | undefined) {
   return locale === "en" ? `Blocked: ${code}` : `目前不可執行：${code}`;
 }
 
-function timeSinceMs(ms: number, locale: string) {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) {
-    return locale === "en" ? `${seconds}s ago` : `${seconds} 秒前`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return locale === "en" ? `${minutes}m ago` : `${minutes} 分前`;
-  }
-  const hours = Math.floor(minutes / 60);
-  return locale === "en" ? `${hours}h ago` : `${hours} 小時前`;
-}
-
 function DescriptorButton({
   theme: th,
   locale,
@@ -1449,9 +1425,9 @@ export default function FeatureFlagsPage() {
           updatedByFallback: "actor pending contract",
           tableTitle: "Feature flag registry",
           tableSubtitle:
-            "KEY, rollout state, per-tenant overrides, last changed by, last changed at, and availableActions.",
-          rolloutCol: "Rollout",
-          overrideCol: "Overrides",
+            "KEY, scope, state, last changed by, last changed at, and availableActions.",
+          scopeCol: "Scope",
+          stateCol: "State",
           updatedByCol: "Updated by",
           atCol: "Changed at",
           actionsCol: "Actions",
@@ -1553,9 +1529,9 @@ export default function FeatureFlagsPage() {
           updatedByFallback: "actor contract 未提供",
           tableTitle: "Feature flag registry",
           tableSubtitle:
-            "呈現 KEY、rollout state、tenant override、最後變更者、最後變更時間，以及 availableActions。",
-          rolloutCol: "Rollout",
-          overrideCol: "Overrides",
+            "呈現 KEY、scope、state、最後變更者、最後變更時間，以及 availableActions。",
+          scopeCol: "Scope",
+          stateCol: "State",
           updatedByCol: "Updated by",
           atCol: "變更時間",
           actionsCol: "Actions",
@@ -1738,13 +1714,6 @@ export default function FeatureFlagsPage() {
     (sum, row) => sum + row.overrides.length,
     0,
   );
-  const midRolloutCount = rows.filter(
-    (row) => row.rolloutState === "mid_rollout",
-  ).length;
-  const deprecatedCount = rows.filter(
-    (row) => row.rolloutState === "deprecated",
-  ).length;
-  const enabledGlobalCount = rows.filter((row) => row.global?.enabled).length;
 
   const dataFreshness = useMemo(() => {
     if (error) {
@@ -1913,14 +1882,36 @@ export default function FeatureFlagsPage() {
       ),
     },
     {
-      h: copy.rolloutCol,
+      h: copy.scopeCol,
       w: 220,
       r: (row) => (
         <div style={stackedCellStyle}>
           <div style={pillRowStyle}>
-            <CanvasPill theme={theme} tone={rolloutTone(row.rolloutState)} dot>
-              {rolloutLabel(locale, row.rolloutState)}
+            <CanvasPill theme={theme} tone="accent">
+              {row.global ? copy.globalDefault : copy.noGlobal}
             </CanvasPill>
+            {row.selectedTenantOverride ? (
+              <CanvasPill theme={theme} tone="info">
+                {copy.selectedOverride}
+              </CanvasPill>
+            ) : null}
+          </div>
+          <div style={secondaryTextStyle}>
+            {row.overrides.length > 0
+              ? `${row.overrides.length} ${copy.overrideCount}`
+              : locale === "en"
+                ? "No tenant overrides"
+                : "目前沒有 tenant override"}
+          </div>
+        </div>
+      ),
+    },
+    {
+      h: copy.stateCol,
+      w: 260,
+      r: (row) => (
+        <div style={stackedCellStyle}>
+          <div style={pillRowStyle}>
             <CanvasPill
               theme={theme}
               tone={row.global?.enabled ? "success" : "neutral"}
@@ -1931,6 +1922,9 @@ export default function FeatureFlagsPage() {
                   : copy.disabled
                 : copy.noGlobal}
             </CanvasPill>
+            <CanvasPill theme={theme} tone={rolloutTone(row.rolloutState)} dot>
+              {rolloutLabel(locale, row.rolloutState)}
+            </CanvasPill>
           </div>
           <div style={secondaryTextStyle}>
             {row.global
@@ -1939,35 +1933,6 @@ export default function FeatureFlagsPage() {
                 }`
               : copy.noGlobalBody}
           </div>
-        </div>
-      ),
-    },
-    {
-      h: copy.overrideCol,
-      w: 260,
-      r: (row) => (
-        <div style={stackedCellStyle}>
-          <div style={pillRowStyle}>
-            <CanvasPill theme={theme} tone="accent">
-              {row.overrides.length} {copy.overrideCount}
-            </CanvasPill>
-            {row.selectedTenantOverride ? (
-              <CanvasPill theme={theme} tone="info">
-                {copy.selectedOverride}
-              </CanvasPill>
-            ) : null}
-          </div>
-          {row.overrides.length > 0 ? (
-            <div style={secondaryTextStyle}>
-              {row.overrides
-                .slice(0, 3)
-                .map((override) => override.tenantCode)
-                .join(", ")}
-              {row.overrides.length > 3 ? ` +${row.overrides.length - 3}` : ""}
-            </div>
-          ) : (
-            <div style={secondaryTextStyle}>{copy.tenantRequired}</div>
-          )}
         </div>
       ),
     },
@@ -2224,6 +2189,7 @@ export default function FeatureFlagsPage() {
       breadcrumb={[copy.breadcrumbParent, copy.pageTitle]}
       env="production"
       versionLabel="canvas"
+      currentPath="/feature-flags"
       searchPlaceholder={
         locale === "en"
           ? "Search key, tenant, or ops scope…"
@@ -2244,6 +2210,31 @@ export default function FeatureFlagsPage() {
             <CanvasPill theme={theme} tone="accent" dot>
               writable · only here
             </CanvasPill>
+            <DescriptorButton
+              theme={theme}
+              locale={locale}
+              descriptor={selectedAddOverride}
+              size="md"
+              onClick={() => {
+                if (!selectedRow || !selectedAddOverride || !selectedTenantId) {
+                  return;
+                }
+                setPendingAction({
+                  kind: "add_tenant_override",
+                  row: selectedRow,
+                  descriptor: selectedAddOverride,
+                  tenantId: selectedTenantId,
+                  enabled:
+                    selectedRow.selectedTenantOverride?.enabled ??
+                    !(selectedRow.global?.enabled ?? false),
+                  description:
+                    selectedRow.selectedTenantOverride?.description ??
+                    selectedRow.global?.description ??
+                    "",
+                });
+                setActionReason("");
+              }}
+            />
             <button
               type="button"
               onClick={() => void loadData("manual")}
@@ -2331,181 +2322,187 @@ export default function FeatureFlagsPage() {
               body={copy.guardrailBody}
             />
 
-            <div style={kpiGridStyle}>
-              <CanvasKPI
-                theme={theme}
-                label="flag keys"
-                value={rows.length}
-                sub={copy.tableTitle}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={copy.globalState}
-                value={enabledGlobalCount}
-                delta={`${rows.length - enabledGlobalCount} ${copy.disabled.toLowerCase()}`}
-                deltaTone={enabledGlobalCount > 0 ? "up" : "neutral"}
-                sub={copy.globalDefault}
-              />
-              <CanvasKPI
-                theme={theme}
-                label="mid-rollout"
-                value={midRolloutCount}
-                delta={`${deprecatedCount} deprecated`}
-                deltaTone={midRolloutCount > 0 ? "down" : "neutral"}
-                sub={`${totalOverrideCount} ${copy.overrideCount}`}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={copy.refreshTier}
-                value={resolvedRefreshTierCode}
-                sub={
-                  lastLoadedAt
-                    ? formatDateTime(new Date(lastLoadedAt).toISOString())
-                    : "—"
-                }
-                hint={
-                  lastLoadedAt
-                    ? timeSinceMs(clockNow - lastLoadedAt, locale)
-                    : undefined
-                }
-              />
-            </div>
-
-            <div style={overviewGridStyle}>
-              <CanvasCard
-                theme={theme}
-                title={copy.summaryTitle}
-                subtitle={copy.summarySubtitle}
-              >
-                <div style={fieldGridStyle}>
-                  <CanvasField theme={theme} label={copy.searchLabel}>
-                    <input
-                      type="text"
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder={copy.searchPlaceholder}
-                      style={inputStyle}
-                    />
-                  </CanvasField>
-                  <CanvasField theme={theme} label={copy.scopeLabel}>
-                    <select
-                      value={scopeFilter}
-                      onChange={(event) =>
-                        setScopeFilter(event.target.value as ScopeFilter)
-                      }
-                      style={inputStyle}
-                    >
-                      {scopeOptions.map((option) => (
-                        <option
-                          key={option.value}
-                          value={option.value}
-                          disabled={
-                            option.value === "selected_tenant" &&
-                            !selectedTenantId
-                          }
-                        >
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </CanvasField>
-                  <CanvasField theme={theme} label={copy.tenantLabel}>
-                    <select
-                      value={selectedTenantId}
-                      onChange={(event) =>
-                        setSelectedTenantId(event.target.value)
-                      }
-                      style={inputStyle}
-                    >
-                      <option value="">{copy.tenantDefault}</option>
-                      {tenants.map((tenant) => (
-                        <option key={tenant.id} value={tenant.id}>
-                          {tenant.name} ({tenant.code})
-                        </option>
-                      ))}
-                    </select>
-                  </CanvasField>
-                </div>
-                <div style={helperTextStyle}>{copy.scopeHint}</div>
-                <div style={{ marginTop: 16 }}>
-                  <CanvasDL
-                    theme={theme}
-                    cols={2}
-                    items={[
-                      {
-                        label: copy.selectedTenantScope,
-                        value: selectedTenant
-                          ? `${selectedTenant.name} (${selectedTenant.code})`
-                          : copy.tenantDefault,
-                      },
-                      {
-                        label: copy.lastLoaded,
-                        value: lastLoadedAt
-                          ? formatDateTime(new Date(lastLoadedAt).toISOString())
-                          : "—",
-                      },
-                      {
-                        label: copy.refreshTier,
-                        value: `${resolvedRefreshTierCode} · ${refreshIntervalLabel(
-                          locale,
-                          resolvedRefreshTier,
-                        )}`,
-                      },
-                      {
-                        label: copy.scopeLabel,
-                        value:
-                          scopeOptions.find(
-                            (option) => option.value === scopeFilter,
-                          )?.label ?? copy.allScopes,
-                      },
-                    ]}
+            <CanvasCard
+              theme={theme}
+              title={copy.summaryTitle}
+              subtitle={copy.summarySubtitle}
+            >
+              <div style={fieldGridStyle}>
+                <CanvasField theme={theme} label={copy.searchLabel}>
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={copy.searchPlaceholder}
+                    style={inputStyle}
                   />
-                </div>
-              </CanvasCard>
-
-              <CanvasCard
-                theme={theme}
-                title={copy.sitemapTitle}
-                subtitle={copy.sitemapSubtitle}
-              >
-                <div style={sitemapListStyle}>
-                  {sitemapItems.map((item) => (
-                    <a
-                      key={item.href}
-                      href={item.href}
-                      style={{
-                        ...sitemapRowStyle,
-                        textDecoration: "none",
-                        color: theme.text,
-                        borderColor: item.active ? theme.accent : theme.border,
-                        background: item.active
-                          ? theme.accentBg
-                          : theme.surfaceLo,
-                      }}
-                    >
-                      <div style={pillRowStyle}>
-                        <CanvasPill
-                          theme={theme}
-                          tone={item.active ? "accent" : "neutral"}
+                </CanvasField>
+                <CanvasField theme={theme} label={copy.scopeLabel}>
+                  <select
+                    value={scopeFilter}
+                    onChange={(event) =>
+                      setScopeFilter(event.target.value as ScopeFilter)
+                    }
+                    style={inputStyle}
+                  >
+                    {scopeOptions.map((option) => (
+                      <option
+                        key={option.value}
+                        value={option.value}
+                        disabled={
+                          option.value === "selected_tenant" &&
+                          !selectedTenantId
+                        }
+                      >
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+                <CanvasField theme={theme} label={copy.tenantLabel}>
+                  <select
+                    value={selectedTenantId}
+                    onChange={(event) =>
+                      setSelectedTenantId(event.target.value)
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="">{copy.tenantDefault}</option>
+                    {tenants.map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>
+                        {tenant.name} ({tenant.code})
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+              </div>
+              <div style={helperTextStyle}>{copy.scopeHint}</div>
+              <div style={{ marginTop: 16, display: "grid", gap: 16 }}>
+                <CanvasDL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      label: copy.selectedTenantScope,
+                      value: selectedTenant
+                        ? `${selectedTenant.name} (${selectedTenant.code})`
+                        : copy.tenantDefault,
+                    },
+                    {
+                      label: copy.lastLoaded,
+                      value: lastLoadedAt
+                        ? formatDateTime(new Date(lastLoadedAt).toISOString())
+                        : "—",
+                    },
+                    {
+                      label: copy.refreshTier,
+                      value: `${resolvedRefreshTierCode} · ${refreshIntervalLabel(
+                        locale,
+                        resolvedRefreshTier,
+                      )}`,
+                    },
+                    {
+                      label: copy.scopeLabel,
+                      value:
+                        scopeOptions.find(
+                          (option) => option.value === scopeFilter,
+                        )?.label ?? copy.allScopes,
+                    },
+                  ]}
+                />
+                <div style={contextGridStyle}>
+                  <div style={stackedCellStyle}>
+                    <strong style={{ fontSize: 12.5, color: theme.text }}>
+                      {copy.sitemapTitle}
+                    </strong>
+                    <div style={secondaryTextStyle}>{copy.sitemapSubtitle}</div>
+                    <div style={sitemapListStyle}>
+                      {sitemapItems.map((item) => (
+                        <a
+                          key={item.href}
+                          href={item.href}
+                          style={{
+                            ...sitemapRowStyle,
+                            textDecoration: "none",
+                            color: theme.text,
+                            borderColor: item.active
+                              ? theme.accent
+                              : theme.border,
+                            background: item.active
+                              ? theme.accentBg
+                              : theme.surfaceLo,
+                          }}
                         >
-                          {item.active
-                            ? locale === "en"
-                              ? "Current"
-                              : "目前頁面"
-                            : locale === "en"
-                              ? "Adjacent"
-                              : "相鄰頁面"}
-                        </CanvasPill>
-                        <strong style={{ fontSize: 12.5 }}>{item.label}</strong>
-                      </div>
-                      <div style={secondaryTextStyle}>{item.note}</div>
-                    </a>
-                  ))}
+                          <div style={pillRowStyle}>
+                            <CanvasPill
+                              theme={theme}
+                              tone={item.active ? "accent" : "neutral"}
+                            >
+                              {item.active
+                                ? locale === "en"
+                                  ? "Current"
+                                  : "目前頁面"
+                                : locale === "en"
+                                  ? "Adjacent"
+                                  : "相鄰頁面"}
+                            </CanvasPill>
+                            <strong style={{ fontSize: 12 }}>
+                              {item.label}
+                            </strong>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={stackedCellStyle}>
+                    <strong style={{ fontSize: 12.5, color: theme.text }}>
+                      {copy.actionInventoryTitle}
+                    </strong>
+                    <div style={secondaryTextStyle}>
+                      {selectedRow
+                        ? locale === "en"
+                          ? `${selectedRow.availableActions.length} action descriptor(s) active for ${selectedRow.key}.`
+                          : `${selectedRow.key} 目前有 ${selectedRow.availableActions.length} 個 action descriptor。`
+                        : copy.actionInventorySubtitle}
+                    </div>
+                    <div style={secondaryTextStyle}>
+                      {totalOverrideCount} {copy.overrideCount} ·{" "}
+                      {rows.length === 0
+                        ? "0"
+                        : rows.filter(
+                            (row) => row.rolloutState === "mid_rollout",
+                          ).length}{" "}
+                      {locale === "en" ? "mid-rollout" : "部分 rollout"}
+                    </div>
+                  </div>
                 </div>
-              </CanvasCard>
-            </div>
+              </div>
+            </CanvasCard>
 
-            <div style={topGridStyle}>
+            <CanvasCard
+              theme={theme}
+              title={copy.tableTitle}
+              subtitle={copy.tableSubtitle}
+              style={{ overflow: "hidden" }}
+            >
+              {filteredRows.length === 0 && activeEmptyReason ? (
+                <EmptyStateCard
+                  theme={theme}
+                  locale={locale}
+                  reason={activeEmptyReason}
+                  {...(error ? { messageOverride: error } : {})}
+                  actionNode={emptyActionNode}
+                />
+              ) : (
+                <CanvasTable<FeatureFlagTableRow>
+                  theme={theme}
+                  columns={columns}
+                  rows={tableRows}
+                />
+              )}
+            </CanvasCard>
+
+            <div style={detailGridStyle}>
               <CanvasCard
                 theme={theme}
                 title={copy.selectedTitle}
@@ -2532,34 +2529,6 @@ export default function FeatureFlagsPage() {
                     <DescriptorButton
                       theme={theme}
                       locale={locale}
-                      descriptor={selectedAddOverride}
-                      onClick={() => {
-                        if (
-                          !selectedRow ||
-                          !selectedAddOverride ||
-                          !selectedTenantId
-                        ) {
-                          return;
-                        }
-                        setPendingAction({
-                          kind: "add_tenant_override",
-                          row: selectedRow,
-                          descriptor: selectedAddOverride,
-                          tenantId: selectedTenantId,
-                          enabled:
-                            selectedRow.selectedTenantOverride?.enabled ??
-                            !(selectedRow.global?.enabled ?? false),
-                          description:
-                            selectedRow.selectedTenantOverride?.description ??
-                            selectedRow.global?.description ??
-                            "",
-                        });
-                        setActionReason("");
-                      }}
-                    />
-                    <DescriptorButton
-                      theme={theme}
-                      locale={locale}
                       descriptor={selectedRemoveOverride}
                       onClick={() => {
                         if (
@@ -2579,11 +2548,28 @@ export default function FeatureFlagsPage() {
                         setActionReason("");
                       }}
                     />
+                    {selectedHistory ? (
+                      <DescriptorButton
+                        theme={theme}
+                        locale={locale}
+                        descriptor={selectedHistory}
+                        onClick={() => {
+                          if (!selectedRow) {
+                            return;
+                          }
+                          window.open(
+                            auditHref(selectedRow.key),
+                            "_blank",
+                            "noopener,noreferrer",
+                          );
+                        }}
+                      />
+                    ) : null}
                   </div>
                 }
               >
                 {selectedRow ? (
-                  <div style={stackedCellStyle}>
+                  <div style={{ display: "grid", gap: 16 }}>
                     <div style={pillRowStyle}>
                       <code style={codeStyle}>{selectedRow.key}</code>
                       <CanvasPill
@@ -2592,6 +2578,16 @@ export default function FeatureFlagsPage() {
                         dot
                       >
                         {rolloutLabel(locale, selectedRow.rolloutState)}
+                      </CanvasPill>
+                      <CanvasPill
+                        theme={theme}
+                        tone={
+                          selectedRow.global?.enabled ? "success" : "neutral"
+                        }
+                      >
+                        {selectedRow.global?.enabled
+                          ? copy.enabled
+                          : copy.disabled}
                       </CanvasPill>
                     </div>
                     <CanvasDL
@@ -2658,22 +2654,110 @@ export default function FeatureFlagsPage() {
                       ) : null}
                     </div>
                     <div style={helperTextStyle}>{copy.removeUnsupported}</div>
-                    {selectedHistory ? (
-                      <div style={actionRowStyle}>
-                        <DescriptorButton
+                    {selectedRowActions.length > 0 ? (
+                      <ActionInventory
+                        locale={locale}
+                        actions={selectedRowActions}
+                      />
+                    ) : (
+                      <EmptyStateCard
+                        theme={theme}
+                        locale={locale}
+                        reason="permission_denied"
+                        compact
+                        messageOverride={
+                          locale === "en"
+                            ? "No availableActions are exposed for the selected flag."
+                            : "目前選取的旗標沒有回傳 availableActions。"
+                        }
+                      />
+                    )}
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <strong style={{ fontSize: 12.5, color: theme.text }}>
+                        {copy.overrideMatrixTitle}
+                      </strong>
+                      {selectedRow.overrides.length > 0 ? (
+                        selectedRow.overrides.map((override) => (
+                          <div
+                            key={`${selectedRow.key}-${override.tenantId}`}
+                            style={{
+                              padding: 12,
+                              borderRadius: 8,
+                              border: `1px solid ${theme.border}`,
+                              background: theme.surfaceLo,
+                              display: "grid",
+                              gap: 8,
+                            }}
+                          >
+                            <div style={pillRowStyle}>
+                              <CanvasPill theme={theme} tone="accent">
+                                {override.tenantCode}
+                              </CanvasPill>
+                              <CanvasPill
+                                theme={theme}
+                                tone={override.enabled ? "success" : "neutral"}
+                                dot
+                              >
+                                {override.enabled
+                                  ? copy.enabled
+                                  : copy.disabled}
+                              </CanvasPill>
+                              {selectedTenantId === override.tenantId ? (
+                                <CanvasPill theme={theme} tone="info">
+                                  {copy.selectedOverride}
+                                </CanvasPill>
+                              ) : null}
+                            </div>
+                            <div style={secondaryTextStyle}>
+                              {override.tenantName}
+                            </div>
+                            <div style={secondaryMonoStyle}>
+                              {formatDateTime(override.updatedAt)}
+                            </div>
+                            <div style={metaRowStyle}>
+                              <a
+                                href={crossAppHref(override.crossLink)}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={deepLinkStyle}
+                              >
+                                {copy.viewOps}
+                                <CanvasIcon name="ext" size={12} />
+                              </a>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <EmptyStateCard
                           theme={theme}
                           locale={locale}
-                          descriptor={selectedHistory}
-                          onClick={() => {
-                            window.open(
-                              auditHref(selectedRow.key),
-                              "_blank",
-                              "noopener,noreferrer",
-                            );
-                          }}
+                          reason={
+                            selectedTenantId ? "not_provisioned" : "no_data"
+                          }
+                          compact
+                          messageOverride={
+                            selectedTenantId
+                              ? locale === "en"
+                                ? "The selected tenant has no override for this flag yet. Review ops context or create one."
+                                : "所選 tenant 目前還沒有這支旗標的 override；可先看 ops context，或直接建立 override。"
+                              : copy.selectPrompt
+                          }
+                          actionNode={
+                            selectedOpsLink ? (
+                              <a
+                                href={crossAppHref(selectedOpsLink)}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={deepLinkStyle}
+                              >
+                                {copy.viewOps}
+                                <CanvasIcon name="ext" size={12} />
+                              </a>
+                            ) : undefined
+                          }
                         />
-                      </div>
-                    ) : null}
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <EmptyStateCard
@@ -2682,142 +2766,6 @@ export default function FeatureFlagsPage() {
                     reason="no_data"
                     compact
                     messageOverride={copy.selectPrompt}
-                  />
-                )}
-              </CanvasCard>
-
-              <CanvasCard
-                theme={theme}
-                title={copy.actionInventoryTitle}
-                subtitle={copy.actionInventorySubtitle}
-              >
-                {selectedRowActions.length > 0 ? (
-                  <ActionInventory
-                    locale={locale}
-                    actions={selectedRowActions}
-                  />
-                ) : (
-                  <EmptyStateCard
-                    theme={theme}
-                    locale={locale}
-                    reason="permission_denied"
-                    compact
-                    messageOverride={
-                      locale === "en"
-                        ? "No availableActions are exposed for the selected flag."
-                        : "目前選取的旗標沒有回傳 availableActions。"
-                    }
-                  />
-                )}
-              </CanvasCard>
-            </div>
-
-            <CanvasCard
-              theme={theme}
-              title={copy.tableTitle}
-              subtitle={copy.tableSubtitle}
-              style={{ overflow: "hidden" }}
-            >
-              {filteredRows.length === 0 && activeEmptyReason ? (
-                <EmptyStateCard
-                  theme={theme}
-                  locale={locale}
-                  reason={activeEmptyReason}
-                  {...(error ? { messageOverride: error } : {})}
-                  actionNode={emptyActionNode}
-                />
-              ) : (
-                <CanvasTable<FeatureFlagTableRow>
-                  theme={theme}
-                  columns={columns}
-                  rows={tableRows}
-                />
-              )}
-            </CanvasCard>
-
-            <div style={bottomGridStyle}>
-              <CanvasCard
-                theme={theme}
-                title={copy.overrideMatrixTitle}
-                subtitle={copy.overrideMatrixSubtitle}
-              >
-                {selectedRow?.overrides.length ? (
-                  <div style={{ display: "grid", gap: 12 }}>
-                    {selectedRow.overrides.map((override) => (
-                      <div
-                        key={`${selectedRow.key}-${override.tenantId}`}
-                        style={{
-                          padding: 12,
-                          borderRadius: 8,
-                          border: `1px solid ${theme.border}`,
-                          background: theme.surfaceLo,
-                          display: "grid",
-                          gap: 8,
-                        }}
-                      >
-                        <div style={pillRowStyle}>
-                          <CanvasPill theme={theme} tone="accent">
-                            {override.tenantCode}
-                          </CanvasPill>
-                          <CanvasPill
-                            theme={theme}
-                            tone={override.enabled ? "success" : "neutral"}
-                            dot
-                          >
-                            {override.enabled ? copy.enabled : copy.disabled}
-                          </CanvasPill>
-                          {selectedTenantId === override.tenantId ? (
-                            <CanvasPill theme={theme} tone="info">
-                              {copy.selectedOverride}
-                            </CanvasPill>
-                          ) : null}
-                        </div>
-                        <div style={secondaryTextStyle}>
-                          {override.tenantName}
-                        </div>
-                        <div style={secondaryMonoStyle}>
-                          {formatDateTime(override.updatedAt)}
-                        </div>
-                        <div style={metaRowStyle}>
-                          <a
-                            href={crossAppHref(override.crossLink)}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={deepLinkStyle}
-                          >
-                            {copy.viewOps}
-                            <CanvasIcon name="ext" size={12} />
-                          </a>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyStateCard
-                    theme={theme}
-                    locale={locale}
-                    reason={selectedTenantId ? "not_provisioned" : "no_data"}
-                    compact
-                    messageOverride={
-                      selectedTenantId
-                        ? locale === "en"
-                          ? "The selected tenant has no override for this flag yet. Review ops context or create one."
-                          : "所選 tenant 目前還沒有這支旗標的 override；可先看 ops context，或直接建立 override。"
-                        : copy.selectPrompt
-                    }
-                    actionNode={
-                      selectedOpsLink ? (
-                        <a
-                          href={crossAppHref(selectedOpsLink)}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={deepLinkStyle}
-                        >
-                          {copy.viewOps}
-                          <CanvasIcon name="ext" size={12} />
-                        </a>
-                      ) : undefined
-                    }
                   />
                 )}
               </CanvasCard>
