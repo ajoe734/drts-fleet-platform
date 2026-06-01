@@ -12,9 +12,14 @@ import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import type {
   DriverTaskRecord,
+  EmptyReason,
+  EmptyStateEnvelope,
   ForwardedDriverActionOutcome,
   ForwardedDriverActionResponse,
   OwnedOrderRecord,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
@@ -78,6 +83,276 @@ import {
 } from "@/lib/trip-workflow";
 import { driverStrings, driverTripActionSuccessLabels } from "@/lib/strings";
 import { usePendingCompletionReplay } from "@/lib/use-pending-completion-replay";
+
+// ── Refresh tier (Q-X01 / Q-X02) — `/trip` active state is T1 fast (3s) plus
+// push interrupt. Pages read the cadence from the shared tier map rather than
+// writing magic numbers (packets §3.2).
+const TRIP_REFRESH_TIER: RefreshTier = "fast";
+const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number | null> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: null,
+};
+
+function getRefreshTierIntervalMs(tier: RefreshTier): number | null {
+  return REFRESH_TIER_INTERVAL_MS[tier];
+}
+
+function getTripRefreshTierLabel(tier: RefreshTier): string {
+  return tier === "fast" ? "T1 · 3s" : tier;
+}
+
+function buildTripRefreshMetadata(
+  loadedAtMs: number | null,
+  nowMs: number,
+  tier: RefreshTier,
+): UiRefreshMetadata {
+  if (loadedAtMs == null) {
+    return {
+      generatedAt: new Date(nowMs).toISOString(),
+      staleAfterMs: 0,
+      dataFreshness: "unknown",
+      source: "static",
+    };
+  }
+
+  const age = nowMs - loadedAtMs;
+  const staleAfterMs = getRefreshTierIntervalMs(tier) ?? 0;
+  return {
+    generatedAt: new Date(loadedAtMs).toISOString(),
+    staleAfterMs,
+    dataFreshness: age <= staleAfterMs ? "fresh" : "stale",
+    source: "live",
+  };
+}
+
+function getRefreshFreshnessLabel(metadata: UiRefreshMetadata): string {
+  switch (metadata.dataFreshness) {
+    case "fresh":
+      return "即時";
+    case "stale":
+      return "待更新";
+    case "degraded":
+      return "降級";
+    default:
+      return "尚未同步";
+  }
+}
+
+// ── availableActions (Q-X13 / Q-DRV01) — CTA visibility/enablement comes from
+// the per-resource descriptors. A disabled descriptor renders the CTA disabled
+// with a reason (never hidden); an absent descriptor falls back to the
+// status-driven workflow so backends not yet emitting actions keep working.
+function findTaskAction(
+  task: DriverTaskRecord | null,
+  action: string,
+): ResourceActionDescriptor | undefined {
+  return task?.availableActions?.find(
+    (descriptor) => descriptor.action === action,
+  );
+}
+
+function getActionDisabledReasonLabel(reasonCode: string | undefined): string {
+  switch (reasonCode) {
+    case "relay_accept_unsupported":
+    case "relay_unavailable":
+      return "此平台不支援由司機端接受，請依來源平台操作。";
+    case "relay_reject_unsupported":
+      return "此平台不支援由司機端婉拒，訂單由來源平台主導。";
+    case "source_platform_controls":
+      return "此訂單由來源平台主導，本地無法變更狀態。";
+    case "awaiting_platform":
+      return "等待平台確認中，暫不開放其他操作。";
+    case "permission_denied":
+      return "目前帳號權限不足，請聯繫派車台。";
+    case "external_unavailable":
+      return "來源平台暫時不可用，請稍後再試。";
+    default:
+      return "目前無法執行此動作。";
+  }
+}
+
+// ── Q-DRV02 — forwarded accept-pending countdown.
+function getAcceptDeadlineRemainingSec(
+  acceptDeadlineAt: string | null | undefined,
+  nowMs: number,
+): number | null {
+  if (!acceptDeadlineAt) {
+    return null;
+  }
+
+  const deadlineMs = Date.parse(acceptDeadlineAt);
+  if (Number.isNaN(deadlineMs)) {
+    return null;
+  }
+
+  return Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
+}
+
+const FORWARDED_ACCEPT_TIMEOUT_SAFE_COPY = "平台未確認此單，請勿再回應";
+
+// ── EmptyReason (Q-X15) — six distinct not-ready treatments for `/trip`.
+type TripEmptyRoute =
+  | "/jobs"
+  | "/platform-presence"
+  | "/settings"
+  | "/onboarding";
+
+interface TripEmptyStateModel {
+  envelope: EmptyStateEnvelope;
+  tone: Exclude<CanvasTone, "neutral">;
+  icon: keyof typeof Ionicons.glyphMap;
+  eyebrow: string;
+  title: string;
+  body: string;
+  actionLabel: string;
+  actionRoute: TripEmptyRoute | null;
+}
+
+function classifyTripEmptyReason(
+  errorMessage: string | null,
+  identityIssue: string | null,
+): EmptyReason {
+  if (identityIssue) {
+    return "not_provisioned";
+  }
+
+  if (!errorMessage) {
+    return "no_data";
+  }
+
+  const normalized = errorMessage.toLowerCase();
+  if (
+    normalized.includes("403") ||
+    normalized.includes("401") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("permission") ||
+    normalized.includes("權限")
+  ) {
+    return "permission_denied";
+  }
+
+  if (
+    normalized.includes("eligib") ||
+    normalized.includes("not_eligible") ||
+    normalized.includes("資格")
+  ) {
+    return "driver_not_eligible";
+  }
+
+  if (
+    normalized.includes("adapter") ||
+    normalized.includes("unavailable") ||
+    normalized.includes("upstream") ||
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("外部") ||
+    normalized.includes("平台")
+  ) {
+    return "external_unavailable";
+  }
+
+  return "fetch_failed";
+}
+
+function getTripEmptyStateModel(
+  reason: EmptyReason,
+  errorMessage: string | null,
+): TripEmptyStateModel {
+  const envelope: EmptyStateEnvelope = {
+    reason,
+    messageCode: `driver.trip.${reason}`,
+  };
+
+  switch (reason) {
+    case "not_provisioned":
+      return {
+        envelope,
+        tone: "info",
+        icon: "link-outline",
+        eyebrow: "Setup required",
+        title: "裝置尚未完成啟用",
+        body: "需先完成裝置與身分綁定，才能載入指派給你的行程。",
+        actionLabel: "前往裝置啟用",
+        actionRoute: "/onboarding",
+      };
+    case "permission_denied":
+      return {
+        envelope,
+        tone: "warn",
+        icon: "shield-outline",
+        eyebrow: "Access check required",
+        title: "權限不足",
+        body: "目前帳號無法讀取此行程資料，請確認司機權限或聯繫派車台。",
+        actionLabel: "前往設定",
+        actionRoute: "/settings",
+      };
+    case "external_unavailable":
+      return {
+        envelope,
+        tone: "warn",
+        icon: "warning-outline",
+        eyebrow: "Adapter degraded",
+        title: "來源平台暫時不可用",
+        body:
+          errorMessage ??
+          "外部平台 adapter 降級中，行程鏡像資料暫時無法同步，請稍後再試。",
+        actionLabel: "前往平台中心",
+        actionRoute: "/platform-presence",
+      };
+    case "driver_not_eligible":
+      return {
+        envelope,
+        tone: "danger",
+        icon: "ban-outline",
+        eyebrow: "Eligibility blocked",
+        title: "目前不具備接單資格",
+        body: "平台回報司機資格不符，無法承接行程。請至平台頁檢查授權或由派車台協助。",
+        actionLabel: "檢查資格",
+        actionRoute: "/platform-presence",
+      };
+    case "fetch_failed":
+      return {
+        envelope,
+        tone: "danger",
+        icon: "cloud-offline-outline",
+        eyebrow: "Needs refresh",
+        title: "行程資料讀取失敗",
+        body: errorMessage ?? "無法載入目前行程，請重新整理後再試。",
+        actionLabel: "重新整理",
+        actionRoute: null,
+      };
+    case "filtered_empty":
+      return {
+        envelope,
+        tone: "info",
+        icon: "sparkles-outline",
+        eyebrow: "Filtered",
+        title: "沒有符合條件的行程",
+        body: "目前的篩選條件下沒有進行中的行程，可返回任務列表查看其他任務。",
+        actionLabel: "查看任務",
+        actionRoute: "/jobs",
+      };
+    case "no_data":
+    default:
+      return {
+        envelope,
+        tone: "info",
+        icon: "moon-outline",
+        eyebrow: "Quiet lane",
+        title: "目前沒有進行中的行程",
+        body: "工作台已待命。新的派單或平台行程會自動同步到這裡，也可返回任務列表查看。",
+        actionLabel: "查看任務",
+        actionRoute: "/jobs",
+      };
+  }
+}
 
 function ActionButton({
   label,
@@ -805,6 +1080,104 @@ function getTripAuthorityBannerProps(
   }
 }
 
+function TripEmptyState({
+  model,
+  onRefresh,
+  onNavigate,
+  disabled,
+}: {
+  model: TripEmptyStateModel;
+  onRefresh: () => void;
+  onNavigate: (route: TripEmptyRoute) => void;
+  disabled: boolean;
+}) {
+  const toneSet = getCanvasToneSet(toBannerTone(model.tone));
+
+  return (
+    <Card
+      theme={driverCanvasTheme}
+      padding={16}
+      style={[
+        styles.emptyStateCard,
+        { backgroundColor: toneSet.bg, borderColor: toneSet.bd },
+      ]}
+    >
+      <View style={styles.emptyStateHeader}>
+        <View
+          style={[
+            styles.emptyStateIconWrap,
+            { backgroundColor: `${toneSet.fg}22` },
+          ]}
+        >
+          <Ionicons name={model.icon} size={20} color={toneSet.fg} />
+        </View>
+        <View style={styles.emptyStateCopy}>
+          <Text style={[styles.emptyStateEyebrow, { color: toneSet.fg }]}>
+            {model.eyebrow}
+          </Text>
+          <Text style={styles.emptyStateTitle}>{model.title}</Text>
+          <Text style={styles.emptyStateBody}>{model.body}</Text>
+        </View>
+      </View>
+      <View style={styles.emptyStateFooter}>
+        <Pill theme={driverCanvasTheme} tone={model.tone} dot>
+          {model.envelope.reason}
+        </Pill>
+        <ActionButton
+          label={model.actionLabel}
+          onPress={() =>
+            model.actionRoute ? onNavigate(model.actionRoute) : onRefresh()
+          }
+          disabled={disabled}
+          variant="primary"
+        />
+      </View>
+    </Card>
+  );
+}
+
+function OpsInstructionCard({
+  instruction,
+}: {
+  instruction: DriverTaskRecord["opsInstruction"];
+}) {
+  if (!instruction) {
+    return null;
+  }
+
+  const issuedAtLabel = formatShortTime(instruction.issuedAt);
+  const expiresAtLabel = formatShortTime(instruction.expiresAt);
+
+  return (
+    <Card
+      theme={driverCanvasTheme}
+      padding={14}
+      style={[
+        styles.opsInstructionCard,
+        { borderColor: driverCanvasTheme.warnBorder },
+      ]}
+    >
+      <View style={styles.opsInstructionHeader}>
+        <Ionicons
+          name="megaphone-outline"
+          size={16}
+          color={driverCanvasTheme.warn}
+        />
+        <Text style={styles.opsInstructionTitle}>派車台指示</Text>
+        <Pill theme={driverCanvasTheme} tone="warn">
+          {`DriverOpsInstruction · ${instruction.instructionId}`}
+        </Pill>
+      </View>
+      <Text style={styles.opsInstructionMessage}>{instruction.message}</Text>
+      <Text style={styles.opsInstructionMeta}>
+        {`由 ${instruction.issuedBy} 發出${issuedAtLabel ? ` · ${issuedAtLabel}` : ""}${
+          expiresAtLabel ? ` · 有效至 ${expiresAtLabel}` : ""
+        }`}
+      </Text>
+    </Card>
+  );
+}
+
 export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
   const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
@@ -826,6 +1199,8 @@ export default function TripScreen() {
     string | null
   >(null);
   const [trackingRetryKey, setTrackingRetryKey] = useState(0);
+  const [lastLoadedAtMs, setLastLoadedAtMs] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const lastTrackedCoordinateRef = useRef<TripCoordinate | null>(null);
   const tripStartTimeRef = useRef<number | null>(null);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
@@ -905,6 +1280,56 @@ export default function TripScreen() {
     taskDetail,
     tripExperienceState,
   );
+  const isTerminalForwardedState =
+    tripExperienceState === "forwarded_completed" ||
+    tripExperienceState === "forwarded_lost" ||
+    tripExperienceState === "forwarded_cancelled";
+  const isAcceptPending = tripExperienceState === "forwarded_pending";
+  const acceptDeadlineRemainingSec = isAcceptPending
+    ? getAcceptDeadlineRemainingSec(taskDetail?.acceptDeadlineAt, nowMs)
+    : null;
+  const acceptDeadlineElapsed =
+    isAcceptPending &&
+    taskDetail?.acceptDeadlineAt != null &&
+    acceptDeadlineRemainingSec === 0;
+  const shouldPollTrip =
+    Boolean(taskDetail) &&
+    submittingAction === null &&
+    !isTerminalForwardedState;
+  const tripRefreshMetadata = buildTripRefreshMetadata(
+    lastLoadedAtMs,
+    nowMs,
+    TRIP_REFRESH_TIER,
+  );
+  const opsInstruction = taskDetail?.opsInstruction ?? null;
+  // Q-X13 / Q-DRV01 — gate the owned primary CTA on its descriptor when the
+  // backend supplies one; absent descriptors keep the status-driven workflow.
+  const ownedActionDescriptor = primaryTripAction
+    ? findTaskAction(taskDetail, primaryTripAction.action)
+    : undefined;
+  const ownedActionBlocked = Boolean(
+    ownedActionDescriptor && !ownedActionDescriptor.enabled,
+  );
+  const ownedActionDisabledReason = ownedActionBlocked
+    ? getActionDisabledReasonLabel(ownedActionDescriptor?.disabledReasonCode)
+    : null;
+  // Forwarded relay capability (Q-DRV01): a present-but-disabled descriptor
+  // shows the CTA disabled with a reason; an absent descriptor keeps the legacy
+  // always-available behaviour so the offer can still be actioned.
+  const relayAcceptDescriptor = findTaskAction(taskDetail, "relay_accept");
+  const relayRejectDescriptor = findTaskAction(taskDetail, "relay_reject");
+  const relayAcceptBlocked = Boolean(
+    relayAcceptDescriptor && !relayAcceptDescriptor.enabled,
+  );
+  const relayRejectSupported = relayRejectDescriptor
+    ? relayRejectDescriptor.enabled
+    : true;
+  const relayAcceptDisabledReason = relayAcceptBlocked
+    ? getActionDisabledReasonLabel(relayAcceptDescriptor?.disabledReasonCode)
+    : null;
+  // EmptyReason (Q-X15) — distinct not-ready treatment when there is no task.
+  const tripEmptyReason = classifyTripEmptyReason(error, getDriverIdentityIssue());
+  const tripEmptyStateModel = getTripEmptyStateModel(tripEmptyReason, error);
   const headerSubtitle = taskDetail
     ? taskDetail.orderId
       ? `${taskDetail.taskId} · ${taskDetail.orderId}`
@@ -958,9 +1383,16 @@ export default function TripScreen() {
       : orderDetail?.etaSnapshot?.etaMinutes != null
         ? `ETA ${orderDetail.etaSnapshot.etaMinutes} 分`
         : routeMetricDuration;
-  const footerNotice =
-    completionSubmitBlocker === "proof_requirements_unavailable"
-      ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
+  const footerNotice = acceptDeadlineElapsed
+    ? FORWARDED_ACCEPT_TIMEOUT_SAFE_COPY
+    : isAcceptPending && acceptDeadlineRemainingSec != null
+      ? `平台確認倒數 ${acceptDeadlineRemainingSec}s · 請等待平台回應，勿重複送出。`
+      : ownedActionDisabledReason
+        ? ownedActionDisabledReason
+        : relayAcceptDisabledReason
+          ? relayAcceptDisabledReason
+          : completionSubmitBlocker === "proof_requirements_unavailable"
+            ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
       : completionSubmitBlocker === "expense_amount_invalid"
         ? "費用金額格式無效，請輸入有效的正數後再完成行程。"
         : completionSubmitBlocker === "tracking_unavailable"
@@ -998,28 +1430,32 @@ export default function TripScreen() {
           submittingAction === primaryTripAction.action &&
           primaryTripAction.action === "complete"
             ? "完成中…"
-            : primaryTripAction.label,
+            : ownedActionBlocked
+              ? `${primaryTripAction.label}（不可用）`
+              : primaryTripAction.label,
         onPress: () => void handleAction(primaryTripAction.action),
         loading:
           submittingAction === primaryTripAction.action &&
           primaryTripAction.action !== "complete",
         disabled:
-          primaryTripAction.action === "complete"
+          ownedActionBlocked ||
+          (primaryTripAction.action === "complete"
             ? completeActionDisabled
-            : submittingAction !== null,
+            : submittingAction !== null),
       }
     : tripExperienceState === "forwarded_offered" &&
         forwardedActionResult === null
       ? {
-          title: "接受平台訂單",
+          title: relayAcceptBlocked ? "接受平台訂單（不可用）" : "接受平台訂單",
           onPress: () => void handleForwardedAccept(),
           loading: submittingAction === "forwarded_accept",
-          disabled: submittingAction !== null,
+          disabled: relayAcceptBlocked || submittingAction !== null,
         }
       : undefined;
   const bottomSecondaryAction =
     tripExperienceState === "forwarded_offered" &&
-    forwardedActionResult === null
+    forwardedActionResult === null &&
+    relayRejectSupported
       ? {
           title: "婉拒平台訂單",
           onPress: () => void handleForwardedReject(),
@@ -1120,12 +1556,46 @@ export default function TripScreen() {
       setOrderDetail(null);
     } finally {
       setLoading(false);
+      setLastLoadedAtMs(Date.now());
     }
   }
 
   useEffect(() => {
     void loadTrip(true);
   }, []);
+
+  // Refresh tier T1 (Q-X02 fast / 3s): poll the active trip while idle. Push
+  // interrupts arrive out-of-band; this is the polling fallback.
+  useEffect(() => {
+    if (!shouldPollTrip) {
+      return;
+    }
+
+    const intervalMs = getRefreshTierIntervalMs(TRIP_REFRESH_TIER);
+    if (intervalMs == null) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      void loadTrip(false);
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [shouldPollTrip, taskDetail?.taskId]);
+
+  // Q-DRV02 — tick the accept-pending countdown once per second.
+  useEffect(() => {
+    if (!isAcceptPending || !taskDetail?.acceptDeadlineAt) {
+      return;
+    }
+
+    setNowMs(Date.now());
+    const timer = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isAcceptPending, taskDetail?.acceptDeadlineAt]);
 
   useEffect(() => {
     resetCompletionDraft();
@@ -1597,6 +2067,17 @@ export default function TripScreen() {
         }
       />
 
+      <View style={styles.refreshTierRow}>
+        <Pill theme={driverCanvasTheme} tone="info" dot>
+          {`刷新 ${getTripRefreshTierLabel(TRIP_REFRESH_TIER)}`}
+        </Pill>
+        <Text style={styles.refreshTierMeta}>
+          {`資料 ${getRefreshFreshnessLabel(tripRefreshMetadata)}${
+            lastLoadedAtMs ? ` · 更新於 ${formatShortTime(new Date(lastLoadedAtMs).toISOString())}` : ""
+          }`}
+        </Text>
+      </View>
+
       {error ? (
         <Banner
           theme={driverCanvasTheme}
@@ -1637,6 +2118,10 @@ export default function TripScreen() {
             }
             body={tripAuthorityBanner.description}
           />
+
+          {opsInstruction ? (
+            <OpsInstructionCard instruction={opsInstruction} />
+          ) : null}
 
           <Card theme={driverCanvasTheme} padding={0} style={styles.mapCard}>
             <View
@@ -1737,6 +2222,17 @@ export default function TripScreen() {
               <Pill theme={driverCanvasTheme} tone={statusPillTone} dot>
                 {tripStatusPresentation.label}
               </Pill>
+              {isAcceptPending && acceptDeadlineRemainingSec != null ? (
+                <Pill
+                  theme={driverCanvasTheme}
+                  tone={acceptDeadlineElapsed ? "danger" : "warn"}
+                  dot
+                >
+                  {acceptDeadlineElapsed
+                    ? "平台未確認"
+                    : `平台確認倒數 ${acceptDeadlineRemainingSec}s`}
+                </Pill>
+              ) : null}
               <Pill
                 theme={driverCanvasTheme}
                 tone={isForwardedTrip ? "info" : "accent"}
@@ -2014,19 +2510,12 @@ export default function TripScreen() {
           ) : null}
         </>
       ) : (
-        <Card theme={driverCanvasTheme} padding={18}>
-          <Text style={styles.emptyTitle}>目前沒有進行中的行程</Text>
-          <Text style={styles.emptyBody}>
-            重新整理後可再次檢查是否有新任務同步進來。
-          </Text>
-          <View style={styles.inlineActionRow}>
-            <ActionButton
-              label={driverStrings.common.refresh}
-              onPress={() => void loadTrip(true)}
-              disabled={submittingAction !== null}
-            />
-          </View>
-        </Card>
+        <TripEmptyState
+          model={tripEmptyStateModel}
+          onRefresh={() => void loadTrip(true)}
+          onNavigate={(route) => router.push(route)}
+          disabled={submittingAction !== null}
+        />
       )}
     </Shell>
   );
@@ -2056,6 +2545,92 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  refreshTierRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  refreshTierMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: driverCanvasTheme.textMuted,
+    fontFamily: driverCanvasTheme.monoFamily,
+  },
+  opsInstructionCard: {
+    borderWidth: 1,
+    gap: 6,
+  },
+  opsInstructionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  opsInstructionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
+  },
+  opsInstructionMessage: {
+    fontSize: 13.5,
+    lineHeight: 20,
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
+  },
+  opsInstructionMeta: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: driverCanvasTheme.textMuted,
+    fontFamily: driverCanvasTheme.monoFamily,
+  },
+  emptyStateCard: {
+    gap: 14,
+  },
+  emptyStateHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  emptyStateIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyStateCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  emptyStateEyebrow: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    fontFamily: driverCanvasTheme.monoFamily,
+  },
+  emptyStateTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
+  },
+  emptyStateBody: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: driverCanvasTheme.textMuted,
+    fontFamily: driverCanvasTheme.fontFamily,
+  },
+  emptyStateFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
   },
   bannerTitleRow: {
     flexDirection: "row",
@@ -2415,20 +2990,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: driverCanvasTheme.textMuted,
     textAlign: "center",
-    fontFamily: driverCanvasTheme.fontFamily,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: "700",
-    color: driverCanvasTheme.text,
-    fontFamily: driverCanvasTheme.fontFamily,
-  },
-  emptyBody: {
-    marginTop: 6,
-    fontSize: 12.5,
-    lineHeight: 18,
-    color: driverCanvasTheme.textMuted,
     fontFamily: driverCanvasTheme.fontFamily,
   },
 });

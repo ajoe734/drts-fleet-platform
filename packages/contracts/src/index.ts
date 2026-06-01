@@ -2,6 +2,7 @@ import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type {
   DriverMatchingSuppression,
+  DriverOpsInstruction,
   ResourceActionDescriptor,
 } from "./ui-runtime";
 
@@ -2507,6 +2508,26 @@ export interface DriverTaskRecord {
   proof: CompletionProofBundle | null;
   complianceGates?: ComplianceGateRecord[];
   forwardedStatus?: string | null;
+  /**
+   * Q-X13 / Q-DRV01 — per-resource capability descriptors driving the
+   * `/trip` CTAs (owned lifecycle transitions + forwarded `relay_accept` /
+   * `relay_reject`). When omitted, the consuming screen falls back to the
+   * status-driven workflow. A descriptor with `enabled: false` +
+   * `disabledReasonCode` means "show the CTA disabled with a reason", never
+   * hide it (Q-DRV01).
+   */
+  availableActions?: ResourceActionDescriptor[];
+  /**
+   * Q-DRV02 — deadline by which a forwarded accept must be confirmed by the
+   * source platform. The `/trip` screen renders a countdown while pending and
+   * switches to the safe copy once elapsed.
+   */
+  acceptDeadlineAt?: string | null;
+  /**
+   * Q-DRV04 — ops-authored manual-fallback instruction tied to this task,
+   * surfaced as an in-app banner on `/trip` (NOT a static label).
+   */
+  opsInstruction?: DriverOpsInstruction | null;
 }
 
 export type DriverTaskStreamEventType =
