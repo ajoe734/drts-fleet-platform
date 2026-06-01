@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
+import type { RefreshControlProps } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import {
@@ -112,6 +113,7 @@ export interface ShellProps {
   children: ReactNode;
   footer?: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  refreshControl?: ReactElement<RefreshControlProps>;
 }
 
 function ShellStatusBar({ theme }: { theme: DriverCanvasTheme }) {
@@ -146,6 +148,7 @@ export function Shell({
   children,
   footer,
   contentContainerStyle,
+  refreshControl,
 }: ShellProps) {
   const theme = resolveTheme(providedTheme);
   const frame = (
@@ -168,6 +171,7 @@ export function Shell({
           contentContainerStyle,
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={refreshControl}
       >
         {children}
       </ScrollView>
