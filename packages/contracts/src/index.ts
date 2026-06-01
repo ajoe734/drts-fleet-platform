@@ -4703,6 +4703,7 @@ export interface CreatePlatformAdminUserCommand {
   email: string;
   displayName: string;
   roleCode: PlatformAdminUserRole;
+  reason?: string;
 }
 
 export interface UpdatePlatformAdminUserRoleCommand {

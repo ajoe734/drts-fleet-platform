@@ -632,7 +632,7 @@ export class PlatformAdminService implements OnModuleInit {
   createPlatformAdminUser(
     command: CreatePlatformAdminUserCommand,
     requestId?: string,
-  ): PlatformAdminUserRecord {
+  ): PlatformAdminUserMutationResult {
     this.assertNonBlank(command.email, "email");
     this.assertNonBlank(command.displayName, "displayName");
     const existing = this.platformAdminUsers.find(
@@ -657,7 +657,7 @@ export class PlatformAdminService implements OnModuleInit {
       updatedAt: now,
     };
     this.platformAdminUsers.push({ ...user });
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -666,18 +666,30 @@ export class PlatformAdminService implements OnModuleInit {
         actionName: "create_platform_admin_user",
         resourceType: "platform_admin_user",
         resourceId: user.userId,
-        newValuesSummary: { email: user.email, roleCode: user.roleCode },
+        newValuesSummary: {
+          email: user.email,
+          roleCode: user.roleCode,
+          reason: command.reason?.trim() || null,
+        },
       },
       requestId,
     );
-    return { ...user };
+    return {
+      user: { ...user },
+      receipt: this.buildUserMutationReceipt(
+        "create_platform_admin_user",
+        auditLog.auditId,
+        user.userId,
+        `Invited ${user.displayName}.`,
+      ),
+    };
   }
 
   updatePlatformAdminUserRole(
     userId: string,
     command: UpdatePlatformAdminUserRoleCommand,
     requestId?: string,
-  ): PlatformAdminUserRecord {
+  ): PlatformAdminUserMutationResult {
     const user = this.platformAdminUsers.find((u) => u.userId === userId);
     if (!user) {
       throw new ApiRequestError(
@@ -688,12 +700,13 @@ export class PlatformAdminService implements OnModuleInit {
       );
     }
     const oldRole = user.roleCode;
+    const oldStatus = user.status;
     user.roleCode = command.roleCode;
     if (command.status) {
       user.status = command.status;
     }
     user.updatedAt = new Date().toISOString();
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -702,12 +715,24 @@ export class PlatformAdminService implements OnModuleInit {
         actionName: "update_platform_admin_user_role",
         resourceType: "platform_admin_user",
         resourceId: userId,
-        oldValuesSummary: { roleCode: oldRole },
-        newValuesSummary: { roleCode: command.roleCode },
+        oldValuesSummary: { roleCode: oldRole, status: oldStatus },
+        newValuesSummary: {
+          roleCode: command.roleCode,
+          status: user.status,
+          reason: command.reason?.trim() || null,
+        },
       },
       requestId,
     );
-    return { ...user };
+    return {
+      user: { ...user },
+      receipt: this.buildUserMutationReceipt(
+        "update_platform_admin_user_role",
+        auditLog.auditId,
+        user.userId,
+        `Updated ${user.displayName}.`,
+      ),
+    };
   }
 
   // ── Platform Notices ──────────────────────────────────────────────────────
@@ -1043,7 +1068,23 @@ export class PlatformAdminService implements OnModuleInit {
     if (requestId) {
       auditLogInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditLogInput);
+    return this.auditNotificationService.recordAuditLog(auditLogInput);
+  }
+
+  private buildUserMutationReceipt(
+    actionId: string,
+    auditId: string,
+    userId: string,
+    message: string,
+  ): ActionReceipt {
+    return {
+      actionId,
+      auditId,
+      resourceType: "platform_admin_user",
+      resourceId: userId,
+      status: "completed",
+      message,
+    };
   }
 
   private clonePublicInfoVersion(
