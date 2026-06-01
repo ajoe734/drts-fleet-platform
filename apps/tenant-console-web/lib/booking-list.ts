@@ -1,17 +1,88 @@
-import type { BookingRecord, OwnedOrderStatus } from "@drts/contracts";
-import { OWNED_ORDER_STATUSES } from "@drts/contracts";
+import type {
+  BookingRecord,
+  BusinessDispatchSubtype,
+  OwnedOrderStatus,
+} from "@drts/contracts";
+import {
+  BUSINESS_DISPATCH_SUBTYPES,
+  OWNED_ORDER_STATUSES,
+} from "@drts/contracts";
 
 export type BookingDateField = "reservationStart" | "createdAt";
+
+/**
+ * Status-group tab vocabulary mirrored from the canvas Bookings list
+ * (`Tenant Console.html` · TN_Bookings): 全部 / 進行中 / 預約 / 待審批 /
+ * 已完成 / 取消. The grouping is derived from `orderStatus` + `approvalState`
+ * so the tabs stay aligned to the canonical workflow vocabulary instead of a
+ * tenant-local alias set.
+ */
+export type BookingTab =
+  | "all"
+  | "live"
+  | "reserve"
+  | "approval"
+  | "done"
+  | "cancel";
+
+export const BOOKING_TABS: BookingTab[] = [
+  "all",
+  "live",
+  "reserve",
+  "approval",
+  "done",
+  "cancel",
+];
+
+/** Order statuses where a driver is actively fulfilling the trip (進行中). */
+const LIVE_ORDER_STATUSES = new Set<OwnedOrderStatus>([
+  "assigned",
+  "driver_accepted",
+  "enroute_pickup",
+  "arrived_pickup",
+  "on_trip",
+  "proof_pending",
+]);
+
+const SUBTYPE_SET = new Set<BusinessDispatchSubtype>(BUSINESS_DISPATCH_SUBTYPES);
 
 export type BookingListQuery = {
   q: string;
   statuses: OwnedOrderStatus[];
+  tab: BookingTab;
+  subtype: "" | BusinessDispatchSubtype;
   dateField: BookingDateField;
   dateFrom: string;
   dateTo: string;
   page: number;
   pageSize: number;
 };
+
+/**
+ * Classify a booking into its canvas tab. `approval` takes precedence so a
+ * booking awaiting approval surfaces in 待審批 regardless of its dispatch
+ * status; otherwise terminal states (done/cancel) win, then live, then the
+ * remaining pre-dispatch / queued bookings fall into 預約.
+ */
+export function getBookingTab(booking: BookingRecord): BookingTab {
+  if (booking.approvalState === "pending") {
+    return "approval";
+  }
+  if (booking.orderStatus === "completed" || booking.status === "completed") {
+    return "done";
+  }
+  if (booking.orderStatus === "cancelled" || booking.status === "cancelled") {
+    return "cancel";
+  }
+  if (LIVE_ORDER_STATUSES.has(booking.orderStatus)) {
+    return "live";
+  }
+  return "reserve";
+}
+
+function isBookingTab(value: string): value is BookingTab {
+  return (BOOKING_TABS as string[]).includes(value);
+}
 
 type SearchParamValue = string | string[] | undefined;
 
@@ -48,9 +119,16 @@ export function parseBookingListQuery(
     DEFAULT_PAGE_SIZE,
   );
 
+  const rawTab = first(searchParams.tab).trim();
+  const rawSubtype = first(searchParams.subtype).trim();
+
   return {
     q: first(searchParams.q).trim(),
     statuses,
+    tab: isBookingTab(rawTab) ? rawTab : "all",
+    subtype: SUBTYPE_SET.has(rawSubtype as BusinessDispatchSubtype)
+      ? (rawSubtype as BusinessDispatchSubtype)
+      : "",
     dateField:
       first(searchParams.dateField) === "createdAt"
         ? "createdAt"
@@ -98,12 +176,21 @@ export function applyBookingListQuery(
   bookings: BookingRecord[],
   query: BookingListQuery,
 ) {
-  const filtered = bookings
+  // Everything except the tab grouping: search + status chips + service
+  // bucket + date window. Tab badge counts are computed over this set so the
+  // badges reflect "how many of the currently-filtered bookings live in each
+  // tab" rather than the unfiltered totals.
+  const base = bookings
     .filter((booking) => matchesTextQuery(booking, query.q))
     .filter((booking) =>
       query.statuses.length === 0
         ? true
         : query.statuses.includes(booking.orderStatus),
+    )
+    .filter((booking) =>
+      query.subtype === ""
+        ? true
+        : booking.businessDispatchSubtype === query.subtype,
     )
     .filter((booking) => {
       const value = getBookingDateValue(booking, query.dateField);
@@ -135,6 +222,12 @@ export function applyBookingListQuery(
       );
     });
 
+  const tabCounts = getTabCounts(base);
+  const filtered =
+    query.tab === "all"
+      ? base
+      : base.filter((booking) => getBookingTab(booking) === query.tab);
+
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
   const page = Math.min(query.page, totalPages);
@@ -143,9 +236,11 @@ export function applyBookingListQuery(
   return {
     items: filtered.slice(startIndex, startIndex + query.pageSize),
     total,
+    baseTotal: base.length,
     totalPages,
     page,
     statusCounts: getStatusCounts(filtered),
+    tabCounts,
   };
 }
 
@@ -164,6 +259,12 @@ export function buildBookingListQueryString(
   }
   if (next.statuses.length > 0) {
     params.set("status", next.statuses.join(","));
+  }
+  if (next.tab !== "all") {
+    params.set("tab", next.tab);
+  }
+  if (next.subtype) {
+    params.set("subtype", next.subtype);
   }
   if (next.dateField !== "reservationStart") {
     params.set("dateField", next.dateField);
@@ -196,6 +297,25 @@ export function toggleStatus(
   }
 
   return OWNED_ORDER_STATUSES.filter((status) => next.has(status));
+}
+
+export function getTabCounts(
+  bookings: BookingRecord[],
+): Record<BookingTab, number> {
+  const counts: Record<BookingTab, number> = {
+    all: bookings.length,
+    live: 0,
+    reserve: 0,
+    approval: 0,
+    done: 0,
+    cancel: 0,
+  };
+
+  for (const booking of bookings) {
+    counts[getBookingTab(booking)] += 1;
+  }
+
+  return counts;
 }
 
 export function getStatusCounts(bookings: BookingRecord[]) {
