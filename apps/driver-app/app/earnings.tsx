@@ -538,6 +538,13 @@ export default function EarningsScreen() {
     await loadDashboard(period, true);
   };
 
+  const triggerRefresh = async () => {
+    if (refreshing) {
+      return;
+    }
+    await onRefresh();
+  };
+
   const openStatementDetail = async (
     statement: DriverEarningsStatementListItem,
   ) => {
@@ -599,7 +606,7 @@ export default function EarningsScreen() {
     }
 
     if (action.action === "refresh_earnings") {
-      await onRefresh();
+      await triggerRefresh();
       return;
     }
 
@@ -696,7 +703,11 @@ export default function EarningsScreen() {
                 variant="secondary"
                 size="sm"
                 icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
-                onPress={() => void invokeAction(refreshAction)}
+                onPress={() =>
+                  refreshAction
+                    ? void invokeAction(refreshAction)
+                    : void triggerRefresh()
+                }
               >
                 {driverStrings.common.retry}
               </Btn>
