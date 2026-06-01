@@ -31,10 +31,15 @@ import type {
   EmptyReason,
   EmptyStateEnvelope,
   GeneratePlacardVersionCommand,
+  PlacardScopeType,
   PlacardVersionRecord,
+  PlatformAdminSwitchboardPayload,
   PublicInfoVersionRecord,
   RefreshTier,
   ResourceActionDescriptor,
+  SwitchboardListPayload,
+  SwitchboardPlacardRecord,
+  SwitchboardPublicInfoRecord,
 } from "@drts/contracts";
 import { getPlacardVersionCodePrecheckMessage } from "./placard-version-code";
 import {
@@ -45,28 +50,8 @@ import {
   isPlacardSourceSelectionBlocked,
 } from "./placard-source";
 
-type PublicInfoWithRuntime = PublicInfoVersionRecord & {
-  availableActions?: ResourceActionDescriptor[];
-  crossAppLinks?: CrossAppResourceLink[];
-};
-
-type PlacardWithRuntime = PlacardVersionRecord & {
-  availableActions?: ResourceActionDescriptor[];
-  crossAppLinks?: CrossAppResourceLink[];
-  scope?: string | null;
-};
-
-type SwitchboardListPayload<T> = {
-  items: T[];
-  availableActions: ResourceActionDescriptor[];
-  emptyState: EmptyStateEnvelope | null;
-  refreshTier: RefreshTier | null;
-  lastUpdatedAt: string | null;
-  crossAppLinks: CrossAppResourceLink[];
-};
-
 type SwitchboardTab = "versions" | "placards" | "history";
-type PlacardScopeOption = "fleet" | "vehicle" | "brand_template";
+type PlacardScopeOption = PlacardScopeType;
 type PlacardFormState = {
   versionCode: string;
   publicInfoVersionId: string;
@@ -75,8 +60,8 @@ type PlacardFormState = {
   artifactFileId: string;
 };
 type ActionContext = {
-  version?: PublicInfoWithRuntime;
-  placard?: PlacardWithRuntime;
+  version?: SwitchboardPublicInfoRecord;
+  placard?: SwitchboardPlacardRecord;
   link?: CrossAppResourceLink;
 };
 
@@ -111,127 +96,43 @@ function cleanNullable(value: string) {
   return normalized.length > 0 ? normalized : null;
 }
 
+function createEmptyListPayload<T>(
+  emptyReason: EmptyReason | null = null,
+): SwitchboardListPayload<T> {
+  return {
+    items: [],
+    availableActions: [],
+    emptyState: emptyReason
+      ? {
+          reason: emptyReason,
+          messageCode: `switchboard.empty.${emptyReason}`,
+        }
+      : null,
+    refreshTier: REFRESH_TIER_FALLBACK,
+    lastUpdatedAt: null,
+    crossAppLinks: [],
+  };
+}
+
+function createEmptySwitchboardPayload(
+  emptyReason: EmptyReason | null = null,
+): PlatformAdminSwitchboardPayload {
+  return {
+    publicInfo:
+      createEmptyListPayload<SwitchboardPublicInfoRecord>(emptyReason),
+    placards: createEmptyListPayload<SwitchboardPlacardRecord>(emptyReason),
+    availableActions: [],
+    crossAppLinks: [],
+    refreshTier: REFRESH_TIER_FALLBACK,
+    lastUpdatedAt: null,
+  };
+}
+
 function shortHash(value: string | null | undefined) {
   if (!value) {
     return "—";
   }
   return `${value.slice(0, 12)}...`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isActionDescriptor(value: unknown): value is ResourceActionDescriptor {
-  return (
-    isRecord(value) &&
-    typeof value.action === "string" &&
-    typeof value.enabled === "boolean" &&
-    typeof value.riskLevel === "string"
-  );
-}
-
-function isCrossAppLink(value: unknown): value is CrossAppResourceLink {
-  return (
-    isRecord(value) &&
-    typeof value.targetApp === "string" &&
-    typeof value.route === "string" &&
-    typeof value.label === "string"
-  );
-}
-
-function isEmptyReason(value: unknown): value is EmptyReason {
-  return (
-    value === "no_data" ||
-    value === "not_provisioned" ||
-    value === "fetch_failed" ||
-    value === "permission_denied" ||
-    value === "external_unavailable" ||
-    value === "driver_not_eligible" ||
-    value === "filtered_empty"
-  );
-}
-
-function normalizeEmptyState(value: unknown): EmptyStateEnvelope | null {
-  if (!isRecord(value) || !isEmptyReason(value.reason)) {
-    return null;
-  }
-  const normalized: EmptyStateEnvelope = {
-    reason: value.reason,
-    messageCode:
-      typeof value.messageCode === "string"
-        ? value.messageCode
-        : `switchboard.empty.${value.reason}`,
-  };
-  if (isActionDescriptor(value.nextAction)) {
-    normalized.nextAction = value.nextAction;
-  }
-  return normalized;
-}
-
-function normalizeListPayload<T extends object>(
-  value: unknown,
-): SwitchboardListPayload<T> {
-  if (Array.isArray(value)) {
-    return {
-      items: value.filter(isRecord) as T[],
-      availableActions: [],
-      emptyState:
-        value.length === 0
-          ? {
-              reason: "no_data",
-              messageCode: "switchboard.empty.no_data",
-            }
-          : null,
-      refreshTier: null,
-      lastUpdatedAt: null,
-      crossAppLinks: [],
-    };
-  }
-
-  if (!isRecord(value)) {
-    return {
-      items: [],
-      availableActions: [],
-      emptyState: {
-        reason: "fetch_failed",
-        messageCode: "switchboard.empty.fetch_failed",
-      },
-      refreshTier: null,
-      lastUpdatedAt: null,
-      crossAppLinks: [],
-    };
-  }
-
-  const items = Array.isArray(value.items)
-    ? (value.items.filter(isRecord) as T[])
-    : [];
-  const availableActions = Array.isArray(value.availableActions)
-    ? value.availableActions.filter(isActionDescriptor)
-    : [];
-  const crossAppLinks = Array.isArray(value.crossAppLinks)
-    ? value.crossAppLinks.filter(isCrossAppLink)
-    : [];
-  const emptyState = normalizeEmptyState(value.emptyState);
-
-  return {
-    items,
-    availableActions,
-    emptyState:
-      items.length === 0
-        ? (emptyState ?? {
-            reason: "no_data",
-            messageCode: "switchboard.empty.no_data",
-          })
-        : emptyState,
-    refreshTier:
-      typeof value.refreshTier === "string"
-        ? (value.refreshTier as RefreshTier)
-        : null,
-    lastUpdatedAt:
-      typeof value.lastUpdatedAt === "string" ? value.lastUpdatedAt : null,
-    crossAppLinks,
-  };
 }
 
 function getRefreshIntervalMs(refreshTier: RefreshTier) {
@@ -307,7 +208,7 @@ function inferPlacardScope(templateName: string) {
 }
 
 function getDefaultTemplateForScope(scope: PlacardScopeOption) {
-  return PLACARD_SCOPE_TEMPLATES[scope][0] ?? "seatback-default";
+  return PLACARD_SCOPE_TEMPLATES[scope]?.[0] ?? "seatback-default";
 }
 
 function normalizePlacardScope(templateName: string): PlacardScopeOption {
@@ -331,8 +232,8 @@ function compareIsoDateDesc(
 }
 
 function sortPublicInfoVersions(
-  versions: PublicInfoWithRuntime[],
-): PublicInfoWithRuntime[] {
+  versions: SwitchboardPublicInfoRecord[],
+): SwitchboardPublicInfoRecord[] {
   return [...versions].sort((left, right) => {
     const statusWeight = (status: PublicInfoVersionRecord["status"]) =>
       status === "published" ? 0 : status === "draft" ? 1 : 2;
@@ -358,7 +259,9 @@ function sortPublicInfoVersions(
   });
 }
 
-function sortPlacards(placards: PlacardWithRuntime[]): PlacardWithRuntime[] {
+function sortPlacards(
+  placards: SwitchboardPlacardRecord[],
+): SwitchboardPlacardRecord[] {
   return [...placards].sort((left, right) => {
     const publishedDifference = compareIsoDateDesc(
       left.publishedAt ?? left.updatedAt ?? left.createdAt,
@@ -795,26 +698,8 @@ export default function SwitchboardPage() {
         },
       };
 
-  const [publicInfoPayload, setPublicInfoPayload] = useState<
-    SwitchboardListPayload<PublicInfoWithRuntime>
-  >({
-    items: [],
-    availableActions: [],
-    emptyState: null,
-    refreshTier: null,
-    lastUpdatedAt: null,
-    crossAppLinks: [],
-  });
-  const [placardPayload, setPlacardPayload] = useState<
-    SwitchboardListPayload<PlacardWithRuntime>
-  >({
-    items: [],
-    availableActions: [],
-    emptyState: null,
-    refreshTier: null,
-    lastUpdatedAt: null,
-    crossAppLinks: [],
-  });
+  const [switchboardPayload, setSwitchboardPayload] =
+    useState<PlatformAdminSwitchboardPayload>(createEmptySwitchboardPayload());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<SwitchboardTab>("versions");
@@ -838,72 +723,25 @@ export default function SwitchboardPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
-
-    const [publicInfoResult, placardResult] = await Promise.allSettled([
-      client.get<unknown>("/api/platform-admin/public-info"),
-      client.get<unknown>("/api/platform-admin/placards"),
-    ]);
-
-    let nextError: string | null = null;
-
-    if (publicInfoResult.status === "fulfilled") {
-      setPublicInfoPayload(
-        normalizeListPayload<PublicInfoWithRuntime>(publicInfoResult.value),
-      );
-    } else {
-      nextError =
-        publicInfoResult.reason instanceof Error
-          ? publicInfoResult.reason.message
-          : String(publicInfoResult.reason);
-      setPublicInfoPayload({
-        items: [],
-        availableActions: [],
-        emptyState: {
-          reason: "fetch_failed",
-          messageCode: "switchboard.empty.fetch_failed",
-        },
-        refreshTier: null,
-        lastUpdatedAt: null,
-        crossAppLinks: [],
-      });
+    try {
+      const payload = await client.getPlatformAdminSwitchboard();
+      setSwitchboardPayload(payload);
+      setLastRefreshedAt(new Date().toISOString());
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+      setSwitchboardPayload(createEmptySwitchboardPayload("fetch_failed"));
+    } finally {
+      setLoading(false);
     }
-
-    if (placardResult.status === "fulfilled") {
-      setPlacardPayload(
-        normalizeListPayload<PlacardWithRuntime>(placardResult.value),
-      );
-    } else {
-      const placardError =
-        placardResult.reason instanceof Error
-          ? placardResult.reason.message
-          : String(placardResult.reason);
-      nextError = nextError ?? placardError;
-      setPlacardPayload({
-        items: [],
-        availableActions: [],
-        emptyState: {
-          reason: "fetch_failed",
-          messageCode: "switchboard.empty.fetch_failed",
-        },
-        refreshTier: null,
-        lastUpdatedAt: null,
-        crossAppLinks: [],
-      });
-    }
-
-    setError(nextError);
-    setLastRefreshedAt(new Date().toISOString());
-    setLoading(false);
   }, [client]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
-  const refreshTier =
-    publicInfoPayload.refreshTier ??
-    placardPayload.refreshTier ??
-    REFRESH_TIER_FALLBACK;
+  const publicInfoPayload = switchboardPayload.publicInfo;
+  const placardPayload = switchboardPayload.placards;
+  const refreshTier = switchboardPayload.refreshTier ?? REFRESH_TIER_FALLBACK;
 
   useEffect(() => {
     const intervalMs = getRefreshIntervalMs(refreshTier);
@@ -973,7 +811,9 @@ export default function SwitchboardPage() {
   const placardSourceBlocked = isPlacardSourceSelectionBlocked(
     selectedPublicInfoVersion,
   );
-  const scopeTemplateOptions = PLACARD_SCOPE_TEMPLATES[placardForm.scope];
+  const scopeTemplateOptions =
+    PLACARD_SCOPE_TEMPLATES[placardForm.scope] ??
+    PLACARD_SCOPE_TEMPLATES.brand_template;
 
   useEffect(() => {
     const preferredVersion = getPreferredPlacardSourceVersion(publicInfo);
@@ -988,54 +828,8 @@ export default function SwitchboardPage() {
   }, [placardForm.publicInfoVersionId, publicInfo]);
 
   const pageActions = useMemo(() => {
-    const merged = dedupeActionDescriptors([
-      ...publicInfoPayload.availableActions,
-      ...placardPayload.availableActions,
-    ]);
-    if (merged.length > 0) {
-      return merged;
-    }
-
-    const fallback: ResourceActionDescriptor[] = [];
-    if (draftVersions.length > 0) {
-      fallback.push({
-        action: "publish_public_info",
-        enabled: true,
-        requiresReason: true,
-        riskLevel: "high",
-      });
-    }
-    fallback.push({
-      action: "create_version",
-      enabled: true,
-      riskLevel: "medium",
-    });
-    fallback.push(
-      publicInfo.length > 0
-        ? {
-            action: "generate_placard_version",
-            enabled: true,
-            riskLevel: "medium",
-          }
-        : {
-            action: "generate_placard_version",
-            enabled: false,
-            disabledReasonCode: "switchboard.public_info_required",
-            riskLevel: "medium",
-          },
-    );
-    fallback.push({
-      action: "refresh",
-      enabled: true,
-      riskLevel: "low",
-    });
-    return fallback;
-  }, [
-    draftVersions.length,
-    placardPayload.availableActions,
-    publicInfo.length,
-    publicInfoPayload.availableActions,
-  ]);
+    return dedupeActionDescriptors(switchboardPayload.availableActions);
+  }, [switchboardPayload.availableActions]);
 
   const generatePlacardAction = useMemo(
     () =>
@@ -1071,50 +865,8 @@ export default function SwitchboardPage() {
   );
 
   const deepLinks = useMemo(() => {
-    const payloadLinks = [
-      ...publicInfoPayload.crossAppLinks,
-      ...placardPayload.crossAppLinks,
-    ];
-    if (payloadLinks.length > 0) {
-      return payloadLinks;
-    }
-
-    const fallbackLinks: CrossAppResourceLink[] = [
-      {
-        targetApp: "ops-console",
-        route: "/dispatch?switchboard=switchboard",
-        resourceType: "placard_distribution",
-        resourceId: livePlacardVersion?.placardVersionId ?? "switchboard",
-        openMode: "new_tab",
-        label: copy.quickLinks.ops,
-      },
-      {
-        targetApp: "platform-admin",
-        route: "/audit?resourceType=public_info",
-        resourceType: "audit_log",
-        resourceId: livePublicInfoVersion?.versionId ?? "switchboard",
-        openMode: "same_tab",
-        label: copy.quickLinks.audit,
-      },
-      {
-        targetApp: "platform-admin",
-        route: "/notices?channel=rider_disclosure",
-        resourceType: "notice",
-        resourceId: "rider_disclosure",
-        openMode: "same_tab",
-        label: copy.quickLinks.notices,
-      },
-    ];
-    return fallbackLinks;
-  }, [
-    copy.quickLinks.audit,
-    copy.quickLinks.notices,
-    copy.quickLinks.ops,
-    livePlacardVersion?.placardVersionId,
-    livePublicInfoVersion?.versionId,
-    placardPayload.crossAppLinks,
-    publicInfoPayload.crossAppLinks,
-  ]);
+    return switchboardPayload.crossAppLinks;
+  }, [switchboardPayload.crossAppLinks]);
 
   const historyEvents = useMemo(() => {
     const versionEvents = publicInfo.map((version) => ({
@@ -1145,7 +897,7 @@ export default function SwitchboardPage() {
   }, [placards, publicInfo]);
 
   const placardsByPublicInfo = useMemo(() => {
-    const grouped = new Map<string, PlacardWithRuntime[]>();
+    const grouped = new Map<string, SwitchboardPlacardRecord[]>();
     for (const placard of placards) {
       const key = placard.publicInfoVersionId;
       const existing = grouped.get(key);
@@ -1165,7 +917,7 @@ export default function SwitchboardPage() {
   }, [placards, publicInfoById]);
 
   function getVersionLinks(
-    version: PublicInfoWithRuntime,
+    version: SwitchboardPublicInfoRecord,
   ): CrossAppResourceLink[] {
     if (version.crossAppLinks && version.crossAppLinks.length > 0) {
       return version.crossAppLinks;
@@ -1184,7 +936,7 @@ export default function SwitchboardPage() {
   }
 
   function getPlacardLinks(
-    placard: PlacardWithRuntime,
+    placard: SwitchboardPlacardRecord,
   ): CrossAppResourceLink[] {
     if (placard.crossAppLinks && placard.crossAppLinks.length > 0) {
       return placard.crossAppLinks;
@@ -1213,29 +965,31 @@ export default function SwitchboardPage() {
   async function confirmDescriptorAction(
     descriptor: ResourceActionDescriptor,
     label: string,
-  ) {
+  ): Promise<string | null> {
     if (!descriptor.enabled) {
-      return false;
+      return null;
     }
 
+    let reason: string | null = null;
     if (descriptor.riskLevel === "high") {
-      const reason = window.prompt(
+      const promptedReason = window.prompt(
         `${copy.labels.publishReason}\n${copy.labels.requiresReason}`,
       );
-      if (reason === null || reason.trim() === "") {
-        return false;
+      if (promptedReason === null || promptedReason.trim() === "") {
+        return null;
       }
+      reason = promptedReason.trim();
     }
 
     if (descriptor.riskLevel === "medium" || descriptor.riskLevel === "high") {
-      return window.confirm(label);
+      return window.confirm(label) ? reason : null;
     }
 
-    return true;
+    return reason;
   }
 
   function getVersionActions(
-    version: PublicInfoWithRuntime,
+    version: SwitchboardPublicInfoRecord,
   ): ResourceActionDescriptor[] {
     if (version.availableActions && version.availableActions.length > 0) {
       return version.availableActions;
@@ -1259,7 +1013,7 @@ export default function SwitchboardPage() {
   }
 
   function getPlacardActions(
-    placard: PlacardWithRuntime,
+    placard: SwitchboardPlacardRecord,
   ): ResourceActionDescriptor[] {
     if (placard.availableActions && placard.availableActions.length > 0) {
       return placard.availableActions;
@@ -1306,18 +1060,18 @@ export default function SwitchboardPage() {
     versionId: string,
     descriptor: ResourceActionDescriptor,
   ) {
-    const confirmed = await confirmDescriptorAction(
+    const reason = await confirmDescriptorAction(
       descriptor,
       copy.labels.reasonPrompt,
     );
-    if (!confirmed) {
+    if (reason === null) {
       return;
     }
 
     setPublishingVersionId(versionId);
     setError(null);
     try {
-      await client.publishPublicInfoVersion(versionId, {});
+      await client.publishPublicInfoVersion(versionId, { reason });
       await loadData();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1330,11 +1084,11 @@ export default function SwitchboardPage() {
     versionId: string,
     descriptor: ResourceActionDescriptor,
   ) {
-    const confirmed = await confirmDescriptorAction(
+    const confirmation = await confirmDescriptorAction(
       descriptor,
       isEnglish ? "Delete this draft version?" : "要刪除這個公開資訊草稿嗎？",
     );
-    if (!confirmed) {
+    if (confirmation === null) {
       return;
     }
 
@@ -1358,6 +1112,7 @@ export default function SwitchboardPage() {
       const command: GeneratePlacardVersionCommand = {
         versionCode: placardForm.versionCode.trim(),
         publicInfoVersionId: placardForm.publicInfoVersionId,
+        scopeType: placardForm.scope,
         templateName:
           placardForm.templateName.trim() ||
           getDefaultTemplateForScope(placardForm.scope),
@@ -1381,18 +1136,18 @@ export default function SwitchboardPage() {
     placardVersionId: string,
     descriptor: ResourceActionDescriptor,
   ) {
-    const confirmed = await confirmDescriptorAction(
+    const reason = await confirmDescriptorAction(
       descriptor,
       copy.labels.reasonPrompt,
     );
-    if (!confirmed) {
+    if (reason === null) {
       return;
     }
 
     setPublishingPlacardId(placardVersionId);
     setError(null);
     try {
-      await client.publishPlacardVersion(placardVersionId);
+      await client.publishPlacardVersion(placardVersionId, { reason });
       await loadData();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -2428,7 +2183,7 @@ export default function SwitchboardPage() {
                               label={copy.labels.scope}
                               value={formatPlatformCodeLabel(
                                 locale,
-                                placard.scope ??
+                                placard.scopeType ??
                                   inferPlacardScope(placard.templateName),
                               )}
                             />

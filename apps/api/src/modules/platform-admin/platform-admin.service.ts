@@ -4,12 +4,15 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  CrossAppResourceLink,
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
+  PlacardScopeType,
+  PlatformAdminSwitchboardPayload,
   PlatformAdminUserRecord,
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
@@ -18,7 +21,12 @@ import type {
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
+  RefreshTier,
+  ResourceActionDescriptor,
   SetPlatformMaintenanceModeCommand,
+  SwitchboardListPayload,
+  SwitchboardPlacardRecord,
+  SwitchboardPublicInfoRecord,
   TenantInvoiceRecord,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
@@ -63,6 +71,7 @@ const PLACARD_SEED: PlacardVersionRecord[] = [
     placardVersionId: "placard-demo-001",
     versionCode: "placard-2026-q2",
     publicInfoVersionId: "public-info-demo-001",
+    scopeType: "brand_template",
     templateName: "seatback-default",
     artifactFileId: "artifact-demo-001",
     artifactManifestHash: null,
@@ -74,6 +83,8 @@ const PLACARD_SEED: PlacardVersionRecord[] = [
     downloadMetadata: null,
   },
 ];
+
+const SWITCHBOARD_REFRESH_TIER: RefreshTier = "medium_slow";
 
 const PLATFORM_ADMIN_USERS_SEED: PlatformAdminUserRecord[] = [
   {
@@ -240,6 +251,26 @@ export class PlatformAdminService implements OnModuleInit {
     );
   }
 
+  getSwitchboard(): PlatformAdminSwitchboardPayload {
+    const publicInfo = this.buildSwitchboardPublicInfoPayload();
+    const placards = this.buildSwitchboardPlacardPayload(publicInfo.items);
+
+    return {
+      publicInfo,
+      placards,
+      availableActions: this.buildSwitchboardActions(publicInfo.items),
+      crossAppLinks: this.buildSwitchboardLinks(
+        publicInfo.items,
+        placards.items,
+      ),
+      refreshTier: SWITCHBOARD_REFRESH_TIER,
+      lastUpdatedAt: this.maxTimestamp(
+        publicInfo.lastUpdatedAt,
+        placards.lastUpdatedAt,
+      ),
+    };
+  }
+
   createPublicInfoVersion(
     command: CreatePublicInfoVersionCommand,
     requestId?: string,
@@ -299,6 +330,7 @@ export class PlatformAdminService implements OnModuleInit {
     requestId?: string,
     publisherActorId?: string | null,
   ) {
+    this.assertNonBlank(command.reason, "reason");
     const version = this.requirePublicInfoVersion(versionId);
     if (version.status !== "draft") {
       throw new ApiRequestError(
@@ -371,6 +403,7 @@ export class PlatformAdminService implements OnModuleInit {
           newVersionId: version.versionId,
           publishedAt,
           publishedBy,
+          reason: command.reason.trim(),
         },
       },
       requestId,
@@ -436,11 +469,11 @@ export class PlatformAdminService implements OnModuleInit {
 
   publishPlacardVersion(
     placardVersionId: string,
-    command: PublishPlacardVersionCommand = {},
+    command: PublishPlacardVersionCommand,
     requestId?: string,
     publishActorId?: string | null,
   ) {
-    void command;
+    this.assertNonBlank(command.reason, "reason");
     const placard = this.placardVersions.find(
       (candidate) => candidate.placardVersionId === placardVersionId,
     );
@@ -482,6 +515,7 @@ export class PlatformAdminService implements OnModuleInit {
           placardVersionId: placard.placardVersionId,
           versionCode: placard.versionCode,
           publishedAt: now,
+          reason: command.reason.trim(),
         },
       },
       requestId,
@@ -530,6 +564,7 @@ export class PlatformAdminService implements OnModuleInit {
       placardVersionId,
       versionCode: normalizedVersionCode,
       publicInfoVersionId: command.publicInfoVersionId.trim(),
+      scopeType: command.scopeType,
       templateName: command.templateName.trim(),
       artifactFileId:
         this.normalizeNullableText(command.artifactFileId) ??
@@ -996,6 +1031,265 @@ export class PlatformAdminService implements OnModuleInit {
     this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 
+  private buildSwitchboardPublicInfoPayload(): SwitchboardListPayload<SwitchboardPublicInfoRecord> {
+    const items = this.publicInfoVersions.map((version) => {
+      const cloned = this.clonePublicInfoVersion(version);
+      return {
+        ...cloned,
+        availableActions: this.buildPublicInfoActions(cloned),
+        crossAppLinks: this.buildPublicInfoLinks(cloned),
+      };
+    });
+
+    return {
+      items,
+      availableActions: this.buildSwitchboardActions(items),
+      emptyState:
+        items.length > 0
+          ? null
+          : {
+              reason: "no_data",
+              messageCode: "switchboard.public_info.empty.no_data",
+              nextAction: {
+                action: "create_version",
+                enabled: true,
+                riskLevel: "medium",
+              },
+            },
+      refreshTier: SWITCHBOARD_REFRESH_TIER,
+      lastUpdatedAt: this.maxTimestamp(...items.map((item) => item.updatedAt)),
+      crossAppLinks: items[0]?.crossAppLinks ?? [],
+    };
+  }
+
+  private buildSwitchboardPlacardPayload(
+    publicInfo: SwitchboardPublicInfoRecord[],
+  ): SwitchboardListPayload<SwitchboardPlacardRecord> {
+    const items = this.placardVersions.map((placard) => {
+      const cloned = this.clonePlacardVersion(placard);
+      return {
+        ...cloned,
+        availableActions: this.buildPlacardActions(cloned),
+        crossAppLinks: this.buildPlacardLinks(cloned),
+      };
+    });
+
+    const hasPublicInfo = publicInfo.length > 0;
+    return {
+      items,
+      availableActions: [
+        {
+          action: "generate_placard_version",
+          enabled: hasPublicInfo,
+          disabledReasonCode: hasPublicInfo
+            ? undefined
+            : "switchboard.public_info_required",
+          riskLevel: "medium",
+        },
+      ],
+      emptyState:
+        items.length > 0
+          ? null
+          : {
+              reason: "no_data",
+              messageCode: "switchboard.placards.empty.no_data",
+              nextAction: {
+                action: "generate_placard_version",
+                enabled: hasPublicInfo,
+                disabledReasonCode: hasPublicInfo
+                  ? undefined
+                  : "switchboard.public_info_required",
+                riskLevel: "medium",
+              },
+            },
+      refreshTier: SWITCHBOARD_REFRESH_TIER,
+      lastUpdatedAt: this.maxTimestamp(...items.map((item) => item.updatedAt)),
+      crossAppLinks: this.buildSwitchboardLinks(publicInfo, items),
+    };
+  }
+
+  private buildSwitchboardActions(
+    publicInfo: SwitchboardPublicInfoRecord[],
+  ): ResourceActionDescriptor[] {
+    const hasDraft = publicInfo.some((version) => version.status === "draft");
+    const hasPublicInfo = publicInfo.length > 0;
+
+    return [
+      {
+        action: "create_version",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      {
+        action: "publish_public_info",
+        enabled: hasDraft,
+        disabledReasonCode: hasDraft
+          ? undefined
+          : "switchboard.no_draft_public_info",
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "generate_placard_version",
+        enabled: hasPublicInfo,
+        disabledReasonCode: hasPublicInfo
+          ? undefined
+          : "switchboard.public_info_required",
+        riskLevel: "medium",
+      },
+      {
+        action: "refresh",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
+  }
+
+  private buildPublicInfoActions(
+    version: PublicInfoVersionRecord,
+  ): ResourceActionDescriptor[] {
+    if (version.status !== "draft") {
+      return [];
+    }
+
+    return [
+      {
+        action: "publish",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "delete_draft",
+        enabled: true,
+        riskLevel: "medium",
+      },
+    ];
+  }
+
+  private buildPlacardActions(
+    placard: PlacardVersionRecord,
+  ): ResourceActionDescriptor[] {
+    const actions: ResourceActionDescriptor[] = [];
+    if (!placard.publishedAt) {
+      actions.push({
+        action: "publish",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      });
+    }
+    if (placard.artifactDownloadUrl) {
+      actions.push({
+        action: "download",
+        enabled: true,
+        riskLevel: "low",
+      });
+    }
+    return actions;
+  }
+
+  private buildSwitchboardLinks(
+    publicInfo: PublicInfoVersionRecord[],
+    placards: PlacardVersionRecord[],
+  ): CrossAppResourceLink[] {
+    const livePublicInfo =
+      publicInfo.find((version) => version.status === "published") ?? null;
+    const livePlacard =
+      placards.find((placard) => placard.publishedAt != null) ??
+      placards[0] ??
+      null;
+
+    return [
+      {
+        targetApp: "ops-console",
+        route: livePlacard
+          ? `/dispatch?placardVersionId=${encodeURIComponent(livePlacard.placardVersionId)}`
+          : "/dispatch?switchboard=switchboard",
+        resourceType: "placard_distribution",
+        resourceId: livePlacard?.placardVersionId ?? "switchboard",
+        openMode: "new_tab",
+        label: "Open placard distribution",
+      },
+      {
+        targetApp: "platform-admin",
+        route: livePublicInfo
+          ? `/audit?resourceType=public_info_version&resourceId=${encodeURIComponent(livePublicInfo.versionId)}`
+          : "/audit?resourceType=public_info_version",
+        resourceType: "audit_log",
+        resourceId: livePublicInfo?.versionId ?? "switchboard",
+        openMode: "same_tab",
+        label: "Open audit trail",
+      },
+      {
+        targetApp: "platform-admin",
+        route: "/notices?channel=rider_disclosure",
+        resourceType: "notice",
+        resourceId: "rider_disclosure",
+        openMode: "same_tab",
+        label: "Open rider notices",
+      },
+    ];
+  }
+
+  private buildPublicInfoLinks(
+    version: PublicInfoVersionRecord,
+  ): CrossAppResourceLink[] {
+    return [
+      {
+        targetApp: "platform-admin",
+        route: `/audit?resourceType=public_info_version&resourceId=${encodeURIComponent(version.versionId)}`,
+        resourceType: "public_info_version",
+        resourceId: version.versionId,
+        openMode: "same_tab",
+        label: "Open audit trail",
+      },
+    ];
+  }
+
+  private buildPlacardLinks(
+    placard: PlacardVersionRecord,
+  ): CrossAppResourceLink[] {
+    const links: CrossAppResourceLink[] = [
+      {
+        targetApp: "platform-admin",
+        route: `/audit?resourceType=placard_version&resourceId=${encodeURIComponent(placard.placardVersionId)}`,
+        resourceType: "placard_version",
+        resourceId: placard.placardVersionId,
+        openMode: "same_tab",
+        label: "Open audit trail",
+      },
+    ];
+
+    if (placard.publishedAt) {
+      links.unshift({
+        targetApp: "ops-console",
+        route: `/dispatch?placardVersionId=${encodeURIComponent(placard.placardVersionId)}`,
+        resourceType: "placard_distribution",
+        resourceId: placard.placardVersionId,
+        openMode: "new_tab",
+        label: "Open placard distribution",
+      });
+    }
+
+    return links;
+  }
+
+  private maxTimestamp(
+    ...timestamps: Array<string | null | undefined>
+  ): string | null {
+    const candidates = timestamps.filter(
+      (timestamp): timestamp is string =>
+        typeof timestamp === "string" && timestamp.length > 0,
+    );
+    if (candidates.length === 0) {
+      return null;
+    }
+    return candidates.reduce((latest, current) =>
+      current.localeCompare(latest) > 0 ? current : latest,
+    );
+  }
+
   private clonePublicInfoVersion(
     version: PublicInfoVersionRecord,
   ): PublicInfoVersionRecord {
@@ -1007,6 +1301,8 @@ export class PlatformAdminService implements OnModuleInit {
   private clonePlacardVersion(
     placard: PlacardVersionRecord,
   ): PlacardVersionRecord {
+    const scopeType =
+      placard.scopeType ?? this.inferPlacardScopeType(placard.templateName);
     const artifactFileId =
       this.normalizeNullableText(placard.artifactFileId) ??
       `placard-artifact-${placard.placardVersionId}`;
@@ -1030,6 +1326,7 @@ export class PlatformAdminService implements OnModuleInit {
 
     return {
       ...placard,
+      scopeType,
       artifactFileId,
       artifactManifestHash,
       artifactDownloadUrl: downloadMetadata.downloadUrl,
@@ -1065,6 +1362,17 @@ export class PlatformAdminService implements OnModuleInit {
   private normalizeNullableText(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+  }
+
+  private inferPlacardScopeType(templateName: string): PlacardScopeType {
+    const normalized = templateName.toLowerCase();
+    if (normalized.includes("vehicle")) {
+      return "vehicle";
+    }
+    if (normalized.includes("fleet")) {
+      return "fleet";
+    }
+    return "brand_template";
   }
 
   private assertNonBlank(value: string, fieldName: string) {

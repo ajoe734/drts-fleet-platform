@@ -1,5 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  RefreshTier,
+  ResourceActionDescriptor,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -2980,6 +2986,7 @@ export interface PublishPublicInfoVersionCommand {
   publishedBy?: string | null;
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
+  reason: string;
 }
 
 export interface RetirePublicInfoVersionCommand {
@@ -2987,10 +2994,13 @@ export interface RetirePublicInfoVersionCommand {
   effectiveTo?: string | null;
 }
 
+export type PlacardScopeType = "fleet" | "vehicle" | "brand_template";
+
 export interface PlacardVersionRecord {
   placardVersionId: string;
   versionCode: string;
   publicInfoVersionId: string;
+  scopeType: PlacardScopeType;
   templateName: string;
   artifactFileId: string | null;
   artifactManifestHash: string | null;
@@ -3005,6 +3015,7 @@ export interface PlacardVersionRecord {
 export interface GeneratePlacardVersionCommand {
   versionCode: string;
   publicInfoVersionId: string;
+  scopeType: PlacardScopeType;
   templateName: string;
   artifactFileId?: string | null;
   publishedAt?: string | null;
@@ -3012,6 +3023,35 @@ export interface GeneratePlacardVersionCommand {
 
 export interface PublishPlacardVersionCommand {
   publishedAt?: string | null;
+  reason: string;
+}
+
+export interface SwitchboardPublicInfoRecord extends PublicInfoVersionRecord {
+  availableActions: ResourceActionDescriptor[];
+  crossAppLinks: CrossAppResourceLink[];
+}
+
+export interface SwitchboardPlacardRecord extends PlacardVersionRecord {
+  availableActions: ResourceActionDescriptor[];
+  crossAppLinks: CrossAppResourceLink[];
+}
+
+export interface SwitchboardListPayload<T> {
+  items: T[];
+  availableActions: ResourceActionDescriptor[];
+  emptyState: EmptyStateEnvelope | null;
+  refreshTier: RefreshTier;
+  lastUpdatedAt: string | null;
+  crossAppLinks: CrossAppResourceLink[];
+}
+
+export interface PlatformAdminSwitchboardPayload {
+  publicInfo: SwitchboardListPayload<SwitchboardPublicInfoRecord>;
+  placards: SwitchboardListPayload<SwitchboardPlacardRecord>;
+  availableActions: ResourceActionDescriptor[];
+  crossAppLinks: CrossAppResourceLink[];
+  refreshTier: RefreshTier;
+  lastUpdatedAt: string | null;
 }
 
 export const CALL_TYPES = [

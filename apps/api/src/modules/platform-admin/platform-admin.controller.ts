@@ -14,6 +14,7 @@ import type {
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
+  PlatformAdminSwitchboardPayload,
   PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
@@ -32,6 +33,14 @@ import { PlatformAdminService } from "./platform-admin.service";
 @Controller("platform-admin")
 export class PlatformAdminController {
   constructor(private readonly platformAdminService: PlatformAdminService) {}
+
+  @Get("switchboard")
+  getSwitchboard(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope<PlatformAdminSwitchboardPayload>(
+      this.platformAdminService.getSwitchboard(),
+      requestId,
+    );
+  }
 
   @Get("public-info")
   listPublicInfoVersions(@Headers("x-request-id") requestId?: string) {

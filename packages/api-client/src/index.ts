@@ -115,6 +115,7 @@ import type {
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
   PlacardVersionRecord,
+  PlatformAdminSwitchboardPayload,
   PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
   PlatformEarningsByPlatformResponse,
@@ -1799,6 +1800,12 @@ export class ApiClient {
 
   // ── Platform Admin ──
 
+  async getPlatformAdminSwitchboard(): Promise<PlatformAdminSwitchboardPayload> {
+    return this.get<PlatformAdminSwitchboardPayload>(
+      "/api/platform-admin/switchboard",
+    );
+  }
+
   async listPublicInfo(): Promise<PublicInfoVersionRecord[]> {
     return this.getList<PublicInfoVersionRecord>(
       "/api/platform-admin/public-info",
@@ -1848,7 +1855,7 @@ export class ApiClient {
 
   async publishPlacardVersion(
     placardVersionId: string,
-    command: PublishPlacardVersionCommand = {},
+    command: PublishPlacardVersionCommand,
   ): Promise<PlacardVersionRecord> {
     return this.post<PlacardVersionRecord>(
       `/api/platform-admin/placards/${placardVersionId}/publish`,
