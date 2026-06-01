@@ -355,6 +355,10 @@ function getEmptyStateContent(reason: EmptyReason): {
   }
 }
 
+// Empty-reason taxonomy (§3.6 / Q-X15). `hasFilter` below counts the status
+// tab (active/inactive) as a filter, so an active- or inactive-tab selection
+// that matches no rows resolves to `filtered_empty`, not `no_data` — distinct
+// from the brand-new-tenant `no_data` (totalCount === 0) case.
 function inferEmptyReason(args: {
   totalCount: number;
   visibleCount: number;
@@ -439,6 +443,11 @@ async function loadAddressesData(args: {
   const client = getTenantClient();
   const errors: string[] = [];
 
+  // Contract note (review UI-FE-TEN-ADR): GET /api/tenant/addresses returns
+  // the canonical paginated list envelope ({ items, pageInfo }); ApiClient
+  // .getList unwraps it to TenantAddressRecord[]. There is no separate
+  // "directory response" contract — both this page and /bookings/new consume
+  // the bare TenantAddressRecord[] directly.
   const [recordsResult, passengersResult] = await Promise.allSettled([
     args.view === "export"
       ? (client.listAddressExportView() as Promise<
