@@ -189,6 +189,7 @@ import type {
   TenantCostCenterQuotaSummary,
   TenantIntegrationGovernancePackage,
   TenantInvoiceRecord,
+  TenantAuditListView,
   TenantPassengerRecord,
   TenantQuotaLedgerEntry,
   TenantQuotaPolicyRecord,
@@ -1666,16 +1667,42 @@ export class ApiClient {
     return this.getList<AuditLogRecord>("/api/audit");
   }
 
-  async listTenantAuditLogs(options: { tenantId?: string } = {}) {
-    return this.getList<AuditLogRecord>("/api/tenant/audit", {
-      ...(options.tenantId
-        ? {
-            headers: {
-              "x-tenant-id": options.tenantId,
-            },
-          }
-        : {}),
-    });
+  async listTenantAuditLogs(
+    options: { tenantId?: string } & ExportTenantAuditCommand = {},
+  ): Promise<TenantAuditListView> {
+    const searchParams = new URLSearchParams();
+    if (options.actorScope) {
+      searchParams.set("actorScope", options.actorScope);
+    }
+    if (options.moduleName) {
+      searchParams.set("moduleName", options.moduleName);
+    }
+    if (options.actionName) {
+      searchParams.set("actionName", options.actionName);
+    }
+    if (options.from) {
+      searchParams.set("from", options.from);
+    }
+    if (options.to) {
+      searchParams.set("to", options.to);
+    }
+    if (options.auditId) {
+      searchParams.set("auditId", options.auditId);
+    }
+    const query = searchParams.toString();
+
+    return this.get<TenantAuditListView>(
+      query ? `/api/tenant/audit?${query}` : "/api/tenant/audit",
+      {
+        ...(options.tenantId
+          ? {
+              headers: {
+                "x-tenant-id": options.tenantId,
+              },
+            }
+          : {}),
+      },
+    );
   }
 
   async exportTenantAudit(

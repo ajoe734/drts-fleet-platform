@@ -1,5 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  EmptyStateEnvelope,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -610,6 +616,15 @@ export interface ExportTenantAuditCommand {
   from?: string | null;
   to?: string | null;
   auditId?: string | null;
+}
+
+export interface TenantAuditListView {
+  items: AuditLogRecord[];
+  pageInfo: ApiPageInfo;
+  refreshTier: RefreshTier;
+  refreshMetadata: UiRefreshMetadata;
+  availableActions: ResourceActionDescriptor[];
+  emptyState: EmptyStateEnvelope | null;
 }
 
 export const EVIDENCE_RETENTION_FAMILIES = [

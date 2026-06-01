@@ -5,6 +5,7 @@ import type {
   EmptyReason,
   ExportTenantAuditCommand,
   ResourceActionDescriptor,
+  TenantAuditListView,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -232,20 +233,8 @@ const emptyStateStyle: CSSProperties = {
   alignItems: "start",
 };
 
-const emptyReasonPreviewStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-  gap: 8,
-};
-
 const tableCardStyle: CSSProperties = {
   overflow: "hidden",
-};
-
-const captionStyle: CSSProperties = {
-  fontSize: 11.5,
-  color: th.textMuted,
-  lineHeight: 1.5,
 };
 
 const actorToneByScope = {
@@ -256,12 +245,6 @@ const actorToneByScope = {
   partner: "success",
 } satisfies Record<string, CanvasTone>;
 
-const pageActionCatalog = [
-  { action: "filter", enabled: true, riskLevel: "low" },
-  { action: "refresh", enabled: true, riskLevel: "low" },
-  { action: "export", enabled: true, riskLevel: "low" },
-] satisfies ResourceActionDescriptor[];
-
 const auditDateFormatter = new Intl.DateTimeFormat("zh-Hant", {
   dateStyle: "short",
   timeStyle: "medium",
@@ -270,14 +253,13 @@ const auditDateFormatter = new Intl.DateTimeFormat("zh-Hant", {
 type SearchParamsInput = Record<string, string | string[] | undefined>;
 
 type FilterState = {
-  actor: string;
+  actor: keyof typeof actorToneByScope | "";
   module: string;
   action: string;
   from: string;
   to: string;
   auditId: string;
   expanded: string;
-  empty: EmptyReason | "";
   download: string;
 };
 
@@ -312,6 +294,7 @@ type EmptyStateSpec = {
   body: string;
   tone: CanvasTone;
   actions: Array<{ href: string; label: string }>;
+  messageCode?: string;
 };
 
 type ExportState = {
@@ -325,29 +308,27 @@ function getSingleParam(searchParams: SearchParamsInput, key: string): string {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
 }
 
-function isEmptyReason(value: string): value is EmptyReason {
+function isActorScope(value: string): value is keyof typeof actorToneByScope {
   return (
-    value === "no_data" ||
-    value === "not_provisioned" ||
-    value === "fetch_failed" ||
-    value === "permission_denied" ||
-    value === "external_unavailable" ||
-    value === "filtered_empty"
+    value === "tenant" ||
+    value === "ops" ||
+    value === "platform" ||
+    value === "system" ||
+    value === "partner"
   );
 }
 
 function parseFilters(searchParams: SearchParamsInput): FilterState {
-  const emptyParam = getSingleParam(searchParams, "empty");
+  const actor = getSingleParam(searchParams, "actor");
 
   return {
-    actor: getSingleParam(searchParams, "actor"),
+    actor: isActorScope(actor) ? actor : "",
     module: getSingleParam(searchParams, "module"),
     action: getSingleParam(searchParams, "action"),
     from: getSingleParam(searchParams, "from"),
     to: getSingleParam(searchParams, "to"),
     auditId: getSingleParam(searchParams, "auditId"),
     expanded: getSingleParam(searchParams, "expanded"),
-    empty: isEmptyReason(emptyParam) ? emptyParam : "",
     download: getSingleParam(searchParams, "download"),
   };
 }
@@ -361,7 +342,6 @@ function buildAuditHref(overrides: Partial<FilterState>) {
     to: "",
     auditId: "",
     expanded: "",
-    empty: "",
     download: "",
     ...overrides,
   };
@@ -374,7 +354,6 @@ function buildAuditHref(overrides: Partial<FilterState>) {
   if (merged.to) params.set("to", merged.to);
   if (merged.auditId) params.set("auditId", merged.auditId);
   if (merged.expanded) params.set("expanded", merged.expanded);
-  if (merged.empty) params.set("empty", merged.empty);
   if (merged.download) params.set("download", merged.download);
 
   const query = params.toString();
@@ -395,6 +374,13 @@ function formatArtifactAt(value: string | null | undefined) {
   return Number.isNaN(parsed.getTime())
     ? "—"
     : auditDateFormatter.format(parsed);
+}
+
+function withSelectedOption<T extends string>(options: T[], selected: T | "") {
+  if (!selected || options.includes(selected)) {
+    return options;
+  }
+  return [selected, ...options];
 }
 
 function normalizeActorScope(
@@ -500,7 +486,7 @@ function buildBaseUrl(base: string, route: string) {
 }
 
 function buildRequestAuditLink(filters: FilterState, auditId: string) {
-  return `${buildAuditHref({ ...filters, auditId, expanded: auditId, empty: "" })}#audit-detail`;
+  return `${buildAuditHref({ ...filters, auditId, expanded: auditId })}#audit-detail`;
 }
 
 function buildResourceLink(record: AuditLogRecord): ResourceLink {
@@ -623,50 +609,6 @@ function buildResourceLink(record: AuditLogRecord): ResourceLink {
   };
 }
 
-function matchesDateRange(record: AuditLogRecord, filters: FilterState) {
-  if (!filters.from && !filters.to) return true;
-
-  const createdAt = new Date(record.createdAt);
-  if (Number.isNaN(createdAt.getTime())) return false;
-
-  if (filters.from) {
-    const from = new Date(`${filters.from}T00:00:00.000Z`);
-    if (createdAt < from) return false;
-  }
-
-  if (filters.to) {
-    const to = new Date(`${filters.to}T23:59:59.999Z`);
-    if (createdAt > to) return false;
-  }
-
-  return true;
-}
-
-function applyFilters(records: AuditLogRecord[], filters: FilterState) {
-  return records.filter((record) => {
-    if (
-      filters.actor &&
-      normalizeActorScope(record.actorType) !== filters.actor
-    ) {
-      return false;
-    }
-    if (filters.module && record.moduleName !== filters.module) {
-      return false;
-    }
-    if (filters.action && record.actionName !== filters.action) {
-      return false;
-    }
-    if (
-      filters.auditId &&
-      !record.auditId.includes(filters.auditId) &&
-      !record.requestId.includes(filters.auditId)
-    ) {
-      return false;
-    }
-    return matchesDateRange(record, filters);
-  });
-}
-
 function toViewModel(
   record: AuditLogRecord,
   filters: FilterState,
@@ -724,88 +666,126 @@ function describeErrorReason(error: unknown): EmptyReason {
   return "fetch_failed";
 }
 
-function buildEmptyState(reason: EmptyReason): EmptyStateSpec {
-  switch (reason) {
-    case "not_provisioned":
-      return {
-        title: "此租戶尚未完成稽核治理接線",
-        body: "Audit trail route 已開通，但此 tenant 的 audit export / evidence governance 尚未 provisioning；這不是 no_data。",
-        tone: "warn",
-        actions: [
-          { href: "/settings", label: "查看租戶設定" },
-          { href: "/integration-governance", label: "查看整合就緒度" },
-        ],
-      };
-    case "permission_denied":
-      return {
-        title: "目前角色無法讀取稽核資料",
-        body: "此畫面僅對具 audit read 權限的租戶角色開放，請由 `tc_admin` 或 `tc_finance` 協助。",
-        tone: "danger",
-        actions: [
-          { href: "/users", label: "查看角色配置" },
-          { href: "/audit", label: "返回稽核首頁" },
-        ],
-      };
-    case "external_unavailable":
-      return {
-        title: "上游稽核服務暫時不可用",
-        body: `Tenant snapshot 無法自 ${API_URL} 取得最新資料。此頁 refresh tier 為 T6，只支援手動重新整理。`,
-        tone: "warn",
-        actions: [
-          { href: "/audit", label: "重新整理" },
-          { href: "/reports", label: "改查報表" },
-        ],
-      };
-    case "fetch_failed":
-      return {
-        title: "稽核資料讀取失敗",
-        body: "保留目前篩選條件後重試；若持續失敗，請帶著 request correlation 聯絡平台支援。",
-        tone: "danger",
-        actions: [
-          { href: "/audit", label: "重新整理" },
-          { href: "/audit?download=1", label: "重試簽章匯出" },
-        ],
-      };
-    case "filtered_empty":
-      return {
-        title: "目前篩選條件沒有命中任何稽核列",
-        body: "可放寬 actor、module、action 或時間範圍，或直接清除所有篩選後重新檢視。",
-        tone: "info",
-        actions: [
-          { href: "/audit", label: "清除篩選" },
-          {
-            href: buildAuditHref({ empty: "", download: "" }),
-            label: "退出空態預覽",
-          },
-        ],
-      };
-    case "no_data":
+function formatRefreshTier(
+  tier: TenantAuditListView["refreshTier"] | null | undefined,
+) {
+  return tier === "manual" ? "T6 manual" : (tier ?? "unknown");
+}
+
+function buildActionHref(
+  action: ResourceActionDescriptor,
+  filters: FilterState,
+  overrides: Partial<FilterState> = {},
+) {
+  switch (action.action) {
+    case "refresh":
+      return buildAuditHref({ ...filters, ...overrides, download: "" });
+    case "export":
+      return buildAuditHref({ ...filters, ...overrides, download: "1" });
+    case "filter":
+      return "/audit";
     default:
-      return {
-        title: "目前沒有可顯示的稽核列",
-        body: "此租戶尚未產生任何 state-changing action，或 audit snapshot 仍在初始化中。",
-        tone: "neutral",
-        actions: [
-          { href: "/bookings/new", label: "建立第一筆叫車" },
-          { href: "/audit", label: "重新整理" },
-        ],
-      };
+      return buildAuditHref({ ...filters, ...overrides });
   }
 }
 
-function resolvePageActions(rowCount: number) {
-  return pageActionCatalog.map((action) => {
-    if (action.action !== "export") {
-      return action;
-    }
-    return rowCount > 0
-      ? action
-      : {
-          ...action,
-          enabled: false,
-          disabledReasonCode: "No visible audit rows to export",
+function buildEmptyState(
+  reason: EmptyReason,
+  filters: FilterState,
+  refreshTier: TenantAuditListView["refreshTier"] | null | undefined,
+  nextAction?: ResourceActionDescriptor,
+  messageCode?: string,
+): EmptyStateSpec {
+  const spec: Omit<EmptyStateSpec, "messageCode"> = (() => {
+    switch (reason) {
+      case "not_provisioned":
+        return {
+          title: "此租戶尚未完成稽核治理接線",
+          body: "Audit trail route 已開通，但此 tenant 的 audit export / evidence governance 尚未 provisioning；這不是 no_data。",
+          tone: "warn",
+          actions: [
+            { href: "/settings", label: "查看租戶設定" },
+            { href: "/integration-governance", label: "查看整合就緒度" },
+          ],
         };
-  });
+      case "permission_denied":
+        return {
+          title: "目前角色無法讀取稽核資料",
+          body: "此畫面僅對具 audit read 權限的租戶角色開放，請由 `tc_admin` 或 `tc_finance` 協助。",
+          tone: "danger",
+          actions: [
+            { href: "/users", label: "查看角色配置" },
+            { href: "/audit", label: "返回稽核首頁" },
+          ],
+        };
+      case "external_unavailable":
+        return {
+          title: "上游稽核服務暫時不可用",
+          body: `Tenant snapshot 無法自 ${API_URL} 取得最新資料。此頁 refresh tier 為 ${formatRefreshTier(refreshTier)}，只支援手動重新整理。`,
+          tone: "warn",
+          actions: [
+            {
+              href: buildAuditHref({ ...filters, download: "" }),
+              label: "重新整理",
+            },
+            { href: "/reports", label: "改查報表" },
+          ],
+        };
+      case "fetch_failed":
+        return {
+          title: "稽核資料讀取失敗",
+          body: "保留目前篩選條件後重試；若持續失敗，請帶著 request correlation 聯絡平台支援。",
+          tone: "danger",
+          actions: [
+            {
+              href: buildAuditHref({ ...filters, download: "" }),
+              label: "重新整理",
+            },
+          ],
+        };
+      case "filtered_empty":
+        return {
+          title: "目前篩選條件沒有命中任何稽核列",
+          body: "可放寬 actor、module、action 或時間範圍，或直接清除所有篩選後重新檢視。",
+          tone: "info",
+          actions: [{ href: "/audit", label: "清除篩選" }],
+        };
+      case "no_data":
+      default:
+        return {
+          title: "目前沒有可顯示的稽核列",
+          body: "此租戶尚未產生任何 state-changing action，或 audit snapshot 仍在初始化中。",
+          tone: "neutral",
+          actions: [
+            { href: "/bookings/new", label: "建立第一筆叫車" },
+            { href: "/audit", label: "重新整理" },
+          ],
+        };
+    }
+  })();
+
+  if (!nextAction) {
+    return messageCode ? { ...spec, messageCode } : spec;
+  }
+
+  return {
+    ...spec,
+    ...(messageCode ? { messageCode } : {}),
+    actions: [
+      ...spec.actions,
+      {
+        href: buildActionHref(nextAction, filters),
+        label:
+          nextAction.action === "refresh"
+            ? "依建議重新整理"
+            : nextAction.action === "export"
+              ? "依建議匯出"
+              : nextAction.action === "filter"
+                ? "調整篩選"
+                : `執行 ${nextAction.action}`,
+      },
+    ],
+  };
 }
 
 function renderActionLink(
@@ -849,23 +829,18 @@ function renderActionLink(
   );
 }
 
-function emptyReasonLabel(reason: EmptyReason) {
-  switch (reason) {
-    case "no_data":
-      return "No data";
-    case "not_provisioned":
-      return "Not provisioned";
-    case "fetch_failed":
-      return "Fetch failed";
-    case "permission_denied":
-      return "Permission denied";
-    case "external_unavailable":
-      return "External unavailable";
-    case "filtered_empty":
-      return "Filtered empty";
-    default:
-      return reason;
-  }
+function resolveHeaderAction(
+  availableActions: ResourceActionDescriptor[],
+  actionName: "filter" | "refresh" | "export",
+): ResourceActionDescriptor {
+  return (
+    availableActions.find((action) => action.action === actionName) ?? {
+      action: actionName,
+      enabled: false,
+      disabledReasonCode: "action_unavailable",
+      riskLevel: "low",
+    }
+  );
 }
 
 function buildTableColumns(
@@ -931,7 +906,7 @@ function buildTableColumns(
       w: 116,
       r: (row) => (
         <a
-          href={`${buildAuditHref({ ...filters, expanded: row.record.auditId, empty: "" })}#audit-detail`}
+          href={`${buildAuditHref({ ...filters, expanded: row.record.auditId })}#audit-detail`}
           style={inlineLinkStyle}
         >
           {row._selected ? "已展開" : "查看細節"}
@@ -941,12 +916,25 @@ function buildTableColumns(
   ];
 }
 
-async function loadAuditLogs() {
+async function loadAuditLogs(
+  filters: FilterState,
+): Promise<TenantAuditListView> {
   const client = getTenantClient();
-  const logs = (await client.listTenantAuditLogs()) as AuditLogRecord[];
-  return [...logs].sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt),
-  );
+  const result = (await client.listTenantAuditLogs({
+    actorScope: normalizeExportScope(filters.actor),
+    moduleName: filters.module || null,
+    actionName: filters.action || null,
+    from: filters.from || null,
+    to: filters.to || null,
+    auditId: filters.auditId || null,
+  })) as TenantAuditListView;
+
+  return {
+    ...result,
+    items: [...result.items].sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt),
+    ),
+  };
 }
 
 function normalizeExportScope(
@@ -1012,19 +1000,19 @@ export default async function AuditPage({
   searchParams: Promise<SearchParamsInput>;
 }) {
   const filters = parseFilters(await searchParams);
-  let records: AuditLogRecord[] = [];
+  let auditView: TenantAuditListView | null = null;
   let errorReason: EmptyReason | null = null;
   let errorMessage: string | null = null;
 
   try {
-    records = await loadAuditLogs();
+    auditView = await loadAuditLogs(filters);
   } catch (error) {
-    errorReason = filters.empty || describeErrorReason(error);
+    errorReason = describeErrorReason(error);
     errorMessage = error instanceof Error ? error.message : String(error);
   }
 
-  const filteredRecords = applyFilters(records, filters);
-  const rows = filteredRecords.map((record) => toViewModel(record, filters));
+  const records = auditView?.items ?? [];
+  const rows = records.map((record) => toViewModel(record, filters));
   const focusedAuditId =
     filters.expanded || filters.auditId || rows[0]?.record.auditId || "";
   const focusedRow =
@@ -1036,47 +1024,47 @@ export default async function AuditPage({
     _selected: row.record.auditId === focusedRow?.record.auditId,
   }));
 
-  const actorOptions = Array.from(
+  const actorOptions = withSelectedOption(
+    Array.from(
+      new Set(records.map((record) => normalizeActorScope(record.actorType))),
+    ),
+    filters.actor,
+  );
+  const moduleOptions = withSelectedOption(
+    Array.from(new Set(records.map((record) => record.moduleName))).sort(
+      (left, right) => left.localeCompare(right, "en"),
+    ),
+    filters.module,
+  );
+  const actionOptions = withSelectedOption(
+    Array.from(new Set(records.map((record) => record.actionName))).sort(
+      (left, right) => left.localeCompare(right, "en"),
+    ),
+    filters.action,
+  );
+  const visibleActorScopes = Array.from(
     new Set(records.map((record) => normalizeActorScope(record.actorType))),
   );
-  const moduleOptions = Array.from(
-    new Set(records.map((record) => record.moduleName)),
-  ).sort((left, right) => left.localeCompare(right, "en"));
-  const actionOptions = Array.from(
-    new Set(records.map((record) => record.actionName)),
-  ).sort((left, right) => left.localeCompare(right, "en"));
-  const visibleActorScopes = Array.from(
-    new Set(
-      filteredRecords.map((record) => normalizeActorScope(record.actorType)),
-    ),
-  );
-  const moduleCount = new Set(
-    filteredRecords.map((record) => record.moduleName),
-  ).size;
+  const moduleCount = new Set(records.map((record) => record.moduleName)).size;
   const maskedActorCount = rows.filter((row) => row.masked).length;
-  const requestLinkedCount = filteredRecords.filter((record) =>
+  const requestLinkedCount = records.filter((record) =>
     Boolean(record.requestId),
   ).length;
   const exportCount = rows.length;
-  const availableActions = resolvePageActions(exportCount);
-  const filterAction = availableActions.find(
-    (action) => action.action === "filter",
-  )!;
-  const refreshAction = availableActions.find(
-    (action) => action.action === "refresh",
-  )!;
-  const exportAction = availableActions.find(
-    (action) => action.action === "export",
-  )!;
-  const emptyReason =
-    filters.empty ||
-    errorReason ||
-    (filteredRecords.length === 0
-      ? records.length > 0
-        ? "filtered_empty"
-        : "no_data"
-      : null);
-  const emptyState = emptyReason ? buildEmptyState(emptyReason) : null;
+  const availableActions = auditView?.availableActions ?? [];
+  const filterAction = resolveHeaderAction(availableActions, "filter");
+  const refreshAction = resolveHeaderAction(availableActions, "refresh");
+  const exportAction = resolveHeaderAction(availableActions, "export");
+  const emptyReason = auditView?.emptyState?.reason ?? errorReason;
+  const emptyState = emptyReason
+    ? buildEmptyState(
+        emptyReason,
+        filters,
+        auditView?.refreshTier,
+        auditView?.emptyState?.nextAction,
+        auditView?.emptyState?.messageCode,
+      )
+    : null;
   const exportLoadState =
     exportAction.enabled && !emptyState && filters.download === "1"
       ? await loadAuditExport(filters)
@@ -1107,7 +1095,7 @@ export default async function AuditPage({
       <CanvasPageHeader
         theme={th}
         title="稽核紀錄"
-        subtitle="不可變 · request correlation · cross-actor visibility · refresh tier T6"
+        subtitle={`不可變 · request correlation · cross-actor visibility · refresh tier ${formatRefreshTier(auditView?.refreshTier)}`}
         actions={
           <>
             {renderActionLink(filterAction, "/audit", "清除篩選")}
@@ -1120,7 +1108,7 @@ export default async function AuditPage({
               exportActionResolved,
               exportReady
                 ? (exportState.download?.downloadUrl ?? "#")
-                : buildAuditHref({ ...filters, empty: "", download: "1" }),
+                : buildAuditHref({ ...filters, download: "1" }),
               exportReady ? "下載簽章匯出" : "產生簽章匯出",
             )}
           </>
@@ -1140,10 +1128,10 @@ export default async function AuditPage({
           <CanvasKPI
             theme={th}
             label="Visible Rows"
-            value={String(filteredRecords.length)}
+            value={String(records.length)}
             sub={
-              records.length
-                ? `of ${records.length} in snapshot`
+              auditView
+                ? `generated ${formatAuditAt(auditView.refreshMetadata.generatedAt)}`
                 : "current snapshot"
             }
           />
@@ -1244,11 +1232,11 @@ export default async function AuditPage({
                     />
                   </label>
                   <label style={fieldStackStyle}>
-                    <span style={fieldLabelStyle}>Audit / Request ID</span>
+                    <span style={fieldLabelStyle}>Audit ID</span>
                     <input
                       defaultValue={filters.auditId}
                       name="auditId"
-                      placeholder="audit-… or req-…"
+                      placeholder="audit-…"
                       style={monoInputStyle}
                     />
                   </label>
@@ -1277,8 +1265,9 @@ export default async function AuditPage({
                     重設
                   </a>
                   <span style={secondaryTextStyle}>
-                    Refresh tier T6: manual refresh only. Export is explicit and
-                    follows the current filtered subset.
+                    Refresh tier {formatRefreshTier(auditView?.refreshTier)}:
+                    manual refresh only. Export is explicit and follows the
+                    current filtered subset.
                   </span>
                 </div>
               </form>
@@ -1333,6 +1322,17 @@ export default async function AuditPage({
                     >
                       {emptyState.body}
                     </div>
+                    {emptyState.messageCode ? (
+                      <div
+                        style={{
+                          ...secondaryTextStyle,
+                          marginTop: 8,
+                          fontFamily: th.monoFamily,
+                        }}
+                      >
+                        {emptyState.messageCode}
+                      </div>
+                    ) : null}
                   </div>
                   <div style={controlRowStyle}>
                     {emptyState.actions.map((action) => (
@@ -1346,44 +1346,6 @@ export default async function AuditPage({
                         }}
                       >
                         {action.label}
-                      </a>
-                    ))}
-                  </div>
-                  <div style={emptyReasonPreviewStyle}>
-                    {(
-                      [
-                        "no_data",
-                        "not_provisioned",
-                        "fetch_failed",
-                        "permission_denied",
-                        "external_unavailable",
-                        "filtered_empty",
-                      ] as EmptyReason[]
-                    ).map((reason) => (
-                      <a
-                        key={reason}
-                        href={buildAuditHref({
-                          ...filters,
-                          empty: reason,
-                          download: "",
-                        })}
-                        style={{
-                          ...summaryCellStyle,
-                          textDecoration: "none",
-                          color: th.text,
-                          gap: 6,
-                        }}
-                      >
-                        <CanvasPill
-                          theme={th}
-                          tone={
-                            reason === emptyReason ? emptyState.tone : "neutral"
-                          }
-                          dot
-                        >
-                          {emptyReasonLabel(reason)}
-                        </CanvasPill>
-                        <span style={captionStyle}>{reason}</span>
                       </a>
                     ))}
                   </div>
