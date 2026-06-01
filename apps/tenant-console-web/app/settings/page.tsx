@@ -297,6 +297,9 @@ type ModuleAction = {
   icon: ModuleActionIcon;
   // Cross-app targets open in a new tab (packet §3.10).
   crossApp?: boolean;
+  // True when the descriptor's internal target route is not yet built in this
+  // app (the owning module lane has not merged); narrowed to a disabled CTA.
+  routeUnavailable?: boolean;
 };
 
 type ModuleActionPresentation = {
@@ -344,6 +347,40 @@ const DISABLED_REASON_LABELS: Record<string, string> = {
   not_provisioned: "尚未開通",
 };
 
+// Internal tenant-console routes that exist in THIS app today. The packet §4
+// sitemap also defines /billing, /notifications, /sla, /integration-governance
+// and /feature-flags, but those module surfaces are still landing on their own
+// lanes (UI-FE-TEN-BILL / -NTF / -SLA / -IG / -FF) and are not merged into this
+// app yet. Until a module route exists here, a descriptor CTA (or the header
+// billing CTA) that targets it is narrowed to a disabled, tooltipped affordance
+// (§6: the FE may narrow display, never widen availability) instead of an
+// enabled link that would 404. Add the route below once its lane merges and the
+// canonical deep link lights up with no other change.
+const EXISTING_TENANT_ROUTES = new Set<string>([
+  "/",
+  "/api-keys",
+  "/audit",
+  "/bookings",
+  "/cost-centers",
+  "/invoices",
+  "/partner",
+  "/passengers",
+  "/rules",
+  "/settings",
+  "/users",
+  "/webhooks",
+]);
+
+const ROUTE_UNAVAILABLE_LABEL = "模組尚未開通";
+
+// A target is reachable when it is an external / cross-app URL, or when its
+// first path segment maps to a route that exists in this app today.
+function isRouteAvailable(href: string): boolean {
+  if (!href.startsWith("/")) return true;
+  const segment = href.slice(1).split(/[/?#]/)[0] ?? "";
+  return EXISTING_TENANT_ROUTES.has(segment.length > 0 ? `/${segment}` : "/");
+}
+
 // Local fallback used ONLY when the governance response does not embed
 // `availableActions` (older backend / governance read failed). Mirrors the
 // `synthesizeRefreshMetadata` convention: the page prefers the embedded array
@@ -386,17 +423,30 @@ function resolveModuleActions(data: SettingsData): ModuleAction[] {
   return descriptors.flatMap((descriptor) => {
     const presentation = MODULE_ACTION_PRESENTATION[descriptor.action];
     if (!presentation) return [];
-    return [{ descriptor, ...presentation }];
+    return [
+      {
+        descriptor,
+        ...presentation,
+        routeUnavailable:
+          !presentation.crossApp && !isRouteAvailable(presentation.href),
+      },
+    ];
   });
 }
 
 function ModuleActionButton({ action }: { action: ModuleAction }) {
   const { descriptor } = action;
-  const disabled = !descriptor.enabled;
+  // §6: a descriptor the backend marks enabled is still narrowed to disabled
+  // when its target module route is not yet built here, so the CTA never deep
+  // links into a 404. The authority reason (if any) wins over the route note.
+  const routeUnavailable = action.routeUnavailable ?? false;
+  const disabled = !descriptor.enabled || routeUnavailable;
   const reasonLabel = descriptor.disabledReasonCode
     ? (DISABLED_REASON_LABELS[descriptor.disabledReasonCode] ??
       descriptor.disabledReasonCode)
-    : undefined;
+    : routeUnavailable
+      ? ROUTE_UNAVAILABLE_LABEL
+      : undefined;
 
   const button = (
     <CanvasBtn
@@ -661,16 +711,30 @@ export default async function SettingsPage() {
         activeTab="一般"
         actions={
           <>
-            <Link href="/billing" style={linkResetStyle}>
-              <CanvasBtn
-                theme={th}
-                size="sm"
-                variant="secondary"
-                icon="billing"
-              >
-                計費設定
-              </CanvasBtn>
-            </Link>
+            {isRouteAvailable("/billing") ? (
+              <Link href="/billing" style={linkResetStyle}>
+                <CanvasBtn
+                  theme={th}
+                  size="sm"
+                  variant="secondary"
+                  icon="billing"
+                >
+                  計費設定
+                </CanvasBtn>
+              </Link>
+            ) : (
+              <span title={ROUTE_UNAVAILABLE_LABEL}>
+                <CanvasBtn
+                  theme={th}
+                  size="sm"
+                  variant="secondary"
+                  icon="billing"
+                  disabled
+                >
+                  計費設定
+                </CanvasBtn>
+              </span>
+            )}
             <a
               href={`${PLATFORM_ADMIN_BASE_URL}/feature-flags`}
               target="_blank"
