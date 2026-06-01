@@ -60,7 +60,6 @@ type TenantSlaEmptyReason = Exclude<
 type SlaManagerProps = {
   view: TenantSlaProfileView | null;
   loadErrorMessage: string | null;
-  previewEmptyReason: EmptyReason | null;
   links: LinkItem[];
   crossAppLinks: CrossAppLinkItem[];
 };
@@ -447,13 +446,9 @@ function getRecalculationStatus(
 }
 
 function getActiveEmptyState(
-  previewEmptyReason: TenantSlaEmptyReason | null,
   emptyState: EmptyStateEnvelope | null,
   loadErrorMessage: string | null,
 ) {
-  if (previewEmptyReason) {
-    return EMPTY_STATE_CONFIG[previewEmptyReason];
-  }
   if (emptyState?.reason && emptyState.reason in EMPTY_STATE_CONFIG) {
     return EMPTY_STATE_CONFIG[emptyState.reason as TenantSlaEmptyReason];
   }
@@ -492,6 +487,23 @@ function getRefreshDeadline(metadata: UiRefreshMetadata | null) {
   const generatedAt = new Date(metadata.generatedAt).getTime();
   if (Number.isNaN(generatedAt)) return null;
   return generatedAt + metadata.staleAfterMs;
+}
+
+function isPendingRecalculationAction(
+  action: ResourceActionDescriptor | null,
+  receiptState: ActionReceiptState | null,
+) {
+  if (receiptState?.actionKey === "recalculate_sla_bookings") {
+    return receiptState.receipt.status === "accepted";
+  }
+
+  if (!action || action.enabled) {
+    return false;
+  }
+
+  return /pending|queued|processing|in_progress/i.test(
+    action.disabledReasonCode ?? "",
+  );
 }
 
 function getReceiptTone(receipt: ActionReceipt) {
@@ -562,7 +574,6 @@ function buildActionPrompt(action: ResourceActionDescriptor | null) {
 export function SlaManager({
   view,
   loadErrorMessage,
-  previewEmptyReason,
   links,
   crossAppLinks,
 }: SlaManagerProps) {
@@ -596,14 +607,8 @@ export function SlaManager({
   const updateAction = getAction(availableActions, "update_sla_profile");
   const recalcAction = getAction(availableActions, "recalculate_sla_bookings");
   const nextAction = emptyState?.nextAction ?? null;
-  const effectiveEmptyReason = getTenantSlaEmptyReason(
-    previewEmptyReason ?? emptyState?.reason,
-  );
-  const activeEmptyState = getActiveEmptyState(
-    effectiveEmptyReason,
-    emptyState,
-    loadErrorMessage,
-  );
+  const effectiveEmptyReason = getTenantSlaEmptyReason(emptyState?.reason);
+  const activeEmptyState = getActiveEmptyState(emptyState, loadErrorMessage);
   const showEditor =
     Boolean(profile) ||
     ((effectiveEmptyReason === "not_provisioned" ||
@@ -624,6 +629,9 @@ export function SlaManager({
     receiptState,
     lastRecalculationAt,
   );
+  const pendingRecalculation =
+    recalculationStatus === "queued" ||
+    isPendingRecalculationAction(recalcAction, receiptState);
   const attainmentUnavailableLabel =
     profile && !activeEmptyState ? "待 SLA attainment read model" : "—";
   const attainmentItems = [
@@ -829,12 +837,9 @@ export function SlaManager({
           </div>
         </div>
         <div style={noteStyle}>
-          messageCode ·{" "}
-          {previewEmptyReason
-            ? `preview.${previewEmptyReason}`
-            : (emptyState?.messageCode ?? "—")}
+          messageCode · {emptyState?.messageCode ?? "transport.fetch_failed"}
         </div>
-        {!previewEmptyReason && nextAction ? (
+        {nextAction ? (
           <div style={emptyActionStyle}>
             <div style={summaryLabelStyle}>recommended action</div>
             <div style={summaryValueStyle}>
@@ -948,17 +953,17 @@ export function SlaManager({
           </CanvasCard>
         ) : null}
 
-        {lastRecalculationAt || recalculationStatus === "queued" ? (
+        {lastRecalculationAt || pendingRecalculation ? (
           <CanvasBanner
             theme={th}
-            tone={recalculationStatus === "queued" ? "warn" : "info"}
+            tone={pendingRecalculation ? "warn" : "info"}
             title={
-              recalculationStatus === "queued"
+              pendingRecalculation
                 ? "既有訂單 SLA 重算已排入佇列"
                 : "最近一次既有訂單重算請求"
             }
             body={
-              recalculationStatus === "queued"
+              pendingRecalculation
                 ? `本次重算請求已 accepted，auditId=${receiptState?.receipt.auditId ?? "—"}。既有訂單在背景重算完成前，仍保留建立時 snapshot。`
                 : `最近一次重算請求於 ${formatDateTime(lastRecalculationAt)} 送出。既有訂單會保留建立時 snapshot，直到該次重算將新的 SLA profile 套用完成。`
             }

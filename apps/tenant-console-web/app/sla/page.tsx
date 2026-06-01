@@ -1,4 +1,4 @@
-import type { EmptyReason, TenantSlaProfileView } from "@drts/contracts";
+import type { TenantSlaProfileView } from "@drts/contracts";
 import { CanvasBanner, buildCanvasTheme } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
 import { SlaManager } from "./sla-manager";
@@ -14,31 +14,6 @@ const th = buildCanvasTheme({
 const pageBodyStyle = {
   padding: 24,
 };
-
-const EMPTY_REASONS: readonly EmptyReason[] = [
-  "no_data",
-  "not_provisioned",
-  "fetch_failed",
-  "permission_denied",
-  "external_unavailable",
-  "filtered_empty",
-] as const;
-
-type SlaPageProps = {
-  searchParams?: Promise<{
-    emptyReason?: string;
-  }>;
-};
-
-function parseEmptyReason(value: string | undefined): EmptyReason | null {
-  if (!value) {
-    return null;
-  }
-
-  return EMPTY_REASONS.includes(value as EmptyReason)
-    ? (value as EmptyReason)
-    : null;
-}
 
 async function loadSlaPageData(): Promise<{
   view: TenantSlaProfileView | null;
@@ -57,11 +32,7 @@ async function loadSlaPageData(): Promise<{
   }
 }
 
-export default async function SlaPage({ searchParams }: SlaPageProps) {
-  const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const emptyReasonOverride = parseEmptyReason(
-    resolvedSearchParams?.emptyReason,
-  );
+export default async function SlaPage() {
   const data = await loadSlaPageData();
 
   return (
@@ -80,7 +51,6 @@ export default async function SlaPage({ searchParams }: SlaPageProps) {
       <SlaManager
         view={data.view}
         loadErrorMessage={data.errorMessage}
-        previewEmptyReason={emptyReasonOverride}
         links={[
           { href: "/integration-governance", label: "查看整合就緒度" },
           {
