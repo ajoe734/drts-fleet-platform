@@ -3,6 +3,10 @@
 import type { ActionReceipt } from "@drts/contracts";
 import { revalidatePath } from "next/cache";
 import { getTenantClient } from "@/lib/api-client";
+import {
+  normalizeNonNegativeInteger,
+  normalizeRequiredReason,
+} from "./sla-action-validation";
 
 type UpdateSlaPayload = {
   waitThresholdMin: number;
@@ -10,21 +14,6 @@ type UpdateSlaPayload = {
   completionThresholdMin: number;
   reason: string;
 };
-
-function normalizePositiveInteger(value: number, field: string) {
-  if (!Number.isInteger(value) || value < 0) {
-    throw new Error(`${field} must be a non-negative integer.`);
-  }
-  return value;
-}
-
-function normalizeReason(value: string) {
-  const normalized = value.trim();
-  if (!normalized) {
-    throw new Error("reason is required.");
-  }
-  return normalized;
-}
 
 function isActionReceipt(value: unknown): value is ActionReceipt {
   return Boolean(
@@ -58,19 +47,19 @@ export async function updateTenantSlaProfileAction(
 
   const receipt = assertActionReceipt(
     await client.updateSlaProfile({
-      waitThresholdMin: normalizePositiveInteger(
+      waitThresholdMin: normalizeNonNegativeInteger(
         payload.waitThresholdMin,
         "waitThresholdMin",
       ),
-      arrivalThresholdMin: normalizePositiveInteger(
+      arrivalThresholdMin: normalizeNonNegativeInteger(
         payload.arrivalThresholdMin,
         "arrivalThresholdMin",
       ),
-      completionThresholdMin: normalizePositiveInteger(
+      completionThresholdMin: normalizeNonNegativeInteger(
         payload.completionThresholdMin,
         "completionThresholdMin",
       ),
-      reason: normalizeReason(payload.reason),
+      reason: normalizeRequiredReason(payload.reason),
     }),
     "update_sla_profile",
   );
@@ -89,7 +78,7 @@ export async function recalculateTenantSlaBookingsAction(
 
   const receipt = assertActionReceipt(
     await client.recalculateSlaBookings({
-      reason: normalizeReason(reason),
+      reason: normalizeRequiredReason(reason),
     }),
     "recalculate_sla_bookings",
   );
