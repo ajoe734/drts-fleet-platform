@@ -33,7 +33,7 @@ const th = buildCanvasTheme({
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "grid",
-  gap: 16,
+  gap: 18,
 };
 
 const kpiGridStyle: CSSProperties = {
@@ -44,7 +44,7 @@ const kpiGridStyle: CSSProperties = {
 
 const overviewGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 0.8fr)",
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(300px, 0.85fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -52,7 +52,7 @@ const overviewGridStyle: CSSProperties = {
 const filterBarStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns:
-    "minmax(220px, 1.4fr) repeat(3, minmax(160px, 0.8fr)) auto",
+    "minmax(220px, 1.35fr) repeat(3, minmax(150px, 0.78fr)) auto",
   gap: 12,
   alignItems: "end",
 };
@@ -84,7 +84,7 @@ const fieldStyle: CSSProperties = {
 
 const stackedLayoutStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.7fr) minmax(280px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.55fr) minmax(320px, 0.95fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -97,11 +97,16 @@ const sideStackStyle: CSSProperties = {
 
 const cardStyle: CSSProperties = {
   overflow: "hidden",
+  borderRadius: 22,
 };
 
 const detailCardStyle: CSSProperties = {
   position: "sticky",
   top: 24,
+};
+
+const heroCardStyle: CSSProperties = {
+  borderRadius: 22,
 };
 
 const primaryCellStyle: CSSProperties = {
@@ -144,9 +149,9 @@ const linkButtonStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  height: 24,
-  padding: "0 8px",
-  borderRadius: 7,
+  minHeight: 30,
+  padding: "0 10px",
+  borderRadius: 999,
   border: `1px solid ${th.border}`,
   background: th.bgRaised,
   color: th.text,
@@ -159,11 +164,11 @@ const linkButtonStyle: CSSProperties = {
 const actionChipStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  height: 24,
-  padding: "0 8px",
-  borderRadius: 7,
+  minHeight: 30,
+  padding: "0 10px",
+  borderRadius: 999,
   border: `1px solid ${th.border}`,
-  background: th.bgRaised,
+  background: `linear-gradient(135deg, ${th.accent}22, ${th.bgRaised})`,
   color: th.text,
   fontSize: 11.5,
   fontWeight: 600,
@@ -171,6 +176,7 @@ const actionChipStyle: CSSProperties = {
 
 const disabledActionStyle: CSSProperties = {
   ...actionChipStyle,
+  background: th.bgRaised,
   opacity: 0.55,
   cursor: "not-allowed",
 };
@@ -187,9 +193,9 @@ const infoListStyle: CSSProperties = {
   gap: 6,
 };
 
-const summaryPanelStyle: CSSProperties = {
+const heroSummaryStyle: CSSProperties = {
   display: "grid",
-  gap: 12,
+  gap: 14,
 };
 
 const summaryStatGridStyle: CSSProperties = {
@@ -255,23 +261,23 @@ const compactListStyle: CSSProperties = {
 const compactListItemStyle: CSSProperties = {
   display: "grid",
   gap: 4,
-  padding: "10px 12px",
-  borderRadius: 10,
+  padding: "12px 14px",
+  borderRadius: 14,
   border: `1px solid ${th.border}`,
   background: "rgba(255,255,255,0.02)",
 };
 
 const emptyStateWrapStyle: CSSProperties = {
-  padding: 24,
+  padding: 28,
   display: "grid",
   gap: 14,
   justifyItems: "start",
 };
 
 const emptyStateAccentStyle: CSSProperties = {
-  width: 40,
-  height: 40,
-  borderRadius: 12,
+  width: 48,
+  height: 48,
+  borderRadius: 16,
   background: `linear-gradient(135deg, ${th.accent}22, ${th.accentHi}33)`,
   border: `1px solid ${th.border}`,
   display: "grid",
@@ -279,6 +285,53 @@ const emptyStateAccentStyle: CSSProperties = {
   color: th.accentHi,
   fontWeight: 800,
   letterSpacing: 0.3,
+};
+
+const rosterMetaBarStyle: CSSProperties = {
+  padding: "14px 16px",
+  borderBottom: `1px solid ${th.border}`,
+  display: "grid",
+  gap: 10,
+  background: "rgba(255,255,255,0.02)",
+};
+
+const detailHeaderStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const detailTitleStyle: CSSProperties = {
+  color: th.text,
+  fontWeight: 700,
+  fontSize: 18,
+  lineHeight: 1.15,
+};
+
+const detailSubtitleStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.45,
+};
+
+const detailSectionStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const deepLinkListStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const deepLinkItemStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  padding: "10px 12px",
+  borderRadius: 14,
+  border: `1px solid ${th.border}`,
+  background: "rgba(255,255,255,0.02)",
 };
 
 type PassengerTabKey = "all" | "employee" | "visitor" | "disabled";
@@ -432,7 +485,7 @@ function getStateTone(activeFlag: boolean): CanvasTone {
 }
 
 function getStateLabel(activeFlag: boolean) {
-  return activeFlag ? "active" : "deactivated";
+  return activeFlag ? "啟用中" : "已停用";
 }
 
 function getKindLabel(passenger: TenantPassengerRecord) {
@@ -904,9 +957,9 @@ function renderActionDescriptor(
 function getActionLabel(action: string) {
   switch (action) {
     case "create":
-      return "新增";
+      return "新增乘客";
     case "edit":
-      return "編輯";
+      return "編輯資料";
     case "deactivate":
       return "軟停用";
     case "reactivate":
@@ -943,12 +996,12 @@ function getActionSummary(action: ResourceActionDescriptor) {
 
   switch (action.riskLevel) {
     case "high":
-      return "高風險確認";
+      return "需高風險確認";
     case "medium":
-      return "一般確認";
+      return "需一般確認";
     case "low":
     default:
-      return "直接執行";
+      return "可直接執行";
   }
 }
 
@@ -1169,12 +1222,12 @@ function toPassengerDeepLinks(
 function getQualityIssueLabel(issue: TenantPassengerQualityIssue) {
   switch (issue) {
     case "duplicate_employee_no":
-      return "duplicate employee no";
+      return "工號重複";
     case "missing_contact":
-      return "missing contact";
+      return "缺少聯絡方式";
     case "missing_employee_no":
     default:
-      return "missing employee no";
+      return "缺少工號";
   }
 }
 
@@ -1254,7 +1307,7 @@ export default async function PassengersPage({
 
   const columns: CanvasTableColumn<PassengerRow>[] = [
     {
-      h: "NAME",
+      h: "姓名",
       w: 190,
       r: (row) => (
         <div style={{ display: "grid", gap: 5 }}>
@@ -1275,7 +1328,7 @@ export default async function PassengersPage({
             </CanvasPill>
             {row.duplicateName ? (
               <CanvasPill theme={th} tone="warn">
-                duplicate name
+                同名
               </CanvasPill>
             ) : null}
           </div>
@@ -1283,29 +1336,29 @@ export default async function PassengersPage({
       ),
     },
     {
-      h: "EMP ID",
+      h: "工號",
       w: 110,
       mono: true,
       r: (row) => row.employeeNo ?? "—",
     },
     {
-      h: "DEPT",
+      h: "部門",
       w: 150,
       r: (row) => row.departmentName ?? "—",
     },
     {
-      h: "MOBILE",
+      h: "手機",
       w: 140,
       mono: true,
       r: (row) => row.mobile ?? "—",
     },
     {
-      h: "EMAIL",
+      h: "Email",
       mono: true,
       r: (row) => row.email ?? "—",
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={row.stateTone} dot>
@@ -1314,13 +1367,13 @@ export default async function PassengersPage({
       ),
     },
     {
-      h: "UPDATED",
+      h: "更新時間",
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.updatedAt),
     },
     {
-      h: "ACTIONS",
+      h: "動作",
       w: 220,
       r: (row) => (
         <div style={tableActionCellStyle}>
@@ -1386,7 +1439,7 @@ export default async function PassengersPage({
       <CanvasPageHeader
         theme={th}
         title="乘客通訊錄"
-        subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本 · soft deactivate"
+        subtitle="快速建單預填主資料 · 軟停用保留歷史 · CTA 依 availableActions"
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={
@@ -1435,83 +1488,93 @@ export default async function PassengersPage({
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Passengers"
+            label="總名冊"
             value={String(passengers.length)}
-            sub={`${activeCount} active / ${inactiveCount} inactive`}
+            sub={`${activeCount} 啟用 / ${inactiveCount} 停用`}
           />
           <CanvasKPI
             theme={th}
-            label="Employee"
+            label="員工比例"
             value={String(employeeCount)}
-            sub={`${passengers.length - employeeCount} visitor`}
+            sub={`${passengers.length - employeeCount} 位訪客`}
           />
           <CanvasKPI
             theme={th}
-            label="Refresh"
+            label="刷新層級"
             value="T5"
             sub={`${refreshTierLabel} · ${refreshSummary}`}
           />
           <CanvasKPI
             theme={th}
-            label="Selected"
-            value={selectedPassenger ? "ready" : "none"}
-            sub={selectedPassenger ? selectedPassenger.fullName : "pick a row"}
+            label="目前檢視"
+            value={selectedPassenger ? "已選取" : "未選取"}
+            sub={
+              selectedPassenger
+                ? selectedPassenger.fullName
+                : "請從左側選取乘客"
+            }
           />
         </div>
 
         <div style={overviewGridStyle}>
           <CanvasCard
             theme={th}
-            title="Directory posture"
-            subtitle="Passenger directory 是 `/bookings/new` 的預填主資料來源，停用採 soft deactivate。"
+            title="目錄摘要"
+            subtitle="Passenger directory 是 `/bookings/new` 的預填來源；停用後會從 picker 隱藏，但歷史訂單仍保留快照。"
+            style={heroCardStyle}
           >
-            <div style={summaryPanelStyle}>
+            <div style={heroSummaryStyle}>
+              <div style={helperTextStyle}>
+                這個畫面同時承接員工與訪客名冊。列表優先顯示啟用資料，若 backend
+                回報 duplicate-name 或 quality issue，會在 row
+                與詳情側欄同步標示。
+              </div>
               <div style={summaryStatGridStyle}>
                 <div style={summaryStatStyle}>
-                  <div style={summaryStatLabelStyle}>Visible roster</div>
+                  <div style={summaryStatLabelStyle}>目前可見</div>
                   <div style={summaryStatValueStyle}>{rows.length}</div>
                   <div style={subtleTextStyle}>
                     {visibleEmployeeCount} 員工 / {visibleVisitorCount} 訪客
                   </div>
                 </div>
                 <div style={summaryStatStyle}>
-                  <div style={summaryStatLabelStyle}>Duplicate name</div>
+                  <div style={summaryStatLabelStyle}>同名警示</div>
                   <div style={summaryStatValueStyle}>
                     {visibleDuplicateCount}
                   </div>
                   <div style={subtleTextStyle}>
-                    依 full name 偵測，需搭配工號或手機辨識
+                    依姓名偵測，需搭配工號或手機辨識
                   </div>
                 </div>
                 <div style={summaryStatStyle}>
-                  <div style={summaryStatLabelStyle}>Quality issues</div>
+                  <div style={summaryStatLabelStyle}>資料品質</div>
                   <div style={summaryStatValueStyle}>
                     {visibleQualityIssueCount}
                   </div>
                   <div style={subtleTextStyle}>
-                    backend quality flags 直接保留在 roster 與 detail
+                    backend flags 直接保留在 roster 與 detail
                   </div>
                 </div>
               </div>
 
               <div style={directoryStateGridStyle}>
                 <div style={stateMetricStyle}>
-                  <div style={summaryStatLabelStyle}>All</div>
+                  <div style={summaryStatLabelStyle}>全部</div>
                   <div style={stateMetricValueStyle}>{counts.all}</div>
                   <div style={subtleTextStyle}>完整名冊</div>
                 </div>
                 <div style={stateMetricStyle}>
-                  <div style={summaryStatLabelStyle}>Employee</div>
+                  <div style={summaryStatLabelStyle}>員工</div>
                   <div style={stateMetricValueStyle}>{counts.employee}</div>
                   <div style={subtleTextStyle}>主要預訂對象</div>
                 </div>
                 <div style={stateMetricStyle}>
-                  <div style={summaryStatLabelStyle}>Visitor</div>
+                  <div style={summaryStatLabelStyle}>訪客</div>
                   <div style={stateMetricValueStyle}>{counts.visitor}</div>
                   <div style={subtleTextStyle}>臨時或外部訪客</div>
                 </div>
                 <div style={stateMetricStyle}>
-                  <div style={summaryStatLabelStyle}>Deactivated</div>
+                  <div style={summaryStatLabelStyle}>已停用</div>
                   <div style={stateMetricValueStyle}>{counts.disabled}</div>
                   <div style={subtleTextStyle}>歷史可見、picker 隱藏</div>
                 </div>
@@ -1521,8 +1584,9 @@ export default async function PassengersPage({
 
           <CanvasCard
             theme={th}
-            title="Refresh contract"
-            subtitle="Tenant Console `/passengers` 依 packet §3.2 採 T5 Tenant slow。"
+            title="刷新與來源"
+            subtitle="Tenant Console `/passengers` 依 packet §3.2 採 T5 Tenant slow；頁面會保留 freshness 與手動 refresh。"
+            style={heroCardStyle}
           >
             <div style={railBlockStyle}>
               <div style={infoListStyle}>
@@ -1541,13 +1605,13 @@ export default async function PassengersPage({
                   { k: "snapshot", v: refreshSummary },
                   {
                     k: "manual refresh",
-                    v: "保留頁面 refresh CTA，讓使用者手動重新取樣",
+                    v: "保留 refresh CTA，讓使用者手動重新取樣",
                   },
                 ]}
               />
               <div style={helperTextStyle}>
-                stale banner 與 CTA 會一起保留，避免把 tenant slow tier
-                假裝成即時資料。
+                當 snapshot stale 或 degraded 時，頁面會直接顯示警示，不會把
+                tenant slow tier 假裝成即時資料。
               </div>
             </div>
           </CanvasCard>
@@ -1555,8 +1619,8 @@ export default async function PassengersPage({
 
         <CanvasCard
           theme={th}
-          title="Directory filters"
-          subtitle="Filter by active state, department, and search by name / employee no / mobile."
+          title="篩選與搜尋"
+          subtitle="可依啟用狀態、部門與姓名 / 工號 / 手機搜尋；停用資料僅在對應 tab 或篩選中出現。"
         >
           <form action="/passengers" method="get" style={filterBarStyle}>
             {selectedTab !== "all" ? (
@@ -1570,7 +1634,7 @@ export default async function PassengersPage({
               />
             ) : null}
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Search</span>
+              <span style={fieldLabelStyle}>搜尋</span>
               <input
                 defaultValue={filters.q}
                 name="q"
@@ -1579,7 +1643,7 @@ export default async function PassengersPage({
               />
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Department</span>
+              <span style={fieldLabelStyle}>部門</span>
               <select
                 defaultValue={filters.department}
                 name="department"
@@ -1594,7 +1658,7 @@ export default async function PassengersPage({
               </select>
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>State</span>
+              <span style={fieldLabelStyle}>狀態</span>
               <select
                 defaultValue={filters.activeState}
                 name="state"
@@ -1606,7 +1670,7 @@ export default async function PassengersPage({
               </select>
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Refresh tier</span>
+              <span style={fieldLabelStyle}>刷新層級</span>
               <div
                 style={{
                   ...fieldStyle,
@@ -1623,10 +1687,10 @@ export default async function PassengersPage({
             </label>
             <div style={{ display: "flex", gap: 8 }}>
               <button style={fieldStyle} type="submit">
-                套用
+                套用條件
               </button>
               <Link href="/passengers" style={linkButtonStyle}>
-                清除
+                清除篩選
               </Link>
             </div>
           </form>
@@ -1637,18 +1701,20 @@ export default async function PassengersPage({
             theme={th}
             padding={0}
             style={cardStyle}
-            title="Passenger roster"
-            subtitle={`${rows.length} visible row(s) · state ${filters.activeState} · tab ${selectedTab}`}
+            title="乘客名冊"
+            subtitle={`${rows.length} 筆目前可見資料 · 依 tab、狀態與部門篩選`}
           >
-            <div
-              style={{ padding: 16, borderBottom: `1px solid ${th.border}` }}
-            >
+            <div style={rosterMetaBarStyle}>
+              <div style={helperTextStyle}>
+                依 packet §5，列表必須顯示姓名、工號、部門、手機、Email、active
+                flag；同名與資料品質問題會直接標示在名冊內。
+              </div>
               <div style={infoListStyle}>
                 <CanvasPill theme={th} tone="info">
-                  search {filters.q ? `"${filters.q}"` : "all"}
+                  搜尋 {filters.q ? `"${filters.q}"` : "全部"}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="neutral">
-                  department {filters.department || "all"}
+                  部門 {filters.department || "全部"}
                 </CanvasPill>
                 <CanvasPill theme={th} tone={refreshTone}>
                   {refreshMetadata?.dataFreshness ?? "fallback"} snapshot
@@ -1658,7 +1724,7 @@ export default async function PassengersPage({
                     theme={th}
                     tone={EMPTY_STATE_VIEWS[emptyReason].tone}
                   >
-                    emptyReason {emptyReason}
+                    {emptyReason}
                   </CanvasPill>
                 ) : null}
               </div>
@@ -1678,33 +1744,42 @@ export default async function PassengersPage({
           <div style={{ ...sideStackStyle, ...detailCardStyle }}>
             <CanvasCard
               theme={th}
-              title="Passenger detail"
+              title="乘客詳情"
               subtitle={
                 selectedPassenger
-                  ? `${selectedPassenger.fullName} · ${selectedPassenger.activeFlag ? "active" : "deactivated"}`
-                  : "Select a row to inspect actions, deep links, and quality warnings."
+                  ? `${selectedPassenger.fullName} · ${selectedPassenger.activeFlag ? "啟用中" : "已停用"}`
+                  : "選取左側任一乘客後，這裡會顯示聯絡資料、可用動作、deep links 與 quality issues。"
               }
             >
               {selectedPassenger ? (
                 <div style={{ display: "grid", gap: 14 }}>
-                  <div style={infoListStyle}>
-                    <CanvasPill
-                      theme={th}
-                      tone={
-                        selectedPassenger.activeFlag ? "success" : "neutral"
-                      }
-                      dot
-                    >
-                      {selectedPassenger.activeFlag ? "active" : "deactivated"}
-                    </CanvasPill>
-                    <CanvasPill theme={th} tone="info">
-                      {getKindLabel(selectedPassenger)}
-                    </CanvasPill>
-                    {selectedPassengerDuplicate ? (
-                      <CanvasPill theme={th} tone="warn">
-                        duplicate name
+                  <div style={detailHeaderStyle}>
+                    <div style={detailTitleStyle}>
+                      {selectedPassenger.fullName}
+                    </div>
+                    <div style={detailSubtitleStyle}>
+                      可直接檢視建單預填資料與 current action
+                      contract；若該筆已停用，歷史訂單仍保留 snapshot。
+                    </div>
+                    <div style={infoListStyle}>
+                      <CanvasPill
+                        theme={th}
+                        tone={
+                          selectedPassenger.activeFlag ? "success" : "neutral"
+                        }
+                        dot
+                      >
+                        {selectedPassenger.activeFlag ? "啟用中" : "已停用"}
                       </CanvasPill>
-                    ) : null}
+                      <CanvasPill theme={th} tone="info">
+                        {getKindLabel(selectedPassenger)}
+                      </CanvasPill>
+                      {selectedPassengerDuplicate ? (
+                        <CanvasPill theme={th} tone="warn">
+                          同名警示
+                        </CanvasPill>
+                      ) : null}
+                    </div>
                   </div>
 
                   <CanvasDL
@@ -1733,20 +1808,20 @@ export default async function PassengersPage({
                         mono: true,
                       },
                       {
-                        k: "editableUntil",
+                        k: "可編輯至",
                         v: formatUpdated(selectedEditableUntil),
                         mono: true,
                       },
                       {
-                        k: "consentVersion",
+                        k: "同意書版本",
                         v: selectedConsentVersion ?? "—",
                       },
                       {
-                        k: "readOnlyReason",
+                        k: "唯讀原因",
                         v: selectedReadOnlyReason ?? "—",
                       },
                       {
-                        k: "updatedAt",
+                        k: "最近更新",
                         v: formatUpdated(selectedPassenger.updatedAt),
                         mono: true,
                       },
@@ -1755,21 +1830,21 @@ export default async function PassengersPage({
                 </div>
               ) : (
                 <div style={subtleTextStyle}>
-                  目前沒有可用 passenger row。若是新租戶，這會對應 `no_data`；
-                  若是套了篩選，則會落在 `filtered_empty`。
+                  目前沒有可用 passenger row。新租戶通常會落在 `no_data`；
+                  若只是條件太窄，則會落在 `filtered_empty`。
                 </div>
               )}
             </CanvasCard>
 
             <CanvasCard
               theme={th}
-              title="Action contract"
-              subtitle="所有 CTA 以 `availableActions[]` 為準，不從 role 或 activeFlag 推論。"
+              title="可用動作"
+              subtitle="所有 CTA 都以 `availableActions[]` 為準，不從 role 或 activeFlag 推論。"
             >
               {selectedPassenger ? (
                 <div style={railBlockStyle}>
-                  <div>
-                    <div style={sectionLabelStyle}>Enabled actions</div>
+                  <div style={detailSectionStyle}>
+                    <div style={sectionLabelStyle}>可立即執行</div>
                     <div style={{ ...actionsWrapStyle, marginTop: 8 }}>
                       {selectedEnabledActions.length > 0 ? (
                         selectedEnabledActions.map((action) =>
@@ -1780,14 +1855,14 @@ export default async function PassengersPage({
                         )
                       ) : (
                         <CanvasPill theme={th} tone="neutral">
-                          no enabled action
+                          目前沒有可直接執行的 CTA
                         </CanvasPill>
                       )}
                     </div>
                   </div>
 
-                  <div>
-                    <div style={sectionLabelStyle}>Disabled affordances</div>
+                  <div style={detailSectionStyle}>
+                    <div style={sectionLabelStyle}>目前不可用</div>
                     <div style={{ ...actionsWrapStyle, marginTop: 8 }}>
                       {selectedDisabledActions.length > 0 ? (
                         selectedDisabledActions.map((action) =>
@@ -1798,7 +1873,7 @@ export default async function PassengersPage({
                         )
                       ) : (
                         <CanvasPill theme={th} tone="success">
-                          all exposed actions enabled
+                          所有 exposed actions 皆可執行
                         </CanvasPill>
                       )}
                     </div>
@@ -1835,9 +1910,8 @@ export default async function PassengersPage({
                   </div>
 
                   <div style={helperTextStyle}>
-                    Q-TEN06: passenger deactivation is soft-only. Existing
-                    bookings retain their snapshot; inactive records disappear
-                    from pickers but stay visible in historical detail.
+                    Q-TEN06: passenger deactivation is soft-only。既有 bookings
+                    保留 snapshot；停用後不再出現在 picker，但歷史明細仍可見。
                   </div>
                 </div>
               ) : (
@@ -1849,29 +1923,41 @@ export default async function PassengersPage({
 
             <CanvasCard
               theme={th}
-              title="Linked flows"
-              subtitle="Tenant Console 內連與 cross-app deep link 在這裡集中呈現。"
+              title="連動流程"
+              subtitle="集中顯示建單預填入口、租戶內稽核，以及跨 app 的 deep links。"
             >
               {selectedPassenger ? (
                 <div style={railBlockStyle}>
-                  <div>
+                  <div style={detailSectionStyle}>
                     <div style={sectionLabelStyle}>Deep links</div>
-                    <div style={{ ...actionsWrapStyle, marginTop: 8 }}>
+                    <div style={deepLinkListStyle}>
                       {selectedDeepLinks.map((link) => (
-                        <Link
+                        <div
                           key={`${link.href}:${link.label}`}
-                          href={link.href}
-                          style={linkButtonStyle}
-                          target={link.newTab ? "_blank" : undefined}
-                          rel={link.newTab ? "noreferrer" : undefined}
+                          style={deepLinkItemStyle}
                         >
-                          {link.label}
-                        </Link>
+                          <div style={{ display: "grid", gap: 4 }}>
+                            <span style={primaryCellStyle}>{link.label}</span>
+                            <span style={subtleTextStyle}>
+                              {link.newTab
+                                ? "新分頁開啟"
+                                : "Tenant Console 內頁導向"}
+                            </span>
+                          </div>
+                          <Link
+                            href={link.href}
+                            style={linkButtonStyle}
+                            target={link.newTab ? "_blank" : undefined}
+                            rel={link.newTab ? "noreferrer" : undefined}
+                          >
+                            開啟
+                          </Link>
+                        </div>
                       ))}
                     </div>
                   </div>
 
-                  <div>
+                  <div style={detailSectionStyle}>
                     <div style={sectionLabelStyle}>Quality issues</div>
                     {selectedQualityIssues.length > 0 ? (
                       <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
@@ -1890,14 +1976,14 @@ export default async function PassengersPage({
                       </div>
                     ) : (
                       <div style={{ ...subtleTextStyle, marginTop: 8 }}>
-                        No current data-quality warning.
+                        目前沒有資料品質警示。
                       </div>
                     )}
                   </div>
 
                   <div style={helperTextStyle}>
-                    Cross-app deep links follow Q-X03 and open in a new tab when
-                    the target lives in Ops Console or Platform Admin.
+                    Cross-app deep links follow Q-X03。當目標落在 Ops Console 或
+                    Platform Admin 時，會以新分頁開啟。
                   </div>
                 </div>
               ) : (
