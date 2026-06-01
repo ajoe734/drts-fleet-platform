@@ -36,6 +36,17 @@ const th = buildCanvasTheme({
 });
 
 const REFRESH_TIER_LABEL = "T5 Tenant slow · 30s";
+const DEFAULT_CROSS_APP_BASE_URLS: Record<
+  CrossAppResourceLink["targetApp"],
+  string
+> = {
+  "ops-console":
+    process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3101",
+  "platform-admin":
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3102",
+  "tenant-console":
+    process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3103",
+};
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -509,6 +520,12 @@ function getCrossAppFailureLink(
     openMode: "new_tab",
     label: "在 Platform Admin 檢查 webhook queue",
   };
+}
+
+function resolveCrossAppHref(link: CrossAppResourceLink) {
+  const baseUrl =
+    DEFAULT_CROSS_APP_BASE_URLS[link.targetApp] ?? "http://localhost:3102";
+  return new URL(link.route, `${baseUrl.replace(/\/$/, "")}/`).toString();
 }
 
 function getEndpointActions(
@@ -1087,7 +1104,7 @@ function renderActionDescriptor(
 
 function renderEmptyStateActions(
   model: EmptyStateModel,
-  platformFailureLink: CrossAppResourceLink,
+  platformFailureHref: string,
 ) {
   if (!model.actions || model.actions.length === 0) return null;
 
@@ -1137,15 +1154,15 @@ function renderEmptyStateActions(
           }
 
           return (
-            <Link
+            <a
               key={action.action}
-              href={platformFailureLink.route}
+              href={platformFailureHref}
               target="_blank"
               rel="noreferrer"
               style={actionLinkStyle}
             >
               Platform Admin health
-            </Link>
+            </a>
           );
         }
 
@@ -1213,6 +1230,7 @@ export default async function WebhooksPage({
     ? `Endpoint ${selectedWebhookId} delivery log`
     : "近 24h 全部 webhook deliveries";
   const platformFailureLink = getCrossAppFailureLink(selectedWebhookId);
+  const platformFailureHref = resolveCrossAppHref(platformFailureLink);
   const webhookReadiness =
     data.readiness?.items.find((item) => item.subSystem === "webhooks") ?? null;
   const selectedEndpointActions = selectedEndpoint
@@ -1561,14 +1579,14 @@ export default async function WebhooksPage({
             <span style={metaValueStyle}>
               {failureClusterCount} failed · {queuedCount} queued
             </span>
-            <Link
-              href={platformFailureLink.route}
+            <a
+              href={platformFailureHref}
               target="_blank"
               rel="noreferrer"
               style={smallLinkStyle}
             >
               {platformFailureLink.label}
-            </Link>
+            </a>
           </div>
         </div>
 
@@ -1579,7 +1597,7 @@ export default async function WebhooksPage({
               description={emptyModel.description}
               tone={emptyModel.tone}
               density="compact"
-              actions={renderEmptyStateActions(emptyModel, platformFailureLink)}
+              actions={renderEmptyStateActions(emptyModel, platformFailureHref)}
             />
           </CanvasCard>
         ) : (
@@ -1759,14 +1777,14 @@ export default async function WebhooksPage({
                     <div style={inlineStackStyle}>
                       <div style={cardSectionLabelStyle}>Cross-app links</div>
                       <div style={actionRowStyle}>
-                        <Link
-                          href={platformFailureLink.route}
+                        <a
+                          href={platformFailureHref}
                           target="_blank"
                           rel="noreferrer"
                           style={actionLinkStyle}
                         >
                           開啟 Platform Admin queue / health
-                        </Link>
+                        </a>
                         <Link
                           href="/integration-governance"
                           style={actionLinkStyle}
@@ -2137,14 +2155,14 @@ export default async function WebhooksPage({
                 : `retry_failed_delivery: ${renderDescriptorHint(retryCapability) ?? "engine_auto_retry_only"}`}
             </div>
             <div style={actionRowStyle}>
-              <Link
-                href={platformFailureLink.route}
+              <a
+                href={platformFailureHref}
                 target="_blank"
                 rel="noreferrer"
                 style={actionLinkStyle}
               >
                 到 Platform Admin 檢查 replay queue
-              </Link>
+              </a>
               <Link href="/integration-governance" style={actionLinkStyle}>
                 檢查 readiness / next action
               </Link>
