@@ -349,6 +349,14 @@ function buildEndpointActions(
   ];
 }
 
+// `WebhookDeliveryRecord` (contracts §webhooks) carries no `availableActions[]`
+// field — unlike the endpoint resource — so the per-delivery retry CTA is the
+// single descriptor derived here from `delivery.status` (the only authority the
+// contract exposes). It is ALWAYS emitted: an enabled `retry_delivery` for
+// `delivery_failed`, otherwise a disabled one carrying `delivery_not_failed`.
+// `ActionButton` never drops a descriptor, so the CTA + its disabled reason stay
+// visible on both the row table and the detail surface; nothing is filtered on
+// the absence of an href.
 function buildDeliveryActions(
   delivery: WebhookDeliveryRecord,
 ): ResourceActionDescriptor[] {
