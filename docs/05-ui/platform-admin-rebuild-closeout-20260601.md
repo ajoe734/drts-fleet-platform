@@ -13,6 +13,7 @@ What is verified in this pass:
 - machine truth for `UI-FE-ADM-UMBRELLA` is now `owner=Codex`, `reviewer=Codex2`, `status=in_progress`
 - the 17 previously missing `UI-FE-ADM-*` dependency task rows were re-materialized into machine truth via `scripts/ai-status.sh assign`
 - `UI-FE-ADM-TENID` auto-reconciled to `done` from `origin/dev@98e1f140b7b3`, so all 18 dependency IDs now resolve in the task board
+- reimbursement queue/detail routes were restored onto this umbrella branch from commits `ff528b79` and `d262f6ad`
 - the assigned branch is `codex/ui-fe-adm-umbrella` in the isolated worker worktree
 - `python3 scripts/ensure-local-node-modules.py repair` passed
 - `pnpm --filter @drts/platform-admin-web typecheck` passed
@@ -25,8 +26,7 @@ What still blocks formal closeout:
 - the task board now resolves all 18 dependency IDs, but only `UI-FE-ADM-REIMBID` and `UI-FE-ADM-TENID` are `done`; the rest remain `backlog` or `in_progress`
 - a fresh `python3 scripts/ai_status.py reconcile-from-git origin/dev` still reports `no drift found against origin/dev` after the task-row repair
 - commit ancestry against `origin/dev` does not support the umbrella acceptance claim that all 18 Platform Admin sub-tasks are done on trunk
-- the current branch `HEAD` is `d285d358`, which is still not descended from the earlier local umbrella closeout commit `0b226f5c`
-- the current branch tree does not contain `apps/platform-admin-web/app/payments/reimbursements/page.tsx` or `apps/platform-admin-web/app/payments/reimbursements/[batchId]/page.tsx`
+- the current branch `HEAD` includes the reimbursement route restores, but the branch is still not descended from the earlier local umbrella closeout commit `0b226f5c`
 - no clean smoke-test result exists for this pass, and there is no local API target listening on `http://localhost:3001`
 
 ## Branch Reality
@@ -34,13 +34,13 @@ What still blocks formal closeout:
 The current branch tip is:
 
 ```text
-d285d358 wip(UI-FE-ADM-UMBRELLA): anchor 2026-06-01 closeout blocker audit
+d262f6ad UI-FE-ADM-REIMBID: build Reimbursement batch detail (NEW) page
 ```
 
 `git merge-base --is-ancestor 0b226f5c HEAD` returned exit status `1`, so the earlier local closeout commit
 `0b226f5c UI-FE-ADM-UMBRELLA: close out platform admin rebuild` is not part of the branch currently assigned to this task.
 
-That matters because the present `next build` route manifest contains:
+The present `next build` route manifest contains:
 
 - `/`
 - `/adapter-registry`
@@ -52,6 +52,8 @@ That matters because the present `next build` route manifest contains:
 - `/partners`
 - `/partners/[entrySlug]`
 - `/payments`
+- `/payments/reimbursements`
+- `/payments/reimbursements/[batchId]`
 - `/pricing`
 - `/switchboard`
 - `/tenant-governance`
@@ -59,7 +61,7 @@ That matters because the present `next build` route manifest contains:
 - `/tenants/[tenantId]`
 - `/users`
 
-It does **not** contain `/payments/reimbursements` or `/payments/reimbursements/[batchId]`, and the corresponding route files are absent from the working tree.
+So the earlier reimbursement-route gap on this umbrella branch is now closed.
 
 ## Dependency Audit
 
@@ -128,8 +130,7 @@ python3 -c "import importlib.util, pathlib, os, subprocess, sys; ..."
 python3 scripts/ai_status.py reconcile-from-git origin/dev
 git log --all --grep='UI-FE-ADM-' --format='%h %s'
 git merge-base --is-ancestor 0b226f5c HEAD
-test -f apps/platform-admin-web/app/payments/reimbursements/page.tsx
-test -f apps/platform-admin-web/app/payments/reimbursements/[batchId]/page.tsx
+git cherry-pick 82e49183 9129ead3
 python3 scripts/ensure-local-node-modules.py repair
 pnpm --filter @drts/platform-admin-web typecheck
 pnpm --filter @drts/platform-admin-web build
@@ -146,11 +147,11 @@ Results:
 - `ai_status.py list`: now shows all 18 Platform Admin dependency IDs plus the umbrella
 - `reconcile-from-git origin/dev`: still reports `no drift found against origin/dev` after the task-row repair
 - `git log --all --grep='UI-FE-ADM-'`: showed local closeout history on multiple branches
+- `git cherry-pick 82e49183 9129ead3`: passed cleanly and restored both reimbursement routes onto this branch
 - `git merge-base --is-ancestor 0b226f5c HEAD`: failed ancestry check for the earlier umbrella closeout commit
-- reimbursement route file presence checks: both missing
 - `ensure-local-node-modules.py repair`: passed
-- `@drts/platform-admin-web typecheck`: passed
-- `@drts/platform-admin-web build`: passed and emitted the 16-route manifest listed above
+- `@drts/platform-admin-web typecheck`: passed after route restoration
+- `@drts/platform-admin-web build`: passed after route restoration and emitted the 18-route manifest listed above
 - `@drts/platform-admin-web test`: passed with no test files
 - `@drts/ui-web build-storybook`: passed and emitted `packages/ui-web/storybook-static`
 - `curl http://localhost:3001/health` and `/api/health`: both failed to connect, so no smoke target was available
@@ -160,6 +161,5 @@ Results:
 Before `UI-FE-ADM-UMBRELLA` can move to review:
 
 1. convert the remaining Platform Admin dependency rows from `backlog`/`in_progress` to real `done` evidence, either by merging valid closeout commits to `origin/dev` or by explicitly reconciling the umbrella dependency set to the canonical shipped tasks
-2. integrate the missing Platform Admin route work onto the assigned branch so the actual working tree matches the intended umbrella surface, including reimbursement routes if they remain in scope
-3. prepare a live API target and run `./scripts/run-smoke-tests.sh` cleanly
-4. only after the above should the owner hand off the task to `Codex2` for review
+2. prepare a live API target and run `./scripts/run-smoke-tests.sh` cleanly
+3. only after the above should the owner hand off the task to `Codex2` for review
