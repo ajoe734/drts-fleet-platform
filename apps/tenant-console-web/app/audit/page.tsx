@@ -376,11 +376,14 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
     const tenantResourceId = id ?? log.requestId ?? log.auditId;
 
     if (log.resourceType === "booking" || log.resourceType === "owned_order") {
+      const bookingId = id ?? log.requestId;
       return {
         targetApp: "tenant-console",
-        route: `/bookings?q=${encodeURIComponent(id ?? log.requestId)}`,
+        route: bookingId
+          ? `/bookings/${encodeURIComponent(bookingId)}`
+          : "/bookings",
         resourceType: log.resourceType,
-        resourceId: id ?? log.requestId,
+        resourceId: bookingId,
         openMode: "same_tab",
         label: "查看租戶叫車",
       };
@@ -530,7 +533,9 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
     if (log.resourceType === "report_job") {
       return {
         targetApp: "tenant-console",
-        route: "/reports",
+        route: tenantResourceId
+          ? `/reports?jobId=${encodeURIComponent(tenantResourceId)}`
+          : "/reports",
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
