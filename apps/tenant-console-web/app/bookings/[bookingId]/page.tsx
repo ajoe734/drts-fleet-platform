@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import type {
   ActionReceipt,
@@ -10,28 +10,7 @@ import type {
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import { BookingCommandPanel } from "@/components/booking-command-panel";
-import {
-  CanvasBanner,
-  CanvasBtn,
-  CanvasCard,
-  CanvasDL,
-  CanvasField,
-  CanvasInput,
-  CanvasPageHeader,
-  CanvasPill,
-  CanvasTable,
-  Stepper,
-  Timeline,
-  buildCanvasTheme,
-} from "@drts/ui-web";
-import type {
-  CanvasTableColumn,
-  CanvasTone,
-  ManagementTone,
-  StepperItem,
-  TimelineItem,
-} from "@drts/ui-web";
-import { BookingCommandPanel } from "@/components/booking-command-panel";
+import { CalloutBanner } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import {
   formatDateTime,
@@ -78,6 +57,26 @@ type DerivedBookingView = {
   generatedAt: string;
   readOnlyReasonCode: string | null;
   timelineStep: number;
+};
+
+type PageHeroProps = {
+  eyebrow: string;
+  title: ReactNode;
+  description: string;
+};
+
+type SurfaceCardProps = {
+  kicker: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+};
+
+type CalloutPanelProps = {
+  title: string;
+  description: string;
+  tone: "default" | "warning";
+  children: ReactNode;
 };
 
 type BookingDetailRecord = BookingRecord & {
@@ -155,6 +154,51 @@ const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
     tone: "warning",
   },
 };
+
+function PageHero({ eyebrow, title, description }: PageHeroProps) {
+  return (
+    <header className="surface-card detail-stack">
+      <span className="eyebrow-copy">{eyebrow}</span>
+      <h1 className="booking-hero-title">{title}</h1>
+      <p className="muted-copy">{description}</p>
+    </header>
+  );
+}
+
+function SurfaceCard({
+  kicker,
+  title,
+  description,
+  children,
+}: SurfaceCardProps) {
+  return (
+    <section className="surface-card detail-stack">
+      <div className="detail-stack">
+        <span className="eyebrow-copy">{kicker}</span>
+        <h2>{title}</h2>
+        <p className="muted-copy">{description}</p>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function CalloutPanel({
+  title,
+  description,
+  tone,
+  children,
+}: CalloutPanelProps) {
+  return (
+    <CalloutBanner
+      title={title}
+      description={description}
+      tone={tone === "warning" ? "warning" : "info"}
+    >
+      {children}
+    </CalloutBanner>
+  );
+}
 
 function buildBookingActions(
   booking: BookingDetailRecord,

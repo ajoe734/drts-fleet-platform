@@ -217,21 +217,6 @@ async function loadRulesPageData(
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
     .slice(0, 12);
 
-  const generatedAt =
-    quotaSummary?.refreshedAt ??
-    sortedLedgerEntries[0]?.createdAt ??
-    approvalRequests[0]?.createdAt ??
-    rules[0]?.updatedAt ??
-    new Date().toISOString();
-
-  const inferredEmptyReason = inferEmptyReason({
-    rules,
-    quotaSummary,
-    approvalRequests,
-    ledgerEntries: sortedLedgerEntries,
-    errors,
-  });
-
   return {
     rules,
     quotaSummary,

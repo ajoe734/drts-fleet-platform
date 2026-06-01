@@ -21,12 +21,10 @@ import {
   type TenantApprovalRuleConditionOperator,
   type TenantApprovalRuleRecord,
   type TenantBookingApprovalRequestRecord,
-  type EmptyReason,
   type TenantPrincipalRef,
   type TenantQuotaEnforcementMode,
   type TenantQuotaLedgerEntry,
   type TenantQuotaSummary,
-  type ResourceActionDescriptor,
 } from "@drts/contracts";
 import {
   CalloutBanner,
@@ -252,6 +250,13 @@ const inlineLinkStyle = {
   color: th.accent,
   fontWeight: 700,
   textDecoration: "none",
+};
+
+const actionLinkStyle: CSSProperties = {
+  ...inlineLinkStyle,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "6px",
 };
 
 function createId() {
@@ -1175,7 +1180,7 @@ export function RulesManager({
                 summary={
                   selectedRule
                     ? `Editing ${selectedRule.ruleName ?? selectedRule.ruleId}.`
-                    : `Creating a new tenant approval rule. Update action published: ${updateRuleAction?.enabled === false ? "disabled" : "enabled"}.`
+                    : `Creating a new tenant approval rule. Update action published: ${updateAction?.enabled === false ? "disabled" : "enabled"}.`
                 }
               >
                 <form
